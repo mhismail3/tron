@@ -57,19 +57,6 @@ final class WizardState {
     /// one helper restart.
     var permissionsRestartInProgress = false
 
-    /// User's first-run choice for local voice transcription. Fresh
-    /// installs default off because enabling it downloads the Parakeet
-    /// model into `~/.tron/internal/transcription/models/hf/`.
-    var transcriptionEnabledSelection = false
-
-    /// Outcome of applying the transcription preference. The wizard
-    /// advances only after this is `.enabled` or `.disabled`.
-    var transcriptionOutcome: TranscriptionSetupResult?
-
-    /// True while the Transcription step is copying sidecar files,
-    /// writing settings, and restarting the helper when needed.
-    var transcriptionIsApplying = false
-
     /// Existing Login Item detection result. Set on entry so the
     /// Install step can surface clean, approval, partial, or registered
     /// states. A registered service still has to be started and pinged
@@ -123,9 +110,9 @@ final class WizardState {
             let persisted = raw.flatMap(WizardStep.init(rawValue:)) ?? .welcome
             // Only resume at steps that are safe to cold-start on.
             // State-dependent post-install steps (.permissions,
-            // .transcription, .pairingInfo, .done) depend on transient state
-            // (installOutcome, permissionStatuses, transcriptionOutcome,
-            // pairingPayload, …) that doesn't survive a relaunch. The
+            // .pairingInfo, .done) depend on transient state
+            // (installOutcome, permissionStatuses, pairingPayload, …)
+            // that doesn't survive a relaunch. The
             // informational .iosBeta handoff is safe to resume because
             // it owns only a static TestFlight QR code. If we honour the
             // state-dependent steps on cold boot, the user lands
@@ -144,14 +131,14 @@ final class WizardState {
     /// state. Pre-permissions steps are always safe, and the iOS beta
     /// handoff owns only static TestFlight data; the other post-install
     /// steps assume `installOutcome` / `permissionStatuses` /
-    /// `transcriptionOutcome` / `pairingPayload`
+    /// `pairingPayload`
     /// from an earlier navigation, so cold-booting into them strands the
     /// user behind a disabled Continue button.
     private static func isSafeToResume(_ step: WizardStep) -> Bool {
         switch step {
         case .welcome, .tailscale, .install, .iosBeta:
             return true
-        case .permissions, .transcription, .pairingInfo, .done:
+        case .permissions, .pairingInfo, .done:
             return false
         }
     }
@@ -200,9 +187,6 @@ final class WizardState {
         permissionStatuses.removeAll()
         permissionsServerRestarted = false
         permissionsRestartInProgress = false
-        transcriptionEnabledSelection = false
-        transcriptionOutcome = nil
-        transcriptionIsApplying = false
         existingInstallStatus = .none
         installOutcome = nil
         installRequestID = 0
@@ -255,7 +239,6 @@ enum InstallOutcome: Equatable, Sendable {
     case success
     case invalidApplicationLocation(String)
     case helperValidationFailed(String)
-    case managedSkillsSyncFailed(String)
     case serviceRequiresApproval
     case serviceRegistrationFailed(String)
     case awaitPingTimedOut

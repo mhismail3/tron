@@ -666,7 +666,6 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         .with_namespace_claim("claim")
         .with_namespace_claim("evidence")
         .with_namespace_claim("decision")
-        .with_namespace_claim("harness_doc")
         .with_namespace_claim("materialized_file")
         .with_namespace_claim("patch");
     Ok(vec![

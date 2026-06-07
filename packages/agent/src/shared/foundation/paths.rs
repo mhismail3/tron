@@ -2,8 +2,8 @@
 //!
 //! All call sites that need `$HOME`, `~/.tron`, or any subdirectory under
 //! `~/.tron` should use the functions and constants in this module. This
-//! centralizes every directory and file name so the profile-first Tron Home has
-//! one enforceable path contract.
+//! centralizes every directory and file name so the primitive Tron Home has one
+//! enforceable path contract.
 
 use std::path::{Path, PathBuf};
 
@@ -26,14 +26,10 @@ pub mod dirs {
 
     /// Tron-owned runtime machinery: databases, locks, journals, caches.
     pub const INTERNAL: &str = "internal";
-    /// Complete agent execution specs: prompts, settings, providers, auth refs.
+    /// Profile settings and auth refs.
     pub const PROFILES: &str = "profiles";
-    /// Durable continuity about the user, Tron, preferences, and summaries.
-    pub const MEMORY: &str = "memory";
     /// Active work, generated artifacts, plans, reports, and experiments.
     pub const WORKSPACE: &str = "workspace";
-    /// Installed skills directory.
-    pub const SKILLS: &str = "skills";
 
     // ── Under internal/ ──
 
@@ -43,15 +39,6 @@ pub mod dirs {
     pub const RUN: &str = "run";
     /// Streaming journals for crash recovery of partial LLM output.
     pub const JOURNALS: &str = "journals";
-    /// Transcription sidecar: Python venv, worker script, HuggingFace model cache.
-    pub const TRANSCRIPTION: &str = "transcription";
-    // ── Under memory/ ──
-
-    /// Auto-generated session summaries.
-    pub const SESSIONS: &str = "sessions";
-    /// Rules and core memories (SYSTEM.md, CLAUDE.md, user preferences).
-    pub const RULES: &str = "rules";
-
     // ── Under workspace/ ──
 
     /// Incoming captures that need later routing.
@@ -60,10 +47,6 @@ pub mod dirs {
     pub const PROJECTS: &str = "projects";
     /// Analysis, research, and investigation reports.
     pub const REPORTS: &str = "reports";
-    /// Automation definitions and user-facing job workspaces.
-    pub const AUTOMATIONS: &str = "automations";
-    /// Plans written during planning workflows.
-    pub const PLANS: &str = "plans";
     /// Rendered pages displayed in the app.
     pub const RENDERS: &str = "renders";
     /// Throwaway output and intermediate results.
@@ -74,31 +57,10 @@ pub mod dirs {
     pub const LABS: &str = "labs";
     /// Retired work material.
     pub const ARCHIVE: &str = "archive";
-    /// Voice notes storage.
-    pub const VOICE_NOTES: &str = "voice-notes";
     /// Workspace-local curated wiki/research experiment.
     pub const KNOWLEDGE: &str = "knowledge";
     /// Workspace-local skill-owned credential vault.
     pub const VAULT: &str = "vault";
-
-    // ── Under profiles/<name>/ ──
-
-    /// Prompt files referenced by a profile.
-    pub const PROMPTS: &str = "prompts";
-    /// Hook behavior/prompt files referenced by a profile.
-    pub const HOOKS: &str = "hooks";
-    /// Provider presentation files referenced by a profile.
-    pub const PROVIDERS: &str = "providers";
-    /// Capability presentation files referenced by a profile.
-    pub const CAPABILITIES: &str = "capabilities";
-    /// Context compiler policy files referenced by a profile.
-    pub const CONTEXT: &str = "context";
-    /// Relative agent dir for rules discovery: `.tron/memory/rules`.
-    ///
-    /// This is a composed constant used in `rules_discovery.rs` where a
-    /// `const &str` is required. A test verifies it stays in sync with
-    /// [`MEMORY`] and [`RULES`].
-    pub const TRON_RULES_RELATIVE: &str = ".tron/memory/rules";
 }
 
 /// Well-known file names under `~/.tron/`.
@@ -127,14 +89,6 @@ pub mod files {
     /// loop and the user-mode auto-updater. Presence of the file blocks
     /// any further install actions without touching settings.
     pub const AUTO_UPDATE_PAUSE: &str = "auto-update.pause";
-    /// Profile prompt file name used by project-local prompt overrides.
-    pub const SYSTEM_MD: &str = "SYSTEM.md";
-    /// Canonical user-memory root file.
-    ///
-    /// Auto-injected into every session's context. Lightweight by design:
-    /// basic user identity (name, email) + pointers to detail files under
-    /// `rules/`. See [`memory_file()`] for the resolved path.
-    pub const MEMORY_MD: &str = "MEMORY.md";
 }
 
 // ── Core path functions ────────────────────────────────────────────────
@@ -211,19 +165,9 @@ pub fn profiles_dir() -> PathBuf {
     tron_home().join(dirs::PROFILES)
 }
 
-/// `~/.tron/memory/`
-pub fn memory_dir() -> PathBuf {
-    tron_home().join(dirs::MEMORY)
-}
-
 /// `~/.tron/workspace/`
 pub fn workspace_dir() -> PathBuf {
     tron_home().join(dirs::WORKSPACE)
-}
-
-/// `~/.tron/skills/`
-pub fn skills_dir() -> PathBuf {
-    tron_home().join(dirs::SKILLS)
 }
 
 // ── Internal subdirectory helpers ──────────────────────────────────────
@@ -248,50 +192,11 @@ pub fn journals_dir() -> PathBuf {
     db_dir().join(dirs::JOURNALS)
 }
 
-// ── Transcription sidecar ──────────────────────────────────────────────
-//
-// The transcription sidecar is a Python venv + parakeet-mlx worker that
-// lives entirely under one directory, with a HuggingFace model cache
-// inside it. The Mac wizard or contributor tooling seeds worker.py and
-// requirements.txt before enabling it; runtime-generated venv/model data
-// stays here. All references to these paths across the Rust agent, the
-// Python worker, and `scripts/tron` should go through the helpers below.
-
-/// `~/.tron/internal/transcription/` — parent dir for venv, worker, model cache.
-pub fn transcription_dir() -> PathBuf {
-    internal_dir().join(dirs::TRANSCRIPTION)
-}
-
-/// `~/.tron/internal/transcription/venv/`
-pub fn transcription_venv_dir() -> PathBuf {
-    transcription_dir().join("venv")
-}
-
-/// `~/.tron/internal/transcription/worker.py`
-pub fn transcription_worker_script() -> PathBuf {
-    transcription_dir().join("worker.py")
-}
-
-/// `~/.tron/internal/transcription/requirements.txt`
-pub fn transcription_requirements_path() -> PathBuf {
-    transcription_dir().join("requirements.txt")
-}
-
-/// `~/.tron/internal/transcription/models/hf/` — `HuggingFace` model cache (`HF_HOME`).
-pub fn transcription_hf_cache_dir() -> PathBuf {
-    transcription_dir().join("models").join("hf")
-}
-
 // ── Workspace subdirectory helpers ─────────────────────────────────────
 
 /// `~/.tron/workspace/reports/`
 pub fn reports_dir() -> PathBuf {
     workspace_dir().join(dirs::REPORTS)
-}
-
-/// `~/.tron/workspace/automations/`
-pub fn automations_dir() -> PathBuf {
-    workspace_dir().join(dirs::AUTOMATIONS)
 }
 
 /// `~/.tron/workspace/scratch/`
@@ -307,11 +212,6 @@ pub fn renders_dir() -> PathBuf {
 /// `~/.tron/workspace/screenshots/`
 pub fn screenshots_dir() -> PathBuf {
     workspace_dir().join(dirs::SCREENSHOTS)
-}
-
-/// `~/.tron/workspace/plans/`
-pub fn plans_dir() -> PathBuf {
-    workspace_dir().join(dirs::PLANS)
 }
 
 /// `~/.tron/workspace/inbox/`
@@ -342,58 +242,6 @@ pub fn knowledge_dir() -> PathBuf {
 /// `~/.tron/workspace/vault/`
 pub fn vault_dir() -> PathBuf {
     workspace_dir().join(dirs::VAULT)
-}
-
-/// `~/.tron/memory/rules/`
-///
-/// Global rules (SYSTEM.md, CLAUDE.md) and core memories (user preferences,
-/// agent identity) live here.
-pub fn rules_dir() -> PathBuf {
-    memory_dir().join(dirs::RULES)
-}
-
-// ── Voice notes ──────────────────────────────────────────────────────
-
-/// `~/.tron/workspace/inbox/voice-notes/`
-pub fn voice_notes_dir() -> PathBuf {
-    inbox_dir().join(dirs::VOICE_NOTES)
-}
-
-// ── Memory subdirectory helpers ───────────────────────────────────────
-
-/// `~/.tron/memory/sessions/`
-pub fn memory_sessions_dir() -> PathBuf {
-    memory_dir().join(dirs::SESSIONS)
-}
-
-/// `~/.tron/memory/MEMORY.md`
-///
-/// Canonical user-memory root file (auto-loaded into every session).
-pub fn memory_file() -> PathBuf {
-    memory_dir().join(files::MEMORY_MD)
-}
-
-/// Same as [`memory_dir`] but rooted at a caller-supplied home (test-only ergonomic).
-///
-/// Used by [`crate::domains::agent::runner::memory`] tests to point fingerprint scans at a
-/// tempdir without manipulating `$HOME` (the workspace lints `unsafe_code = "deny"`).
-pub fn memory_dir_for_home(home: &str) -> PathBuf {
-    PathBuf::from(home).join(".tron").join(dirs::MEMORY)
-}
-
-/// Same as [`memory_file`] but rooted at a caller-supplied home (test-only ergonomic).
-pub fn memory_file_for_home(home: &str) -> PathBuf {
-    memory_dir_for_home(home).join(files::MEMORY_MD)
-}
-
-/// Same as [`memory_rules_dir`] but rooted at a caller-supplied home (test-only ergonomic).
-pub fn memory_rules_dir_for_home(home: &str) -> PathBuf {
-    memory_dir_for_home(home).join(dirs::RULES)
-}
-
-/// `~/.tron/memory/rules/`
-pub fn memory_rules_dir() -> PathBuf {
-    rules_dir()
 }
 
 // ── Composite file path helpers ────────────────────────────────────────
@@ -487,14 +335,6 @@ pub fn updater_state_path() -> PathBuf {
 /// the file.
 pub fn auto_update_pause_path() -> PathBuf {
     run_dir().join(files::AUTO_UPDATE_PAUSE)
-}
-
-/// `~/.tron/profiles/user/prompts/core.md`
-pub fn global_system_prompt_path() -> PathBuf {
-    profiles_dir()
-        .join(crate::shared::profile::USER_PROFILE)
-        .join(dirs::PROMPTS)
-        .join("core.md")
 }
 
 /// `~/.tron/profiles/user/profile.toml`

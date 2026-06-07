@@ -495,9 +495,7 @@ mod tests {
             run_migrations(&conn).unwrap();
         }
         let store = Arc::new(EventStore::new(pool));
-        let session = store
-            .create_session("m", "/tmp", Some("t"), None, None, None)
-            .unwrap();
+        let session = store.create_session("m", "/tmp", Some("t"), None).unwrap();
         let emitter = Arc::new(EventEmitter::new());
         let rx = emitter.subscribe();
         let persister = EventPersister::new(Arc::clone(&store));

@@ -41,6 +41,45 @@ without adding concrete evidence here.
 | PET-10 | running | Traceability checkpoint implemented without awarding full PET-10 points. Fresh storage now includes `trace_records`; `capability::execute` writes a running trace record before every primitive operation and updates the same record on success/failure with status, duration, request/result hashes, authority envelope, provider/model metadata, VCS revision when available, and file attribution/content hashes. `execute` now exposes agent-visible `trace_list` and `trace_get`. The static trace gate also removed a hidden abstraction: provider inference no longer falls back through the model registry; it uses only the primitive `provider/model` id shape. README capability/database docs now describe the primitive trace path and no longer document `observability::trace_get` as the model-visible trace reader. Checkpoint commit: `090f1c7d4`. Approval/observability primitive-plane teardown checkpoint commit: `e4fd80148`; it deleted the engine approval store/primitive/tests, deleted the observability primitive/tests, removed host/runtime approval and old observability dispatch, removed `approval_required` from authority requirements and grants, removed the `agent.autonomy.approvalPromptMode` setting, replaced generated UI `approvalPolicy` with `authorityPolicy`, renamed the process execution classifier from approval to execution policy, and strengthened PET-10 absence gates across retained engine/settings/transport/session/README paths. | `cargo fmt --manifest-path packages/agent/Cargo.toml --all` -> exit 0. First PET-10 static proof `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture` -> exit 101, `capability_registry_recipe_and_conformance_scaffolding_is_deleted` failed because trace provider inference still mentioned `registry`; fixed by deleting that fallback. Green rerun `cargo fmt --manifest-path packages/agent/Cargo.toml --all && cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture` -> exit 0, 12 tests passed. Trace integration proof `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution -- --nocapture` -> exit 0, 1 test passed; it invokes real `capability::execute` `file_write`, then `trace_list`, then `trace_get`, asserting `dev.tron` trace id/status/authority/model/provider plus Agent Trace-style file contributor type/model id and `sha256:` content hash. Red approval/observability absence gate proof before deletion: `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants approval_and_observability_planes_are_not_engine_primitives -- --nocapture` -> exit 101 because the engine approval record/store module still existed. Green approval/observability gate after teardown: `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants approval_and_observability_planes_are_not_engine_primitives -- --nocapture` -> exit 0. Broad retained-surface absence scan `rg -n "approval\|Approval\|approvalPolicy\|approvalRequired\|approval_required\|observability::" README.md packages/agent/src/engine packages/agent/src/domains/settings/implementation/types/server.rs packages/agent/src/transport/engine.rs packages/agent/src/domains/catalog.rs packages/agent/src/domains/registration.rs packages/agent/src/domains/session/reconstruct.rs` -> exit 1/no matches. Final focused proof for this checkpoint: `cargo fmt --manifest-path packages/agent/Cargo.toml --all && cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture && cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution -- --nocapture && cargo check --manifest-path packages/agent/Cargo.toml --bin tron && git diff --check` -> exit 0; PET-10 static suite reported 13 passed, trace integration reported 1 passed, and `cargo check` still reported 293 library warnings plus 1 binary warning. Attempted affected `cargo test --manifest-path packages/agent/Cargo.toml --lib ...` command -> exit 101 before targeted tests ran because stale `#[cfg(test)]` modules still reference removed session profile/rules/subagent APIs; removed the slice-local unused `AgentCapabilityClient` import exposed by that attempt. | Full PET-10 remains open: backend warning cleanup is not done, and full `cargo test --lib` is blocked by stale test-only modules around removed session/profile/rules/subagent surfaces. Those stale tests are the next PET-10/PET-11 teardown target. |
 | PET-11 | pending | Not run. | pending | pending |
 
+### PET-10 Client Cleanup Addendum
+
+This checkpoint removed the remaining iOS client-side product planes that
+survived the earlier primitive-shell pass:
+
+- plugin-source settings, DTOs, client, status plugin, route, and tests;
+- audio/transcription services, media DTO/client, mic input UI, microphone
+  permission copy, transcription coordinator, and tests;
+- memory-retain and rules event plugins, dispatch protocol requirements,
+  chat-model state, system-event enum cases, notification pills, memory detail
+  sheet, local event taxonomy/icon/summary support, detailed context DTO
+  memory/rules fields, and tests;
+- stale iOS docs/README references to those client surfaces.
+
+Evidence:
+
+- `cd packages/ios-app && xcodegen generate` -> exit 0.
+- First focused iOS proof:
+  `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-pet-settings -only-testing:TronMobileTests/ServerSettingsTests -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/AgentContextSettingsPageTests -only-testing:TronMobileTests/ServerSettingsPageTests -only-testing:TronMobileTests/SettingsParityTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
+  -> exit 0, 19 XCTest tests and 41 Swift Testing tests passed; result bundle
+  `/tmp/tron-xcode-pet-settings/Logs/Test/Test-Tron-2026.06.07_05-36-44--0700.xcresult`.
+- First cleanup rerun:
+  `xcodebuild test -project packages/ios-app/TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-pet-ios-cleanup -only-testing:TronMobileTests/InteractionPolicyTests -only-testing:TronMobileTests/SendBlockReasonTests -only-testing:TronMobileTests/SessionStateInvariantsTests -only-testing:TronMobileTests/EventDispatchCoordinatorTests -only-testing:TronMobileTests/UnifiedEventTransformerTests -only-testing:TronMobileTests/EventIconProviderTests -only-testing:TronMobileTests/SessionEventSummaryTests -only-testing:TronMobileTests/NotificationPillTests -only-testing:TronMobileTests/IPadSheetPresentationTests -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/AgentContextSettingsPageTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests`
+  -> exit 65 at compile, stale `BrowserGetStatusResult` test remained after
+  deleting the media/browser DTO. Owner: ios test cleanup. Fixed by deleting
+  the stale browser protocol test block.
+- Green focused cleanup proof: same command and derived-data path -> exit 0,
+  173 XCTest tests plus 39 Swift Testing tests passed; result bundle
+  `/tmp/tron-xcode-pet-ios-cleanup/Logs/Test/Test-Tron-2026.06.07_05-54-22--0700.xcresult`.
+- Absence scans:
+  `rg -n "BrowserGetStatusResult|browser::|BrowserClient|MediaClient|Transcribe|Transcription|transcription|AudioRecorder|AudioCaptureEngine|canRecordAudio|memory\\.retained|rules\\.activated|RulesActivatedPlugin|MemoryUpdatedPlugin" packages/ios-app/Sources packages/ios-app/Tests packages/ios-app/project.yml`
+  -> exit 1/no matches;
+  `rg -n "case rules|case memory|rulesLoaded|rulesActivated|memoryRetained|memoryAuto|MemoryRetain|UserMemory|LoadedRules|ActivatedRule" packages/ios-app/Sources packages/ios-app/Tests`
+  -> exit 1/no matches.
+
+Residual risk: PET-10 still owns backend dead-source/test-only teardown and
+warning cleanup. PET-11 still owns final adversarial "cannot remove more" audit
+and fresh end-to-end proof.
+
 ### PET-8 Approval-Plane Teardown Addendum
 
 After the initial PET-8 shell proof, the iOS approval prompt plane was also

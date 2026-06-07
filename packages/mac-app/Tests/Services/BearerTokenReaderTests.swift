@@ -124,28 +124,4 @@ struct BearerTokenReaderTests {
         #expect(BearerTokenReader.permissionsAreSafe(at: path) == true)
     }
 
-    @Test("transcription setting writer preserves existing profile settings")
-    func transcriptionSettingWriterPreservesExistingSettings() throws {
-        let tmp = TestTempDir.make()
-        defer { TestTempDir.cleanup(tmp) }
-        let path = tmp.appendingPathComponent("profile.toml", isDirectory: false)
-        try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
-        try Data(
-            """
-            [settings.server]
-            tailscaleIp = "100.64.0.1"
-
-            [profileMetadata]
-            theme = "dark"
-            """.utf8
-        ).write(to: path)
-
-        try ServerSettingsWriter.setTranscriptionEnabled(true, at: path)
-
-        let text = try String(contentsOf: path, encoding: .utf8)
-        #expect(text.contains("[settings.server.transcription]"))
-        #expect(text.contains("enabled = true"))
-        #expect(text.contains(#"tailscaleIp = "100.64.0.1""#))
-        #expect(text.contains(#"theme = "dark""#))
-    }
 }

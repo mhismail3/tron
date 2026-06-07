@@ -267,7 +267,7 @@ struct ModelSetupOnboardingPage: View {
 
     var body: some View {
         OnboardingPage(
-            subtitle: "Choose the model Tron should start with. Memory retain uses the same model."
+            subtitle: "Choose the model Tron should start with."
         ) {
             VStack(alignment: .leading, spacing: TronSpacing.section) {
                 OnboardingGlassCard {
@@ -368,8 +368,7 @@ struct ModelSetupOnboardingPage: View {
         Task {
             do {
                 let update = ServerSettingsUpdate(
-                    server: ServerSettingsUpdate.ServerUpdate(defaultModel: model),
-                    memory: ServerSettingsUpdate.MemoryUpdate(retainModel: model)
+                    server: ServerSettingsUpdate.ServerUpdate(defaultModel: model)
                 )
                 try await dependencies.engineClient.settings.update(
                     update,

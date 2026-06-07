@@ -53,8 +53,6 @@ pub struct ListSessionsOptions<'a> {
     pub limit: Option<i64>,
     /// Skip results.
     pub offset: Option<i64>,
-    /// Show only non-empty sessions.
-    pub user_only: Option<bool>,
 }
 
 /// Counters to increment atomically.
@@ -169,17 +167,6 @@ impl SessionRepo {
             } else {
                 sql.push_str(" AND ended_at IS NULL");
             }
-        }
-        if opts.user_only == Some(true) {
-            sql.push_str(
-                " AND NOT (
-                    message_count = 0
-                    AND turn_count = 0
-                    AND total_input_tokens = 0
-                    AND total_output_tokens = 0
-                    AND event_count <= 1
-                )",
-            );
         }
         sql.push_str(" ORDER BY last_activity_at DESC");
         if let Some(limit) = opts.limit {

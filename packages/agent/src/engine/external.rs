@@ -794,7 +794,7 @@ fn stamp_external_capability_metadata(
     if !definition.visibility.is_agent_visible() {
         return;
     }
-    let conformance_state = external_conformance_state(definition, token);
+    let health_state = external_health_state(definition, token);
     let Some(metadata) = definition.metadata.as_object_mut() else {
         return;
     };
@@ -811,12 +811,12 @@ fn stamp_external_capability_metadata(
         Value::String(token.signature_status.clone()),
     );
     metadata.insert(
-        "conformanceState".to_owned(),
-        Value::String(conformance_state.to_owned()),
+        "healthState".to_owned(),
+        Value::String(health_state.to_owned()),
     );
 }
 
-fn external_conformance_state(
+fn external_health_state(
     definition: &FunctionDefinition,
     token: &ScopedWorkerToken,
 ) -> &'static str {

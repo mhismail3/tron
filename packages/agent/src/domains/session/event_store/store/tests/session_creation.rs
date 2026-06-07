@@ -6,14 +6,7 @@ use super::*;
 fn create_session_basic() {
     let store = setup();
     let result = store
-        .create_session(
-            "claude-opus-4-6",
-            "/tmp/project",
-            Some("Test"),
-            None,
-            None,
-            None,
-        )
+        .create_session("claude-opus-4-6", "/tmp/project", Some("Test"), None)
         .unwrap();
 
     assert!(result.session.id.starts_with("sess_"));
@@ -35,14 +28,7 @@ fn create_session_basic() {
 fn create_session_with_explicit_provider() {
     let store = setup();
     let result = store
-        .create_session(
-            "claude-opus-4-6",
-            "/tmp/project",
-            None,
-            Some("openai"),
-            None,
-            None,
-        )
+        .create_session("claude-opus-4-6", "/tmp/project", None, Some("openai"))
         .unwrap();
 
     let payload_str: String = result.root_event.payload;
@@ -58,7 +44,7 @@ fn create_session_with_explicit_provider() {
 fn create_session_creates_workspace() {
     let store = setup();
     store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let ws = store.get_workspace_by_path("/tmp/project").unwrap();
@@ -69,10 +55,10 @@ fn create_session_creates_workspace() {
 fn create_session_reuses_workspace() {
     let store = setup();
     let r1 = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     let r2 = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     assert_eq!(r1.session.workspace_id, r2.session.workspace_id);
@@ -83,7 +69,7 @@ fn create_session_reuses_workspace() {
 fn create_session_root_event_has_correct_fields() {
     let store = setup();
     let result = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     assert!(result.root_event.parent_id.is_none());
@@ -97,7 +83,7 @@ fn create_session_root_event_has_correct_fields() {
 fn create_session_detects_ollama_provider() {
     let store = setup();
     let result = store
-        .create_session("gemma4:e4b", "/tmp/project", None, None, None, None)
+        .create_session("gemma4:e4b", "/tmp/project", None, None)
         .unwrap();
 
     let payload_str: String = result.root_event.payload;
@@ -113,7 +99,7 @@ fn create_session_detects_ollama_provider() {
 fn create_session_detects_anthropic_provider() {
     let store = setup();
     let result = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let payload_str: String = result.root_event.payload;
@@ -125,7 +111,7 @@ fn create_session_detects_anthropic_provider() {
 fn create_session_detects_google_provider() {
     let store = setup();
     let result = store
-        .create_session("gemini-2.5-flash", "/tmp/project", None, None, None, None)
+        .create_session("gemini-2.5-flash", "/tmp/project", None, None)
         .unwrap();
 
     let payload_str: String = result.root_event.payload;

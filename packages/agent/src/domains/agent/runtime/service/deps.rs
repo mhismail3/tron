@@ -8,7 +8,6 @@ pub struct PromptRuntimeDeps {
     pub session_manager:
         Arc<crate::domains::agent::runner::orchestrator::session_manager::SessionManager>,
     pub event_store: Arc<crate::domains::session::event_store::EventStore>,
-    pub profile_runtime: Arc<crate::domains::agent::runner::ProfileRuntime>,
     pub health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
     pub shutdown_coordinator: Option<Arc<crate::app::shutdown::ShutdownCoordinator>>,
     pub engine_host: crate::engine::EngineHostHandle,

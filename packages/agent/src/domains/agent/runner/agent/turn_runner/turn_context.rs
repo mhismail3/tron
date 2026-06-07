@@ -51,7 +51,6 @@ pub(super) async fn resolve_provider_primitive_surface(
             catalog_revision: crate::engine::CatalogRevision(0),
             capabilities: Vec::new(),
             targets_by_name: Default::default(),
-            all_model_capability_ids: Vec::new(),
             turn_stopping_capabilities: Default::default(),
         });
     }

@@ -4,8 +4,8 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::types::{
-    EngineResourceTypeDefinition, EngineResourceVersioningMode, HARNESS_DOC_KIND,
-    HARNESS_DOC_SCHEMA_ID, RegisterResourceType, UI_SURFACE_KIND, UI_SURFACE_SCHEMA_ID,
+    EngineResourceTypeDefinition, EngineResourceVersioningMode, RegisterResourceType,
+    UI_SURFACE_KIND, UI_SURFACE_SCHEMA_ID,
 };
 use super::ui_surface::ui_surface_schema;
 use crate::engine::ids::WorkerId;
@@ -104,7 +104,6 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "supported_by",
                 "contradicted_by",
                 "derived_from",
-                "affects_notification",
                 "revokes",
                 "supersedes",
                 "renewed_by",
@@ -159,7 +158,6 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "contradicted_by",
                 "derived_from",
                 "supports",
-                "affects_notification",
                 "revokes",
                 "supersedes",
                 "renewed_by",
@@ -168,66 +166,6 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "enforces_revocation",
             ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
-        ),
-        builtin_type(
-            "notification",
-            "tron.resource.notification.v1",
-            json!({
-                "type": "object",
-                "required": [
-                    "notificationId",
-                    "title",
-                    "body",
-                    "priority",
-                    "sessionId",
-                    "workspaceId",
-                    "invocationId",
-                    "createdAt",
-                    "delivery",
-                    "metadata"
-                ],
-                "additionalProperties": true,
-                "properties": {
-                    "notificationId": {"type": "string"},
-                    "title": {"type": "string"},
-                    "body": {"type": "string"},
-                    "priority": {"type": "string"},
-                    "badge": {"type": ["integer", "null"]},
-                    "data": {"type": ["object", "null"]},
-                    "sheetContent": {"type": ["string", "null"]},
-                    "sessionId": {"type": "string"},
-                    "workspaceId": {"type": "string"},
-                    "invocationId": {"type": "string"},
-                    "createdAt": {"type": "string"},
-                    "updatedAt": {"type": "string"},
-                    "isUserSession": {"type": "boolean"},
-                    "delivery": {
-                        "type": "object",
-                        "required": ["status", "success", "successCount", "totalCount"],
-                        "additionalProperties": true,
-                        "properties": {
-                            "status": {"type": "string"},
-                            "success": {"type": "boolean"},
-                            "message": {"type": ["string", "null"]},
-                            "successCount": {"type": "integer"},
-                            "totalCount": {"type": "integer"},
-                            "warning": {"type": ["string", "null"]},
-                            "errorCode": {"type": ["string", "null"]},
-                            "observedAt": {"type": "string"}
-                        }
-                    },
-                    "metadata": {"type": "object"}
-                }
-            }),
-            vec![
-                "pending",
-                "active",
-                "delivery_failed",
-                "discarded",
-                "archived",
-            ],
-            vec!["evidence_for", "supported_by", "derived_from", "supersedes"],
-            json!({"read": ["notifications.read", "resource.read"], "write": ["notifications.write", "resource.write"]}),
         ),
         builtin_type(
             UI_SURFACE_KIND,
@@ -258,48 +196,6 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "read": ["ui.read", "resource.read"],
                 "write": ["ui.write", "resource.write"],
                 "delete": ["ui.write", "resource.write"]
-            }),
-        ),
-        builtin_type(
-            HARNESS_DOC_KIND,
-            HARNESS_DOC_SCHEMA_ID,
-            json!({
-                "type": "object",
-                "required": [
-                    "docId",
-                    "title",
-                    "format",
-                    "body",
-                    "catalogRevision",
-                    "policy",
-                    "contentHash",
-                    "source",
-                    "metadata"
-                ],
-                "additionalProperties": true,
-                "properties": {
-                    "docId": {"type": "string"},
-                    "title": {"type": "string"},
-                    "format": {"type": "string"},
-                    "body": {"type": "string"},
-                    "catalogRevision": {"type": "integer"},
-                    "policy": {"type": "object"},
-                    "contentHash": {"type": "string"},
-                    "source": {"type": "string"},
-                    "metadata": {"type": "object"}
-                }
-            }),
-            vec!["active", "superseded", "archived", "discarded"],
-            vec![
-                "documents",
-                "documents_capability",
-                "documents_catalog",
-                "supersedes",
-                "derived_from",
-            ],
-            json!({
-                "read": ["capability.read", "resource.read"],
-                "write": ["capability.write", "resource.write"]
             }),
         ),
         builtin_type(

@@ -216,14 +216,14 @@ mod tests {
     fn parse_with_context_logs() {
         let ctx = CapabilityCallContext {
             invocation_id: Some("toolu_123".into()),
-            model_primitive_name: Some("process::run".into()),
+            model_primitive_name: Some("execute".into()),
             provider: Some("anthropic".into()),
         };
         let err = parse_capability_call_arguments(Some("broken{"), Some(&ctx))
             .expect_err("invalid JSON with context fails closed");
         let err = err.to_string();
         assert!(err.contains("anthropic capability invocation arguments"));
-        assert!(err.contains("process::run"));
+        assert!(err.contains("execute"));
         assert!(err.contains("toolu_123"));
     }
 

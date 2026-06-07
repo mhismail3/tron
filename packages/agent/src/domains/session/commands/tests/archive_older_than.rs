@@ -6,11 +6,11 @@ async fn archive_older_than_archives_stale_and_preserves_fresh() {
 
     let stale = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("stale"), None)
+        .create_session("m", "/tmp", Some("stale"))
         .unwrap();
     let fresh = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("fresh"), None)
+        .create_session("m", "/tmp", Some("fresh"))
         .unwrap();
 
     let ten_days_ago = (chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339();
@@ -41,7 +41,7 @@ async fn archive_older_than_skips_already_archived() {
 
     let s1 = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("s1"), None)
+        .create_session("m", "/tmp", Some("s1"))
         .unwrap();
 
     // Pre-archive s1 by hand.
@@ -60,77 +60,16 @@ async fn archive_older_than_skips_already_archived() {
 }
 
 #[tokio::test]
-async fn archive_older_than_skips_subagents() {
-    let ctx = make_test_context();
-
-    let parent = ctx
-        .session_manager
-        .create_session("m", "/tmp", Some("parent"), None)
-        .unwrap();
-    let subagent = ctx
-        .session_manager
-        .create_session_for_subagent("m", "/tmp", Some("sub"), &parent, "task", "desc")
-        .unwrap();
-
-    let ten_days_ago = (chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339();
-    set_last_activity(&ctx.event_store, &parent, &ten_days_ago);
-    set_last_activity(&ctx.event_store, &subagent, &ten_days_ago);
-
-    let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
-        .await
-        .unwrap();
-    let archived_ids: Vec<&str> = result["archivedSessionIds"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap())
-        .collect();
-    // Only the parent is archived; the subagent is filtered out by
-    // exclude_subagents.
-    assert_eq!(archived_ids, vec![parent.as_str()]);
-}
-
-#[tokio::test]
-async fn archive_older_than_skips_non_user_sources() {
-    let ctx = make_test_context();
-
-    let user_sid = ctx
-        .session_manager
-        .create_session("m", "/tmp", Some("user"), None)
-        .unwrap();
-    let cron_sid = ctx
-        .session_manager
-        .create_session("m", "/tmp", Some("cron"), None)
-        .unwrap();
-    assert!(ctx.event_store.update_source(&cron_sid, "cron").unwrap());
-
-    let ten_days_ago = (chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339();
-    set_last_activity(&ctx.event_store, &user_sid, &ten_days_ago);
-    set_last_activity(&ctx.event_store, &cron_sid, &ten_days_ago);
-
-    let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
-        .await
-        .unwrap();
-    let archived_ids: Vec<&str> = result["archivedSessionIds"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|v| v.as_str().unwrap())
-        .collect();
-    assert_eq!(archived_ids, vec![user_sid.as_str()]);
-}
-
-#[tokio::test]
 async fn archive_older_than_zero_days_archives_all_active() {
     let ctx = make_test_context();
 
     let a = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("a"), None)
+        .create_session("m", "/tmp", Some("a"))
         .unwrap();
     let b = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("b"), None)
+        .create_session("m", "/tmp", Some("b"))
         .unwrap();
 
     // Force both timestamps to the past so they unambiguously precede
@@ -185,15 +124,15 @@ async fn archive_older_than_archives_batch_multiple_stale() {
 
     let a = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("a"), None)
+        .create_session("m", "/tmp", Some("a"))
         .unwrap();
     let b = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("b"), None)
+        .create_session("m", "/tmp", Some("b"))
         .unwrap();
     let c = ctx
         .session_manager
-        .create_session("m", "/tmp", Some("c"), None)
+        .create_session("m", "/tmp", Some("c"))
         .unwrap();
 
     let old = (chrono::Utc::now() - chrono::Duration::days(30)).to_rfc3339();

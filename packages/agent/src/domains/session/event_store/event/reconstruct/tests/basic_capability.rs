@@ -320,9 +320,8 @@ fn reconstructed_capability_history_remains_provider_neutral() {
                     "id": "toolu_01capability",
                     "name": "execute",
                     "arguments": {
-                        "mode": "invoke",
-                        "contractId": "filesystem::read_file",
-                        "payload": {"path": "/tmp/example.txt"}
+                        "operation": "file_read",
+                        "path": "/tmp/example.txt"
                     }
                 }],
                 "turn": 1
@@ -335,19 +334,19 @@ fn reconstructed_capability_history_remains_provider_neutral() {
                 "content": "example contents",
                 "isError": false,
                 "modelPrimitiveName": "execute",
-                "contractId": "filesystem::read_file",
-                "implementationId": "first_party.filesystem.v1.read_file",
-                "functionId": "filesystem::read_file",
-                "pluginId": "first_party.filesystem",
-                "workerId": "filesystem-worker",
+                "contractId": "capability::execute",
+                "implementationId": "primitive.execute",
+                "functionId": "capability::execute",
+                "pluginId": null,
+                "workerId": "capability",
                 "schemaDigest": "sha256:read",
                 "catalogRevision": 7,
-                "trustTier": "first_party_signed",
-                "riskLevel": "low",
-                "effectClass": "read",
+                "trustTier": "host_primitive",
+                "riskLevel": "high",
+                "effectClass": "external_side_effect",
                 "traceId": "trace-read",
                 "rootInvocationId": "root-read",
-                "bindingDecisionId": "binding-read"
+                "bindingDecisionId": null
             }),
         ),
     ];
@@ -360,10 +359,7 @@ fn reconstructed_capability_history_remains_provider_neutral() {
     assert_eq!(msgs[1].role, "assistant");
     assert_eq!(msgs[1].content[0]["type"], "capability_invocation");
     assert_eq!(msgs[1].content[0]["name"], "execute");
-    assert_eq!(
-        msgs[1].content[0]["arguments"]["contractId"],
-        "filesystem::read_file"
-    );
+    assert_eq!(msgs[1].content[0]["arguments"]["operation"], "file_read");
     assert_eq!(msgs[2].role, "capabilityResult");
     assert_eq!(msgs[2].invocation_id.as_deref(), Some("toolu_01capability"));
     assert_eq!(msgs[2].content, "example contents");

@@ -231,17 +231,6 @@ fn make_primitive_loop_deps(
     }
 }
 
-fn resolved_normal_profile() -> Arc<crate::shared::profile::ResolvedProfile> {
-    let tempdir = tempfile::tempdir().expect("profile tempdir");
-    let home = tempdir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).expect("seed profile home");
-    let profile =
-        crate::shared::profile::resolve_profile_at(&home, crate::shared::profile::NORMAL_PROFILE)
-            .expect("normal profile");
-    std::mem::forget(tempdir);
-    Arc::new(profile)
-}
-
 #[test]
 fn agent_uses_empty_initial_capability_snapshot() {
     let agent = TronAgent::new(AgentConfig::default(), make_deps(MockProvider), "s1".into());
@@ -258,21 +247,10 @@ async fn text_only_run_succeeds_without_frozen_capabilities() {
         make_deps(MockProvider),
         "s1".into(),
     );
-    let tempdir = tempfile::tempdir().expect("profile tempdir");
-    let home = tempdir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).expect("seed profile home");
-    let profile = Arc::new(
-        crate::shared::profile::resolve_profile_at(&home, crate::shared::profile::NORMAL_PROFILE)
-            .expect("normal profile"),
-    );
     let result = agent
         .run(
             "hello",
-            crate::domains::agent::runner::types::RunContext {
-                profile_name: Some(profile.name.clone()),
-                resolved_profile: Some(profile),
-                ..Default::default()
-            },
+            crate::domains::agent::runner::types::RunContext::default(),
         )
         .await;
     assert!(
@@ -301,13 +279,10 @@ async fn primitive_loop_calls_execute_observes_result_and_continues() {
         ),
         "primitive-loop-session".into(),
     );
-    let profile = resolved_normal_profile();
     let result = agent
         .run(
             "call execute and continue",
             crate::domains::agent::runner::types::RunContext {
-                profile_name: Some(profile.name.clone()),
-                resolved_profile: Some(profile),
                 run_id: Some("primitive-loop-run".into()),
                 ..Default::default()
             },
@@ -346,26 +321,10 @@ async fn resumed_session_offset_is_used_for_turn_events_and_token_record() {
     agent.set_completed_turn_offset(4);
     let mut events = agent.subscribe();
 
-    let profile = {
-        let tempdir = tempfile::tempdir().expect("profile tempdir");
-        let home = tempdir.path().join(".tron");
-        crate::shared::constitution::ensure_tron_home_at(&home).expect("seed profile home");
-        let profile = crate::shared::profile::resolve_profile_at(
-            &home,
-            crate::shared::profile::NORMAL_PROFILE,
-        )
-        .expect("normal profile");
-        std::mem::forget(tempdir);
-        Arc::new(profile)
-    };
     let result = agent
         .run(
             "hello",
-            crate::domains::agent::runner::types::RunContext {
-                profile_name: Some(profile.name.clone()),
-                resolved_profile: Some(profile),
-                ..Default::default()
-            },
+            crate::domains::agent::runner::types::RunContext::default(),
         )
         .await;
 

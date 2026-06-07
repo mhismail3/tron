@@ -161,38 +161,6 @@ fn compaction_summary(text: &str) -> Message {
     Message::user(format!("{COMPACTION_SUMMARY_PREFIX}\n\n{text}"))
 }
 
-// ========================================================================
-// shouldCompact
-// ========================================================================
-
-#[test]
-fn should_compact_above_threshold() {
-    let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 5, deps);
-    assert!(engine.should_compact());
-}
-
-#[test]
-fn should_compact_below_threshold() {
-    let deps = MockDeps::new(default_messages()).with_tokens(60_000, 100_000);
-    let engine = CompactionEngine::new(0.70, 5, deps);
-    assert!(!engine.should_compact());
-}
-
-#[test]
-fn should_compact_at_exact_threshold() {
-    let deps = MockDeps::new(default_messages()).with_tokens(70_000, 100_000);
-    let engine = CompactionEngine::new(0.70, 5, deps);
-    assert!(engine.should_compact());
-}
-
-#[test]
-fn should_compact_zero_limit() {
-    let deps = MockDeps::new(default_messages()).with_tokens(80_000, 0);
-    let engine = CompactionEngine::new(0.70, 5, deps);
-    assert!(!engine.should_compact());
-}
-
 #[test]
 fn has_summarizable_messages_false_for_single_preserved_turn() {
     let deps = MockDeps::new(vec![Message::user("Hi"), Message::assistant("Hello")]);
@@ -877,47 +845,6 @@ async fn execute_returns_compression_ratio() {
 }
 
 // ========================================================================
-// onNeeded
-// ========================================================================
-
-#[test]
-fn trigger_if_needed_fires_callback() {
-    let deps = MockDeps::new(default_messages());
-    let mut engine = CompactionEngine::new(0.70, 5, deps);
-
-    let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let called_clone = called.clone();
-    engine.on_needed(move || {
-        called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-    });
-
-    engine.trigger_if_needed();
-    assert!(called.load(std::sync::atomic::Ordering::SeqCst));
-}
-
-#[test]
-fn trigger_if_needed_does_not_fire_below_threshold() {
-    let deps = MockDeps::new(default_messages()).with_tokens(50_000, 100_000);
-    let mut engine = CompactionEngine::new(0.70, 5, deps);
-
-    let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let called_clone = called.clone();
-    engine.on_needed(move || {
-        called_clone.store(true, std::sync::atomic::Ordering::SeqCst);
-    });
-
-    engine.trigger_if_needed();
-    assert!(!called.load(std::sync::atomic::Ordering::SeqCst));
-}
-
-#[test]
-fn trigger_if_needed_no_callback_no_panic() {
-    let deps = MockDeps::new(default_messages());
-    let engine = CompactionEngine::new(0.70, 5, deps);
-    engine.trigger_if_needed();
-}
-
-// ========================================================================
 // message_only_tokens
 // ========================================================================
 
@@ -1059,22 +986,6 @@ async fn execute_turn_based_no_orphans() {
 
 const LOCAL_CTX_LIMIT: u64 = 65_536;
 const DEFAULT_COMPACT_THRESHOLD: f64 = 0.70;
-
-#[test]
-fn local_window_no_compact_well_below_threshold() {
-    // 45,000 / 65,536 ≈ 0.686 — below 0.70, no compaction.
-    let deps = MockDeps::new(default_messages()).with_tokens(45_000, LOCAL_CTX_LIMIT);
-    let engine = CompactionEngine::new(DEFAULT_COMPACT_THRESHOLD, 5, deps);
-    assert!(!engine.should_compact());
-}
-
-#[test]
-fn local_window_compacts_above_threshold() {
-    // 50,000 / 65,536 ≈ 0.763 — above 0.70, compaction fires.
-    let deps = MockDeps::new(default_messages()).with_tokens(50_000, LOCAL_CTX_LIMIT);
-    let engine = CompactionEngine::new(DEFAULT_COMPACT_THRESHOLD, 5, deps);
-    assert!(engine.should_compact());
-}
 
 #[test]
 fn local_window_all_turns_fit_under_budget() {

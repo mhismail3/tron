@@ -134,7 +134,7 @@ async fn engine_meta_discover_and_inspect_are_live_and_scope_checked() {
 }
 
 #[tokio::test]
-async fn primitive_catalog_and_worker_functions_share_engine_path() {
+async fn primitive_catalog_and_worker_read_functions_share_engine_path() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let system_context = |trace_id: &str, scope: &str| {
         CausalContext::new(
@@ -159,7 +159,7 @@ async fn primitive_catalog_and_worker_functions_share_engine_path() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|function| function["id"] == "worker::protocol_guide")
+            .any(|function| function["id"] == "worker::list")
     );
 
     let workers = handle
@@ -176,77 +176,6 @@ async fn primitive_catalog_and_worker_functions_share_engine_path() {
             .unwrap()
             .iter()
             .any(|worker| worker["id"] == "worker")
-    );
-
-    let guide = handle
-        .invoke(host_invocation(
-            "worker::protocol_guide",
-            json!({
-                "functionId": "demo::echo",
-                "workerId": "demo-echo-worker",
-                "language": "python"
-            }),
-            system_context("primitive-trace", "worker.read"),
-        ))
-        .await;
-    assert_eq!(guide.error, None);
-    let guide_value = guide.value.as_ref().unwrap();
-    assert_eq!(guide_value["protocolVersion"], 1);
-    assert_eq!(
-        guide_value["environment"]["TRON_ENGINE_BEARER_TOKEN"],
-        "Bearer token injected by worker::spawn; send it as Authorization: Bearer <token>"
-    );
-    let template = guide_value["pythonTemplate"].as_str().unwrap();
-    assert!(template.contains("Authorization: Bearer"));
-    assert!(template.contains("import select"));
-    assert!(template.contains("select.select([sock], [], [], 0.25)"));
-    assert!(template.contains("\"type\": \"register_function\""));
-    assert!(
-        template.find("catalog_snapshot").unwrap() < template.find("register_function").unwrap(),
-        "worker template must wait for the hello catalog snapshot before registering functions"
-    );
-    assert!(template.contains("\"output_contract\": {\"kind\": \"none\"}"));
-    assert!(template.contains("\"sequence\": heartbeat_sequence"));
-    assert!(template.contains("demo::echo"));
-    assert!(template.contains("endpoint = \"ws://\" + endpoint"));
-    assert!(template.contains("must target /engine/workers"));
-    let rules = guide_value["rules"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|rule| rule.as_str())
-        .collect::<Vec<_>>();
-    assert!(
-        rules
-            .iter()
-            .any(|rule| rule.contains("Copy pythonTemplate as-is"))
-    );
-    assert!(
-        rules
-            .iter()
-            .any(|rule| rule.contains("Do not hand-roll WebSocket framing"))
-    );
-
-    let node_guide = handle
-        .invoke(host_invocation(
-            "worker::protocol_guide",
-            json!({
-                "functionId": "demo::echo",
-                "workerId": "demo-echo-worker",
-                "language": "node"
-            }),
-            system_context("primitive-trace-node", "worker.read"),
-        ))
-        .await;
-    assert_eq!(node_guide.error, None);
-    let node_guide_value = node_guide.value.as_ref().unwrap();
-    assert_eq!(node_guide_value["requestedLanguage"], "node");
-    assert_eq!(node_guide_value["templateLanguage"], "python");
-    assert!(
-        node_guide_value["pythonTemplate"]
-            .as_str()
-            .unwrap()
-            .contains("demo::echo")
     );
 }
 

@@ -43,7 +43,6 @@ async fn hmh_f1_host_mutation_families_reject_missing_idempotency_before_payload
 
     for (function_id, scope) in [
         ("worker::disconnect", "worker.write"),
-        ("module::activate", "module.write"),
         ("ui::surface_for_target", "ui.write"),
         ("engine::promote", "engine.promote.workspace"),
         ("queue::enqueue", "queue.write"),
@@ -93,12 +92,11 @@ fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
         .collect::<Vec<_>>();
     assert!(
         missing.is_empty(),
-        "HMH-F1 mutating worker/module/ui/promotion/queue/resource surfaces missing idempotency: {missing:?}"
+        "mutating worker/ui/promotion/queue/resource surfaces missing idempotency: {missing:?}"
     );
 
     for required in [
         "worker::disconnect",
-        "module::activate",
         "ui::submit_action",
         "engine::promote",
         "queue::enqueue",
@@ -107,7 +105,7 @@ fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
         let definition = functions
             .iter()
             .find(|function| function.id.as_str() == required)
-            .unwrap_or_else(|| panic!("{required} must be registered for HMH-F1 coverage"));
+            .unwrap_or_else(|| panic!("{required} must be registered for idempotency coverage"));
         assert!(
             definition.effect_class.requires_idempotency(),
             "{required} must remain classified as mutating"
@@ -122,7 +120,6 @@ fn hmh_f1_mutating_substrate_surfaces_declare_idempotency() {
 fn hmh_f1_surface(function_id: &str) -> bool {
     function_id == "engine::promote"
         || function_id.starts_with("worker::")
-        || function_id.starts_with("module::")
         || function_id.starts_with("ui::")
         || function_id.starts_with("queue::")
         || function_id.starts_with("resource::")

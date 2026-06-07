@@ -9,7 +9,7 @@
 //! ## Prompt Execution Flow
 //!
 //! 1. `/engine` builds an `EngineTransportRequest` for `agent::prompt`.
-//! 2. The engine validates schema, authority, idempotency, approval, leases, and
+//! 2. The engine validates schema, authority, idempotency, leases, and
 //!    catalog revision before this domain handler runs.
 //! 3. `agent::prompt` derives the run id, records the accepted prompt, invokes
 //!    hidden `agent::prompt_apply` synchronously through the engine fabric, and
@@ -36,7 +36,6 @@
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
-pub(crate) mod lineage;
 pub(crate) mod operations;
 pub mod runner;
 pub(crate) use deps::Deps;

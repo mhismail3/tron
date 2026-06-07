@@ -29,7 +29,7 @@ async fn create_session_through_orchestrator() {
     let orch = make_orchestrator();
     let sid = orch
         .session_manager()
-        .create_session("model", "/tmp", Some("test"), None)
+        .create_session("model", "/tmp", Some("test"))
         .unwrap();
 
     assert_eq!(orch.active_session_count(), 1);
@@ -56,7 +56,7 @@ async fn max_concurrent_enforced() {
     for i in 0..MAX_CONCURRENT_SESSIONS {
         let _ = orch
             .session_manager()
-            .create_session("model", &format!("/tmp/{i}"), None, None)
+            .create_session("model", &format!("/tmp/{i}"), None)
             .unwrap();
     }
 
@@ -291,7 +291,7 @@ async fn is_session_busy_reflects_active_session() {
     let orch = make_orchestrator();
     let sid = orch
         .session_manager()
-        .create_session("model", "/tmp", Some("test"), None)
+        .create_session("model", "/tmp", Some("test"))
         .unwrap();
     assert!(orch.is_session_busy(&sid));
 }

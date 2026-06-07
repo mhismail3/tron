@@ -15,47 +15,7 @@ final class SettingsState {
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
     var preserveRecentCount: Int = 5
     var triggerTokenThreshold: Double = 0.70
-    var rulesDiscoverStandaloneFiles: Bool = true
-    var isolationMode: String = "always"
     var queueDrainMode: String = "sequential"
-
-    // MARK: - Hooks
-
-    var hooksLlmModel: String = "claude-haiku-4-5-20251001"
-    var builtinHooks: [BuiltinHookSetting] = []
-    /// What to do when a hook handler errors or times out.
-    /// - `"continue"` (default) — fail-open
-    /// - `"block"` — synthesize a Block with a reason
-    var hooksErrorPolicy: String = "continue"
-
-    // MARK: - Memory
-
-    var autoRetainInterval: Int = 10
-    /// Model used for the retainer LLM. Server default is `claude-sonnet-4-6`.
-    var retainModel: String = "claude-sonnet-4-6"
-
-    // MARK: - Git Workflow
-
-    /// Override the auto-detected main/master branch used for sync/finalize.
-    /// Empty string means "auto-detect".
-    var gitTargetBranch: String = ""
-    /// Branches that require `overrideProtected == true` for push.
-    var gitProtectedBranches: [String] = ["main", "master", "develop"]
-    /// `"keep"` | `"deleteOnFinalize"`.
-    var gitSessionBranchPolicy: String = "keep"
-    /// `"merge"` | `"rebase"` | `"squash"`.
-    var gitMergeStrategy: String = "merge"
-    var gitAutoSetUpstream: Bool = true
-    var gitCrashRecoveryAbortTimeoutMs: UInt64 = 30 * 60 * 1000
-    var gitOpTimeoutNetworkMs: UInt64 = 60_000
-    var gitOpTimeoutLocalMs: UInt64 = 30_000
-
-    // MARK: - plugin source
-
-    /// Proactive schema-refresh TTL in milliseconds. `0` disables.
-    /// plugin-source-derived capability plugins refresh capability metadata when the
-    /// per-server cache is older than this TTL.
-    var mcpSchemaRefreshTtlMs: UInt64 = 30_000
 
     // MARK: - Observability And Storage
 
@@ -65,11 +25,6 @@ final class SettingsState {
     var observabilityMaxInlinePayloadBytes: UInt64 = 8192
     var storageRetentionEnabled: Bool = true
     var storageMaxDatabaseMb: UInt64 = 512
-
-    // MARK: - Transcription
-
-    /// Whether the Mac server loads the local MLX transcription sidecar.
-    var transcriptionEnabled: Bool = false
 
     // MARK: - Update Checks
 
@@ -194,32 +149,14 @@ final class SettingsState {
         defaultModel = settings.defaultModel
         preserveRecentCount = settings.compaction.preserveRecentCount
         triggerTokenThreshold = settings.compaction.triggerTokenThreshold
-        rulesDiscoverStandaloneFiles = settings.rules.discoverStandaloneFiles
-        isolationMode = settings.isolationMode
         queueDrainMode = settings.queueDrainMode
-        hooksLlmModel = settings.hooksLlmModel
-        builtinHooks = settings.builtinHooks
-        hooksErrorPolicy = settings.hooksErrorPolicy
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
-        autoRetainInterval = settings.autoRetainInterval
-        retainModel = settings.retainModel
-
-        gitTargetBranch = settings.gitTargetBranch ?? ""
-        gitProtectedBranches = settings.gitProtectedBranches
-        gitSessionBranchPolicy = settings.gitSessionBranchPolicy
-        gitMergeStrategy = settings.gitMergeStrategy
-        gitAutoSetUpstream = settings.gitAutoSetUpstream
-        gitCrashRecoveryAbortTimeoutMs = settings.gitCrashRecoveryAbortTimeoutMs
-        gitOpTimeoutNetworkMs = settings.gitOpTimeoutNetworkMs
-        gitOpTimeoutLocalMs = settings.gitOpTimeoutLocalMs
-        mcpSchemaRefreshTtlMs = settings.mcpSchemaRefreshTtlMs
         observabilityLogLevel = settings.observabilityLogLevel
         observabilityPayloadCapture = settings.observabilityPayloadCapture
         observabilityVerboseRetentionDays = settings.observabilityVerboseRetentionDays
         observabilityMaxInlinePayloadBytes = settings.observabilityMaxInlinePayloadBytes
         storageRetentionEnabled = settings.storageRetentionEnabled
         storageMaxDatabaseMb = settings.storageMaxDatabaseMb
-        transcriptionEnabled = settings.transcriptionEnabled
 
         updateEnabled = settings.updateEnabled
         updateChannel = settings.updateChannel

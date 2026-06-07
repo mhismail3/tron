@@ -1,6 +1,6 @@
 //! Dashboard projection DTOs and queries for session list/activity surfaces.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
@@ -110,7 +110,7 @@ pub struct ActivitySummaryLine {
     /// Whether the capability invocation produced an error, present for `capability_invocation` lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
-    /// Number of agent turns, present for `subagent` lines.
+    /// Number of agent turns for nested activity summaries.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turns: Option<i64>,
 }
@@ -118,7 +118,6 @@ pub struct ActivitySummaryLine {
 /// Truncation constants matching iOS `DashboardConstants`.
 const MAX_USER_PROMPT_LEN: usize = 100;
 const MAX_ASSISTANT_TEXT_LEN: usize = 200;
-const MAX_SUBAGENT_TEXT_LEN: usize = 50;
 const MAX_ACTIVITY_LINES: usize = 5;
 
 #[derive(Clone, Debug, Default)]
@@ -324,9 +323,8 @@ impl SessionRepo {
     ) -> Result<Vec<ActivitySummaryLine>> {
         let mut stmt = conn.prepare(
             "SELECT type, payload, invocation_id FROM events
-             WHERE session_id = ?1
-               AND type IN ('message.user', 'message.assistant', 'capability.invocation.completed',
-                            'subagent.spawned', 'subagent.completed', 'subagent.failed')
+               WHERE session_id = ?1
+                 AND type IN ('message.user', 'message.assistant', 'capability.invocation.completed')
              ORDER BY sequence ASC",
         )?;
 
@@ -355,23 +353,10 @@ impl SessionRepo {
             }
         }
 
-        // Pass 1b: collect hook subagent IDs (spawned with invocation_id IS NULL)
-        let mut hook_subagent_ids: HashSet<String> = HashSet::new();
-        for (event_type, payload_str, invocation_id) in &rows {
-            if event_type == "subagent.spawned" && invocation_id.is_none() {
-                if let Ok(payload) = serde_json::from_str::<Value>(payload_str) {
-                    if let Some(sub_id) = payload.get("subagentSessionId").and_then(|v| v.as_str())
-                    {
-                        let _ = hook_subagent_ids.insert(sub_id.to_string());
-                    }
-                }
-            }
-        }
-
         // Pass 2: walk events in order, building activity lines
         let mut lines: Vec<ActivitySummaryLine> = Vec::new();
 
-        for (event_type, payload_str, invocation_id) in &rows {
+        for (event_type, payload_str, _invocation_id) in &rows {
             let payload: Value = serde_json::from_str(payload_str).unwrap_or(Value::Null);
 
             match event_type.as_str() {
@@ -409,9 +394,6 @@ impl SessionRepo {
                                         .get("name")
                                         .and_then(|n| n.as_str())
                                         .unwrap_or("unknown");
-                                    if name == "agent::spawn_subagent" {
-                                        continue;
-                                    }
                                     let invocation_id = block.get("id").and_then(|id| id.as_str());
                                     let input = block
                                         .get("input")
@@ -476,65 +458,6 @@ impl SessionRepo {
                                 _ => {}
                             }
                         }
-                    }
-                }
-                "subagent.spawned" => {
-                    if invocation_id.is_some() {
-                        let task = payload
-                            .get("task")
-                            .and_then(|t| t.as_str())
-                            .unwrap_or("Sub-agent task");
-                        lines.push(ActivitySummaryLine {
-                            kind: "subagentSpawn".into(),
-                            text: Some(format!("Agent: {}", truncate(task, MAX_SUBAGENT_TEXT_LEN))),
-                            ..Default::default()
-                        });
-                    }
-                }
-                "subagent.completed" => {
-                    let sub_id = payload.get("subagentSessionId").and_then(|v| v.as_str());
-                    if sub_id.is_some_and(|id| hook_subagent_ids.contains(id)) {
-                        continue;
-                    }
-                    let turns = payload
-                        .get("totalTurns")
-                        .and_then(|v| v.as_i64())
-                        .unwrap_or(0);
-                    let duration = payload.get("duration").and_then(|v| v.as_i64());
-                    let complete_line = ActivitySummaryLine {
-                        kind: "subagentDone".into(),
-                        text: Some(format!("Agent complete ({turns} turns)")),
-                        duration_ms: duration,
-                        turns: Some(turns),
-                        ..Default::default()
-                    };
-                    if let Some(idx) = lines.iter().rposition(|l| l.kind == "subagentSpawn") {
-                        lines[idx] = complete_line;
-                    } else {
-                        lines.push(complete_line);
-                    }
-                }
-                "subagent.failed" => {
-                    let sub_id = payload.get("subagentSessionId").and_then(|v| v.as_str());
-                    if sub_id.is_some_and(|id| hook_subagent_ids.contains(id)) {
-                        continue;
-                    }
-                    let error = payload
-                        .get("error")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("Unknown error");
-                    let fail_line = ActivitySummaryLine {
-                        kind: "subagentFailed".into(),
-                        text: Some(format!(
-                            "Agent failed: {}",
-                            truncate(error, MAX_SUBAGENT_TEXT_LEN)
-                        )),
-                        ..Default::default()
-                    };
-                    if let Some(idx) = lines.iter().rposition(|l| l.kind == "subagentSpawn") {
-                        lines[idx] = fail_line;
-                    } else {
-                        lines.push(fail_line);
                     }
                 }
                 _ => {}

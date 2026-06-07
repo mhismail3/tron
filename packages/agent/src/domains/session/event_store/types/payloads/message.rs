@@ -11,17 +11,13 @@ use super::token_usage::{TokenRecord, TokenUsage};
 pub struct UserMessagePayload {
     /// User message content — either a plain string or array of content blocks.
     pub content: Value,
-    /// Turn number, when known. Live prompt/subagent emitters historically
-    /// persisted user messages before turn start, so production events may
-    /// contain only `content`.
+    /// Turn number, when known. Production events may contain only `content`
+    /// when a message is persisted before turn state is assigned.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub turn: Option<i64>,
     /// Number of images attached.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_count: Option<i64>,
-    /// Skills attached to this message (raw iOS objects: `[{name, source, displayName}]`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skills: Option<Value>,
 }
 
 /// Payload for `message.assistant` events.

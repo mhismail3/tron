@@ -26,7 +26,6 @@ protocol EngineClientProtocol: AnyObject {
     var filesystem: FilesystemClient { get }
     var eventSync: EventSyncClient { get }
     var context: ContextClient { get }
-    var media: MediaClient { get }
     var misc: MiscClient { get }
 
     // MARK: - Connection

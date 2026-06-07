@@ -267,7 +267,7 @@ mod tests {
         let store = crate::domains::session::event_store::store::EventStore::new(pool.clone());
 
         let cr = store
-            .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+            .create_session("claude-opus-4-6", "/tmp/project", None, None)
             .unwrap();
 
         let store2 = crate::domains::session::event_store::store::EventStore::new(pool);
@@ -296,7 +296,7 @@ mod tests {
         let evt3 = chain
             .append(
                 EventType::CapabilityInvocationStarted,
-                serde_json::json!({"modelPrimitiveName": "process::run"}),
+                serde_json::json!({"modelPrimitiveName": "execute", "operation": "process_run"}),
             )
             .unwrap();
         assert_eq!(evt3.parent_id.as_deref(), Some(evt2.id.as_str()));

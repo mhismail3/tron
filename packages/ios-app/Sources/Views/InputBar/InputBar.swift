@@ -1,8 +1,8 @@
 import SwiftUI
 import PhotosUI
 
-// ARCHITECTURE: coordinates keyboard handling, attachment picking, voice
-// capture, and send flow for the primitive prompt composer.
+// ARCHITECTURE: coordinates keyboard handling, attachment picking, and send
+// flow for the primitive prompt composer.
 
 // MARK: - Input Bar (iOS 26 Liquid Glass)
 
@@ -16,24 +16,21 @@ struct InputBar: View {
     /// Read-only configuration (processing state, model info, etc.)
     let config: InputBarConfig
 
-    /// Action callbacks (send, abort, mic, etc.)
+    /// Action callbacks (send, abort, attachment, etc.)
     let actions: InputBarActions
 
     // MARK: - Private State
 
     @FocusState private var isFocused: Bool
     @Environment(\.dependencies) private var dependencies
-    private let audioMonitor = AudioAvailabilityMonitor.shared
     @State private var showingImagePicker = false
     @State private var showCamera = false
     @State private var showFilePicker = false
     @State private var hasAppeared = false
     @State private var showAttachmentButton = false
-    @State private var showMicButton = false
 
     // Namespaces for morph animations
     @Namespace private var actionButtonNamespace
-    @Namespace private var micButtonNamespace
     @Namespace private var attachmentButtonNamespace
 
     private let actionButtonSize: CGFloat = 40
@@ -44,8 +41,8 @@ struct InputBar: View {
         if config.agentPhase.isActive {
             // During processing/postProcessing: allow send if has text
             // so the message can be queued (server rejects if queue full).
-            // Async blockers like compaction / retain / disconnect still
-            // prevent queueing — nothing to queue into.
+            // Async blockers like compaction / disconnect still prevent
+            // queueing — nothing to queue into.
             return state.hasTextContent && config.sendBlockReason == nil
         }
         return state.hasContent && config.sendBlockReason == nil
@@ -69,9 +66,6 @@ struct InputBar: View {
         let basePadding: CGFloat = 14
         var totalPadding = basePadding
         if !shouldShowActionButton {
-            totalPadding += actionButtonSize + 8
-        }
-        if !showMicButton {
             totalPadding += actionButtonSize + 8
         }
         return totalPadding
@@ -128,10 +122,6 @@ struct InputBar: View {
                             if !shouldShowActionButton {
                                 ActionButtonDock(namespace: actionButtonNamespace, buttonSize: actionButtonSize)
                             }
-                            if !showMicButton {
-                                MicButtonDock(buttonSize: actionButtonSize)
-                                    .matchedGeometryEffect(id: "micMorph", in: micButtonNamespace)
-                            }
                         }
                         .padding(.trailing, 8)
                         // Prevent overlay from intercepting text selection drag gestures
@@ -156,22 +146,6 @@ struct InputBar: View {
                     .accessibilityHint(config.sendBlockReason?.description ?? "")
                 }
 
-                // Mic button
-                if showMicButton {
-                    GlassMicButton(
-                        isRecording: config.isRecording,
-                        isTranscribing: config.isTranscribing,
-                        isProcessing: config.isProcessing || config.readOnly,
-                        onMicTap: {
-                            isFocused = false
-                            actions.onMicTap()
-                        },
-                        buttonSize: actionButtonSize,
-                        audioMonitor: audioMonitor
-                    )
-                    .matchedGeometryEffect(id: "micMorph", in: micButtonNamespace)
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
-                }
             }
             .overlay(alignment: .top) {
                 if config.showDragHint {
@@ -183,7 +157,6 @@ struct InputBar: View {
                 }
             }
             .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showAttachmentButton)
-            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: showMicButton)
             .animation(.tronStandard, value: shouldShowActionButton)
             .padding(.horizontal, 16)
             .padding(.bottom, 8)
@@ -261,22 +234,17 @@ struct InputBar: View {
             maxSelectionCount: 5,
             matching: .images
         )
-        // Entrance animation — three staggered morph-ins over ~430ms.
+        // Entrance animation — staggered morph-ins for attachment/status.
         // All timings/springs live in TronAnimationTiming so the
         // cumulative timeline can be tweaked in one place.
         .onAppear {
             showAttachmentButton = false
-            showMicButton = false
             hasAppeared = false
 
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarAttachmentDelayNanos)
                 withAnimation(TronAnimationTiming.inputBarButtonSpring) {
                     showAttachmentButton = true
-                }
-                try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarMicDelayNanos)
-                withAnimation(TronAnimationTiming.inputBarButtonSpring) {
-                    showMicButton = true
                 }
                 try? await Task.sleep(nanoseconds: TronAnimationTiming.inputBarFinalDelayNanos)
                 withAnimation(TronAnimationTiming.inputBarFinalSpring) {
@@ -286,7 +254,6 @@ struct InputBar: View {
         }
         .onDisappear {
             showAttachmentButton = false
-            showMicButton = false
             hasAppeared = false
         }
     }
@@ -351,7 +318,6 @@ struct InputBar: View {
         .frame(minHeight: actionButtonSize)
         .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(.tronStandard, value: shouldShowActionButton)
-        .animation(.spring(response: 0.32, dampingFraction: 0.86), value: showMicButton)
     }
 
     private func resignInputFocusForKeyboardTraversal() -> KeyPress.Result {
@@ -392,8 +358,6 @@ extension Notification.Name {
         InputBar(
             state: previewState,
             config: InputBarConfig(
-                isRecording: false,
-                isTranscribing: false,
                 tokenUsage: TokenUsage(inputTokens: 50000, outputTokens: 10000, cacheReadTokens: nil, cacheCreationTokens: nil),
                 contextPercentage: 30,
                 contextWindow: 200_000,

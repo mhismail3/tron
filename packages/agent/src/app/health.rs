@@ -84,11 +84,9 @@ pub fn deep_health_check(
                 .join(crate::shared::paths::dirs::PROFILES)
                 .join(crate::shared::paths::files::AUTH_JSON),
         ),
-        // 4. Skills
-        check_skills(&tron_home.join(crate::shared::paths::dirs::SKILLS)),
-        // 5. Binary
+        // 4. Binary
         check_binary(&crate::shared::paths::tron_binary_path()),
-        // 6. Disk
+        // 5. Disk
         check_disk(tron_home),
     ];
 
@@ -179,34 +177,6 @@ fn check_auth(path: &Path) -> DeepHealthCheck {
             name: "auth".into(),
             status: "warn".into(),
             detail: Some(json!("auth.json not found")),
-        },
-    }
-}
-
-fn check_skills(path: &Path) -> DeepHealthCheck {
-    if !path.is_dir() {
-        return DeepHealthCheck {
-            name: "skills".into(),
-            status: "warn".into(),
-            detail: Some(json!("skills directory not found")),
-        };
-    }
-    match std::fs::read_dir(path) {
-        Ok(entries) => {
-            let count = entries
-                .filter_map(Result::ok)
-                .filter(|e| e.path().is_dir())
-                .count();
-            DeepHealthCheck {
-                name: "skills".into(),
-                status: "ok".into(),
-                detail: Some(json!({ "count": count })),
-            }
-        }
-        Err(error) => DeepHealthCheck {
-            name: "skills".into(),
-            status: "warn".into(),
-            detail: Some(json!({ "error": error.to_string() })),
         },
     }
 }

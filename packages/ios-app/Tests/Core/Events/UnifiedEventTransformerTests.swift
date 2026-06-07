@@ -201,16 +201,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "newLevel": AnyCodable("high")
             ],
             .notificationInterrupted: [:],
-            .rulesLoaded: [
-                "totalFiles": AnyCodable(1),
-                "dynamicRulesCount": AnyCodable(0)
-            ],
-            .rulesActivated: [
-                "totalActivated": AnyCodable(1),
-                "rules": AnyCodable([
-                    ["relativePath": "AGENTS.md", "scopeDir": "."] as [String: Any]
-                ])
-            ],
             .compactBoundary: [
                 "originalTokens": AnyCodable(10_000),
                 "compactedTokens": AnyCodable(2_000),
@@ -239,14 +229,6 @@ final class UnifiedEventTransformerTests: XCTestCase {
                 "turn": AnyCodable(1),
                 "error": AnyCodable("Turn failed"),
                 "recoverable": AnyCodable(true)
-            ],
-            .memoryRetained: [
-                "title": AnyCodable("Session summary"),
-                "summary": AnyCodable("Important points were retained.")
-            ],
-            .memoryAutoRetainFailed: [
-                "intervalFired": AnyCodable(6),
-                "reason": AnyCodable("summarizer_failed")
             ]
         ]
     }
@@ -711,13 +693,12 @@ final class UnifiedEventTransformerTests: XCTestCase {
             // Session tree / completion metadata lives outside ReconstructedState.
             .sessionEnd,
             .sessionFork,
-            // Prompt/process/memory trigger events do not currently restore
+            // Prompt/process events do not currently restore
             // user-visible chat or persisted ReconstructedState fields.
             .capabilityPauseRequested,
             .capabilityPauseResolved,
             .capabilityRunStatus,
             .configPromptUpdate,
-            .memoryAutoRetainTriggered,
             .notificationProcessResult,
             .processResultsConsumed
         ]

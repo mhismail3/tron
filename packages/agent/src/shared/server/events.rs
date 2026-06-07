@@ -73,19 +73,6 @@ impl ServerEventPayload {
     }
 }
 
-/// Convert an `EventRow` to the neutral server event payload.
-pub(crate) fn event_row_to_server_payload(row: &EventRow) -> ServerEventPayload {
-    let data = serde_json::from_str::<Value>(&row.payload).ok();
-    let mut payload =
-        ServerEventPayload::new(row.event_type.clone(), Some(row.session_id.clone()), data);
-    payload.workspace_id = Some(row.workspace_id.clone());
-    payload.timestamp.clone_from(&row.timestamp);
-    payload.sequence = Some(row.sequence);
-    payload.source_event_id = Some(row.id.clone());
-    payload.source_sequence = Some(row.sequence);
-    payload
-}
-
 /// Convert an `EventRow` to wire format using a payload that has already been
 /// resolved from the event store.
 pub(crate) fn event_row_to_wire_with_payload(row: &EventRow, payload: Option<Value>) -> Value {

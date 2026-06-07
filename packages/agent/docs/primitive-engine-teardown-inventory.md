@@ -170,23 +170,23 @@ state after bootstrap.
 ## Documentation Inventory
 
 PET-9 must rewrite or delete product docs so the branch documents only runnable
-bare-loop behavior. Completed scorecards may remain as historical evidence only
-when their README language says they are completed evidence, not active product
-guidance.
+bare-loop behavior. Retired scorecards and guides are deleted rather than kept
+as historical source files on this branch.
 
 | Document | Class | Teardown decision |
 |----------|-------|-------------------|
 | `capability-orchestration-test-scorecard.md` | delete | Historical evidence for the old catalog/execute orchestration. |
-| `codebase-cleanup-scorecard.md` | retain | Historical cleanup evidence; keep only if language stays completed and non-guiding. |
-| `collapsed-engine-hardening-scorecard.md` | retain | Historical evidence for retained engine primitives. |
+| `codebase-cleanup-scorecard.md` | delete | Historical cleanup evidence with product-era architecture references; primitive branch keeps only the active teardown artifacts. |
+| `collapsed-engine-hardening-scorecard.md` | delete | Superseded by the active primitive teardown scorecard. |
 | `context-architecture.md` | delete | Describes rule/policy context planes that PET-4/PET-6 remove. |
+| `engine-redesign/` | delete | Approval/guardrail-era design set superseded by the primitive teardown plan. |
 | `hyper-modular-agent-architecture-scorecard.md` | delete | Planning doc for worker-pack/harness product architecture. |
 | `hyper-modular-agent-harness-execution-scorecards.md` | delete | Active product harness portfolio; incompatible with primitive branch. |
 | `ipad-action-time-followup-scorecard.md` | delete | Product UI action follow-up. |
-| `legacy-fallback-cleanup-pass-scorecard.md` | retain | Historical absence-gate evidence if it stays completed. |
+| `legacy-fallback-cleanup-pass-scorecard.md` | delete | Superseded by PET-10/PET-11 absence gates. |
 | `post-100-ipad-ui-regression-scorecard.md` | delete | Product UI regression evidence no longer runnable. |
-| `post-100-operating-conditions-scorecard.md` | retain | Historical operating evidence only if completed wording remains. |
-| `post-scorecard-gap-hardening-scorecard.md` | retain | Historical hardening evidence only if completed wording remains. |
+| `post-100-operating-conditions-scorecard.md` | delete | Product operating evidence no longer runnable. |
+| `post-scorecard-gap-hardening-scorecard.md` | delete | Superseded by PET-10/PET-11 absence gates. |
 | `primitive-engine-teardown-evidence-manifest.md` | retain | Active evidence manifest for this campaign. |
 | `primitive-engine-teardown-inventory.md` | retain | PET-1 deletion map. |
 | `primitive-engine-teardown-scorecard.md` | retain | Active teardown scorecard. |
@@ -195,9 +195,9 @@ guidance.
 | `self-extending-local-product-release-notes.md` | delete | Product notes for removed surfaces. |
 | `self-extending-local-product-troubleshooting.md` | delete | Product troubleshooting for removed surfaces. |
 | `self-extending-local-product-user-guide.md` | delete | Product guide for removed surfaces. |
-| `token-accounting-hardening-scorecard.md` | retain | Historical provider accounting evidence; token accounting remains primitive infrastructure. |
-| `tron-productization-evidence-manifest.md` | retain | Historical evidence only if completed. |
-| `tron-productization-scorecard.md` | retain | Historical evidence only if completed. |
+| `token-accounting-hardening-scorecard.md` | delete | Provider accounting is retained in code/tests; the old phase scorecard is not branch truth. |
+| `tron-productization-evidence-manifest.md` | delete | Productization evidence for removed surfaces. |
+| `tron-productization-scorecard.md` | delete | Productization plan superseded by primitive teardown. |
 | `worker-first-product-evidence-manifest.md` | delete | Product evidence for removed Work/Worker Pack surfaces. |
 | `worker-first-product-scorecard.md` | delete | Product scorecard for removed worker-first branch. |
 
@@ -217,7 +217,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `Models` | retain | Keep EngineProtocol, Messages, Tokens. Delete Dashboard, Features, product DTOs. |
 | `Protocols` | retain | Keep only shell/service protocols. |
 | `Resources` | retain | Keep required fonts/resources only. |
-| `Services` | retain | Keep Network, Storage, Settings, Events, Observability, Onboarding. Delete Audio, Notifications, product diagnostics/upload policy if unused. |
+| `Services` | retain | Keep Network, Storage, Settings, Events, Observability, Onboarding, and paired-server bootstrap. Audio/transcription and plugin-source clients are deleted. Notifications remain only as pairing/server delivery infrastructure until PET-11 re-audits them. |
 | `Theme` | retain | Keep minimal accessible styling. |
 | `Utilities` | retain | Keep only generic shell utilities. |
 | `ViewModels` | retain | Keep chat/session/settings state. Delete fixed product handlers and projections. |
@@ -234,7 +234,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `Chat` | retain | Primary prompt and assistant output shell. |
 | `Components` | retain | Shared generic UI components only. |
 | `EngineApproval` | delete | Product approval prompts; infrastructure blocked state can render as plain message. |
-| `InputBar` | retain | Keep prompt composer. Delete skills/prompt-library/voice/action product buttons. |
+| `InputBar` | retain | Keep prompt composer and attachments. Skills, prompt-library, voice/audio, and fixed action product buttons are deleted. |
 | `MessageBubble` | retain | Keep message rendering and generic runtime output. Delete capability/product-specific cards. |
 | `Notifications` | delete | Product notification surface. |
 | `Onboarding` | retain | Keep server pairing/provider setup needed to reach the loop. |
@@ -242,7 +242,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `PromptLibrary` | delete | Product prompt library UI. |
 | `Session` | retain | Keep session list/create/resume/delete. Delete clone/worktree/session analytics/product cards. |
 | `SessionTree` | delete | Product tree visualization. |
-| `Settings` | retain | Keep connection/provider/server settings. Delete agent autonomy, guardrails, hooks, skills, prompt-library, protected branch, capability settings. |
+| `Settings` | retain | Keep connection/provider/server settings plus quick-session, prompt queue, and compaction controls. Agent autonomy, guardrails, hooks, skills, plugin sources, memory/rules, prompt-library, protected branch, and capability settings are deleted. |
 | `Skills` | delete | Skill management UI. |
 | `SourceChanges` | delete | Source-control product UI. |
 | `Subagents` | delete | Product subagent UI. |
@@ -265,14 +265,14 @@ server settings shape and iOS controls together.
 | `guardrails.rs` | delete | Product guardrail rules/audit settings. |
 | `memory.rs` | delete | Auto-retain memory settings. Agent-owned state replaces it. |
 | `prompt_library.rs` | delete | Prompt-history/snippet settings. |
-| `server.rs` | retain | Provider/default model/default workspace/transcription bootstrap only; trim product defaults. |
+| `server.rs` | retain | Provider/default model/default workspace/update/Tailscale bootstrap only; transcription bootstrap is deleted. |
 | `skills.rs` | delete | Skill discovery/injection settings. |
 | `ui.rs` | retain | Keep appearance/accessibility basics only. Delete product dashboard settings. |
 | `update.rs` | retain | Retain only if Mac/server bootstrap still needs update checks; otherwise delete during PET-9. |
 | `SettingsState.swift` | retain | Keep only fields matching retained server settings. |
 | `EngineProtocolTypes+Settings.swift` | retain | Decode/update only retained server settings. |
 | `ConnectionSettingsPage.swift` | retain | Keep server pairing/provider/bootstrap controls. |
-| `AgentSettingsPage.swift` | delete | Most controls are autonomy, guardrails, hooks, prompt library, protected branches, and queue product policy. Rebuild a smaller provider/session settings page if needed. |
+| `AgentSettingsPage.swift` | retain | Retain only quick-session defaults and server-owned queued-message controls. Autonomy, guardrails, hooks, prompt library, protected branches, and plugin-source policy are deleted. |
 | `SettingsView` and shared setting components | retain | Keep shell navigation/components after product pages are removed. |
 
 ## Deletion Checkpoint Order

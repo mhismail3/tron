@@ -5,4 +5,3 @@
 //! helpers; it does not register a worker or execute model calls directly.
 
 pub mod implementations;
-pub(crate) mod interactive_enrichment;

@@ -13,10 +13,10 @@
 //!
 //! # Context Injection
 //!
-//! Context parts (rules, memory, skills, tasks) are injected as a `developer`
-//! message prepended to the input. On the first turn (no assistant messages yet),
-//! a tool clarification message is also prepended when the active profile
-//! supports function capabilities.
+//! Primitive context parts (agent soul, agent-owned state, environment, and
+//! compact history) are injected as a `developer` message prepended to the
+//! input. On the first turn, a clarification message is also prepended when the
+//! provider needs extra guidance for the single `execute` primitive.
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -405,15 +405,15 @@ impl OpenAIProvider {
 
     /// Build the Responses API input array from the context.
     ///
-    /// Converts messages, prepends a tool clarification on the first turn,
-    /// and injects context parts (rules, memory, skills, tasks) as a developer message.
+    /// Converts messages, prepends execute clarification on the first turn,
+    /// and injects primitive context parts as a developer message.
     fn build_input(
         context: &Context,
         include_capability_clarification: bool,
     ) -> Vec<ResponsesInputItem> {
         let mut input = convert_to_responses_input(&context.messages);
 
-        // Prepend tool clarification on first turn (before any assistant messages)
+        // Prepend execute clarification on first turn before any assistant messages.
         if let Some(ref ctx_capabilities) = context.capabilities
             && include_capability_clarification
             && !ctx_capabilities.is_empty()
@@ -436,7 +436,7 @@ impl OpenAIProvider {
             debug!("Prepended tool clarification message (first turn)");
         }
 
-        // Inject context parts as developer message (rules, memory, skills, tasks)
+        // Inject primitive context parts as a developer message.
         let context_parts = compose_context_parts(context);
         if !context_parts.is_empty() {
             input.insert(

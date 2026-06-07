@@ -1,23 +1,14 @@
 //! Summarizer trait and utilities for compaction.
 //!
-//! Defines the [`Summarizer`] trait used by the compaction engine, plus
-//! a [`KeywordSummarizer`] recovery path and message serialization utilities
-//! for LLM-based summarization.
-//!
-//! The concrete LLM summarizer (which spawns a Haiku subagent) lives in
-//! `llm_summarizer`, not here -- it depends on subsession infrastructure.
-//! This module provides the trait and the capabilities it needs.
+//! Defines the [`Summarizer`] trait used by the compaction engine, plus the
+//! deterministic [`KeywordSummarizer`] retained by the primitive loop.
 
 use serde_json::Value;
 
 use crate::shared::content::AssistantContent;
-use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
+use crate::shared::messages::{Message, UserMessageContent};
 
-use super::constants::{
-    SUMMARIZER_ASSISTANT_TEXT_LIMIT, SUMMARIZER_CAPABILITY_RESULT_TEXT_LIMIT,
-    SUMMARIZER_MAX_SERIALIZED_CHARS, SUMMARIZER_THINKING_TEXT_LIMIT,
-};
-use super::types::{ExtractedData, KeyDecision, SummaryResult};
+use super::types::{ExtractedData, SummaryResult};
 
 // =============================================================================
 // Summarizer Trait
@@ -25,9 +16,8 @@ use super::types::{ExtractedData, KeyDecision, SummaryResult};
 
 /// Trait for generating compaction summaries from conversation messages.
 ///
-/// Implementations include:
-/// - `LlmSummarizer` (in `llm_summarizer`) -- calls Haiku subagent
-/// - [`KeywordSummarizer`] -- fast recovery summarizer using keyword extraction
+/// The primitive loop retains [`KeywordSummarizer`] as a deterministic recovery
+/// summarizer using keyword extraction.
 #[async_trait::async_trait]
 pub trait Summarizer: Send + Sync {
     /// Summarize a sequence of messages into a structured result.
@@ -35,31 +25,6 @@ pub trait Summarizer: Send + Sync {
         &self,
         messages: &[Message],
     ) -> Result<SummaryResult, Box<dyn std::error::Error + Send + Sync>>;
-}
-
-/// Errors that can occur during summarization.
-#[derive(Debug, thiserror::Error)]
-pub enum SummarizerError {
-    /// The LLM call timed out.
-    #[error("summarizer timed out after {timeout_ms}ms")]
-    Timeout {
-        /// Timeout in milliseconds.
-        timeout_ms: u64,
-    },
-
-    /// The LLM returned unparseable output.
-    #[error("failed to parse summarizer response: {reason}")]
-    ParseError {
-        /// Why parsing failed.
-        reason: String,
-    },
-
-    /// The LLM call failed.
-    #[error("summarizer call failed: {message}")]
-    CallFailed {
-        /// Error message.
-        message: String,
-    },
 }
 
 // =============================================================================
@@ -177,122 +142,6 @@ impl Summarizer for KeywordSummarizer {
     }
 }
 
-// =============================================================================
-// Message Serialization
-// =============================================================================
-
-/// Serialize messages into a line-based transcript for the summarizer subagent.
-///
-/// Format:
-/// ```text
-/// [USER] text...
-/// [ASSISTANT] text... (truncated to 300 chars)
-/// [THINKING] thinking... (truncated to 500 chars)
-/// [CAPABILITY_INVOCATION] name(key_args)
-/// [CAPABILITY_RESULT] text... (truncated to 100 chars)
-/// [CAPABILITY_ERROR] text...
-/// ```
-///
-/// If the total transcript exceeds [`SUMMARIZER_MAX_SERIALIZED_CHARS`],
-/// it keeps the first 25% and last 25%, inserting a middle marker.
-#[must_use]
-pub fn serialize_messages(messages: &[Message]) -> String {
-    let mut lines = Vec::new();
-
-    for msg in messages {
-        match msg {
-            Message::User { content, .. } => {
-                let text = user_content_text(content);
-                if !text.is_empty() {
-                    lines.push(format!("[USER] {text}"));
-                }
-            }
-            Message::Assistant { content, .. } => {
-                for block in content {
-                    match block {
-                        AssistantContent::Text { text } => {
-                            let t = truncate(text, SUMMARIZER_ASSISTANT_TEXT_LIMIT);
-                            lines.push(format!("[ASSISTANT] {t}"));
-                        }
-                        AssistantContent::Thinking { thinking, .. } => {
-                            if !thinking.is_empty() {
-                                let t = truncate(thinking, SUMMARIZER_THINKING_TEXT_LIMIT);
-                                lines.push(format!("[THINKING] {t}"));
-                            }
-                        }
-                        AssistantContent::CapabilityInvocation {
-                            name, arguments, ..
-                        } => {
-                            let args = extract_key_args(arguments);
-                            if args.is_empty() {
-                                lines.push(format!("[CAPABILITY_INVOCATION] {name}()"));
-                            } else {
-                                lines.push(format!("[CAPABILITY_INVOCATION] {name}({args})"));
-                            }
-                        }
-                    }
-                }
-            }
-            Message::CapabilityResult {
-                content, is_error, ..
-            } => {
-                let text = capability_result_content_text(content);
-                let t = truncate(&text, SUMMARIZER_CAPABILITY_RESULT_TEXT_LIMIT);
-                if *is_error == Some(true) {
-                    lines.push(format!("[CAPABILITY_ERROR] {t}"));
-                } else {
-                    lines.push(format!("[CAPABILITY_RESULT] {t}"));
-                }
-            }
-        }
-    }
-
-    let full = lines.join("\n");
-    cap_transcript(&full, SUMMARIZER_MAX_SERIALIZED_CHARS)
-}
-
-/// Extract key arguments from a `capability_invocation` arguments map.
-///
-/// Looks for priority keys: `file_path`, `path`, `command`, `pattern`, `url`, `query`.
-/// Each value is truncated to 100 chars.
-fn extract_key_args(arguments: &serde_json::Map<String, Value>) -> String {
-    const PRIORITY_KEYS: &[&str] = &["file_path", "path", "command", "pattern", "url", "query"];
-
-    let mut parts = Vec::new();
-    for &key in PRIORITY_KEYS {
-        if let Some(val) = arguments.get(key) {
-            let text = match val {
-                Value::String(s) => s.clone(),
-                other => other.to_string(),
-            };
-            parts.push(format!("{key}: {}", truncate(&text, 100)));
-        }
-    }
-    parts.join(", ")
-}
-
-/// Cap a transcript to a maximum character count.
-///
-/// If within limit, returns as-is. Otherwise, keeps the first 25% and
-/// last 25%, inserting a `[... N characters omitted ...]` marker.
-fn cap_transcript(text: &str, max_chars: usize) -> String {
-    if text.len() <= max_chars {
-        return text.to_string();
-    }
-
-    let quarter = max_chars / 4;
-    // Snap to char boundaries so we don't split multi-byte characters.
-    let head = crate::shared::text::truncate_str(text, quarter);
-    // For the tail, walk forward from the target start to find a char boundary.
-    let tail_start = text.len().saturating_sub(quarter);
-    #[allow(clippy::incompatible_msrv)]
-    let tail_boundary = text.ceil_char_boundary(tail_start);
-    let tail = &text[tail_boundary..];
-    let omitted = text.len().saturating_sub(head.len() + tail.len());
-
-    format!("{head}\n[... {omitted} characters omitted ...]\n{tail}")
-}
-
 /// Truncate a string to a maximum length, appending "..." if truncated.
 fn truncate(s: &str, max_len: usize) -> String {
     crate::shared::text::truncate_with_suffix(s, max_len, "...")
@@ -314,130 +163,6 @@ fn user_content_text(content: &UserMessageContent) -> String {
     }
 }
 
-/// Extract text from a `CapabilityResultMessageContent`.
-fn capability_result_content_text(content: &CapabilityResultMessageContent) -> String {
-    match content {
-        CapabilityResultMessageContent::Text(t) => t.clone(),
-        CapabilityResultMessageContent::Blocks(blocks) => blocks
-            .iter()
-            .filter_map(|b| match b {
-                crate::shared::content::CapabilityResultContent::Text { text } => {
-                    Some(text.as_str())
-                }
-                crate::shared::content::CapabilityResultContent::Image { .. } => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
-}
-
-// =============================================================================
-// Response Parsing
-// =============================================================================
-
-/// Parse a JSON summarizer response into a [`SummaryResult`].
-///
-/// Expects the format:
-/// ```json
-/// {
-///   "narrative": "...",
-///   "extractedData": { ... }
-/// }
-/// ```
-///
-/// Strips markdown code fences if present.
-pub fn parse_summarizer_response(response: &str) -> Result<SummaryResult, SummarizerError> {
-    let cleaned = strip_code_fences(response);
-
-    let parsed: Value =
-        serde_json::from_str(&cleaned).map_err(|e| SummarizerError::ParseError {
-            reason: format!("invalid JSON: {e}"),
-        })?;
-
-    let narrative = parsed
-        .get("narrative")
-        .and_then(Value::as_str)
-        .ok_or_else(|| SummarizerError::ParseError {
-            reason: "missing or invalid 'narrative' field".into(),
-        })?;
-
-    if narrative.is_empty() {
-        return Err(SummarizerError::ParseError {
-            reason: "'narrative' field is empty".into(),
-        });
-    }
-
-    let extracted = parsed.get("extractedData").cloned().unwrap_or(Value::Null);
-    let extracted_data = parse_extracted_data(&extracted);
-
-    Ok(SummaryResult {
-        narrative: narrative.to_string(),
-        extracted_data,
-    })
-}
-
-/// Parse the `extractedData` object from the summarizer response.
-fn parse_extracted_data(value: &Value) -> ExtractedData {
-    let obj = value.as_object();
-
-    let get_string = |key: &str| -> String {
-        obj.and_then(|o| o.get(key))
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string()
-    };
-
-    let get_string_array = |key: &str| -> Vec<String> {
-        obj.and_then(|o| o.get(key))
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_str)
-                    .map(String::from)
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-
-    let key_decisions = obj
-        .and_then(|o| o.get("keyDecisions"))
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| {
-                    let decision = v.get("decision")?.as_str()?.to_string();
-                    let reason = v.get("reason")?.as_str()?.to_string();
-                    Some(KeyDecision { decision, reason })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    ExtractedData {
-        current_goal: get_string("currentGoal"),
-        completed_steps: get_string_array("completedSteps"),
-        pending_tasks: get_string_array("pendingTasks"),
-        key_decisions,
-        files_modified: get_string_array("filesModified"),
-        topics_discussed: get_string_array("topicsDiscussed"),
-        user_preferences: get_string_array("userPreferences"),
-        important_context: get_string_array("importantContext"),
-        thinking_insights: get_string_array("thinkingInsights"),
-    }
-}
-
-/// Strip markdown code fences from a response string.
-fn strip_code_fences(s: &str) -> String {
-    let trimmed = s.trim();
-    if let Some(rest) = trimmed.strip_prefix("```json") {
-        rest.strip_suffix("```").unwrap_or(rest).trim().to_string()
-    } else if let Some(rest) = trimmed.strip_prefix("```") {
-        rest.strip_suffix("```").unwrap_or(rest).trim().to_string()
-    } else {
-        trimmed.to_string()
-    }
-}
-
 // =============================================================================
 // Tests
 // =============================================================================
@@ -448,303 +173,12 @@ mod tests {
     use crate::shared::content::UserContent;
     use serde_json::json;
 
-    // -- truncate --
-
     #[test]
-    fn truncate_short_string_unchanged() {
-        assert_eq!(truncate("hello", 10), "hello");
-    }
-
-    #[test]
-    fn truncate_exact_length_unchanged() {
-        assert_eq!(truncate("hello", 5), "hello");
-    }
-
-    #[test]
-    fn truncate_long_string_adds_ellipsis() {
+    fn truncate_bounds_long_string() {
         let result = truncate("hello world", 8);
         assert!(result.ends_with("..."));
         assert!(result.len() <= 8);
     }
-
-    // -- strip_code_fences --
-
-    #[test]
-    fn strip_json_code_fence() {
-        let input = "```json\n{\"narrative\": \"test\"}\n```";
-        assert_eq!(strip_code_fences(input), "{\"narrative\": \"test\"}");
-    }
-
-    #[test]
-    fn strip_plain_code_fence() {
-        let input = "```\n{\"narrative\": \"test\"}\n```";
-        assert_eq!(strip_code_fences(input), "{\"narrative\": \"test\"}");
-    }
-
-    #[test]
-    fn no_code_fence_passthrough() {
-        let input = "{\"narrative\": \"test\"}";
-        assert_eq!(strip_code_fences(input), input);
-    }
-
-    // -- cap_transcript --
-
-    #[test]
-    fn cap_transcript_within_limit() {
-        let text = "short";
-        assert_eq!(cap_transcript(text, 100), "short");
-    }
-
-    #[test]
-    fn cap_transcript_exceeds_limit() {
-        let text = "a".repeat(200);
-        let result = cap_transcript(&text, 100);
-        assert!(result.contains("[..."));
-        assert!(result.contains("characters omitted"));
-    }
-
-    // -- extract_key_args --
-
-    #[test]
-    fn extract_key_args_file_path() {
-        let mut map = serde_json::Map::new();
-        let _ = map.insert("file_path".into(), json!("/src/main.rs"));
-        assert_eq!(extract_key_args(&map), "file_path: /src/main.rs");
-    }
-
-    #[test]
-    fn extract_key_args_multiple() {
-        let mut map = serde_json::Map::new();
-        let _ = map.insert("command".into(), json!("ls -la"));
-        let _ = map.insert("path".into(), json!("/tmp"));
-        let result = extract_key_args(&map);
-        assert!(result.contains("path: /tmp"));
-        assert!(result.contains("command: ls -la"));
-    }
-
-    #[test]
-    fn extract_key_args_empty() {
-        let map = serde_json::Map::new();
-        assert_eq!(extract_key_args(&map), "");
-    }
-
-    #[test]
-    fn extract_key_args_ignores_non_priority() {
-        let mut map = serde_json::Map::new();
-        let _ = map.insert("random_key".into(), json!("value"));
-        assert_eq!(extract_key_args(&map), "");
-    }
-
-    #[test]
-    fn extract_key_args_truncates_long_values() {
-        let mut map = serde_json::Map::new();
-        let _ = map.insert("command".into(), json!("a".repeat(200)));
-        let result = extract_key_args(&map);
-        assert!(result.len() < 200);
-        assert!(result.contains("..."));
-    }
-
-    // -- serialize_messages --
-
-    #[test]
-    fn serialize_user_message() {
-        let messages = vec![Message::user("Hello world")];
-        let result = serialize_messages(&messages);
-        assert_eq!(result, "[USER] Hello world");
-    }
-
-    #[test]
-    fn serialize_assistant_text() {
-        let messages = vec![Message::assistant("Response text")];
-        let result = serialize_messages(&messages);
-        assert_eq!(result, "[ASSISTANT] Response text");
-    }
-
-    #[test]
-    fn serialize_capability_invocation() {
-        let mut args = serde_json::Map::new();
-        let _ = args.insert("file_path".into(), json!("/src/main.rs"));
-        let messages = vec![Message::Assistant {
-            content: vec![AssistantContent::CapabilityInvocation {
-                id: "tc-1".into(),
-                name: "inspect".into(),
-                arguments: args,
-                thought_signature: None,
-            }],
-            usage: None,
-            cost: None,
-            stop_reason: None,
-            thinking: None,
-        }];
-        let result = serialize_messages(&messages);
-        assert_eq!(
-            result,
-            "[CAPABILITY_INVOCATION] inspect(file_path: /src/main.rs)"
-        );
-    }
-
-    #[test]
-    fn serialize_capability_result() {
-        let messages = vec![Message::CapabilityResult {
-            invocation_id: "tc-1".into(),
-            content: CapabilityResultMessageContent::Text("file contents here".into()),
-            is_error: None,
-        }];
-        let result = serialize_messages(&messages);
-        assert_eq!(result, "[CAPABILITY_RESULT] file contents here");
-    }
-
-    #[test]
-    fn serialize_capability_error() {
-        let messages = vec![Message::CapabilityResult {
-            invocation_id: "tc-1".into(),
-            content: CapabilityResultMessageContent::Text("permission denied".into()),
-            is_error: Some(true),
-        }];
-        let result = serialize_messages(&messages);
-        assert_eq!(result, "[CAPABILITY_ERROR] permission denied");
-    }
-
-    #[test]
-    fn serialize_thinking_block() {
-        let messages = vec![Message::Assistant {
-            content: vec![AssistantContent::Thinking {
-                thinking: "Let me reason about this...".into(),
-                signature: Some("sig".into()),
-            }],
-            usage: None,
-            cost: None,
-            stop_reason: None,
-            thinking: None,
-        }];
-        let result = serialize_messages(&messages);
-        assert_eq!(result, "[THINKING] Let me reason about this...");
-    }
-
-    #[test]
-    fn serialize_empty_thinking_skipped() {
-        let messages = vec![Message::Assistant {
-            content: vec![AssistantContent::Thinking {
-                thinking: String::new(),
-                signature: None,
-            }],
-            usage: None,
-            cost: None,
-            stop_reason: None,
-            thinking: None,
-        }];
-        let result = serialize_messages(&messages);
-        assert!(result.is_empty());
-    }
-
-    #[test]
-    fn serialize_multiple_messages() {
-        let messages = vec![
-            Message::user("Write a function"),
-            Message::assistant("Here's the function:"),
-        ];
-        let result = serialize_messages(&messages);
-        assert!(result.contains("[USER] Write a function"));
-        assert!(result.contains("[ASSISTANT] Here's the function:"));
-    }
-
-    #[test]
-    fn serialize_truncates_long_assistant_text() {
-        let long_text = "a".repeat(500);
-        let messages = vec![Message::assistant(&long_text)];
-        let result = serialize_messages(&messages);
-        assert!(result.len() < 500);
-        assert!(result.contains("..."));
-    }
-
-    #[test]
-    fn serialize_caps_at_max_chars() {
-        let long_text = "a".repeat(1000);
-        let messages: Vec<Message> = (0..200).map(|_| Message::user(&long_text)).collect();
-        let result = serialize_messages(&messages);
-        assert!(result.len() <= SUMMARIZER_MAX_SERIALIZED_CHARS + 100);
-        assert!(result.contains("[...]") || result.len() <= SUMMARIZER_MAX_SERIALIZED_CHARS);
-    }
-
-    // -- parse_summarizer_response --
-
-    #[test]
-    fn parse_valid_response() {
-        let response = r#"{
-            "narrative": "The user asked to implement feature X.",
-            "extractedData": {
-                "currentGoal": "Implement feature X",
-                "completedSteps": ["Step 1", "Step 2"],
-                "filesModified": ["src/main.rs"]
-            }
-        }"#;
-        let result = parse_summarizer_response(response).unwrap();
-        assert_eq!(result.narrative, "The user asked to implement feature X.");
-        assert_eq!(result.extracted_data.current_goal, "Implement feature X");
-        assert_eq!(result.extracted_data.completed_steps.len(), 2);
-        assert_eq!(result.extracted_data.files_modified.len(), 1);
-    }
-
-    #[test]
-    fn parse_response_with_code_fences() {
-        let response = "```json\n{\"narrative\": \"summary\", \"extractedData\": {}}\n```";
-        let result = parse_summarizer_response(response).unwrap();
-        assert_eq!(result.narrative, "summary");
-    }
-
-    #[test]
-    fn parse_response_missing_narrative() {
-        let response = r#"{"extractedData": {}}"#;
-        let err = parse_summarizer_response(response).unwrap_err();
-        assert!(matches!(err, SummarizerError::ParseError { .. }));
-    }
-
-    #[test]
-    fn parse_response_empty_narrative() {
-        let response = r#"{"narrative": "", "extractedData": {}}"#;
-        let err = parse_summarizer_response(response).unwrap_err();
-        assert!(matches!(err, SummarizerError::ParseError { .. }));
-    }
-
-    #[test]
-    fn parse_response_invalid_json() {
-        let err = parse_summarizer_response("not json").unwrap_err();
-        assert!(matches!(err, SummarizerError::ParseError { .. }));
-    }
-
-    #[test]
-    fn parse_response_missing_extracted_data() {
-        let response = r#"{"narrative": "summary"}"#;
-        let result = parse_summarizer_response(response).unwrap();
-        assert_eq!(result.narrative, "summary");
-        assert!(result.extracted_data.current_goal.is_empty());
-    }
-
-    #[test]
-    fn parse_response_key_decisions() {
-        let response = r#"{
-            "narrative": "summary",
-            "extractedData": {
-                "keyDecisions": [
-                    {"decision": "Use Rust", "reason": "Performance"},
-                    {"decision": "Use SQLite", "reason": "Simplicity"}
-                ]
-            }
-        }"#;
-        let result = parse_summarizer_response(response).unwrap();
-        assert_eq!(result.extracted_data.key_decisions.len(), 2);
-        assert_eq!(result.extracted_data.key_decisions[0].decision, "Use Rust");
-    }
-
-    #[test]
-    fn parse_response_omits_empty_arrays() {
-        let response = r#"{"narrative": "summary", "extractedData": {"currentGoal": "test"}}"#;
-        let result = parse_summarizer_response(response).unwrap();
-        assert!(result.extracted_data.completed_steps.is_empty());
-        assert!(result.extracted_data.pending_tasks.is_empty());
-    }
-
-    // -- KeywordSummarizer --
 
     #[tokio::test]
     async fn keyword_summarizer_basic() {
@@ -797,21 +231,17 @@ mod tests {
     // -- User content helpers --
 
     #[test]
-    fn serialize_user_with_blocks() {
-        let messages = vec![Message::User {
-            content: UserMessageContent::Blocks(vec![
-                UserContent::Text {
-                    text: "First block".into(),
-                },
-                UserContent::Text {
-                    text: "Second block".into(),
-                },
-            ]),
-            timestamp: None,
-        }];
-        let result = serialize_messages(&messages);
-        assert!(result.contains("[USER]"));
-        assert!(result.contains("First block"));
+    fn user_content_text_joins_blocks() {
+        let content = UserMessageContent::Blocks(vec![
+            UserContent::Text {
+                text: "First block".into(),
+            },
+            UserContent::Text {
+                text: "Second block".into(),
+            },
+        ]);
+        let result = user_content_text(&content);
+        assert_eq!(result, "First block\nSecond block");
     }
 
     // -- user_content_text --
@@ -827,22 +257,5 @@ mod tests {
         let content =
             UserMessageContent::Blocks(vec![UserContent::text("one"), UserContent::text("two")]);
         assert_eq!(user_content_text(&content), "one\ntwo");
-    }
-
-    // -- capability_result_content_text --
-
-    #[test]
-    fn capability_result_content_text_from_string() {
-        let content = CapabilityResultMessageContent::Text("output".into());
-        assert_eq!(capability_result_content_text(&content), "output");
-    }
-
-    #[test]
-    fn capability_result_content_text_from_blocks() {
-        let content = CapabilityResultMessageContent::Blocks(vec![
-            crate::shared::content::CapabilityResultContent::text("line1"),
-            crate::shared::content::CapabilityResultContent::text("line2"),
-        ]);
-        assert_eq!(capability_result_content_text(&content), "line1\nline2");
     }
 }

@@ -178,22 +178,6 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 Some(data),
             ))
         }
-        TronEvent::JobBackgrounded {
-            job_id,
-            reason,
-            label,
-            invocation_id,
-            ..
-        } => Some(session_scoped(
-            event,
-            "agent.job_backgrounded",
-            Some(json!({
-                "jobId": job_id,
-                "reason": reason,
-                "label": label,
-                "invocationId": invocation_id,
-            })),
-        )),
         _ => None,
     }
 }

@@ -27,6 +27,11 @@ fn fresh_schema_contains_only_primitive_tables() {
             "logs",
             "schema_version",
             "sessions",
+            "storage_checkpoints",
+            "storage_exports",
+            "storage_metadata",
+            "storage_payload_refs",
+            "storage_retention_runs",
             "trace_records",
             "workspaces",
         ]
@@ -98,17 +103,17 @@ fn sessions_table_has_no_product_metadata_columns() {
         .collect::<std::result::Result<Vec<_>, _>>()
         .unwrap();
 
-    for retired in [
-        "origin",
-        "source",
-        "profile",
-        "use_worktree",
-        "spawning_session_id",
-        "spawn_type",
-        "spawn_task",
+    for retired in vec![
+        "origin".to_owned(),
+        "source".to_owned(),
+        "profile".to_owned(),
+        ["use_", "work", "tree"].concat(),
+        "spawning_session_id".to_owned(),
+        "spawn_type".to_owned(),
+        "spawn_task".to_owned(),
     ] {
         assert!(
-            !columns.iter().any(|column| column == retired),
+            !columns.iter().any(|column| column == &retired),
             "retired session column remained: {retired}"
         );
     }

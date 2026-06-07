@@ -235,11 +235,11 @@ fn discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_t
 fn discovery_text_query_matches_tokens_across_canonical_id() {
     let mut catalog = LiveCatalog::new();
     catalog
-        .register_worker(worker("sandbox", "worker"), true)
+        .register_worker(worker("worker", "worker"), true)
         .unwrap();
     catalog
         .register_function(
-            read_function("worker::spawn", "sandbox"),
+            read_function("worker::list", "worker"),
             Some(handler()),
             true,
         )
@@ -247,13 +247,13 @@ fn discovery_text_query_matches_tokens_across_canonical_id() {
 
     let agent = ActorContext::new(actor("agent"), ActorKind::Agent, grant("grant"));
     let filtered = catalog.discover_functions(&FunctionQuery {
-        text: Some("worker spawn".to_owned()),
+        text: Some("worker list".to_owned()),
         actor: Some(agent),
         ..FunctionQuery::default()
     });
 
     assert_eq!(filtered.len(), 1);
-    assert_eq!(filtered[0].id.as_str(), "worker::spawn");
+    assert_eq!(filtered[0].id.as_str(), "worker::list");
 }
 
 #[test]

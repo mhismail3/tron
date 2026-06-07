@@ -14,7 +14,6 @@ use crate::engine::EngineHostHandle;
 use metrics::{counter, histogram};
 
 use crate::app::shutdown::{ShutdownCoordinator, ShutdownPhase};
-use crate::domains::session::context::ContextArtifactsService;
 use crate::shared::server::errors::CapabilityError;
 
 const DEFAULT_BLOCKING_CONCURRENCY: usize = 16;
@@ -147,7 +146,7 @@ fn global_blocking_supervisor() -> Arc<BlockingTaskSupervisor> {
 /// Register a bounded drain for capability blocking work during server shutdown.
 pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>) {
     let supervisor = global_blocking_supervisor();
-    shutdown.register_phase_hook(
+    shutdown.register_phase_callback(
         ShutdownPhase::Capabilities,
         "capability-blocking",
         move || async move {
@@ -198,8 +197,6 @@ pub struct ServerRuntimeContext {
     pub shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     /// Server origin (e.g. `"localhost:9847"`).
     pub origin: String,
-    /// Shared rules/memory/rules-index artifact cache for session and prompt loading.
-    pub context_artifacts: Arc<ContextArtifactsService>,
     /// Path to auth JSON file (`~/.tron/profiles/auth.json`).
     pub auth_path: PathBuf,
     /// Pending OAuth flows keyed by flow ID (in-memory, TTL 10 min).
@@ -344,7 +341,7 @@ mod tests {
         let ctx = make_test_context();
         let _ = ctx
             .session_manager
-            .create_session("model", "/tmp", Some("test"), None)
+            .create_session("model", "/tmp", Some("test"))
             .unwrap();
         assert_eq!(ctx.orchestrator.active_session_count(), 1);
     }
@@ -372,7 +369,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("model", "/tmp", Some("test"), None)
+            .create_session("model", "/tmp", Some("test"))
             .unwrap();
         let session = ctx.event_store.get_session(&sid).unwrap();
         assert!(session.is_some());
@@ -389,7 +386,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("model", "/tmp", Some("test"), None)
+            .create_session("model", "/tmp", Some("test"))
             .unwrap();
 
         let event = ctx

@@ -1,15 +1,9 @@
-//! Profile-first execution spec loading.
+//! Primitive profile loading.
 //!
-//! Profiles are the normal control plane for model-facing behavior and harness
-//! settings. The managed `default` profile is restorable; user profiles inherit
-//! from it and are never silently overwritten.
-//!
-//! v3 profiles resolve to a typed [`AgentExecutionSpec`]. Runtime modules should
-//! consume that effective spec (or helpers backed by it), not hardcoded prompt
-//! folders or local/cloud policy constants.
-//! Profile file compilation and spec hashing live in `profile/compilation.rs`.
-//! Profile validation and context-block manifest contracts live in
-//! `profile/validation.rs` so the root stays on typed profile loading.
+//! Profiles are now retained only for boot-time configuration: inheritance,
+//! auth profile selection, and effective server settings. Model prompts,
+//! process plans, policy packs, and context manifests are
+//! not profile primitives on the teardown branch.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
@@ -38,7 +32,7 @@ pub const DEFAULT_AUTH_PROFILE: &str = "default";
 /// Current profile schema version.
 pub const CURRENT_PROFILE_VERSION: &str = "3";
 
-/// Parsed profile document.
+/// Parsed primitive profile document.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ProfileDocument {
@@ -54,32 +48,6 @@ pub struct ProfileDocument {
     pub inherits: Vec<String>,
     /// Credential profile selected from `profiles/auth.toml`.
     pub auth_profile: String,
-    /// Entrypoints for main chat/local/workflow behavior.
-    pub entrypoints: HashMap<String, EntryPointSpec>,
-    /// All harness-spawned model/process contracts.
-    pub processes: HashMap<String, ProcessSpec>,
-    /// Model selection/inheritance policies.
-    pub model_policies: HashMap<String, ModelPolicySpec>,
-    /// Context assembly policies.
-    pub context_policies: HashMap<String, ContextPolicySpec>,
-    /// Provider-facing primitive surface policies (`execute`).
-    pub primitive_surface_policies: HashMap<String, PrimitiveSurfacePolicySpec>,
-    /// Real worker capability execution policies.
-    pub capability_execution_policies: HashMap<String, CapabilityExecutionPolicySpec>,
-    /// Capability search policies.
-    pub capability_search_policies: HashMap<String, CapabilitySearchPolicySpec>,
-    /// Worker Guide policies.
-    pub capability_context_primer_policies: HashMap<String, CapabilityContextPrimerPolicySpec>,
-    /// Permission and inheritance policies.
-    pub permission_policies: HashMap<String, PermissionPolicySpec>,
-    /// Provider-specific presentation/adaptation policies.
-    pub provider_policies: HashMap<String, ProviderPolicySpec>,
-    /// Provider-independent cache policies.
-    pub cache_policies: HashMap<String, CachePolicySpec>,
-    /// Structured output contracts for subprocesses.
-    pub output_contracts: HashMap<String, OutputContractSpec>,
-    /// Auditing policies.
-    pub audit_policy: HashMap<String, AuditPolicySpec>,
     /// Profile-owned effective settings.
     pub settings: TronSettings,
     /// Auth registry/store refs.
@@ -99,19 +67,12 @@ pub struct CompiledProfileFile {
     pub content: String,
 }
 
-/// Effective agent execution spec after inheritance, settings overlay, and file loading.
+/// Effective agent execution spec after inheritance, settings overlay, and auth
+/// registry loading.
 #[derive(Clone, Debug)]
 pub struct AgentExecutionSpec {
     /// Merged raw profile document.
     document: ProfileDocument,
-    /// Entrypoint prompt files by entrypoint id.
-    pub entrypoint_prompts: HashMap<String, CompiledProfileFile>,
-    /// Process prompt files by process id.
-    pub process_prompts: HashMap<String, CompiledProfileFile>,
-    /// Provider prompt files by provider policy id.
-    pub provider_prompts: HashMap<String, CompiledProfileFile>,
-    /// Context block manifest files by context policy id.
-    pub context_manifests: HashMap<String, CompiledProfileFile>,
     /// Readable auth registry used to resolve authProfile.
     pub auth_registry: Option<CompiledProfileFile>,
     /// All source files that affect this compiled spec.
@@ -124,317 +85,6 @@ impl Deref for AgentExecutionSpec {
     fn deref(&self) -> &Self::Target {
         &self.document
     }
-}
-
-/// Entrypoint policy for a primary runtime surface.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct EntryPointSpec {
-    /// Prompt markdown file, relative to the profile directory.
-    pub prompt: Option<String>,
-    /// Model policy id.
-    pub model_policy: String,
-    /// Cloud/default context policy id.
-    pub context_policy: String,
-    /// Optional local-model context policy id.
-    pub local_context_policy: Option<String>,
-    /// Provider-facing primitive surface policy id.
-    pub primitive_surface_policy: String,
-    /// Worker capability execution policy id.
-    pub capability_execution_policy: String,
-    /// Permission policy id.
-    pub permission_policy: String,
-    /// Provider policy id.
-    pub provider_policy: String,
-    /// Cache policy id.
-    pub cache_policy: String,
-    /// Audit policy id.
-    pub audit_policy: String,
-}
-
-/// Kind of model-backed or harness-backed process.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub enum ProcessKind {
-    /// Primary user-facing agent.
-    #[default]
-    Main,
-    /// Child agent invoked by the LLM or harness.
-    Subagent,
-    /// Bounded summarization/retention transform.
-    Summarizer,
-    /// Hook LLM process.
-    Hook,
-    /// Automation runner.
-    Automation,
-    /// Capability-owned worker process.
-    CapabilityWorker,
-    /// Non-agentic transform.
-    Transform,
-}
-
-/// Contract for every subprocess Tron may spawn.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct ProcessSpec {
-    /// Process kind.
-    pub kind: ProcessKind,
-    /// Prompt markdown file, relative to the profile directory.
-    pub prompt: Option<String>,
-    /// Model policy id.
-    pub model_policy: String,
-    /// Context policy id.
-    pub context_policy: String,
-    /// Provider-facing primitive surface policy id.
-    pub primitive_surface_policy: String,
-    /// Worker capability execution policy id.
-    pub capability_execution_policy: String,
-    /// Permission policy id.
-    pub permission_policy: String,
-    /// Output contract id.
-    pub output_contract: String,
-    /// Audit policy id.
-    pub audit_policy: String,
-    /// Wall-clock timeout in milliseconds.
-    pub timeout_ms: Option<u64>,
-    /// Blocking timeout before a process is backgrounded. `None` means use the
-    /// process default; `blocking = false` means immediate background.
-    pub blocking_timeout_ms: Option<u64>,
-    /// Whether the process blocks the caller by default.
-    pub blocking: Option<bool>,
-    /// Maximum LLM turns.
-    pub max_turns: Option<u32>,
-    /// Maximum child nesting depth.
-    pub max_depth: Option<u32>,
-    /// Whether process authority is inherited from the parent registry.
-    pub inherit_capabilities: Option<bool>,
-    /// Reasoning level string (`none`, `low`, `medium`, `high`, `xhigh`, `max`).
-    pub reasoning: Option<String>,
-    /// Working directory override.
-    pub working_directory: Option<String>,
-    /// How process results are injected back into parent context.
-    pub result_injection: Option<String>,
-    /// Whether this process is audited.
-    pub audit: Option<bool>,
-}
-
-/// Model inheritance/selection policy.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct ModelPolicySpec {
-    /// `sessionDefault`, `inheritParent`, `settingsSubagent`, or explicit.
-    pub selection: String,
-    /// Optional explicit model id.
-    pub model: Option<String>,
-    /// Optional provider class (`cloud`, `local`, `any`).
-    pub provider_class: Option<String>,
-    /// Optional reasoning level.
-    pub reasoning: Option<String>,
-}
-
-/// Context assembly policy.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct ContextPolicySpec {
-    /// Context block manifest file.
-    pub blocks: Option<String>,
-    /// Provider ids that activate this policy as local.
-    pub local_providers: Vec<String>,
-    /// Provider-facing primitive surface policy to use when this context policy is active.
-    pub primitive_surface_policy: Option<String>,
-    /// Worker capability execution policy to use when this context policy is active.
-    pub capability_execution_policy: Option<String>,
-    /// Strip memory block.
-    pub strip_memory: bool,
-    /// Strip skill index block.
-    pub strip_skill_index: bool,
-    /// Strip job-result block.
-    pub strip_job_results: bool,
-    /// Skip bootstrap queries for pending background results.
-    pub skip_pending_jobs_bootstrap: bool,
-    /// Character budget for rules truncation.
-    pub rules_truncation_chars: Option<usize>,
-    /// Suffix appended after rules truncation.
-    pub rules_truncation_suffix: Option<String>,
-}
-
-/// Provider-facing primitive surface policy.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct PrimitiveSurfacePolicySpec {
-    /// Strict allowlist of model-facing primitive ids.
-    pub allowed_primitives: Option<Vec<String>>,
-    /// Primitive ids denied by this policy.
-    pub denied_primitives: Vec<String>,
-    /// Whether interactive capabilities may be exposed.
-    pub expose_interactive_capabilities: Option<bool>,
-    /// Whether spawn/wait capabilities are removed at max depth.
-    pub remove_spawn_at_max_depth: Option<bool>,
-}
-
-/// Worker capability execution policy.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct CapabilityExecutionPolicySpec {
-    /// Search policy used by capability::search.
-    pub search_policy: Option<String>,
-    /// Worker Guide policy used for generated provider context.
-    pub context_primer_policy: Option<String>,
-    /// Strict allowlist of contract ids.
-    pub allowed_contracts: Option<Vec<String>>,
-    /// Contract ids denied by this policy.
-    pub denied_contracts: Vec<String>,
-    /// Strict allowlist of implementation ids.
-    pub allowed_implementations: Option<Vec<String>>,
-    /// Implementation ids denied by this policy.
-    pub denied_implementations: Vec<String>,
-    /// Strict allowlist of plugin ids.
-    pub allowed_plugins: Option<Vec<String>>,
-    /// Plugin ids denied by this policy.
-    pub denied_plugins: Vec<String>,
-    /// Optional maximum risk level.
-    pub max_risk: Option<String>,
-    /// Optional allowlist of effect classes.
-    pub allowed_effects: Option<Vec<String>>,
-    /// Optional minimum trust tier.
-    pub minimum_trust_tier: Option<String>,
-}
-
-/// Capability search policy.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct CapabilitySearchPolicySpec {
-    /// Whether local lexical search is enabled.
-    pub lexical: bool,
-    /// Whether local vector search is enabled.
-    pub local_vector: bool,
-    /// Cloud embeddings are intentionally unsupported for core search.
-    pub cloud_embeddings: bool,
-    /// Maximum results retained by the index layer.
-    pub max_results: usize,
-    /// Whether local vector search must be available for this policy.
-    pub require_local_vector: bool,
-    /// Whether search may fall back to lexical-only when the vector index is degraded.
-    pub allow_lexical_only_when_degraded: bool,
-}
-
-impl Default for CapabilitySearchPolicySpec {
-    fn default() -> Self {
-        Self {
-            lexical: true,
-            local_vector: true,
-            cloud_embeddings: false,
-            max_results: 50,
-            require_local_vector: false,
-            allow_lexical_only_when_degraded: true,
-        }
-    }
-}
-
-/// Generated Worker Guide policy.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct CapabilityContextPrimerPolicySpec {
-    /// Whether the Worker Guide block is rendered.
-    pub enabled: bool,
-    /// `coreFirstParty` or `allVisibleCompact`.
-    pub mode: String,
-    /// Approximate token budget.
-    pub max_tokens: usize,
-    /// Whether examples may be rendered when metadata provides them.
-    pub include_examples: bool,
-    /// Whether compact payload schema hints may be rendered.
-    pub include_compact_schemas: bool,
-}
-
-impl Default for CapabilityContextPrimerPolicySpec {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            mode: "coreFirstParty".to_owned(),
-            max_tokens: 2600,
-            include_examples: true,
-            include_compact_schemas: true,
-        }
-    }
-}
-
-/// Permission inheritance policy.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct PermissionPolicySpec {
-    /// Whether capabilities may be inherited from the parent registry.
-    pub inherit_capabilities: bool,
-    /// Whether filesystem access may exceed the parent process.
-    pub allow_filesystem_escalation: bool,
-    /// Whether model/provider class may exceed the parent process.
-    pub allow_model_escalation: bool,
-    /// Whether auth authority may exceed the profile auth profile.
-    pub allow_auth_escalation: bool,
-}
-
-/// Provider-specific presentation policy.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct ProviderPolicySpec {
-    /// Provider prompt/presentation file.
-    pub prompt: Option<String>,
-    /// Where system prompt content is rendered.
-    pub system_prompt_surface: Option<String>,
-    /// Whether a capability-clarification message is required.
-    pub capability_clarification: Option<bool>,
-    /// Whether duplicate system-prompt inclusion is permitted.
-    pub allow_duplicate_system_prompt: Option<bool>,
-    /// Cache policy id.
-    pub cache_policy: Option<String>,
-}
-
-/// Provider-independent cache policy.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct CachePolicySpec {
-    /// Foundation cache behavior.
-    pub foundation: String,
-    /// Profile cache behavior.
-    pub profile: String,
-    /// Session cache behavior.
-    pub session: String,
-    /// Turn cache behavior.
-    pub turn: String,
-    /// None/unsafe cache behavior.
-    pub none: String,
-}
-
-/// Structured output contract.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct OutputContractSpec {
-    /// Contract kind.
-    pub kind: String,
-    /// Whether valid output is required.
-    pub required: bool,
-}
-
-/// Audit policy.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct AuditPolicySpec {
-    /// Whether calls under this policy are audited.
-    pub enabled: bool,
-    /// Whether provider payloads are retained by hash/blob.
-    pub record_provider_payload: bool,
-    /// Whether rendered context blocks are retained by hash/blob.
-    pub record_context_blocks: bool,
-}
-
-/// Settings file refs owned by the profile.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
-pub struct SettingsSpec {
-    /// Managed default settings JSON, relative to the profile directory.
-    pub defaults: String,
-    /// User profile that stores sparse overrides.
-    pub user_overrides_profile: String,
 }
 
 /// Auth registry/store refs owned by profiles.
@@ -490,10 +140,6 @@ impl AgentExecutionSpec {
     fn from_document_uncompiled(document: ProfileDocument) -> Self {
         Self {
             document,
-            entrypoint_prompts: HashMap::new(),
-            process_prompts: HashMap::new(),
-            provider_prompts: HashMap::new(),
-            context_manifests: HashMap::new(),
             auth_registry: None,
             source_files: Vec::new(),
         }
@@ -509,87 +155,6 @@ impl AgentExecutionSpec {
     #[must_use]
     pub fn settings(&self) -> &TronSettings {
         &self.document.settings
-    }
-
-    /// Prompt ref for a main entrypoint.
-    #[must_use]
-    pub fn entrypoint_prompt(&self, name: &str) -> Option<&str> {
-        self.document.entrypoints.get(name)?.prompt.as_deref()
-    }
-
-    /// Prompt ref for a process.
-    #[must_use]
-    pub fn process_prompt(&self, name: &str) -> Option<&str> {
-        self.document.processes.get(name)?.prompt.as_deref()
-    }
-
-    /// Provider prompt ref.
-    #[must_use]
-    pub fn provider_prompt(&self, provider: &str) -> Option<&str> {
-        self.document
-            .provider_policies
-            .get(provider)?
-            .prompt
-            .as_deref()
-    }
-
-    /// Process spec by id.
-    #[must_use]
-    pub fn process(&self, name: &str) -> Option<&ProcessSpec> {
-        self.document.processes.get(name)
-    }
-
-    /// Context policy by id.
-    #[must_use]
-    pub fn context_policy(&self, name: &str) -> Option<&ContextPolicySpec> {
-        self.document.context_policies.get(name)
-    }
-
-    /// Provider-facing primitive surface policy by id.
-    #[must_use]
-    pub fn primitive_surface_policy(&self, name: &str) -> Option<&PrimitiveSurfacePolicySpec> {
-        self.document.primitive_surface_policies.get(name)
-    }
-
-    /// Worker capability execution policy by id.
-    #[must_use]
-    pub fn capability_execution_policy(
-        &self,
-        name: &str,
-    ) -> Option<&CapabilityExecutionPolicySpec> {
-        self.document.capability_execution_policies.get(name)
-    }
-
-    /// Capability search policy by id.
-    #[must_use]
-    pub fn capability_search_policy(&self, name: &str) -> Option<&CapabilitySearchPolicySpec> {
-        self.document.capability_search_policies.get(name)
-    }
-
-    /// Worker Guide policy by id.
-    #[must_use]
-    pub fn capability_context_primer_policy(
-        &self,
-        name: &str,
-    ) -> Option<&CapabilityContextPrimerPolicySpec> {
-        self.document.capability_context_primer_policies.get(name)
-    }
-
-    /// Worker Guide policy by id.
-    #[must_use]
-    pub fn context_primer_policy(&self, name: &str) -> Option<&CapabilityContextPrimerPolicySpec> {
-        self.document.capability_context_primer_policies.get(name)
-    }
-
-    /// Local context policy, if any, matching provider id.
-    #[must_use]
-    pub fn local_context_policy_for_provider(&self, provider: &str) -> Option<&ContextPolicySpec> {
-        self.document.context_policies.values().find(|policy| {
-            policy
-                .local_providers
-                .iter()
-                .any(|candidate| candidate == provider)
-        })
     }
 }
 
@@ -797,11 +362,6 @@ mod compilation;
 mod validation;
 
 use compilation::{agent_execution_spec_hash, compile_agent_execution_spec};
-pub(crate) use validation::validate_context_block_manifest;
-#[cfg(test)]
-use validation::{
-    CAPABILITY_SCHEMA_PROVIDER_SURFACE, ContextBlockManifest, ContextBlockProviderSurface,
-};
 use validation::{profile_file_candidate_profiles, validate_profile};
 
 #[cfg(test)]

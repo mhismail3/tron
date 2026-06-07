@@ -15,7 +15,6 @@ use crate::engine::{CausalContext, FunctionId, FunctionRevision, InvocationId};
 use crate::shared::server::context::AgentDeps;
 
 use super::cleanup::{PromptRunCleanup, ShutdownCancelForwarder};
-use super::predicates::retain_eligible;
 use crate::domains::agent::runtime::runtime::{
     build_user_content_override, build_user_event_payload, load_session_update_data,
     persist_user_message_event, resume_prompt_session,

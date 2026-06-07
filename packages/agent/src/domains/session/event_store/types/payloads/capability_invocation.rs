@@ -26,13 +26,11 @@ pub struct CapabilityInvocationStartedPayload {
 
 /// Payload for `capability.invocation.progress` events.
 ///
-/// Emitted by long-running capability calls (`process::run`, `web::fetch`,
-/// `agent::spawn_subagent`, …) to keep
-/// iOS chips from looking frozen and to let users cancel work that's taking
-/// too long. Every field except `invocation_id` is optional — capabilities pick
-/// whichever fit their work: process::run streams a `message` with the latest stdout
-/// line; web::fetch sets both `percent` (bytes/total) and `message` ("32 KiB of
-/// 120 KiB"); subagent execution sets `message` with the child turn count.
+/// Emitted by long-running primitive operations to keep clients from looking
+/// frozen and to let users cancel work that's taking too long. Every field
+/// except `invocation_id` is optional. For example, `process_run` may stream a
+/// `message` with the latest stdout line, while future bounded operations may
+/// set both `percent` and `message`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityInvocationProgressPayload {
@@ -42,9 +40,8 @@ pub struct CapabilityInvocationProgressPayload {
     /// Free-form human-readable status ("downloaded 32 KiB", "turn 3 of 8").
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    /// Fractional completion in `[0.0, 1.0]` when a total is known. Capabilities
-    /// without a bound (process::run heartbeat, indefinite subagent) leave this unset
-    /// rather than guessing.
+    /// Fractional completion in `[0.0, 1.0]` when a total is known. Operations
+    /// without a bound leave this unset rather than guessing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub percent: Option<f64>,
     /// Turn number the progress belongs to.
@@ -65,7 +62,7 @@ pub struct CapabilityPauseRequestedPayload {
     /// Owning capability invocation id.
     #[serde(rename = "invocationId")]
     pub invocation_id: String,
-    /// Pause kind, for example `user_input` or `approval`.
+    /// Pause kind, for example `user_input`.
     pub kind: String,
     /// Current pause status.
     pub status: String,
@@ -156,8 +153,8 @@ pub struct CapabilityInvocationCompletedPayload {
     /// Blob ID for truncated content.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blob_id: Option<String>,
-    /// Capability-specific metadata (e.g. `web::fetch`: url, status, `fromCache`, `responseHeaders`;
-    /// `process::run`: `exitCode`, command, `durationMs`).
+    /// Primitive-operation metadata such as `operation`, `exitCode`, path,
+    /// trace id, status, or duration.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub details: Option<Value>,
     /// Capability identity used by active clients. The event type remains a
@@ -173,11 +170,11 @@ mod tests {
     fn full_identity() -> CapabilityEventIdentity {
         CapabilityEventIdentity {
             model_primitive_name: Some("execute".into()),
-            contract_id: Some("filesystem::read_file".into()),
-            implementation_id: Some("first_party.filesystem.v1.read_file".into()),
-            function_id: Some("filesystem::read_file".into()),
-            plugin_id: Some("first_party.filesystem".into()),
-            worker_id: Some("filesystem-worker".into()),
+            contract_id: Some("capability::execute".into()),
+            implementation_id: Some("first_party.capability.v1.execute".into()),
+            function_id: Some("capability::execute".into()),
+            plugin_id: Some("first_party.capability".into()),
+            worker_id: Some("capability-worker".into()),
             schema_digest: Some("sha256:test".into()),
             catalog_revision: Some(7),
             trust_tier: Some("first_party_signed".into()),
@@ -188,9 +185,9 @@ mod tests {
             binding_decision_id: Some("binding-test".into()),
             theme_color: Some("#10B981".into()),
             presentation_hints: Some(serde_json::json!({
-                "displayName": "Read File",
-                "chipTitle": "Read",
-                "icon": "doc.text.magnifyingglass",
+                "displayName": "Execute",
+                "chipTitle": "Execute",
+                "icon": "terminal",
                 "themeColor": "#10B981"
             })),
         }
@@ -208,12 +205,12 @@ mod tests {
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["invocationId"], "call-1");
         assert_eq!(v["modelPrimitiveName"], "execute");
-        assert_eq!(v["contractId"], "filesystem::read_file");
-        assert_eq!(v["implementationId"], "first_party.filesystem.v1.read_file");
+        assert_eq!(v["contractId"], "capability::execute");
+        assert_eq!(v["implementationId"], "first_party.capability.v1.execute");
         assert_eq!(v["schemaDigest"], "sha256:test");
         assert_eq!(v["catalogRevision"], 7);
         assert_eq!(v["bindingDecisionId"], "binding-test");
-        assert_eq!(v["presentationHints"]["displayName"], "Read File");
+        assert_eq!(v["presentationHints"]["displayName"], "Execute");
     }
 
     #[test]
@@ -234,9 +231,9 @@ mod tests {
         assert_eq!(v["invocationId"], "call-1");
         assert_eq!(v["modelContextContent"], "ok\nmetadata");
         assert_eq!(v["modelPrimitiveName"], "execute");
-        assert_eq!(v["contractId"], "filesystem::read_file");
+        assert_eq!(v["contractId"], "capability::execute");
         assert_eq!(v["bindingDecisionId"], "binding-test");
-        assert_eq!(v["presentationHints"]["icon"], "doc.text.magnifyingglass");
+        assert_eq!(v["presentationHints"]["icon"], "terminal");
     }
 
     #[test]

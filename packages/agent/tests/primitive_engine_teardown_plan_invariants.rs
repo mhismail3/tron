@@ -462,6 +462,9 @@ fn prompt_loop_internals_have_no_hidden_policy_or_worker_planes() {
             "packages/agent/src/domains/capability_support/implementations/primitive_surface.rs",
         ),
     ] {
+        if !repo_path(path).exists() {
+            continue;
+        }
         let source = read_repo_file(path);
         assert_absent(
             &source,
@@ -686,6 +689,7 @@ fn self_authored_worker_pack_primitives_are_not_registered_or_left_on_disk() {
         "packages/agent/src/engine/primitives/module",
         "packages/agent/src/engine/primitives/runtime/worker_protocol.rs",
         "packages/agent/src/engine/primitives/runtime/worker_protocol_template.py",
+        "packages/agent/src/engine/primitives/ui/authoring/source_control.rs",
         "packages/agent/src/engine/host/module_jobs.rs",
         "packages/agent/src/engine/tests/module_activation.rs",
         "packages/agent/src/engine/tests/module_activation",
@@ -1176,10 +1180,6 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "generated ui action authoring",
         ),
         (
-            "packages/agent/src/engine/primitives/ui/authoring/source_control.rs",
-            "source-control ui authoring",
-        ),
-        (
             "packages/agent/src/engine/primitives/worker.rs",
             "worker primitive",
         ),
@@ -1234,6 +1234,9 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
         ("packages/agent/src/engine/types.rs", "engine core types"),
         ("packages/agent/src/transport/engine.rs", "engine transport"),
     ] {
+        if !repo_path(path).exists() {
+            continue;
+        }
         let source = read_repo_file(path);
         assert_absent(
             &source,

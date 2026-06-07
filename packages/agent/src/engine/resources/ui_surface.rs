@@ -245,8 +245,6 @@ fn validate_ui_bindings(value: Option<&Value>) -> Result<()> {
                     | "grant"
                     | "goal"
                     | "resource_collection"
-                    | "source_control"
-                    | "agent_control"
                     | "decision"
                     | "resource"
                     | "invocation"

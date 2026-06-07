@@ -20,7 +20,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         provider_factory,
         health_tracker,
         event_store,
-        profile_runtime,
         shutdown_token,
         engine_host,
         engine_causality,
@@ -32,39 +31,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         request,
         ..
     } = plan;
-
-    let session_plan =
-        match profile_runtime.plan_session(crate::domains::agent::runner::SessionPlanRequest {
-            requested_profile: None,
-            model: model.clone(),
-            source: None,
-            entrypoint: None,
-        }) {
-            Ok(plan) => plan,
-            Err(error) => {
-                warn!(
-                    session_id = %request.session_id,
-                    error = %error,
-                    "failed to resolve active runtime profile"
-                );
-                let _ = broadcast.emit(crate::shared::events::TronEvent::Error {
-                    base: crate::shared::events::BaseEvent::now(&request.session_id),
-                    error: format!("Active runtime profile is invalid: {error}"),
-                    context: None,
-                    code: Some("PROFILE_INVALID".into()),
-                    provider: None,
-                    category: Some("profile".into()),
-                    suggestion: Some("Repair the active profile configuration.".into()),
-                    retryable: Some(false),
-                    status_code: None,
-                    error_type: Some("profile".into()),
-                    model: Some(model),
-                });
-                return;
-            }
-        };
-    let resolved_profile = session_plan.resolved_profile.clone();
-
     let PromptRequest {
         session_id,
         prompt,
@@ -199,8 +165,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             crate::domains::agent::runner::types::ReasoningLevel::from_str_loose(&level)
         }),
         agent_state_context,
-        profile_name: Some(session_plan.profile_name.clone()),
-        resolved_profile: Some(resolved_profile.clone()),
         user_content_override,
         run_id: Some(run_id.clone()),
         engine_trace_id: engine_causality
@@ -209,9 +173,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         parent_invocation_id: engine_causality
             .as_ref()
             .and_then(|causality| causality.parent_invocation_id.clone()),
-        engine_catalog_revision: engine_causality
-            .as_ref()
-            .map(|causality| causality.context.catalog_revision),
         ..Default::default()
     };
 

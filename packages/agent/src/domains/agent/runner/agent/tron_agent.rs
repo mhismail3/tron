@@ -282,18 +282,6 @@ impl TronAgent {
         self.invocation_abort_registry = Some(registry);
     }
 
-    pub fn abort(&self) {
-        self.abort_token.cancel();
-    }
-
-    pub fn is_running(&self) -> bool {
-        self.is_running.load(Ordering::Relaxed)
-    }
-
-    pub fn current_turn(&self) -> u32 {
-        self.current_turn.load(Ordering::Relaxed)
-    }
-
     pub fn subscribe(&self) -> broadcast::Receiver<TronEvent> {
         self.emitter.subscribe()
     }
@@ -302,20 +290,9 @@ impl TronAgent {
         &self.session_id
     }
 
-    pub fn model(&self) -> &str {
-        &self.config.model
-    }
-
+    #[cfg(test)]
     pub fn context_manager(&self) -> &ContextManager {
         &self.context_manager
-    }
-
-    pub fn context_manager_mut(&mut self) -> &mut ContextManager {
-        &mut self.context_manager
-    }
-
-    pub fn emitter(&self) -> &Arc<EventEmitter> {
-        &self.emitter
     }
 
     pub fn compaction_handler(&self) -> &Arc<CompactionHandler> {

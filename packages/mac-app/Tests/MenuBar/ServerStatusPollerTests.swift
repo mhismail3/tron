@@ -40,7 +40,6 @@ struct ServerStatusPollerTests {
             pingServer: { _ in pingResult },
             launchAgentManager: launchAgentManager,
             probeServerProcess: { _ in serverProcess },
-            applyTranscriptionPreference: { _ in .disabled },
             touchOnboardedSentinel: { }
         )
     }

@@ -25,7 +25,6 @@ use crate::domains::model::providers::ollama::types::all_ollama_models_api_json_
 use crate::domains::model::providers::openai::types::openai_model_available_for_auth_path;
 use crate::domains::model::providers::openai::types::{
     OpenAIAuthPath, all_openai_models_api_json_for_auth_path, get_openai_model,
-    get_openai_model_profile,
 };
 use crate::shared::server::errors::{self, CapabilityError};
 use crate::shared::server::params::require_string_param;
@@ -166,19 +165,4 @@ pub(crate) async fn switch_model(
         "previousModel": previous_model,
         "newModel": model,
     }))
-}
-
-/// Look up the default reasoning level for a model ID from the provider registries.
-pub(crate) fn default_reasoning_level(
-    model_id: &str,
-    openai_auth_path: OpenAIAuthPath,
-) -> Option<String> {
-    let bare = strip_provider_prefix(model_id);
-    if let Some(m) = get_claude_model(bare) {
-        return m.default_reasoning_level.map(String::from);
-    }
-    if let Some((_, profile)) = get_openai_model_profile(bare, openai_auth_path) {
-        return Some(profile.default_reasoning_level.to_string());
-    }
-    None
 }

@@ -59,12 +59,11 @@ impl SessionCommandService {
         Ok(json!({ "unarchived": true }))
     }
 
-    /// Archive every user-facing session whose `last_activity_at` is older
-    /// than `days` days ago.
+    /// Archive every active session whose `last_activity_at` is older than
+    /// `days` days ago.
     ///
     /// Scope semantics:
     ///   - only non-archived sessions (`ended_at IS NULL`)
-    ///   - only user-facing (excludes subagents + non-user sources like cron)
     ///   - `days == 0` archives every currently-active session (equivalent to
     ///     "archive all"), provided on request so batch cleanup has one entry
     ///     point.
@@ -84,16 +83,13 @@ impl SessionCommandService {
         let cutoff = chrono::Utc::now() - chrono::Duration::days(i64::from(days));
         let cutoff_rfc = cutoff.to_rfc3339();
 
-        // Gather candidate session IDs inside a blocking task. Use the
-        // existing filter that already excludes archived + subagents + non-user
-        // sources so the batch is a strict subset of what the iOS sidebar shows.
+        // Gather candidate session IDs inside a blocking task.
         let session_manager = deps.session_manager.clone();
         let cutoff_for_filter = cutoff_rfc.clone();
         let candidates: Vec<String> =
             run_blocking_task("session.archiveOlderThan.list", move || {
                 let filter = crate::domains::agent::runner::SessionFilter {
                     include_archived: false,
-                    user_only: true,
                     ..Default::default()
                 };
                 let sessions = session_manager.list_sessions(&filter).map_err(|error| {

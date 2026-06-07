@@ -16,7 +16,7 @@ fn make_manager() -> SessionManager {
 async fn create_session() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
     assert!(!sid.is_empty());
     assert!(mgr.is_active(&sid));
@@ -24,32 +24,10 @@ async fn create_session() {
 }
 
 #[tokio::test]
-async fn create_subagent_session_inherits_parent_profile() {
-    let mgr = make_manager();
-    let parent = mgr
-        .create_session_with_profile_and_worktree_override(
-            "test-model",
-            "/tmp",
-            Some("parent"),
-            None,
-            Some(crate::shared::profile::CHAT_PROFILE),
-            None,
-        )
-        .unwrap();
-
-    let child = mgr
-        .create_session_for_subagent("test-model", "/tmp", Some("child"), &parent, "task", "do")
-        .unwrap();
-
-    let child_row = mgr.event_store.get_session(&child).unwrap().unwrap();
-    assert_eq!(child_row.profile, crate::shared::profile::CHAT_PROFILE);
-}
-
-#[tokio::test]
 async fn resume_session() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     // Drop from active cache
@@ -66,7 +44,7 @@ async fn resume_session() {
 async fn resume_already_active() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     // Resume when already active should return existing
@@ -79,7 +57,7 @@ async fn resume_already_active() {
 async fn end_session() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     mgr.end_session(&sid).await.unwrap();
@@ -96,7 +74,7 @@ async fn end_session_emits_session_end_event() {
 
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     mgr.end_session(&sid).await.unwrap();
@@ -121,7 +99,7 @@ async fn end_session_emits_session_end_event() {
 async fn fork_session() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     let result = mgr.fork_session(&sid, None, None, Some("forked")).unwrap();
@@ -135,7 +113,7 @@ async fn fork_session() {
 async fn fork_session_from_specific_event() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     // Append an event so we have something besides the root to fork from
@@ -173,7 +151,7 @@ async fn fork_session_from_specific_event() {
 async fn fork_session_from_head_when_no_event_id() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     // Get the HEAD event
@@ -191,7 +169,7 @@ async fn fork_session_from_head_when_no_event_id() {
 async fn fork_session_from_nonexistent_event_fails() {
     let mgr = make_manager();
     let _sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     let result = mgr.fork_session(&_sid, Some("nonexistent-event-id"), None, None);
@@ -205,7 +183,7 @@ async fn fork_session_from_nonexistent_event_fails() {
 async fn archive_and_unarchive() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     mgr.archive_session(&sid).unwrap();
@@ -220,7 +198,7 @@ async fn archive_and_unarchive() {
 async fn delete_session() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     mgr.delete_session(&sid).unwrap();
@@ -230,12 +208,8 @@ async fn delete_session() {
 #[tokio::test]
 async fn list_sessions() {
     let mgr = make_manager();
-    let _ = mgr
-        .create_session("model-a", "/tmp/a", Some("s1"), None)
-        .unwrap();
-    let _ = mgr
-        .create_session("model-b", "/tmp/b", Some("s2"), None)
-        .unwrap();
+    let _ = mgr.create_session("model-a", "/tmp/a", Some("s1")).unwrap();
+    let _ = mgr.create_session("model-b", "/tmp/b", Some("s2")).unwrap();
 
     let sessions = mgr.list_sessions(&SessionFilter::default()).unwrap();
     assert_eq!(sessions.len(), 2);
@@ -244,12 +218,8 @@ async fn list_sessions() {
 #[tokio::test]
 async fn list_sessions_filters_by_workspace_path_and_offset() {
     let mgr = make_manager();
-    let first = mgr
-        .create_session("model-a", "/tmp/a", Some("s1"), None)
-        .unwrap();
-    let second = mgr
-        .create_session("model-b", "/tmp/b", Some("s2"), None)
-        .unwrap();
+    let first = mgr.create_session("model-a", "/tmp/a", Some("s1")).unwrap();
+    let second = mgr.create_session("model-b", "/tmp/b", Some("s2")).unwrap();
 
     let filtered = mgr
         .list_sessions(&SessionFilter {
@@ -279,7 +249,7 @@ async fn list_sessions_filters_by_workspace_path_and_offset() {
 async fn get_session() {
     let mgr = make_manager();
     let sid = mgr
-        .create_session("test-model", "/tmp", Some("test"), None)
+        .create_session("test-model", "/tmp", Some("test"))
         .unwrap();
 
     let session = mgr.get_session(&sid).unwrap();
@@ -293,171 +263,12 @@ async fn session_not_found() {
     assert!(result.is_err());
 }
 
-#[tokio::test]
-async fn create_session_with_origin() {
-    let pool = crate::domains::session::event_store::new_in_memory(
-        &crate::domains::session::event_store::ConnectionConfig::default(),
-    )
-    .unwrap();
-    {
-        let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
-    }
-    let store = Arc::new(EventStore::new(pool));
-    let mgr = SessionManager::new(store.clone()).with_origin("localhost:9847".to_string());
-
-    let sid = mgr
-        .create_session("test-model", "/tmp", Some("origin test"), None)
-        .unwrap();
-    let session = store.get_session(&sid).unwrap().unwrap();
-    assert_eq!(session.origin.as_deref(), Some("localhost:9847"));
-}
-
-#[tokio::test]
-async fn create_session_without_origin() {
-    let mgr = make_manager();
-    let sid = mgr
-        .create_session("test-model", "/tmp", Some("no origin"), None)
-        .unwrap();
-    let session = mgr.get_session(&sid).unwrap().unwrap();
-    assert!(session.origin.is_none());
-}
-
-#[tokio::test]
-async fn list_sessions_user_only() {
-    let pool = crate::domains::session::event_store::new_in_memory(
-        &crate::domains::session::event_store::ConnectionConfig::default(),
-    )
-    .unwrap();
-    {
-        let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
-    }
-    let store = Arc::new(EventStore::new(pool));
-    let mgr = SessionManager::new(store.clone());
-
-    let _ = mgr
-        .create_session("test-model", "/tmp", Some("user session"), None)
-        .unwrap();
-    let cron_sid = mgr
-        .create_session("test-model", "/tmp", Some("Cron: daily"), None)
-        .unwrap();
-    assert!(store.update_source(&cron_sid, "cron").unwrap());
-
-    let filtered = mgr
-        .list_sessions(&SessionFilter {
-            user_only: true,
-            ..Default::default()
-        })
-        .unwrap();
-    assert_eq!(filtered.len(), 1);
-    assert_ne!(filtered[0].id, cron_sid);
-}
-
-#[tokio::test]
-async fn list_sessions_user_only_hides_unstarted_chat_drafts() {
-    let pool = crate::domains::session::event_store::new_in_memory(
-        &crate::domains::session::event_store::ConnectionConfig::default(),
-    )
-    .unwrap();
-    {
-        let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
-    }
-    let store = Arc::new(EventStore::new(pool));
-    let mgr = SessionManager::new(store.clone());
-
-    let user_sid = mgr
-        .create_session("test-model", "/tmp", Some("user session"), None)
-        .unwrap();
-    let chat_draft_sid = mgr
-        .create_session_with_profile_and_worktree_override(
-            "gpt-5.5",
-            "/tmp",
-            Some("Chat"),
-            Some("chat"),
-            Some(crate::shared::profile::CHAT_PROFILE),
-            None,
-        )
-        .unwrap();
-
-    let filtered = mgr
-        .list_sessions(&SessionFilter {
-            user_only: true,
-            ..Default::default()
-        })
-        .unwrap();
-    let ids: Vec<&str> = filtered.iter().map(|s| s.id.as_str()).collect();
-
-    assert!(ids.contains(&user_sid.as_str()));
-    assert!(!ids.contains(&chat_draft_sid.as_str()));
-}
-
-#[tokio::test]
-async fn list_sessions_default_shows_all() {
-    let pool = crate::domains::session::event_store::new_in_memory(
-        &crate::domains::session::event_store::ConnectionConfig::default(),
-    )
-    .unwrap();
-    {
-        let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
-    }
-    let store = Arc::new(EventStore::new(pool));
-    let mgr = SessionManager::new(store.clone());
-
-    let _ = mgr
-        .create_session("test-model", "/tmp", Some("user session"), None)
-        .unwrap();
-    let cron_sid = mgr
-        .create_session("test-model", "/tmp", Some("Cron: daily"), None)
-        .unwrap();
-    assert!(store.update_source(&cron_sid, "cron").unwrap());
-
-    let all = mgr.list_sessions(&SessionFilter::default()).unwrap();
-    assert_eq!(all.len(), 2);
-}
-
-#[tokio::test]
-async fn user_only_excludes_cron_sessions() {
-    let pool = crate::domains::session::event_store::new_in_memory(
-        &crate::domains::session::event_store::ConnectionConfig::default(),
-    )
-    .unwrap();
-    {
-        let conn = pool.get().unwrap();
-        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
-    }
-    let store = Arc::new(EventStore::new(pool));
-    let mgr = SessionManager::new(store.clone());
-
-    let _ = mgr
-        .create_session("test-model", "/tmp", Some("user session"), None)
-        .unwrap();
-    let cron_id = mgr
-        .create_session("test-model", "/tmp", Some("Cron: daily"), None)
-        .unwrap();
-    assert!(store.update_source(&cron_id, "cron").unwrap());
-
-    let filtered = mgr
-        .list_sessions(&SessionFilter {
-            user_only: true,
-            ..Default::default()
-        })
-        .unwrap();
-
-    // Should include user session but NOT cron
-    assert_eq!(filtered.len(), 1);
-    let ids: Vec<&str> = filtered.iter().map(|s| s.id.as_str()).collect();
-    assert!(!ids.contains(&cron_id.as_str()));
-}
-
 // ── Cache eviction tests ────────────────────────────────────
 
 #[tokio::test]
 async fn evict_idle_session() {
     let mgr = make_manager();
-    let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
+    let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
 
     // Force last_accessed to the past
     if let Some(cached) = mgr.active_sessions.get(&sid) {
@@ -472,7 +283,7 @@ async fn evict_idle_session() {
 #[tokio::test]
 async fn evict_preserves_recent_session() {
     let mgr = make_manager();
-    let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
+    let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
 
     let evicted = mgr.evict_idle_sessions(Duration::from_secs(3600));
     assert_eq!(evicted, 0);
@@ -482,7 +293,7 @@ async fn evict_preserves_recent_session() {
 #[tokio::test]
 async fn evict_preserves_processing_session() {
     let mgr = make_manager();
-    let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
+    let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
 
     // Mark as processing and make it old
     let _ = mgr.mark_processing(&sid);
@@ -498,7 +309,7 @@ async fn evict_preserves_processing_session() {
 #[tokio::test]
 async fn evicted_session_reconstructs_on_resume() {
     let mgr = make_manager();
-    let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
+    let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
 
     // Evict it
     if let Some(cached) = mgr.active_sessions.get(&sid) {
@@ -516,10 +327,8 @@ async fn evicted_session_reconstructs_on_resume() {
 #[tokio::test]
 async fn evict_mixed_idle_and_active() {
     let mgr = make_manager();
-    let idle = mgr.create_session("m", "/tmp", Some("idle"), None).unwrap();
-    let recent = mgr
-        .create_session("m", "/tmp", Some("recent"), None)
-        .unwrap();
+    let idle = mgr.create_session("m", "/tmp", Some("idle")).unwrap();
+    let recent = mgr.create_session("m", "/tmp", Some("recent")).unwrap();
 
     if let Some(cached) = mgr.active_sessions.get(&idle) {
         *cached.last_accessed.lock() = Instant::now() - Duration::from_secs(7200);
@@ -534,8 +343,8 @@ async fn evict_mixed_idle_and_active() {
 #[tokio::test]
 async fn evict_zero_ttl_evicts_all_idle() {
     let mgr = make_manager();
-    let s1 = mgr.create_session("m", "/tmp", Some("s1"), None).unwrap();
-    let s2 = mgr.create_session("m", "/tmp", Some("s2"), None).unwrap();
+    let s1 = mgr.create_session("m", "/tmp", Some("s1")).unwrap();
+    let s2 = mgr.create_session("m", "/tmp", Some("s2")).unwrap();
 
     let evicted = mgr.evict_idle_sessions(Duration::ZERO);
     assert_eq!(evicted, 2);
@@ -553,7 +362,7 @@ async fn evict_empty_map_is_noop() {
 #[tokio::test]
 async fn processing_flag_lifecycle() {
     let mgr = make_manager();
-    let sid = mgr.create_session("m", "/tmp", Some("test"), None).unwrap();
+    let sid = mgr.create_session("m", "/tmp", Some("test")).unwrap();
 
     assert!(!mgr.is_processing(&sid));
     mgr.mark_processing(&sid);

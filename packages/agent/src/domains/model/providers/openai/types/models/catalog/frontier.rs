@@ -150,7 +150,7 @@ pub(super) fn insert(m: &mut HashMap<&'static str, OpenAIModelInfo>) {
             "GPT-5.4 Mini",
             "GPT-5.4",
             "standard",
-            "Fast GPT-5.4-class model for responsive coding tasks and subagents.",
+            "Fast GPT-5.4-class model for responsive coding tasks.",
             &["gpt-5.4-mini-2026-03-17"],
             vec![
                 codex_profile(

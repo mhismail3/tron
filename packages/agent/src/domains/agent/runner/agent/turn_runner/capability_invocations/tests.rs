@@ -5,7 +5,6 @@ use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
 
 fn make_exec_result(content: CapabilityResultBody) -> CapabilityInvocationExecutionResult {
     CapabilityInvocationExecutionResult {
-        invocation_id: "test".into(),
         result: CapabilityResult {
             content,
             details: None,
@@ -13,7 +12,6 @@ fn make_exec_result(content: CapabilityResultBody) -> CapabilityInvocationExecut
             stop_turn: None,
         },
         duration_ms: 100,
-        is_interactive: false,
         stops_turn: false,
     }
 }

@@ -99,10 +99,6 @@ final class MenuBarActionHandler {
     func restartServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Restart blocked") else { return }
         applyBusy(.restarting)
-        guard await syncManagedSkillsForServerStart(action: "restart") else {
-            await refreshStatus()
-            return
-        }
         let outcome = await InstallLaunchAgentRunner.ensureLoaded(
             manager: setup.launchAgentManager,
             plistPath: setup.launchAgentPlistPath,
@@ -158,10 +154,6 @@ final class MenuBarActionHandler {
     func resumeServer() async {
         guard await ensureLaunchAgentManagementAllowed(actionTitle: "Resume blocked") else { return }
         applyBusy(.resuming)
-        guard await syncManagedSkillsForServerStart(action: "resume") else {
-            await refreshStatus()
-            return
-        }
         let outcome = await setup.launchAgentManager.load(
             plistPath: setup.launchAgentPlistPath,
             label: setup.launchAgentLabel
@@ -198,12 +190,6 @@ final class MenuBarActionHandler {
 
         switch await setup.stopDevServer(port) {
         case .stopped:
-            if setup.canManageLaunchAgent {
-                guard await syncManagedSkillsForServerStart(action: "resume") else {
-                    await refreshStatus()
-                    return
-                }
-            }
             let outcome = await resumeServerAfterDevStop()
             switch outcome {
             case .ok, .alreadyLoaded:
@@ -234,18 +220,6 @@ final class MenuBarActionHandler {
             await refreshStatus()
             await MenuBarNotifier.post(title: "Stop dev server failed", body: message)
             await presentNonBlockingError(title: "Stop dev server failed", message: message)
-        }
-    }
-
-    private func syncManagedSkillsForServerStart(action: String) async -> Bool {
-        switch await setup.syncManagedSkills() {
-        case .synced:
-            return true
-        case .failed(let message):
-            let title = action == "resume" ? "Resume blocked" : "Restart blocked"
-            await MenuBarNotifier.post(title: title, body: message)
-            await presentNonBlockingError(title: title, message: "Could not sync bundled skills: \(message)")
-            return false
         }
     }
 

@@ -102,10 +102,6 @@ enum SessionEventType: String, Codable, Sendable {
 
     case compactBoundary = "compact.boundary"
 
-    // Rules tracking
-    case rulesLoaded = "rules.loaded"
-    case rulesActivated = "rules.activated"
-
     // Context
     case contextCleared = "context.cleared"
 
@@ -126,11 +122,6 @@ enum SessionEventType: String, Codable, Sendable {
 
     // Turn events
     case turnFailed = "turn.failed"
-
-    // Memory
-    case memoryRetained = "memory.retained"
-    case memoryAutoRetainTriggered = "memory.auto_retain_triggered"
-    case memoryAutoRetainFailed = "memory.auto_retain_failed"
 
     // Hooks
     case llmHookResult = "hook.llm_result"

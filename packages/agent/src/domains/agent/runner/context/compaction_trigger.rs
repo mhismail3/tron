@@ -1,11 +1,6 @@
 //! Smart compaction trigger.
 //!
-//! Determines when context compaction should happen based on two signals:
-//! 1. Token ratio exceeding threshold (primary trigger)
-//! 2. Progress signals (commits, pushes, PRs, tags)
-
-use regex::Regex;
-use std::sync::LazyLock;
+//! Determines when context compaction should happen based on token pressure.
 
 use super::types::CompactionTriggerConfig;
 use super::types::CompactionTriggerInput;
@@ -20,30 +15,12 @@ pub struct CompactionTriggerResult {
     pub reason: String,
 }
 
-/// Progress signal patterns matched against recent process::run capability invocation commands.
-// SAFETY: Constant patterns validated by every test run. LazyLock ensures
-// these compile exactly once at first use; invalid regex panics immediately
-// at startup, never at runtime.
-static PROGRESS_PATTERNS: LazyLock<[Regex; 4]> = LazyLock::new(|| {
-    [
-        Regex::new(r"\bgit\s+push\b").expect("valid regex"),
-        Regex::new(r"\bgh\s+pr\s+create\b").expect("valid regex"),
-        Regex::new(r"\bgh\s+pr\s+merge\b").expect("valid regex"),
-        Regex::new(r"\bgit\s+tag\b").expect("valid regex"),
-    ]
-});
-
-fn progress_patterns() -> &'static [Regex; 4] {
-    &PROGRESS_PATTERNS
-}
-
-/// Multi-signal compaction trigger.
+/// Token-pressure compaction trigger.
 ///
 /// Evaluates whether compaction should run after each agent turn.
-/// The decision order is:
-///
-/// 1. **Token threshold** — if the ratio exceeds `trigger_token_threshold`, compact.
-/// 2. **Progress signals** — if a commit, push, PR, or tag is detected, compact.
+/// The primitive loop compacts only when the token ratio exceeds
+/// `trigger_token_threshold`; task-specific progress signals are agent-owned
+/// state, not host policy.
 #[derive(Debug)]
 pub struct CompactionTrigger {
     config: CompactionTriggerConfig,
@@ -66,31 +43,6 @@ impl CompactionTrigger {
                 compact: true,
                 reason: format!("token ratio {pct}% >= threshold"),
             };
-        }
-
-        // 2. Progress signals — event types
-        if input
-            .recent_event_types
-            .iter()
-            .any(|t| t == "worktree.commit")
-        {
-            return CompactionTriggerResult {
-                compact: true,
-                reason: "commit detected — good compaction point".to_string(),
-            };
-        }
-
-        // 2b. Progress signals — capability invocation patterns
-        let patterns = progress_patterns();
-        for cmd in &input.recent_capability_invocations {
-            for pattern in patterns {
-                if pattern.is_match(cmd) {
-                    return CompactionTriggerResult {
-                        compact: true,
-                        reason: "progress signal: push/pr/tag detected".to_string(),
-                    };
-                }
-            }
         }
 
         CompactionTriggerResult {
@@ -138,31 +90,6 @@ mod tests {
         let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
         let result = trigger.should_compact(&default_input(0.69));
         assert!(!result.compact);
-    }
-
-    #[test]
-    fn test_worktree_commit_triggers() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        let input = CompactionTriggerInput {
-            current_token_ratio: 0.3,
-            recent_event_types: vec!["worktree.commit".to_string()],
-            recent_capability_invocations: Vec::new(),
-        };
-        let result = trigger.should_compact(&input);
-        assert!(result.compact);
-        assert!(result.reason.contains("commit"));
-    }
-
-    #[test]
-    fn test_git_push_triggers() {
-        let mut trigger = CompactionTrigger::new(CompactionTriggerConfig::default());
-        let input = CompactionTriggerInput {
-            current_token_ratio: 0.3,
-            recent_event_types: Vec::new(),
-            recent_capability_invocations: vec!["git push origin main".to_string()],
-        };
-        let result = trigger.should_compact(&input);
-        assert!(result.compact);
     }
 
     #[test]

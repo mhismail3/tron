@@ -40,71 +40,10 @@ pub(in crate::engine::primitives::ui::authoring) fn generated_actions(
     {
         actions.push(action);
     }
-    if request.target_type == RESOURCE_COLLECTION_TARGET {
-        actions.extend(resource_collection_actions(
-            host, invocation, request, &functions,
-        )?);
-    }
-    if request.target_type == SOURCE_CONTROL_TARGET {
-        actions.extend(source_control_actions(invocation, request, &functions)?);
-    }
-    if request.target_type == AGENT_CONTROL_TARGET {
-        actions.extend(agent_control_actions(invocation, request, &functions)?);
-    }
     Ok(actions
         .into_iter()
         .map(with_stored_action_consequence)
         .collect())
-}
-
-fn resource_collection_actions(
-    host: &dyn PrimitiveRuntimeHost,
-    invocation: &crate::engine::Invocation,
-    request: &SurfaceAuthoringRequest,
-    functions: &[FunctionDefinition],
-) -> Result<Vec<Value>> {
-    match (request.target_id.as_str(), request.layout_profile.as_str()) {
-        (PROMPT_SNIPPET_COLLECTION_TARGET, PROMPT_SNIPPET_LAYOUT_PROFILE) => {
-            prompt_snippet_collection_actions(host, invocation, functions)
-        }
-        (PROMPT_HISTORY_COLLECTION_TARGET, PROMPT_HISTORY_LAYOUT_PROFILE) => {
-            prompt_history_collection_actions(host, invocation, functions)
-        }
-        (NOTIFICATION_COLLECTION_TARGET, NOTIFICATION_INBOX_LAYOUT_PROFILE) => {
-            notification_collection_actions(host, invocation, functions)
-        }
-        (SUBAGENT_COLLECTION_TARGET, SUBAGENT_LINEAGE_LAYOUT_PROFILE) => {
-            subagent_collection_actions(host, invocation, request, functions)
-        }
-        _ => Ok(Vec::new()),
-    }
-}
-
-pub(in crate::engine::primitives::ui::authoring) fn push_optional_action(
-    actions: &mut Vec<Value>,
-    invocation: &crate::engine::Invocation,
-    functions: &[FunctionDefinition],
-    action_id: &str,
-    label: &str,
-    target_function: &str,
-    input_schema: Value,
-    payload_template: Value,
-) -> Result<()> {
-    if functions
-        .iter()
-        .any(|function| function.id.as_str() == target_function)
-    {
-        actions.push(prompt_collection_action(
-            invocation,
-            functions,
-            action_id,
-            label,
-            target_function,
-            input_schema,
-            payload_template,
-        )?);
-    }
-    Ok(())
 }
 
 fn capability_invocation_action(
@@ -197,35 +136,4 @@ fn capability_schema_field_is_renderable(schema: &Value) -> bool {
         return schema.get("enum").and_then(Value::as_array).is_some();
     };
     matches!(kind, "string" | "boolean" | "integer")
-}
-
-pub(in crate::engine::primitives::ui::authoring) fn prompt_collection_action(
-    invocation: &crate::engine::Invocation,
-    functions: &[FunctionDefinition],
-    action_id: &str,
-    label: &str,
-    target_function: &str,
-    input_schema: Value,
-    payload_template: Value,
-) -> Result<Value> {
-    let target = functions
-        .iter()
-        .find(|function| function.id.as_str() == target_function)
-        .ok_or_else(|| EngineError::NotFound {
-            kind: "function",
-            id: target_function.to_owned(),
-        })?;
-    Ok(json!({
-        "actionId": action_id,
-        "label": label,
-        "targetFunctionId": target_function,
-        "inputSchema": input_schema,
-        "payloadTemplate": payload_template,
-        "idempotencyKeyTemplate": "${submission.idempotencyKey}",
-        "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
-        "requiredRisk": risk_label(&target.risk_level),
-        "authorityPolicy": {"requiredScopes": target.required_authority.scopes.clone()},
-        "targetRevision": target.revision.0,
-        "expiresAt": default_expires_at()
-    }))
 }

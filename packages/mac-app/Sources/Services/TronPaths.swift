@@ -12,8 +12,6 @@ enum TronPaths {
         static let databaseDir = "database"
         static let authFile = "auth.json"
         static let profileFile = "profile.toml"
-        static let transcriptionDir = "transcription"
-        static let skillsDir = "skills"
     }
 
     static let tronDataDirEnv = "TRON_DATA_DIR"
@@ -100,24 +98,6 @@ enum TronPaths {
 
     static var settingsPath: URL {
         userProfileDir.appendingPathComponent(HomeComponent.profileFile, isDirectory: false)
-    }
-
-    static var transcriptionDir: URL {
-        internalDir.appendingPathComponent(HomeComponent.transcriptionDir, isDirectory: true)
-    }
-
-    static var transcriptionResourceDir: URL {
-        (Bundle.main.resourceURL ?? applicationBundle.appendingPathComponent("Contents/Resources", isDirectory: true))
-            .appendingPathComponent("Transcription", isDirectory: true)
-    }
-
-    static var skillsDir: URL {
-        tronHome.appendingPathComponent(HomeComponent.skillsDir, isDirectory: true)
-    }
-
-    static var managedSkillsResourceDir: URL {
-        (Bundle.main.resourceURL ?? applicationBundle.appendingPathComponent("Contents/Resources", isDirectory: true))
-            .appendingPathComponent("Skills", isDirectory: true)
     }
 
     static var launchAgentPlistPath: URL {

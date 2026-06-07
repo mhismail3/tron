@@ -67,14 +67,3 @@ struct TreeGetAncestorsParams: Encodable {
 struct TreeGetAncestorsResult: Decodable {
     let events: [RawEvent]
 }
-
-struct MemoryRetainParams: Encodable {
-    let sessionId: String
-}
-
-struct MemoryRetainResult: Decodable {
-    let retained: Bool
-    let reason: String?
-    let title: String?
-    let eventId: String?
-}

@@ -19,6 +19,7 @@ use crate::shared::messages::Message;
 use super::token_estimator::estimate_message_tokens;
 
 /// Configuration for creating a [`MessageStore`].
+#[cfg(test)]
 #[derive(Clone, Debug, Default)]
 pub struct MessageStoreConfig {
     /// Initial messages to populate the store.
@@ -50,6 +51,7 @@ impl MessageStore {
     }
 
     /// Create a message store with an initial configuration.
+    #[cfg(test)]
     #[must_use]
     pub fn with_config(config: MessageStoreConfig) -> Self {
         let mut store = Self::new();
@@ -79,6 +81,7 @@ impl MessageStore {
     }
 
     /// Get a clone of all messages.
+    #[cfg(test)]
     #[must_use]
     pub fn get(&self) -> Vec<Message> {
         self.messages.clone()
@@ -121,6 +124,7 @@ impl MessageStore {
     /// Get the cached token count for a message at the given index.
     ///
     /// Returns `None` if the index is out of bounds.
+    #[cfg(test)]
     #[must_use]
     pub fn get_cached_tokens(&self, index: usize) -> Option<u32> {
         self.token_cache.get(index).copied()
@@ -133,6 +137,7 @@ impl MessageStore {
     }
 
     /// Returns `true` if the store contains no messages.
+    #[cfg(test)]
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.messages.is_empty()

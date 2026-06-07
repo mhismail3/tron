@@ -285,25 +285,6 @@ final class FilesystemTypesTests: XCTestCase {
     }
 }
 
-// MARK: - Browser Types Tests
-
-@MainActor
-final class BrowserTypesTests: XCTestCase {
-
-    func testBrowserGetStatusResultInit() {
-        let status = BrowserGetStatusResult(
-            hasBrowser: true,
-            isStreaming: true,
-            currentUrl: "https://example.com"
-        )
-
-        XCTAssertTrue(status.hasBrowser)
-        XCTAssertTrue(status.isStreaming)
-        XCTAssertEqual(status.currentUrl, "https://example.com")
-    }
-
-}
-
 // MARK: - Task Types Tests
 
 @MainActor

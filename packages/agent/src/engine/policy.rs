@@ -34,7 +34,9 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
         )));
     }
 
-    if function.effect_class.is_mutating() && function.risk_level >= RiskLevel::High {
+    if function.effect_class == EffectClass::IrreversibleSideEffect
+        || (function.effect_class.is_mutating() && function.risk_level >= RiskLevel::High)
+    {
         let Some(compensation) = &function.compensation else {
             return Err(EngineError::PolicyViolation(format!(
                 "high-risk function {} requires a compensation contract",
@@ -316,32 +318,32 @@ mod tests {
         IdempotencyContract, Provenance, ResourceLeaseRequirement, WorkerId,
     };
 
-    fn high_risk_process_function() -> FunctionDefinition {
+    fn high_risk_execute_function() -> FunctionDefinition {
         FunctionDefinition::new(
-            FunctionId::new("process::run").expect("function id"),
-            WorkerId::new("process").expect("worker id"),
-            "Run process".to_owned(),
+            FunctionId::new("capability::execute").expect("function id"),
+            WorkerId::new("capability").expect("worker id"),
+            "Execute primitive operation".to_owned(),
             VisibilityScope::System,
             EffectClass::ExternalSideEffect,
         )
         .with_risk(RiskLevel::High)
-        .with_required_authority(AuthorityRequirement::scope("process.run"))
+        .with_required_authority(AuthorityRequirement::scope("capability.execute"))
         .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
         .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
-            "process",
-            "process:{sessionId}",
+            "capability_execute",
+            "capability_execute:{sessionId}",
             60_000,
         ))
         .with_compensation(CompensationContract::new(
             CompensationKind::ManualOnly,
-            "process output is the audit boundary",
+            "trace record is the audit boundary",
         ))
         .with_provenance(Provenance::system())
     }
 
     #[test]
     fn high_risk_registration_requires_compensation_not_prompt_metadata() {
-        let function = high_risk_process_function();
+        let function = high_risk_execute_function();
 
         validate_function_registration(&function)
             .expect("high-risk registration relies on idempotency, lease, and compensation");

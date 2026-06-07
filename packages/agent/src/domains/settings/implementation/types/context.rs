@@ -1,6 +1,6 @@
 //! Context management settings.
 //!
-//! Configuration for compaction and rules.
+//! Configuration for primitive context compaction.
 
 use serde::{Deserialize, Serialize};
 
@@ -10,8 +10,6 @@ use serde::{Deserialize, Serialize};
 pub struct ContextSettings {
     /// Context compaction settings.
     pub compactor: CompactorSettings,
-    /// Rules discovery settings.
-    pub rules: RulesSettings,
 }
 
 /// Context compaction settings.
@@ -45,22 +43,6 @@ impl Default for CompactorSettings {
             buffer_tokens: 4000,
             trigger_token_threshold: Some(0.70),
             preserve_recent_count: 5,
-        }
-    }
-}
-
-/// Rules discovery settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct RulesSettings {
-    /// Whether to discover standalone rule files (AGENTS.md, CLAUDE.md).
-    pub discover_standalone_files: bool,
-}
-
-impl Default for RulesSettings {
-    fn default() -> Self {
-        Self {
-            discover_standalone_files: true,
         }
     }
 }
@@ -111,12 +93,6 @@ mod tests {
     }
 
     #[test]
-    fn rules_defaults() {
-        let r = RulesSettings::default();
-        assert!(r.discover_standalone_files);
-    }
-
-    #[test]
     fn context_partial_json() {
         let json = serde_json::json!({
             "compactor": {
@@ -125,6 +101,5 @@ mod tests {
         });
         let ctx: ContextSettings = serde_json::from_value(json).unwrap();
         assert_eq!(ctx.compactor.max_tokens, 50_000);
-        assert!(ctx.rules.discover_standalone_files);
     }
 }

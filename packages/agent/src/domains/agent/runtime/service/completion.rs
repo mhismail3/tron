@@ -6,9 +6,8 @@ use tracing::{debug, warn};
 
 use super::{
     PromptEngineCausality, PromptRunCleanup, load_session_update_data,
-    publish_prompt_runtime_stream, retain_eligible,
+    publish_prompt_runtime_stream,
 };
-use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
 };
@@ -54,13 +53,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         &provider_type,
         &model_for_error,
         &result,
-    );
-    maybe_fire_auto_retain(
-        &result,
-        &engine_host,
-        engine_causality.as_ref(),
-        &session_id,
-        &run_id,
     );
     let agent_result_refs = create_agent_result_resource(
         &engine_host,
@@ -220,62 +212,6 @@ fn emit_run_error_if_needed(
         error_type: Some(parsed.category.to_string()),
         model: Some(model_for_error.to_owned()),
     });
-}
-
-fn maybe_fire_auto_retain(
-    result: &crate::domains::agent::runner::types::RunResult,
-    engine_host: &crate::engine::EngineHostHandle,
-    engine_causality: Option<&PromptEngineCausality>,
-    session_id: &str,
-    run_id: &str,
-) {
-    if result.error.is_some() || result.interrupted || !retain_eligible(&result.stop_reason) {
-        return;
-    }
-    let function_id = match FunctionId::new("memory::auto_retain_fire") {
-        Ok(function_id) => function_id,
-        Err(error) => {
-            warn!(session_id, run_id, error = %error, "invalid auto-retain function id");
-            return;
-        }
-    };
-    let mut context = engine_causality
-        .map(|causality| causality.context.clone())
-        .unwrap_or_else(|| {
-            CausalContext::new(
-                ActorId::new("system").expect("valid static actor id"),
-                ActorKind::System,
-                AuthorityGrantId::new("agent-runtime").expect("valid static grant id"),
-                TraceId::generate(),
-            )
-        });
-    for scope in ["memory.write", ENGINE_INTERNAL_INVOKE_SCOPE] {
-        if !context
-            .authority_scopes
-            .iter()
-            .any(|existing| existing == scope)
-        {
-            context.authority_scopes.push(scope.to_owned());
-        }
-    }
-    context.session_id = Some(session_id.to_owned());
-    context.parent_invocation_id =
-        engine_causality.and_then(|causality| causality.parent_invocation_id.clone());
-    context.idempotency_key = Some(format!("memory.auto_retain:{session_id}:{run_id}"));
-    let host = engine_host.clone();
-    let payload = serde_json::json!({
-        "sessionId": session_id,
-        "runId": run_id,
-        "workspaceId": context.workspace_id.clone(),
-    });
-    drop(tokio::spawn(async move {
-        let result = host
-            .invoke(Invocation::new_sync(function_id.clone(), payload, context))
-            .await;
-        if let Some(error) = result.error {
-            warn!(function_id = %function_id, error = %error, "auto-retain engine invocation failed");
-        }
-    }));
 }
 
 async fn emit_session_update(

@@ -244,7 +244,6 @@ mod tests {
     }
 
     #[test]
-    #[test]
     fn is_session_type() {
         assert!(EventType::SessionStart.is_session_type());
         assert!(EventType::SessionEnd.is_session_type());

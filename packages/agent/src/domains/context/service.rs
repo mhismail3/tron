@@ -40,40 +40,12 @@ pub(crate) fn build_context_manager_for_session(
         },
     };
 
-    let session_plan = profile_runtime
-        .plan_session(crate::domains::agent::runner::SessionPlanRequest {
-            requested_profile: None,
-            model: state.model.clone(),
-            source: None,
-            entrypoint: None,
-        })
-        .map_err(|error| CapabilityError::Internal {
-            message: format!("invalid active runtime profile: {error}"),
-        })?;
-    let profile_name = session_plan.profile_name.as_str();
-    let settings = session_plan.settings.clone();
+    let settings = profile_runtime.current().settings.clone();
     let context_limit = crate::domains::model::providers::model_context_window(&state.model);
     let compactor_settings = &settings.context.compactor;
     let mut context_manager = ContextManager::new(ContextManagerConfig {
         model: state.model.clone(),
-        system_prompt: if profile_name == crate::shared::profile::NORMAL_PROFILE {
-            crate::domains::agent::runner::context::instruction_prompts::load_system_prompt_from_file(
-                &session.working_directory,
-            )
-            .or_else(crate::domains::agent::runner::context::instruction_prompts::load_global_system_prompt)
-            .map(|loaded| loaded.content)
-            .or_else(|| {
-                session_plan
-                    .prompt
-                    .as_ref()
-                    .map(|prompt| prompt.content.clone())
-            })
-        } else {
-            session_plan
-                .prompt
-                .as_ref()
-                .map(|prompt| prompt.content.clone())
-        },
+        system_prompt: Some(crate::domains::agent::runner::context::soul::AGENT_SOUL.to_owned()),
         working_directory: state.working_directory.clone(),
         capabilities: model_capability_definitions,
         compaction: CompactionConfig {

@@ -499,13 +499,13 @@ mod tests {
     fn enqueue_with_metadata_roundtrips_through_event_log() {
         let (store, sid) = make_store_and_session();
         let metadata = json!({
-            "messageKind": "answered_questions",
-            "answerCount": 1,
+            "messageKind": "queued_prompt",
+            "source": "test",
         });
         let item = PromptQueueService::enqueue_with_metadata(
             &store,
             &sid,
-            "[Answered questions]\n\nAnswer 1: looks good",
+            "queued follow-up",
             Some(metadata.clone()),
         )
         .unwrap();
@@ -534,10 +534,10 @@ mod tests {
         PromptQueueService::enqueue_with_metadata(
             &store,
             &sid,
-            "[Answered questions]\n\nAnswer 1: no",
+            "queued follow-up",
             Some(json!({
-                "messageKind": "answered_questions",
-                "answerCount": 1,
+                "messageKind": "queued_prompt",
+                "source": "test",
             })),
         )
         .unwrap();
@@ -546,8 +546,8 @@ mod tests {
         assert_eq!(pending.len(), 2);
         assert!(pending[0].metadata.is_none());
         let meta = pending[1].metadata.as_ref().unwrap();
-        assert_eq!(meta["messageKind"], "answered_questions");
-        assert_eq!(meta["answerCount"], 1);
+        assert_eq!(meta["messageKind"], "queued_prompt");
+        assert_eq!(meta["source"], "test");
     }
 
     #[test]

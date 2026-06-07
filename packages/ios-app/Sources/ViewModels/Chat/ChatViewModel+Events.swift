@@ -4,7 +4,7 @@ import SwiftUI
 
 // MARK: - Context Protocol Conformances
 
-extension ChatViewModel: CompactionContext, MemoryContext {
+extension ChatViewModel: CompactionContext {
     func refreshContextInBackground() {
         launchBackground { [weak self] in
             await self?.refreshContextFromServer()
@@ -289,8 +289,6 @@ extension ChatViewModel {
         }
         isCompacting = false
         compactionInProgressMessageId = nil
-        isRetaining = false
-        memoryRetainInProgressMessageId = nil
         userInteractionState.clearAll()
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
@@ -338,22 +336,6 @@ extension ChatViewModel {
         compactionCoordinator.handleCompaction(pluginResult, context: self)
     }
 
-    func handleMemoryUpdating(_ pluginResult: MemoryUpdatingPlugin.Result) {
-        memoryCoordinator.handleMemoryUpdating(pluginResult, context: self)
-    }
-
-    func handleMemoryUpdated(_ pluginResult: MemoryUpdatedPlugin.Result) {
-        memoryCoordinator.handleMemoryUpdated(pluginResult, context: self)
-    }
-
-    func handleMemoryAutoRetainTriggered(_ pluginResult: MemoryAutoRetainTriggeredPlugin.Result) {
-        memoryCoordinator.handleMemoryAutoRetainTriggered(pluginResult, context: self)
-    }
-
-    func handleMemoryAutoRetainFailed(_ pluginResult: MemoryAutoRetainFailedPlugin.Result) {
-        memoryCoordinator.handleMemoryAutoRetainFailed(pluginResult, context: self)
-    }
-
     func handleContextCleared(_ pluginResult: ContextClearedPlugin.Result) {
         let tokensFreed = pluginResult.tokensBefore - pluginResult.tokensAfter
         logger.info("Context cleared: \(pluginResult.tokensBefore) -> \(pluginResult.tokensAfter) tokens (freed \(tokensFreed))", category: .events)
@@ -387,21 +369,6 @@ extension ChatViewModel {
         appendToMessages(deletedMessage)
     }
 
-    func handleRulesActivated(_ pluginResult: RulesActivatedPlugin.Result) {
-        let dirs = pluginResult.rules.map(\.scopeDir).joined(separator: ", ")
-        logger.info("Rules activated for: \(dirs)", category: .events)
-
-        let message = ChatMessage.rulesActivated(
-            rules: pluginResult.rules,
-            totalActivated: pluginResult.totalActivated
-        )
-        appendToMessages(message)
-
-        launchBackground { [weak self] in
-            await self?.refreshContextFromServer()
-        }
-    }
-
     /// Reset all processing state to idle after an error.
     /// Shared by handleProviderError and handleAgentError.
     private func resetToIdleState(errorPreview: String) {
@@ -413,8 +380,6 @@ extension ChatViewModel {
         agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
-        isRetaining = false
-        memoryRetainInProgressMessageId = nil
         userInteractionState.clearAll()
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(

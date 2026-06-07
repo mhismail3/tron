@@ -61,16 +61,6 @@ extension ChatMessage {
         ChatMessage(role: .system, content: .interrupted)
     }
 
-    /// In-chat notification for transcription failure
-    static func transcriptionFailed() -> ChatMessage {
-        ChatMessage(role: .system, content: .transcriptionFailed)
-    }
-
-    /// In-chat notification for no speech detected
-    static func transcriptionNoSpeech() -> ChatMessage {
-        ChatMessage(role: .system, content: .transcriptionNoSpeech)
-    }
-
     /// In-chat notification for compaction in progress (spinning indicator)
     static func compactionInProgress(reason: String) -> ChatMessage {
         ChatMessage(role: .system, content: .compactionInProgress(reason: reason))
@@ -89,43 +79,6 @@ extension ChatMessage {
     /// In-chat notification for message deletion from context
     static func messageDeleted(targetType: String) -> ChatMessage {
         ChatMessage(role: .system, content: .messageDeleted(targetType: targetType))
-    }
-
-    /// In-chat notification for memory retain in progress (spinning indicator)
-    static func memoryRetainInProgress() -> ChatMessage {
-        ChatMessage(role: .system, content: .memoryRetainInProgress)
-    }
-
-    /// In-chat notification for automatic memory retain in progress (distinct label)
-    static func memoryAutoRetainInProgress(intervalFired: Int) -> ChatMessage {
-        ChatMessage(role: .system, content: .memoryAutoRetainInProgress(intervalFired: intervalFired))
-    }
-
-    /// In-chat notification that an auto-retain pipeline failed (H3).
-    /// The server will still land a summary; this pill surfaces
-    /// the quality signal to the user.
-    static func memoryAutoRetainFailed(intervalFired: Int, reason: String) -> ChatMessage {
-        ChatMessage(role: .system, content: .memoryAutoRetainFailed(intervalFired: intervalFired, reason: reason))
-    }
-
-    /// In-chat notification for memory retained to long-term log
-    static func memoryRetained(title: String, summary: String?) -> ChatMessage {
-        ChatMessage(role: .system, content: .memoryRetained(title: title, summary: summary))
-    }
-
-    /// In-chat notification for memory retain with nothing new
-    static func memoryRetainedNothingNew() -> ChatMessage {
-        ChatMessage(role: .system, content: .memoryRetainedNothingNew)
-    }
-
-    /// In-chat notification for rules loaded on session start
-    static func rulesLoaded(count: Int) -> ChatMessage {
-        ChatMessage(role: .system, content: .rulesLoaded(count: count))
-    }
-
-    /// In-chat notification for dynamically activated rules
-    static func rulesActivated(rules: [ActivatedRuleEntry], totalActivated: Int) -> ChatMessage {
-        ChatMessage(role: .system, content: .rulesActivated(rules: rules, totalActivated: totalActivated))
     }
 
     /// In-chat notification for catching up to in-progress session

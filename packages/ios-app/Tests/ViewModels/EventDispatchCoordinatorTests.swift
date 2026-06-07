@@ -366,7 +366,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
     var handleCompactionCalledWith: CompactionPlugin.Result?
     var handleContextClearedCalledWith: ContextClearedPlugin.Result?
     var handleMessageDeletedCalledWith: MessageDeletedPlugin.Result?
-    var handleRulesActivatedCalledWith: RulesActivatedPlugin.Result?
 
     // MARK: - Logging
     var logWarningCalled = false
@@ -453,32 +452,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
 
     func handleMessageDeleted(_ result: MessageDeletedPlugin.Result) {
         handleMessageDeletedCalledWith = result
-    }
-
-    func handleRulesActivated(_ result: RulesActivatedPlugin.Result) {
-        handleRulesActivatedCalledWith = result
-    }
-
-    // MARK: - Memory
-    var handleMemoryUpdatingCalledWith: MemoryUpdatingPlugin.Result?
-    var handleMemoryUpdatedCalledWith: MemoryUpdatedPlugin.Result?
-    var handleMemoryAutoRetainTriggeredCalledWith: MemoryAutoRetainTriggeredPlugin.Result?
-    var handleMemoryAutoRetainFailedCalledWith: MemoryAutoRetainFailedPlugin.Result?
-
-    func handleMemoryUpdating(_ result: MemoryUpdatingPlugin.Result) {
-        handleMemoryUpdatingCalledWith = result
-    }
-
-    func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result) {
-        handleMemoryUpdatedCalledWith = result
-    }
-
-    func handleMemoryAutoRetainTriggered(_ result: MemoryAutoRetainTriggeredPlugin.Result) {
-        handleMemoryAutoRetainTriggeredCalledWith = result
-    }
-
-    func handleMemoryAutoRetainFailed(_ result: MemoryAutoRetainFailedPlugin.Result) {
-        handleMemoryAutoRetainFailedCalledWith = result
     }
 
     // MARK: - Server

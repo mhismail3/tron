@@ -22,8 +22,6 @@ pub struct ReconstructedState {
     pub system_prompt: Option<String>,
     /// Whether the session has ended.
     pub is_ended: bool,
-    /// Active worktree path (from `worktree.acquired` event, if not released).
-    pub worktree_path: Option<String>,
     /// Last-seen reasoning level from `config.reasoning_level` events.
     pub reasoning_level: Option<String>,
 }
@@ -37,19 +35,7 @@ pub fn reconstruct(
         .get_state_at_head(session_id)
         .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
-    let mut result = from_session_state(&state);
-
-    // Check for active worktree
-    if let Ok(Some(event)) = event_store.get_active_worktree(session_id)
-        && let Ok(payload) = serde_json::from_str::<serde_json::Value>(&event.payload)
-    {
-        result.worktree_path = payload
-            .get("path")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-    }
-
-    Ok(result)
+    Ok(from_session_state(&state))
 }
 
 /// Convert `SessionState` to `ReconstructedState`.
@@ -144,7 +130,6 @@ fn from_session_state(state: &SessionState) -> ReconstructedState {
         working_directory: Some(state.working_directory.clone()),
         system_prompt: state.system_prompt.clone(),
         is_ended: state.is_ended.unwrap_or(false),
-        worktree_path: None,
         reasoning_level: state.reasoning_level.clone(),
     }
 }
@@ -169,7 +154,7 @@ mod tests {
     fn reconstruct_empty_session() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None, None)
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
 
         let state = reconstruct(&store, &session.session.id).unwrap();
@@ -182,7 +167,7 @@ mod tests {
     fn reconstruct_with_messages() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None, None)
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
         let sid = &session.session.id;
 
@@ -226,7 +211,7 @@ mod tests {
     fn reconstruct_provider_capability_invocation_survives_serde_roundtrip() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None, None)
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
         let sid = &session.session.id;
 
@@ -245,9 +230,9 @@ mod tests {
             session_id: sid,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [
-                    {"type": "thinking", "thinking": "I'll write the file", "signature": "sig123"},
-                    {"type": "capability_invocation", "id": "toolu_01abc", "name": "filesystem::write_file", "arguments": {"file_path": "/tmp/test.txt", "content": "hello"}}
+                    "content": [
+                        {"type": "thinking", "thinking": "I'll write the file", "signature": "sig123"},
+                    {"type": "capability_invocation", "id": "toolu_01abc", "name": "execute", "arguments": {"operation": "file_write", "path": "/tmp/test.txt", "content": "hello"}}
                 ],
                 "turn": 1
             }),
@@ -307,8 +292,9 @@ mod tests {
             } = capability_invocation
             {
                 assert_eq!(id, "toolu_01abc");
-                assert_eq!(name, "filesystem::write_file");
-                assert_eq!(arguments["file_path"], "/tmp/test.txt");
+                assert_eq!(name, "execute");
+                assert_eq!(arguments["operation"], "file_write");
+                assert_eq!(arguments["path"], "/tmp/test.txt");
             }
         } else {
             panic!("Expected assistant message at index 1");
@@ -319,66 +305,10 @@ mod tests {
     fn reconstruct_reasoning_level_none_by_default() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None, None)
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
         let state = reconstruct(&store, &session.session.id).unwrap();
         assert!(state.reasoning_level.is_none());
-    }
-
-    #[test]
-    fn reconstruct_reasoning_level_from_event() {
-        let store = make_store();
-        let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None, None)
-            .unwrap();
-        let sid = &session.session.id;
-
-        let _ = store
-            .append(&AppendOptions {
-                session_id: sid,
-                event_type: EventType::ConfigReasoningLevel,
-                payload: serde_json::json!({
-                    "previousLevel": null,
-                    "newLevel": "high"
-                }),
-                parent_id: None,
-                sequence: None,
-            })
-            .unwrap();
-
-        let state = reconstruct(&store, sid).unwrap();
-        assert_eq!(state.reasoning_level.as_deref(), Some("high"));
-    }
-
-    #[test]
-    fn reconstruct_reasoning_level_latest_wins() {
-        let store = make_store();
-        let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None, None)
-            .unwrap();
-        let sid = &session.session.id;
-
-        let _ = store
-            .append(&AppendOptions {
-                session_id: sid,
-                event_type: EventType::ConfigReasoningLevel,
-                payload: serde_json::json!({"previousLevel": null, "newLevel": "medium"}),
-                parent_id: None,
-                sequence: None,
-            })
-            .unwrap();
-        let _ = store
-            .append(&AppendOptions {
-                session_id: sid,
-                event_type: EventType::ConfigReasoningLevel,
-                payload: serde_json::json!({"previousLevel": "medium", "newLevel": "high"}),
-                parent_id: None,
-                sequence: None,
-            })
-            .unwrap();
-
-        let state = reconstruct(&store, sid).unwrap();
-        assert_eq!(state.reasoning_level.as_deref(), Some("high"));
     }
 
     #[test]
@@ -398,38 +328,10 @@ mod tests {
     }
 
     #[test]
-    fn reconstruct_with_model_switch() {
-        let store = make_store();
-        let session = store
-            .create_session("model-a", "/tmp", Some("test"), None, None, None)
-            .unwrap();
-        let sid = &session.session.id;
-
-        // Switch model via event
-        let _ = store
-            .append(&AppendOptions {
-                session_id: sid,
-                event_type: EventType::ConfigModelSwitch,
-                payload: serde_json::json!({
-                    "model": "model-b",
-                    "previousModel": "model-a"
-                }),
-                parent_id: None,
-                sequence: None,
-            })
-            .unwrap();
-
-        let state = reconstruct(&store, sid).unwrap();
-        // The latest model should be reflected
-        // (exact behavior depends on SessionState reconstruction logic)
-        assert!(!state.model.is_empty());
-    }
-
-    #[test]
     fn reconstruct_multimodal_user_message() {
         let store = make_store();
         let session = store
-            .create_session("test-model", "/tmp", Some("test"), None, None, None)
+            .create_session("test-model", "/tmp", Some("test"), None)
             .unwrap();
         let sid = &session.session.id;
 

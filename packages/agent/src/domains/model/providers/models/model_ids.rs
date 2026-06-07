@@ -293,9 +293,6 @@ pub const DEFAULT_OLLAMA_MODEL: &str = GEMMA4_E4B;
 // Role-Based Aliases
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Default model for subagent tasks (fast, cheap).
-pub const SUBAGENT_MODEL: &str = CLAUDE_HAIKU_4_5;
-
 /// Default API model (most capable).
 pub const DEFAULT_API_MODEL: &str = CLAUDE_OPUS_4_6;
 
@@ -360,7 +357,6 @@ mod tests {
     fn role_aliases_point_to_valid_models() {
         let anthropic = all_claude_model_ids();
         let google = all_gemini_model_ids();
-        assert!(anthropic.contains(&SUBAGENT_MODEL));
         assert!(anthropic.contains(&DEFAULT_API_MODEL));
         assert!(anthropic.contains(&DEFAULT_SERVER_MODEL));
         assert!(google.contains(&DEFAULT_GOOGLE_MODEL));

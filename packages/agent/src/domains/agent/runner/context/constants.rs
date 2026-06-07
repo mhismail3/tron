@@ -1,7 +1,6 @@
 //! Context subsystem constants.
 //!
-//! Shared constants for the LLM summarizer, context manager,
-//! system prompts, and token estimator.
+//! Shared constants for the context manager and token estimator.
 
 // =============================================================================
 // Token Estimation
@@ -27,32 +26,6 @@ pub const CAPABILITY_RESULT_MIN_TOKENS: u32 = 2_500;
 pub const CAPABILITY_RESULT_MAX_CHARS: usize = 100_000;
 
 // =============================================================================
-// System Prompts
-// =============================================================================
-
-/// Maximum file size (bytes) for a user-provided SYSTEM.md prompt.
-pub const MAX_SYSTEM_PROMPT_FILE_SIZE: u64 = 100 * 1024;
-
-// =============================================================================
-// LLM Summarizer
-// =============================================================================
-
-/// Maximum serialized character length for the summarizer transcript.
-pub const SUMMARIZER_MAX_SERIALIZED_CHARS: usize = 150_000;
-
-/// Truncation limit for assistant text blocks in the serialized transcript.
-pub const SUMMARIZER_ASSISTANT_TEXT_LIMIT: usize = 300;
-
-/// Truncation limit for thinking blocks in the serialized transcript.
-pub const SUMMARIZER_THINKING_TEXT_LIMIT: usize = 500;
-
-/// Truncation limit for capability result text in the serialized transcript.
-pub const SUMMARIZER_CAPABILITY_RESULT_TEXT_LIMIT: usize = 100;
-
-/// Timeout for the summarizer subagent (milliseconds).
-pub const SUMMARIZER_SUBAGENT_TIMEOUT_MS: u64 = 30_000;
-
-// =============================================================================
 // Compaction Engine
 // =============================================================================
 
@@ -62,13 +35,6 @@ pub const COMPACTION_SUMMARY_PREFIX: &str = "[Context from earlier in this conve
 /// Assistant acknowledgment text after compaction.
 pub const COMPACTION_ACK_TEXT: &str =
     "I understand the previous context. Let me continue helping you.";
-
-// =============================================================================
-// Rules
-// =============================================================================
-
-/// Header prepended to rules content when injecting into context.
-pub const RULES_HEADER: &str = "# Project Rules\n\n";
 
 // =============================================================================
 // Context Thresholds

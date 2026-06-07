@@ -82,13 +82,6 @@ enum MacAppStartupMaintenance {
         let recordedVersion = setup.readRecordedAppVersion()
         let onboarded = setup.onboardedSentinelExists()
 
-        switch await setup.syncManagedSkills() {
-        case .synced:
-            break
-        case .failed(let message):
-            NSLog("[Tron] Menu-bar startup failed to sync managed skills: %@", message)
-        }
-
         let devServerActive = await setup.probeServerProcess(setup.serverPort)?.isDevServer == true
         guard shouldRestartServerOnLaunch(
             context: context,

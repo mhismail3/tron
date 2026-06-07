@@ -269,29 +269,22 @@ authProfile = "default"
         let _lock = lock_settings();
         reset_settings();
 
-        // Start with defaults
         init_settings(TronSettings::default());
-        assert!(get_settings().context.rules.discover_standalone_files);
 
-        // Write a settings file that disables standalone files discovery
+        // Write a settings file that updates retained compaction settings.
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         write_sparse_settings(
             &path,
-            r#"[settings.context.rules]
-discoverStandaloneFiles = false
+            r#"[settings.context.compactor]
+maxTokens = 50000
 "#,
         );
 
-        // Reload — should pick up the change
         reload_settings_from_path(&path).unwrap();
 
         let updated = get_settings();
-        assert!(
-            !updated.context.rules.discover_standalone_files,
-            "discover_standalone_files should be disabled after reload"
-        );
-        // Other defaults should be preserved (deep merge)
+        assert_eq!(updated.context.compactor.max_tokens, 50_000);
         assert_eq!(updated.server.heartbeat_interval_ms, 30_000);
 
         reset_settings();
@@ -327,9 +320,7 @@ discoverStandaloneFiles = false
         let _lock = lock_settings();
         reset_settings();
 
-        // Simulate server startup: standalone files enabled by default
         init_settings(TronSettings::default());
-        assert!(get_settings().context.rules.discover_standalone_files);
 
         // Simulate iOS settings.update: write sparse settings to the profile overlay.
         let dir = tempfile::tempdir().unwrap();
@@ -337,19 +328,15 @@ discoverStandaloneFiles = false
 
         write_sparse_settings(
             &settings_path,
-            r#"[settings.context.rules]
-discoverStandaloneFiles = false
+            r#"[settings.context.compactor]
+preserveRecentCount = 8
 "#,
         );
 
         // Reload (what the engine-owned settings.update capability function should do)
         reload_settings_from_path(&settings_path).unwrap();
 
-        // Now get_settings should reflect the iOS toggle
-        assert!(
-            !get_settings().context.rules.discover_standalone_files,
-            "after reload, discover_standalone_files should be disabled"
-        );
+        assert_eq!(get_settings().context.compactor.preserve_recent_count, 8);
 
         reset_settings();
     }

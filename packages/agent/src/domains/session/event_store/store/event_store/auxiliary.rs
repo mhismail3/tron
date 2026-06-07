@@ -53,50 +53,27 @@ impl EventStore {
     }
 }
 
-#[async_trait::async_trait]
-impl crate::domains::capability_support::implementations::traits::BlobStore for EventStore {
-    async fn store(
-        &self,
-        content: &[u8],
-        mime_type: &str,
-    ) -> std::result::Result<
-        String,
-        crate::domains::capability_support::implementations::errors::CapabilityExecutionError,
-    > {
-        let pool = self.pool().clone();
-        let content = content.to_vec();
-        let mime = mime_type.to_string();
-        tokio::task::spawn_blocking(move || {
-            let conn = pool.get().map_err(|e| {
-                crate::domains::capability_support::implementations::errors::CapabilityExecutionError::Internal {
-                    message: format!("blob store connection error: {e}"),
-                }
-            })?;
-            BlobRepo::store(&conn, &content, &mime).map_err(|e| {
-                crate::domains::capability_support::implementations::errors::CapabilityExecutionError::Internal {
-                    message: format!("blob store write error: {e}"),
-                }
-            })
-        })
-        .await
-        .map_err(|e| {
-            crate::domains::capability_support::implementations::errors::CapabilityExecutionError::Internal {
-                message: format!("blob store task join error: {e}"),
-            }
-        })?
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn event_store_implements_blob_store() {
-        fn assert_blob_store<
-            T: crate::domains::capability_support::implementations::traits::BlobStore,
-        >() {
-        }
-        assert_blob_store::<EventStore>();
+    fn event_store_stores_blob_content() {
+        let pool = crate::domains::session::event_store::sqlite::connection::new_in_memory(
+            &crate::domains::session::event_store::sqlite::connection::ConnectionConfig::default(),
+        )
+        .expect("pool");
+        let store = EventStore::new(pool);
+        let conn = store.conn().expect("conn");
+        crate::domains::session::event_store::sqlite::migrations::run_migrations(&conn)
+            .expect("migrate");
+        let blob_id = store
+            .store_blob(b"hello", "text/plain")
+            .expect("store blob");
+        let content = store
+            .get_blob_content(&blob_id)
+            .expect("read blob")
+            .expect("blob content");
+        assert_eq!(content, b"hello");
     }
 }

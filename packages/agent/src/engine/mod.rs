@@ -1,12 +1,11 @@
 //! # engine
 //!
-//! In-process live capability fabric for the Tron agent.
+//! In-process primitive execution fabric for the Tron agent.
 //!
-//! This module is the foundation for the engine redesign documented in
-//! `packages/agent/docs/engine-redesign/`. The public `/engine` protocol is
-//! worker/client transport over canonical capabilities; model providers do not
-//! see that transport surface directly. Agents receive the capability-domain
-//! `execute` orchestrator over this same live catalog.
+//! The public `/engine` protocol is client and worker transport over canonical
+//! engine functions. Model providers do not see that transport surface
+//! directly; agents receive one model-facing capability, `execute`, which
+//! routes through this fabric and records durable invocation/trace evidence.
 //! The core invariants are:
 //!
 //! - the catalog is live, revisioned, and discoverable;
@@ -38,7 +37,7 @@
 //!   auditable rollback/compensation state for direct and host-dispatched
 //!   functions, and avoid blocking the whole host or inventing per-handler locks;
 //! - typed resources are the durable object substrate: artifacts, goals, claims,
-//!   evidence, decisions, generated UI surfaces, worker packages, and
+//!   evidence, decisions, generated UI surfaces, trace records, and
 //!   materialized files are modeled as versioned resources with links and
 //!   events instead of separate persistence planes;
 //! - generated UI surfaces are fixed-catalog `ui_surface` resources; the engine
@@ -61,10 +60,8 @@
 //!   through `stream::publish`, cleans volatile workers on disconnect, marks
 //!   durable disconnected workers unhealthy, hydrates durable external-worker
 //!   definitions from SQLite restart as stopped/unhealthy until the socket
-//!   reconnects, treats engine-issued scoped worker tokens from `worker::spawn`
-//!   as selectable session-generated implementations once healthy, classifies
-//!   socket loss separately from application handler failures, and supplies the
-//!   sandbox-created worker path used by `worker::spawn`;
+//!   reconnects, and classifies socket loss separately from application handler
+//!   failures;
 //! - queue receipts retain inspectable delivery truth: current lease state,
 //!   retry/dead-letter/cancellation status, delivery and result invocation ids,
 //!   replay refs, errors, resource lease ids, and compensation refs are stored
@@ -164,9 +161,8 @@ pub use registry::LiveCatalog;
 pub use resources::{
     CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
     EngineResourceLink, EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
-    EngineResourceVersion, EngineResourceVersioningMode, HARNESS_DOC_KIND, HARNESS_DOC_SCHEMA_ID,
-    InMemoryEngineResourceStore, LinkResources, ListResources, RegisterResourceType,
-    SqliteEngineResourceStore, UpdateResource,
+    EngineResourceVersion, EngineResourceVersioningMode, InMemoryEngineResourceStore,
+    LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
 };
 pub use state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,

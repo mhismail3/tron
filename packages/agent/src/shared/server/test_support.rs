@@ -19,7 +19,6 @@ use crate::domains::model::providers::models::types::Provider as ProviderKind;
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
 };
-use crate::domains::session::context::ContextArtifactsService;
 use crate::domains::session::event_store::EventStore;
 use crate::shared::server::context::{AgentDeps, ServerRuntimeContext};
 
@@ -171,7 +170,6 @@ pub fn make_test_context() -> ServerRuntimeContext {
         health_tracker: Arc::new(crate::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
-        context_artifacts: Arc::new(ContextArtifactsService::new()),
         auth_path,
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),

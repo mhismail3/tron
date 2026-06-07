@@ -34,31 +34,6 @@ pub enum ReasoningLevel {
 }
 
 impl ReasoningLevel {
-    /// Convert to Anthropic effort string (`budget_tokens` style).
-    pub fn as_effort_str(&self) -> &str {
-        match self {
-            Self::None => "none",
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::XHigh => "xhigh",
-            Self::Max => "max",
-        }
-    }
-
-    /// Convert to `OpenAI` `reasoning_effort` string.
-    /// GPT 5.4 supports: "none", "low", "medium", "high", "xhigh".
-    /// Older models may not support all levels — clamping happens in the provider.
-    pub fn as_openai_reasoning_effort(&self) -> &str {
-        match self {
-            Self::None => "none",
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::XHigh | Self::Max => "xhigh",
-        }
-    }
-
     /// Convert to Google Gemini thinking level string.
     /// Gemini supports: `THINKING_DISABLED`, `THINKING_LOW`, `THINKING_MEDIUM`, `THINKING_HIGH`.
     /// XHigh/Max clamp to `THINKING_HIGH`.
@@ -214,15 +189,6 @@ pub struct RunContext {
     /// Parent engine invocation id for child capability/function invocations.
     #[serde(skip)]
     pub parent_invocation_id: Option<crate::engine::InvocationId>,
-    /// Catalog revision captured by the hidden `agent::run_turn` invocation.
-    #[serde(skip)]
-    pub engine_catalog_revision: Option<crate::engine::CatalogRevision>,
-    /// Session execution profile name used for this turn.
-    #[serde(skip)]
-    pub profile_name: Option<String>,
-    /// Resolved profile used for this turn's prompt/context/capability policies.
-    #[serde(skip)]
-    pub resolved_profile: Option<Arc<crate::shared::profile::ResolvedProfile>>,
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,
@@ -338,16 +304,12 @@ impl Default for RunResult {
 /// Result of a primitive capability invocation.
 #[derive(Clone, Debug)]
 pub struct CapabilityInvocationExecutionResult {
-    /// Capability invocation ID.
-    pub invocation_id: String,
     /// Capability result.
     pub result: crate::shared::model_capabilities::CapabilityResult,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
     /// Whether this capability requested a turn stop.
     pub stops_turn: bool,
-    /// Whether this capability is interactive.
-    pub is_interactive: bool,
 }
 
 /// Accumulated result from stream processing.
@@ -583,30 +545,6 @@ mod tests {
     fn reasoning_level_xhigh_alias_rejected() {
         let result = serde_json::from_str::<ReasoningLevel>("\"xhigh\"");
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn reasoning_level_as_effort_str() {
-        assert_eq!(ReasoningLevel::None.as_effort_str(), "none");
-        assert_eq!(ReasoningLevel::Low.as_effort_str(), "low");
-        assert_eq!(ReasoningLevel::Medium.as_effort_str(), "medium");
-        assert_eq!(ReasoningLevel::High.as_effort_str(), "high");
-        assert_eq!(ReasoningLevel::XHigh.as_effort_str(), "xhigh");
-        assert_eq!(ReasoningLevel::Max.as_effort_str(), "max");
-    }
-
-    #[test]
-    fn reasoning_level_as_openai_reasoning_effort() {
-        assert_eq!(ReasoningLevel::None.as_openai_reasoning_effort(), "none");
-        assert_eq!(ReasoningLevel::Low.as_openai_reasoning_effort(), "low");
-        assert_eq!(
-            ReasoningLevel::Medium.as_openai_reasoning_effort(),
-            "medium"
-        );
-        assert_eq!(ReasoningLevel::High.as_openai_reasoning_effort(), "high");
-        assert_eq!(ReasoningLevel::XHigh.as_openai_reasoning_effort(), "xhigh");
-        // Max maps to xhigh
-        assert_eq!(ReasoningLevel::Max.as_openai_reasoning_effort(), "xhigh");
     }
 
     #[test]

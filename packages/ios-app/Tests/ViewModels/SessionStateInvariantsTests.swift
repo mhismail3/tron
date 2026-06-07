@@ -54,7 +54,6 @@ final class SessionStateInvariantsTests: XCTestCase {
         XCTAssertTrue(vm.inputBarState.text.isEmpty)
         XCTAssertTrue(vm.inputBarState.attachments.isEmpty)
         XCTAssertFalse(vm.isCompacting)
-        XCTAssertFalse(vm.isRetaining)
         XCTAssertEqual(vm.agentPhase, .idle)
         XCTAssertEqual(vm.sequenceHighWaterMark, -1)
         XCTAssertEqual(vm.eventBufferCount, 0)

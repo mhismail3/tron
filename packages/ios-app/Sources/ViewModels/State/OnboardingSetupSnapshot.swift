@@ -23,10 +23,6 @@ struct OnboardingSetupSnapshot {
         settings?.defaultModel ?? ""
     }
 
-    var retainModel: String {
-        settings?.retainModel ?? ""
-    }
-
     mutating func hydrate(
         serverId: String,
         settings: ServerSettings,

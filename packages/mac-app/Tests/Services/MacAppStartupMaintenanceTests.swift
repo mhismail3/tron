@@ -47,10 +47,6 @@ struct MacAppStartupMaintenanceTests {
             serverStartHealthCheckDelayNanoseconds: 0,
             launchAgentManager: launchAgentManager,
             probeServerProcess: { _ in serverProcess },
-            syncManagedSkills: {
-                .synced(ManagedSkillSyncSummary(synced: 1, skippedUserOwned: 0, removedStale: 0))
-            },
-            applyTranscriptionPreference: { _ in .disabled },
             touchOnboardedSentinel: { },
             currentAppVersion: { currentVersion },
             readRecordedAppVersion: {

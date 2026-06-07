@@ -264,7 +264,7 @@ async fn local_external_worker_stamps_capability_policy_metadata_from_scoped_tok
         VisibilityScope::Session,
         EffectClass::PureRead,
     ));
-    function.metadata["conformanceState"] = json!("disabled");
+    function.metadata["healthState"] = json!("disabled");
     function.metadata["signatureStatus"] = json!("valid");
     runtime
         .register_function(super::RegisterFunction {
@@ -290,7 +290,7 @@ async fn local_external_worker_stamps_capability_policy_metadata_from_scoped_tok
         json!("session_generated.local-policy-worker")
     );
     assert_eq!(stored.metadata["signatureStatus"], json!("session_scoped"));
-    assert_eq!(stored.metadata["conformanceState"], json!("healthy"));
+    assert_eq!(stored.metadata["healthState"], json!("healthy"));
 }
 
 #[tokio::test]
@@ -334,7 +334,7 @@ async fn local_external_worker_engine_issued_token_is_binding_selectable() {
         .await
         .unwrap();
     assert_eq!(stored.metadata["signatureStatus"], json!("engine_issued"));
-    assert_eq!(stored.metadata["conformanceState"], json!("healthy"));
+    assert_eq!(stored.metadata["healthState"], json!("healthy"));
 }
 
 #[tokio::test]

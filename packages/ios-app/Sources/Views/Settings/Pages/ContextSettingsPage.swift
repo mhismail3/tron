@@ -4,26 +4,10 @@ struct ContextSettingsPage: View {
     let settingsState: SettingsState
     let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
 
-    @State private var showRetainModelPicker = false
-
     var body: some View {
         SettingsPageContainer(title: "Context") {
             summaryCard
             compactionSection
-            memoryCard
-            rulesCard
-        }
-        .sheet(isPresented: $showRetainModelPicker) {
-            ModelPickerSheet(
-                models: settingsState.availableModels,
-                currentModelId: settingsState.retainModel,
-                onSelect: { model in
-                    settingsState.retainModel = model.id
-                    updateServerSetting {
-                        ServerSettingsUpdate(memory: .init(retainModel: model.id))
-                    }
-                }
-            )
         }
     }
 
@@ -39,18 +23,8 @@ struct ContextSettingsPage: View {
         ContextSettingsSummary.Context(
             isLoaded: settingsState.isLoaded,
             triggerTokenThreshold: settingsState.triggerTokenThreshold,
-            preserveRecentCount: settingsState.preserveRecentCount,
-            autoRetainInterval: settingsState.autoRetainInterval,
-            retainModelDisplayName: retainModelDisplayName,
-            rulesDiscoverStandaloneFiles: settingsState.rulesDiscoverStandaloneFiles
+            preserveRecentCount: settingsState.preserveRecentCount
         )
-    }
-
-    private var retainModelDisplayName: String {
-        if let model = settingsState.availableModels.first(where: { $0.id == settingsState.retainModel }) {
-            return model.formattedModelName
-        }
-        return settingsState.retainModel.shortModelName
     }
 
     // MARK: - Compaction
@@ -115,7 +89,6 @@ struct ContextSettingsPage: View {
                         }
                     }
                 }
-
             }
         }
     }
@@ -123,107 +96,11 @@ struct ContextSettingsPage: View {
     @ViewBuilder
     private func compactionSettingBlock<Content: View>(
         _ setting: ContextCompactionSetting,
-        description: String? = nil,
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             content()
-            SettingsCaption(text: description ?? setting.description)
+            SettingsCaption(text: setting.description)
         }
-    }
-
-    // MARK: - Memory
-
-    private var autoRetainDisplayText: String {
-        if settingsState.autoRetainInterval == 0 {
-            return "Off"
-        } else {
-            return "\(settingsState.autoRetainInterval)"
-        }
-    }
-
-    private var memoryCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Memory")
-
-            SettingsCard {
-                SettingsRow(icon: "brain", label: "Auto-Retain") {
-                    Text(autoRetainDisplayText)
-                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                        .foregroundStyle(.tronEmerald)
-                        .monospacedDigit()
-                        .frame(minWidth: 30, alignment: .trailing)
-                    TronStepper(
-                        value: Bindable(settingsState).autoRetainInterval,
-                        range: 0...10,
-                        step: 1
-                    )
-                }
-                .onChange(of: settingsState.autoRetainInterval) { _, newValue in
-                    updateServerSetting {
-                        ServerSettingsUpdate(memory: .init(autoRetainInterval: newValue))
-                    }
-                }
-
-                SettingsRowDivider()
-
-                navigationRow(
-                    icon: "cpu",
-                    label: "Retain Model",
-                    value: retainModelDisplayName,
-                    action: { showRetainModelPicker = true }
-                )
-            }
-
-            SettingsCaption(text: "Turns between automatic memory retention (0 to disable). Retain Model is the LLM that condenses retained turns.")
-        }
-    }
-
-    // MARK: - Rules
-
-    private var rulesCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Rules")
-
-            SettingsCard {
-                SettingsRow(icon: "doc.text.magnifyingglass", label: "Discover standalone rules") {
-                    Toggle("", isOn: Bindable(settingsState).rulesDiscoverStandaloneFiles)
-                        .labelsHidden()
-                        .tint(.tronEmerald)
-                }
-            }
-            .onChange(of: settingsState.rulesDiscoverStandaloneFiles) { _, newValue in
-                updateServerSetting {
-                    ServerSettingsUpdate(context: .init(rules: .init(discoverStandaloneFiles: newValue)))
-                }
-            }
-
-            SettingsCaption(text: "Discover rules files outside .claude/ directories.")
-        }
-    }
-
-    // MARK: - Shared Row
-
-    private func navigationRow(icon: String, label: String, value: String, action: @escaping () -> Void) -> some View {
-        HStack {
-            Image(systemName: icon)
-                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 18)
-            Text(label)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-            Spacer()
-            Text(value)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3))
-                .foregroundStyle(.tronEmerald)
-                .lineLimit(1)
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                .foregroundStyle(.tronTextMuted)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 14)
-        .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .onTapGesture { action() }
     }
 }

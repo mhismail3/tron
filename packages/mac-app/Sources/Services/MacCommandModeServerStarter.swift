@@ -5,7 +5,6 @@ enum MacCommandModeServerStartResult: Equatable, Sendable {
     case invalidApplicationLocation(String)
     case invalidBundledHelper(String)
     case unmanagedWrapper
-    case managedSkillSyncFailed(String)
     case launchAgentFailed(LaunchAgentOutcome)
     case unhealthy(ServerPingResult)
 }
@@ -20,12 +19,6 @@ enum MacCommandModeServerStarter {
         }
         guard setup.canManageLaunchAgent else {
             return .unmanagedWrapper
-        }
-        switch await setup.syncManagedSkills() {
-        case .synced:
-            break
-        case .failed(let message):
-            return .managedSkillSyncFailed(message)
         }
 
         let outcome = await InstallLaunchAgentRunner.ensureLoaded(

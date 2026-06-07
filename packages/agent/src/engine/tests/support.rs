@@ -35,12 +35,11 @@ pub(in crate::engine::tests) use crate::engine::types::{
     VisibilityScope, WorkerDefinition, WorkerKind,
 };
 pub(in crate::engine::tests) use crate::engine::{
-    AcquireResourceLease, CatalogWatchRequest, EngineExternalWorkerRuntime, EngineHost,
-    EngineHostHandle, EngineQueueDrainer, EngineResourceLeaseStatus, EngineTriggerRuntime,
-    PublishStreamEvent, RegisterFunction, RegisterTrigger, SqliteEngineStreamStore,
-    StreamActorScope, StreamCursor, TriggerDispatchRequest, WorkerDisconnect, WorkerHello,
-    WorkerInvocationResult, WorkerInvoke, WorkerLifecycleState, WorkerProtocolMessage,
-    WorkerRegistrationMode, WorkerStreamPublish,
+    CatalogWatchRequest, EngineExternalWorkerRuntime, EngineHost, EngineHostHandle,
+    EngineQueueDrainer, EngineResourceLeaseStatus, EngineTriggerRuntime, PublishStreamEvent,
+    RegisterFunction, RegisterTrigger, SqliteEngineStreamStore, StreamActorScope, StreamCursor,
+    TriggerDispatchRequest, WorkerDisconnect, WorkerHello, WorkerInvocationResult, WorkerInvoke,
+    WorkerLifecycleState, WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish,
 };
 pub(in crate::engine::tests) use crate::engine::{external, host, ids, queue};
 
@@ -62,25 +61,6 @@ pub(in crate::engine::tests) fn grant(value: &str) -> AuthorityGrantId {
 
 pub(in crate::engine::tests) fn trace(value: &str) -> TraceId {
     TraceId::new(value).unwrap()
-}
-
-pub(in crate::engine::tests) fn lease_request(
-    resource_kind: &str,
-    resource_id: &str,
-    ttl_ms: i64,
-) -> AcquireResourceLease {
-    AcquireResourceLease {
-        resource_kind: resource_kind.to_owned(),
-        resource_id: resource_id.to_owned(),
-        holder_invocation_id: InvocationId::generate(),
-        function_id: fid("test::write"),
-        actor_id: actor("actor"),
-        authority_grant_id: grant("grant"),
-        trace_id: trace("trace"),
-        parent_invocation_id: None,
-        idempotency_key: Some("idem".to_owned()),
-        ttl_ms,
-    }
 }
 
 pub(in crate::engine::tests) fn worker(id: &str, namespace: &str) -> WorkerDefinition {
@@ -380,59 +360,6 @@ pub(in crate::engine::tests) fn host_invocation(
     context: CausalContext,
 ) -> Invocation {
     Invocation::new_sync(fid(function_id), payload, context)
-}
-
-pub(in crate::engine::tests) fn valid_ui_surface(
-    action_target: &str,
-    target_revision: u64,
-) -> Value {
-    json!({
-        "surfaceId": "surface-test",
-        "title": "Surface Test",
-        "purpose": "Inspect and act on substrate state",
-        "catalog": {
-            "id": "tron.ui.catalog.core.v1",
-            "revision": 1
-        },
-        "layout": {
-            "type": "Section",
-            "props": {"title": "Substrate"},
-            "children": [
-                {"type": "Heading", "props": {"text": "Substrate"}},
-                {"type": "Text", "props": {"text": "Generated UI renders from a resource."}},
-                {"type": "Button", "props": {"actionId": "submit-test"}}
-            ]
-        },
-        "bindings": [],
-        "actions": [
-            {
-                "actionId": "submit-test",
-                "label": "Submit",
-                "targetFunctionId": action_target,
-                "inputSchema": {
-                    "type": "object",
-                    "required": ["message"],
-                    "additionalProperties": false,
-                    "properties": {
-                        "message": {"type": "string"}
-                    }
-                },
-                "payloadTemplate": {
-                    "message": "${input.message}",
-                    "sourceSurface": "${surface.resourceId}"
-                },
-                "idempotencyKeyTemplate": "${submission.idempotencyKey}",
-                "requiredGrant": "grant",
-                "requiredRisk": "medium",
-                "authorityPolicy": {"requiredScopes": []},
-                "targetRevision": target_revision,
-                "expiresAt": "2100-01-01T00:00:00Z"
-            }
-        ],
-        "redactionPolicy": {"mode": "redacted"},
-        "expiresAt": "2100-01-01T00:00:00Z",
-        "refreshPolicy": {"mode": "manual"}
-    })
 }
 
 pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLedgerStore) {

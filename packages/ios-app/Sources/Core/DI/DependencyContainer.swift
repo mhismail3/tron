@@ -8,8 +8,6 @@ extension Notification.Name {
     static let serverSettingsDidChange = Notification.Name("tron.serverSettingsDidChange")
     /// Posted when auth.json changes on the server.
     static let authDidUpdate = Notification.Name("tron.authDidUpdate")
-    /// Posted when plugin source server status changes.
-    static let mcpStatusChanged = Notification.Name("tron.mcpStatusChanged")
 }
 
 // MARK: - Dependency Container
@@ -57,9 +55,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// server's log table. Server-side `logs::ingest` owns durable storage and
     /// deduplication; this service only batches the local in-memory buffer.
     private(set) var clientLogIngestionService: ClientLogIngestionService
-
-    /// Shared audio recorder — starts on-demand when user taps mic
-    let audioRecorder = AudioRecorder()
 
     /// iOS-local paired server list and active selection.
     @ObservationIgnored

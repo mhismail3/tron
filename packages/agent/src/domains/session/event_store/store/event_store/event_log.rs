@@ -461,27 +461,4 @@ impl EventStore {
             (Some(assistant), Some(turn_end)) => Ok(assistant.sequence > turn_end.sequence),
         }
     }
-
-    /// Get the active worktree for a session, if any.
-    ///
-    /// Returns the most recent `worktree.acquired` event if there is no
-    /// subsequent `worktree.released` event (or the acquired event has a
-    /// higher sequence number).
-    pub fn get_active_worktree(&self, session_id: &str) -> Result<Option<EventRow>> {
-        let acquired = self.get_events_by_type(session_id, &["worktree.acquired"], None)?;
-        if acquired.is_empty() {
-            return Ok(None);
-        }
-
-        let released = self.get_events_by_type(session_id, &["worktree.released"], None)?;
-
-        let latest_acquired = acquired.last();
-        let latest_released = released.last();
-
-        match (latest_acquired, latest_released) {
-            (Some(acq), None) => Ok(Some(acq.clone())),
-            (Some(acq), Some(rel)) if acq.sequence > rel.sequence => Ok(Some(acq.clone())),
-            _ => Ok(None),
-        }
-    }
 }

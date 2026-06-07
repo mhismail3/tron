@@ -88,24 +88,24 @@ fn tron_event_capability_invocation_started() {
         arguments: None,
         capability_identity: CapabilityEventIdentity {
             model_primitive_name: Some("execute".into()),
-            contract_id: Some("filesystem::read_file".into()),
-            implementation_id: Some("first_party.filesystem.v1.read_file".into()),
-            function_id: Some("filesystem::read_file".into()),
-            plugin_id: Some("first_party.filesystem".into()),
-            worker_id: Some("filesystem-worker".into()),
+            contract_id: Some("capability::execute".into()),
+            implementation_id: Some("primitive.execute".into()),
+            function_id: Some("capability::execute".into()),
+            plugin_id: None,
+            worker_id: Some("capability".into()),
             schema_digest: Some("sha256:test".into()),
             catalog_revision: Some(7),
-            trust_tier: Some("first_party_signed".into()),
-            risk_level: Some("low".into()),
-            effect_class: Some("read".into()),
+            trust_tier: Some("host_primitive".into()),
+            risk_level: Some("high".into()),
+            effect_class: Some("external_side_effect".into()),
             trace_id: Some("trace-test".into()),
             root_invocation_id: Some("root-test".into()),
-            binding_decision_id: Some("binding-test".into()),
+            binding_decision_id: None,
             theme_color: Some("#10B981".into()),
             presentation_hints: Some(serde_json::json!({
-                "displayName": "Read File",
-                "chipTitle": "Read",
-                "icon": "doc.text.magnifyingglass",
+                "displayName": "Execute",
+                "chipTitle": "Execute",
+                "icon": "terminal",
                 "themeColor": "#10B981"
             })),
         },
@@ -113,20 +113,13 @@ fn tron_event_capability_invocation_started() {
     assert!(e.is_capability_invocation());
     let json = serde_json::to_value(&e).unwrap();
     assert_eq!(json["modelPrimitiveName"], "execute");
-    assert_eq!(json["contractId"], "filesystem::read_file");
-    assert_eq!(
-        json["implementationId"],
-        "first_party.filesystem.v1.read_file"
-    );
+    assert_eq!(json["contractId"], "capability::execute");
+    assert_eq!(json["implementationId"], "primitive.execute");
     assert_eq!(json["schemaDigest"], "sha256:test");
     assert_eq!(json["catalogRevision"], 7);
-    assert_eq!(json["bindingDecisionId"], "binding-test");
     assert_eq!(json["themeColor"], "#10B981");
-    assert_eq!(json["presentationHints"]["displayName"], "Read File");
-    assert_eq!(
-        json["presentationHints"]["icon"],
-        "doc.text.magnifyingglass"
-    );
+    assert_eq!(json["presentationHints"]["displayName"], "Execute");
+    assert_eq!(json["presentationHints"]["icon"], "terminal");
 }
 
 #[test]
@@ -135,7 +128,7 @@ fn tron_event_binding_resolution_is_capability_invocation_event() {
         base: BaseEvent::now("s1"),
         invocation_id: "tc-1".into(),
         model_primitive_name: "execute".into(),
-        requested_contract_id: Some("filesystem::read_file".into()),
+        requested_contract_id: Some("capability::execute".into()),
         requested_implementation_id: None,
         requested_function_id: None,
         capability_identity: CapabilityEventIdentity::with_model_primitive("execute"),
@@ -145,7 +138,7 @@ fn tron_event_binding_resolution_is_capability_invocation_event() {
     let json = serde_json::to_value(&e).unwrap();
     assert_eq!(json["type"], "capability.resolution");
     assert_eq!(json["invocationId"], "tc-1");
-    assert_eq!(json["requestedContractId"], "filesystem::read_file");
+    assert_eq!(json["requestedContractId"], "capability::execute");
 }
 
 #[test]
@@ -167,23 +160,6 @@ fn tron_event_compaction_complete() {
     assert_eq!(json["tokensAfter"], 30_000);
     assert_eq!(json["compressionRatio"], 0.3);
     assert_eq!(json["reason"], "threshold_exceeded");
-}
-
-#[test]
-fn tron_event_hook_completed() {
-    let e = TronEvent::HookCompleted {
-        base: BaseEvent::now("s1"),
-        hook_names: vec!["pre-capability-invocation".into()],
-        hook_event: "PreCapabilityInvocation".into(),
-        result: HookResult::Block,
-        duration: Some(150),
-        reason: Some("Dangerous command detected".into()),
-        model_primitive_name: Some("execute".into()),
-        invocation_id: Some("tc-1".into()),
-    };
-    let json = serde_json::to_value(&e).unwrap();
-    assert_eq!(json["result"], "block");
-    assert_eq!(json["reason"], "Dangerous command detected");
 }
 
 #[test]

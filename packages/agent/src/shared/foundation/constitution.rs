@@ -1,11 +1,10 @@
-//! Profile-first Tron Home layout, recovery, and context block types.
+//! Primitive Tron Home layout, recovery, and context block types.
 //!
-//! Normal runtime code reads the five constitutional roots only:
-//! `internal/`, `skills/`, `profiles/`, `memory/`, and `workspace/`.
-//! Source-owned managed defaults are refreshed from the compiled bundle when
-//! their content changes. Mutable install records such as the active profile,
-//! auth sentinels, and sparse user profile are only created or repaired when
-//! invalid.
+//! Normal runtime code reads three constitutional roots: `internal/`,
+//! `profiles/`, and `workspace/`. Source-owned managed defaults are refreshed
+//! from the compiled bundle when their content changes. Mutable install records
+//! such as the active profile, auth sentinels, and sparse user profile are only
+//! created or repaired when invalid.
 
 use std::fs;
 use std::io;
@@ -23,10 +22,6 @@ use super::profile::{CHAT_PROFILE, DEFAULT_PROFILE, LOCAL_PROFILE, NORMAL_PROFIL
 pub enum TronHome {
     /// Complete agent execution specs.
     Profiles,
-    /// Reusable plug-in capabilities.
-    Skills,
-    /// Durable world/user/environment continuity.
-    Memory,
     /// Active substrate: projects, artifacts, experiments, knowledge, vault.
     Workspace,
     /// Tron-owned runtime machinery.
@@ -122,7 +117,6 @@ pub struct SeedReport {
 
 #[derive(Clone, Copy)]
 enum DefaultKind {
-    Text,
     Toml,
     Json,
 }
@@ -154,49 +148,6 @@ const MANAGED_DEFAULTS: &[ManagedDefault] = &[
     managed_default!("profiles/chat/profile.toml", DefaultKind::Toml, true),
     managed_default!("profiles/local/profile.toml", DefaultKind::Toml, true),
     managed_default!("profiles/user/profile.toml", DefaultKind::Toml, false),
-    managed_default!("profiles/default/prompts/core.md", DefaultKind::Text, true),
-    managed_default!("profiles/default/prompts/chat.md", DefaultKind::Text, true),
-    managed_default!("profiles/default/prompts/local.md", DefaultKind::Text, true),
-    managed_default!(
-        "profiles/default/prompts/git-workflow.md",
-        DefaultKind::Text,
-        true
-    ),
-    managed_default!(
-        "profiles/default/prompts/processes/compaction.md",
-        DefaultKind::Text,
-        true
-    ),
-    managed_default!(
-        "profiles/default/prompts/processes/memory-retain.md",
-        DefaultKind::Text,
-        true
-    ),
-    managed_default!(
-        "profiles/default/prompts/processes/conflict-resolver.md",
-        DefaultKind::Text,
-        true
-    ),
-    managed_default!(
-        "profiles/default/prompts/processes/web-fetch-summarizer.md",
-        DefaultKind::Text,
-        true
-    ),
-    managed_default!(
-        "profiles/default/providers/openai/codex-instructions.md",
-        DefaultKind::Text,
-        true
-    ),
-    managed_default!(
-        "profiles/default/context/context-blocks.toml",
-        DefaultKind::Toml,
-        true
-    ),
-    managed_default!(
-        "profiles/default/capabilities/presentation.toml",
-        DefaultKind::Toml,
-        true
-    ),
 ];
 
 /// Ensure the current Tron Home is recovered and structurally complete.
@@ -225,44 +176,15 @@ fn profile_first_dirs(home: &Path) -> Vec<PathBuf> {
         home.join(dirs::INTERNAL)
             .join(dirs::DB)
             .join(dirs::JOURNALS),
-        home.join(dirs::INTERNAL).join(dirs::TRANSCRIPTION),
-        home.join(dirs::SKILLS),
         home.join(dirs::PROFILES),
         home.join(dirs::PROFILES).join(DEFAULT_PROFILE),
         home.join(dirs::PROFILES).join(NORMAL_PROFILE),
         home.join(dirs::PROFILES).join(CHAT_PROFILE),
         home.join(dirs::PROFILES).join(LOCAL_PROFILE),
-        home.join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(dirs::PROMPTS),
-        home.join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(dirs::PROMPTS)
-            .join("processes"),
-        home.join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(dirs::PROVIDERS),
-        home.join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(dirs::CONTEXT),
-        home.join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(dirs::CAPABILITIES),
         home.join(dirs::PROFILES).join(USER_PROFILE),
-        home.join(dirs::PROFILES)
-            .join(USER_PROFILE)
-            .join(dirs::PROMPTS),
-        home.join(dirs::MEMORY),
-        home.join(dirs::MEMORY).join(dirs::SESSIONS),
-        home.join(dirs::MEMORY).join(dirs::RULES),
         home.join(dirs::WORKSPACE),
         home.join(dirs::WORKSPACE).join(dirs::INBOX),
-        home.join(dirs::WORKSPACE)
-            .join(dirs::INBOX)
-            .join(dirs::VOICE_NOTES),
         home.join(dirs::WORKSPACE).join(dirs::PROJECTS),
-        home.join(dirs::WORKSPACE).join(dirs::AUTOMATIONS),
-        home.join(dirs::WORKSPACE).join(dirs::PLANS),
         home.join(dirs::WORKSPACE).join(dirs::REPORTS),
         home.join(dirs::WORKSPACE).join(dirs::RENDERS),
         home.join(dirs::WORKSPACE).join(dirs::SCREENSHOTS),
@@ -334,7 +256,6 @@ fn managed_default_valid(path: &Path, kind: DefaultKind) -> bool {
         return false;
     }
     match kind {
-        DefaultKind::Text => true,
         DefaultKind::Toml => {
             let Ok(value) = toml::from_str::<toml::Value>(&content) else {
                 return false;
@@ -344,9 +265,6 @@ fn managed_default_valid(path: &Path, kind: DefaultKind) -> bool {
                     .get("active")
                     .and_then(toml::Value::as_str)
                     .is_some_and(|active| !active.trim().is_empty() && active != DEFAULT_PROFILE);
-            }
-            if path.file_name().and_then(|name| name.to_str()) == Some("context-blocks.toml") {
-                return super::profile::validate_context_block_manifest(path).is_ok();
             }
             if path.file_name().and_then(|name| name.to_str()) == Some(files::PROFILE_TOML)
                 && let Some(profile_name) = path
@@ -457,16 +375,14 @@ mod tests {
     }
 
     #[test]
-    fn seeding_creates_profile_first_layout() {
+    fn seeding_creates_primitive_layout() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(".tron");
         let report = ensure_tron_home_at(&home).unwrap();
 
         assert!(!report.seeded.is_empty());
         assert!(home.join(dirs::INTERNAL).exists());
-        assert!(home.join(dirs::SKILLS).exists());
         assert!(home.join(dirs::PROFILES).exists());
-        assert!(home.join(dirs::MEMORY).exists());
         assert!(home.join(dirs::WORKSPACE).exists());
         let mut top_level: Vec<String> = fs::read_dir(&home)
             .unwrap()
@@ -477,46 +393,15 @@ mod tests {
             top_level,
             vec![
                 dirs::INTERNAL.to_string(),
-                dirs::MEMORY.to_string(),
                 dirs::PROFILES.to_string(),
-                dirs::SKILLS.to_string(),
                 dirs::WORKSPACE.to_string(),
             ],
-            "fresh Tron Home should expose exactly the five root primitives"
+            "fresh Tron Home should expose only primitive roots"
         );
         assert!(
             home.join(dirs::PROFILES)
                 .join(DEFAULT_PROFILE)
                 .join(files::PROFILE_TOML)
-                .exists()
-        );
-        assert!(
-            home.join(dirs::PROFILES)
-                .join(DEFAULT_PROFILE)
-                .join(dirs::PROMPTS)
-                .join("core.md")
-                .exists()
-        );
-        assert!(
-            home.join(dirs::PROFILES)
-                .join(DEFAULT_PROFILE)
-                .join(dirs::PROMPTS)
-                .join("processes")
-                .join("compaction.md")
-                .exists()
-        );
-        assert!(
-            !home
-                .join(dirs::PROFILES)
-                .join(DEFAULT_PROFILE)
-                .join("summarizers")
-                .exists()
-        );
-        assert!(
-            !home
-                .join(dirs::PROFILES)
-                .join(DEFAULT_PROFILE)
-                .join("subagents")
                 .exists()
         );
         assert!(
@@ -525,6 +410,29 @@ mod tests {
                 .join(files::PROFILE_TOML)
                 .exists()
         );
+        assert!(
+            !home
+                .join(dirs::PROFILES)
+                .join(DEFAULT_PROFILE)
+                .join("prompts")
+                .exists()
+        );
+        assert!(
+            !home
+                .join(dirs::PROFILES)
+                .join(DEFAULT_PROFILE)
+                .join("context")
+                .exists()
+        );
+        assert!(
+            !home
+                .join(dirs::PROFILES)
+                .join(DEFAULT_PROFILE)
+                .join("capabilities")
+                .exists()
+        );
+        assert!(!home.join(["sk", "ills"].concat()).exists());
+        assert!(!home.join("memory").exists());
         assert!(home.join(dirs::WORKSPACE).join(dirs::KNOWLEDGE).exists());
         assert!(home.join(dirs::WORKSPACE).join(dirs::VAULT).exists());
         assert!(home.join(dirs::WORKSPACE).join(dirs::RENDERS).exists());
@@ -545,10 +453,8 @@ mod tests {
             .join(dirs::PROFILES)
             .join(DEFAULT_PROFILE)
             .join(files::PROFILE_TOML);
-        let stale = fs::read_to_string(&default_profile).unwrap().replace(
-            "reasoning = \"medium\"\naudit = true",
-            "reasoning = \"medium\"\nremovedProcessMode = \"keyword\"\naudit = true",
-        );
+        let mut stale = fs::read_to_string(&default_profile).unwrap();
+        stale.push_str("\n[entrypoints.main]\nmodelPolicy = \"sessionDefault\"\n");
         fs::write(&default_profile, stale).unwrap();
 
         let report = ensure_tron_home_at(&home).unwrap();
@@ -557,45 +463,12 @@ mod tests {
             "schema-stale managed profile should be repaired from bundled defaults"
         );
         let repaired = fs::read_to_string(&default_profile).unwrap();
-        assert!(!repaired.contains("removedProcessMode ="));
+        assert!(!repaired.contains("[entrypoints.main]"));
         crate::shared::profile::resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
     }
 
     #[test]
-    fn seeding_repairs_stale_context_block_manifest() {
-        let dir = tempfile::tempdir().unwrap();
-        let home = dir.path().join(".tron");
-        ensure_tron_home_at(&home).unwrap();
-
-        let manifest = home
-            .join(dirs::PROFILES)
-            .join(DEFAULT_PROFILE)
-            .join(dirs::CONTEXT)
-            .join("context-blocks.toml");
-        let stale = fs::read_to_string(&manifest)
-            .unwrap()
-            .replace("capabilities.schemas", &["tools", "schemas"].join("."))
-            .replace("Capability Schemas", &["To", "ol Schemas"].concat())
-            .replace(
-                "providerSurface = \"capability\"",
-                &format!("providerSurface = \"{}\"", ["to", "ol"].concat()),
-            );
-        fs::write(&manifest, stale).unwrap();
-
-        let report = ensure_tron_home_at(&home).unwrap();
-
-        assert!(
-            report.repaired.contains(&manifest),
-            "stale managed context manifest should be repaired from bundled defaults"
-        );
-        let repaired = fs::read_to_string(&manifest).unwrap();
-        assert!(repaired.contains("capabilities.schemas"));
-        assert!(repaired.contains("providerSurface = \"capability\""));
-        crate::shared::profile::resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
-    }
-
-    #[test]
-    fn seeding_refreshes_source_owned_prompt_defaults_when_content_changes() {
+    fn seeding_does_not_restore_deleted_profile_prompt_assets() {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(".tron");
         ensure_tron_home_at(&home).unwrap();
@@ -603,22 +476,21 @@ mod tests {
         let core_prompt = home
             .join(dirs::PROFILES)
             .join(DEFAULT_PROFILE)
-            .join(dirs::PROMPTS)
+            .join("prompts")
             .join("core.md");
+        fs::create_dir_all(core_prompt.parent().unwrap()).unwrap();
         fs::write(&core_prompt, "old source-owned prompt").unwrap();
 
         let report = ensure_tron_home_at(&home).unwrap();
 
         assert!(
-            report.repaired.contains(&core_prompt),
-            "source-owned default prompt should refresh when bundled content changes"
+            !report.repaired.contains(&core_prompt),
+            "deleted prompt defaults are not source-owned managed assets"
         );
-        let refreshed = fs::read_to_string(core_prompt).unwrap();
-        assert!(refreshed.contains("You have one model-facing primitive: `execute`"));
-        assert!(refreshed.contains("\"target\":\"process::run\""));
-        assert!(refreshed.contains("\"arguments\":{\"command\":\"date\""));
-        assert!(refreshed.contains("Do not run `date` as a routine session preflight"));
-        assert!(!refreshed.contains("At the start of every session, check the current date"));
+        assert_eq!(
+            fs::read_to_string(core_prompt).unwrap(),
+            "old source-owned prompt"
+        );
     }
 
     #[test]

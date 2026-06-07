@@ -40,7 +40,7 @@ struct WizardStateTests {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
-        let expected: [WizardStep] = [.tailscale, .install, .permissions, .transcription, .iosBeta, .pairingInfo, .done]
+        let expected: [WizardStep] = [.tailscale, .install, .permissions, .iosBeta, .pairingInfo, .done]
         for step in expected {
             state.advance()
             #expect(state.step == step, "after advance, expected \(step) got \(state.step)")
@@ -120,9 +120,6 @@ struct WizardStateTests {
         state.pairingPayload = PairingPayload(host: "1.2.3.4", port: 9847, token: "x", label: nil)
         state.tailscaleStatus = .signedIn(ipv4: "100.1.2.3")
         state.permissionStatuses[.fullDiskAccess] = .granted
-        state.transcriptionEnabledSelection = true
-        state.transcriptionOutcome = .enabled
-        state.transcriptionIsApplying = true
         state.existingInstallStatus = .registered(version: "0.5.0")
         state.complete()
 
@@ -136,9 +133,6 @@ struct WizardStateTests {
         #expect(state.pairingPayload == nil)
         #expect(state.tailscaleStatus == nil)
         #expect(state.permissionStatuses.isEmpty)
-        #expect(state.transcriptionEnabledSelection == false)
-        #expect(state.transcriptionOutcome == nil)
-        #expect(state.transcriptionIsApplying == false)
         #expect(state.existingInstallStatus == .none)
         #expect(defaults.bool(forKey: WizardState.onboardingCompleteKey) == false)
         #expect(defaults.string(forKey: WizardState.stepStorageKey) == WizardStep.welcome.rawValue)
@@ -200,15 +194,6 @@ struct WizardStateTests {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         defaults.set(WizardStep.pairingInfo.rawValue, forKey: WizardState.stepStorageKey)
-        let state = WizardState(defaults: defaults)
-        #expect(state.step == .welcome)
-    }
-
-    @Test("persisted .transcription clamps back to welcome on cold start")
-    func persistedTranscriptionClamped() {
-        let (defaults, cleanup) = Self.isolatedDefaults()
-        defer { cleanup() }
-        defaults.set(WizardStep.transcription.rawValue, forKey: WizardState.stepStorageKey)
         let state = WizardState(defaults: defaults)
         #expect(state.step == .welcome)
     }

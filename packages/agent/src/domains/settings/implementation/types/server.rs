@@ -1,11 +1,10 @@
-//! Server, agent, logging, hook, session, and tmux settings.
+//! Server, agent, logging, session, and tmux settings.
 //!
 //! These are grouped here because they are all relatively small and
 //! server-oriented.
 
-use std::collections::HashMap;
-
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 use super::{UpdateAction, UpdateChannel, UpdateFrequency};
 
@@ -18,8 +17,6 @@ pub struct ServerSettings {
     /// Must be non-zero before it reaches the runtime because
     /// `tokio::time::interval(Duration::ZERO)` panics.
     pub heartbeat_interval_ms: u64,
-    /// Path to the memory database (relative to `~/.tron`).
-    pub memory_db_path: String,
     /// Default LLM model identifier.
     pub default_model: String,
     /// Default LLM provider.
@@ -27,8 +24,6 @@ pub struct ServerSettings {
     /// Default workspace path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_workspace: Option<String>,
-    /// Audio transcription settings.
-    pub transcription: TranscriptionSettings,
     /// User-mode update-check configuration.
     #[serde(default)]
     pub update: UpdateSettings,
@@ -43,11 +38,9 @@ impl Default for ServerSettings {
     fn default() -> Self {
         Self {
             heartbeat_interval_ms: 30_000,
-            memory_db_path: "memory.db".to_string(),
             default_model: "claude-sonnet-4-6".to_string(),
             default_provider: "anthropic".to_string(),
             default_workspace: None,
-            transcription: TranscriptionSettings::default(),
             update: UpdateSettings::default(),
             tailscale_ip: None,
         }
@@ -120,39 +113,17 @@ impl Default for UpdateSettings {
     }
 }
 
-/// Audio transcription settings.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct TranscriptionSettings {
-    /// Whether transcription is enabled.
-    pub enabled: bool,
-}
-
-impl Default for TranscriptionSettings {
-    fn default() -> Self {
-        Self { enabled: false }
-    }
-}
-
 /// Agent runtime settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AgentRuntimeSettings {
     /// Maximum number of agentic turns per prompt.
     pub max_turns: u32,
-    /// Maximum subagent nesting depth.
-    pub subagent_max_depth: u32,
-    /// Default model for skill sub-agents.
-    pub subagent_model: String,
 }
 
 impl Default for AgentRuntimeSettings {
     fn default() -> Self {
-        Self {
-            max_turns: 250,
-            subagent_max_depth: 3,
-            subagent_model: "claude-haiku-4-5-20251001".to_string(),
-        }
+        Self { max_turns: 250 }
     }
 }
 
@@ -285,10 +256,6 @@ impl Default for TmuxSettings {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SessionSettings {
-    /// Timeout for git worktree commands in milliseconds.
-    pub worktree_timeout_ms: u64,
-    /// Git worktree isolation settings.
-    pub isolation: IsolationSettings,
     /// How queued messages are drained when the agent finishes.
     pub queue_drain_mode: QueueDrainMode,
 }
@@ -296,8 +263,6 @@ pub struct SessionSettings {
 impl Default for SessionSettings {
     fn default() -> Self {
         Self {
-            worktree_timeout_ms: 30_000,
-            isolation: IsolationSettings::default(),
             queue_drain_mode: QueueDrainMode::default(),
         }
     }
@@ -312,50 +277,6 @@ pub enum QueueDrainMode {
     Sequential,
     /// All pending queued messages are combined into a single prompt for one turn.
     Batched,
-}
-
-/// When to create isolated git worktrees for sessions.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum IsolationMode {
-    /// Every session in a git repo gets its own worktree.
-    #[default]
-    Always,
-    /// Only create worktrees when multiple sessions target the same repo.
-    Lazy,
-    /// Never create worktrees.
-    Never,
-}
-
-/// Git worktree isolation configuration.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct IsolationSettings {
-    /// When to create worktrees.
-    pub mode: IsolationMode,
-    /// Directory name under repo root for worktrees.
-    pub base_dir: String,
-    /// Branch name prefix for session branches.
-    pub branch_prefix: String,
-    /// Auto-commit uncommitted changes when releasing a worktree.
-    pub auto_commit_on_release: bool,
-    /// Keep the branch after deleting the worktree directory.
-    pub preserve_branches: bool,
-    /// Delete the worktree directory on release.
-    pub delete_worktree_on_release: bool,
-}
-
-impl Default for IsolationSettings {
-    fn default() -> Self {
-        Self {
-            mode: IsolationMode::Always,
-            base_dir: ".worktrees".to_string(),
-            branch_prefix: "session/".to_string(),
-            auto_commit_on_release: true,
-            preserve_branches: true,
-            delete_worktree_on_release: true,
-        }
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -500,12 +421,6 @@ mod tests {
     }
 
     #[test]
-    fn transcription_defaults() {
-        let t = TranscriptionSettings::default();
-        assert!(!t.enabled);
-    }
-
-    #[test]
     fn log_level_serde() {
         for (level, expected) in [
             (LogLevel::Trace, "\"trace\""),
@@ -536,19 +451,16 @@ mod tests {
     fn agent_defaults() {
         let a = AgentRuntimeSettings::default();
         assert_eq!(a.max_turns, 250);
-        assert_eq!(a.subagent_max_depth, 3);
-        assert_eq!(a.subagent_model, "claude-haiku-4-5-20251001");
     }
 
     #[test]
-    fn agent_serde_subagent_max_depth() {
-        let json = serde_json::json!({ "subagentMaxDepth": 5 });
+    fn agent_partial_json_uses_defaults() {
+        let json = serde_json::json!({});
         let a: AgentRuntimeSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(a.subagent_max_depth, 5);
-        assert_eq!(a.max_turns, 250); // other fields default
+        assert_eq!(a.max_turns, 250);
 
         let roundtrip = serde_json::to_value(&a).unwrap();
-        assert_eq!(roundtrip.get("subagentMaxDepth").unwrap(), 5);
+        assert_eq!(roundtrip["maxTurns"], 250);
     }
 
     #[test]
@@ -571,55 +483,22 @@ mod tests {
     #[test]
     fn session_defaults() {
         let s = SessionSettings::default();
-        assert_eq!(s.worktree_timeout_ms, 30_000);
-        assert_eq!(s.isolation.mode, IsolationMode::Always);
-        assert_eq!(s.isolation.base_dir, ".worktrees");
-        assert_eq!(s.isolation.branch_prefix, "session/");
-        assert!(s.isolation.auto_commit_on_release);
-        assert!(s.isolation.preserve_branches);
-        assert!(s.isolation.delete_worktree_on_release);
+        assert_eq!(s.queue_drain_mode, QueueDrainMode::Sequential);
     }
 
     #[test]
-    fn isolation_mode_serde() {
-        for (mode, expected) in [
-            (IsolationMode::Always, "\"always\""),
-            (IsolationMode::Lazy, "\"lazy\""),
-            (IsolationMode::Never, "\"never\""),
-        ] {
-            let json = serde_json::to_string(&mode).unwrap();
-            assert_eq!(json, expected);
-            let back: IsolationMode = serde_json::from_str(&json).unwrap();
-            assert_eq!(back, mode);
-        }
-    }
-
-    #[test]
-    fn isolation_partial_json() {
-        let json = serde_json::json!({ "mode": "never" });
-        let s: IsolationSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(s.mode, IsolationMode::Never);
-        assert_eq!(s.base_dir, ".worktrees");
-        assert_eq!(s.branch_prefix, "session/");
-        assert!(s.auto_commit_on_release);
-    }
-
-    #[test]
-    fn session_with_isolation_override() {
+    fn session_with_queue_override() {
         let json = serde_json::json!({
-            "isolation": { "mode": "lazy", "branchPrefix": "wt/" }
+            "queueDrainMode": "batched"
         });
         let s: SessionSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(s.isolation.mode, IsolationMode::Lazy);
-        assert_eq!(s.isolation.branch_prefix, "wt/");
-        assert_eq!(s.worktree_timeout_ms, 30_000);
+        assert_eq!(s.queue_drain_mode, QueueDrainMode::Batched);
     }
 
     #[test]
     fn empty_session_json_uses_defaults() {
         let s: SessionSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(s.isolation.mode, IsolationMode::Always);
-        assert_eq!(s.worktree_timeout_ms, 30_000);
+        assert_eq!(s.queue_drain_mode, QueueDrainMode::Sequential);
     }
 
     #[test]

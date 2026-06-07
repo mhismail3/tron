@@ -6,22 +6,7 @@ enum ServerSettingsFixture {
         guard var object = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
             throw FixtureError.invalidObject
         }
-        if object["git"] == nil {
-            object["git"] = gitPolicy()
-        }
         return try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
-    }
-
-    private static func gitPolicy() -> [String: Any] {
-        [
-            "protectedBranches": ["main", "master", "develop"],
-            "sessionBranchPolicy": "keep",
-            "mergeStrategy": "merge",
-            "autoSetUpstream": true,
-            "crashRecoveryAbortTimeoutMs": 1_800_000,
-            "opTimeoutNetworkMs": 60_000,
-            "opTimeoutLocalMs": 30_000
-        ]
     }
 
     enum FixtureError: Error {

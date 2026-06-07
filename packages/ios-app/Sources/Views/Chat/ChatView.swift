@@ -57,13 +57,13 @@ struct ChatView: View {
     let workspaceDeleted: Bool
     var onToggleSidebar: (() -> Void)?
 
-    init(engineClient: EngineClient, sessionId: String, audioRecorder: AudioRecorder, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
+    init(engineClient: EngineClient, sessionId: String, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
         self.sessionId = sessionId
         self.engineClient = engineClient
         self.workspaceDeleted = workspaceDeleted
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
-        _viewModel = State(wrappedValue: ChatViewModel(engineClient: engineClient, sessionId: sessionId, audioRecorder: audioRecorder))
+        _viewModel = State(wrappedValue: ChatViewModel(engineClient: engineClient, sessionId: sessionId))
     }
 
     // MARK: - Body
@@ -307,10 +307,7 @@ struct ChatView: View {
                     config: InputBarConfig(
                         agentPhase: viewModel.agentPhase,
                         isCompacting: viewModel.isCompacting,
-                        isRetaining: viewModel.isRetaining,
                         isConnected: viewModel.connectionState == .connected,
-                        isRecording: viewModel.isRecording,
-                        isTranscribing: viewModel.isTranscribing,
                         tokenUsage: viewModel.contextState.totalTokenUsage,
                         contextPercentage: viewModel.contextState.contextPercentage,
                         contextWindow: viewModel.contextState.currentContextWindow,
@@ -339,7 +336,6 @@ struct ChatView: View {
                             }
                         },
                         onAbort: viewModel.abortAgent,
-                        onMicTap: viewModel.toggleRecording,
                         onAddAttachment: viewModel.addAttachment,
                         onRemoveAttachment: viewModel.removeAttachment,
                         onHistoryNavigate: { newText in viewModel.inputText = newText },
@@ -423,8 +419,6 @@ struct ChatView: View {
             viewModel.abortCapabilityInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortCapabilityInvocation"))
         case .providerError(let data):
             sheetCoordinator.showProviderErrorDetail(data)
-        case .memoryRetainDetail(let title, let summary):
-            sheetCoordinator.showMemoryRetainDetail(title: title, summary: summary)
         case .retryTurn:
             // C7: user tapped the "Retry" button on a recoverable
             // `turn.failed` notification. Re-issues the last user prompt

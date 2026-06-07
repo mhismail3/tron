@@ -7,25 +7,18 @@
 
 #![deny(unsafe_code)]
 
-pub mod agent;
-pub mod context;
+pub(crate) mod agent;
+pub(crate) mod context;
 pub mod errors;
 pub mod orchestrator;
-pub mod pipeline;
+pub(crate) mod pipeline;
 pub mod profile_runtime;
-pub mod types;
+pub(crate) mod types;
 
-// Re-export main public API
-pub use agent::event_emitter::EventEmitter;
-pub use agent::tron_agent::{AgentDeps, TronAgent};
+pub(crate) use agent::event_emitter::EventEmitter;
 pub use errors::{RuntimeError, StopReason};
-pub use orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
-pub use orchestrator::agent_runner::run_agent;
 pub use orchestrator::orchestrator::Orchestrator;
+pub use orchestrator::recovery::recover_incomplete_turns;
 pub use orchestrator::session_manager::{ForkSessionResult, SessionFilter, SessionManager};
 pub use orchestrator::session_reconstructor::ReconstructedState;
-pub use profile_runtime::{
-    ProcessExecutionPlan, ProfileRuntime, ResolvedHarnessSpec, SessionExecutionPlan,
-    SessionPlanRequest,
-};
-pub use types::{AgentConfig, ReasoningLevel, RunContext, RunResult, TurnResult};
+pub use profile_runtime::{ProfileRuntime, ResolvedHarnessSpec};

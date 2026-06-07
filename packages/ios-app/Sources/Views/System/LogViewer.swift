@@ -175,7 +175,6 @@ struct LogViewer: View {
         case .general: return .gray
         case .notification: return .red
         case .database: return .indigo
-        case .audio: return .mint
         }
     }
 }
@@ -264,7 +263,6 @@ private extension LogCategory {
         case .general: return .gray
         case .notification: return .red
         case .database: return .indigo
-        case .audio: return .mint
         }
     }
 }

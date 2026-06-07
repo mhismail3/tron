@@ -41,6 +41,7 @@ impl CapabilityInvocationTracker {
     }
 
     /// Number of pending capability invocations.
+    #[cfg(test)]
     pub fn pending_count(&self) -> usize {
         self.pending.len()
     }

@@ -33,7 +33,6 @@ pub struct ContextManager {
     messages: MessageStore,
     api_context_tokens: Option<u64>,
     system_prompt: String,
-    on_compaction_needed: Option<Box<dyn Fn() + Send + Sync>>,
     last_extracted_data: Option<ExtractedData>,
     server_origin: Option<String>,
     turn_generation: u64,
@@ -56,7 +55,6 @@ impl ContextManager {
             messages: MessageStore::new(),
             api_context_tokens: None,
             system_prompt,
-            on_compaction_needed: None,
             last_extracted_data: None,
             server_origin: None,
             turn_generation: 0,
@@ -310,18 +308,6 @@ impl ContextManager {
         Ok(result)
     }
 
-    pub fn on_compaction_needed(&mut self, callback: impl Fn() + Send + Sync + 'static) {
-        self.on_compaction_needed = Some(Box::new(callback));
-    }
-
-    pub fn trigger_compaction_if_needed(&self) {
-        if self.should_compact()
-            && let Some(cb) = &self.on_compaction_needed
-        {
-            cb();
-        }
-    }
-
     #[must_use]
     pub fn process_capability_result(
         &self,
@@ -373,7 +359,6 @@ impl ContextManager {
         self.config.model = new_model;
         self.config.compaction.context_limit = context_limit;
         self.api_context_tokens = None;
-        self.trigger_compaction_if_needed();
     }
 
     #[must_use]

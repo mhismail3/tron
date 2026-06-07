@@ -11,18 +11,15 @@ struct ServerSettingsPageTests {
         #expect(SettingsLabels.connectToNewServer == "Connect to a new server")
         #expect(SettingsLabels.connectedServerUnavailableDescription == "The connected server can't be reached.")
         #expect(SettingsLabels.loadingServerSettingsDescription == "Loading server settings from the active server.")
-        #expect(SettingsLabels.transcriptionSidecar == "Transcription Sidecar")
         #expect(SettingsLabels.updates == "Updates")
     }
 
-    @Test("server-backed settings show transcription, updates, then diagnostics")
+    @Test("server-backed settings show updates then diagnostics")
     func serverBackedSettingsOrder() {
         #expect(ConnectionSettingsServerBackedSection.loadedOrder == [
-            .transcriptionSidecar,
             .updates,
             .diagnostics,
         ])
-        #expect(ConnectionSettingsServerBackedSection.transcriptionSidecar.title == "Transcription Sidecar")
         #expect(ConnectionSettingsServerBackedSection.updates.title == "Updates")
         #expect(ConnectionSettingsServerBackedSection.diagnostics.title == "Engine Diagnostics")
     }
@@ -108,14 +105,13 @@ struct ServerSettingsPageTests {
             activeServerUnavailable: false,
             isLoaded: false,
             loadError: nil,
-            transcriptionEnabled: false,
             updateEnabled: false,
             updateChannel: "stable",
             updateFrequency: "daily"
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Connect a Mac")
-        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to manage server-backed transcription, update, and diagnostics settings from this iPhone.")
+        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to manage server-backed update and diagnostics settings from this iPhone.")
     }
 
     @Test("server summary explains unavailable active server settings")
@@ -126,7 +122,6 @@ struct ServerSettingsPageTests {
             activeServerUnavailable: false,
             isLoaded: false,
             loadError: "Connection timed out",
-            transcriptionEnabled: false,
             updateEnabled: false,
             updateChannel: "stable",
             updateFrequency: "daily"
@@ -144,14 +139,13 @@ struct ServerSettingsPageTests {
             activeServerUnavailable: false,
             isLoaded: false,
             loadError: nil,
-            transcriptionEnabled: false,
             updateEnabled: false,
             updateChannel: "stable",
             updateFrequency: "daily"
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Loading transcription, update, and diagnostics settings.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Loading update and diagnostics settings.")
     }
 
     @Test("server summary warns when active server cannot be reached")
@@ -162,7 +156,6 @@ struct ServerSettingsPageTests {
             activeServerUnavailable: true,
             isLoaded: false,
             loadError: "Connection timed out",
-            transcriptionEnabled: false,
             updateEnabled: false,
             updateChannel: "stable",
             updateFrequency: "daily"
@@ -222,7 +215,7 @@ struct ServerSettingsPageTests {
         #expect(status.icon == "hourglass")
     }
 
-    @Test("server summary reflects loaded security transcription and update settings")
+    @Test("server summary reflects loaded update settings")
     func serverSummaryReflectsLoadedSettings() {
         let context = ServerSettingsSummary.Context(
             activeServerLabel: "Test Server",
@@ -230,14 +223,13 @@ struct ServerSettingsPageTests {
             activeServerUnavailable: false,
             isLoaded: true,
             loadError: nil,
-            transcriptionEnabled: true,
             updateEnabled: true,
             updateChannel: "beta",
             updateFrequency: "daily"
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Local transcription is on. Update checks run daily on the beta channel.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Update checks run daily on the beta channel.")
     }
 
     @Test("server summary reflects disabled automatic update checks")
@@ -248,13 +240,12 @@ struct ServerSettingsPageTests {
             activeServerUnavailable: false,
             isLoaded: true,
             loadError: nil,
-            transcriptionEnabled: false,
             updateEnabled: false,
             updateChannel: "stable",
             updateFrequency: "weekly"
         )
 
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Local transcription is off. Automatic update checks are off.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Automatic update checks are off.")
     }
 
     @Test("active unreachable row overrides stale connected status")

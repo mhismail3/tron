@@ -56,16 +56,6 @@ final class NotificationPillTests: XCTestCase {
         XCTAssertNotNil(view)
     }
 
-    func testTranscriptionFailedNotificationCreation() {
-        let view = TranscriptionFailedNotificationView()
-        XCTAssertNotNil(view)
-    }
-
-    func testTranscriptionNoSpeechNotificationCreation() {
-        let view = TranscriptionNoSpeechNotificationView()
-        XCTAssertNotNil(view)
-    }
-
     func testContextClearedNotificationCreation() {
         let view = ContextClearedNotificationView(tokensBefore: 80000, tokensAfter: 20000)
         XCTAssertNotNil(view)
@@ -73,11 +63,6 @@ final class NotificationPillTests: XCTestCase {
 
     func testMessageDeletedNotificationCreation() {
         let view = MessageDeletedNotificationView(targetType: "message.user")
-        XCTAssertNotNil(view)
-    }
-
-    func testRulesLoadedNotificationCreation() {
-        let view = RulesLoadedNotificationView(count: 3)
         XCTAssertNotNil(view)
     }
 

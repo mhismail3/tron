@@ -50,9 +50,5 @@ fn session_start() -> SessionEvent {
 
 #[path = "tests/basic_capability.rs"]
 mod basic_capability;
-#[path = "tests/lifecycle_metadata.rs"]
-mod lifecycle_metadata;
 #[path = "tests/multimodal_performance.rs"]
 mod multimodal_performance;
-#[path = "tests/synthetic_interrupts.rs"]
-mod synthetic_interrupts;

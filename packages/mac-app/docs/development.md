@@ -1,6 +1,6 @@
 # Mac App Development
 
-> Last verified: 2026-05-30 (health-gated recovery, isolated helper registration, and two-helper signing)
+> Last verified: 2026-06-07 (primitive helper bundle, health-gated recovery, isolated helper registration, and two-helper signing)
 
 ## Setup
 
@@ -30,7 +30,7 @@ Use the `TronMac Isolated Install` scheme only when testing first-run or reinsta
 
 > **Disambiguation**: the Debug-config `TronMac.app` (wrapper UI dogfood or isolated install testing) is unrelated to `Tron-Dev.app` at `~/.tron/internal/run/Tron-Dev.app`, which is the headless agent built by `tron dev` (bundle ID `com.tron.agent`, no SwiftUI). See [architecture.md → Workflows & Variants](./architecture.md#workflows--variants) for the canonical workflow breakdown.
 
-The wizard install path validates the bundled helper app + LaunchAgent plist, registers or refreshes the active scheme's LaunchAgent through `SMAppService`, and waits for the server heartbeat. A previously enabled Login Item registration is shown as registered, not ready; the user still has to press Start server and the wizard still waits for `system::ping` before continuing. Release builds must run from `/Applications/Tron.app`; default Debug builds may run from DerivedData for wrapper dogfood but cannot mutate the production Login Item; isolated Debug is the explicit install-test path. The wizard does not copy a server bundle into `~/.tron/internal/`, write `~/Library/LaunchAgents`, or stage contributor CLI artifacts under `~/.tron/internal/run/`. The only app-bundled files copied into the active data root are the transcription sidecar source files (`worker.py`, `requirements.txt`) when the user applies the transcription step. Menu-bar startup writes `~/.tron/internal/run/mac-app-version.json` after a successful first-run or update finalization; when that marker does not match the current app build, startup syncs managed skills and restarts the production helper once, then records the marker only after `/health` is reachable.
+The wizard install path validates the bundled helper app + LaunchAgent plist, registers or refreshes the active scheme's LaunchAgent through `SMAppService`, and waits for the server heartbeat. A previously enabled Login Item registration is shown as registered, not ready; the user still has to press Start server and the wizard still waits for `system::ping` before continuing. Release builds must run from `/Applications/Tron.app`; default Debug builds may run from DerivedData for wrapper dogfood but cannot mutate the production Login Item; isolated Debug is the explicit install-test path. The wizard does not copy a server bundle into `~/.tron/internal/`, write `~/Library/LaunchAgents`, stage contributor CLI artifacts under `~/.tron/internal/run/`, or sync managed product assets. Menu-bar startup writes `~/.tron/internal/run/mac-app-version.json` after a successful first-run or update finalization; when that marker does not match the current app build, startup restarts the production helper once and records the marker only after `/health` is reachable.
 
 ## Workflow quick reference
 
@@ -47,7 +47,7 @@ The workspace CLI dispatcher is intentionally small. Command families live in
 `scripts/tron.d/`; runtime helpers shared by the installed `tron-cli` live in
 `scripts/tron-lib.d/` and are copied beside `tron-lib.sh` during
 `tron install`, `tron setup`, and contributor deploy refreshes.
-| Production DMG release | Push/run the `server-v*` release workflow in `.github/workflows/release-mac.yml` | Builds `tron` with relay secrets, stages it into `Tron.app`, verifies bundled transcription resources, signs helper then wrapper, notarizes/staples, creates the DMG, and publishes it |
+| Production DMG release | Push/run the `server-v*` release workflow in `.github/workflows/release-mac.yml` | Builds `tron` with relay secrets, stages it into `Tron.app`, verifies the bundled helper and LaunchAgent, signs helper then wrapper, notarizes/staples, creates the DMG, and publishes it |
 
 ## Local dev loop
 
@@ -80,9 +80,9 @@ TRON_RELAY_SECRET=<same HMAC secret set in Wrangler>
 TRON_RELAY_ENVIRONMENT=production
 ```
 
-`bundle-agent.sh` and `scripts/tron dev` read only `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT` from that ignored file immediately before they run Cargo, so every Debug, local Release, or agent-only dev helper has the same relay config without repeating shell exports. Already-exported environment variables still take precedence, which keeps CI and one-off builds explicit. The Rust build also embeds the first-party capability-search ONNX/tokenizer assets from `packages/agent/assets/capability-search/`; no Mac build step copies a separate semantic-search model cache.
+`bundle-agent.sh` and `scripts/tron dev` read only `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT` from that ignored file immediately before they run Cargo, so every Debug, local Release, or agent-only dev helper has the same relay config without repeating shell exports. Already-exported environment variables still take precedence, which keeps CI and one-off builds explicit.
 
-The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` and `packages/agent/src/domains/transcription/implementation/sidecar/worker.py` plus `requirements.txt` into `Contents/Resources/Transcription/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization; transcription files are source files only, with the MLX venv and Parakeet model cache created later under `~/.tron/internal/transcription/` if the wizard or iOS settings enables transcription.
+The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization. The primitive branch does not bundle managed skills, transcription sidecars, or product capability assets.
 
 After staging, regenerate the Xcode project so it picks up the file reference:
 
@@ -182,8 +182,8 @@ Defined in `.github/workflows/release-mac.yml`. Broadly:
 2. `cargo build --release --bin tron --locked` on the same `macos-15` runner with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` from GitHub secrets (cross-compile is avoided for code-signing reasons).
 3. `bash packages/mac-app/scripts/bundle-agent.sh --skip-build` inside `packages/mac-app`, which stages `packages/agent/target/release/tron`.
 4. `xcodegen generate` inside `packages/mac-app/`.
-5. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`; the target post-build script copies transcription sidecar source files into `Contents/Resources/Transcription/`.
-6. Export the `.app`, verify the helper executable, LaunchAgent plist, managed skills, and transcription resource files are present, then code-sign inside-out with Developer ID (no `--deep` on the re-sign — `--deep` would clobber the helper signature; it's used only for read-only `--verify`).
+5. `xcodebuild -scheme TronMac -configuration Release archive -archivePath build/TronMac.xcarchive`; the target post-build script copies the helper Library tree and Constitution defaults.
+6. Export the `.app`, verify the helper executable and LaunchAgent plist are present, then code-sign inside-out with Developer ID (no `--deep` on the re-sign — `--deep` would clobber the helper signature; it's used only for read-only `--verify`).
 7. Notarize the signed app via `xcrun notarytool submit --keychain-profile tron-notarize` (credentials live ONLY in an isolated path-based keychain at `$RUNNER_TEMP/tron-build.keychain-db`, never on argv), staple the app, package it into a DMG via `create-dmg`, sign the DMG, then notarize and staple the DMG separately because notary tickets are artifact-specific.
 8. Keep dSYMs in the archive/release artifacts for Apple crash diagnostics.
 9. `scripts/tron-release-notes` generates a bounded draft changelog body from first-parent git history since the previous release tag, with DMG, SHA256, and full compare-link details included. The body starts below GitHub's release title so the rendered page does not repeat the release name. The beta2 release intentionally compares against the historical Mac-scoped beta1 tag so the tag-prefix rename does not turn beta2 into an all-history changelog.

@@ -36,13 +36,6 @@ fn create_default_session(conn: &Connection, ws_id: &str) -> SessionRow {
             tags: None,
             parent_session_id: None,
             fork_from_event_id: None,
-            spawning_session_id: None,
-            spawn_type: None,
-            spawn_task: None,
-            origin: None,
-            profile: None,
-            source: None,
-            use_worktree: None,
         },
     )
     .unwrap()
@@ -50,7 +43,5 @@ fn create_default_session(conn: &Connection, ws_id: &str) -> SessionRow {
 
 #[path = "tests/core.rs"]
 mod core;
-#[path = "tests/filters.rs"]
-mod filters;
 #[path = "tests/projections.rs"]
 mod projections;

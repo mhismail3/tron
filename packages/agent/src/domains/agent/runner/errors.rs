@@ -100,7 +100,7 @@ pub enum StopReason {
     EndTurn,
     /// Turn limit reached.
     MaxTurns,
-    /// Capability requested stop (`agent::ask_user`).
+    /// A turn-stopping primitive call requested the next loop iteration.
     CapabilityStop,
     /// Unrecoverable error.
     Error,

@@ -18,7 +18,7 @@
 //! | `contracts` | Public engine protocol message contracts and trigger bindings |
 //! | `engine` | Engine protocol `EngineTransportRequest` builder/dispatcher |
 //! | `engine_ws` | `/engine` WebSocket protocol, heartbeat, stream subscribe/poll/ack |
-//! | `setup` | Startup hook that delegates domain worker registration |
+//! | `setup` | Startup entrypoint that delegates domain worker registration |
 
 pub mod auth;
 pub mod contracts;

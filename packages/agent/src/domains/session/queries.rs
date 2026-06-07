@@ -40,7 +40,6 @@ impl SessionQueryService {
         let filter = crate::domains::agent::runner::SessionFilter {
             workspace_path: working_directory,
             include_archived,
-            user_only: true,
             limit,
             offset,
             ..Default::default()
@@ -346,7 +345,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"), None)
+            .create_session("m", "/tmp", Some("t"))
             .unwrap();
 
         let result = SessionQueryService::export(&Deps::from_test_context(&ctx), sid.clone())
@@ -384,7 +383,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"), None)
+            .create_session("m", "/tmp", Some("t"))
             .unwrap();
 
         // Append three user messages. Sequence auto-increments starting
@@ -430,7 +429,7 @@ mod tests {
         let ctx = make_test_context();
         let sid = ctx
             .session_manager
-            .create_session("m", "/tmp", Some("t"), None)
+            .create_session("m", "/tmp", Some("t"))
             .unwrap();
 
         let result = SessionQueryService::export(&Deps::from_test_context(&ctx), sid)
@@ -442,35 +441,16 @@ mod tests {
         });
     }
 
-    /// Export accepts any real session ID without dashboard filtering.
-    #[tokio::test]
-    async fn export_of_subagent_session_succeeds() {
-        let ctx = make_test_context();
-        let parent = ctx
-            .session_manager
-            .create_session("m", "/tmp", Some("parent"), None)
-            .unwrap();
-        let subagent = ctx
-            .session_manager
-            .create_session_for_subagent("m", "/tmp", Some("sub"), &parent, "task", "desc")
-            .unwrap();
-
-        let result = SessionQueryService::export(&Deps::from_test_context(&ctx), subagent.clone())
-            .await
-            .unwrap();
-        assert_eq!(result["session"]["id"].as_str().unwrap(), subagent);
-    }
-
     #[tokio::test]
     async fn list_accepts_ios_dashboard_pagination_payload() {
         let ctx = make_test_context();
         let first = ctx
             .session_manager
-            .create_session("m", "/tmp/a", Some("a"), None)
+            .create_session("m", "/tmp/a", Some("a"))
             .unwrap();
         let second = ctx
             .session_manager
-            .create_session("m", "/tmp/b", Some("b"), None)
+            .create_session("m", "/tmp/b", Some("b"))
             .unwrap();
 
         let result = SessionQueryService::list(

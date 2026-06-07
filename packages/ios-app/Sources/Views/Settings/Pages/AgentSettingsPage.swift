@@ -2,7 +2,6 @@ import SwiftUI
 
 struct AgentSettingsPage: View {
     @Environment(\.dependencies) var dependencies
-    @FocusState private var focusedField: AgentSettingsFocusedField?
 
     let settingsState: SettingsState
     let selectedModelDisplayName: String
@@ -10,8 +9,6 @@ struct AgentSettingsPage: View {
 
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var showDefaultModelPicker = false
-    @State private var showHooksModelPicker = false
-    @State private var newProtectedBranch = ""
 
     private var engineClient: EngineClient { dependencies.engineClient }
 
@@ -50,29 +47,13 @@ struct AgentSettingsPage: View {
                 }
             )
         }
-        .sheet(isPresented: $showHooksModelPicker) {
-            ModelPickerSheet(
-                models: settingsState.availableModels,
-                currentModelId: settingsState.hooksLlmModel,
-                onSelect: { model in
-                    settingsState.hooksLlmModel = model.id
-                    updateServerSetting {
-                        ServerSettingsUpdate(hooks: .init(llmModel: model.id))
-                    }
-                }
-            )
-        }
     }
 
     @ViewBuilder
     private var stackedContent: some View {
         summaryCard
         quickSessionCard
-        autonomySection
-        guardrailsSection
-        hooksSection
         messageQueueCard
-        protectedBranchesSection
     }
 
     private var landscapeContent: some View {
@@ -80,19 +61,10 @@ struct AgentSettingsPage: View {
             summaryCard
 
             HStack(alignment: .top, spacing: 16) {
-                VStack(spacing: 16) {
-                    quickSessionCard
-                    autonomySection
-                    guardrailsSection
-                    hooksSection
-                }
-                .frame(maxWidth: .infinity, alignment: .top)
-
-                VStack(spacing: 16) {
-                    protectedBranchesSection
-                    messageQueueCard
-                }
-                .frame(maxWidth: .infinity, alignment: .top)
+                quickSessionCard
+                    .frame(maxWidth: .infinity, alignment: .top)
+                messageQueueCard
+                    .frame(maxWidth: .infinity, alignment: .top)
             }
         }
     }
@@ -108,60 +80,8 @@ struct AgentSettingsPage: View {
     private var summaryContext: AgentSettingsSummary.Context {
         AgentSettingsSummary.Context(
             isLoaded: settingsState.isLoaded,
-            queueDrainMode: settingsState.queueDrainMode,
-            enabledBuiltinHookCount: enabledBuiltinHookCount,
-            totalBuiltinHookCount: BuiltinHookCatalog.all.count,
-            hooksErrorPolicy: settingsState.hooksErrorPolicy,
-            protectedBranchCount: settingsState.gitProtectedBranches.count
+            queueDrainMode: settingsState.queueDrainMode
         )
-    }
-
-    private var enabledBuiltinHookCount: Int {
-        BuiltinHookCatalog.all.filter { meta in
-            settingsState.builtinHooks.first(where: { $0.id == meta.id })?.enabled ?? true
-        }.count
-    }
-
-    // MARK: - Autonomy
-
-    private var autonomySection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: AgentSettingsSection.autonomy.rawValue)
-
-            SettingsCard {
-                SettingsRow(icon: "shield", label: "Autonomy Mode") {
-                    Text("Independent")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: "The engine runs inside its configured authority envelope and records blocked work as runtime evidence.")
-        }
-    }
-
-    private var guardrailsSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: AgentSettingsSection.guardrails.rawValue)
-
-            SettingsCard {
-                SettingsRow(icon: "checkmark.shield", label: "Run Unless Blocked") {
-                    Text("On")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                }
-
-                SettingsRowDivider()
-
-                SettingsRow(icon: "list.bullet.rectangle", label: "Audit Trail") {
-                    Text("Always")
-                        .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: "Server constraints stop work outside the configured authority envelope before it runs.")
-        }
     }
 
     // MARK: - Quick Session
@@ -169,7 +89,7 @@ struct AgentSettingsPage: View {
     @available(iOS 26.0, *)
     private var quickSessionCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Quick Session")
+            SettingsSectionHeader(title: AgentSettingsSection.quickSession.rawValue)
 
             SettingsCard {
                 navigationRow(
@@ -200,13 +120,13 @@ struct AgentSettingsPage: View {
         case "batched":
             return "All queued messages are combined into a single prompt when the agent finishes."
         default:
-            return "Each queued message is sent as its own turn - the agent responds to each individually."
+            return "Each queued message is sent as its own turn when the agent finishes."
         }
     }
 
     private var messageQueueCard: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Message Queue")
+            SettingsSectionHeader(title: AgentSettingsSection.messageQueue.rawValue)
 
             SettingsCard {
                 HStack {
@@ -239,258 +159,6 @@ struct AgentSettingsPage: View {
         }
     }
 
-    // MARK: - Built-in Hooks
-
-    private var hooksSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: AgentSettingsSection.hooks.rawValue)
-
-            VStack(spacing: 12) {
-                hookSettingBlock(.llmModel) {
-                    SettingsCard {
-                        navigationRow(
-                            icon: "cpu",
-                            label: AgentHookSetting.llmModel.title,
-                            value: hooksModelDisplayName,
-                            action: { showHooksModelPicker = true }
-                        )
-                        .accessibilityHint("Change the model used for built-in and prompt-based hooks")
-                    }
-                }
-
-                hookSettingBlock(.errorPolicy) {
-                    SettingsCard {
-                        SettingsRow(icon: "exclamationmark.shield", label: AgentHookSetting.errorPolicy.title) {
-                            SettingsCycleToggle(
-                                options: [("continue", "Continue"), ("block", "Block")],
-                                current: settingsState.hooksErrorPolicy
-                            ) { newValue in
-                                settingsState.hooksErrorPolicy = newValue
-                                updateServerSetting {
-                                    ServerSettingsUpdate(hooks: .init(errorPolicy: newValue))
-                                }
-                            }
-                        }
-                    }
-                }
-
-                hookSettingBlock(.builtInHooks) {
-                    SettingsCard {
-                        ForEach(Array(BuiltinHookCatalog.all.enumerated()), id: \.element.id) { index, meta in
-                            if index > 0 {
-                                SettingsRowDivider()
-                            }
-                            builtinHookRow(meta: meta)
-                        }
-                    }
-                }
-
-                userHooksBlock
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func hookSettingBlock<Content: View>(
-        _ setting: AgentHookSetting,
-        @ViewBuilder content: () -> Content
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            content()
-            SettingsCaption(text: setting.description)
-        }
-    }
-
-    private func builtinHookRow(meta: BuiltinHookInfo) -> some View {
-        let isEnabled = settingsState.builtinHooks.first(where: { $0.id == meta.id })?.enabled ?? true
-
-        return SettingsRow(icon: "arrow.uturn.up.circle.fill", label: meta.label) {
-            Toggle("", isOn: Binding(
-                get: { isEnabled },
-                set: { newValue in
-                    toggleBuiltin(id: meta.id, enabled: newValue)
-                }
-            ))
-            .toggleStyle(.switch)
-            .tint(.tronEmerald)
-            .labelsHidden()
-        }
-    }
-
-    private func toggleBuiltin(id: String, enabled: Bool) {
-        var hooks = settingsState.builtinHooks
-        if let index = hooks.firstIndex(where: { $0.id == id }) {
-            hooks[index].enabled = enabled
-        } else {
-            hooks.append(BuiltinHookSetting(id: id, enabled: enabled))
-        }
-        settingsState.builtinHooks = hooks
-        updateServerSetting {
-            ServerSettingsUpdate(hooks: .init(builtinHooks: settingsState.builtinHooks))
-        }
-    }
-
-    // MARK: - Hook Model
-
-    private var hooksModelDisplayName: String {
-        if let model = settingsState.availableModels.first(where: { $0.id == settingsState.hooksLlmModel }) {
-            return model.formattedModelName
-        }
-        return ModelNameFormatter.format(settingsState.hooksLlmModel, style: .short)
-    }
-
-    private var userHooksBlock: some View {
-        hookSettingBlock(.userHooks) {
-            SettingsCard {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "folder")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(.tronEmerald)
-                            .frame(width: 18)
-                        Text(AgentHookSetting.userHooks.title)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronTextPrimary)
-                        Spacer(minLength: 12)
-                        Text(UserHookDirectoryDisplay.path)
-                            .font(TronTypography.code(size: TronTypography.sizeBody3, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.78)
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-
-                    Text(UserHookDirectoryDisplay.emptyState)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
-                        .foregroundStyle(.tronTextMuted)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.vertical, 8)
-                        .accessibilityLabel(UserHookDirectoryDisplay.emptyState)
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
-            }
-        }
-    }
-
-    // MARK: - Protected Branches
-
-    private var protectedBranchesSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: AgentSettingsSection.protectedBranches.rawValue)
-
-            SettingsCard {
-                VStack(spacing: 0) {
-                    if settingsState.gitProtectedBranches.isEmpty {
-                        HStack(spacing: 10) {
-                            Image(systemName: "lock.open")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                .foregroundStyle(.tronTextMuted)
-                                .frame(width: 18)
-                            Text("No protected branches")
-                                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                                .foregroundStyle(.tronTextMuted)
-                            Spacer()
-                        }
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 12)
-
-                        SettingsRowDivider()
-                    } else {
-                        ForEach(Array(settingsState.gitProtectedBranches.enumerated()), id: \.offset) { index, branch in
-                            HStack {
-                                Image(systemName: "lock.shield")
-                                    .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                    .foregroundStyle(.tronEmerald)
-                                    .frame(width: 18)
-                                Text(branch)
-                                    .font(TronTypography.code(size: TronTypography.sizeBody3, weight: .medium))
-                                    .foregroundStyle(.tronTextPrimary)
-                                Spacer()
-                                Button {
-                                    removeProtected(branch)
-                                } label: {
-                                    Image(systemName: "minus.circle.fill")
-                                        .font(TronTypography.sans(size: TronTypography.sizeBody))
-                                        .foregroundStyle(.tronError)
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel("Remove \(branch)")
-                            }
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 12)
-
-                            if index < settingsState.gitProtectedBranches.count - 1 {
-                                SettingsRowDivider()
-                            }
-                        }
-
-                        SettingsRowDivider()
-                    }
-
-                    HStack(spacing: 10) {
-                        Image(systemName: "plus.circle")
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(.tronEmerald)
-                            .frame(width: 18)
-                        TextField("add branch name", text: $newProtectedBranch)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .focused($focusedField, equals: .protectedBranch)
-                            .onSubmit(addProtected)
-                            .onKeyPress(.tab) {
-                                resignProtectedBranchFocusForKeyboardTraversal()
-                            }
-                        Button("Add", action: addProtected)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-                            .foregroundStyle(.tronEmerald)
-                            .disabled(newProtectedBranch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 12)
-                }
-            }
-
-            SettingsCaption(text: "Pushes to protected branches require an explicit override. Runtime actions can still choose merge, push, and branch behavior per action.")
-        }
-    }
-
-    private func addProtected() {
-        let name = newProtectedBranch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty, !settingsState.gitProtectedBranches.contains(name) else { return }
-        settingsState.gitProtectedBranches.append(name)
-        newProtectedBranch = ""
-        pushProtectedBranches()
-    }
-
-    private func removeProtected(_ branch: String) {
-        settingsState.gitProtectedBranches.removeAll { $0 == branch }
-        pushProtectedBranches()
-    }
-
-    private func pushProtectedBranches() {
-        let branches = settingsState.gitProtectedBranches
-        updateServerSetting {
-            ServerSettingsUpdate(git: .init(protectedBranches: branches))
-        }
-    }
-
-    private func resignProtectedBranchFocusForKeyboardTraversal() -> KeyPress.Result {
-        guard UIDevice.current.userInterfaceIdiom == .pad else {
-            return .ignored
-        }
-
-        focusedField = nil
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
-        return .handled
-    }
-
     // MARK: - Shared Row
 
     private func navigationRow(icon: String, label: String, value: String, action: @escaping () -> Void) -> some View {
@@ -515,8 +183,4 @@ struct AgentSettingsPage: View {
         .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .onTapGesture { action() }
     }
-}
-
-private enum AgentSettingsFocusedField: Hashable {
-    case protectedBranch
 }

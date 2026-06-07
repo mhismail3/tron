@@ -16,7 +16,7 @@ fn concurrent_auto_sequence_appends_are_strictly_monotonic() {
 
     let store = Arc::new(setup());
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     let session_id = cr.session.id.clone();
 
@@ -69,7 +69,7 @@ fn concurrent_auto_sequence_appends_are_strictly_monotonic() {
 fn auto_sequence_resumes_from_pre_assigned_max() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // Pre-assign a gap (sequence 42) — simulates an import or test scenario
@@ -104,10 +104,10 @@ fn auto_sequence_resumes_from_pre_assigned_max() {
 fn auto_sequence_is_per_session() {
     let store = setup();
     let a = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     let b = store
-        .create_session("claude-opus-4-6", "/tmp/project-b", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project-b", None, None)
         .unwrap();
 
     // Append 3 events to session A.

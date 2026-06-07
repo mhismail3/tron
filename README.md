@@ -104,21 +104,13 @@ Current living entry points:
   source-audited deletion map for every current Rust domain, engine primitive
   worker, runner context plane, managed skill, doc, iOS source/view root, and
   settings surface.
-- `packages/agent/docs/token-accounting-hardening-scorecard.md`: completed
-  server-authoritative token accounting, pricing, provider-cache, and
-  iPhone-only UI hardening scorecard with final evidence caveats.
-- `packages/agent/docs/capability-orchestration-test-scorecard.md`:
-  historical covered-path evidence for the single `execute` portal.
-- `packages/agent/src/domains/cron/implementation/mod.rs`: decision-backed
-  schedule truth and scheduler-cache boundary.
+- `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
+  absence, traceability, schema, registration, and documentation gates for the
+  primitive branch.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
-- `packages/agent/tests/threat_model_invariants.rs`: absence gates and
-  cross-cutting architectural invariants.
 
-Older product campaign scorecards and guides under `packages/agent/docs/` are
-evidence artifacts only on this branch. PET-9 owns deleting or rewriting any
-remaining retired docs before closeout.
+Retired product campaign scorecards and guides are deleted on this branch.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -168,7 +160,7 @@ app/        Binary/server bootstrap, health, metrics, onboarding, shutdown
 transport/  /engine client protocol, /engine/workers socket transport, auth gate
 engine/     Live capability fabric: catalog, workers, triggers, ledger, streams, queues
 domains/    Every Tron worker: contracts, deps, handlers, operations, local services, tests
-platform/   OS/vendor integrations: APNS, device broker, updater
+platform/   OS/vendor integrations retained by the primitive loop, including updater
 shared/     Foundation IDs/errors/paths, protocol DTOs, unified storage helpers
 main.rs     Thin binary entry point
 main_cli.rs CLI parsing and auth subcommand dispatch
@@ -181,7 +173,7 @@ main_runtime.rs Server startup/runtime wiring
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
 | `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
-| `platform` | OS/vendor/product-protocol integrations | APNS senders, updater scheduler |
+| `platform` | OS/vendor integrations | updater scheduler |
 | `shared` | Foundation vocabulary, protocol DTOs, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
 The domain package is intentionally vertical. A domain root is only docs,
@@ -210,7 +202,7 @@ a capability by reading one domain folder instead of a central dispatch table.
 
 1. Install [Tailscale](https://tailscale.com) and sign in on the Mac that will host the agent.
 2. Download the latest `tron-v*.dmg` from [GitHub Releases](https://github.com/mhismail3/tron/releases) and drag `Tron.app` into `/Applications`.
-3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, local transcription preference, and the iOS handoff.
+3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and the iOS handoff.
 4. On iPhone, scan the wizard's Tron iOS Beta QR code to open the public TestFlight invite, install the latest available Tron beta, then scan the Mac pairing QR or enter the pairing fields manually.
 
 The wizard and menu bar surface everything else (`Check for updates`, `Send feedback`, `Restart server`, etc.) — you never need the CLI unless you want to.
@@ -434,10 +426,9 @@ authority scopes, and explicit runtime metadata through to the engine. The
 transport does not derive profile policy scopes or capability runtime metadata;
 `execute` is the primitive operation boundary.
 
-Hidden functions remain in the engine catalog for queue, cron, runtime, and
-domain side effects such as agent apply/run-turn, prompt-history capture, and
-auto-retain. Normal discovery excludes them and the public transport cannot
-invoke them directly.
+Hidden functions remain in the engine catalog for queue/runtime side effects
+such as agent apply/run-turn and prompt-history capture. Normal discovery
+excludes them and the public transport cannot invoke them directly.
 
 The core request set is `hello`, `discover`, `inspect`, `watch`, `invoke`,
 `promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`. Every request
@@ -566,7 +557,8 @@ a normal policy error. The trace record for that `execute` call captures the
 authority grant id, scopes, provider/model metadata, request/result hashes, and
 file/VCS attribution so the agent can inspect why an action did or did not run.
 
-The `EngineStreamEventPump` also routes browser CDP frames and `Display` capability frames when iOS clients are subscribed.
+The `EngineStreamEventPump` routes retained neutral engine/session stream
+records to subscribed clients.
 
 ---
 
@@ -598,7 +590,6 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
     "defaultProvider": "anthropic",
     "defaultModel": "claude-sonnet-4-6",
     "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
-    "transcription": { "enabled": false },
     "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
     "update": {                     // User-mode update checks. All fields off / safest by default.
       "enabled": false,             // Master switch — false means the scheduler never runs + no GitHub API traffic
@@ -642,20 +633,8 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
 
   "retry":  { "maxRetries": 1 },
 
-  "git": {
-    "targetBranch": null,                       // null → auto-detect via init.defaultBranch / main / master
-    "protectedBranches": ["main", "master", "develop"],
-    "sessionBranchPolicy": "keep",              // "keep" | "deleteOnFinalize"
-    "mergeStrategy": "merge",                   // "merge" | "rebase" | "squash"
-    "autoSetUpstream": true,
-    "crashRecoveryAbortTimeoutMs": 1800000,     // 30 min — auto-abort a pending merge recovered at startup
-    "opTimeoutNetworkMs": 60000,                // Timeout for fetch / push / ls-remote
-    "opTimeoutLocalMs": 30000                   // Timeout for local git ops
-  },
-
-  "pluginSources": {
-    "servers": [],                              // plugin source server configs
-    "schemaRefreshTtlMs": 30000                 // Proactive schema re-fetch TTL. 0 disables.
+  "session": {
+    "queueDrainMode": "sequential"              // "sequential" | "drop" for queued prompts
   }
 }
 ```
@@ -825,7 +804,7 @@ packages/ios-app/Sources/
 +-- Core/                 DI, EventDispatchCoordinator, plugins, payloads
 +-- Database/             SQLite event database, queries
 +-- Models/               Data models, engine protocol codables, event types
-+-- Services/             Engine transport/domain clients, paired servers, audio,
++-- Services/             Engine transport/domain clients, paired servers,
 +                         push notifications, local diagnostics, feedback,
 +                         Keychain tokens
 +-- ViewModels/           Chat view models, handlers, managers,
@@ -848,7 +827,7 @@ packages/ios-app/Sources/
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
-- **Primitive chat shell**: the app keeps connection/onboarding/settings, session navigation, prompt input, message rendering, local reconstruction, diagnostics, and generic runtime surfaces. Fixed Work, Audit Details, Source Control, Prompt Library, Voice Notes, Skills, Subagents, and Agent Control product modes are removed from the primary source tree.
+- **Primitive chat shell**: the app keeps connection/onboarding/settings, session navigation, prompt input, message rendering, local reconstruction, diagnostics, and generic runtime surfaces. Fixed Work, Audit Details, Source Control, Prompt Library, Voice Notes, Skills, Subagents, Agent Control, Plugin Sources, audio transcription, memory-retain, and rules product modes are removed from the primary source tree.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
 - **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
@@ -883,7 +862,6 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `architecture.md` — App architecture, patterns, file placement
 - `development.md` — Xcode setup, builds, testing
 - `events.md` — Event plugin system
-- `apns.md` — Push notification setup
 - `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, local paired servers, and bearer persistence
 
 ---
@@ -892,7 +870,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles signed helpers under `Contents/Library/LoginItems/` (`Tron Server.app` for production/local Release and `Tron Server Dev.app` for isolated Debug install testing), bundled LaunchAgent plists, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. Each helper app contains the `tron` agent binary. The wizard registers the active helper through `SMAppService`, syncs bundled managed skills into the active Tron home, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles signed helpers under `Contents/Library/LoginItems/` (`Tron Server.app` for production/local Release and `Tron Server Dev.app` for isolated Debug install testing), bundled LaunchAgent plists, and Constitution defaults under `Contents/Resources/Constitution/`. Each helper app contains the `tron` agent binary. The wizard registers the active helper through `SMAppService`, confirms permissions, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
 
 ```
 packages/mac-app/Sources/
@@ -901,7 +879,7 @@ packages/mac-app/Sources/
 +-- Wizard/                    First-run flow
 |   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
 |   +-- WizardView.swift       NavigationStack shell
-|   +-- Steps/                 Welcome, Tailscale, Install, Permissions, Transcription, iOS Beta, Pairing, Done
+|   +-- Steps/                 Welcome, Tailscale, Install, Permissions, iOS Beta, Pairing, Done
 +-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
 +-- Services/
 |   +-- Server/                Bearer-token reader, engine transport client, status poller
@@ -912,7 +890,6 @@ packages/mac-app/Sources/
 |   +-- LaunchAgentManaging.swift
 |   +-- TronPaths.swift        ~/.tron/ path helpers (mirrors Rust `core::foundation::paths`)
 +-- Resources/
-    +-- Transcription/worker.py + requirements.txt
     +-- Library/
         +-- LoginItems/Tron Server.app/Contents/MacOS/tron
         +-- LoginItems/Tron Server Dev.app/Contents/MacOS/tron
@@ -926,10 +903,9 @@ packages/mac-app/Sources/
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
 3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system::ping` answers through `/engine` `invoke`. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles macOS Login Items authorization by opening Settings when needed, and polls `system::ping` after the initial `hello.ok` frame.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
-5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/internal/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/internal/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server. Voice-note saves require this server transcription backend; if it is disabled or unloaded, the engine returns a visible error before writing any voice-note resources.
-6. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open alternatives. TestFlight then owns beta availability and update selection.
-7. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it in `profiles/user/profile.toml`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
-8. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
+5. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open alternatives. TestFlight then owns beta availability and update selection.
+6. **Pairing** — reads the agent-issued bearer token, confirms the local server heartbeat, resolves this Mac's Tailscale IP live (then caches it in `profiles/user/profile.toml`), detects the Mac's user-facing computer name, and displays host + port + token + server name with copy buttons and a QR code encoding `tron://pair?host=<ip>&port=<port>&token=<token>&label=<server-name>`.
+7. **Done** — touches `.onboarded` sentinel, transforms to menu-bar mode.
 
 ### Menu-bar Actions
 
@@ -938,7 +914,7 @@ packages/mac-app/Sources/
 | Custom status header | Shows `Tron`, the Tailscale endpoint, color-coded state, PID, normalized live uptime, and a `Dev Server active` marker when `tron dev` owns port 9847 |
 | Show pairing info | Opens a pairing-only window that shows one emerald resolving spinner directly on the window background until the QR + manual copy buttons for host, port, token, and server name crossfade in; copy actions quickly show a checkmark for two seconds on success |
 | Restart / Pause / Resume server | `SMAppService.register` repair/load before restart or resume, then `launchctl kickstart` when the label was already loaded; start-like actions post success only after `/health` passes |
-| Update finalization | On the first menu-bar launch or command-mode start for a new app build, syncs managed skills, refreshes stale SMAppService metadata, and restarts the bundled server once; the app-version marker is recorded only after `/health` passes, and `tron dev` takeover defers this until the production server is active again |
+| Update finalization | On the first menu-bar launch or command-mode start for a new app build, refreshes stale SMAppService metadata and restarts the bundled server once; the app-version marker is recorded only after `/health` passes, and `tron dev` takeover defers this until the production server is active again |
 | Stop dev server | Appears with the server controls whenever `Tron-Dev.app` owns port 9847; stops the dev process and resumes the installed Login Item through the same health-gated path. Pause, restart, and uninstall are disabled while dev takeover is active. |
 | Show logs | Opens the native logs window backed by the read-only `logs::recent` capability |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
@@ -1008,7 +984,7 @@ The deploy process (`scripts/tron.d/deploy.sh::cmd_deploy`) is retained for loca
 4. Runs `cargo test`. Failures prompt for continuation unless `--ci`.
 5. Under `--ci`, also runs the benchmark gate.
 6. Uses contributor-only artifacts directly under `~/.tron/internal/run/`.
-7. Syncs managed skills and transcription support.
+7. Seeds managed defaults and runtime support.
 8. Runs local health checks for the contributor server.
 
 ### Install Directory
@@ -1024,7 +1000,6 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- default/                   Managed, restorable base AgentExecutionSpec/manual
 |   |   +-- profile.toml           Complete typed AgentExecutionSpec v3
 |   |   +-- prompts/               Main, chat, local, workflow, and process prompts
-|   |   |   +-- processes/         Summarizer, hook, automation, and subagent process prompts
 |   |   +-- context/               Context block assembly policy
 |   |   +-- providers/             Provider-specific presentation defaults
 |   |   +-- capabilities/          Capability presentation policy
@@ -1036,16 +1011,12 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   |   +-- profile.toml           Inherits default; maps main entrypoint to local prompt/context/runtime policies
 |   +-- user/                      Sparse user profile/settings/prompt overrides
 |       +-- profile.toml           Sparse `[settings]` overrides
-+-- skills/                       Global skills (SKILL.md files); managed entries have a .managed sentinel
 +-- memory/                       Durable user/agent continuity
 |   +-- MEMORY.md                  Canonical single-file root (name, preferences, active projects)
 |   +-- rules/                     Detail files listed in context, read on demand
 |   +-- sessions/                  Auto-generated retain summaries
 +-- workspace/                    Active work and generated artifacts
-|   +-- inbox/
-|   |   +-- voice-notes/           Transcribed voice notes
 |   +-- projects/                  Project-local active work
-|   +-- automations/               Test-only automation fixtures and working directories
 |   +-- plans/                     Plan files and TODOs
 |   +-- reports/                   Analysis and investigation reports
 |   +-- renders/                   Rendered pages displayed in chat
@@ -1072,7 +1043,6 @@ Base directories in the tree below are resolved through helpers in `packages/age
     |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server
     |   +-- updater-state.json     Update-check scheduler state
     |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle
-    +-- transcription/             Speech-to-text sidecar
         +-- worker.py              parakeet-mlx Python worker
         +-- requirements.txt       Pip deps for the venv
         +-- venv/                  Auto-created when enabled and the sidecar starts
@@ -1080,7 +1050,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 ```
 
 Notes:
-- The five top-level homes are the primitives: behavior in `profiles`, capabilities in `skills`, continuity in `memory`, active substrate in `workspace`, and runtime machinery in `internal`.
+- The four top-level homes are the primitives: behavior in `profiles`, continuity in `memory`, active substrate in `workspace`, and runtime machinery in `internal`.
 - Credentials for external CLIs (Google Workspace, etc.) live in `~/.tron/workspace/vault/`. Tron-owned provider auth and the bearer token live in `~/.tron/profiles/auth.json`.
 - Pause/lock sentinels live under `~/.tron/internal/run/` with the rest of the runtime machinery. They are managed by the respective CLI subcommands, not user-edited at the Tron Home root.
 
@@ -1104,7 +1074,7 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 6. `xcodegen generate` inside `packages/mac-app/`.
 7. Create an isolated release keychain from the signing/notarization secrets, or fall back to dry-run ad-hoc signing when secrets are absent.
 8. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
-9. Verify the bundled helper app, both helper executables, LaunchAgent plist, managed skills, and transcription resources are present in the archive.
+9. Verify the bundled helper app, both helper executables, LaunchAgent plist, and Constitution defaults are present in the archive.
 10. Sign the helper apps first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
 11. `xcrun notarytool submit` the signed `Tron.app` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple the app on success.
 12. Build the DMG with `create-dmg`, sign the DMG, submit that signed DMG to `notarytool`, then staple the DMG. The app and DMG require separate notary tickets.
@@ -1120,7 +1090,7 @@ Required iOS release credentials are GitHub Actions secrets `ASC_KEY_ID`, `ASC_I
 
 ### User-mode Update Checks
 
-For users installed via DMG (no git remote), the server can poll GitHub Releases and surface the notarized DMG URL per the `server.update.*` settings. The module lives at `packages/agent/src/platform/updater/mod.rs`. Installing an update remains a visible replacement of `/Applications/Tron.app` from the notarized DMG; the server does not mutate the signed app bundle or stage update artifacts under `~/.tron`. After app replacement, the wrapper syncs bundled managed skills into `~/.tron/skills/` the next time the menu-bar app opens or starts the helper.
+For users installed via DMG (no git remote), the server can poll GitHub Releases and surface the notarized DMG URL per the `server.update.*` settings. The module lives at `packages/agent/src/platform/updater/mod.rs`. Installing an update remains a visible replacement of `/Applications/Tron.app` from the notarized DMG; the server does not mutate the signed app bundle or stage update artifacts under `~/.tron`.
 
 | Phase | Action | Effect |
 |-------|--------|--------|

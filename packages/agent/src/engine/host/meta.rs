@@ -655,6 +655,5 @@ pub(super) fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {
 }
 
 pub(super) fn is_host_dispatched_primitive_function(function_id: &FunctionId) -> bool {
-    function_id.as_str() != "worker::spawn"
-        && is_host_dispatched_primitive_namespace(function_id.namespace())
+    is_host_dispatched_primitive_namespace(function_id.namespace())
 }

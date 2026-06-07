@@ -171,45 +171,9 @@ impl CapabilityContract {
         self
     }
 
-    /// Attach durable output contract metadata.
-    pub(crate) fn output_contract(mut self, contract: DurableOutputContract) -> Self {
-        self.output_contract = contract;
-        self
-    }
-
     /// Attach stream topics.
     pub(crate) fn stream_topics(mut self, topics: Vec<&'static str>) -> Self {
         self.stream_topics = topics;
-        self
-    }
-
-    /// Override the discovery description.
-    pub(crate) fn description(mut self, description: &'static str) -> Self {
-        self.description = Some(description);
-        self
-    }
-
-    /// Attach search/discovery tags.
-    pub(crate) fn tags(mut self, tags: Vec<&'static str>) -> Self {
-        self.tags = tags;
-        self
-    }
-
-    /// Attach compact examples consumed by generated docs and primers.
-    pub(crate) fn examples(mut self, examples: Vec<Value>) -> Self {
-        self.examples = examples;
-        self
-    }
-
-    /// Attach lifecycle metadata.
-    pub(crate) fn lifecycle(mut self, lifecycle: Value) -> Self {
-        self.lifecycle = Some(lifecycle);
-        self
-    }
-
-    /// Attach presentation hints for generated UI.
-    pub(crate) fn presentation_hints(mut self, hints: Value) -> Self {
-        self.presentation_hints = Some(hints);
         self
     }
 
@@ -281,41 +245,10 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         definition.revision.0,
         spec.operation_key.as_str()
     );
-    let context_primer_level = if matches!(
-        spec.function_id.as_str(),
-        "capability::search"
-            | "capability::inspect"
-            | "capability::execute"
-            | "filesystem::list_dir"
-            | "filesystem::read_file"
-            | "filesystem::write_file"
-            | "filesystem::edit_file"
-            | "filesystem::find"
-            | "filesystem::glob"
-            | "filesystem::search_text"
-            | "filesystem::diff"
-            | "filesystem::apply_patch"
-            | "process::run"
-            | "web::search"
-            | "web::fetch"
-            | "notifications::send"
-            | "agent::ask_user"
-            | "agent::status"
-            | "agent::submit_answers"
-            | "agent::spawn_subagent"
-            | "agent::subagent_status"
-            | "agent::subagent_result"
-            | "agent::cancel_subagent"
-            | "job::wait"
-            | "job::stream_output"
-            | "worker::spawn"
-            | "sandbox::list_spawned_workers"
-            | "sandbox::stop_spawned_worker"
-            | "worker::protocol_guide"
-    ) {
-        "core"
+    let context_primer_level = if spec.function_id.as_str() == "capability::execute" {
+        "primitive"
     } else {
-        "catalog"
+        "transport"
     };
     let stops_turn = spec
         .lifecycle
@@ -323,12 +256,6 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         .and_then(|value| value.get("stopsTurn"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
-    let is_interactive = spec.lifecycle.as_ref().is_some_and(|value| {
-        matches!(
-            value.get("kind").and_then(Value::as_str),
-            Some("approval" | "user_input" | "async_run" | "stream" | "external_interaction")
-        )
-    });
     let presentation_hints = presentation_hints_for_capability(spec);
     definition.metadata = json!({
         "operationKey": spec.operation_key.as_str(),
@@ -351,7 +278,6 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         "streamTopics": spec.stream_topics,
         "lifecycle": spec.lifecycle,
         "stopsTurn": stops_turn,
-        "isInteractive": is_interactive,
         "presentationHints": presentation_hints,
     });
     definition
@@ -378,16 +304,16 @@ fn default_theme_color(function_id: &str) -> Option<&'static str> {
         .map(|(namespace, _)| namespace)?;
     match namespace {
         "capability" => Some("#10B981"),
-        "filesystem" => Some("#10B981"),
-        "process" => Some("#38BDF8"),
-        "web" => Some("#3B82F6"),
-        "notifications" => Some("#EC4899"),
         "agent" => Some("#8B5CF6"),
-        "job" => Some("#F59E0B"),
-        "sandbox" => Some("#A97BFF"),
-        "display" => Some("#818CF8"),
-        "browser" => Some("#06B6D4"),
-        "mcp" => Some("#2DD4BF"),
+        "auth" => Some("#0EA5E9"),
+        "blob" => Some("#64748B"),
+        "context" => Some("#F97316"),
+        "logs" => Some("#22C55E"),
+        "message" => Some("#A855F7"),
+        "model" => Some("#38BDF8"),
+        "session" => Some("#F59E0B"),
+        "settings" => Some("#94A3B8"),
+        "system" => Some("#14B8A6"),
         _ => None,
     }
 }

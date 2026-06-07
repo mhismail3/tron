@@ -249,7 +249,7 @@ fn capability_execution_error_basic() {
 
 #[test]
 fn capability_execution_error_with_severity() {
-    let err = CapabilityExecutionError::new("inspect", "call-2", "file not found")
+    let err = CapabilityExecutionError::new("execute", "call-2", "file not found")
         .with_severity(ErrorSeverity::Warning);
     assert_eq!(err.severity, ErrorSeverity::Warning);
 }
@@ -258,7 +258,7 @@ fn capability_execution_error_with_severity() {
 fn capability_execution_error_with_source() {
     let cause = std::io::Error::new(std::io::ErrorKind::NotFound, "no such file");
     let err =
-        CapabilityExecutionError::new("inspect", "call-2", "file not found").with_source(cause);
+        CapabilityExecutionError::new("execute", "call-2", "file not found").with_source(cause);
     assert!(err.source.is_some());
 }
 

@@ -1,37 +1,10 @@
-//! Server-owned generated UI authoring for resource, lineage, and operator
-//! surfaces.
+//! Server-owned generated UI authoring for engine substrate surfaces.
 
 use super::*;
 
-pub(in crate::engine::primitives::ui::authoring) use actions::{
-    generated_actions, prompt_collection_action, push_optional_action,
-};
-use agent_control::{
-    agent_control_actions, agent_control_projection, agent_control_session_layout,
-};
-use notifications::{
-    notification_collection_actions, notification_collection_layout,
-    notification_collection_projection,
-};
-use prompt::{
-    prompt_history_collection_actions, prompt_history_collection_layout,
-    prompt_history_collection_row, prompt_snippet_collection_actions,
-    prompt_snippet_collection_layout, prompt_snippet_collection_row,
-};
-use source_control::{
-    source_control_actions, source_control_invocation_rows, source_control_projection,
-    source_control_session_layout,
-};
-use subagent::{
-    subagent_collection_actions, subagent_collection_layout, subagent_collection_projection,
-};
+pub(in crate::engine::primitives::ui::authoring) use actions::generated_actions;
 
 mod actions;
-mod agent_control;
-mod notifications;
-mod prompt;
-mod source_control;
-mod subagent;
 
 #[derive(Clone, Debug)]
 pub(in crate::engine::primitives::ui) struct SurfaceAuthoringRequest {
@@ -321,8 +294,6 @@ pub(in crate::engine::primitives::ui) fn target_projection(
             })
         }
         RESOURCE_COLLECTION_TARGET => resource_collection_projection(host, request),
-        SOURCE_CONTROL_TARGET => source_control_projection(host, request),
-        AGENT_CONTROL_TARGET => agent_control_projection(host, invocation, request),
         "decision" => {
             let inspection = host.inspect_resource(&request.target_id)?.ok_or_else(|| {
                 EngineError::NotFound {
@@ -459,144 +430,74 @@ fn resource_collection_projection(
     host: &dyn PrimitiveRuntimeHost,
     request: &SurfaceAuthoringRequest,
 ) -> Result<TargetProjection> {
-    if request.target_id == NOTIFICATION_COLLECTION_TARGET {
-        return notification_collection_projection(host, request);
-    }
-    if request.target_id == SUBAGENT_COLLECTION_TARGET {
-        return subagent_collection_projection(host, request);
-    }
-    let (prefix, title, expected_profile, row_kind) = match request.target_id.as_str() {
-        PROMPT_SNIPPET_COLLECTION_TARGET => (
-            PROMPT_SNIPPET_RESOURCE_PREFIX,
-            "Prompt Snippets",
-            PROMPT_SNIPPET_LAYOUT_PROFILE,
-            "snippet",
-        ),
-        PROMPT_HISTORY_COLLECTION_TARGET => (
-            PROMPT_HISTORY_RESOURCE_PREFIX,
-            "Prompt History",
-            PROMPT_HISTORY_LAYOUT_PROFILE,
-            "history",
-        ),
-        other => {
-            return Err(EngineError::PolicyViolation(format!(
-                "unsupported resource_collection target {other}"
-            )));
-        }
-    };
-    if request.layout_profile != expected_profile {
+    if request.layout_profile != "compact" {
         return Err(EngineError::PolicyViolation(format!(
-            "resource_collection target {} requires layoutProfile {expected_profile}",
+            "resource_collection target {} requires layoutProfile compact",
             request.target_id
         )));
     }
-
-    let mut rows = Vec::new();
-    for projection in current_resource_payloads_by_prefix(host, "artifact", prefix, &["discarded"])?
-    {
-        let row = match row_kind {
-            "snippet" => {
-                prompt_snippet_collection_row(&projection.inspection, &projection.payload, request)
-            }
-            "history" => {
-                prompt_history_collection_row(&projection.inspection, &projection.payload, request)
-            }
-            _ => None,
-        };
-        if let Some(row) = row {
-            rows.push(row);
-        }
-    }
+    let kind = match request.target_id.as_str() {
+        "*" | "all" => None,
+        kind => Some(kind.to_owned()),
+    };
+    let resources = host.list_resources(ListResources {
+        kind: kind.clone(),
+        scope: None,
+        lifecycle: None,
+        limit: RESOURCE_COLLECTION_SCAN_LIMIT,
+    })?;
+    let mut rows = resources
+        .into_iter()
+        .map(|resource| {
+            json!({
+                "resourceId": resource.resource_id,
+                "kind": resource.kind,
+                "scope": resource.scope.kind(),
+                "scopeValue": resource.scope.value(),
+                "lifecycle": resource.lifecycle,
+                "currentVersionId": resource.current_version_id,
+                "createdAt": resource.created_at.to_rfc3339(),
+                "updatedAt": resource.updated_at.to_rfc3339(),
+            })
+        })
+        .collect::<Vec<_>>();
     rows.sort_by(|left, right| {
         right
-            .get("sortKey")
+            .get("updatedAt")
             .and_then(Value::as_str)
-            .cmp(&left.get("sortKey").and_then(Value::as_str))
+            .cmp(&left.get("updatedAt").and_then(Value::as_str))
             .then_with(|| {
                 left.get("resourceId")
                     .and_then(Value::as_str)
                     .cmp(&right.get("resourceId").and_then(Value::as_str))
             })
     });
-    let truncated = rows.len() > PROMPT_COLLECTION_LIMIT;
-    rows.truncate(PROMPT_COLLECTION_LIMIT);
+    let truncated = rows.len() > RESOURCE_COLLECTION_LIMIT;
+    rows.truncate(RESOURCE_COLLECTION_LIMIT);
+    let title = kind.as_deref().map_or_else(
+        || "Resources".to_owned(),
+        |kind| format!("{kind} resources"),
+    );
     let summary = format!(
-        "{} {}{}",
+        "{} resources{}",
         rows.len(),
-        if row_kind == "snippet" {
-            "snippets"
-        } else {
-            "history entries"
-        },
         if truncated { " shown" } else { "" }
     );
     Ok(TargetProjection {
-        title: title.to_owned(),
+        title,
         summary,
         revision: host.catalog_revision().0,
         graph: json!({
             "collection": {
                 "targetId": request.target_id,
                 "layoutProfile": request.layout_profile,
-                "resourceKind": "artifact",
-                "rowKind": row_kind,
+                "resourceKind": kind,
                 "rows": rows,
                 "truncated": truncated,
-                "limit": PROMPT_COLLECTION_LIMIT,
+                "limit": RESOURCE_COLLECTION_LIMIT,
             }
         }),
     })
-}
-
-pub(super) struct CurrentResourcePayload {
-    pub(super) inspection: EngineResourceInspection,
-    pub(super) payload: Value,
-}
-
-pub(super) fn current_resource_payloads_by_prefix(
-    host: &dyn PrimitiveRuntimeHost,
-    kind: &str,
-    resource_id_prefix: &str,
-    excluded_lifecycles: &[&str],
-) -> Result<Vec<CurrentResourcePayload>> {
-    let resources = host.list_resources(ListResources {
-        kind: Some(kind.to_owned()),
-        scope: None,
-        lifecycle: None,
-        limit: RESOURCE_COLLECTION_SCAN_LIMIT,
-    })?;
-    let mut projections = Vec::new();
-    for resource in resources.into_iter().filter(|resource| {
-        resource.resource_id.starts_with(resource_id_prefix)
-            && !excluded_lifecycles.contains(&resource.lifecycle.as_str())
-            && resource.current_version_id.is_some()
-    }) {
-        let Some(inspection) = host.inspect_resource(&resource.resource_id)? else {
-            continue;
-        };
-        let Some(payload) = current_payload(&inspection) else {
-            continue;
-        };
-        projections.push(CurrentResourcePayload {
-            inspection,
-            payload,
-        });
-    }
-    Ok(projections)
-}
-
-pub(super) fn bounded_text_preview(text: &str, max_preview_bytes: usize) -> String {
-    if unsafe_prompt_preview_text(text) {
-        return "[redacted]".to_owned();
-    }
-    let max_chars = max_preview_bytes.clamp(64, 512);
-    if text.chars().count() <= max_chars {
-        text.to_owned()
-    } else {
-        let mut preview = text.chars().take(max_chars).collect::<String>();
-        preview.push_str("...");
-        preview
-    }
 }
 
 pub(super) fn display_identifier(value: &str) -> String {
@@ -616,31 +517,13 @@ pub(super) fn display_identifier(value: &str) -> String {
     format!("{prefix}...{suffix}")
 }
 
-pub(super) fn unsafe_prompt_preview_text(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("secret=")
-        || lower.contains("api_key")
-        || lower.contains("access_token")
-        || lower.contains("private_key")
-        || lower.contains("file://")
-        || lower.contains("javascript:")
-        || lower.contains("<script")
-        || text.contains("sk-")
-}
-
 fn layout_for_projection(
     request: &SurfaceAuthoringRequest,
     projection: &TargetProjection,
     actions: &[Value],
 ) -> Value {
     if request.target_type == RESOURCE_COLLECTION_TARGET {
-        return resource_collection_layout(request, projection);
-    }
-    if request.target_type == SOURCE_CONTROL_TARGET {
-        return source_control_session_layout(projection, actions);
-    }
-    if request.target_type == AGENT_CONTROL_TARGET {
-        return agent_control_session_layout(projection);
+        return resource_collection_layout(projection);
     }
     if request.target_type == "capability" {
         return capability_layout(projection, actions);
@@ -794,26 +677,44 @@ fn component_for_capability_field(name: &str, schema: &Value) -> Value {
     }
 }
 
-fn resource_collection_layout(
-    request: &SurfaceAuthoringRequest,
-    projection: &TargetProjection,
-) -> Value {
+fn resource_collection_layout(projection: &TargetProjection) -> Value {
     let rows = projection
         .graph
         .pointer("/collection/rows")
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    if request.layout_profile == PROMPT_SNIPPET_LAYOUT_PROFILE {
-        return prompt_snippet_collection_layout(projection, &rows);
+    let mut children = vec![
+        json!({"type": "Heading", "props": {"text": projection.title}}),
+        json!({"type": "Text", "props": {"text": projection.summary}}),
+    ];
+    for row in rows {
+        let title = row
+            .get("resourceId")
+            .and_then(Value::as_str)
+            .unwrap_or("resource");
+        let detail = json!({
+            "kind": row.get("kind").cloned().unwrap_or(Value::Null),
+            "scope": row.get("scope").cloned().unwrap_or(Value::Null),
+            "lifecycle": row.get("lifecycle").cloned().unwrap_or(Value::Null),
+            "currentVersionId": row.get("currentVersionId").cloned().unwrap_or(Value::Null),
+        });
+        children.push(json!({
+            "type": "ResourceRow",
+            "props": {
+                "title": title,
+                "subtitle": detail.to_string()
+            }
+        }));
     }
-    if request.layout_profile == NOTIFICATION_INBOX_LAYOUT_PROFILE {
-        return notification_collection_layout(projection, &rows);
-    }
-    if request.layout_profile == SUBAGENT_LINEAGE_LAYOUT_PROFILE {
-        return subagent_collection_layout(projection, &rows);
-    }
-    prompt_history_collection_layout(projection, &rows)
+    children.push(
+        json!({"type": "Button", "props": {"label": "Refresh", "actionId": "refresh-surface"}}),
+    );
+    json!({
+        "type": "Section",
+        "props": {"title": projection.title},
+        "children": children
+    })
 }
 
 pub(in crate::engine::primitives::ui) fn actor_context(

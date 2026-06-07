@@ -1,8 +1,6 @@
 # Onboarding (iOS sheet)
 
-> Reference companion to `.claude/rules/onboarding.md` (load-on-demand
-> rule consumed by Claude). This file is the human-readable narrative;
-> when in doubt, the rule is normative.
+> Last verified: 2026-06-07 (PET-10 client primitive cleanup).
 
 The iOS app always opens to the normal dashboard after initialization.
 Fresh installs present a medium-detent onboarding sheet above the
@@ -154,8 +152,8 @@ After pairing succeeds, onboarding continues with optional setup pages:
 - **Search services** exposes API-key rows for Brave Search and Exa.
   Saved service keys use the same right-aligned masked preview layout as
   optional model providers.
-- **Default model** reuses `ModelPickerSheet`, then writes both
-  `server.defaultModel` and `memory.retainModel`.
+- **Default model** reuses `ModelPickerSheet`, then writes
+  `server.defaultModel`.
 
 Pairing hydrates an in-memory `OnboardingSetupSnapshot` from the newly active
 server before the setup pages unlock. Existing server preferences from
@@ -202,16 +200,16 @@ settings live as sparse `[settings]` overrides in
 `~/.tron/profiles/user/profile.toml`; they remain behind the server-backed
 settings grid tiles and are enabled only after the active server connects and
 `settings.get` returns real values. The main Settings sheet starts at the medium detent and
-uses a 3x3 launcher grid: App, Server, and Providers for settings surfaces;
-Agent, Context, and Plugin Sources for agent behavior; then Clear Prompt History, Archive
-All Sessions, and Reset All Settings as the red destructive row with no separate
-Danger Zone header. All nine tiles share the same compact icon size; the green
+uses a compact launcher grid: App, Server, and Providers for settings surfaces;
+Agent and Context for primitive agent behavior; then Clear Prompt History,
+Archive All Sessions, and Reset All Settings as the red destructive row with no
+separate Danger Zone header. All tiles share the same compact icon size; the green
 surface and behavior tiles are slightly taller with left-aligned emerald titles,
 top-right icons, and short softer descriptive copy. A thin muted divider separates
 those destination rows from the destructive row, which sizes to its two-line red
 labels and top-right icons. When the paired server is unavailable or
 server-backed settings have not loaded, the launcher collapses to a two-column
-App and Server row, hides Providers, Agent, Context, and Plugin Sources, and shows the
+App and Server row, hides Providers, Agent, and Context, and shows the
 server-unavailable card immediately below that row before the destructive
 actions.
 Device-only preferences such as onboarding completion,
@@ -221,10 +219,9 @@ clears server-backed controls immediately and reloads them from the newly active
 Mac.
 The Servers sheet starts with a dynamic summary card, then groups settings as:
 header, one or more glass containers with control titles, and optional
-description text below each container. Transcription, paired-device token
-enforcement, and update checks all live in this sheet because they are active
-Mac server settings; update controls sit at the bottom after security under one
-Updates header.
+description text below each container. Diagnostics and update checks live in
+this sheet because they are active Mac server settings; update controls sit at
+the bottom under one Updates header.
 When the active paired server is unreachable, the Servers sheet keeps paired
 server rows visible for local switching and removal, turns the summary card
 warning-yellow with `<server name> not available`, and hides server-backed
@@ -251,12 +248,12 @@ rebuild without requiring every screen to own retry logic.
 The Agent and Context settings sheets follow the same top summary-card pattern
 and divide server settings by ownership. Agent owns the retained execution and
 lifecycle controls that still exist in the current settings schema:
-quick-session defaults, hook model/error behavior, queued-message delivery, and
-protected branch metadata. Each setting keeps its own glass container and
-description unless controls are intentionally coupled. Context owns retained
-context-management behavior such as compaction and memory auto-retain. Deleted
-prompt-history and prompt-library controls must not reappear as separate
-Settings destinations or destructive actions.
+quick-session defaults and queued-message delivery. Each setting keeps its own
+glass container and description unless controls are intentionally coupled.
+Context owns retained context-management behavior: compaction only. Deleted
+plugin-source, hook, rules, memory-retain, prompt-history, and prompt-library
+controls must not reappear as separate Settings destinations or destructive
+actions.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
 pairing bearer token and sends `system::ping`. The server emits a

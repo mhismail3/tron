@@ -5,13 +5,13 @@
 //! They do not own durable state. Generated surface authoring lives in
 //! `ui/authoring/` so fixed clients can render server-owned review surfaces
 //! without constructing target functions, payload templates, grants, or
-//! stale-state policy locally. The authoring folder is split by target family:
-//! prompt-library collections, notifications, subagent lineage, source-control,
-//! AgentControl, capability actions, and module package/activation/decision
-//! operator surfaces. Capability authoring can expose a stored invoke action
-//! for session-created functions when the required request fields map to the
-//! fixed native catalog. Resource-collection authoring uses bounded projections
-//! over `PrimitiveRuntimeHost::list_resources` and `inspect_resource`.
+//! stale-state policy locally. Generated authoring is intentionally substrate
+//! shaped: workers, capabilities, resources, decisions, invocations, grants,
+//! queues, leases, storage, integrity, and generic resource-kind collections.
+//! Capability authoring can expose a stored invoke action for session-created
+//! functions when the required request fields map to the fixed native catalog.
+//! Resource-collection authoring uses bounded projections over
+//! `PrimitiveRuntimeHost::list_resources` and `inspect_resource`.
 //! Generated UI writes and action submissions share a `ui_surface` lifecycle
 //! lease and compensation notes so server-authored surfaces and stored action
 //! submissions are visible in the invocation, lease, and compensation ledgers.
@@ -63,28 +63,8 @@ pub(crate) const EXPIRE_SURFACE_FUNCTION: &str = "ui::expire_surface";
 
 const GENERATED_AUTHORING_MODE: &str = "generated";
 const RESOURCE_COLLECTION_TARGET: &str = "resource_collection";
-const SOURCE_CONTROL_TARGET: &str = "source_control";
-const AGENT_CONTROL_TARGET: &str = "agent_control";
-const SOURCE_CONTROL_SESSION_LAYOUT_PROFILE: &str = "source_control.session.v1";
-const AGENT_CONTROL_SESSION_LAYOUT_PROFILE: &str = "agent_control.session.v1";
-const PROMPT_SNIPPET_COLLECTION_TARGET: &str = "artifact:prompt-snippet";
-const PROMPT_HISTORY_COLLECTION_TARGET: &str = "artifact:prompt-history";
-const PROMPT_SNIPPET_RESOURCE_PREFIX: &str = "artifact:prompt-snippet:";
-const PROMPT_HISTORY_RESOURCE_PREFIX: &str = "artifact:prompt-history:";
-const PROMPT_SNIPPET_LAYOUT_PROFILE: &str = "prompt_library.snippets.v1";
-const PROMPT_HISTORY_LAYOUT_PROFILE: &str = "prompt_library.history.v1";
-const PROMPT_COLLECTION_LIMIT: usize = 25;
 const RESOURCE_COLLECTION_SCAN_LIMIT: usize = 500;
-const NOTIFICATION_COLLECTION_TARGET: &str = "notification";
-const NOTIFICATION_RESOURCE_PREFIX: &str = "notification:";
-const NOTIFICATION_INBOX_LAYOUT_PROFILE: &str = "notifications.inbox.v1";
-const NOTIFICATION_COLLECTION_LIMIT: usize = 50;
-const SUBAGENT_COLLECTION_TARGET: &str = "agent_result:subagent";
-const SUBAGENT_RESULT_RESOURCE_PREFIX: &str = "agent_result:subagent:";
-const SUBAGENT_LINEAGE_LAYOUT_PROFILE: &str = "subagent.lineage.v1";
-const SUBAGENT_COLLECTION_LIMIT: usize = 50;
-const SOURCE_CONTROL_INVOCATION_LIMIT: usize = 12;
-const SOURCE_CONTROL_FILE_LIMIT: usize = 25;
+const RESOURCE_COLLECTION_LIMIT: usize = 50;
 
 pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
     Ok(vec![
@@ -773,8 +753,6 @@ fn ensure_supported_target_type(target_type: &str) -> Result<()> {
             | "capability"
             | "goal"
             | RESOURCE_COLLECTION_TARGET
-            | SOURCE_CONTROL_TARGET
-            | AGENT_CONTROL_TARGET
             | "decision"
             | "resource"
             | "invocation"
@@ -815,12 +793,6 @@ fn slug(value: &str) -> String {
         slug = slug.replace("--", "-");
     }
     slug.trim_matches('-').chars().take(48).collect::<String>()
-}
-
-fn collection_row_key(value: &str) -> String {
-    let digest = Sha256::digest(value.as_bytes());
-    let hex = format!("{digest:x}");
-    format!("r{}", &hex[..12])
 }
 
 fn hash_json(value: &Value) -> Result<String> {

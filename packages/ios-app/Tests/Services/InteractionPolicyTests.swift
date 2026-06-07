@@ -43,8 +43,6 @@ struct InteractionPolicyTests {
         #expect(f.policy.canSendMessage == false)
         #expect(f.policy.canCreateSession == false)
         #expect(f.policy.canMutateSession == false)
-        #expect(f.policy.canRecordAudio == false)
-        #expect(f.policy.canManagePluginSources == false)
         #expect(f.policy.canLoadServerData == false)
     }
 
@@ -57,8 +55,6 @@ struct InteractionPolicyTests {
         #expect(f.policy.canSendMessage)
         #expect(f.policy.canCreateSession)
         #expect(f.policy.canMutateSession)
-        #expect(f.policy.canRecordAudio)
-        #expect(f.policy.canManagePluginSources)
         #expect(f.policy.canLoadServerData)
     }
 

@@ -1,6 +1,6 @@
 //! Domain-specific dependency bundle for the context worker.
 
-use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::runner::Orchestrator;
 use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
 use crate::domains::agent::runner::profile_runtime::ProfileRuntime;
 use crate::domains::session::event_store::EventStore;
@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
-    pub(super) context_artifacts: Arc<crate::domains::session::context::ContextArtifactsService>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) event_store: Arc<EventStore>,
     pub(super) orchestrator: Arc<Orchestrator>,
@@ -20,7 +19,6 @@ pub(crate) struct Deps {
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
-            context_artifacts: deps.context_artifacts.clone(),
             engine_host: deps.engine_host.clone(),
             event_store: deps.event_store.clone(),
             orchestrator: deps.orchestrator.clone(),

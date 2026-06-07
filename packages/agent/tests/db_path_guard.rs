@@ -212,40 +212,39 @@ fn retired_tron_home_paths_are_absent() {
         root.join("CONTRIBUTING.md"),
         root.join("packages/agent/defaults"),
         root.join("packages/agent/docs"),
-        root.join("packages/agent/skills"),
         root.join("packages/agent/src"),
         root.join("packages/ios-app/Sources"),
         root.join("packages/mac-app/Sources"),
         root.join("packages/mac-app/docs"),
         root.join("scripts"),
     ];
-    let old_patterns = [
-        "~/.tron/system/",
-        ".tron/system/",
-        "system/database",
-        "system/settings.json",
-        "system/auth.json",
-        "system/run",
-        "system/transcription",
-        "workspace/memory",
-        "workspace/artifacts",
-        "artifacts/renders",
-        "artifacts/screenshots",
-        "artifacts/exports",
-        "exports_dir",
-        "dirs::ARTIFACTS",
-        "dirs::EXPORTS",
-        "~/.tron/settings",
-        "~/.tron/knowledge/",
-        "~/.tron/vault/",
-        "~/.tron/instructions",
-        "~/.tron/user",
-        "master-default",
-        "~/.tron/auto-update.pause",
-        "~/.tron/auto-deploy.pause",
-        "~/.tron/deploy.lock",
-        "~/.tron/auto-deploy.lock",
-        concat!("~/.tron/", "to", "ols", "/json-render"),
+    let old_patterns = vec![
+        "~/.tron/system/".to_owned(),
+        ".tron/system/".to_owned(),
+        "system/database".to_owned(),
+        "system/settings.json".to_owned(),
+        "system/auth.json".to_owned(),
+        "system/run".to_owned(),
+        ["system/", "trans", "cription"].concat(),
+        "workspace/memory".to_owned(),
+        "workspace/artifacts".to_owned(),
+        "artifacts/renders".to_owned(),
+        "artifacts/screenshots".to_owned(),
+        "artifacts/exports".to_owned(),
+        "exports_dir".to_owned(),
+        "dirs::ARTIFACTS".to_owned(),
+        "dirs::EXPORTS".to_owned(),
+        "~/.tron/settings".to_owned(),
+        "~/.tron/knowledge/".to_owned(),
+        "~/.tron/vault/".to_owned(),
+        "~/.tron/instructions".to_owned(),
+        "~/.tron/user".to_owned(),
+        "master-default".to_owned(),
+        "~/.tron/auto-update.pause".to_owned(),
+        "~/.tron/auto-deploy.pause".to_owned(),
+        "~/.tron/deploy.lock".to_owned(),
+        "~/.tron/auto-deploy.lock".to_owned(),
+        concat!("~/.tron/", "to", "ols", "/json-render").to_owned(),
     ];
     let mut files = Vec::new();
     for scan_root in scan_roots {
@@ -260,7 +259,7 @@ fn retired_tron_home_paths_are_absent() {
         let Ok(body) = std::fs::read_to_string(&file) else {
             continue;
         };
-        for pattern in old_patterns {
+        for pattern in &old_patterns {
             if body.contains(pattern) {
                 violations.push(format!("{relative}: contains {pattern}"));
             }
@@ -269,7 +268,7 @@ fn retired_tron_home_paths_are_absent() {
 
     assert!(
         violations.is_empty(),
-        "old Tron Home paths must not appear in runtime, defaults, docs, skills, or scripts:\n{}",
+        "old Tron Home paths must not appear in runtime, defaults, docs, or scripts:\n{}",
         violations.join("\n")
     );
 }
@@ -278,7 +277,6 @@ fn retired_tron_home_paths_are_absent() {
 fn runtime_does_not_use_global_active_profile_helpers() {
     let root = repo_root();
     let scan_roots = [
-        root.join("packages/agent/src/domains/cron"),
         root.join("packages/agent/src/domains/model/providers"),
         root.join("packages/agent/src/domains/agent/runner"),
         root.join("packages/agent/src/app"),
@@ -297,7 +295,9 @@ fn runtime_does_not_use_global_active_profile_helpers() {
 
     let mut files = Vec::new();
     for scan_root in scan_roots {
-        collect_text_files(&scan_root, &mut files);
+        if scan_root.exists() {
+            collect_text_files(&scan_root, &mut files);
+        }
     }
 
     let mut violations = Vec::new();

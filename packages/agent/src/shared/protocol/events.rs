@@ -5,7 +5,7 @@
 //! - **[`StreamEvent`]**: Low-level LLM streaming events from a provider
 //!   (text deltas, thinking deltas, capability invocation construction, done/error).
 //! - **[`TronEvent`]**: High-level agent lifecycle events with session context
-//!   (agent start/end, turn boundaries, capability invocation, hooks, compaction).
+//!   (agent start/end, turn boundaries, capability invocation, compaction).
 //!
 //! `StreamEvent` is purely in-memory (never persisted). `TronEvent` is
 //! published through engine streams and may be recorded as session events.
@@ -35,6 +35,4 @@ pub use factory::{
 pub use stream::{AssistantMessage, RetryErrorInfo, StreamEvent, is_stream_event_type};
 #[cfg(test)]
 pub(crate) use tron::VARIANT_COUNT;
-pub use tron::{
-    ActivatedRuleInfo, BackgroundHookResult, BaseEvent, CompactionReason, HookResult, TronEvent,
-};
+pub use tron::{BaseEvent, CompactionReason, TronEvent};

@@ -13,7 +13,6 @@
 //! - **Events**: [`events::StreamEvent`] for LLM streaming, [`events::TronEvent`] for agent lifecycle
 //! - **Retry**: [`retry::RetryConfig`] and backoff calculation
 //! - **Profile Home**: [`constitution`] home migration/recovery and [`profile`] execution specs
-//! - **`agent::ask_user`**: [`user_interaction`] payload types for native interaction
 //! - **Memory**: [`memory::SessionMemory`]
 //!
 //! ## Module Position
@@ -52,5 +51,3 @@ pub mod server;
 pub mod storage;
 #[path = "foundation/text.rs"]
 pub mod text;
-#[path = "protocol/user_interaction.rs"]
-pub mod user_interaction;

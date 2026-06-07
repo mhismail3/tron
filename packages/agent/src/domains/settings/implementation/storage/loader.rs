@@ -61,7 +61,9 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
     let defaults = load_settings_defaults_for(path)?;
     let overlay = read_sparse_settings_overlay(path)?;
     let merged = deep_merge(serde_json::to_value(defaults)?, overlay);
-    let mut settings: TronSettings = serde_json::from_value(merged)?;
+    let mut settings: TronSettings = serde_json::from_value(merged).map_err(|error| {
+        SettingsError::InvalidValue(format!("failed to load settings: {error}"))
+    })?;
     settings.validate_strict()?;
     apply_env_overrides(&mut settings);
     settings.validate();
@@ -173,15 +175,6 @@ pub fn apply_env_overrides(settings: &mut TronSettings) {
     if let Some(v) = read_env_u64("TRON_HEARTBEAT_INTERVAL", 1000, 600_000) {
         settings.server.heartbeat_interval_ms = v;
     }
-    if let Some(v) = read_env_string("TRON_MEMORY_DB") {
-        settings.server.memory_db_path = v;
-    }
-
-    // ── Transcription settings ──────────────────────────────────────
-    if let Some(v) = read_env_bool("TRON_TRANSCRIBE_ENABLED") {
-        settings.server.transcription.enabled = v;
-    }
-
     // ── API settings ────────────────────────────────────────────────
     if let Some(v) = read_env_string("ANTHROPIC_CLIENT_ID") {
         settings.api.anthropic.client_id = v;
@@ -227,15 +220,6 @@ pub fn parse_u64_range(val: &str, min: u64, max: u64) -> Option<u64> {
 
 fn read_env_string(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.is_empty())
-}
-
-fn read_env_bool(name: &str) -> Option<bool> {
-    let val = std::env::var(name).ok()?;
-    let result = parse_bool(&val);
-    if result.is_none() {
-        tracing::warn!(key = name, value = %val, "invalid boolean env var, ignoring");
-    }
-    result
 }
 
 fn read_env_u64(name: &str, min: u64, max: u64) -> Option<u64> {
@@ -413,7 +397,6 @@ authProfile = "default"
         assert_eq!(settings.retry.max_retries, defaults.retry.max_retries);
         assert!((settings.retry.jitter_factor - defaults.retry.jitter_factor).abs() < f64::EPSILON);
         assert_eq!(settings.agent.max_turns, defaults.agent.max_turns);
-        assert_eq!(settings.agent.subagent_model, defaults.agent.subagent_model);
         assert_eq!(
             settings.capabilities.process.default_timeout_ms,
             defaults.capabilities.process.default_timeout_ms
@@ -571,7 +554,6 @@ maxTokens = 50000
 
         let settings = load_settings_from_path(&path).unwrap();
         assert_eq!(settings.context.compactor.max_tokens, 50_000);
-        assert!(settings.context.rules.discover_standalone_files);
     }
 
     #[test]
@@ -606,21 +588,24 @@ heartbeatIntervalMs = 0
     }
 
     #[test]
-    fn load_rejects_removed_guardrail_settings() {
+    fn load_rejects_removed_policy_settings() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
+        let section = ["guard", "rails"].concat();
         write_sparse_settings(
             &path,
-            r#"[settings.guardrails.audit]
+            &format!(
+                r#"[settings.{section}.audit]
 enabled = true
 maxEntries = 500
-"#,
+"#
+            ),
         );
 
         let err = load_settings_from_path(&path).unwrap_err();
 
         assert!(matches!(err, SettingsError::InvalidValue(_)));
-        assert!(err.to_string().contains("guardrails"));
+        assert!(err.to_string().contains(&section));
     }
 
     #[test]

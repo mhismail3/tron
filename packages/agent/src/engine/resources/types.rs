@@ -15,11 +15,6 @@ pub const UI_SURFACE_SCHEMA_ID: &str = "tron.resource.ui_surface.v1";
 pub const UI_CATALOG_ID: &str = "tron.ui.catalog.core.v1";
 /// Fixed first-party generated UI component catalog revision.
 pub const UI_CATALOG_REVISION: u64 = 1;
-/// Built-in harness documentation resource kind.
-pub const HARNESS_DOC_KIND: &str = "harness_doc";
-/// Built-in harness documentation schema id.
-pub const HARNESS_DOC_SCHEMA_ID: &str = "tron.resource.harness_doc.v1";
-
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

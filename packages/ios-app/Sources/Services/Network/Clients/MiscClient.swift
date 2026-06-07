@@ -79,21 +79,6 @@ final class MiscClient: EngineDomainClient {
         return result
     }
 
-    // MARK: - Memory Methods
-
-    /// Trigger manual memory retention — summarizes the session and appends to the memory log.
-    func retainMemory(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws -> MemoryRetainResult {
-        _ = try requireTransport().requireConnection()
-
-        let params = MemoryRetainParams(sessionId: sessionId)
-        return try await invokeWrite(
-            "memory::retain",
-            params,
-            idempotencyKey: idempotencyKey,
-            context: sessionInvocationContext(sessionId)
-        )
-    }
-
     // MARK: - Device Token Methods (Push Notifications)
 
     /// Register a device token for push notifications.

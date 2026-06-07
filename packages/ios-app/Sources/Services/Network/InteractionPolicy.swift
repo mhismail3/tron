@@ -83,10 +83,8 @@ final class InteractionPolicy {
     // MARK: - Semantic predicates
 
     var canSendMessage: Bool        { isConnected }
-    var canRecordAudio: Bool        { isConnected }
     var canCreateSession: Bool      { isConnected }
     var canMutateSession: Bool      { isConnected }
-    var canManagePluginSources: Bool          { isConnected }
     var canLoadServerData: Bool     { isConnected }
 
     // MARK: - Private

@@ -1,11 +1,11 @@
 use super::support::*;
 
 #[tokio::test]
-async fn archive_without_worktree_succeeds() {
+async fn archive_without_external_workspace_succeeds() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("model", "/tmp", Some("test"), None)
+        .create_session("model", "/tmp", Some("test"))
         .unwrap();
 
     SessionCommandService::archive(&Deps::from_test_context(&ctx), sid.clone())
@@ -17,11 +17,11 @@ async fn archive_without_worktree_succeeds() {
 }
 
 #[tokio::test]
-async fn delete_without_worktree_succeeds() {
+async fn delete_without_external_workspace_succeeds() {
     let ctx = make_test_context();
     let sid = ctx
         .session_manager
-        .create_session("model", "/tmp", Some("test"), None)
+        .create_session("model", "/tmp", Some("test"))
         .unwrap();
 
     SessionCommandService::delete(&Deps::from_test_context(&ctx), sid.clone())

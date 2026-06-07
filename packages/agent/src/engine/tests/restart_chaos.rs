@@ -13,7 +13,7 @@ async fn sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect(
         actor("owner"),
         grant("external-grant"),
     )
-    .with_namespace_claim("hmh_f7");
+    .with_namespace_claim("restart_chaos");
     let mut hello = WorkerHello::loopback(worker);
     hello.registration_mode = WorkerRegistrationMode::Durable;
     hello.session_id = Some("hmh-f7-session".to_owned());
@@ -21,9 +21,9 @@ async fn sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect(
     runtime
         .register_function(RegisterFunction {
             definition: external_visible_function(FunctionDefinition::new(
-                fid("hmh_f7::echo"),
+                fid("restart_chaos::echo"),
                 worker_id.clone(),
-                "HMH-F7 durable external function",
+                "durable external function",
                 VisibilityScope::Session,
                 EffectClass::PureRead,
             )),
@@ -38,7 +38,7 @@ async fn sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect(
     let reopened = EngineHostHandle::open_sqlite(&path).unwrap();
     let admin = ActorContext::new(actor("admin"), ActorKind::System, grant("admin-grant"));
     let function = reopened
-        .inspect_function(&fid("hmh_f7::echo"), Some(&admin))
+        .inspect_function(&fid("restart_chaos::echo"), Some(&admin))
         .await
         .unwrap();
     assert_eq!(function.health, FunctionHealth::Unhealthy);
@@ -49,10 +49,10 @@ async fn sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect(
 
     let result = reopened
         .invoke(host_invocation(
-            "hmh_f7::echo",
+            "restart_chaos::echo",
             json!({}),
             causal()
-                .with_scope("hmh_f7.read")
+                .with_scope("restart_chaos.read")
                 .with_session_id("hmh-f7-session"),
         ))
         .await;

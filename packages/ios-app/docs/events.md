@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-07 (PET-8 primitive shell teardown).
+> Last verified: 2026-06-07 (PET-10 client primitive cleanup).
 
 The iOS app handles engine events through two paths:
 
@@ -27,12 +27,12 @@ Current retained plugin groups:
 |-------|-----------|---------|
 | Streaming | `Plugins/Streaming/` | Text, thinking, and turn lifecycle deltas. |
 | Capability invocation | `Plugins/CapabilityInvocation/` | Generic `capability.invocation.*` lifecycle evidence for chat. |
-| Lifecycle | `Plugins/Lifecycle/` | Agent readiness, completion, compaction, context, memory, message deletion, and turn failure labels that still reach the shell. |
+| Lifecycle | `Plugins/Lifecycle/` | Agent readiness, completion, compaction, context clearing, message deletion, and turn failure labels that still reach the shell. |
 | Session | `Plugins/Session/` | Connection and session list/update/archive/delete state. |
 | Queue | `Plugins/Queue/` | Prompt queue/dequeue/send status. |
 | Process | `Plugins/Process/` | Generic process lifecycle evidence emitted through the primitive runtime. |
 | Display | `Plugins/Display/` | Generic display frames for runtime surfaces. |
-| Server | `Plugins/Server/` | Server/auth/plugin-source/restart status messages. |
+| Server | `Plugins/Server/` | Server/auth/restart status messages. |
 | Hook | `Plugins/Hook/` | Generic LLM hook result display while PET-10 audits remaining hook labels. |
 
 Deleted plugin roots such as `Plugins/Subagent/`, `Plugins/Worktree/`, and

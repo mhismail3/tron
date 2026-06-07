@@ -35,14 +35,6 @@ enum MessageContent: Equatable {
     static var interrupted: MessageContent {
         .systemEvent(.interrupted)
     }
-    /// In-chat notification for transcription failure
-    static var transcriptionFailed: MessageContent {
-        .systemEvent(.transcriptionFailed)
-    }
-    /// In-chat notification for no speech detected
-    static var transcriptionNoSpeech: MessageContent {
-        .systemEvent(.transcriptionNoSpeech)
-    }
     /// In-chat notification for compaction in progress
     static func compactionInProgress(reason: String) -> MessageContent {
         .systemEvent(.compactionInProgress(reason: reason))
@@ -58,36 +50,6 @@ enum MessageContent: Equatable {
     /// In-chat notification for message deletion from context
     static func messageDeleted(targetType: String) -> MessageContent {
         .systemEvent(.messageDeleted(targetType: targetType))
-    }
-    /// In-chat notification for memory retain in progress
-    static var memoryRetainInProgress: MessageContent {
-        .systemEvent(.memoryRetainInProgress)
-    }
-    /// In-chat notification for automatic memory retain in progress
-    static func memoryAutoRetainInProgress(intervalFired: Int) -> MessageContent {
-        .systemEvent(.memoryAutoRetainInProgress(intervalFired: intervalFired))
-    }
-    /// In-chat notification that an auto-retain pipeline started but its
-    /// summarizer failed. The server still writes a reduced-quality summary;
-    /// this pill surfaces the quality signal.
-    static func memoryAutoRetainFailed(intervalFired: Int, reason: String) -> MessageContent {
-        .systemEvent(.memoryAutoRetainFailed(intervalFired: intervalFired, reason: reason))
-    }
-    /// In-chat notification for memory retained to long-term log
-    static func memoryRetained(title: String, summary: String?) -> MessageContent {
-        .systemEvent(.memoryRetained(title: title, summary: summary))
-    }
-    /// In-chat notification for memory retain with nothing new
-    static var memoryRetainedNothingNew: MessageContent {
-        .systemEvent(.memoryRetainedNothingNew)
-    }
-    /// In-chat notification for rules loaded on session start
-    static func rulesLoaded(count: Int) -> MessageContent {
-        .systemEvent(.rulesLoaded(count: count))
-    }
-    /// In-chat notification for dynamically activated rules
-    static func rulesActivated(rules: [ActivatedRuleEntry], totalActivated: Int) -> MessageContent {
-        .systemEvent(.rulesActivated(rules: rules, totalActivated: totalActivated))
     }
     /// In-chat notification for catching up to in-progress session
     static var catchingUp: MessageContent {

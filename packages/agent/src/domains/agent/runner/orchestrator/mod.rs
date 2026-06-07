@@ -27,8 +27,8 @@
 //! the `TronEvent` (via `BaseEvent.sequence`) and server stream event sequence fields.
 //! Runtime-persisted events that pre-assign from the counter must go through
 //! `EventPersister::append_with_runtime_sequence`: it advances the counter from
-//! DB truth and retries sequence collisions caused by background hooks or
-//! worktree events that use the event-store allocator directly.
+//! DB truth and retries sequence collisions caused by any direct event-store
+//! writer racing with the active turn.
 //!
 //! ## Streaming Journal (Crash Recovery)
 //!
@@ -38,16 +38,16 @@
 //! journals are recovered on next startup by `recovery::recover_incomplete_turns`,
 //! which persists partial content as assistant messages before accepting connections.
 //!
-pub mod agent_factory;
-pub mod agent_runner;
-pub mod capability_invocation_tracker;
-pub mod event_persister;
-pub mod invocation_abort_registry;
+pub(crate) mod agent_factory;
+pub(crate) mod agent_runner;
+pub(crate) mod capability_invocation_tracker;
+pub(crate) mod event_persister;
+pub(crate) mod invocation_abort_registry;
 #[allow(clippy::module_inception)]
-pub mod orchestrator;
-pub mod recovery;
-pub mod session_context;
-pub mod session_manager;
-pub mod session_reconstructor;
-pub mod streaming_journal;
-pub mod turn_accumulator;
+pub(crate) mod orchestrator;
+pub(crate) mod recovery;
+pub(crate) mod session_context;
+pub(crate) mod session_manager;
+pub(crate) mod session_reconstructor;
+pub(crate) mod streaming_journal;
+pub(crate) mod turn_accumulator;

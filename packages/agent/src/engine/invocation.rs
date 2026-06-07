@@ -17,7 +17,7 @@ use super::types::{CatalogRevision, DeliveryMode, FunctionRevision, IdempotencyS
 /// Runtime metadata key carrying the trusted session working directory.
 ///
 /// This is engine-owned context, not model-supplied payload. Domain workers use it
-/// when a relative path needs to resolve against the active session/worktree.
+/// when a relative path needs to resolve against the active session workspace.
 pub const RUNTIME_METADATA_WORKING_DIRECTORY: &str = "agent.workingDirectory";
 /// Runtime metadata key carrying the provider/model tool-call id that caused an
 /// engine invocation.

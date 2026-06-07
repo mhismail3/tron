@@ -29,8 +29,6 @@ impl SessionCommandService {
                 base: BaseEvent::now(&session_id),
                 model: request.model.clone(),
                 working_directory: request.working_directory.clone(),
-                source: None,
-                profile: None,
                 title: request.title.clone(),
             });
 

@@ -6,13 +6,13 @@ use super::*;
 fn get_sessions_by_ids_basic() {
     let store = setup();
     let cr1 = store
-        .create_session("claude-opus-4-6", "/tmp/a", Some("A"), None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", Some("A"), None)
         .unwrap();
     let cr2 = store
-        .create_session("claude-opus-4-6", "/tmp/b", Some("B"), None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/b", Some("B"), None)
         .unwrap();
     store
-        .create_session("claude-opus-4-6", "/tmp/c", Some("C"), None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/c", Some("C"), None)
         .unwrap();
 
     let ids = [cr1.session.id.as_str(), cr2.session.id.as_str()];
@@ -33,7 +33,7 @@ fn get_sessions_by_ids_empty() {
 fn get_sessions_by_ids_missing_omitted() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None)
         .unwrap();
 
     let ids = [cr.session.id.as_str(), "sess_nonexistent"];
@@ -46,7 +46,7 @@ fn get_sessions_by_ids_missing_omitted() {
 fn get_session_message_previews_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None)
         .unwrap();
 
     store
@@ -84,7 +84,7 @@ fn get_session_message_previews_basic() {
 fn get_events_by_ids_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None)
         .unwrap();
     let evt = store
         .append(&AppendOptions {
@@ -107,10 +107,10 @@ fn get_events_by_ids_basic() {
 fn get_events_by_sessions_and_types_returns_all_matching_events() {
     let store = setup();
     let first = store
-        .create_session("claude-opus-4-6", "/tmp/project-a", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project-a", None, None)
         .unwrap();
     let second = store
-        .create_session("claude-opus-4-6", "/tmp/project-b", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project-b", None, None)
         .unwrap();
 
     let first_user = store
@@ -157,7 +157,7 @@ fn get_events_by_sessions_and_types_returns_all_matching_events() {
 fn get_events_by_type_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -189,10 +189,10 @@ fn get_events_by_type_basic() {
 fn get_events_by_workspace_and_types_cross_session() {
     let store = setup();
     let cr1 = store
-        .create_session("claude-opus-4-6", "/tmp/proj", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/proj", None, None)
         .unwrap();
     let cr2 = store
-        .create_session("claude-opus-4-6", "/tmp/proj", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/proj", None, None)
         .unwrap();
 
     store
@@ -224,7 +224,7 @@ fn get_events_by_workspace_and_types_cross_session() {
 fn count_events_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -246,7 +246,7 @@ fn count_events_basic() {
 fn get_messages_at_head_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -281,7 +281,7 @@ fn get_messages_at_head_basic() {
 fn get_messages_at_head_resolves_blob_backed_event_payloads() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     let content = "large message ".repeat(1024);
     let event = store
@@ -328,7 +328,7 @@ fn get_messages_at_head_resolves_blob_backed_event_payloads() {
 fn resolve_event_payloads_expands_blob_backed_capability_events() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     let large_content = "inspect result ".repeat(2048);
     let event = store
@@ -368,7 +368,7 @@ fn resolve_event_payloads_expands_blob_backed_capability_events() {
 fn get_messages_at_specific_event() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     let user_evt = store
         .append(&AppendOptions {
@@ -409,7 +409,7 @@ fn get_messages_at_nonexistent_fails() {
 fn get_state_at_head_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     store
         .append(&AppendOptions {
@@ -460,7 +460,7 @@ fn get_state_at_head_basic() {
 fn get_state_at_head_ended_session() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     store.end_session(&cr.session.id).unwrap();
 
@@ -472,7 +472,7 @@ fn get_state_at_head_ended_session() {
 fn get_state_at_specific_event() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     let user_evt = store
         .append(&AppendOptions {
@@ -513,7 +513,7 @@ fn get_state_at_head_nonexistent_session_fails() {
 fn get_state_at_head_with_agentic_loop() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     store
@@ -530,7 +530,7 @@ fn get_state_at_head_with_agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [{"type": "capability_invocation", "id": "c1", "name": "process::run", "arguments": {}}],
+                "content": [{"type": "capability_invocation", "id": "c1", "name": "execute", "arguments": {"operation": "observe", "input": "ok"}}],
                 "turn": 1,
             }),
             parent_id: None,
@@ -575,7 +575,7 @@ fn get_state_at_head_with_agentic_loop() {
 fn get_state_at_head_with_compaction_boundary() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     store

@@ -9,11 +9,8 @@ use std::time::Instant;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Mutex;
-use tron::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
-use tron::domains::agent::runner::orchestrator::session_manager::SessionManager;
-use tron::domains::agent::runner::profile_runtime::ProfileRuntime;
+use tron::domains::agent::runner::{Orchestrator, ProfileRuntime, SessionManager};
 use tron::domains::model::providers::ProviderHealthTracker;
-use tron::domains::session::context::ContextArtifactsService;
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
 use tron::engine::invocation::{
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
@@ -72,7 +69,6 @@ fn test_runtime() -> TestRuntime {
         health_tracker: Arc::new(ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_owned(),
-        context_artifacts: Arc::new(ContextArtifactsService::new()),
         auth_path,
         oauth_flows: Arc::new(Mutex::new(HashMap::new())),
         ws_port: Arc::new(AtomicU16::new(9847)),

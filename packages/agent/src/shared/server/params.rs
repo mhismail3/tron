@@ -40,34 +40,11 @@ pub(crate) fn opt_string(params: Option<&serde_json::Value>, key: &str) -> Optio
         .map(ToOwned::to_owned)
 }
 
-/// Extract an optional u64 parameter, returning `default` if absent or wrong type.
-pub(crate) fn opt_u64(params: Option<&serde_json::Value>, key: &str, default: u64) -> u64 {
-    params
-        .and_then(|p| p.get(key))
-        .and_then(serde_json::Value::as_u64)
-        .unwrap_or(default)
-}
-
 /// Extract an optional bool parameter.
 pub(crate) fn opt_bool(params: Option<&serde_json::Value>, key: &str) -> Option<bool> {
     params
         .and_then(|p| p.get(key))
         .and_then(serde_json::Value::as_bool)
-}
-
-/// Extract a required bool parameter. Missing or wrong-typed returns
-/// `CapabilityError::InvalidParams` — use this when the client is contractually
-/// required to send the flag and there is no sane server-side default
-/// (see I7: `stageAll` on `worktree.commit`).
-pub(crate) fn require_bool(
-    params: Option<&serde_json::Value>,
-    key: &str,
-) -> Result<bool, CapabilityError> {
-    require_param(params, key)?
-        .as_bool()
-        .ok_or_else(|| CapabilityError::InvalidParams {
-            message: format!("Parameter '{key}' must be a boolean"),
-        })
 }
 
 /// Extract an optional array parameter.
@@ -149,37 +126,6 @@ mod tests {
     fn opt_string_null_value() {
         let p = Some(serde_json::json!({"name": null}));
         assert_eq!(opt_string(p.as_ref(), "name"), None);
-    }
-
-    // ── opt_u64 ──
-
-    #[test]
-    fn opt_u64_present() {
-        let p = Some(serde_json::json!({"limit": 50}));
-        assert_eq!(opt_u64(p.as_ref(), "limit", 20), 50);
-    }
-
-    #[test]
-    fn opt_u64_missing_uses_default() {
-        let p = Some(serde_json::json!({"other": 1}));
-        assert_eq!(opt_u64(p.as_ref(), "limit", 20), 20);
-    }
-
-    #[test]
-    fn opt_u64_null_params_uses_default() {
-        assert_eq!(opt_u64(None, "limit", 20), 20);
-    }
-
-    #[test]
-    fn opt_u64_wrong_type_uses_default() {
-        let p = Some(serde_json::json!({"limit": "fifty"}));
-        assert_eq!(opt_u64(p.as_ref(), "limit", 20), 20);
-    }
-
-    #[test]
-    fn opt_u64_negative_uses_default() {
-        let p = Some(serde_json::json!({"limit": -5}));
-        assert_eq!(opt_u64(p.as_ref(), "limit", 20), 20);
     }
 
     // ── opt_bool ──

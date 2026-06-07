@@ -7,7 +7,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case tailscale
     case install
     case permissions
-    case transcription
     case iosBeta
     case pairingInfo
     case done
@@ -23,7 +22,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .welcome: return "Tron Installer"
         case .tailscale: return "Tailscale"
         case .permissions: return "Permissions"
-        case .transcription: return "Transcription"
         case .iosBeta: return "Install iOS Beta"
         case .install: return "Install Tron"
         case .pairingInfo: return "Pair your iPhone"
@@ -40,7 +38,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .welcome: return .asset("TronLogo")
         case .tailscale: return .symbol("network")
         case .permissions: return .symbol("lock.shield.fill")
-        case .transcription: return .symbol("waveform")
         case .iosBeta: return .symbol("iphone")
         case .install: return .symbol("arrow.down.circle.fill")
         case .pairingInfo: return .symbol("qrcode")
@@ -62,7 +59,6 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         case .welcome: return 360
         case .tailscale: return 360
         case .permissions: return 480
-        case .transcription: return 400
         case .iosBeta: return 420
         case .install: return 440
         case .pairingInfo: return 420
@@ -149,20 +145,6 @@ struct PairingPayload: Equatable, Sendable, Hashable {
     var label: String?
 }
 
-/// Result of applying the first-run transcription preference.
-enum TranscriptionSetupResult: Equatable, Sendable {
-    case enabled
-    case disabled
-    case failed(String)
-
-    var succeeded: Bool {
-        switch self {
-        case .enabled, .disabled: return true
-        case .failed: return false
-        }
-    }
-}
-
 /// Discrete steps in the install pipeline. Each is
 /// tested separately in `InstallPlannerTests`.
 enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
@@ -170,8 +152,6 @@ enum InstallPipelineStage: String, Equatable, Sendable, CaseIterable {
     case validateApplication
     /// Confirms the embedded helper app, plist, and signature are intact.
     case validateHelper
-    /// Syncs bundled first-party skills into `~/.tron/skills`.
-    case syncSkills
     /// Registers the bundled LaunchAgent through `SMAppService`.
     case registerAgent
     case awaitPing

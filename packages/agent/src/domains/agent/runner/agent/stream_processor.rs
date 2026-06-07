@@ -29,6 +29,7 @@ use super::stream_state::{StreamAction, StreamState, StreamTraceContext};
 /// accurate token usage from the `Done` event. The result is built from
 /// accumulators (which contain only pre-drain content), not from the
 /// provider's final message.
+#[cfg(test)]
 pub async fn process_stream(
     stream: StreamEventStream,
     session_id: &str,

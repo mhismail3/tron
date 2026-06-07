@@ -94,10 +94,6 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var context: ContextClient = ContextClient(transport: self)
 
-    /// Media operations client (transcription, browser)
-    @ObservationIgnored
-    lazy var media: MediaClient = MediaClient(transport: self)
-
     /// Settings operations client (server-authoritative settings)
     @ObservationIgnored
     lazy var settings: SettingsClient = SettingsClient(transport: self)
@@ -117,10 +113,6 @@ final class EngineClient: EngineTransport {
     /// Auth/provider operations client (API keys, OAuth tokens)
     @ObservationIgnored
     lazy var auth: AuthClient = AuthClient(transport: self)
-
-    /// plugin source server management client (status, add, remove, enable, disable, restart, reload)
-    @ObservationIgnored
-    lazy var pluginSources: PluginSourceClient = PluginSourceClient(transport: self)
 
     /// Blob storage client (for Display capability image loading).
     @ObservationIgnored
@@ -367,11 +359,6 @@ final class EngineClient: EngineTransport {
         // Handle auth updated — notify observers so Providers page refreshes
         if eventType == AuthUpdatedPlugin.eventType {
             NotificationCenter.default.post(name: .authDidUpdate, object: nil)
-        }
-
-        // Handle plugin source status changed — notify observers so plugin source servers page refreshes
-        if eventType == PluginSourceStatusChangedPlugin.eventType {
-            NotificationCenter.default.post(name: .mcpStatusChanged, object: nil)
         }
 
         // Notifications are normal engine capabilities. When the notification

@@ -2,7 +2,6 @@
 
 use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
 use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
-use crate::domains::agent::runner::profile_runtime::ProfileRuntime;
 use crate::domains::session::event_store::EventStore;
 use crate::domains::worker::DomainRegistrationContext;
 use std::sync::Arc;
@@ -15,7 +14,6 @@ pub(crate) struct Deps {
     pub(super) health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) origin: String,
-    pub(super) profile_runtime: Arc<ProfileRuntime>,
     pub(super) session_manager: Arc<SessionManager>,
     pub(super) shutdown_coordinator: Option<Arc<crate::app::shutdown::ShutdownCoordinator>>,
 }
@@ -29,7 +27,6 @@ impl Deps {
             health_tracker: deps.health_tracker.clone(),
             orchestrator: deps.orchestrator.clone(),
             origin: deps.origin.clone(),
-            profile_runtime: deps.profile_runtime.clone(),
             session_manager: deps.session_manager.clone(),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
         }
@@ -42,7 +39,6 @@ impl Deps {
             orchestrator: self.orchestrator.clone(),
             session_manager: self.session_manager.clone(),
             event_store: self.event_store.clone(),
-            profile_runtime: self.profile_runtime.clone(),
             health_tracker: self.health_tracker.clone(),
             shutdown_coordinator: self.shutdown_coordinator.clone(),
             engine_host: self.engine_host.clone(),

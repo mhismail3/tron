@@ -9,7 +9,7 @@ use crate::domains::agent::runner::orchestrator::event_persister::EventPersister
 use crate::domains::agent::runner::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::runner::types::{CapabilityInvocationExecutionResult, StreamResult};
 use crate::domains::capability_support::implementations::primitive_surface::ResolvedCapabilitySurface;
-use crate::domains::capability_support::implementations::traits::ExecutionMode;
+use crate::domains::capability_support::implementations::scheduling::ExecutionMode;
 use crate::domains::session::event_store::EventType;
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::messages::{CapabilityResultMessageContent, Message};

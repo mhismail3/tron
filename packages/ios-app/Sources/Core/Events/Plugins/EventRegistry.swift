@@ -109,13 +109,8 @@ final class EventRegistry: @unchecked Sendable {
         register(CompactionStartedPlugin.self)
         register(CompactionPlugin.self)
         register(ContextClearedPlugin.self)
-        register(MemoryUpdatingPlugin.self)
-        register(MemoryUpdatedPlugin.self)
-        register(MemoryAutoRetainTriggeredPlugin.self)
-        register(MemoryAutoRetainFailedPlugin.self)
         register(MessageDeletedPlugin.self)
         register(TurnFailedPlugin.self)
-        register(RulesActivatedPlugin.self)
 
         // Session events
         register(ConnectedPlugin.self)
@@ -129,7 +124,6 @@ final class EventRegistry: @unchecked Sendable {
         // Server events
         register(ServerRestartingPlugin.self)
         register(AuthUpdatedPlugin.self)
-        register(PluginSourceStatusChangedPlugin.self)
 
         // Display streaming events
         register(DisplayFramePlugin.self)

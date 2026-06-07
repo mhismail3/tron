@@ -178,18 +178,15 @@ pub async fn execute_capability_invocation(
     else {
         error!(model_primitive_name, "capability primitive not found");
         return CapabilityInvocationExecutionResult {
-            invocation_id,
             result: crate::shared::model_capabilities::error_result(format!(
                 "Capability primitive not found: {model_primitive_name}"
             )),
             duration_ms: duration_ceil_ms(start.elapsed()),
             stops_turn: false,
-            is_interactive: false,
         };
     };
 
     let stops_turn = engine_target.stops_turn;
-    let is_interactive = engine_target.is_interactive;
     let primitive_identity = primitive_capability_identity(
         &model_primitive_name,
         engine_target,
@@ -241,13 +238,11 @@ pub async fn execute_capability_invocation(
         .await
     } else {
         return CapabilityInvocationExecutionResult {
-            invocation_id,
             result: crate::shared::model_capabilities::error_result(format!(
                 "Engine host is required to execute capability primitive '{model_primitive_name}'"
             )),
             duration_ms: duration_ceil_ms(start.elapsed()),
             stops_turn,
-            is_interactive,
         };
     };
 
@@ -277,11 +272,9 @@ pub async fn execute_capability_invocation(
     debug!(capability = %model_primitive_name, duration_ms, "capability invocation completed");
 
     CapabilityInvocationExecutionResult {
-        invocation_id,
         result: capability_result,
         duration_ms,
         stops_turn: stops_turn || result_stops_turn,
-        is_interactive,
     }
 }
 

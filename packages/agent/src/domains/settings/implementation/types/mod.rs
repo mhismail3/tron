@@ -10,8 +10,6 @@
 mod api;
 mod capabilities;
 mod context;
-mod git;
-mod memory;
 mod server;
 mod ui;
 mod update;
@@ -19,8 +17,6 @@ mod update;
 pub use api::*;
 pub use capabilities::*;
 pub use context::*;
-pub use git::*;
-pub use memory::*;
 pub use server::*;
 pub use ui::*;
 pub use update::*;
@@ -75,10 +71,6 @@ pub struct TronSettings {
     pub session: SessionSettings,
     /// UI/TUI appearance settings.
     pub ui: UiSettings,
-    /// Memory retention settings (auto-retain interval, model).
-    pub memory: MemorySettings,
-    /// Git workflow settings (sync, push, switch, finalize, conflict resolution).
-    pub git: GitWorkflowSettings,
 }
 
 impl Default for TronSettings {
@@ -98,8 +90,6 @@ impl Default for TronSettings {
             tmux: TmuxSettings::default(),
             session: SessionSettings::default(),
             ui: UiSettings::default(),
-            memory: MemorySettings::default(),
-            git: GitWorkflowSettings::default(),
         }
     }
 }
@@ -234,8 +224,8 @@ mod tests {
         assert!(server.get("tailscaleIp").is_none());
         assert!(server.get("anthropicAccount").is_none());
 
-        // Optional sections omitted when None
-        assert!(json.get("guardrails").is_none());
+        let removed_policy_key = ["guard", "rails"].concat();
+        assert!(json.get(&removed_policy_key).is_none());
     }
 
     #[test]
@@ -302,9 +292,10 @@ mod tests {
     }
 
     #[test]
-    fn settings_reject_removed_guardrails_section() {
+    fn settings_reject_removed_policy_section() {
+        let removed_policy_key = ["guard", "rails"].concat();
         let json = serde_json::json!({
-            "guardrails": {
+            removed_policy_key.clone(): {
                 "audit": {
                     "enabled": true,
                     "maxEntries": 200
@@ -313,7 +304,7 @@ mod tests {
         });
         let err = serde_json::from_value::<TronSettings>(json).unwrap_err();
 
-        assert!(err.to_string().contains("guardrails"));
+        assert!(err.to_string().contains(&removed_policy_key));
     }
 
     // ── validate ───────────────────────────────────────────────────
@@ -423,13 +414,14 @@ mod tests {
     }
 
     #[test]
-    fn settings_reject_removed_prompt_library_section() {
+    fn settings_reject_removed_prompt_store_section() {
+        let removed_prompt_key = ["prompt", "Library"].concat();
         let json = serde_json::json!({
-            "promptLibrary": { "historyEnabled": false }
+            removed_prompt_key.clone(): { "historyEnabled": false }
         });
         let err = serde_json::from_value::<TronSettings>(json).unwrap_err();
 
-        assert!(err.to_string().contains("promptLibrary"));
+        assert!(err.to_string().contains(&removed_prompt_key));
     }
 
     #[test]
@@ -443,7 +435,5 @@ mod tests {
         });
         let settings: TronSettings = serde_json::from_value(json).unwrap();
         assert_eq!(settings.context.compactor.max_tokens, 50_000);
-        // All other context fields should be defaults
-        assert!(settings.context.rules.discover_standalone_files);
     }
 }

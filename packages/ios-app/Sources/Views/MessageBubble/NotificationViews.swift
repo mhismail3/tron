@@ -163,42 +163,6 @@ struct CatchingUpNotificationView: View {
     }
 }
 
-// MARK: - Transcription Failed Notification View
-
-struct TranscriptionFailedNotificationView: View {
-    var body: some View {
-        NotificationPill(tint: .tronError) {
-            HStack(spacing: 8) {
-                Image(systemName: "mic.slash.fill")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronError)
-
-                Text("Transcription failed")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.tronError.opacity(0.9))
-            }
-        }
-    }
-}
-
-// MARK: - No Speech Detected Notification View
-
-struct TranscriptionNoSpeechNotificationView: View {
-    var body: some View {
-        NotificationPill(tint: .tronAmber) {
-            HStack(spacing: 8) {
-                Image(systemName: "waveform")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(Color.tronAmber)
-
-                Text("No speech detected")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(Color.tronAmber.opacity(0.9))
-            }
-        }
-    }
-}
-
 // MARK: - Compaction Notification View (unified in-progress + completed)
 
 struct CompactionNotificationView: View {
@@ -357,47 +321,6 @@ struct MessageDeletedNotificationView: View {
     }
 }
 
-// MARK: - Rules Loaded Notification View
-
-struct RulesLoadedNotificationView: View {
-    let count: Int
-
-    var body: some View {
-        NotificationPill(tint: .tronIndigo) {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text.fill")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronIndigo)
-
-                Text("Loaded \(count) \(count == 1 ? "rule" : "rules")")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.tronIndigo.opacity(0.9))
-            }
-        }
-    }
-}
-
-// MARK: - Rules Activated Notification View
-
-struct RulesActivatedNotificationView: View {
-    let rules: [ActivatedRuleEntry]
-    let totalActivated: Int
-
-    var body: some View {
-        NotificationPill(tint: .tronIndigo) {
-            HStack(spacing: 8) {
-                Image(systemName: "doc.text.fill")
-                    .font(TronTypography.codeSM)
-                    .foregroundStyle(.tronIndigo)
-
-                Text("Loaded \(rules.count) nested \(rules.count == 1 ? "rule" : "rules")")
-                    .font(TronTypography.filePath)
-                    .foregroundStyle(.tronIndigo.opacity(0.9))
-            }
-        }
-    }
-}
-
 // MARK: - Workspace Deleted Notification View
 
 struct WorkspaceDeletedNotificationView: View {
@@ -549,102 +472,6 @@ enum ErrorCategoryDisplay {
         case "invalid_request": return "xmark.circle.fill"
         case "quota": return "creditcard.fill"
         default: return "exclamationmark.triangle.fill"
-        }
-    }
-}
-
-// MARK: - Memory Retained Notification View (unified in-progress + completed)
-
-struct MemoryRetainedNotificationView: View {
-    let isInProgress: Bool
-    var title: String?
-    var nothingNew: Bool = false
-    /// True when the retain was fired automatically by the auto-retain policy.
-    /// Changes the in-progress pill text to "Auto-retaining memory...".
-    var isAuto: Bool = false
-    /// Non-nil signals that an auto-retain attempt failed mid-pipeline (H3).
-    /// When present, the pill renders in an error tint with the provided reason
-    /// rather than the success/in-progress states.
-    var failureReason: String? = nil
-    var onTap: (() -> Void)? = nil
-
-    private let iconSize: CGFloat = TronTypography.sizeBody2
-
-    /// Single source of truth for the pill tint — error when the retain
-    /// failed, pink otherwise.
-    private var tint: Color { failureReason == nil ? .tronPink : .tronError }
-
-    var body: some View {
-        NotificationPill(
-            tint: tint,
-            interactive: !isInProgress && (title != nil || failureReason != nil),
-            onTap: isInProgress ? nil : onTap
-        ) {
-            HStack(spacing: 8) {
-                ZStack {
-                    if isInProgress {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .tint(tint)
-                            .transition(.blurReplace)
-                    } else if failureReason != nil {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(tint)
-                            .transition(.blurReplace)
-                    } else {
-                        Image(systemName: "brain")
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(tint)
-                            .transition(.blurReplace)
-                    }
-                }
-                .frame(width: iconSize, height: iconSize)
-
-                if let failureReason {
-                    Text("Auto-retain failed")
-                        .font(TronTypography.filePath)
-                        .foregroundStyle(tint.opacity(0.9))
-                        .contentTransition(.interpolate)
-
-                    Text("\u{2022}")
-                        .font(TronTypography.badge)
-                        .foregroundStyle(tint.opacity(0.5))
-                        .transition(.blurReplace)
-
-                    Text(failureReason)
-                        .font(TronTypography.filePath)
-                        .foregroundStyle(tint.opacity(0.7))
-                        .lineLimit(1)
-                        .transition(.blurReplace)
-                } else if isInProgress {
-                    Text(isAuto ? "Auto-retaining memory..." : "Retaining memory...")
-                        .font(TronTypography.filePath)
-                        .foregroundStyle(tint.opacity(0.9))
-                        .contentTransition(.interpolate)
-                } else if let title {
-                    Text("Memory saved")
-                        .font(TronTypography.filePath)
-                        .foregroundStyle(tint.opacity(0.9))
-                        .contentTransition(.interpolate)
-
-                    Text("\u{2022}")
-                        .font(TronTypography.badge)
-                        .foregroundStyle(tint.opacity(0.5))
-                        .transition(.blurReplace)
-
-                    Text(inlineMarkdown(from: title, size: TronTypography.sizeBody2))
-                        .foregroundStyle(tint.opacity(0.7))
-                        .lineLimit(1)
-                        .transition(.blurReplace)
-                } else {
-                    Text("Nothing new to retain")
-                        .font(TronTypography.filePath)
-                        .foregroundStyle(tint.opacity(0.6))
-                        .contentTransition(.interpolate)
-                }
-            }
-            .animation(.smooth(duration: 0.35), value: isInProgress)
         }
     }
 }

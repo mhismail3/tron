@@ -50,7 +50,6 @@ enum LogCategory: String, CaseIterable {
     case notification = "Notification"
     case general = "General"
     case database = "Database"
-    case audio = "Audio"
 
     var subsystem: String { "com.tron.mobile" }
 }

@@ -533,15 +533,15 @@ struct CapabilityInvocationDisplayModel: Equatable {
             groups.append(CapabilityDisplayGroup(title: "Run", rows: run))
         }
 
-        var guardrails: [CapabilityDisplayRow] = []
+        var discoveryRows: [CapabilityDisplayRow] = []
         if let searchStatus = dictionary(phaseDetails?["searchStatus"]) {
-            appendRow("Search", humanizeToken(string(searchStatus["state"])), to: &guardrails)
-            appendRow("Vector index", bool(searchStatus["localVector"]).map { $0 ? "Ready" : "Unavailable" }, to: &guardrails)
-            appendRow("Lexical", bool(searchStatus["lexical"]).map { $0 ? "Enabled" : "Disabled" }, to: &guardrails)
-            appendRow("Degraded reason", string(searchStatus["degradedReason"]), to: &guardrails)
+            appendRow("Search", humanizeToken(string(searchStatus["state"])), to: &discoveryRows)
+            appendRow("Vector index", bool(searchStatus["localVector"]).map { $0 ? "Ready" : "Unavailable" }, to: &discoveryRows)
+            appendRow("Lexical", bool(searchStatus["lexical"]).map { $0 ? "Enabled" : "Disabled" }, to: &discoveryRows)
+            appendRow("Degraded reason", string(searchStatus["degradedReason"]), to: &discoveryRows)
         }
-        if !guardrails.isEmpty {
-            groups.append(CapabilityDisplayGroup(title: "Discovery", rows: guardrails))
+        if !discoveryRows.isEmpty {
+            groups.append(CapabilityDisplayGroup(title: "Discovery", rows: discoveryRows))
         }
 
         if correctedRequest != nil, !corrections.isEmpty {

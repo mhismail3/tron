@@ -1,9 +1,8 @@
-//! Product model presets and server-owned routing presentation.
+//! Model presets and server-owned routing presentation.
 //!
-//! The model domain owns the user-facing preset vocabulary shared by chat,
-//! automations, and subagents. Callers may request an exact model, but product
-//! flows should prefer these presets so the server can disclose the concrete
-//! selected model and any hosted route without client policy logic.
+//! Callers may request an exact model, but retained client shells can use these
+//! presets so the server discloses the concrete selected model and any hosted
+//! route without client policy logic.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -76,8 +75,6 @@ impl LocalModelAvailability {
 pub struct ModelRoutingPolicy {
     /// Profile/session default hosted model.
     pub default_model: String,
-    /// Profile subagent model.
-    pub subagent_model: String,
     /// Local model observation.
     pub local: LocalModelAvailability,
     /// Optional profile name for audit/Inspect.
@@ -90,7 +87,6 @@ impl ModelRoutingPolicy {
     pub fn from_settings(settings: &crate::domains::settings::types::TronSettings) -> Self {
         Self {
             default_model: settings.server.default_model.clone(),
-            subagent_model: settings.agent.subagent_model.clone(),
             local: LocalModelAvailability::unavailable("Local model is unavailable for this flow."),
             profile_name: None,
         }
@@ -173,7 +169,7 @@ impl ModelRoutingPresentation {
     }
 }
 
-/// Resolve the route for an automation or subagent.
+/// Resolve the route for a model call.
 #[must_use]
 pub fn resolve_model_route(
     exact_model: Option<&str>,
@@ -336,7 +332,6 @@ mod tests {
     fn local_when_possible_uses_local_model_when_available() {
         let policy = ModelRoutingPolicy {
             default_model: CLAUDE_SONNET_4_6.to_owned(),
-            subagent_model: "claude-haiku-4-5-20251001".to_owned(),
             local: LocalModelAvailability {
                 available: true,
                 model: preferred_local_model(),
@@ -362,7 +357,6 @@ mod tests {
     fn local_when_possible_discloses_hosted_route_when_unavailable() {
         let policy = ModelRoutingPolicy {
             default_model: CLAUDE_SONNET_4_6.to_owned(),
-            subagent_model: "claude-haiku-4-5-20251001".to_owned(),
             local: LocalModelAvailability::unavailable("Ollama is not running."),
             profile_name: Some("normal".to_owned()),
         };

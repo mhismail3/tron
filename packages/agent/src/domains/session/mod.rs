@@ -5,8 +5,8 @@
 //! Lifecycle, history, reconstruction, archive/delete, and export operation
 //! bodies live in `operations/`; command/query/reconstruct services remain
 //! nearby and take the narrowed `SessionDeps` bundle. `commands/` is split by
-//! lifecycle action, and `context/` owns session-context artifact caching,
-//! dynamic rule tracking, rule loading, and DTOs used by agent/context domains.
+//! lifecycle action. The prompt context is owned by the agent runtime and
+//! primitive state; this domain does not preload external policy planes.
 //! `session::list` is the server-owned dashboard query for clients and supports
 //! domain-local filtering and pagination through the session event store. Its
 //! user-visible filter intentionally hides abandoned chat drafts that contain
@@ -37,6 +37,5 @@ pub(crate) fn worker_module(
 }
 
 pub(crate) mod commands;
-pub mod context;
 pub(crate) mod queries;
 pub(crate) mod reconstruct;

@@ -236,7 +236,7 @@ TronLogger.shared.debug("Message", category: .network)
 TronLogger.shared.error("Error: \(error)", category: .session)
 ```
 
-Categories: `.network`, `.session`, `.events`, `.notification`, `.audio`
+Categories: `.network`, `.session`, `.events`, `.notification`, `.database`
 
 ### Network Inspector
 

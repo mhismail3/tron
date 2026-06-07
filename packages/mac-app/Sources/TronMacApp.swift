@@ -287,8 +287,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("[Tron] Cannot start server from command mode: %@", problem)
             case .unmanagedWrapper:
                 NSLog("[Tron] Cannot start server from command mode: Debug companion mode does not manage the production server")
-            case .managedSkillSyncFailed(let message):
-                NSLog("[Tron] Cannot start server from command mode: failed to sync managed skills: %@", message)
             case .launchAgentFailed(let outcome):
                 NSLog("[Tron] Command-mode server start returned %@", String(describing: outcome))
             case .unhealthy(let health):

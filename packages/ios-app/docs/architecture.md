@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-07 (PET-8 primitive shell teardown).
+> Last verified: 2026-06-07 (PET-10 client primitive cleanup).
 
 ## Overview
 
@@ -11,7 +11,8 @@ is intentionally a shell: it pairs with a local Tron server, sends prompts,
 renders session messages, persists a local event cache for reconstruction, and
 renders generic runtime surfaces emitted by the engine. It does not own fixed
 product modes for Work, Audit Details, Source Control, Prompt Library, Voice
-Notes, Skills, Agent Control, subagents, or worktrees.
+Notes, Skills, Agent Control, subagents, worktrees, audio transcription,
+plugin sources, memory-retain, or rules.
 
 The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
@@ -24,7 +25,7 @@ source-control state, worker state, or product dashboards locally.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
 - Session list, session creation/fork/resume, prompt composer, attachments,
-  audio transcription input, and message rendering.
+  and message rendering.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Generic capability invocation chips and generic generated runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, and bounded local
@@ -62,7 +63,7 @@ Sources/
 +-- Core/                 Dependency injection, event plugins, transformers
 +-- Database/             Local event database and cache queries
 +-- Models/               Messages, event types, engine protocol DTOs
-+-- Services/             Engine transport, domain clients, pairing, audio,
++-- Services/             Engine transport, domain clients, pairing,
 |                         diagnostics, notifications, storage
 +-- ViewModels/           Chat state, event handlers, settings/onboarding state
 +-- Views/                Chat, input bar, message bubbles, session tree,

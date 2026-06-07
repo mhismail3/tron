@@ -144,49 +144,34 @@ pub fn generate_capability_clarification_message(
 
     format!(
         "[TRON CONTEXT]\n\
-        You are Tron, an AI coding assistant that acts through Tron's live capability system.\n\
+        You are Tron, an AI coding assistant running in Tron's primitive loop.\n\
         {cwd_line}\n\
         \n\
-        ## Available Capabilities\n\
-        The capabilities mentioned in the system instructions (shell, apply_patch, etc.) are NOT available. \
-        Use ONLY these tools:\n\
+        ## Available Primitive\n\
+        Use ONLY this model-facing tool:\n\
         \n\
         {tool_list}\n\
         \n\
-        ## Capability Execution\n\
-        Use `execute` for every capability task. It is intent-first and each call runs at most one target capability invocation: if you do not already know the \
-        exact capability, call `execute` with intent only (and optional constraints). Do not invent a \
-        target for discovery, matching, or shape tests. Use `target` only when the user supplied an \
-        exact id, a prior `execute` result selected it, or a primed recipe makes it unambiguous. Put \
-        only target capability arguments inside `arguments`; wrapper fields such as `target`, \
-        `idempotencyKey`, `reason`, and `constraints` stay top-level. Never set `target` to `execute` \
-        or `capability::execute`; `execute` is already the portal and will resolve the real target from intent. The engine resolves, prepares, \
-        checks freshness, requests approval when needed, runs, and observes. For multi-step work, make \
-        one `execute` call per selected capability/target; if a result returns `needs_decomposition`, \
-        follow its suggested calls only when the user still wants the underlying work performed, and report \
-        the decomposition result without running suggestions when the user asked only to test or inspect decomposition. `execute` results include \
-        an `[execute observation]` metadata block for reasoning; use it to answer selected target, child \
-        invocation, approval, correction, and resource-ref questions, but do not quote the metadata block \
-        unless the user asks for raw details.\n\
-        Common contracts include filesystem capabilities for file operations, `process::run` for \
-        command execution, and web capabilities for network retrieval when they are visible to the session.\n\
-        Do not add `constraints.riskMax` or `constraints.effect` unless the user explicitly gives that \
-        bound. Web search and fetch are pure reads but medium risk because they touch the network; \
-        `riskMax=low` intentionally rejects them.\n\
-        If the user gives an exact contract id and arguments, call that exact target once; do not run \
-        warm-up, probe, date, status, or example commands first.\n\
+        ## Execute Operations\n\
+        Each `execute` call performs one direct host operation. Set `operation` to exactly one of: \
+        `observe`, `state_get`, `state_set`, `state_list`, `file_read`, `file_write`, `process_run`, \
+        `trace_list`, or `trace_get`. Do not send `target`, `contractId`, `functionId`, `arguments`, \
+        or catalog-search constraints. Put operation fields at the top level of the execute payload. \
+        Use `observe` to record reasoning-relevant facts, state operations for agent-owned memory, \
+        file operations for files under the current working directory, `process_run` for bounded shell \
+        commands, and trace operations to inspect durable execution records. Mutating operations should \
+        include a short `reason`; repeated writes or commands should include a stable `idempotencyKey` \
+        when retry safety matters. The engine records a trace record for every execute operation with \
+        status, timing, provider/model context, authority metadata, touched resources, hashes where \
+        available, errors, and implementation metadata.\n\
         \n\
         ## Important Rules\n\
-        1. If the target or required fields are uncertain, call `execute` with a clear intent first; do not guess a target or fabricate arguments\n\
-        2. You MUST provide ALL known required target parameters when invoking a selected capability - never call with empty arguments after a target is selected\n\
-        3. Never execute sample/example capability payloads as exploratory calls; examples are templates only\n\
-        4. When `execute` returns `needs_input`, retry only the same selected target with the missing required parameters, not an unrelated probe\n\
-        5. When `execute` returns `needs_decomposition`, make the suggested `execute` calls one by one only if the user still wants the underlying work performed; otherwise report the decomposition result\n\
-        6. For file paths, provide the complete path (e.g., \"src/index.ts\" or \"/absolute/path/file.txt\")\n\
-        7. Confidently interpret and explain results from capability invocations - you have full context of what was returned\n\
-        8. Be helpful, accurate, and efficient when working with code\n\
-        9. Inspect/read existing files through capabilities before changing them\n\
-        10. Make targeted, minimal edits rather than rewriting entire files",
+        1. Use one operation per `execute` call\n\
+        2. Inspect files before changing them unless the user explicitly provides full replacement content\n\
+        3. Use relative paths under the current working directory unless an absolute path is clearly required\n\
+        4. Prefer small, tested changes and record useful evidence through `observe` or trace inspection\n\
+        5. When authority is unavailable, report the blocked state inside the current authority envelope\n\
+        6. Be helpful, accurate, and efficient when working with code",
         tool_list = tool_descriptions.join("\n")
     )
 }
@@ -834,34 +819,27 @@ mod tests {
     #[test]
     fn clarification_includes_capability_execution_guidance() {
         let result = generate_capability_clarification_message(&[], None);
-        assert!(result.contains("Capability Execution"));
-        assert!(result.contains("process::run"));
-        assert!(result.contains("Use `execute` for every capability task"));
-        assert!(result.contains("It is intent-first"));
-        assert!(result.contains("Do not invent a"));
-        assert!(result.contains("target for discovery"));
-        assert!(result.contains("only target capability arguments inside `arguments`"));
-        assert!(result.contains("The engine resolves, prepares"));
-        assert!(result.contains("one `execute` call per selected capability/target"));
-        assert!(result.contains("[execute observation]"));
-        assert!(result.contains("Do not add `constraints.riskMax`"));
-        assert!(result.contains("Web search and fetch are pure reads but medium risk"));
+        assert!(result.contains("Execute Operations"));
+        assert!(result.contains("state_get"));
+        assert!(result.contains("file_write"));
+        assert!(result.contains("process_run"));
+        assert!(result.contains("trace_list"));
+        assert!(result.contains("Do not send `target`"));
+        assert!(result.contains("Put operation fields at the top level"));
+        assert!(result.contains("The engine records a trace record"));
+        assert!(result.contains("When authority is unavailable"));
     }
 
     #[test]
     fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
         let result = generate_capability_clarification_message(&[], None);
 
-        assert!(result.contains("exact contract id and arguments"));
-        assert!(result.contains("call that exact target once"));
-        assert!(
-            result.contains("do not run warm-up, probe, date, status, or example commands first")
-        );
-        assert!(result.contains("examples are templates only"));
-        assert!(result.contains("When `execute` returns `needs_input`"));
-        assert!(result.contains("retry only the same selected target"));
-        assert!(result.contains("When `execute` returns `needs_decomposition`"));
-        assert!(result.contains("make the suggested `execute` calls one by one"));
+        assert!(result.contains("Use ONLY this model-facing tool"));
+        assert!(result.contains("Each `execute` call performs one direct host operation"));
+        assert!(result.contains("Do not send `target`, `contractId`, `functionId`, `arguments`"));
+        assert!(result.contains("Put operation fields at the top level"));
+        assert!(result.contains("Use one operation per `execute` call"));
+        assert!(result.contains("When authority is unavailable"));
     }
 
     // ── normalize_schema_for_openai ──────────────────────────────────

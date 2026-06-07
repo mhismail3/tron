@@ -66,7 +66,7 @@ fn multimodal_user_content_merges_with_string() {
     assert_eq!(arr[2]["text"], "follow up");
 }
 
-// ── H16: reconstruction performance guardrail ─────────────────────
+// ── H16: reconstruction performance budget ─────────────────────
 //
 // `reconstruct_from_events` runs a two-pass O(N) walk over every
 // ancestor event. That's fine for today's session sizes (median
@@ -89,7 +89,7 @@ fn multimodal_user_content_merges_with_string() {
 // These tests are cheap enough to run in debug (~10ms for 10k
 // events on a local dev machine as of 2026-04-22) and protect the
 // reconstruction hot path from silent algorithmic regressions.
-// When median session size grows past 1k, revisit this guardrail
+// When median session size grows past 1k, revisit this budget
 // and consider the snapshot-at-compaction-boundary scheme from
 // the audit plan.
 

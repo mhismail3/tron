@@ -10,7 +10,7 @@
 //! tron::transport     /engine and /engine/workers protocol surfaces
 //! tron::engine        Live capability fabric, host lifecycle, engine ledger
 //! tron::domains       Worker-owned contracts, handlers, operations, services
-//! tron::platform      OS/vendor integrations, APNS, updater, device broker
+//! tron::platform      OS/vendor integrations and updater support
 //! tron::shared        Foundation types, protocol DTOs, neutral helpers
 //! ```
 //!

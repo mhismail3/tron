@@ -28,7 +28,7 @@
 //! The intended execution flow is:
 //! `/engine frame -> EngineTransportRequest -> EngineTriggerRuntime -> domain
 //! worker -> contract operation key -> handlers.rs -> operations/ -> narrow
-//! deps/service -> engine ledger/streams/queues/approvals/leases`.
+//! deps/service -> engine ledger/streams/queues/grants/leases`.
 //!
 //! # INVARIANT: no transport-owned behavior
 //!

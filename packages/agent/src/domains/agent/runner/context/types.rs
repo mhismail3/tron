@@ -263,8 +263,6 @@ pub struct CompactionTriggerInput {
     pub recent_capability_invocations: Vec<String>,
 }
 
-pub use crate::shared::messages::Provider;
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -118,12 +118,6 @@ cmd_dev() {
         esac
     done
 
-    # Ensure transcription sidecar files are deployed
-    deploy_transcription_sidecar 2>/dev/null || true
-
-    # Sync managed skills from repo
-    sync_managed_skills
-
     if [ "$do_build" = true ]; then
         build_rust_dev
     fi

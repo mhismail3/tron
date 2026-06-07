@@ -12,10 +12,6 @@ enum SystemEvent: Equatable, Hashable {
     case reasoningLevelChange(from: String, to: String)
     /// Session was interrupted
     case interrupted
-    /// Voice transcription failed
-    case transcriptionFailed
-    /// No speech was detected in recording
-    case transcriptionNoSpeech
     /// Context compaction started (in-progress spinner)
     case compactionInProgress(reason: String)
     /// Context was compacted to save tokens
@@ -24,51 +20,25 @@ enum SystemEvent: Equatable, Hashable {
     case contextCleared(tokensBefore: Int, tokensAfter: Int)
     /// A message was deleted from context
     case messageDeleted(targetType: String)
-    /// Rules were loaded on session start
-    case rulesLoaded(count: Int)
-    /// Dynamic scoped rules were activated by file access
-    case rulesActivated(rules: [ActivatedRuleEntry], totalActivated: Int)
     /// Catching up to in-progress session
     case catchingUp
     /// Turn failed with error
     case turnFailed(error: String, code: String?, recoverable: Bool)
     /// Provider API error (auth, rate limit, network, etc.)
     case providerError(ProviderErrorDetailData)
-    /// Memory retain in progress (shows spinner pill)
-    case memoryRetainInProgress
-    /// Automatic memory retain in progress (shows distinct "Auto-retaining" pill)
-    case memoryAutoRetainInProgress(intervalFired: Int)
-    /// Automatic memory retain failed mid-pipeline (H3). Paired with a
-    /// prior `memoryAutoRetainInProgress` — a `memoryUpdated` still
-    /// lands afterward when the server writes the summary.
-    case memoryAutoRetainFailed(intervalFired: Int, reason: String)
-    /// Memory was retained to long-term log
-    case memoryRetained(title: String, summary: String?)
-    /// Memory retain was requested but there was nothing new since the last boundary
-    case memoryRetainedNothingNew
-
 /// Tint color for the notification pill — single source of truth.
     var tintColor: Color {
         switch self {
         case .modelChange:                return .tronEmerald
         case .reasoningLevelChange:       return .tronEmerald
         case .interrupted:                return .tronError
-        case .transcriptionFailed:        return .tronError
-        case .transcriptionNoSpeech:      return .tronAmber
         case .compactionInProgress:       return .tronSky
         case .compaction:                 return .tronSky
         case .contextCleared:             return .tronSky
         case .messageDeleted:             return .tronSky
-        case .rulesLoaded:                return .tronIndigo
-        case .rulesActivated:             return .tronIndigo
         case .catchingUp:                 return .tronSlate
         case .turnFailed:                 return .tronError
         case .providerError:              return .tronError
-        case .memoryRetainInProgress:     return .tronPink
-        case .memoryAutoRetainInProgress: return .tronPink
-        case .memoryAutoRetainFailed:     return .tronError
-        case .memoryRetained:             return .tronPink
-        case .memoryRetainedNothingNew:   return .tronPink
         }
     }
 
@@ -81,10 +51,6 @@ enum SystemEvent: Equatable, Hashable {
             return "Reasoning: \(SystemEvent.reasoningLabel(from)) → \(SystemEvent.reasoningLabel(to))"
         case .interrupted:
             return "Session interrupted"
-        case .transcriptionFailed:
-            return "Transcription failed"
-        case .transcriptionNoSpeech:
-            return "No speech detected"
         case .compactionInProgress:
             return "Compacting context..."
         case .compaction(let before, let after, _, _, _, _):
@@ -98,10 +64,6 @@ enum SystemEvent: Equatable, Hashable {
                            targetType == "message.assistant" ? "assistant message" :
                            targetType == "capability.invocation.completed" ? "capability result" : "message"
             return "Deleted \(typeLabel) from context"
-        case .rulesLoaded(let count):
-            return "Loaded \(count) \(count == 1 ? "rule" : "rules")"
-        case .rulesActivated(let rules, _):
-            return "Loaded \(rules.count) nested \(rules.count == 1 ? "rule" : "rules")"
         case .catchingUp:
             return "Loading latest messages..."
         case .turnFailed(let error, _, _):
@@ -109,64 +71,7 @@ enum SystemEvent: Equatable, Hashable {
         case .providerError(let data):
             let label = ErrorCategoryDisplay.label(for: data.category, provider: data.provider)
             return "\(label): \(data.message)"
-        case .memoryRetainInProgress:
-            return "Retaining memory..."
-        case .memoryAutoRetainInProgress:
-            return "Auto-retaining memory..."
-        case .memoryAutoRetainFailed(_, let reason):
-            return "Auto-retain failed: \(reason)"
-        case .memoryRetained(let title, _):
-            return "Memory saved: \(title)"
-        case .memoryRetainedNothingNew:
-            return "Nothing new to retain"
         }
-    }
-
-    /// Whether this is a memory retain notification (for unified animation)
-    var isMemoryRetainNotification: Bool {
-        switch self {
-        case .memoryRetainInProgress, .memoryAutoRetainInProgress,
-             .memoryAutoRetainFailed,
-             .memoryRetained, .memoryRetainedNothingNew:
-            return true
-        default:
-            return false
-        }
-    }
-
-    /// Whether the memory retain is still in progress
-    var memoryRetainIsInProgress: Bool {
-        switch self {
-        case .memoryRetainInProgress, .memoryAutoRetainInProgress: return true
-        default: return false
-        }
-    }
-
-    /// True for automatic retentions (policy-triggered), false for manual ones.
-    /// Controls UI pill copy ("Auto-retaining memory..." vs "Retaining memory...").
-    var memoryRetainIsAuto: Bool {
-        if case .memoryAutoRetainInProgress = self { return true }
-        if case .memoryAutoRetainFailed = self { return true }
-        return false
-    }
-
-    /// When present, the memory-retain pill should render in its "failed"
-    /// variant with this reason (H3). Nil for all other memory states.
-    var memoryRetainFailureReason: String? {
-        if case .memoryAutoRetainFailed(_, let reason) = self { return reason }
-        return nil
-    }
-
-    /// Memory retain title (nil for in-progress / nothing-new)
-    var memoryRetainTitle: String? {
-        if case .memoryRetained(let title, _) = self { return title }
-        return nil
-    }
-
-    /// Memory retain summary (nil for in-progress / nothing-new)
-    var memoryRetainSummary: String? {
-        if case .memoryRetained(_, let summary) = self { return summary }
-        return nil
     }
 
     /// Whether this is a compaction in-progress or completed event (for unified animation)

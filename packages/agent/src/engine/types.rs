@@ -364,7 +364,7 @@ pub enum ResourceLeaseFailureBehavior {
 pub struct ResourceLeaseRequirement {
     /// Resolver identifier. `payload_template` is the built-in v1 resolver.
     pub resolver_id: String,
-    /// Domain resource kind, such as `session`, `worktree`, or `git`.
+    /// Domain resource kind, such as `session`, `trace`, or `artifact`.
     pub resource_kind: String,
     /// Template used by the resolver to derive a canonical resource id.
     pub resource_id_template: String,

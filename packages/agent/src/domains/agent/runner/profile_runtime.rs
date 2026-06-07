@@ -1,10 +1,8 @@
-//! Compiled profile runtime service.
+//! Primitive profile runtime service.
 //!
-//! Profiles are the single runtime control plane for agent behavior and
-//! settings. [`ProfileRuntime`] keeps the latest valid compiled profile graph
-//! in an atomic snapshot. Reloads are all-or-previous: invalid profile edits
-//! are reported and the last known-good spec remains active for in-flight and
-//! future sessions.
+//! [`ProfileRuntime`] keeps the latest valid profile settings/auth snapshot in
+//! an atomic value. Reloads are all-or-previous: invalid profile edits are
+//! reported and the last known-good snapshot remains active.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -16,17 +14,11 @@ use tokio_util::sync::CancellationToken;
 use walkdir::WalkDir;
 
 use crate::domains::settings::types::TronSettings;
-use crate::shared::messages::Provider;
-use crate::shared::profile::{
-    AgentExecutionSpec, AuditPolicySpec, CHAT_PROFILE, CachePolicySpec,
-    CapabilityExecutionPolicySpec, CompiledProfileFile, ContextPolicySpec, DEFAULT_PROFILE,
-    LOCAL_PROFILE, NORMAL_PROFILE, OutputContractSpec, PermissionPolicySpec,
-    PrimitiveSurfacePolicySpec, ProcessSpec, ProviderPolicySpec, ResolvedProfile,
-};
+use crate::shared::profile::{AgentExecutionSpec, ResolvedProfile};
 
 const PROFILE_WATCH_INTERVAL: Duration = Duration::from_secs(2);
 
-/// Current compiled harness snapshot.
+/// Current compiled profile snapshot.
 #[derive(Clone, Debug)]
 pub struct ResolvedHarnessSpec {
     /// Tron home this spec was compiled from.
@@ -54,151 +46,6 @@ impl ResolvedHarnessSpec {
     #[must_use]
     pub fn execution_spec(&self) -> &AgentExecutionSpec {
         &self.profile.spec
-    }
-}
-
-/// Request for primary session planning.
-#[derive(Clone, Debug, Default)]
-pub struct SessionPlanRequest {
-    /// Explicit profile requested by the client.
-    pub requested_profile: Option<String>,
-    /// Model selected for the session.
-    pub model: String,
-    /// Session source (`chat`, app-specific source labels, etc.).
-    pub source: Option<String>,
-    /// Entrypoint id; defaults to `main`.
-    pub entrypoint: Option<String>,
-}
-
-/// Per-session immutable execution plan.
-#[derive(Clone, Debug)]
-pub struct SessionExecutionPlan {
-    /// Home this plan was compiled from.
-    pub home: PathBuf,
-    /// Selected profile name.
-    pub profile_name: String,
-    /// Profile chain from root ancestor to active profile.
-    pub profile_chain: Vec<String>,
-    /// Resolved profile hash.
-    pub spec_hash: String,
-    /// Entrypoint id, usually `main`.
-    pub entrypoint_id: String,
-    /// Requested model.
-    pub model: String,
-    /// Provider detected from the model, if known.
-    pub provider: Option<Provider>,
-    /// Resolved auth profile.
-    pub auth_profile: String,
-    /// Full effective settings snapshot.
-    pub settings: TronSettings,
-    /// Resolved profile snapshot.
-    pub resolved_profile: Arc<ResolvedProfile>,
-    /// Entrypoint prompt file, if configured.
-    pub prompt: Option<CompiledProfileFile>,
-    /// Context policy id.
-    pub context_policy_id: String,
-    /// Resolved context policy.
-    pub context_policy: ContextPolicySpec,
-    /// Provider-facing primitive surface policy id.
-    pub primitive_surface_policy_id: String,
-    /// Resolved provider-facing primitive surface policy.
-    pub primitive_surface_policy: PrimitiveSurfacePolicySpec,
-    /// Worker capability execution policy id.
-    pub capability_execution_policy_id: String,
-    /// Resolved worker capability execution policy.
-    pub capability_execution_policy: CapabilityExecutionPolicySpec,
-    /// Permission policy id.
-    pub permission_policy_id: String,
-    /// Resolved permission policy.
-    pub permission_policy: PermissionPolicySpec,
-    /// Provider policy id.
-    pub provider_policy_id: String,
-    /// Resolved provider policy.
-    pub provider_policy: ProviderPolicySpec,
-    /// Cache policy id.
-    pub cache_policy_id: String,
-    /// Resolved cache policy.
-    pub cache_policy: CachePolicySpec,
-    /// Audit policy id.
-    pub audit_policy_id: String,
-    /// Resolved audit policy.
-    pub audit_policy: AuditPolicySpec,
-}
-
-impl SessionExecutionPlan {
-    /// Runtime context view derived from this immutable session plan.
-    #[must_use]
-    pub fn runtime_context_policy(
-        &self,
-    ) -> crate::domains::agent::runner::context::local_policy::ContextPolicy {
-        let provider_is_local = self.provider.is_some_and(|provider| {
-            crate::domains::agent::runner::context::local_policy::provider_is_local_for_spec(
-                provider,
-                &self.resolved_profile.spec,
-            )
-        });
-        crate::domains::agent::runner::context::local_policy::ContextPolicy::from_resolved_parts(
-            self.context_policy_id.clone(),
-            self.context_policy.clone(),
-            Some(self.primitive_surface_policy.clone()),
-            Some(self.capability_execution_policy.clone()),
-            provider_is_local || !self.context_policy.local_providers.is_empty(),
-        )
-    }
-}
-
-/// Per-process immutable execution plan.
-#[derive(Clone, Debug)]
-pub struct ProcessExecutionPlan {
-    /// Process id.
-    pub process_id: String,
-    /// Resolved process spec.
-    pub process: ProcessSpec,
-    /// Process prompt file, if configured.
-    pub prompt: Option<CompiledProfileFile>,
-    /// Model policy id.
-    pub model_policy_id: String,
-    /// Context policy id.
-    pub context_policy_id: String,
-    /// Resolved context policy.
-    pub context_policy: ContextPolicySpec,
-    /// Provider-facing primitive surface policy id.
-    pub primitive_surface_policy_id: String,
-    /// Resolved provider-facing primitive surface policy.
-    pub primitive_surface_policy: PrimitiveSurfacePolicySpec,
-    /// Worker capability execution policy id.
-    pub capability_execution_policy_id: String,
-    /// Resolved worker capability execution policy.
-    pub capability_execution_policy: CapabilityExecutionPolicySpec,
-    /// Permission policy id.
-    pub permission_policy_id: String,
-    /// Resolved permission policy.
-    pub permission_policy: PermissionPolicySpec,
-    /// Output contract id.
-    pub output_contract_id: String,
-    /// Resolved output contract.
-    pub output_contract: OutputContractSpec,
-    /// Audit policy id.
-    pub audit_policy_id: String,
-    /// Resolved audit policy.
-    pub audit_policy: AuditPolicySpec,
-    /// Parent profile snapshot used to plan the process.
-    pub resolved_profile: Arc<ResolvedProfile>,
-}
-
-impl ProcessExecutionPlan {
-    /// Runtime context view derived from this immutable process plan.
-    #[must_use]
-    pub fn runtime_context_policy(
-        &self,
-    ) -> crate::domains::agent::runner::context::local_policy::ContextPolicy {
-        crate::domains::agent::runner::context::local_policy::ContextPolicy::from_resolved_parts(
-            self.context_policy_id.clone(),
-            self.context_policy.clone(),
-            Some(self.primitive_surface_policy.clone()),
-            Some(self.capability_execution_policy.clone()),
-            !self.context_policy.local_providers.is_empty(),
-        )
     }
 }
 
@@ -230,11 +77,6 @@ impl ProfileRuntime {
     #[must_use]
     pub fn current(&self) -> Arc<ResolvedHarnessSpec> {
         self.current.load_full()
-    }
-
-    /// Resolve a profile without swapping the active runtime.
-    pub fn resolve_profile(&self, name: &str) -> std::io::Result<Arc<ResolvedProfile>> {
-        crate::shared::profile::resolve_profile_at(&self.home, name).map(Arc::new)
     }
 
     /// Recompile the active profile and swap it in only if validation succeeds.
@@ -329,69 +171,6 @@ impl ProfileRuntime {
             }
         }
     }
-
-    /// Plan a primary session from the current snapshot.
-    pub fn plan_session(
-        &self,
-        request: SessionPlanRequest,
-    ) -> std::io::Result<SessionExecutionPlan> {
-        let provider =
-            crate::domains::model::providers::models::registry::detect_provider_from_model(
-                &request.model,
-            );
-        let current = self.current();
-        let local_model = provider.is_some_and(|provider| {
-            crate::domains::agent::runner::context::local_policy::provider_is_local_for_spec(
-                provider,
-                current.execution_spec(),
-            )
-        });
-        let mut profile_name = request
-            .requested_profile
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-            .unwrap_or_else(|| {
-                if local_model {
-                    LOCAL_PROFILE.to_string()
-                } else if request.source.as_deref() == Some("chat") {
-                    CHAT_PROFILE.to_string()
-                } else {
-                    NORMAL_PROFILE.to_string()
-                }
-            });
-
-        if profile_name == DEFAULT_PROFILE {
-            profile_name = NORMAL_PROFILE.to_string();
-        }
-
-        let mut resolved = self.resolve_profile(&profile_name)?;
-        if local_model && resolved.spec.profile_class.as_deref() != Some(LOCAL_PROFILE) {
-            profile_name = LOCAL_PROFILE.to_string();
-            resolved = self.resolve_profile(&profile_name)?;
-        }
-
-        build_session_plan(
-            &self.home,
-            resolved,
-            request.entrypoint.as_deref().unwrap_or("main"),
-            request.model,
-            provider,
-        )
-    }
-
-    /// Plan a process from a parent/session profile snapshot.
-    pub fn plan_process(
-        &self,
-        process_id: &str,
-        parent: Option<&SessionExecutionPlan>,
-    ) -> std::io::Result<ProcessExecutionPlan> {
-        let resolved = parent
-            .map(|plan| plan.resolved_profile.clone())
-            .unwrap_or_else(|| self.current().profile.clone());
-        build_process_plan(resolved, process_id)
-    }
 }
 
 fn profile_tree_hash(home: &Path) -> std::io::Result<String> {
@@ -443,136 +222,6 @@ fn load_harness_spec(home: &Path) -> std::io::Result<ResolvedHarnessSpec> {
     })
 }
 
-fn build_session_plan(
-    home: &Path,
-    resolved_profile: Arc<ResolvedProfile>,
-    entrypoint_id: &str,
-    model: String,
-    provider: Option<Provider>,
-) -> std::io::Result<SessionExecutionPlan> {
-    let spec = &resolved_profile.spec;
-    let entrypoint = spec.entrypoints.get(entrypoint_id).ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "profile `{}` is missing entrypoint `{entrypoint_id}`",
-                resolved_profile.name
-            ),
-        )
-    })?;
-    let context_policy_id = if provider.is_some_and(|provider| {
-        crate::domains::agent::runner::context::local_policy::provider_is_local_for_spec(
-            provider, spec,
-        )
-    }) {
-        entrypoint
-            .local_context_policy
-            .as_deref()
-            .unwrap_or(&entrypoint.context_policy)
-            .to_string()
-    } else {
-        entrypoint.context_policy.clone()
-    };
-    let primitive_surface_policy_id = spec
-        .context_policy(&context_policy_id)
-        .and_then(|policy| policy.primitive_surface_policy.clone())
-        .unwrap_or_else(|| entrypoint.primitive_surface_policy.clone());
-    let capability_execution_policy_id = spec
-        .context_policy(&context_policy_id)
-        .and_then(|policy| policy.capability_execution_policy.clone())
-        .unwrap_or_else(|| entrypoint.capability_execution_policy.clone());
-    let context_policy = required_spec_ref(
-        &resolved_profile.name,
-        "context policy",
-        &context_policy_id,
-        spec.context_policy(&context_policy_id).cloned(),
-    )?;
-    let primitive_surface_policy = required_spec_ref(
-        &resolved_profile.name,
-        "primitive surface policy",
-        &primitive_surface_policy_id,
-        spec.primitive_surface_policy(&primitive_surface_policy_id)
-            .cloned(),
-    )?;
-    let capability_execution_policy = required_spec_ref(
-        &resolved_profile.name,
-        "capability execution policy",
-        &capability_execution_policy_id,
-        spec.capability_execution_policy(&capability_execution_policy_id)
-            .cloned(),
-    )?;
-    let permission_policy = required_spec_ref(
-        &resolved_profile.name,
-        "permission policy",
-        &entrypoint.permission_policy,
-        spec.permission_policies
-            .get(&entrypoint.permission_policy)
-            .cloned(),
-    )?;
-    let provider_policy = required_spec_ref(
-        &resolved_profile.name,
-        "provider policy",
-        &entrypoint.provider_policy,
-        spec.provider_policies
-            .get(&entrypoint.provider_policy)
-            .cloned(),
-    )?;
-    let cache_policy = required_spec_ref(
-        &resolved_profile.name,
-        "cache policy",
-        &entrypoint.cache_policy,
-        spec.cache_policies.get(&entrypoint.cache_policy).cloned(),
-    )?;
-    let audit_policy = required_spec_ref(
-        &resolved_profile.name,
-        "audit policy",
-        &entrypoint.audit_policy,
-        spec.audit_policy.get(&entrypoint.audit_policy).cloned(),
-    )?;
-
-    Ok(SessionExecutionPlan {
-        home: home.to_path_buf(),
-        profile_name: resolved_profile.name.clone(),
-        profile_chain: resolved_profile.profile_chain.clone(),
-        spec_hash: resolved_profile.spec_hash.clone(),
-        entrypoint_id: entrypoint_id.to_string(),
-        model,
-        provider,
-        auth_profile: spec.auth_profile.clone(),
-        settings: effective_settings(spec.settings())?,
-        prompt: spec.entrypoint_prompts.get(entrypoint_id).cloned(),
-        context_policy,
-        context_policy_id,
-        primitive_surface_policy,
-        primitive_surface_policy_id,
-        capability_execution_policy,
-        capability_execution_policy_id,
-        permission_policy,
-        permission_policy_id: entrypoint.permission_policy.clone(),
-        provider_policy,
-        provider_policy_id: entrypoint.provider_policy.clone(),
-        cache_policy,
-        cache_policy_id: entrypoint.cache_policy.clone(),
-        audit_policy,
-        audit_policy_id: entrypoint.audit_policy.clone(),
-        resolved_profile,
-    })
-}
-
-fn required_spec_ref<T>(
-    profile_name: &str,
-    kind: &str,
-    id: &str,
-    value: Option<T>,
-) -> std::io::Result<T> {
-    value.ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("profile `{profile_name}` references missing {kind} `{id}`"),
-        )
-    })
-}
-
 fn effective_settings(settings: &TronSettings) -> std::io::Result<TronSettings> {
     let mut settings = settings.clone();
     crate::domains::settings::loader::apply_env_overrides(&mut settings);
@@ -586,85 +235,10 @@ fn effective_settings(settings: &TronSettings) -> std::io::Result<TronSettings> 
     Ok(settings)
 }
 
-fn build_process_plan(
-    resolved_profile: Arc<ResolvedProfile>,
-    process_id: &str,
-) -> std::io::Result<ProcessExecutionPlan> {
-    let spec = &resolved_profile.spec;
-    let process = spec.process(process_id).cloned().ok_or_else(|| {
-        std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "profile `{}` is missing process `{process_id}`",
-                resolved_profile.name
-            ),
-        )
-    })?;
-    let context_policy = required_spec_ref(
-        &resolved_profile.name,
-        "context policy",
-        &process.context_policy,
-        spec.context_policy(&process.context_policy).cloned(),
-    )?;
-    let primitive_surface_policy = required_spec_ref(
-        &resolved_profile.name,
-        "primitive surface policy",
-        &process.primitive_surface_policy,
-        spec.primitive_surface_policy(&process.primitive_surface_policy)
-            .cloned(),
-    )?;
-    let capability_execution_policy = required_spec_ref(
-        &resolved_profile.name,
-        "capability execution policy",
-        &process.capability_execution_policy,
-        spec.capability_execution_policy(&process.capability_execution_policy)
-            .cloned(),
-    )?;
-    let permission_policy = required_spec_ref(
-        &resolved_profile.name,
-        "permission policy",
-        &process.permission_policy,
-        spec.permission_policies
-            .get(&process.permission_policy)
-            .cloned(),
-    )?;
-    let output_contract = required_spec_ref(
-        &resolved_profile.name,
-        "output contract",
-        &process.output_contract,
-        spec.output_contracts.get(&process.output_contract).cloned(),
-    )?;
-    let audit_policy = required_spec_ref(
-        &resolved_profile.name,
-        "audit policy",
-        &process.audit_policy,
-        spec.audit_policy.get(&process.audit_policy).cloned(),
-    )?;
-
-    Ok(ProcessExecutionPlan {
-        process_id: process_id.to_string(),
-        prompt: spec.process_prompts.get(process_id).cloned(),
-        model_policy_id: process.model_policy.clone(),
-        context_policy,
-        context_policy_id: process.context_policy.clone(),
-        primitive_surface_policy,
-        primitive_surface_policy_id: process.primitive_surface_policy.clone(),
-        capability_execution_policy,
-        capability_execution_policy_id: process.capability_execution_policy.clone(),
-        permission_policy,
-        permission_policy_id: process.permission_policy.clone(),
-        output_contract,
-        output_contract_id: process.output_contract.clone(),
-        audit_policy,
-        audit_policy_id: process.audit_policy.clone(),
-        process,
-        resolved_profile,
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::profile::NORMAL_PROFILE;
 
     fn seeded_runtime() -> (tempfile::TempDir, ProfileRuntime) {
         let dir = tempfile::tempdir().unwrap();
@@ -681,12 +255,8 @@ mod tests {
 
         assert_eq!(current.profile_name(), NORMAL_PROFILE);
         assert_eq!(current.settings.server.default_provider, "anthropic");
-        assert!(
-            current
-                .execution_spec()
-                .entrypoint_prompts
-                .contains_key("main")
-        );
+        assert_eq!(current.execution_spec().auth_profile, "default");
+        assert!(current.execution_spec().auth_registry.is_some());
     }
 
     #[test]
@@ -781,34 +351,19 @@ mod tests {
     }
 
     #[test]
-    fn local_model_plans_local_profile() {
+    fn product_control_plane_tables_are_not_profile_schema() {
         let (_dir, runtime) = seeded_runtime();
+        let profile_path = runtime
+            .home()
+            .join(crate::shared::paths::dirs::PROFILES)
+            .join(NORMAL_PROFILE)
+            .join(crate::shared::paths::files::PROFILE_TOML);
+        let mut profile = std::fs::read_to_string(&profile_path).unwrap();
+        profile.push_str("\n[entrypoints.main]\nmodelPolicy = \"sessionDefault\"\n");
+        std::fs::write(&profile_path, profile).unwrap();
 
-        let plan = runtime
-            .plan_session(SessionPlanRequest {
-                requested_profile: Some(NORMAL_PROFILE.to_string()),
-                model: "ollama/gemma4:e4b".to_string(),
-                source: None,
-                entrypoint: None,
-            })
-            .unwrap();
+        let error = runtime.reload_now("test").unwrap_err();
 
-        assert_eq!(plan.profile_name, LOCAL_PROFILE);
-        assert_eq!(plan.context_policy_id, "localDefault");
-        assert_eq!(plan.primitive_surface_policy_id, "localModel");
-        assert_eq!(plan.capability_execution_policy_id, "localModel");
-    }
-
-    #[test]
-    fn process_plan_resolves_prompt_and_policies() {
-        let (_dir, runtime) = seeded_runtime();
-
-        let plan = runtime.plan_process("compaction", None).unwrap();
-
-        assert_eq!(plan.process_id, "compaction");
-        assert!(plan.prompt.is_some());
-        assert_eq!(plan.primitive_surface_policy_id, "none");
-        assert_eq!(plan.capability_execution_policy_id, "none");
-        assert_eq!(plan.output_contract_id, "compactionSummary");
+        assert!(error.to_string().contains("unknown field"));
     }
 }

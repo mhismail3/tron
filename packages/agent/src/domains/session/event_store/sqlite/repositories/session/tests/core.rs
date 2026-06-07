@@ -9,96 +9,8 @@ fn create_session() {
     assert_eq!(sess.workspace_id, ws_id);
     assert_eq!(sess.latest_model, "claude-opus-4-6");
     assert_eq!(sess.title.as_deref(), Some("Test Session"));
-    assert_eq!(sess.profile, crate::shared::profile::NORMAL_PROFILE);
     assert_eq!(sess.event_count, 0);
     assert!(sess.ended_at.is_none());
-}
-
-#[test]
-fn create_session_with_profile_round_trips() {
-    let (conn, ws_id) = setup();
-    let sess = SessionRepo::create(
-        &conn,
-        &CreateSessionOptions {
-            workspace_id: &ws_id,
-            model: "llama3.2",
-            working_directory: "/tmp/test",
-            title: Some("Local Session"),
-            tags: None,
-            parent_session_id: None,
-            fork_from_event_id: None,
-            spawning_session_id: None,
-            spawn_type: None,
-            spawn_task: None,
-            origin: None,
-            source: None,
-            profile: Some(crate::shared::profile::LOCAL_PROFILE),
-            use_worktree: None,
-        },
-    )
-    .unwrap();
-
-    assert_eq!(sess.profile, crate::shared::profile::LOCAL_PROFILE);
-    let fetched = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
-    assert_eq!(fetched.profile, crate::shared::profile::LOCAL_PROFILE);
-}
-
-fn create_session_with_use_worktree(
-    conn: &Connection,
-    ws_id: &str,
-    use_worktree: Option<bool>,
-) -> SessionRow {
-    SessionRepo::create(
-        conn,
-        &CreateSessionOptions {
-            workspace_id: ws_id,
-            model: "claude-opus-4-6",
-            working_directory: "/tmp/test",
-            title: Some("Override Test"),
-            tags: None,
-            parent_session_id: None,
-            fork_from_event_id: None,
-            spawning_session_id: None,
-            spawn_type: None,
-            spawn_task: None,
-            origin: None,
-            profile: None,
-            source: None,
-            use_worktree,
-        },
-    )
-    .unwrap()
-}
-
-#[test]
-fn create_session_default_use_worktree_is_none() {
-    let (conn, ws_id) = setup();
-    let sess = create_default_session(&conn, &ws_id);
-    assert!(sess.use_worktree.is_none());
-
-    // Round-trip through get_by_id.
-    let fetched = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
-    assert!(fetched.use_worktree.is_none());
-}
-
-#[test]
-fn create_session_with_use_worktree_true_round_trips() {
-    let (conn, ws_id) = setup();
-    let sess = create_session_with_use_worktree(&conn, &ws_id, Some(true));
-    assert_eq!(sess.use_worktree, Some(true));
-
-    let fetched = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
-    assert_eq!(fetched.use_worktree, Some(true));
-}
-
-#[test]
-fn create_session_with_use_worktree_false_round_trips() {
-    let (conn, ws_id) = setup();
-    let sess = create_session_with_use_worktree(&conn, &ws_id, Some(false));
-    assert_eq!(sess.use_worktree, Some(false));
-
-    let fetched = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
-    assert_eq!(fetched.use_worktree, Some(false));
 }
 
 #[test]
@@ -151,13 +63,6 @@ fn list_by_workspace() {
             tags: None,
             parent_session_id: None,
             fork_from_event_id: None,
-            spawning_session_id: None,
-            spawn_type: None,
-            spawn_task: None,
-            origin: None,
-            profile: None,
-            source: None,
-            use_worktree: None,
         },
     )
     .unwrap();
@@ -196,13 +101,6 @@ fn list_by_working_directory_and_offset() {
             tags: None,
             parent_session_id: None,
             fork_from_event_id: None,
-            spawning_session_id: None,
-            spawn_type: None,
-            spawn_task: None,
-            origin: None,
-            profile: None,
-            source: None,
-            use_worktree: None,
         },
     )
     .unwrap();
@@ -321,34 +219,6 @@ fn update_title() {
 }
 
 #[test]
-fn update_source() {
-    let (conn, ws_id) = setup();
-    let sess = create_default_session(&conn, &ws_id);
-
-    SessionRepo::update_source(&conn, &sess.id, "cron").unwrap();
-    let found = SessionRepo::get_by_id(&conn, &sess.id).unwrap().unwrap();
-    assert_eq!(found.source.as_deref(), Some("cron"));
-}
-
-#[test]
-fn update_spawn_info() {
-    let (conn, ws_id) = setup();
-    let parent = create_default_session(&conn, &ws_id);
-    let child = create_default_session(&conn, &ws_id);
-
-    SessionRepo::update_spawn_info(&conn, &child.id, &parent.id, "query", "summarize history")
-        .unwrap();
-
-    let found = SessionRepo::get_by_id(&conn, &child.id).unwrap().unwrap();
-    assert_eq!(
-        found.spawning_session_id.as_deref(),
-        Some(parent.id.as_str())
-    );
-    assert_eq!(found.spawn_type.as_deref(), Some("query"));
-    assert_eq!(found.spawn_task.as_deref(), Some("summarize history"));
-}
-
-#[test]
 fn increment_counters() {
     let (conn, ws_id) = setup();
     let sess = create_default_session(&conn, &ws_id);
@@ -451,77 +321,6 @@ fn delete_session() {
 
     assert!(SessionRepo::delete(&conn, &sess.id).unwrap());
     assert!(!SessionRepo::exists(&conn, &sess.id).unwrap());
-}
-
-#[test]
-fn list_subagents() {
-    let (conn, ws_id) = setup();
-    let parent = create_default_session(&conn, &ws_id);
-
-    SessionRepo::create(
-        &conn,
-        &CreateSessionOptions {
-            workspace_id: &ws_id,
-            model: "claude-3",
-            working_directory: "/tmp/test",
-            title: None,
-            tags: None,
-            parent_session_id: None,
-            fork_from_event_id: None,
-            spawning_session_id: Some(&parent.id),
-            spawn_type: Some("query"),
-            spawn_task: Some("do something"),
-            origin: None,
-            profile: None,
-            source: None,
-            use_worktree: None,
-        },
-    )
-    .unwrap();
-
-    let subagents = SessionRepo::list_subagents(&conn, &parent.id).unwrap();
-    assert_eq!(subagents.len(), 1);
-    assert_eq!(subagents[0].spawn_type.as_deref(), Some("query"));
-}
-
-#[test]
-fn exclude_subagents_filter() {
-    let (conn, ws_id) = setup();
-    let parent = create_default_session(&conn, &ws_id);
-
-    SessionRepo::create(
-        &conn,
-        &CreateSessionOptions {
-            workspace_id: &ws_id,
-            model: "claude-3",
-            working_directory: "/tmp/test",
-            title: None,
-            tags: None,
-            parent_session_id: None,
-            fork_from_event_id: None,
-            spawning_session_id: Some(&parent.id),
-            spawn_type: Some("query"),
-            spawn_task: None,
-            origin: None,
-            profile: None,
-            source: None,
-            use_worktree: None,
-        },
-    )
-    .unwrap();
-
-    let all = SessionRepo::list(&conn, &ListSessionsOptions::default()).unwrap();
-    assert_eq!(all.len(), 2);
-
-    let no_subagents = SessionRepo::list(
-        &conn,
-        &ListSessionsOptions {
-            exclude_subagents: Some(true),
-            ..Default::default()
-        },
-    )
-    .unwrap();
-    assert_eq!(no_subagents.len(), 1);
 }
 
 // ── Batch operations ─────────────────────────────────────────────

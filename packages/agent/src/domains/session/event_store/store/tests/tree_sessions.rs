@@ -6,7 +6,7 @@ use super::*;
 fn fork_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let user_msg = store
@@ -43,7 +43,7 @@ fn fork_basic() {
 fn fork_ancestors_cross_sessions() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let user_msg = store
@@ -70,7 +70,7 @@ fn fork_ancestors_cross_sessions() {
 fn fork_with_model_override() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let fork = store
@@ -100,7 +100,7 @@ fn fork_nonexistent_event_fails() {
 fn delete_message_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let user_msg = store
@@ -126,7 +126,7 @@ fn delete_message_basic() {
 fn delete_non_message_fails() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // Try to delete the root session.start event
@@ -140,7 +140,7 @@ fn delete_non_message_fails() {
 fn get_session() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let session = store.get_session(&cr.session.id).unwrap();
@@ -151,10 +151,10 @@ fn get_session() {
 fn list_sessions() {
     let store = setup();
     store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
     store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let sessions = store
@@ -167,7 +167,7 @@ fn list_sessions() {
 fn end_and_reactivate_session() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     store.end_session(&cr.session.id).unwrap();
@@ -183,7 +183,7 @@ fn end_and_reactivate_session() {
 fn update_session_title() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     store
@@ -197,7 +197,7 @@ fn update_session_title() {
 fn delete_session_cascade() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     store
@@ -219,120 +219,11 @@ fn delete_session_cascade() {
     assert!(events.is_empty());
 }
 
-// ── Source tracking ────────────────────────────────────────────────
-
-#[test]
-fn update_source_sets_source() {
-    let store = setup();
-    let cr = store
-        .create_session(
-            "claude-opus-4-6",
-            "/tmp/project",
-            Some("Cron: test"),
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let updated = store.update_source(&cr.session.id, "cron").unwrap();
-    assert!(updated);
-
-    let session = store.get_session(&cr.session.id).unwrap().unwrap();
-    assert_eq!(session.source.as_deref(), Some("cron"));
-}
-
-#[test]
-fn update_source_nonexistent_session() {
-    let store = setup();
-    let updated = store.update_source("sess_nonexistent", "cron").unwrap();
-    assert!(!updated);
-}
-
-#[test]
-fn update_source_is_idempotent() {
-    let store = setup();
-    let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
-        .unwrap();
-
-    store.update_source(&cr.session.id, "cron").unwrap();
-    let updated = store.update_source(&cr.session.id, "cron").unwrap();
-    assert!(updated);
-
-    let session = store.get_session(&cr.session.id).unwrap().unwrap();
-    assert_eq!(session.source.as_deref(), Some("cron"));
-}
-
-#[test]
-fn update_spawn_info_links_subagent_and_lists_it() {
-    let store = setup();
-    let parent = store
-        .create_session(
-            "claude-opus-4-6",
-            "/tmp/project",
-            Some("Parent"),
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-    let child = store
-        .create_session(
-            "claude-opus-4-6",
-            "/tmp/project",
-            Some("Child"),
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let updated = store
-        .update_spawn_info(
-            &child.session.id,
-            &parent.session.id,
-            "query",
-            "summarize history",
-        )
-        .unwrap();
-    assert!(updated);
-
-    let child_session = store.get_session(&child.session.id).unwrap().unwrap();
-    assert_eq!(
-        child_session.spawning_session_id.as_deref(),
-        Some(parent.session.id.as_str())
-    );
-    assert_eq!(child_session.spawn_type.as_deref(), Some("query"));
-    assert_eq!(
-        child_session.spawn_task.as_deref(),
-        Some("summarize history")
-    );
-
-    let subagents = store.list_subagents(&parent.session.id).unwrap();
-    assert_eq!(subagents.len(), 1);
-    assert_eq!(subagents[0].id, child.session.id);
-}
-
-#[test]
-fn update_spawn_info_nonexistent_session_returns_false() {
-    let store = setup();
-    let updated = store
-        .update_spawn_info(
-            "sess_nonexistent",
-            "sess_parent",
-            "query",
-            "summarize history",
-        )
-        .unwrap();
-    assert!(!updated);
-}
-
 #[test]
 fn was_session_interrupted_tracks_incomplete_turns() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     assert!(!store.was_session_interrupted(&cr.session.id).unwrap());
@@ -380,7 +271,7 @@ fn blob_storage() {
 
     let blob = store.get_blob(&blob_id).unwrap().unwrap();
     assert_eq!(blob.mime_type, "text/plain");
-    assert_eq!(blob.size_original, 11);
+    assert_eq!(blob.uncompressed_size, 11);
 }
 
 // ── Workspace ─────────────────────────────────────────────────────
@@ -399,10 +290,10 @@ fn workspace_get_or_create() {
 fn list_workspaces() {
     let store = setup();
     store
-        .create_session("claude-opus-4-6", "/tmp/a", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/a", None, None)
         .unwrap();
     store
-        .create_session("claude-opus-4-6", "/tmp/b", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/b", None, None)
         .unwrap();
 
     let workspaces = store.list_workspaces().unwrap();
@@ -415,7 +306,7 @@ fn list_workspaces() {
 fn agentic_loop() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // Turn 1: user → assistant(capability_invocation) → turn_end → capability.invocation.completed → assistant(end_turn) → turn_end
@@ -434,7 +325,7 @@ fn agentic_loop() {
             session_id: &cr.session.id,
             event_type: EventType::MessageAssistant,
             payload: serde_json::json!({
-                "content": [{"type": "capability_invocation", "id": "capability_1", "name": "process::run", "arguments": {"command": "ls"}}],
+                "content": [{"type": "capability_invocation", "id": "capability_1", "name": "execute", "arguments": {"operation": "process_run", "command": "ls"}}],
                 "turn": 1,
                 "tokenUsage": {"inputTokens": 200, "outputTokens": 30}
             }),
@@ -515,7 +406,7 @@ fn agentic_loop() {
 fn fork_then_diverge() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let user_msg = store

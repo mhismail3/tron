@@ -6,7 +6,7 @@ use super::*;
 fn append_basic() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let event = store
@@ -31,7 +31,7 @@ fn append_basic() {
 fn append_chains_from_head() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let evt1 = store
@@ -62,7 +62,7 @@ fn append_chains_from_head() {
 fn append_updates_session_head() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let event = store
@@ -83,7 +83,7 @@ fn append_updates_session_head() {
 fn append_increments_counters() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     store
@@ -142,7 +142,7 @@ fn append_increments_counters() {
 fn last_turn_input_tokens_prefers_context_window_tokens() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // Append assistant message with BOTH tokenUsage.inputTokens AND
@@ -179,7 +179,7 @@ fn last_turn_input_tokens_prefers_context_window_tokens() {
 fn last_turn_input_tokens_requires_canonical_token_record() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // No tokenRecord — tokenUsage is not enough to update context state.
@@ -207,7 +207,7 @@ fn last_turn_input_tokens_requires_canonical_token_record() {
 fn last_turn_input_tokens_not_set_for_user_messages() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // User messages should NOT update last_turn_input_tokens even if
@@ -238,7 +238,7 @@ fn last_turn_input_tokens_not_set_for_user_messages() {
 fn token_counters_only_from_stream_turn_end() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // message.assistant with tokenUsage should NOT increment token counters
@@ -304,7 +304,7 @@ fn token_counters_only_from_stream_turn_end() {
 fn cost_only_from_stream_turn_end() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // message.assistant with cost should NOT increment cost
@@ -348,7 +348,7 @@ fn cost_only_from_stream_turn_end() {
 fn no_double_counting_with_both_events() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // Simulate a real turn: message.assistant then stream.turn_end with identical tokens
@@ -399,7 +399,7 @@ fn no_double_counting_with_both_events() {
 fn stream_turn_end_without_token_usage_no_counter_change() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // stream.turn_end with no tokenUsage (e.g. capability-only turn)
@@ -425,7 +425,7 @@ fn stream_turn_end_without_token_usage_no_counter_change() {
 fn events_without_token_usage_dont_affect_counters() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     store
@@ -457,7 +457,7 @@ fn events_without_token_usage_dont_affect_counters() {
 fn last_turn_input_tokens_still_set_on_message_assistant() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // Even though token counters don't increment from message.assistant,
@@ -489,7 +489,7 @@ fn last_turn_input_tokens_still_set_on_message_assistant() {
 fn multi_turn_no_double_counting() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // Turn 1
@@ -577,7 +577,7 @@ fn multi_turn_no_double_counting() {
 fn append_with_explicit_parent() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     // Append with explicit parent = root event (not head)
@@ -625,7 +625,7 @@ fn append_to_nonexistent_session_fails() {
 fn get_event() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let event = store.get_event(&cr.root_event.id).unwrap();
@@ -637,7 +637,7 @@ fn get_event() {
 fn get_events_by_session() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     store
@@ -662,7 +662,7 @@ fn get_events_by_session() {
 fn get_ancestors() {
     let store = setup();
     let cr = store
-        .create_session("claude-opus-4-6", "/tmp/project", None, None, None, None)
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
         .unwrap();
 
     let evt1 = store

@@ -704,12 +704,12 @@ async fn abort_mid_thinking_preserves_signature() {
 
 // -- drain mode tests --
 
-fn ask_user_stopping_capabilities() -> HashSet<String> {
-    HashSet::from(["agent::ask_user".to_string()])
+fn execute_stopping_capabilities() -> HashSet<String> {
+    HashSet::from(["execute".to_string()])
 }
 
-fn both_stopping_capabilities() -> HashSet<String> {
-    HashSet::from(["agent::ask_user".to_string(), "agent::ask_user".to_string()])
+fn unrelated_stopping_capabilities() -> HashSet<String> {
+    HashSet::from(["other".to_string()])
 }
 
 /// Helper: build a Done event with token usage.
@@ -728,7 +728,7 @@ fn done_with_usage(content: Vec<AssistantContent>, stop_reason: &str) -> StreamE
 }
 
 #[tokio::test]
-async fn drain_after_interactive_capability_drops_trailing_text() {
+async fn drain_after_turn_stopping_execute_drops_trailing_text() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::TextStart);
@@ -736,16 +736,17 @@ async fn drain_after_interactive_capability_drops_trailing_text() {
         yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
         yield Ok(StreamEvent::CapabilityInvocationDraftStart {
             invocation_id: "tc-ask".into(),
-            name: "agent::ask_user".into(),
+            name: "execute".into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: "tc-ask".into(),
-            arguments_delta: r#"{"questions":["q1"]}"#.into(),
+            arguments_delta: r#"{"operation":"observe","input":"q1"}"#.into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "agent::ask_user", {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "execute", {
                 let mut m = serde_json::Map::new();
-                let _ = m.insert("questions".into(), serde_json::json!(["q1"]));
+                let _ = m.insert("operation".into(), serde_json::json!("observe"));
+                let _ = m.insert("input".into(), serde_json::json!("q1"));
                 m
             }),
         });
@@ -763,7 +764,7 @@ async fn drain_after_interactive_capability_drops_trailing_text() {
         "s1",
         &emitter,
         &cancel,
-        &ask_user_stopping_capabilities(),
+        &execute_stopping_capabilities(),
         None,
         None,
     )
@@ -773,7 +774,7 @@ async fn drain_after_interactive_capability_drops_trailing_text() {
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "capability_invocation");
     assert_eq!(result.capability_invocations.len(), 1);
-    assert_eq!(result.capability_invocations[0].name, "agent::ask_user");
+    assert_eq!(result.capability_invocations[0].name, "execute");
 
     // Token usage captured from Done event
     let usage = result.token_usage.expect("should have token usage");
@@ -801,7 +802,7 @@ async fn drain_after_interactive_capability_drops_trailing_text() {
 }
 
 #[tokio::test]
-async fn drain_after_execute_targeting_turn_stopping_contract() {
+async fn drain_after_execute_primitive_operation() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::TextStart);
@@ -813,14 +814,13 @@ async fn drain_after_execute_targeting_turn_stopping_contract() {
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: "tc-execute-ask".into(),
-            arguments_delta: r#"{"mode":"invoke","contractId":"agent::ask_user","payload":{"questions":[{"question":"Proceed?"}]}}"#.into(),
+            arguments_delta: r#"{"operation":"observe","input":"Proceed?"}"#.into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
             capability_invocation: CapabilityInvocationDraft::new("tc-execute-ask", "execute", {
                 let mut m = serde_json::Map::new();
-                let _ = m.insert("mode".into(), serde_json::json!("invoke"));
-                let _ = m.insert("contractId".into(), serde_json::json!("agent::ask_user"));
-                let _ = m.insert("payload".into(), serde_json::json!({"questions":[{"question":"Proceed?"}]}));
+                let _ = m.insert("operation".into(), serde_json::json!("observe"));
+                let _ = m.insert("input".into(), serde_json::json!("Proceed?"));
                 m
             }),
         });
@@ -837,7 +837,7 @@ async fn drain_after_execute_targeting_turn_stopping_contract() {
         "s1",
         &emitter,
         &cancel,
-        &ask_user_stopping_capabilities(),
+        &execute_stopping_capabilities(),
         None,
         None,
     )
@@ -861,7 +861,7 @@ async fn drain_after_execute_targeting_turn_stopping_contract() {
 }
 
 #[tokio::test]
-async fn drain_preserves_thinking_and_text_before_interactive() {
+async fn drain_preserves_thinking_and_text_before_stopping_execute() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::ThinkingStart);
@@ -872,16 +872,17 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
         yield Ok(StreamEvent::TextEnd { text: "answer".into(), signature: None });
         yield Ok(StreamEvent::CapabilityInvocationDraftStart {
             invocation_id: "tc-ask-confirm".into(),
-            name: "agent::ask_user".into(),
+            name: "execute".into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: "tc-ask-confirm".into(),
-            arguments_delta: r#"{"questions":[{"question":"Proceed?"}]}"#.into(),
+            arguments_delta: r#"{"operation":"observe","input":"Proceed?"}"#.into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-ask-confirm", "agent::ask_user", {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask-confirm", "execute", {
                 let mut m = serde_json::Map::new();
-                let _ = m.insert("questions".into(), serde_json::json!([{ "question": "Proceed?" }]));
+                let _ = m.insert("operation".into(), serde_json::json!("observe"));
+                let _ = m.insert("input".into(), serde_json::json!("Proceed?"));
                 m
             }),
         });
@@ -897,7 +898,7 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
         "s1",
         &emitter,
         &cancel,
-        &both_stopping_capabilities(),
+        &execute_stopping_capabilities(),
         None,
         None,
     )
@@ -930,50 +931,52 @@ async fn drain_preserves_thinking_and_text_before_interactive() {
     if let AssistantContent::Text { text: t, .. } = text.unwrap() {
         assert_eq!(t, "answer");
     }
-    // ModelCapability preserved
+    // Capability invocation preserved
     assert_eq!(result.capability_invocations.len(), 1);
-    assert_eq!(result.capability_invocations[0].name, "agent::ask_user");
+    assert_eq!(result.capability_invocations[0].name, "execute");
 }
 
 #[tokio::test]
-async fn drain_with_preceding_tools_keeps_all_before_interactive() {
+async fn drain_after_first_stopping_execute_drops_following_invocations() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-bash".into(), name: "process::run".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-observe".into(), name: "execute".into() });
         yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
-            invocation_id: "tc-bash".into(),
-            arguments_delta: r#"{"command":"ls"}"#.into(),
+            invocation_id: "tc-observe".into(),
+            arguments_delta: r#"{"operation":"observe","input":"first"}"#.into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-bash", "process::run", {
+            capability_invocation: CapabilityInvocationDraft::new("tc-observe", "execute", {
                 let mut m = serde_json::Map::new();
-                let _ = m.insert("command".into(), serde_json::json!("ls"));
+                let _ = m.insert("operation".into(), serde_json::json!("observe"));
+                let _ = m.insert("input".into(), serde_json::json!("first"));
                 m
             }),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftStart {
             invocation_id: "tc-ask".into(),
-            name: "agent::ask_user".into(),
+            name: "execute".into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: "tc-ask".into(),
-            arguments_delta: r#"{"questions":["q"]}"#.into(),
+            arguments_delta: r#"{"operation":"observe","input":"second"}"#.into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "agent::ask_user", {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "execute", {
                 let mut m = serde_json::Map::new();
-                let _ = m.insert("questions".into(), serde_json::json!(["q"]));
+                let _ = m.insert("operation".into(), serde_json::json!("observe"));
+                let _ = m.insert("input".into(), serde_json::json!("second"));
                 m
             }),
         });
-        // ModelCapability after interactive — should be drained
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-edit".into(), name: "filesystem::edit_file".into() });
+        // Capability invocation after the stopping call should be drained.
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-write".into(), name: "execute".into() });
         yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
-            invocation_id: "tc-edit".into(),
-            arguments_delta: r#"{"file":"x"}"#.into(),
+            invocation_id: "tc-write".into(),
+            arguments_delta: r#"{"operation":"file_write","path":"x","content":"y"}"#.into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-edit", "filesystem::edit_file", serde_json::Map::new()),
+            capability_invocation: CapabilityInvocationDraft::new("tc-write", "execute", serde_json::Map::new()),
         });
         yield Ok(done_with_usage(vec![], "capability_invocation"));
     };
@@ -985,22 +988,21 @@ async fn drain_with_preceding_tools_keeps_all_before_interactive() {
         "s1",
         &emitter,
         &cancel,
-        &ask_user_stopping_capabilities(),
+        &execute_stopping_capabilities(),
         None,
         None,
     )
     .await
     .unwrap();
 
-    assert_eq!(result.capability_invocations.len(), 2);
-    assert_eq!(result.capability_invocations[0].name, "process::run");
-    assert_eq!(result.capability_invocations[1].name, "agent::ask_user");
-    // filesystem::edit_file should NOT be in capability_invocations
+    assert_eq!(result.capability_invocations.len(), 1);
+    assert_eq!(result.capability_invocations[0].name, "execute");
+    // The later execute call should NOT be in capability_invocations.
     assert!(
         !result
             .capability_invocations
             .iter()
-            .any(|tc| tc.name == "filesystem::edit_file")
+            .any(|tc| tc.id == "tc-write")
     );
 }
 
@@ -1011,14 +1013,15 @@ async fn no_drain_for_non_stopping_capabilities() {
         yield Ok(StreamEvent::TextStart);
         yield Ok(StreamEvent::TextDelta { delta: "hello".into() });
         yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
-        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-1".into(), name: "process::run".into() });
+        yield Ok(StreamEvent::CapabilityInvocationDraftStart { invocation_id: "tc-1".into(), name: "execute".into() });
         yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: "tc-1".into(),
-            arguments_delta: r#"{"command":"ls"}"#.into(),
+            arguments_delta: r#"{"operation":"process_run","command":"ls"}"#.into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-1", "process::run", {
+            capability_invocation: CapabilityInvocationDraft::new("tc-1", "execute", {
                 let mut m = serde_json::Map::new();
+                let _ = m.insert("operation".into(), serde_json::json!("process_run"));
                 let _ = m.insert("command".into(), serde_json::json!("ls"));
                 m
             }),
@@ -1032,7 +1035,7 @@ async fn no_drain_for_non_stopping_capabilities() {
                     AssistantContent::text("hello world"),
                     AssistantContent::CapabilityInvocation {
                         id: "tc-1".into(),
-                        name: "process::run".into(),
+                        name: "execute".into(),
                         arguments: serde_json::Map::new(),
                         thought_signature: None,
                     },
@@ -1045,13 +1048,13 @@ async fn no_drain_for_non_stopping_capabilities() {
 
     let emitter = make_emitter();
     let cancel = CancellationToken::new();
-    // agent::ask_user is in the set, but process::run is not — no drain
+    // execute is not in the stopping set, so no drain happens.
     let result = process_stream(
         Box::pin(s),
         "s1",
         &emitter,
         &cancel,
-        &ask_user_stopping_capabilities(),
+        &unrelated_stopping_capabilities(),
         None,
         None,
     )
@@ -1061,7 +1064,7 @@ async fn no_drain_for_non_stopping_capabilities() {
     assert!(!result.interrupted);
     assert_eq!(result.stop_reason, "capability_invocation");
     assert_eq!(result.capability_invocations.len(), 1);
-    assert_eq!(result.capability_invocations[0].name, "process::run");
+    assert_eq!(result.capability_invocations[0].name, "execute");
     // Message should come from final_message (has combined text)
     let usage = result.token_usage.unwrap();
     assert_eq!(usage.input_tokens, 50);
@@ -1076,16 +1079,17 @@ async fn cancel_during_drain_returns_interrupted() {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::CapabilityInvocationDraftStart {
             invocation_id: "tc-ask".into(),
-            name: "agent::ask_user".into(),
+            name: "execute".into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: "tc-ask".into(),
-            arguments_delta: r#"{"questions":["q"]}"#.into(),
+            arguments_delta: r#"{"operation":"observe","input":"q"}"#.into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "agent::ask_user", {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "execute", {
                 let mut m = serde_json::Map::new();
-                let _ = m.insert("questions".into(), serde_json::json!(["q"]));
+                let _ = m.insert("operation".into(), serde_json::json!("observe"));
+                let _ = m.insert("input".into(), serde_json::json!("q"));
                 m
             }),
         });
@@ -1101,7 +1105,7 @@ async fn cancel_during_drain_returns_interrupted() {
         "s1",
         &emitter,
         &cancel,
-        &ask_user_stopping_capabilities(),
+        &execute_stopping_capabilities(),
         None,
         None,
     )
@@ -1112,7 +1116,7 @@ async fn cancel_during_drain_returns_interrupted() {
     assert_eq!(result.stop_reason, "interrupted");
     // Capability invocation should still be in the result (was finalized before drain)
     assert_eq!(result.capability_invocations.len(), 1);
-    assert_eq!(result.capability_invocations[0].name, "agent::ask_user");
+    assert_eq!(result.capability_invocations[0].name, "execute");
 }
 
 #[tokio::test]
@@ -1124,16 +1128,17 @@ async fn drain_empty_stopping_set_no_change() {
         yield Ok(StreamEvent::TextEnd { text: "hello".into(), signature: None });
         yield Ok(StreamEvent::CapabilityInvocationDraftStart {
             invocation_id: "tc-ask".into(),
-            name: "agent::ask_user".into(),
+            name: "execute".into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: "tc-ask".into(),
-            arguments_delta: r#"{"questions":["q"]}"#.into(),
+            arguments_delta: r#"{"operation":"observe","input":"q"}"#.into(),
         });
         yield Ok(StreamEvent::CapabilityInvocationDraftEnd {
-            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "agent::ask_user", {
+            capability_invocation: CapabilityInvocationDraft::new("tc-ask", "execute", {
                 let mut m = serde_json::Map::new();
-                let _ = m.insert("questions".into(), serde_json::json!(["q"]));
+                let _ = m.insert("operation".into(), serde_json::json!("observe"));
+                let _ = m.insert("input".into(), serde_json::json!("q"));
                 m
             }),
         });

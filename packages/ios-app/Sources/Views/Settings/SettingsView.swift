@@ -21,7 +21,7 @@ struct SettingsView: View {
     @State private var isPreparingFeedback = false
 
     enum SettingsPage: String, Identifiable {
-        case server, agent, context, providers, app, mcpServers
+        case server, agent, context, providers, app
         var id: String { rawValue }
     }
 
@@ -201,11 +201,6 @@ struct SettingsView: View {
                 confirmArchive: $confirmArchive,
                 autoMarkRead: $autoMarkRead
             )
-        case .mcpServers:
-            PluginSourcesPage(
-                settingsState: settingsState,
-                updateServerSetting: updateServerSetting
-            )
         }
     }
 
@@ -298,7 +293,7 @@ struct SettingsView: View {
         switch destination {
         case .server, .app:
             return true
-        case .providers, .agent, .context, .mcpServers:
+        case .providers, .agent, .context:
             return serverSettingsReady
         }
     }
@@ -328,8 +323,6 @@ struct SettingsView: View {
             activePage = .agent
         case .context:
             activePage = .context
-        case .mcpServers:
-            activePage = .mcpServers
         }
     }
 

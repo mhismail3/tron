@@ -46,10 +46,6 @@ enum PersistedEventType: String, CaseIterable {
     // Notifications (in-chat pill notifications)
     case notificationInterrupted = "notification.interrupted"
 
-    // Rules
-    case rulesLoaded = "rules.loaded"
-    case rulesActivated = "rules.activated"
-
     // Compaction/summarization
     case compactBoundary = "compact.boundary"
 
@@ -72,11 +68,6 @@ enum PersistedEventType: String, CaseIterable {
 
     // Turn events
     case turnFailed = "turn.failed"
-
-    // Memory
-    case memoryRetained = "memory.retained"
-    case memoryAutoRetainTriggered = "memory.auto_retain_triggered"
-    case memoryAutoRetainFailed = "memory.auto_retain_failed"
 
     // Process management
     case notificationProcessResult = "notification.process_result"
@@ -124,9 +115,6 @@ enum PersistedEventType: String, CaseIterable {
         case .messageDeleted:          return .init(false,   true,    false,   true,   "Message deleted")
         // Notifications
         case .notificationInterrupted: return .init(true,    false,   false,   false,  "Session interrupted")
-        // Rules
-        case .rulesLoaded:             return .init(true,    false,   false,   false,  "Rules loaded")
-        case .rulesActivated:          return .init(true,    false,   false,   false,  "Rules activated")
         // Compaction
         case .compactBoundary:         return .init(true,    true,    false,   true,   "Compact boundary")
         // Context
@@ -144,10 +132,6 @@ enum PersistedEventType: String, CaseIterable {
         case .errorProvider:           return .init(true,    false,   false,   false,  "Provider error")
         // Turn events
         case .turnFailed:              return .init(true,    false,   false,   false,  "Turn failed")
-        // Memory
-        case .memoryRetained:          return .init(true,    false,   false,   false,  "Memory retained")
-        case .memoryAutoRetainTriggered: return .init(false,  false,   false,   true,   "Auto-retain triggered")
-        case .memoryAutoRetainFailed:  return .init(true,    false,   false,   false,  "Auto-retain failed")
         // Process
         case .notificationProcessResult: return .init(false, false,   false,   false,  "Process result")
         case .processResultsConsumed:  return .init(false,   false,   false,   false,  "Results consumed")

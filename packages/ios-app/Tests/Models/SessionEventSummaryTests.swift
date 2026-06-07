@@ -72,13 +72,6 @@ final class SessionEventSummaryTests: XCTestCase {
         XCTAssertEqual(event.summary, "Turn failed")
     }
 
-    // MARK: - Memory
-
-    func testMemoryRetained_summary() {
-        let event = makeEvent(type: "memory.retained")
-        XCTAssertEqual(event.summary, "Memory retained")
-    }
-
     // MARK: - Unknown Event Formatting
 
     func testUnknownEvent_formatsRawType_dotSeparated() {

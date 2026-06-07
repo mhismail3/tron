@@ -29,10 +29,6 @@ enum EventIconProvider {
                 return "xmark.circle.fill"
             }
             return "checkmark.circle.fill"
-        case .rulesLoaded:
-            return "doc.text.fill"
-        case .rulesActivated:
-            return "doc.text.badge.plus"
         case .contextCleared:
             return "clear.fill"
         case .compactBoundary:
@@ -63,8 +59,6 @@ enum EventIconProvider {
             return "wand.and.rays"
         case .turnFailed:
             return "exclamationmark.triangle.fill"
-        case .memoryRetained:
-            return "brain.head.profile.fill"
         case .streamTextDelta, .streamThinkingDelta:
             return "text.cursor"
         case .streamThinkingComplete:
@@ -100,8 +94,6 @@ enum EventIconProvider {
                 return .tronError
             }
             return .tronSuccess
-        case .rulesLoaded, .rulesActivated:
-            return .tronPurple
         case .contextCleared:
             return .tronCyan
         case .compactBoundary:
@@ -130,8 +122,6 @@ enum EventIconProvider {
             return .tronPurple
         case .turnFailed:
             return .tronError
-        case .memoryRetained:
-            return .tronPurple
         case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete:
             return .tronBlue
         default:

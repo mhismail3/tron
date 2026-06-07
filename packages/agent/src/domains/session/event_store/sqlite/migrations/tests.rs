@@ -13,22 +13,5 @@ fn open_memory() -> Connection {
     conn
 }
 
-fn seed_workspace_and_session(conn: &Connection, ws: &str, sess: &str) {
-    conn.execute(
-        "INSERT INTO workspaces (id, path, created_at, last_activity_at)
-         VALUES (?1, ?2, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-        rusqlite::params![ws, format!("/tmp/{ws}")],
-    )
-    .unwrap();
-    conn.execute(
-        "INSERT INTO sessions (id, workspace_id, latest_model, working_directory,
-                               created_at, last_activity_at)
-         VALUES (?1, ?2, 'claude-3', '/tmp',
-                 '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')",
-        rusqlite::params![sess, ws],
-    )
-    .unwrap();
-}
-
 #[path = "tests/primitive.rs"]
 mod primitive;

@@ -40,8 +40,6 @@ fn all_session_events_project_to_system_visible_stream_scope() {
         base: BaseEvent::now("session-a"),
         model: "claude-opus-4-6".to_owned(),
         working_directory: "/tmp".to_owned(),
-        source: None,
-        profile: None,
         title: None,
     };
 

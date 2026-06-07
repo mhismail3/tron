@@ -354,7 +354,6 @@ struct ContentView: View {
             ChatView(
                 engineClient: engineClient,
                 sessionId: sessionId,
-                audioRecorder: dependencies.audioRecorder,
                 workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget,
                 onToggleSidebar: toggleSidebar
@@ -364,7 +363,6 @@ struct ContentView: View {
             ChatView(
                 engineClient: engineClient,
                 sessionId: sessionId,
-                audioRecorder: dependencies.audioRecorder,
                 workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget
             )

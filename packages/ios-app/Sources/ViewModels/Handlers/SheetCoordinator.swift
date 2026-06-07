@@ -79,11 +79,6 @@ final class SheetCoordinator {
         )))
     }
 
-    /// Show memory retain detail sheet
-    func showMemoryRetainDetail(title: String, summary: String?) {
-        present(.memoryRetainDetail(MemoryRetainDetailData(title: title, summary: summary)))
-    }
-
     /// Show provider error detail sheet
     func showProviderErrorDetail(_ data: ProviderErrorDetailData) {
         present(.providerErrorDetail(data))

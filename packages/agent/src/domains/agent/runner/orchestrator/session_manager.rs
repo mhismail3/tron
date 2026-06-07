@@ -67,8 +67,6 @@ pub struct SessionFilter {
     pub workspace_path: Option<String>,
     /// Include archived sessions.
     pub include_archived: bool,
-    /// Show only user-created sessions (exclude cron, etc.).
-    pub user_only: bool,
     /// Maximum number of results.
     pub limit: Option<usize>,
     /// Skip results.
@@ -126,10 +124,7 @@ impl SessionManager {
         Ok(session_id)
     }
 
-    /// Resume an existing session (reconstruct from events).
-    ///
-    /// INVARIANT: callers must drain background hooks before calling this.
-    /// The prompt handler drains via `agent_runner` pre-run step.
+    /// Resume an existing session by reconstructing from persisted events.
     #[instrument(skip(self), fields(session_id))]
     pub fn resume_session(&self, session_id: &str) -> Result<Arc<ActiveSession>, RuntimeError> {
         // Check if already active
@@ -277,7 +272,6 @@ impl SessionManager {
             limit: filter.limit.map(|l| l as i64),
             #[allow(clippy::cast_possible_wrap)]
             offset: filter.offset.map(|o| o as i64),
-            user_only: if filter.user_only { Some(true) } else { None },
         };
         self.event_store
             .list_sessions(&opts)

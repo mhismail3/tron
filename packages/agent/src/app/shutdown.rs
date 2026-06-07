@@ -6,15 +6,13 @@
 //!    background tasks that observe [`ShutdownCoordinator::token`] to
 //!    cooperatively stop. These are drained at the end of
 //!    [`ShutdownCoordinator::graceful_shutdown`].
-//! 2. [`ShutdownCoordinator::register_phase_hook`] — for subsystems
-//!    that need a specific async "please drain now" callback. Hooks run
+//! 2. [`ShutdownCoordinator::register_phase_callback`] — for subsystems
+//!    that need a specific async "please drain now" callback. Callbacks run
 //!    in [`ShutdownPhase`] order BEFORE the task drain so that, e.g.,
-//!    MCP servers can send `shutdown` messages before the WebSocket
-//!    server is torn down.
+//!    capability blocking work can drain before the database pool closes.
 //!
-//! The order is intentional: agent loops finish turns → capabilities drain →
-//! MCP disconnects cleanly → cron stops scheduling → transcription
-//! workers drop → DB pool closes. See [`ShutdownPhase`].
+//! The order is intentional: agent loops finish turns -> capabilities drain ->
+//! DB pool closes. See [`ShutdownPhase`].
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,12 +30,12 @@ use tracing::{info, warn};
 /// Default timeout for graceful shutdown before force-exiting.
 const DEFAULT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(30);
 const ABORT_DRAIN_TIMEOUT: Duration = Duration::from_secs(1);
-/// Per-hook budget so one slow subsystem can't starve the rest.
+/// Per-callback budget so one slow subsystem can't starve the rest.
 /// Shorter than `DEFAULT_SHUTDOWN_TIMEOUT`/N so the full drain still
 /// finishes within the overall budget.
-const PER_HOOK_TIMEOUT: Duration = Duration::from_secs(5);
+const PER_CALLBACK_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// Subsystem categories that run as async shutdown hooks, in strict
+/// Subsystem categories that run as async shutdown callbacks, in strict
 /// declaration order (lower variant runs first).
 ///
 /// The order matters:
@@ -45,11 +43,6 @@ const PER_HOOK_TIMEOUT: Duration = Duration::from_secs(5);
 ///   capabilities they own finish naturally.
 /// - [`Capabilities`](ShutdownPhase::Capabilities) then cancels anything still running
 ///   (e.g. long process capabilities that ignored turn cancel).
-/// - [`Mcp`](ShutdownPhase::Mcp) disconnects external MCP servers BEFORE
-///   we stop accepting capability calls that would call them.
-/// - [`Cron`](ShutdownPhase::Cron) stops scheduling new runs.
-/// - [`Transcription`](ShutdownPhase::Transcription) reaps sidecar
-///   processes last, after any capability that might produce audio has drained.
 /// - [`Database`](ShutdownPhase::Database) flushes pending writes last.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ShutdownPhase {
@@ -57,14 +50,8 @@ pub enum ShutdownPhase {
     Agent = 0,
     /// Capability executors that outlive their turn.
     Capabilities = 1,
-    /// MCP stdio/SSE clients — disconnect cleanly before the transport stops.
-    Mcp = 2,
-    /// Cron scheduler — stop enqueuing new runs; in-flight runs drain via tasks.
-    Cron = 3,
-    /// Transcription sidecar workers (MLX, etc.).
-    Transcription = 4,
     /// Database pool — flushed last so all preceding phases can still write.
-    Database = 5,
+    Database = 2,
 }
 
 impl ShutdownPhase {
@@ -72,17 +59,14 @@ impl ShutdownPhase {
         match self {
             Self::Agent => "agent",
             Self::Capabilities => "capabilities",
-            Self::Mcp => "mcp",
-            Self::Cron => "cron",
-            Self::Transcription => "transcription",
             Self::Database => "database",
         }
     }
 }
 
-/// One registered shutdown hook. The factory produces the future lazily
-/// so the hook's side-effects don't start until `graceful_shutdown` calls it.
-struct PhaseHook {
+/// One registered shutdown callback. The factory produces the future lazily so
+/// side effects do not start until `graceful_shutdown` calls it.
+struct PhaseCallback {
     phase: ShutdownPhase,
     name: &'static str,
     factory: Box<dyn FnOnce() -> BoxFuture<'static, ()> + Send>,
@@ -149,7 +133,7 @@ impl TaskRegistry {
 pub struct ShutdownCoordinator {
     token: CancellationToken,
     registry: Arc<TaskRegistry>,
-    hooks: Mutex<Vec<PhaseHook>>,
+    callbacks: Mutex<Vec<PhaseCallback>>,
 }
 
 impl ShutdownCoordinator {
@@ -158,26 +142,30 @@ impl ShutdownCoordinator {
         Self {
             token: CancellationToken::new(),
             registry: Arc::new(TaskRegistry::new()),
-            hooks: Mutex::new(Vec::new()),
+            callbacks: Mutex::new(Vec::new()),
         }
     }
 
-    /// Register an async hook that runs during graceful shutdown.
+    /// Register an async callback that runs during graceful shutdown.
     ///
-    /// Hooks run in [`ShutdownPhase`] order (lower variant first) BEFORE
-    /// the task-drain step, each with a `PER_HOOK_TIMEOUT` budget. Use
+    /// Callbacks run in [`ShutdownPhase`] order (lower variant first) BEFORE
+    /// the task-drain step, each with a `PER_CALLBACK_TIMEOUT` budget. Use
     /// this for subsystems that need an explicit "stop" call — e.g.
-    /// MCP's `router.shutdown_all()` — rather than the generic
+    /// draining blocking capability work — rather than the generic
     /// token-observation pattern of [`register_task`](Self::register_task).
     ///
     /// The factory runs lazily (on `graceful_shutdown`), so side-effects
     /// don't begin at registration time.
-    pub fn register_phase_hook<F, Fut>(&self, phase: ShutdownPhase, name: &'static str, factory: F)
-    where
+    pub fn register_phase_callback<F, Fut>(
+        &self,
+        phase: ShutdownPhase,
+        name: &'static str,
+        factory: F,
+    ) where
         F: FnOnce() -> Fut + Send + 'static,
         Fut: std::future::Future<Output = ()> + Send + 'static,
     {
-        self.hooks.lock().push(PhaseHook {
+        self.callbacks.lock().push(PhaseCallback {
             phase,
             name,
             factory: Box::new(move || Box::pin(factory())),
@@ -239,11 +227,11 @@ impl ShutdownCoordinator {
         self.registry.tracked_count()
     }
 
-    /// Perform a graceful shutdown of all tracked tasks and registered hooks.
+    /// Perform a graceful shutdown of all tracked tasks and registered callbacks.
     ///
     /// 1. Cancel the shutdown token (signals all tasks)
     /// 2. Register any explicit handles with the tracker
-    /// 3. Run phase hooks in [`ShutdownPhase`] order, each with `PER_HOOK_TIMEOUT`
+    /// 3. Run phase callbacks in [`ShutdownPhase`] order, each with `PER_CALLBACK_TIMEOUT`
     /// 4. Wait up to `timeout` for all handles to complete
     /// 5. Abort any remaining tasks after timeout
     pub async fn graceful_shutdown(&self, handles: Vec<JoinHandle<()>>, timeout: Option<Duration>) {
@@ -256,7 +244,7 @@ impl ShutdownCoordinator {
 
         self.close();
 
-        self.run_phase_hooks().await;
+        self.run_phase_callbacks().await;
 
         info!(
             task_count = self.tracked_task_count(),
@@ -293,26 +281,26 @@ impl ShutdownCoordinator {
         }
     }
 
-    /// Drain registered phase hooks in phase order, isolating failures.
+    /// Drain registered phase callbacks in phase order, isolating failures.
     ///
-    /// Each hook is:
-    /// - bounded by `PER_HOOK_TIMEOUT` so one slow subsystem can't block the rest
+    /// Each callback is:
+    /// - bounded by `PER_CALLBACK_TIMEOUT` so one slow subsystem can't block the rest
     /// - spawned on its own task so a panic terminates that task, not the coordinator
     /// - logged with outcome (`completed` / `timed_out` / `panicked`)
-    async fn run_phase_hooks(&self) {
-        let mut hooks: Vec<PhaseHook> = std::mem::take(&mut self.hooks.lock());
-        if hooks.is_empty() {
+    async fn run_phase_callbacks(&self) {
+        let mut callbacks: Vec<PhaseCallback> = std::mem::take(&mut self.callbacks.lock());
+        if callbacks.is_empty() {
             return;
         }
 
-        hooks.sort_by_key(|h| h.phase);
+        callbacks.sort_by_key(|callback| callback.phase);
 
-        for hook in hooks {
-            let PhaseHook {
+        for callback in callbacks {
+            let PhaseCallback {
                 phase,
                 name,
                 factory,
-            } = hook;
+            } = callback;
             let phase_str = phase.as_str();
             let start = std::time::Instant::now();
 
@@ -320,30 +308,34 @@ impl ShutdownCoordinator {
                 factory().await;
             });
 
-            match tokio::time::timeout(PER_HOOK_TIMEOUT, join).await {
+            match tokio::time::timeout(PER_CALLBACK_TIMEOUT, join).await {
                 Ok(Ok(())) => {
-                    histogram!("shutdown_hook_seconds", "phase" => phase_str, "name" => name, "outcome" => "completed")
+                    histogram!("shutdown_callback_seconds", "phase" => phase_str, "name" => name, "outcome" => "completed")
                         .record(start.elapsed().as_secs_f64());
-                    info!(phase = phase_str, name = name, "shutdown hook completed");
+                    info!(
+                        phase = phase_str,
+                        name = name,
+                        "shutdown callback completed"
+                    );
                 }
                 Ok(Err(join_err)) => {
-                    counter!("shutdown_hook_panics_total", "phase" => phase_str, "name" => name)
+                    counter!("shutdown_callback_panics_total", "phase" => phase_str, "name" => name)
                         .increment(1);
                     warn!(
                         phase = phase_str,
                         name = name,
                         error = %join_err,
-                        "shutdown hook panicked or was cancelled"
+                        "shutdown callback panicked or was cancelled"
                     );
                 }
                 Err(_) => {
-                    counter!("shutdown_hook_timeouts_total", "phase" => phase_str, "name" => name)
+                    counter!("shutdown_callback_timeouts_total", "phase" => phase_str, "name" => name)
                         .increment(1);
                     warn!(
                         phase = phase_str,
                         name = name,
-                        timeout_secs = PER_HOOK_TIMEOUT.as_secs(),
-                        "shutdown hook timed out"
+                        timeout_secs = PER_CALLBACK_TIMEOUT.as_secs(),
+                        "shutdown callback timed out"
                     );
                 }
             }
@@ -580,7 +572,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn phase_hooks_run_in_declared_order() {
+    async fn phase_callbacks_run_in_declared_order() {
         let coord = ShutdownCoordinator::new();
         let order: Arc<Mutex<Vec<&'static str>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -588,13 +580,10 @@ mod tests {
         for (phase, name) in [
             (ShutdownPhase::Database, "database"),
             (ShutdownPhase::Agent, "agent"),
-            (ShutdownPhase::Mcp, "mcp"),
-            (ShutdownPhase::Cron, "cron"),
-            (ShutdownPhase::Transcription, "transcription"),
             (ShutdownPhase::Capabilities, "capabilities"),
         ] {
             let order = Arc::clone(&order);
-            coord.register_phase_hook(phase, name, move || async move {
+            coord.register_phase_callback(phase, name, move || async move {
                 order.lock().push(name);
             });
         }
@@ -604,29 +593,19 @@ mod tests {
             .await;
 
         let observed = order.lock().clone();
-        assert_eq!(
-            observed,
-            vec![
-                "agent",
-                "capabilities",
-                "mcp",
-                "cron",
-                "transcription",
-                "database",
-            ]
-        );
+        assert_eq!(observed, vec!["agent", "capabilities", "database"]);
     }
 
     #[tokio::test]
-    async fn phase_hook_panic_isolated_others_continue() {
+    async fn phase_callback_panic_isolated_others_continue() {
         let coord = ShutdownCoordinator::new();
         let ran_after: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
         let ran_after_clone = Arc::clone(&ran_after);
 
-        coord.register_phase_hook(ShutdownPhase::Agent, "bad", move || async move {
+        coord.register_phase_callback(ShutdownPhase::Agent, "bad", move || async move {
             panic!("intentional test panic");
         });
-        coord.register_phase_hook(ShutdownPhase::Capabilities, "good", move || async move {
+        coord.register_phase_callback(ShutdownPhase::Capabilities, "good", move || async move {
             ran_after_clone.store(true, Ordering::SeqCst);
         });
 
@@ -636,21 +615,21 @@ mod tests {
 
         assert!(
             ran_after.load(Ordering::SeqCst),
-            "later hook must run even when earlier hook panics"
+            "later callback must run even when earlier callback panics"
         );
     }
 
     #[tokio::test]
-    async fn phase_hook_timeout_does_not_block_others() {
+    async fn phase_callback_timeout_does_not_block_others() {
         let coord = ShutdownCoordinator::new();
         let ran_after: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
         let ran_after_clone = Arc::clone(&ran_after);
 
-        // Hangs past PER_HOOK_TIMEOUT (5s) — must be force-completed.
-        coord.register_phase_hook(ShutdownPhase::Agent, "slow", move || async move {
+        // Hangs past PER_CALLBACK_TIMEOUT (5s) and must be force-completed.
+        coord.register_phase_callback(ShutdownPhase::Agent, "slow", move || async move {
             tokio::time::sleep(Duration::from_secs(60)).await;
         });
-        coord.register_phase_hook(ShutdownPhase::Capabilities, "fast", move || async move {
+        coord.register_phase_callback(ShutdownPhase::Capabilities, "fast", move || async move {
             ran_after_clone.store(true, Ordering::SeqCst);
         });
 
@@ -662,27 +641,27 @@ mod tests {
 
         assert!(
             ran_after.load(Ordering::SeqCst),
-            "hook after the hanging one must still run"
+            "callback after the hanging one must still run"
         );
         assert!(
             elapsed < Duration::from_secs(10),
-            "timed-out hook must not block further than its own budget; elapsed={:?}",
+            "timed-out callback must not block further than its own budget; elapsed={:?}",
             elapsed
         );
     }
 
     #[tokio::test]
-    async fn graceful_shutdown_waits_for_slow_hook_to_finish() {
+    async fn graceful_shutdown_waits_for_slow_callback_to_finish() {
         // INVARIANT: graceful_shutdown must not return until every registered
-        // phase hook has either completed or been cut by PER_HOOK_TIMEOUT.
+        // phase callback has either completed or been cut by PER_CALLBACK_TIMEOUT.
         // This is the load-bearing guarantee callers rely on.
         let coord = ShutdownCoordinator::new();
-        let hook_ran = Arc::new(AtomicBool::new(false));
-        let hook_ran_clone = Arc::clone(&hook_ran);
+        let callback_ran = Arc::new(AtomicBool::new(false));
+        let callback_ran_clone = Arc::clone(&callback_ran);
 
-        coord.register_phase_hook(ShutdownPhase::Agent, "slow", move || async move {
+        coord.register_phase_callback(ShutdownPhase::Agent, "slow", move || async move {
             tokio::time::sleep(Duration::from_millis(150)).await;
-            hook_ran_clone.store(true, Ordering::SeqCst);
+            callback_ran_clone.store(true, Ordering::SeqCst);
         });
 
         coord
@@ -690,26 +669,23 @@ mod tests {
             .await;
 
         assert!(
-            hook_ran.load(Ordering::SeqCst),
-            "graceful_shutdown must await hook completion before returning"
+            callback_ran.load(Ordering::SeqCst),
+            "graceful_shutdown must await callback completion before returning"
         );
     }
 
     #[tokio::test]
-    async fn graceful_shutdown_runs_every_registered_phase_hook() {
+    async fn graceful_shutdown_runs_every_registered_phase_callback() {
         let coord = ShutdownCoordinator::new();
         let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
         for phase in [
             ShutdownPhase::Agent,
             ShutdownPhase::Capabilities,
-            ShutdownPhase::Mcp,
-            ShutdownPhase::Cron,
-            ShutdownPhase::Transcription,
             ShutdownPhase::Database,
         ] {
             let count = Arc::clone(&count);
-            coord.register_phase_hook(phase, "sub", move || async move {
+            coord.register_phase_callback(phase, "sub", move || async move {
                 let _ = count.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             });
         }
@@ -718,7 +694,7 @@ mod tests {
             .graceful_shutdown(vec![], Some(Duration::from_secs(5)))
             .await;
 
-        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 6);
+        assert_eq!(count.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 
     #[test]
@@ -726,9 +702,6 @@ mod tests {
         // Lock in the declared phase order; any reordering requires an
         // explicit change to this test + the module docs.
         assert!(ShutdownPhase::Agent < ShutdownPhase::Capabilities);
-        assert!(ShutdownPhase::Capabilities < ShutdownPhase::Mcp);
-        assert!(ShutdownPhase::Mcp < ShutdownPhase::Cron);
-        assert!(ShutdownPhase::Cron < ShutdownPhase::Transcription);
-        assert!(ShutdownPhase::Transcription < ShutdownPhase::Database);
+        assert!(ShutdownPhase::Capabilities < ShutdownPhase::Database);
     }
 }

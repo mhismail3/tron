@@ -6,8 +6,6 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             base,
             model,
             working_directory,
-            source,
-            profile,
             title,
             ..
         } => Some(global(
@@ -23,8 +21,6 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "cost": 0.0,
                 "lastActivity": base.timestamp,
                 "isActive": true,
-                "source": source,
-                "profile": profile,
             })),
         )),
         TronEvent::SessionForked { new_session_id, .. } => Some(global(

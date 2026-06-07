@@ -15,9 +15,10 @@
 use crate::shared::content::{AssistantContent, CapabilityResultContent, UserContent};
 use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
 use crate::shared::model_capabilities::ModelCapability;
+#[cfg(test)]
 use serde_json::Value;
 
-use super::constants::{CHARS_PER_TOKEN, DEFAULT_URL_IMAGE_TOKENS, MIN_IMAGE_TOKENS, RULES_HEADER};
+use super::constants::{CHARS_PER_TOKEN, DEFAULT_URL_IMAGE_TOKENS, MIN_IMAGE_TOKENS};
 
 /// Shorthand for chars → tokens conversion.
 #[allow(clippy::cast_possible_truncation)]
@@ -36,11 +37,6 @@ pub enum ImageSource {
     Base64 {
         /// Raw base64 string (no data: prefix).
         data: String,
-    },
-    /// URL-referenced image.
-    Url {
-        /// Image URL.
-        url: String,
     },
 }
 
@@ -67,7 +63,7 @@ pub fn estimate_image_tokens(source: Option<&ImageSource>) -> u32 {
             let tokens = (estimated_pixels / 750.0).ceil() as u32;
             tokens.max(MIN_IMAGE_TOKENS)
         }
-        Some(ImageSource::Url { .. }) | None => DEFAULT_URL_IMAGE_TOKENS,
+        None => DEFAULT_URL_IMAGE_TOKENS,
     }
 }
 
@@ -78,6 +74,7 @@ pub fn estimate_image_tokens(source: Option<&ImageSource>) -> u32 {
 /// Estimate character count for a content block (internal helper).
 ///
 /// Avoids precision loss from double conversion by working in chars.
+#[cfg(test)]
 fn estimate_block_chars(block: &Value) -> usize {
     let Some(obj) = block.as_object() else {
         return 0;
@@ -145,6 +142,7 @@ fn estimate_block_chars(block: &Value) -> usize {
 ///
 /// Handles text, thinking, capability invocation/result, and image blocks.
 #[must_use]
+#[cfg(test)]
 pub fn estimate_block_tokens(block: &Value) -> u32 {
     chars_to_tokens(estimate_block_chars(block))
 }
@@ -247,6 +245,7 @@ pub fn estimate_message_tokens(message: &Message) -> u32 {
 
 /// Estimate tokens for an array of messages.
 #[must_use]
+#[cfg(test)]
 pub fn estimate_messages_tokens(messages: &[Message]) -> u32 {
     messages.iter().map(estimate_message_tokens).sum()
 }
@@ -277,19 +276,9 @@ pub fn estimate_capabilities_tokens(capabilities: &[ModelCapability]) -> u32 {
     chars_to_tokens(total_chars)
 }
 
-/// Estimate tokens for rules content.
-///
-/// Includes header overhead (`"# Project Rules\n\n"`, 18 chars).
-#[must_use]
-pub fn estimate_rules_tokens(rules_content: Option<&str>) -> u32 {
-    match rules_content {
-        Some(content) if !content.is_empty() => chars_to_tokens(content.len() + RULES_HEADER.len()),
-        _ => 0,
-    }
-}
-
 /// Estimate tokens for system prompt and capabilities combined.
 #[must_use]
+#[cfg(test)]
 pub fn estimate_system_tokens(system_prompt: &str, capabilities: &[ModelCapability]) -> u32 {
     let mut chars = system_prompt.len();
     for capability in capabilities {
@@ -312,17 +301,6 @@ mod tests {
     #[test]
     fn image_tokens_none_returns_default() {
         assert_eq!(estimate_image_tokens(None), DEFAULT_URL_IMAGE_TOKENS);
-    }
-
-    #[test]
-    fn image_tokens_url_returns_default() {
-        let source = ImageSource::Url {
-            url: "https://example.com/image.png".to_string(),
-        };
-        assert_eq!(
-            estimate_image_tokens(Some(&source)),
-            DEFAULT_URL_IMAGE_TOKENS
-        );
     }
 
     #[test]
@@ -527,23 +505,6 @@ mod tests {
     }
 
     #[test]
-    fn rules_tokens_none() {
-        assert_eq!(estimate_rules_tokens(None), 0);
-    }
-
-    #[test]
-    fn rules_tokens_empty_string() {
-        assert_eq!(estimate_rules_tokens(Some("")), 0);
-    }
-
-    #[test]
-    fn rules_tokens_with_content() {
-        let content = "Follow these rules carefully.";
-        // content(29) + header(18) = 47 / 4 = 12
-        assert_eq!(estimate_rules_tokens(Some(content)), chars_to_tokens(47));
-    }
-
-    #[test]
     fn system_tokens_combined() {
         let prompt = "System prompt here";
         let capabilities = vec![make_test_capability("execute", "Run commands")];
@@ -675,12 +636,6 @@ mod tests {
     }
 
     #[test]
-    fn rules_header_length_is_17() {
-        // "# Project Rules\n\n" = 15 + 2 newlines = 17
-        assert_eq!(RULES_HEADER.len(), 17);
-    }
-
-    #[test]
     fn image_tokens_base64_empty_data() {
         let source = ImageSource::Base64 {
             data: String::new(),
@@ -725,12 +680,6 @@ mod tests {
             data: "a".repeat(100_000),
         };
         assert_eq!(estimate_image_tokens(Some(&source)), 500);
-    }
-
-    #[test]
-    fn ts_parity_rules_with_header() {
-        // total = 10 + 17 = 27, ceil(27/4) = 7
-        assert_eq!(estimate_rules_tokens(Some("test rules")), 7);
     }
 
     // ── chars_to_tokens helper ───────────────────────────────────────────

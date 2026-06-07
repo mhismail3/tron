@@ -125,17 +125,4 @@ struct TronPathsTests {
         #expect(s.hasSuffix("/profiles/user/profile.toml"))
     }
 
-    @Test("transcription sidecar files live under internal/transcription")
-    func transcriptionShape() {
-        #expect(TronPaths.transcriptionDir.path.hasSuffix("/internal/transcription"))
-        #expect(TronPaths.transcriptionResourceDir.path.hasSuffix("/Contents/Resources/Transcription")
-                || TronPaths.transcriptionResourceDir.path.contains("/Resources/Transcription"))
-    }
-
-    @Test("managed skills sync from bundle resources into ~/.tron/skills")
-    func managedSkillsShape() {
-        #expect(TronPaths.tronHome(environment: [:]).appendingPathComponent("skills", isDirectory: true).path.hasSuffix("/.tron/skills"))
-        #expect(TronPaths.managedSkillsResourceDir.path.hasSuffix("/Contents/Resources/Skills")
-                || TronPaths.managedSkillsResourceDir.path.contains("/Resources/Skills"))
-    }
 }

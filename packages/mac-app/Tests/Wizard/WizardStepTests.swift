@@ -11,15 +11,13 @@ struct WizardStepOrderingTests {
         // Install runs BEFORE permissions on purpose: the wrapper first
         // registers the LaunchAgent with its associated bundle IDs, then
         // probes/prompts the wrapper-owned TCC rows that macOS shows in
-        // System Settings. Transcription comes after permissions so its
-        // optional helper restart is the final first-run server restart.
-        // The iOS beta handoff must then run before the pairing QR.
+        // System Settings. The iOS beta handoff then runs before the
+        // pairing QR.
         #expect(WizardStep.allCases == [
             .welcome,
             .tailscale,
             .install,
             .permissions,
-            .transcription,
             .iosBeta,
             .pairingInfo,
             .done,
@@ -31,7 +29,6 @@ struct WizardStepOrderingTests {
         #expect(WizardStep.welcome.rawValue == "welcome")
         #expect(WizardStep.tailscale.rawValue == "tailscale")
         #expect(WizardStep.permissions.rawValue == "permissions")
-        #expect(WizardStep.transcription.rawValue == "transcription")
         #expect(WizardStep.install.rawValue == "install")
         #expect(WizardStep.iosBeta.rawValue == "iosBeta")
         #expect(WizardStep.pairingInfo.rawValue == "pairingInfo")
@@ -52,12 +49,11 @@ struct WizardStepOrderingTests {
 
 @Suite("InstallPipelineStage ordering")
 struct InstallPipelineStageOrderingTests {
-    @Test("stages run validate app, validate helper, sync skills, register, ping")
+    @Test("stages run validate app, validate helper, register, ping")
     func canonicalOrder() {
         #expect(InstallPipelineStage.allCases == [
             .validateApplication,
             .validateHelper,
-            .syncSkills,
             .registerAgent,
             .awaitPing,
         ])
@@ -75,7 +71,6 @@ struct InstallPipelineStageOrderingTests {
         #expect(InstallStepLayout.stageRowMinHeight >= 22)
         #expect(InstallStepLayout.stageIconGlyphSize <= 13)
         #expect(InstallStepContent.label(for: .validateApplication) == "Confirm app location")
-        #expect(InstallStepContent.label(for: .syncSkills) == "Sync managed skills")
         #expect(InstallStepContent.label(for: .registerAgent) == "Register Login Item")
         for stage in InstallPipelineStage.allCases {
             #expect(!InstallStepContent.label(for: stage).isEmpty)
@@ -361,7 +356,6 @@ struct WizardVisualLayoutTests {
         for path in [
             "Sources/Wizard/Steps/TailscaleStep.swift",
             "Sources/Wizard/Steps/PermissionsStep.swift",
-            "Sources/Wizard/Steps/TranscriptionStep.swift",
             "Sources/Wizard/Steps/PairingInfoStep.swift",
         ] {
             let source = try String(contentsOf: packageRoot.appending(path: path), encoding: .utf8)
@@ -376,24 +370,6 @@ struct WizardVisualLayoutTests {
         #expect(install.contains("WizardCardLayout.iconTextSpacing"))
         #expect(install.contains("WizardCardLayout.horizontalInset"))
         #expect(install.contains("WizardCardLayout.iconColumnWidth"))
-    }
-
-    @Test("transcription step owns local model opt-in")
-    func transcriptionStepOwnsLocalModelOptIn() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let step = packageRoot.appending(path: "Sources/Wizard/Steps/TranscriptionStep.swift")
-        let source = try String(contentsOf: step, encoding: .utf8)
-        let shell = try String(contentsOf: packageRoot.appending(path: "Sources/Wizard/WizardView.swift"), encoding: .utf8)
-
-        #expect(TranscriptionStepContent.toggleTitle == "Enable local transcription")
-        #expect(source.contains("state.transcriptionEnabledSelection"))
-        #expect(source.contains("~/.tron/internal/transcription/models/hf"))
-        #expect(shell.contains("setup.applyTranscriptionPreference"))
-        #expect(shell.contains("case .transcription:"))
-        #expect(shell.contains("transcriptionPrimaryLabel"))
     }
 
     @Test("iOS beta page owns the public TestFlight QR handoff")

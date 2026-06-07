@@ -13,7 +13,6 @@ final class InputBarState {
     var selectedImages: [PhotosPickerItem] = []
     var attachments: [Attachment] = []
 
-    // MARK: - Recording
     var reasoningLevel: String = "medium"
 
     // MARK: - Clear All
@@ -84,8 +83,6 @@ enum SendBlockReason: Equatable, Sendable {
     case disconnected
     /// Context compaction is in progress.
     case compacting
-    /// Memory retention summarizer is running.
-    case retaining
     /// This chat view is read-only (shared, workspace deleted, etc.).
     case readOnly
 
@@ -94,7 +91,6 @@ enum SendBlockReason: Equatable, Sendable {
         switch self {
         case .disconnected: return "Reconnect to the server to send messages."
         case .compacting:   return "Waiting for context compaction to finish…"
-        case .retaining:    return "Waiting for memory retention to finish…"
         case .readOnly:     return "This conversation is read-only."
         }
     }
@@ -107,8 +103,6 @@ struct InputBarConfig {
     let agentPhase: AgentPhase
     /// Compaction in progress (send blocked, spinning pill shown)
     let isCompacting: Bool
-    /// Memory retention summarizer in progress (send blocked).
-    let isRetaining: Bool
     /// WebSocket connection is live. False during reconnect attempts.
     let isConnected: Bool
 
@@ -116,8 +110,6 @@ struct InputBarConfig {
     var isProcessing: Bool { agentPhase.isProcessing }
     /// Whether background hooks are running after completion (convenience).
     var isPostProcessing: Bool { agentPhase.isPostProcessing }
-    let isRecording: Bool
-    let isTranscribing: Bool
 
     /// Why the send button would be unavailable even with non-empty input.
     /// `nil` means no async blocker; input emptiness is the only remaining gate.
@@ -126,13 +118,11 @@ struct InputBarConfig {
     /// the tooltip names the most specific cause. `readOnly` wins over
     /// everything else (the session fundamentally can't accept input);
     /// `disconnected` over async processing (reconnect would unblock it
-    /// regardless of what the server is doing); compaction over retain
-    /// (users see the compaction pill more prominently).
+    /// regardless of what the server is doing).
     var sendBlockReason: SendBlockReason? {
         if readOnly { return .readOnly }
         if !isConnected { return .disconnected }
         if isCompacting { return .compacting }
-        if isRetaining { return .retaining }
         return nil
     }
 
@@ -173,10 +163,7 @@ struct InputBarConfig {
     init(
         agentPhase: AgentPhase = .idle,
         isCompacting: Bool = false,
-        isRetaining: Bool = false,
         isConnected: Bool = true,
-        isRecording: Bool = false,
-        isTranscribing: Bool = false,
         tokenUsage: TokenUsage? = nil,
         contextPercentage: Int = 0,
         contextWindow: Int = 0,
@@ -190,10 +177,7 @@ struct InputBarConfig {
     ) {
         self.agentPhase = agentPhase
         self.isCompacting = isCompacting
-        self.isRetaining = isRetaining
         self.isConnected = isConnected
-        self.isRecording = isRecording
-        self.isTranscribing = isTranscribing
         self.tokenUsage = tokenUsage
         self.contextPercentage = contextPercentage
         self.contextWindow = contextWindow
@@ -212,7 +196,6 @@ struct InputBarActions {
     // MARK: - Core Actions
     let onSend: () -> Void
     let onAbort: () -> Void
-    let onMicTap: () -> Void
 
     // MARK: - Attachments
     let onAddAttachment: (Attachment) -> Void
@@ -230,7 +213,6 @@ struct InputBarActions {
     init(
         onSend: @escaping () -> Void = {},
         onAbort: @escaping () -> Void = {},
-        onMicTap: @escaping () -> Void = {},
         onAddAttachment: @escaping (Attachment) -> Void = { _ in },
         onRemoveAttachment: @escaping (Attachment) -> Void = { _ in },
         onHistoryNavigate: ((String) -> Void)? = nil,
@@ -239,7 +221,6 @@ struct InputBarActions {
     ) {
         self.onSend = onSend
         self.onAbort = onAbort
-        self.onMicTap = onMicTap
         self.onAddAttachment = onAddAttachment
         self.onRemoveAttachment = onRemoveAttachment
         self.onHistoryNavigate = onHistoryNavigate

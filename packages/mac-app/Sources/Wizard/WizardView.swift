@@ -28,8 +28,6 @@ struct WizardView: View {
                 InstallStep(state: state)
             case .permissions:
                 PermissionsStep(state: state)
-            case .transcription:
-                TranscriptionStep(state: state)
             case .iosBeta:
                 IOSBetaStep()
             case .pairingInfo:
@@ -365,24 +363,6 @@ struct WizardShell<Content: View>: View {
             .buttonStyle(.wizardPrimary)
             .keyboardShortcut(.defaultAction)
             .disabled(!permissionsCanContinue || state.permissionsRestartInProgress)
-        case .transcription:
-            Button {
-                Task { @MainActor in
-                    guard !state.transcriptionIsApplying else { return }
-                    state.transcriptionIsApplying = true
-                    let result = await setup.applyTranscriptionPreference(state.transcriptionEnabledSelection)
-                    state.transcriptionOutcome = result
-                    state.transcriptionIsApplying = false
-                    if result.succeeded {
-                        state.advance()
-                    }
-                }
-            } label: {
-                Text(transcriptionPrimaryLabel)
-            }
-            .buttonStyle(.wizardPrimary)
-            .keyboardShortcut(.defaultAction)
-            .disabled(state.transcriptionIsApplying)
         case .install:
             Button {
                 if installCanContinue {
@@ -454,16 +434,6 @@ struct WizardShell<Content: View>: View {
             return "Start server"
         }
         return "Install"
-    }
-
-    private var transcriptionPrimaryLabel: String {
-        if state.transcriptionIsApplying {
-            return state.transcriptionEnabledSelection ? "Enabling..." : "Saving..."
-        }
-        if case .failed = state.transcriptionOutcome {
-            return "Retry"
-        }
-        return state.transcriptionEnabledSelection ? "Enable & continue" : "Skip"
     }
 
     // MARK: - Pinned progress pill

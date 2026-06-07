@@ -187,27 +187,27 @@ fn accumulates_function_call_arguments() {
 fn accumulates_args_delta_before_added_event() {
     let mut state = create_stream_state();
     let events = process_stream_event(
-        &function_args_delta_event("call_late", r#"{"command":"date"}"#),
+        &function_args_delta_event(
+            "call_late",
+            r#"{"operation":"process_run","command":"date"}"#,
+        ),
         &mut state,
     );
     assert_eq!(events.len(), 1);
     assert_eq!(
         state.capability_invocations["call_late"].args,
-        r#"{"command":"date"}"#
+        r#"{"operation":"process_run","command":"date"}"#
     );
 
     let events = process_stream_event(
-        &function_call_added_event("call_late", "process::run"),
+        &function_call_added_event("call_late", "execute"),
         &mut state,
     );
     assert!(events.is_empty());
-    assert_eq!(
-        state.capability_invocations["call_late"].name,
-        "process::run"
-    );
+    assert_eq!(state.capability_invocations["call_late"].name, "execute");
     assert_eq!(
         state.capability_invocations["call_late"].args,
-        r#"{"command":"date"}"#
+        r#"{"operation":"process_run","command":"date"}"#
     );
 }
 
@@ -398,7 +398,7 @@ fn completed_emits_toolcall_end_with_capability_invocation_stop_reason() {
 fn output_item_done_emits_toolcall_end_with_arguments() {
     let mut state = create_stream_state();
     let _ = process_stream_event(
-        &function_call_added_event("call_abc", "process::run"),
+        &function_call_added_event("call_abc", "execute"),
         &mut state,
     );
 
@@ -407,8 +407,8 @@ fn output_item_done_emits_toolcall_end_with_arguments() {
         item: Some(ResponsesOutputItem {
             item_type: OutputItemType::FunctionCall,
             call_id: Some("call_abc".into()),
-            name: Some("process::run".into()),
-            arguments: Some(r#"{"command":"date"}"#.into()),
+            name: Some("execute".into()),
+            arguments: Some(r#"{"operation":"process_run","command":"date"}"#.into()),
             ..Default::default()
         }),
         ..Default::default()
@@ -423,7 +423,14 @@ fn output_item_done_emits_toolcall_end_with_arguments() {
         capability_invocation,
     }) = capability_completed
     {
-        assert_eq!(capability_invocation.name, "process::run");
+        assert_eq!(capability_invocation.name, "execute");
+        assert_eq!(
+            capability_invocation
+                .arguments
+                .get("operation")
+                .and_then(|value| value.as_str()),
+            Some("process_run")
+        );
         assert_eq!(
             capability_invocation
                 .arguments
@@ -438,7 +445,7 @@ fn output_item_done_emits_toolcall_end_with_arguments() {
 fn output_item_done_with_malformed_arguments_fails_closed() {
     let mut state = create_stream_state();
     let _ = process_stream_event(
-        &function_call_added_event("call_bad", "process::run"),
+        &function_call_added_event("call_bad", "execute"),
         &mut state,
     );
 
@@ -447,7 +454,7 @@ fn output_item_done_with_malformed_arguments_fails_closed() {
         item: Some(ResponsesOutputItem {
             item_type: OutputItemType::FunctionCall,
             call_id: Some("call_bad".into()),
-            name: Some("process::run".into()),
+            name: Some("execute".into()),
             arguments: Some("not json".into()),
             ..Default::default()
         }),
@@ -521,7 +528,7 @@ fn completed_malformed_function_call_arguments_emit_error_without_invocation() {
         vec![ResponsesOutputItem {
             item_type: OutputItemType::FunctionCall,
             call_id: Some("call_bad".into()),
-            name: Some("process::run".into()),
+            name: Some("execute".into()),
             arguments: Some("not json".into()),
             ..Default::default()
         }],
@@ -536,7 +543,7 @@ fn completed_malformed_function_call_arguments_emit_error_without_invocation() {
     assert!(
             events
                 .iter()
-                .any(|event| matches!(event, StreamEvent::Error { error } if error.contains("openai capability invocation arguments") && error.contains("process::run") && error.contains("call_bad")))
+                .any(|event| matches!(event, StreamEvent::Error { error } if error.contains("openai capability invocation arguments") && error.contains("execute") && error.contains("call_bad")))
         );
     assert!(
         !events

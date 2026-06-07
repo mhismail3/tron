@@ -73,8 +73,6 @@ pub struct CompactionEngine<D: CompactionDeps> {
     preserve_recent_turns: usize,
     /// Injected dependencies.
     pub(crate) deps: D,
-    /// Callback for when compaction is needed.
-    on_needed_callback: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl<D: CompactionDeps> CompactionEngine<D> {
@@ -84,7 +82,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             threshold,
             preserve_recent_turns,
             deps,
-            on_needed_callback: None,
         }
     }
 
@@ -172,18 +169,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
     /// Count real user turns in a slice of messages.
     fn count_real_turns(messages: &[Message]) -> usize {
         messages.iter().filter(|m| m.is_real_user_turn()).count()
-    }
-
-    /// Check if compaction is recommended based on current token usage.
-    #[must_use]
-    pub fn should_compact(&self) -> bool {
-        let limit = self.deps.get_context_limit();
-        if limit == 0 {
-            return false;
-        }
-        #[allow(clippy::cast_precision_loss)]
-        let ratio = self.deps.get_current_tokens() as f64 / limit as f64;
-        ratio >= self.threshold
     }
 
     /// Check whether the current message list has an older compaction window.
@@ -389,20 +374,6 @@ impl<D: CompactionDeps> CompactionEngine<D> {
             summary,
             extracted_data,
         })
-    }
-
-    /// Register callback for when compaction is needed.
-    pub fn on_needed(&mut self, callback: impl Fn() + Send + Sync + 'static) {
-        self.on_needed_callback = Some(Box::new(callback));
-    }
-
-    /// Trigger callback if compaction is needed.
-    pub fn trigger_if_needed(&self) {
-        if self.should_compact()
-            && let Some(cb) = &self.on_needed_callback
-        {
-            cb();
-        }
     }
 
     // ─── Private helpers ─────────────────────────────────────────────────

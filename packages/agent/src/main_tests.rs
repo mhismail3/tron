@@ -1,12 +1,10 @@
 use super::*;
 use clap::Parser;
-use parking_lot::RwLock;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tron::app::config::ServerConfig;
 use tron::app::server::TronServer;
-use tron::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
-use tron::domains::agent::runner::orchestrator::session_manager::SessionManager;
+use tron::domains::agent::runner::{Orchestrator, SessionManager};
 use tron::domains::model::providers::factory as provider_factory;
 use tron::domains::model::providers::provider::ProviderFactory;
 use tron::domains::session::event_store::{ConnectionConfig, EventStore};
@@ -15,7 +13,6 @@ use tron::domains::settings::db_path_policy::{
     PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_tron_home,
     validate_production_db_path_for_tron_home,
 };
-use tron::domains::skills::registry::SkillRegistry;
 use tron::shared::server::context::ServerRuntimeContext;
 use tron::transport::runtime::streams::EngineStreamEventPump;
 
@@ -465,44 +462,20 @@ async fn server_boots_and_responds() {
 
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
-    let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
-
     let runtime_context = ServerRuntimeContext {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
-        skill_registry,
-        memory_registry: Arc::new(parking_lot::Mutex::new(
-            tron::domains::agent::runner::memory::MemoryRegistry::new(),
-        )),
         profile_runtime: test_profile_runtime(&home),
         settings_path,
         agent_deps: None,
-        capability_support_config: tron::shared::server::context::CapabilitySupportConfig::default(
-        ),
         server_start_time: std::time::Instant::now(),
-        transcription_engine: Arc::new(std::sync::OnceLock::new()),
-        subagent_manager: None,
         health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
-        cron_scheduler: None,
-        worktree_coordinator: None,
-        device_request_broker: None,
-        context_artifacts: Arc::new(
-            tron::domains::session::context::ContextArtifactsService::new(),
-        ),
         auth_path: dir.path().join("auth.json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        mcp_router: None,
-        display_stream_registry: None,
-        process_manager: None,
-        job_manager: None,
-        output_buffer_registry: None,
-        hook_abort_tracker: Arc::new(
-            tron::domains::agent::runner::hooks::abort_tracker::HookAbortTracker::new(),
-        ),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
         onboarded_marker_path: dir.path().join(".onboarded"),
         release_fetcher: None,
@@ -568,15 +541,6 @@ fn server_runs_migrations() {
         )
         .unwrap();
     assert_eq!(count, 1);
-}
-
-#[tokio::test]
-async fn init_mcp_registers_meta_tools_without_servers() {
-    let settings = TronSettings::default();
-    let dir = tempfile::tempdir().unwrap();
-    let home = test_tron_home(&dir);
-    let state = init_mcp(&settings, &test_settings_path(&home)).await;
-    assert!(state.router.read().await.status().is_empty());
 }
 
 #[test]
@@ -688,37 +652,15 @@ async fn server_graceful_shutdown() {
         session_manager,
         event_store,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
-        skill_registry: Arc::new(RwLock::new(SkillRegistry::new())),
-        memory_registry: Arc::new(parking_lot::Mutex::new(
-            tron::domains::agent::runner::memory::MemoryRegistry::new(),
-        )),
         profile_runtime: test_profile_runtime(&home),
         settings_path,
         agent_deps: None,
-        capability_support_config: tron::shared::server::context::CapabilitySupportConfig::default(
-        ),
         server_start_time: std::time::Instant::now(),
-        transcription_engine: Arc::new(std::sync::OnceLock::new()),
-        subagent_manager: None,
         health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
-        cron_scheduler: None,
-        worktree_coordinator: None,
-        device_request_broker: None,
-        context_artifacts: Arc::new(
-            tron::domains::session::context::ContextArtifactsService::new(),
-        ),
         auth_path: dir.path().join("auth.json"),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        mcp_router: None,
-        display_stream_registry: None,
-        process_manager: None,
-        job_manager: None,
-        output_buffer_registry: None,
-        hook_abort_tracker: Arc::new(
-            tron::domains::agent::runner::hooks::abort_tracker::HookAbortTracker::new(),
-        ),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
         onboarded_marker_path: dir.path().join(".onboarded"),
         release_fetcher: None,

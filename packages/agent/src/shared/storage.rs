@@ -6,7 +6,7 @@
 //! single-file artifacts when the operator needs one. The `modular-engine-v4`
 //! generation is a clean break for the collapsed substrate: startup archives
 //! older active DB, WAL, and SHM files before creating the grant, resource,
-//! ledger, stream, state, queue, approval, lease, compensation, storage, and
+//! ledger, stream, state, queue, grant, lease, compensation, storage, and
 //! session-harness tables from the current schema only.
 
 use std::fs;

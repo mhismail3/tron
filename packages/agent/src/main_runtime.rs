@@ -11,8 +11,7 @@ use std::sync::Arc;
 use anyhow::{Context, Result};
 use tron::app::config::ServerConfig;
 use tron::app::server::TronServer;
-use tron::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
-use tron::domains::agent::runner::orchestrator::session_manager::SessionManager;
+use tron::domains::agent::runner::{Orchestrator, SessionManager, recover_incomplete_turns};
 use tron::domains::model::providers::factory as provider_factory;
 use tron::domains::model::providers::provider::ProviderFactory;
 use tron::domains::session::event_store::{ConnectionConfig, EventStore};
@@ -223,23 +222,19 @@ struct ServiceState {
     event_store: Arc<EventStore>,
     session_manager: Arc<SessionManager>,
     orchestrator: Arc<Orchestrator>,
-    engine_host: tron::engine::EngineHostHandle,
     agent_deps: Option<AgentDeps>,
 }
 
-/// Build core services: orchestrator, session manager, providers, capabilities, subagent manager.
+/// Build core services: orchestrator, session manager, providers, and capabilities.
 async fn init_services(
     event_store: Arc<EventStore>,
     settings: &tron::domains::settings::TronSettings,
-    engine_host: tron::engine::EngineHostHandle,
 ) -> anyhow::Result<ServiceState> {
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
 
     // Crash recovery: recover partial LLM output from orphaned streaming journals
-    let recovered = tron::domains::agent::runner::orchestrator::recovery::recover_incomplete_turns(
-        &event_store,
-    );
+    let recovered = recover_incomplete_turns(&event_store);
     if !recovered.is_empty() {
         tracing::info!(
             count = recovered.len(),
@@ -260,7 +255,6 @@ async fn init_services(
         event_store,
         session_manager,
         orchestrator,
-        engine_host,
         agent_deps,
     })
 }
@@ -310,9 +304,6 @@ fn build_server_runtime_context(
         health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin,
-        context_artifacts: Arc::new(
-            tron::domains::session::context::ContextArtifactsService::new(),
-        ),
         auth_path: auth_path(),
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         // Provisional defaults; `TronServer::new` overwrites both with the
@@ -431,7 +422,7 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     let engine_host = init_engine_host(&db_path)?;
 
     // Phase 3: Core services (orchestrator, providers, primitive agent deps)
-    let services = init_services(event_store, &settings, engine_host.clone()).await?;
+    let services = init_services(event_store, &settings).await?;
 
     // Phase 4: Runtime context
     let session_manager_for_startup = services.session_manager.clone();

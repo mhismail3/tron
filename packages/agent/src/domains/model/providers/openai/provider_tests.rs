@@ -823,18 +823,3 @@ async fn ensure_valid_tokens_skips_refresh_when_valid() {
     let result = provider.ensure_valid_tokens().await;
     assert!(result.is_ok());
 }
-
-// ── Profile-backed instructions ──────────────────────────────────
-
-#[test]
-fn instructions_not_empty() {
-    let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
-    let profile =
-        crate::shared::profile::resolve_profile_at(&home, crate::shared::profile::NORMAL_PROFILE)
-            .unwrap();
-    let instructions = &profile.spec.provider_prompts["openaiCodex"].content;
-    assert!(!instructions.is_empty());
-    assert!(instructions.contains("Codex") || instructions.contains("instructions are missing"));
-}

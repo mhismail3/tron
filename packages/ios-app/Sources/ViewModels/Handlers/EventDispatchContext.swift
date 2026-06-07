@@ -32,14 +32,6 @@ import Foundation
     func handleCompaction(_ result: CompactionPlugin.Result)
     func handleContextCleared(_ result: ContextClearedPlugin.Result)
     func handleMessageDeleted(_ result: MessageDeletedPlugin.Result)
-    func handleRulesActivated(_ result: RulesActivatedPlugin.Result)
-}
-
-@MainActor protocol MemoryEventHandler: AnyObject {
-    func handleMemoryUpdating(_ result: MemoryUpdatingPlugin.Result)
-    func handleMemoryUpdated(_ result: MemoryUpdatedPlugin.Result)
-    func handleMemoryAutoRetainTriggered(_ result: MemoryAutoRetainTriggeredPlugin.Result)
-    func handleMemoryAutoRetainFailed(_ result: MemoryAutoRetainFailedPlugin.Result)
 }
 
 @MainActor protocol ServerEventHandler: AnyObject {
@@ -78,7 +70,7 @@ import Foundation
 /// Composes all domain protocols into a single conformance point.
 @MainActor protocol EventDispatchTarget:
     StreamingEventHandler, CapabilityInvocationEventHandler, TurnLifecycleEventHandler,
-    ContextEventHandler, MemoryEventHandler,
+    ContextEventHandler,
     ServerEventHandler,
     DisplayStreamEventHandler, ProcessEventHandler, HookEventHandler,
     QueueEventHandler, EventDispatchLogger {}

@@ -18,9 +18,6 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
         "patch_proposal",
         "execution_output",
         "agent_result",
-        "worker_package",
-        "module_config",
-        "activation_record",
     ] {
         assert!(
             definitions
@@ -34,20 +31,22 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
         .find(|definition| definition.kind == "decision")
         .unwrap();
     for relation in [
-        "trusts_source",
-        "verifies_signature",
-        "affects_package",
-        "affects_activation",
-        "revokes",
+        "decides",
+        "promotes",
+        "discards",
+        "supports",
+        "supported_by",
+        "contradicted_by",
+        "derived_from",
         "supersedes",
-        "enforces_revocation",
+        "evidence_for",
     ] {
         assert!(
             decision
                 .allowed_link_relations
                 .iter()
                 .any(|allowed| allowed == relation),
-            "decision resources must keep module trust relation `{relation}`"
+            "decision resources must keep primitive relation `{relation}`"
         );
     }
 }
@@ -747,19 +746,19 @@ async fn resource_backed_refs_are_persisted_in_invocation_records() {
 }
 
 #[tokio::test]
-async fn converted_filesystem_outputs_have_no_audit_projection() {
+async fn resource_backed_primitive_outputs_have_trace_identity() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle
-        .register_worker_for_setup(worker("filesystem", "filesystem"), false)
+        .register_worker_for_setup(worker("capability", "capability"), false)
         .unwrap();
     let function = FunctionDefinition::new(
-        fid("filesystem::write_file"),
-        wid("filesystem"),
-        "write file",
+        fid("capability::execute"),
+        wid("capability"),
+        "execute primitive",
         VisibilityScope::Agent,
         EffectClass::IdempotentWrite,
     )
-    .with_required_authority(AuthorityRequirement::scope("filesystem.write"))
+    .with_required_authority(AuthorityRequirement::scope("capability.execute"))
     .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
     .with_output_contract(DurableOutputContract::resource_backed([
         "materialized_file",
@@ -784,11 +783,15 @@ async fn converted_filesystem_outputs_have_no_audit_projection() {
         .unwrap();
     let result = handle
         .invoke(host_invocation(
-            "filesystem::write_file",
-            json!({"path": "/tmp/tron-materialized-output.txt", "content": "draft"}),
-            mutating_causal("filesystem-materialized-output")
-                .with_scope("filesystem.write")
-                .with_idempotency_key("filesystem-materialized-output"),
+            "capability::execute",
+            json!({
+                "operation": "file_write",
+                "path": "/tmp/tron-materialized-output.txt",
+                "content": "draft"
+            }),
+            mutating_causal("capability-materialized-output")
+                .with_scope("capability.execute")
+                .with_idempotency_key("capability-materialized-output"),
         ))
         .await;
     assert_eq!(result.error, None);

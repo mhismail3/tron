@@ -10,7 +10,6 @@ enum SettingsLabels {
     static let connectToNewServer = "Connect to a new server"
     static let connectedServerUnavailableDescription = ConnectionStatusCopy.connectedServerUnavailableDescription
     static let loadingServerSettingsDescription = "Loading server settings from the active server."
-    static let transcriptionSidecar = "Transcription Sidecar"
     static let updates = "Updates"
 }
 
@@ -30,14 +29,12 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
     case providers
     case agent
     case context
-    case mcpServers
 
     static let serverBackedOrder: [Self] = [
         .server,
         .providers,
         .agent,
         .context,
-        .mcpServers,
     ]
 
     var icon: String {
@@ -50,8 +47,6 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
             return "wand.and.stars"
         case .context:
             return "gauge.with.dots.needle.67percent"
-        case .mcpServers:
-            return "server.rack"
         }
     }
 
@@ -65,23 +60,19 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
             return "Agent"
         case .context:
             return "Context"
-        case .mcpServers:
-            return "Plugin Sources"
         }
     }
 
     var subtitle: String {
         switch self {
         case .server:
-            return "Paired servers, transcription, and updates"
+            return "Paired servers, updates, and diagnostics"
         case .providers:
             return "Login with OAuth and configure API keys"
         case .agent:
-            return "Hooks, prompts, queueing, and branch safety"
+            return "Prompt defaults and queueing"
         case .context:
-            return "Compaction, memory retention, and rules"
-        case .mcpServers:
-            return "Configure external capability sources"
+            return "Compaction for the prompt loop"
         }
     }
 }
@@ -122,7 +113,6 @@ enum MainSettingsGridDestination: Hashable, Sendable {
     case providers
     case agent
     case context
-    case mcpServers
 
     static let surfaceRow: [Self] = [
         .app,
@@ -133,7 +123,6 @@ enum MainSettingsGridDestination: Hashable, Sendable {
     static let behaviorRow: [Self] = [
         .agent,
         .context,
-        .mcpServers,
     ]
 
     static let unavailableRow: [Self] = [
@@ -157,8 +146,6 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return ServerSettingsCategory.agent.icon
         case .context:
             return ServerSettingsCategory.context.icon
-        case .mcpServers:
-            return ServerSettingsCategory.mcpServers.icon
         }
     }
 
@@ -174,25 +161,21 @@ enum MainSettingsGridDestination: Hashable, Sendable {
             return ServerSettingsCategory.agent.title
         case .context:
             return ServerSettingsCategory.context.title
-        case .mcpServers:
-            return ServerSettingsCategory.mcpServers.title
         }
     }
 
     var description: String {
         switch self {
         case .server:
-            return "Paired servers, transcription, updates"
+            return "Paired servers, updates, diagnostics"
         case .app:
             return "Appearance, notifications, local behavior"
         case .providers:
             return "OAuth login and API keys"
         case .agent:
-            return "Hooks, prompts, queueing"
+            return "Prompt defaults, queueing"
         case .context:
-            return "Compaction, memory, rules"
-        case .mcpServers:
-            return "External capability sources"
+            return "Prompt compaction"
         }
     }
 
@@ -200,7 +183,7 @@ enum MainSettingsGridDestination: Hashable, Sendable {
         switch self {
         case .server, .app, .providers:
             return "Configure settings for app surfaces."
-        case .agent, .context, .mcpServers:
+        case .agent, .context:
             return "Configure settings for agent behavior."
         }
     }
@@ -215,75 +198,9 @@ enum MainSettingsFooterLayout {
     static let feedbackButtonGlassTintOpacity = 0.14
 }
 
-struct BuiltinHookInfo: Equatable, Identifiable, Sendable {
-    let id: String
-    let label: String
-    let description: String
-    let event: String
-}
-
-enum BuiltinHookCatalog {
-    static let all: [BuiltinHookInfo] = [
-        BuiltinHookInfo(
-            id: "builtin:title-gen",
-            label: "Generate Session Title",
-            description: "Auto-generates a short title when a session starts",
-            event: "session-start"
-        ),
-        BuiltinHookInfo(
-            id: "builtin:suggest-prompts",
-            label: "Suggest Follow-up Prompts",
-            description: "Suggests short follow-up prompts when the agent finishes",
-            event: "stop"
-        ),
-    ]
-}
-
 enum AgentSettingsSection: String, CaseIterable, Sendable {
     case quickSession = "Quick Session"
-    case autonomy = "Autonomy"
-    case guardrails = "Guardrails"
-    case hooks = "Hooks"
     case messageQueue = "Message Queue"
-    case protectedBranches = "Protected Branches"
-}
-
-enum AgentHookSetting: CaseIterable, Hashable, Sendable {
-    case llmModel
-    case errorPolicy
-    case builtInHooks
-    case userHooks
-
-    var title: String {
-        switch self {
-        case .builtInHooks:
-            return "Built-in lifecycle hooks"
-        case .llmModel:
-            return "LLM Hook Model"
-        case .errorPolicy:
-            return "Hook error policy"
-        case .userHooks:
-            return "User hook directory"
-        }
-    }
-
-    var description: String {
-        switch self {
-        case .builtInHooks:
-            return "Enable platform hooks that create session titles, branch names, and follow-up suggestions as the agent runs."
-        case .llmModel:
-            return "Model used for built-in and .prompt hooks. Defaults to Haiku for speed."
-        case .errorPolicy:
-            return "Continue lets the agent proceed when a hook fails. Block stops execution with a safety reason."
-        case .userHooks:
-            return "Place .prompt or script files (.sh, .js, .ts) with YAML frontmatter. Hooks are discovered fresh each session."
-        }
-    }
-}
-
-enum UserHookDirectoryDisplay {
-    static let path = "~/.tron/hooks/"
-    static let emptyState = "No user added hooks found"
 }
 
 enum ContextCompactionSetting: CaseIterable, Hashable, Sendable {
@@ -355,10 +272,6 @@ enum AgentSettingsSummary {
     struct Context: Equatable, Sendable {
         let isLoaded: Bool
         let queueDrainMode: String
-        let enabledBuiltinHookCount: Int
-        let totalBuiltinHookCount: Int
-        let hooksErrorPolicy: String
-        let protectedBranchCount: Int
     }
 
     static func title(for context: Context) -> String {
@@ -371,17 +284,10 @@ enum AgentSettingsSummary {
 
     static func description(for context: Context) -> String {
         guard context.isLoaded else {
-            return "Loading agent execution and hook settings from the active server."
+            return "Loading prompt defaults from the active server."
         }
 
-        let queue = queueDescription(context.queueDrainMode)
-        let hooks = hooksDescription(
-            enabled: context.enabledBuiltinHookCount,
-            total: context.totalBuiltinHookCount,
-            errorPolicy: context.hooksErrorPolicy
-        )
-        let protectedBranches = protectedBranchesDescription(context.protectedBranchCount)
-        return "\(queue) \(hooks). \(protectedBranches)"
+        return queueDescription(context.queueDrainMode)
     }
 
     private static func queueDescription(_ mode: String) -> String {
@@ -392,24 +298,6 @@ enum AgentSettingsSummary {
             return "Queued messages are delivered one turn at a time."
         }
     }
-
-    private static func hooksDescription(
-        enabled: Int,
-        total: Int,
-        errorPolicy: String
-    ) -> String {
-        let safeEnabled = max(0, enabled)
-        let safeTotal = max(safeEnabled, total)
-        let failureBehavior = errorPolicy == "block" ? "block execution" : "let execution continue"
-        return "\(safeEnabled) of \(safeTotal) built-in hooks are enabled; hook failures \(failureBehavior)"
-    }
-
-    private static func protectedBranchesDescription(_ count: Int) -> String {
-        guard count > 0 else {
-            return "No protected branches are configured."
-        }
-        return "\(count) protected \(count == 1 ? "branch requires" : "branches require") push override."
-    }
 }
 
 enum ContextSettingsSummary {
@@ -417,9 +305,6 @@ enum ContextSettingsSummary {
         let isLoaded: Bool
         let triggerTokenThreshold: Double
         let preserveRecentCount: Int
-        let autoRetainInterval: Int
-        let retainModelDisplayName: String
-        let rulesDiscoverStandaloneFiles: Bool
     }
 
     static func title(for context: Context) -> String {
@@ -431,24 +316,11 @@ enum ContextSettingsSummary {
 
     static func description(for context: Context) -> String {
         guard context.isLoaded else {
-            return "Loading compaction, memory, and rule discovery settings from the active server."
+            return "Loading compaction settings from the active server."
         }
 
         let threshold = Int((context.triggerTokenThreshold * 100).rounded())
-        let compaction = "Compaction starts at \(threshold)% and keeps \(context.preserveRecentCount) recent \(context.preserveRecentCount == 1 ? "turn" : "turns")."
-        let memory = memoryDescription(
-            interval: context.autoRetainInterval,
-            retainModelDisplayName: context.retainModelDisplayName
-        )
-        let rules = "Standalone rule discovery is \(context.rulesDiscoverStandaloneFiles ? "on" : "off")."
-        return "\(compaction) \(memory) \(rules)"
-    }
-
-    private static func memoryDescription(interval: Int, retainModelDisplayName: String) -> String {
-        guard interval > 0 else {
-            return "Memory auto-retain is off."
-        }
-        return "Memory auto-retain runs every \(interval) \(interval == 1 ? "turn" : "turns") using \(retainModelDisplayName)."
+        return "Compaction starts at \(threshold)% and keeps \(context.preserveRecentCount) recent \(context.preserveRecentCount == 1 ? "turn" : "turns")."
     }
 }
 
@@ -536,20 +408,16 @@ enum ServerOnboardingLauncher {
 }
 
 enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
-    case transcriptionSidecar
     case updates
     case diagnostics
 
     static let loadedOrder: [Self] = [
-        .transcriptionSidecar,
         .updates,
         .diagnostics,
     ]
 
     var title: String {
         switch self {
-        case .transcriptionSidecar:
-            return SettingsLabels.transcriptionSidecar
         case .updates:
             return SettingsLabels.updates
         case .diagnostics:
@@ -653,7 +521,6 @@ enum ServerSettingsSummary {
         let activeServerUnavailable: Bool
         let isLoaded: Bool
         let loadError: String?
-        let transcriptionEnabled: Bool
         let updateEnabled: Bool
         let updateChannel: String
         let updateFrequency: String
@@ -671,7 +538,7 @@ enum ServerSettingsSummary {
 
     static func description(for context: Context) -> String {
         guard context.pairedServerCount > 0 else {
-            return "Pair a Mac to manage server-backed transcription, update, and diagnostics settings from this iPhone."
+            return "Pair a Mac to manage server-backed update and diagnostics settings from this iPhone."
         }
 
         guard let label = cleaned(context.activeServerLabel), !label.isEmpty else {
@@ -688,16 +555,15 @@ enum ServerSettingsSummary {
             if let error = cleaned(context.loadError), !error.isEmpty {
                 return "\(label) is paired, but settings are unavailable: \(error)"
             }
-            return "\(label) is connected. Loading transcription, update, and diagnostics settings."
+            return "\(label) is connected. Loading update and diagnostics settings."
         }
 
-        let transcription = "Local transcription is \(context.transcriptionEnabled ? "on" : "off")"
         let updates = updateDescription(
             enabled: context.updateEnabled,
             channel: context.updateChannel,
             frequency: context.updateFrequency
         )
-        return "\(label) is connected. \(transcription). \(updates)."
+        return "\(label) is connected. \(updates)."
     }
 
     private static func updateDescription(enabled: Bool, channel: String, frequency: String) -> String {

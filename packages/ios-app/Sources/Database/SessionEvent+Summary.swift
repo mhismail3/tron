@@ -130,20 +130,6 @@ extension SessionEvent {
         case .compactBoundary:
             return "Context compacted"
 
-        case .rulesLoaded:
-            let count = payload.int("count") ?? 0
-            if count > 0 {
-                return "Rules loaded (\(count))"
-            }
-            return "Rules loaded"
-
-        case .rulesActivated:
-            let count = payload.int("totalActivated") ?? 0
-            if count > 0 {
-                return "Rules activated (\(count))"
-            }
-            return "Rules activated"
-
         case .contextCleared:
             return "Context cleared"
 
@@ -223,23 +209,8 @@ extension SessionEvent {
             }
             return "Turn failed"
 
-        case .memoryRetained:
-            return "Memory retained"
-
-        case .memoryAutoRetainTriggered:
-            let interval = payload.int("intervalFired") ?? 0
-            return interval > 0
-                ? "Auto-retain triggered (every \(interval) turns)"
-                : "Auto-retain triggered"
-
-        case .memoryAutoRetainFailed:
-            let reason = payload.string("reason") ?? ""
-            return reason.isEmpty
-                ? "Auto-retain failed"
-                : "Auto-retain failed: \(String(reason.prefix(40)))"
-
         case .unknown:
-            // Format raw type into friendly name: "rules.loaded" -> "Rules loaded"
+            // Format raw type into friendly name: "foo.bar" -> "Foo Bar"
             let formatted = type
                 .replacingOccurrences(of: ".", with: " ")
                 .replacingOccurrences(of: "_", with: " ")

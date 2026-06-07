@@ -54,46 +54,12 @@ impl BaseEvent {
     }
 }
 
-/// Hook completion result.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HookResult {
-    /// Hook allowed the operation to continue.
-    Continue,
-    /// Hook blocked the operation.
-    Block,
-    /// Hook modified the operation.
-    Modify,
-}
-
-/// Background hook completion result.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum BackgroundHookResult {
-    /// All hooks succeeded.
-    Continue,
-    /// At least one hook failed.
-    Error,
-}
-
-/// Info about a dynamically activated scoped rule.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ActivatedRuleInfo {
-    /// Path relative to project root (e.g., `src/context/.claude/CLAUDE.md`).
-    pub relative_path: String,
-    /// Directory this rule applies to (e.g., `src/context`).
-    pub scope_dir: String,
-}
-
 /// Compaction trigger reason.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CompactionReason {
     /// Token threshold exceeded.
     ThresholdExceeded,
-    /// Progress signal detected (commit, push, PR, tag).
-    ProgressSignal,
     /// User requested compaction.
     Manual,
 }

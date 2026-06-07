@@ -90,18 +90,6 @@ struct EnvironmentSetup: Sendable {
         await DevServerStopper.stop(port: port)
     }
 
-    /// Syncs first-party `.managed` skills from the app bundle into
-    /// `~/.tron/skills`, preserving user-owned skill directories.
-    var syncManagedSkills: @Sendable () async -> ManagedSkillSyncResult = {
-        .synced(ManagedSkillSyncSummary(synced: 0, skippedUserOwned: 0, removedStale: 0))
-    }
-
-    /// Applies the first-run transcription preference. The wizard seeds
-    /// bundled sidecar support files into `~/.tron/internal/transcription/`
-    /// either way so iOS can enable it later; enabling also writes
-    /// `profile.toml`, restarts the helper, and waits for ping.
-    var applyTranscriptionPreference: @Sendable (Bool) async -> TranscriptionSetupResult
-
     /// Touches the `~/.tron/internal/run/.onboarded` sentinel atomically.
     var touchOnboardedSentinel: @Sendable () throws -> Void
 
@@ -174,40 +162,6 @@ struct EnvironmentSetup: Sendable {
         },
         stopDevServer: { port in
             await DevServerStopper.stop(port: port)
-        },
-        syncManagedSkills: {
-            await Task.detached(priority: .utility) {
-                do {
-                    let summary = try ManagedSkillInstaller.sync(
-                        from: TronPaths.managedSkillsResourceDir,
-                        to: TronPaths.skillsDir
-                    )
-                    NSLog(
-                        "[EnvironmentSetup] synced managed skills: %d synced, %d user-owned skipped, %d stale removed",
-                        summary.synced,
-                        summary.skippedUserOwned,
-                        summary.removedStale
-                    )
-                    return .synced(summary)
-                } catch {
-                    NSLog("[EnvironmentSetup] failed to sync managed skills: %@", error.localizedDescription)
-                    return .failed(error.localizedDescription)
-                }
-            }.value
-        },
-        applyTranscriptionPreference: { enabled in
-            await TranscriptionSetupCoordinator.apply(
-                enabled: enabled,
-                sidecarSource: TronPaths.transcriptionResourceDir,
-                sidecarDestination: TronPaths.transcriptionDir,
-                settingsPath: TronPaths.settingsPath,
-                bearerToken: BearerTokenReader.read(at: TronPaths.bearerTokenPath),
-                launchAgentManager: LiveLaunchAgentManager(),
-                label: TronPaths.launchAgentLabel,
-                pingServer: { token in
-                    await ServerPing.ping(host: "127.0.0.1", port: TronPaths.defaultServerPort, token: token)
-                }
-            )
         },
         touchOnboardedSentinel: {
             try OnboardedSentinelWriter.touch(at: TronPaths.onboardedMarkerPath)

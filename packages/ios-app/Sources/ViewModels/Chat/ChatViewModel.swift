@@ -19,11 +19,8 @@ final class ChatViewModel {
     /// Compaction is in progress (LLM summarizer call running).
     /// While true: send button disabled, spinning compaction pill shown.
     /// Orthogonal to `agentPhase`: compaction can run during any phase (including idle)
-    /// because the memory-manager triggers it asynchronously. A turn_start resets it.
+    /// because context maintenance can trigger it asynchronously. A turn_start resets it.
     var isCompacting = false
-    /// Memory retain is in progress (LLM summarizer call running).
-    /// While true: Retain button shows a spinner and is disabled.
-    var isRetaining = false
     var connectionState: ConnectionState = .disconnected
     var showSettings = false
     var errorMessage: String?
@@ -31,8 +28,6 @@ final class ChatViewModel {
     /// Set to true when the session doesn't exist on server and view should navigate back
     var shouldDismiss = false
     var isThinkingExpanded = false
-    var isRecording = false
-    var isTranscribing = false
     /// Whether more older messages are available for loading
     var hasMoreMessages = false
     /// Whether currently loading more messages
@@ -159,8 +154,6 @@ final class ChatViewModel {
     var streamingRecoverySnapshot: StreamingRecoverySnapshot?
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
     var compactionInProgressMessageId: UUID?
-    /// ID of the memory-retain-in-progress notification (replaced when retain completes)
-    var memoryRetainInProgressMessageId: UUID?
     /// Safety-net timeout: if agent.ready never arrives after agent.complete, warn at 15s, recover at 30s
     @ObservationIgnored
     var postProcessingTimeoutTask: Task<Void, Never>?
@@ -179,8 +172,6 @@ final class ChatViewModel {
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
     /// Coordinates UserInteraction event handling and user interaction
     let userInteractionCoordinator = UserInteractionCoordinator()
-    /// Coordinates voice recording and transcription
-    let transcriptionCoordinator = TranscriptionCoordinator()
     /// Coordinates message sending, abort, and attachments
     let messagingCoordinator = MessagingCoordinator()
     /// Coordinates session connection, reconnection, and catch-up
@@ -189,16 +180,12 @@ final class ChatViewModel {
     let eventDispatchCoordinator = EventDispatchCoordinator()
     /// Coordinates compaction event handling (start/complete pill transitions)
     let compactionCoordinator = CompactionCoordinator()
-    /// Coordinates memory retention event handling (start/complete pill transitions)
-    let memoryCoordinator = MemoryCoordinator()
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
     var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
 
     /// Track capability invocations for the current turn (for display purposes)
     var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
-
-    let audioRecorder: AudioRecorder
 
     /// Track the message index where the current turn started
     /// Used to find which messages to update with metadata at turn_end
@@ -254,16 +241,14 @@ final class ChatViewModel {
 
     // MARK: - Initialization
 
-    init(engineClient: EngineClient, sessionId: String, audioRecorder: AudioRecorder = AudioRecorder(), eventStoreManager: EventStoreManager? = nil) {
+    init(engineClient: EngineClient, sessionId: String, eventStoreManager: EventStoreManager? = nil) {
         self.engineClient = engineClient
         self.sessionId = sessionId
-        self.audioRecorder = audioRecorder
         self.eventStoreManager = eventStoreManager
         self.connectionState = engineClient.connectionState
         self.modelPickerState = ModelPickerState(modelClient: engineClient.model)
         setupBindings()
         setupEventProcessingCallbacks()
-        setupAudioRecorder()
     }
 
     private var observationTasks: [Task<Void, Never>] = []
@@ -298,8 +283,6 @@ final class ChatViewModel {
                 self.streamingManager.reset()
                 self.isCompacting = false
                 self.compactionInProgressMessageId = nil
-                self.isRetaining = false
-                self.memoryRetainInProgressMessageId = nil
                 self.runningCapabilityInvocationCount = 0
                 self.clearDisplayStreamState()
                 self.clearProcessState()
@@ -309,19 +292,9 @@ final class ChatViewModel {
             }
         })
 
-        observationTasks.append(Self.observeLoop({ self.audioRecorder.isRecording }) { [self] recording in
-            self.isRecording = recording
-        })
-
         observationTasks.append(Self.observeLoop({ self.inputBarState.selectedImages }) { [self] images in
             Task { await self.processSelectedImages(images) }
         })
-    }
-
-    private func setupAudioRecorder() {
-        audioRecorder.onFinish = { [weak self] url, success in
-            Task { await self?.handleRecordingFinished(url: url, success: success) }
-        }
     }
 
     /// Set up StreamingManager callbacks for text delta batching

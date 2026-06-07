@@ -83,10 +83,6 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             ),
             (
-                ["Sources", "Views", "System", "MemoryRetainDetailSheet.swift"],
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
-            ),
-            (
                 ["Sources", "Views", "System", "ProviderErrorDetailSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
             ),
@@ -115,11 +111,6 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ["Sources", "Views", "Process", "ProcessListSheet.swift"],
                 "struct ProcessListSheet: View",
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
-            ),
-            (
-                ["Sources", "Views", "Settings", "Pages", "PluginSourcesPage.swift"],
-                "private struct AddPluginSourceSheet: View",
-                ".adaptivePresentationDetents([.medium], ipadSizing: .largeForm)"
             ),
             (
                 ["Sources", "Views", "System", "LogViewer.swift"],

@@ -386,7 +386,7 @@ defaultModel = "claude-sonnet-4-6"
             let store = store.clone();
             std::thread::spawn(move || {
                 store
-                    .update(json!({"context": {"rules": {"discoverStandaloneFiles": false}}}))
+                    .update(json!({"context": {"compactor": {"preserveRecentCount": 8}}}))
                     .unwrap();
             })
         };
@@ -395,7 +395,7 @@ defaultModel = "claude-sonnet-4-6"
 
         let saved = store.read_sparse_value().unwrap();
         assert_eq!(saved["server"]["heartbeatIntervalMs"], 41_000);
-        assert_eq!(saved["context"]["rules"]["discoverStandaloneFiles"], false);
+        assert_eq!(saved["context"]["compactor"]["preserveRecentCount"], 8);
         crate::domains::settings::reset_settings();
     }
 

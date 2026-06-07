@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use serde_json::Value;
 
 use crate::domains::capability::contract::EXECUTE_FUNCTION_ID;
-use crate::domains::capability_support::implementations::traits::ExecutionMode;
+use crate::domains::capability_support::implementations::scheduling::ExecutionMode;
 use crate::engine::{
     ActorContext, ActorId, ActorKind, AuthorityGrantId, CatalogRevision, EngineHostHandle,
     FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery,
@@ -23,7 +23,6 @@ pub struct EngineCapabilityTarget {
     pub function_id: FunctionId,
     pub function: FunctionDefinition,
     pub stops_turn: bool,
-    pub is_interactive: bool,
     pub execution_mode: ExecutionMode,
 }
 
@@ -32,7 +31,6 @@ pub struct ResolvedCapabilitySurface {
     pub catalog_revision: CatalogRevision,
     pub capabilities: Vec<ModelCapability>,
     pub targets_by_name: BTreeMap<String, EngineCapabilityTarget>,
-    pub all_model_capability_ids: Vec<String>,
     pub turn_stopping_capabilities: HashSet<String>,
 }
 
@@ -45,12 +43,10 @@ pub(crate) async fn resolve_provider_capabilities(
         resolve_capability_targets_with_lifecycle(host, session_id, workspace_id).await?;
     let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
-    let mut all_model_capability_ids = Vec::new();
     let mut turn_stopping_capabilities = resolved.turn_stopping_capabilities;
 
     for target in resolved.targets {
         let capability = model_capability_schema(&target);
-        all_model_capability_ids.push(target.model_capability_id.clone());
         if target.stops_turn {
             let _ = turn_stopping_capabilities.insert(target.model_capability_id.clone());
         }
@@ -62,21 +58,8 @@ pub(crate) async fn resolve_provider_capabilities(
         catalog_revision: host.catalog_revision().await,
         capabilities,
         targets_by_name,
-        all_model_capability_ids,
         turn_stopping_capabilities,
     })
-}
-
-pub(crate) async fn list_model_capability_ids(
-    host: &EngineHostHandle,
-    session_id: &str,
-    workspace_id: Option<&str>,
-) -> Result<Vec<String>, String> {
-    Ok(resolve_capability_targets(host, session_id, workspace_id)
-        .await?
-        .into_iter()
-        .map(|target| target.model_capability_id)
-        .collect())
 }
 
 pub(crate) async fn list_model_capabilities(
@@ -150,7 +133,6 @@ async fn resolve_capability_targets_with_lifecycle(
         }
         targets.push(EngineCapabilityTarget {
             stops_turn: metadata_bool(&function, "stopsTurn").unwrap_or(false),
-            is_interactive: metadata_bool(&function, "isInteractive").unwrap_or(false),
             execution_mode: execution_mode(&function),
             model_capability_id,
             function_id: function.id.clone(),
@@ -339,11 +321,11 @@ mod tests {
     async fn provider_surface_contains_only_execute() {
         let host = EngineHostHandle::new_in_memory().expect("host");
         register_execute(&host);
-        host.register_worker_for_setup(worker("filesystem", "filesystem"), false)
-            .expect("filesystem worker");
+        host.register_worker_for_setup(worker("demo", "demo"), false)
+            .expect("demo worker");
         let mut old_builtin_like_function = FunctionDefinition::new(
-            FunctionId::new("filesystem::read_file").expect("function id"),
-            WorkerId::new("filesystem").expect("worker id"),
+            FunctionId::new("demo::read").expect("function id"),
+            WorkerId::new("demo").expect("worker id"),
             "Should not be provider-facing",
             crate::engine::VisibilityScope::System,
             EffectClass::PureRead,
@@ -356,7 +338,7 @@ mod tests {
         let surface = resolve_provider_capabilities(&host, "session-a", None)
             .await
             .expect("surface");
-        assert_eq!(surface.all_model_capability_ids, ["execute"]);
+        assert!(surface.targets_by_name.contains_key("execute"));
     }
 
     #[tokio::test]

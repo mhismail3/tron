@@ -45,9 +45,6 @@ struct ChatSheetContent: View {
                 summarizedTurns: data.summarizedTurns
             )
 
-        case .memoryRetainDetail(let data):
-            MemoryRetainDetailSheet(title: data.title, summary: data.summary)
-
         case .userInteraction:
             userInteractionSheet
 

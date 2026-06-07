@@ -61,8 +61,6 @@ struct ConnectionSettingsPage: View {
                     pairedServersSection
                         .fixedSize(horizontal: false, vertical: true)
                     if settingsState.isLoaded && !activeServerUnavailable {
-                        transcriptionSection
-                            .fixedSize(horizontal: false, vertical: true)
                         diagnosticsSection
                     }
                 }
@@ -105,7 +103,6 @@ struct ConnectionSettingsPage: View {
             activeServerUnavailable: activeServerUnavailable,
             isLoaded: settingsState.isLoaded,
             loadError: settingsState.loadError,
-            transcriptionEnabled: settingsState.transcriptionEnabled,
             updateEnabled: settingsState.updateEnabled,
             updateChannel: settingsState.updateChannel,
             updateFrequency: settingsState.updateFrequency
@@ -303,8 +300,6 @@ struct ConnectionSettingsPage: View {
     @ViewBuilder
     private func serverBackedSection(_ section: ConnectionSettingsServerBackedSection) -> some View {
         switch section {
-        case .transcriptionSidecar:
-            transcriptionSection
         case .updates:
             updatesSection
         case .diagnostics:
@@ -336,37 +331,6 @@ struct ConnectionSettingsPage: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 14)
             }
-        }
-    }
-
-    private var transcriptionSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: ConnectionSettingsServerBackedSection.transcriptionSidecar.title)
-
-            SettingsCard {
-                SettingsRow(icon: "waveform", label: "Local transcription") {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { settingsState.transcriptionEnabled },
-                            set: { newValue in
-                                settingsState.transcriptionEnabled = newValue
-                                updateServerSetting {
-                                    var update = ServerSettingsUpdate()
-                                    update.server = ServerSettingsUpdate.ServerUpdate(
-                                        transcription: ServerSettingsUpdate.ServerUpdate.TranscriptionUpdate(enabled: newValue)
-                                    )
-                                    return update
-                                }
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: "Uses the Mac's local transcription sidecar when enabled. Changing this setting takes effect after Tron Server restarts from the Mac menu bar.")
         }
     }
 

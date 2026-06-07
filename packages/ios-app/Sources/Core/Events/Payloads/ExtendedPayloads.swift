@@ -164,7 +164,7 @@ struct CompactBoundaryPayload {
         // Summary is optional (may not be present in auto-compaction events)
         self.summary = payload.string("summary")
 
-        // Estimated total context tokens after compaction (system + capabilities + rules + messages)
+        // Estimated total context tokens after compaction (system + capabilities + environment + messages)
         self.estimatedContextTokens = payload.int("estimatedContextTokens")
 
         // Turn counts from turn-based compaction
@@ -210,9 +210,6 @@ struct ContextSnapshotResult: Codable {
     struct ContextBreakdown: Codable {
         let systemPrompt: Int
         let capabilities: Int
-        let rules: Int
-        let memory: Int
-        let jobResults: Int
         let environment: Int
         let messages: Int
         let providerAdjustment: Int?
@@ -294,63 +291,8 @@ struct DetailedContextSnapshotResult: Codable {
     /// Raw capability clarification content if applicable (for debugging)
     let capabilityClarificationContent: String?
     let capabilitiesContent: [CapabilitySummaryInfo]
-    /// Rules files loaded for this session (immutable, cannot be removed)
-    let rules: LoadedRules?
-    /// User-memory file (MEMORY.md + rules/ listing) auto-injected into the
-    /// LLM context every turn. Server-side: `runtime::memory::MemoryRegistry`.
-    let memory: UserMemorySnapshot?
-    /// Session memories written during this session (auto or manual ledger)
-    let sessionMemories: LoadedMemory?
-    /// Task context summary (if tasks exist)
-    let taskContext: LoadedTaskContext?
     /// Full composed system prompt as sent to the LLM (single source of truth via compose_context_parts)
     let composedSystemPrompt: String?
     /// Environment metadata (working directory, server origin)
     let environment: EnvironmentInfo?
-}
-
-/// A single auto-injected memory entry
-struct LoadedMemoryEntry: Codable, Identifiable {
-    let title: String
-    let content: String
-
-    var id: String { title }
-}
-
-/// Memory auto-injected at session start
-struct LoadedMemory: Codable {
-    let count: Int
-    let tokens: Int
-    let entries: [LoadedMemoryEntry]?
-}
-
-/// User-memory wire format. Server populates this every turn from
-/// `~/.tron/memory/MEMORY.md` + the listing of `rules/*.md`.
-///
-/// See `runtime::memory::MemoryRegistry` for the load path.
-struct UserMemorySnapshot: Codable, Equatable {
-    /// Full content string injected into the LLM system prompt. When
-    /// `bootstrapped == false`, this is the server-generated bootstrap stub.
-    let content: String
-    /// Listing of `rules/*.md` files (not contents). Agent reads individual
-    /// files on demand via the `filesystem::read_file` capability.
-    let ruleFiles: [UserMemoryRuleFile]
-    /// True iff `MEMORY.md` exists on disk at read time.
-    let bootstrapped: Bool
-}
-
-/// One entry in the user-memory `rules/` listing.
-struct UserMemoryRuleFile: Codable, Equatable, Identifiable {
-    /// Filename relative to `rules/` (e.g. `"user-preferences.md"`).
-    let name: String
-    /// Single-line description from YAML frontmatter, if present.
-    let description: String?
-
-    var id: String { name }
-}
-
-/// Task context summary auto-injected into LLM context
-struct LoadedTaskContext: Codable {
-    let summary: String
-    let tokens: Int
 }

@@ -275,42 +275,6 @@ mod session_event_tests {
     }
 
     #[test]
-    fn typed_payload_config_model_switch() {
-        let event = make_event(
-            EventType::ConfigModelSwitch,
-            json!({
-                "previousModel": "claude-sonnet-4-5-20250929",
-                "newModel": "claude-opus-4-6"
-            }),
-        );
-        let payload = event.typed_payload().unwrap();
-        match payload {
-            SessionEventPayload::ConfigModelSwitch(p) => {
-                assert_eq!(p.new_model, "claude-opus-4-6");
-            }
-            other => panic!("expected ConfigModelSwitch, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn typed_payload_config_reasoning_level() {
-        let event = make_event(
-            EventType::ConfigReasoningLevel,
-            json!({
-                "previousLevel": "medium",
-                "newLevel": "high"
-            }),
-        );
-        let payload = event.typed_payload().unwrap();
-        match payload {
-            SessionEventPayload::ConfigReasoningLevel(p) => {
-                assert_eq!(p.new_level.as_deref(), Some("high"));
-            }
-            other => panic!("expected ConfigReasoningLevel, got {other:?}"),
-        }
-    }
-
-    #[test]
     fn typed_payload_error_provider() {
         let event = make_event(
             EventType::ErrorProvider,
@@ -329,28 +293,6 @@ mod session_event_tests {
                 assert!(p.retryable);
             }
             other => panic!("expected ErrorProvider, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn typed_payload_subagent_spawned() {
-        let event = make_event(
-            EventType::SubagentSpawned,
-            json!({
-                "subagentSessionId": "sess-child",
-                "spawnType": "subsession",
-                "task": "fix the bug",
-                "model": "claude-opus-4-6",
-                "workingDirectory": "/project"
-            }),
-        );
-        let payload = event.typed_payload().unwrap();
-        match payload {
-            SessionEventPayload::SubagentSpawned(p) => {
-                assert_eq!(p.subagent_session_id, "sess-child");
-                assert_eq!(p.spawn_type, "subsession");
-            }
-            other => panic!("expected SubagentSpawned, got {other:?}"),
         }
     }
 
@@ -394,6 +336,10 @@ mod session_event_tests {
                 EventType::CapabilityInvocationCompleted,
                 json!({"invocationId": "tc", "content": "ok", "isError": false, "duration": 100}),
             ),
+            (
+                EventType::CapabilityInvocationProgress,
+                json!({"invocationId": "tc", "message": "running", "turn": 1}),
+            ),
             (EventType::StreamTurnStart, json!({"turn": 1})),
             (
                 EventType::StreamTurnEnd,
@@ -408,16 +354,6 @@ mod session_event_tests {
                 json!({"delta": "hmm", "turn": 1}),
             ),
             (
-                EventType::ConfigModelSwitch,
-                json!({"previousModel": "a", "newModel": "b"}),
-            ),
-            (EventType::ConfigPromptUpdate, json!({"newHash": "abc"})),
-            (EventType::ConfigReasoningLevel, json!({})),
-            (
-                EventType::NotificationInterrupted,
-                json!({"timestamp": "t", "turn": 1}),
-            ),
-            (
                 EventType::CompactBoundary,
                 json!({"range": {"from": "a", "to": "b"}, "originalTokens": 100, "compactedTokens": 10, "reason": "manual"}),
             ),
@@ -430,60 +366,10 @@ mod session_event_tests {
                 json!({"tokensBefore": 100, "tokensAfter": 0, "reason": "manual"}),
             ),
             (
-                EventType::SkillActivated,
-                json!({"skillName": "s", "source": "global"}),
-            ),
-            (EventType::SkillDeactivated, json!({"skillName": "s"})),
-            (
-                EventType::SkillsCleared,
-                json!({"clearedSkills": ["s"], "reason": "compaction", "mode": "askUser"}),
-            ),
-            (
-                EventType::RulesLoaded,
-                json!({"files": [], "totalFiles": 0, "mergedTokens": 0}),
-            ),
-            (
-                EventType::RulesIndexed,
-                json!({"totalRules": 0, "globalRules": 0, "scopedRules": 0, "files": []}),
-            ),
-            (
-                EventType::RulesActivated,
-                json!({"rules": [], "totalActivated": 0}),
-            ),
-            (
                 EventType::MetadataUpdate,
                 json!({"key": "k", "newValue": "v"}),
             ),
             (EventType::MetadataTag, json!({"action": "add", "tag": "t"})),
-            (EventType::FileRead, json!({"path": "/f"})),
-            (
-                EventType::FileWrite,
-                json!({"path": "/f", "size": 100, "contentHash": "h"}),
-            ),
-            (
-                EventType::FileEdit,
-                json!({"path": "/f", "oldString": "a", "newString": "b"}),
-            ),
-            (
-                EventType::WorktreeAcquired,
-                json!({"path": "/w", "branch": "b", "baseCommit": "c", "isolated": true}),
-            ),
-            (
-                EventType::WorktreeCommit,
-                json!({"commitHash": "h", "message": "m", "filesChanged": []}),
-            ),
-            (
-                EventType::WorktreeReleased,
-                json!({"deleted": false, "branchPreserved": true}),
-            ),
-            (
-                EventType::WorktreeMerged,
-                json!({"sourceBranch": "s", "targetBranch": "t", "mergeCommit": "m", "strategy": "merge"}),
-            ),
-            (
-                EventType::WorktreeRenamed,
-                json!({"oldBranch": "session/old", "newBranch": "session/new"}),
-            ),
             (
                 EventType::ErrorAgent,
                 json!({"error": "e", "recoverable": true}),
@@ -497,56 +383,12 @@ mod session_event_tests {
                 json!({"provider": "p", "error": "e", "category": "unknown", "retryable": false}),
             ),
             (
-                EventType::SubagentSpawned,
-                json!({"subagentSessionId": "s", "spawnType": "subsession", "task": "t", "model": "m", "workingDirectory": "/"}),
-            ),
-            (
-                EventType::SubagentStatusUpdate,
-                json!({"subagentSessionId": "s", "status": "running", "currentTurn": 1}),
-            ),
-            (
-                EventType::SubagentCompleted,
-                json!({"subagentSessionId": "s", "resultSummary": "r", "totalTurns": 1, "totalTokenUsage": {"inputTokens": 0, "outputTokens": 0}, "duration": 100}),
-            ),
-            (
-                EventType::SubagentFailed,
-                json!({"subagentSessionId": "s", "error": "e", "recoverable": false}),
-            ),
-            (
-                EventType::TodoWrite,
-                json!({"todos": [], "trigger": "capability"}),
-            ),
-            (
                 EventType::TurnFailed,
                 json!({"turn": 1, "error": "e", "recoverable": false}),
             ),
-            (
-                EventType::HookTriggered,
-                json!({"hookNames": ["h"], "hookEvent": "PreCapabilityInvocation", "timestamp": "t"}),
-            ),
-            (
-                EventType::HookCompleted,
-                json!({"hookNames": ["h"], "hookEvent": "PreCapabilityInvocation", "result": "continue", "timestamp": "t"}),
-            ),
-            (
-                EventType::HookBackgroundStarted,
-                json!({"hookNames": ["h"], "hookEvent": "PostCapabilityInvocation", "executionId": "x", "timestamp": "t"}),
-            ),
-            (
-                EventType::HookBackgroundCompleted,
-                json!({"hookNames": ["h"], "hookEvent": "PostCapabilityInvocation", "executionId": "x", "result": "continue", "duration": 50, "timestamp": "t"}),
-            ),
-            (
-                EventType::LlmHookResult,
-                json!({"hookName": "title-gen", "hookId": "built-in-title-gen", "hookEvent": "sessionStart", "output": "Fix login bug", "durationMs": 450, "model": "claude-haiku-4-5-20251001", "inputTokens": 100, "outputTokens": 10, "success": true, "timestamp": "t"}),
-            ),
-            (
-                EventType::MemoryRetained,
-                json!({"sessionId": "s1", "title": "Implement auth", "summary": "Full summary text here", "timestamp": "2026-01-01T00:00:00Z"}),
-            ),
         ];
 
-        assert_eq!(cases.len(), 51, "must cover all 51 event types");
+        assert_eq!(cases.len(), 23, "must cover all 23 event types");
 
         for (event_type, payload) in &cases {
             let event = make_event(*event_type, payload.clone());
@@ -630,49 +472,6 @@ mod type_guard_tests {
     fn context_guards() {
         assert_eq!(EventType::ContextCleared, EventType::ContextCleared);
         assert_ne!(EventType::ContextCleared, EventType::CompactBoundary);
-    }
-
-    #[test]
-    fn config_guards() {
-        assert!(EventType::ConfigModelSwitch.is_config_type());
-        assert_eq!(
-            EventType::ConfigReasoningLevel,
-            EventType::ConfigReasoningLevel
-        );
-        assert_eq!(EventType::ConfigPromptUpdate, EventType::ConfigPromptUpdate);
-    }
-
-    #[test]
-    fn worktree_guards() {
-        assert!(EventType::WorktreeAcquired.is_worktree_type());
-        assert!(EventType::WorktreeMerged.is_worktree_type());
-        assert!(EventType::WorktreeRenamed.is_worktree_type());
-    }
-
-    #[test]
-    fn subagent_guards() {
-        assert!(EventType::SubagentSpawned.is_subagent_type());
-        assert!(EventType::SubagentCompleted.is_subagent_type());
-    }
-
-    #[test]
-    fn hook_guards() {
-        assert!(EventType::HookTriggered.is_hook_type());
-        assert!(EventType::HookBackgroundCompleted.is_hook_type());
-        assert!(EventType::LlmHookResult.is_hook_type());
-    }
-
-    #[test]
-    fn skill_guards() {
-        assert!(EventType::SkillActivated.is_skill_type());
-        assert!(EventType::SkillDeactivated.is_skill_type());
-        assert!(EventType::SkillsCleared.is_skill_type());
-    }
-
-    #[test]
-    fn rules_guards() {
-        assert!(EventType::RulesLoaded.is_rules_type());
-        assert!(EventType::RulesIndexed.is_rules_type());
     }
 
     #[test]

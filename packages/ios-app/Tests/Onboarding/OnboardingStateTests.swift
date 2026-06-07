@@ -369,9 +369,6 @@ struct OnboardingStateTests {
           "server": {
             "defaultWorkspace": "/Users/example/project",
             "defaultModel": "claude-opus-4-6"
-          },
-          "memory": {
-            "retainModel": "claude-haiku-4-5-20251001"
           }
         }
         """))
@@ -405,7 +402,6 @@ struct OnboardingStateTests {
         #expect(snapshot.serverId == "server-1")
         #expect(snapshot.defaultWorkspace == "/Users/example/project")
         #expect(snapshot.defaultModel == "claude-opus-4-6")
-        #expect(snapshot.retainModel == "claude-haiku-4-5-20251001")
         #expect(snapshot.providerSummary(for: "anthropic")?.title == "API key saved")
         #expect(snapshot.providerSummary(for: "anthropic")?.detail == "work - sk-ant-...xyz")
         #expect(snapshot.providerSummary(for: "anthropic")?.credentialLabel == "work")

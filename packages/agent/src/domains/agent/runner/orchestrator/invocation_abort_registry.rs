@@ -187,10 +187,7 @@ mod tests {
 
         reg.unregister("sess-1", "call_1");
         assert!(reg.is_empty());
-        assert!(
-            !child.is_cancelled(),
-            "unregister is a cleanup hook, not a cancel"
-        );
+        assert!(!child.is_cancelled(), "unregister is cleanup, not a cancel");
     }
 
     #[test]

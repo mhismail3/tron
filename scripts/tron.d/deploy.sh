@@ -254,14 +254,6 @@ cmd_deploy() {
     create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
     sign_and_notarize "$INSTALLED_BUNDLE"
 
-    # Deploy transcription sidecar
-    print_status "Deploying transcription sidecar..."
-    deploy_transcription_sidecar
-
-    # Sync managed skills from repo
-    print_status "Syncing managed skills..."
-    sync_managed_skills
-
     # Install runtime CLI, shared library, and entitlements (only if changed)
     for f in tron-cli tron-lib.sh tron-agent.entitlements AppIcon.icns; do
         if [ -f "$SCRIPT_DIR/$f" ] && ! cmp -s "$SCRIPT_DIR/$f" "$CONTRIBUTOR_DIR/$f"; then
@@ -422,17 +414,6 @@ cmd_install() {
     sign_and_notarize "$INSTALLED_BUNDLE"
     [ "$gui_helper" -eq 0 ] && print_success "Installed app bundle"
     _emit_event bundle ok "$INSTALLED_BUNDLE"
-
-    _emit_event sidecar start ""
-    [ "$gui_helper" -eq 0 ] && print_status "Deploying transcription sidecar..."
-    deploy_transcription_sidecar
-    [ "$gui_helper" -eq 0 ] && print_success "Deployed transcription sidecar"
-    _emit_event sidecar ok ""
-
-    _emit_event skills start ""
-    [ "$gui_helper" -eq 0 ] && print_status "Syncing managed skills..."
-    sync_managed_skills
-    _emit_event skills ok ""
 
     _emit_event plist start "$PLIST_PATH"
     [ "$gui_helper" -eq 0 ] && print_status "Creating launchd service..."

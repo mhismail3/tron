@@ -211,25 +211,8 @@ mod tests {
         make_agent_with_provider(Arc::new(MockProvider))
     }
 
-    fn test_resolved_profile() -> Arc<crate::shared::profile::ResolvedProfile> {
-        let tempdir = tempfile::tempdir().expect("profile tempdir");
-        let home = tempdir.path().join(".tron");
-        crate::shared::constitution::ensure_tron_home_at(&home).expect("seed profile home");
-        let profile = crate::shared::profile::resolve_profile_at(
-            &home,
-            crate::shared::profile::NORMAL_PROFILE,
-        )
-        .expect("normal profile");
-        std::mem::forget(tempdir);
-        Arc::new(profile)
-    }
-
     fn run_context() -> RunContext {
-        RunContext {
-            profile_name: Some(crate::shared::profile::NORMAL_PROFILE.to_string()),
-            resolved_profile: Some(test_resolved_profile()),
-            ..Default::default()
-        }
+        RunContext::default()
     }
 
     #[tokio::test]

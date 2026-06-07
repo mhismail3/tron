@@ -39,18 +39,6 @@ pub enum BroadcastEventType {
     /// Context compaction completed.
     #[serde(rename = "agent.compaction")]
     AgentCompaction,
-    /// Memory ledger update in progress.
-    #[serde(rename = "agent.memory_updating")]
-    AgentMemoryUpdating,
-    /// Memory ledger update completed.
-    #[serde(rename = "agent.memory_updated")]
-    AgentMemoryUpdated,
-    /// A skill was deactivated from the session.
-    #[serde(rename = "agent.skill_deactivated")]
-    AgentSkillDeactivated,
-    /// The todo list was updated.
-    #[serde(rename = "agent.todos_updated")]
-    AgentTodosUpdated,
 
     // ── Event store ──────────────────────────────────────────────────
     /// A new event was persisted to the store.
@@ -67,10 +55,6 @@ pub const ALL_BROADCAST_EVENT_TYPES: &[BroadcastEventType] = &[
     BroadcastEventType::AgentMessageDeleted,
     BroadcastEventType::AgentContextCleared,
     BroadcastEventType::AgentCompaction,
-    BroadcastEventType::AgentMemoryUpdating,
-    BroadcastEventType::AgentMemoryUpdated,
-    BroadcastEventType::AgentSkillDeactivated,
-    BroadcastEventType::AgentTodosUpdated,
     BroadcastEventType::EventNew,
 ];
 
@@ -136,7 +120,7 @@ mod tests {
 
     #[test]
     fn all_broadcast_types_count() {
-        assert_eq!(ALL_BROADCAST_EVENT_TYPES.len(), 12);
+        assert_eq!(ALL_BROADCAST_EVENT_TYPES.len(), 8);
     }
 
     #[test]
@@ -164,19 +148,6 @@ mod tests {
                 "agent.context_cleared",
             ),
             (BroadcastEventType::AgentCompaction, "agent.compaction"),
-            (
-                BroadcastEventType::AgentMemoryUpdating,
-                "agent.memory_updating",
-            ),
-            (
-                BroadcastEventType::AgentMemoryUpdated,
-                "agent.memory_updated",
-            ),
-            (
-                BroadcastEventType::AgentSkillDeactivated,
-                "agent.skill_deactivated",
-            ),
-            (BroadcastEventType::AgentTodosUpdated, "agent.todos_updated"),
             (BroadcastEventType::EventNew, "event.new"),
         ];
 

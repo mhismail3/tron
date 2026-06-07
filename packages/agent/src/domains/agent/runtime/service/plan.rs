@@ -12,7 +12,6 @@ pub(crate) struct PromptRunPlan {
         Arc<dyn crate::domains::model::providers::provider::ProviderFactory>,
     pub(super) health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
     pub(super) event_store: Arc<crate::domains::session::event_store::EventStore>,
-    pub(super) profile_runtime: Arc<crate::domains::agent::runner::ProfileRuntime>,
     pub(super) shutdown_token: Option<tokio_util::sync::CancellationToken>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) engine_causality: Option<PromptEngineCausality>,

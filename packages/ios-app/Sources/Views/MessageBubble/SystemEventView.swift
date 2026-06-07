@@ -10,8 +10,6 @@ struct SystemEventView: View {
     var body: some View {
         if event.isCompactionNotification {
             compactionNotificationView
-        } else if event.isMemoryRetainNotification {
-            memoryRetainNotificationView
         } else {
             eventView
         }
@@ -36,24 +34,6 @@ struct SystemEventView: View {
     }
 
     @ViewBuilder
-    private var memoryRetainNotificationView: some View {
-        let isInProgress = event.memoryRetainIsInProgress
-        let isAuto = event.memoryRetainIsAuto
-        let title = event.memoryRetainTitle
-        let summary = event.memoryRetainSummary
-        let failureReason = event.memoryRetainFailureReason
-        MemoryRetainedNotificationView(
-            isInProgress: isInProgress,
-            title: title,
-            isAuto: isAuto,
-            failureReason: failureReason,
-            onTap: isInProgress ? nil : (title != nil ? {
-                onTap?(.memoryRetainDetail(title: title!, summary: summary))
-            } : nil)
-        )
-    }
-
-    @ViewBuilder
     private var eventView: some View {
         switch event {
         case .modelChange(let from, let to):
@@ -65,23 +45,11 @@ struct SystemEventView: View {
         case .interrupted:
             InterruptedNotificationView()
 
-        case .transcriptionFailed:
-            TranscriptionFailedNotificationView()
-
-        case .transcriptionNoSpeech:
-            TranscriptionNoSpeechNotificationView()
-
         case .contextCleared(let tokensBefore, let tokensAfter):
             ContextClearedNotificationView(tokensBefore: tokensBefore, tokensAfter: tokensAfter)
 
         case .messageDeleted(let targetType):
             MessageDeletedNotificationView(targetType: targetType)
-
-        case .rulesLoaded(let count):
-            RulesLoadedNotificationView(count: count)
-
-        case .rulesActivated(let rules, let total):
-            RulesActivatedNotificationView(rules: rules, totalActivated: total)
 
         case .catchingUp:
             CatchingUpNotificationView()
@@ -106,19 +74,12 @@ struct SystemEventView: View {
             )
 
         case .compactionInProgress,
-             .compaction,
-             .memoryRetainInProgress,
-             .memoryAutoRetainInProgress,
-             .memoryAutoRetainFailed,
-             .memoryRetained,
-             .memoryRetainedNothingNew:
+             .compaction:
             // Unreachable by construction — these cases are intercepted by
-            // the parent `body`'s if/else-if on `isCompactionNotification` /
-            // `isMemoryRetainNotification` before `eventView` is ever
-            // evaluated. We enumerate them explicitly (rather than a
-            // `default:` catch-all) so the compiler flags any new
-            // `SystemEvent` case that lacks a rendering here instead of
-            // silently rendering an empty pill.
+            // the parent `body`'s check on `isCompactionNotification` before
+            // `eventView` is ever evaluated. We enumerate them explicitly so
+            // the compiler flags any new `SystemEvent` case that lacks a
+            // rendering here instead of silently rendering an empty pill.
             EmptyView()
         }
     }

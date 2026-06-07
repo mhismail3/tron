@@ -16,7 +16,6 @@ final class EventIconProviderTests: XCTestCase {
             "config.model_switch", "config.prompt_update", "config.reasoning_level",
             "message.deleted",
             "notification.interrupted",
-            "rules.loaded", "rules.activated",
             "compact.boundary",
             "context.cleared",
             "metadata.update", "metadata.tag",
@@ -24,7 +23,6 @@ final class EventIconProviderTests: XCTestCase {
             "error.agent", "error.capability", "error.provider",
             "notification.process_result", "process.results_consumed",
             "turn.failed",
-            "memory.retained",
             "hook.llm_result",
         ]
         return rawValues.compactMap { SessionEventType(rawValue: $0) }
@@ -78,16 +76,6 @@ final class EventIconProviderTests: XCTestCase {
 
     func testTurnFailed_hasErrorColor() {
         XCTAssertEqual(EventIconProvider.color(for: .turnFailed), .tronError)
-    }
-
-    // MARK: - Memory Events
-
-    func testMemoryRetained_hasBrainIcon() {
-        XCTAssertEqual(EventIconProvider.iconName(for: .memoryRetained), "brain.head.profile.fill")
-    }
-
-    func testMemoryRetained_hasPurpleColor() {
-        XCTAssertEqual(EventIconProvider.color(for: .memoryRetained), .tronPurple)
     }
 
     // MARK: - Capability Result Payload Variants

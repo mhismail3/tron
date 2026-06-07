@@ -19,7 +19,6 @@ pub fn spawn_prompt_run(
         provider_factory: agent_deps.provider_factory.clone(),
         health_tracker: runtime_deps.health_tracker.clone(),
         event_store: runtime_deps.event_store.clone(),
-        profile_runtime: runtime_deps.profile_runtime.clone(),
         shutdown_token: runtime_deps
             .shutdown_coordinator
             .as_ref()

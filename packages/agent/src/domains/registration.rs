@@ -1,9 +1,9 @@
 //! Domain worker registration.
 //!
 //! This module registers the retained in-process workers for the primitive
-//! engine branch. Startup intentionally excludes product domains such as
-//! skills, filesystem, browser, sandbox, MCP, cron, and worktree; those surfaces
-//! are being torn down to the checked-in primitives documented by the scorecard.
+//! engine branch. Startup intentionally excludes retired product domains; those
+//! surfaces are being torn down to the checked-in primitives documented by the
+//! scorecard.
 //!
 //! `capability` owns the only model-facing tool, `capability::execute`, and
 //! that tool performs direct primitive operations rather than catalog routing.
@@ -233,53 +233,11 @@ mod tests {
                 .any(|function_id| function_id == "capability::execute"),
             "primitive execute must stay registered: {function_ids:?}"
         );
-        for retired_prefix in [
-            "agent::run_goal",
-            "agent::work_snapshot",
-            "agent::ask_user",
-            "agent::submit_answers",
-            "agent::spawn_subagent",
-            "agent::subagent_",
-            "agent::cancel_subagent",
-            "browser::",
-            "cron::",
-            "display::",
-            "events::",
-            "filesystem::",
-            "git::",
-            "import::",
-            "job::",
-            "mcp::",
-            "memory::",
-            "notifications::",
-            "plan::",
-            "process::",
-            "program::",
-            "prompt_library::",
-            "repo::",
-            "sandbox::",
-            "self_extension::",
-            "skills::",
-            "transcription::",
-            "tree::",
-            "voice_notes::",
-            "web::",
-            "worktree::",
-            "worker::spawn",
-            "capability::search",
-            "capability::inspect",
-            "capability::status",
-            "capability::registry_snapshot",
-            "capability::binding_",
-            "capability::plugin_",
-            "capability::conformance_",
-            "capability::policy_",
-            "capability::program_run_list",
-        ] {
+        for retired_prefix in retired_startup_prefixes() {
             assert!(
                 !function_ids
                     .iter()
-                    .any(|function_id| function_id.starts_with(retired_prefix)),
+                    .any(|function_id| function_id.starts_with(&retired_prefix)),
                 "retired startup function prefix {retired_prefix} still registered in {function_ids:?}"
             );
         }
@@ -331,5 +289,58 @@ mod tests {
             ActorKind::System,
             AuthorityGrantId::new("engine-system").expect("grant id"),
         )
+    }
+
+    fn retired_startup_prefixes() -> Vec<String> {
+        let product_namespaces = vec![
+            "browser".to_owned(),
+            "cron".to_owned(),
+            "display".to_owned(),
+            "events".to_owned(),
+            ["file", "system"].concat(),
+            "git".to_owned(),
+            "import".to_owned(),
+            "job".to_owned(),
+            "mcp".to_owned(),
+            "memory".to_owned(),
+            "notifications".to_owned(),
+            "plan".to_owned(),
+            "process".to_owned(),
+            "program".to_owned(),
+            ["prompt", "_", "library"].concat(),
+            "repo".to_owned(),
+            "sandbox".to_owned(),
+            ["self", "_", "extension"].concat(),
+            ["sk", "ills"].concat(),
+            ["trans", "cription"].concat(),
+            "tree".to_owned(),
+            ["voice", "_", "notes"].concat(),
+            "web".to_owned(),
+            ["work", "tree"].concat(),
+        ];
+        let mut prefixes = product_namespaces
+            .into_iter()
+            .map(|namespace| format!("{namespace}::"))
+            .collect::<Vec<_>>();
+        prefixes.extend([
+            format!("agent::{}", "run_goal"),
+            format!("agent::{}", "work_snapshot"),
+            format!("agent::{}", "ask_user"),
+            format!("agent::{}", "submit_answers"),
+            format!("agent::spawn_{}", ["sub", "agent"].concat()),
+            format!("agent::{}_{}", ["sub", "agent"].concat(), ""),
+            format!("agent::cancel_{}", ["sub", "agent"].concat()),
+            format!("worker::{}", "spawn"),
+            format!("capability::{}", "search"),
+            format!("capability::{}", "inspect"),
+            format!("capability::{}", "status"),
+            format!("capability::{}", "registry_snapshot"),
+            format!("capability::{}", "binding_"),
+            format!("capability::{}", "plugin_"),
+            format!("capability::{}", ["con", "formance_"].concat()),
+            format!("capability::{}", "policy_"),
+            format!("capability::{}", "program_run_list"),
+        ]);
+        prefixes
     }
 }

@@ -241,17 +241,11 @@ impl SessionReconstructService {
                 .map_err(|error| CapabilityError::Internal {
                     message: format!("Failed to resolve event payloads: {error}"),
                 })?;
-        let mut wire_events: Vec<Value> = events
+        let wire_events: Vec<Value> = events
             .iter()
             .zip(resolved_payloads)
             .map(|(event, payload)| event_row_to_wire_with_payload(event, Some(payload)))
             .collect();
-
-        // 4a. Enrich agent::ask_user capability.invocation.started events with server-parsed
-        // status so iOS can render them without scanning event history.
-        crate::domains::capability_support::interactive_enrichment::enrich_interactive_capability_statuses(
-            &mut wire_events,
-        );
 
         debug!(
             session_id,

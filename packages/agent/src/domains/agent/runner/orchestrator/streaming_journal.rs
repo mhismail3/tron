@@ -43,10 +43,6 @@ struct JournalEntry {
 /// Recovered turn data from an orphaned journal.
 #[derive(Debug)]
 pub struct RecoveredTurn {
-    /// Session that was running when the crash occurred.
-    pub session_id: String,
-    /// Turn number within the session.
-    pub turn: u32,
     /// Accumulated text content from all text deltas.
     pub accumulated_text: String,
     /// Accumulated thinking/reasoning content from all thinking deltas.
@@ -219,8 +215,6 @@ impl StreamingJournal {
         );
 
         Ok(Some(RecoveredTurn {
-            session_id: session_id.to_string(),
-            turn,
             accumulated_text: text,
             accumulated_thinking: thinking,
             capability_invocations,

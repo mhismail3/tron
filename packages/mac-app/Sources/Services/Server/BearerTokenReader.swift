@@ -131,15 +131,6 @@ enum ServerSettingsWriter {
         )
     }
 
-    static func setTranscriptionEnabled(_ enabled: Bool, at path: URL) throws {
-        try updateToml(
-            at: path,
-            table: "settings.server.transcription",
-            key: "enabled",
-            value: enabled ? "true" : "false"
-        )
-    }
-
     static func removeSettingsOverlay(at path: URL) throws {
         guard FileManager.default.fileExists(atPath: path.path) else {
             return

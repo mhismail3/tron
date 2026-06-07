@@ -41,55 +41,33 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             content.range(of: "private var landscapeContent: some View")?.lowerBound
         )
         let landscapeContent = content[landscapeStart..<content.endIndex]
+        let quickSessionIndex = try XCTUnwrap(landscapeContent.range(of: "quickSessionCard")?.lowerBound)
         let messageQueueIndex = try XCTUnwrap(landscapeContent.range(of: "messageQueueCard")?.lowerBound)
-        let protectedIndex = try XCTUnwrap(
-            landscapeContent.range(of: "protectedBranchesSection", range: messageQueueIndex..<landscapeContent.endIndex)?.lowerBound
-        )
         XCTAssertLessThan(
+            quickSessionIndex,
             messageQueueIndex,
-            protectedIndex,
-            "Message queue controls should stay above protected branches in the landscape right column"
-        )
-    }
-
-    func testAgentSettingsAutonomyUsesAuthorityEnvelopeCopy() throws {
-        let content = try settingsPageSource(named: "AgentSettingsPage.swift")
-
-        XCTAssertTrue(
-            content.contains("label: \"Autonomy Mode\""),
-            "The settings surface should present the primitive autonomy model, not approval internals"
-        )
-        XCTAssertTrue(
-            content.contains("configured authority envelope"),
-            "Autonomy copy must describe the upfront authority envelope"
+            "Quick-session defaults should stay before queue controls in the landscape projection"
         )
         XCTAssertFalse(
-            content.contains("Approval " + "Prompts") || content.contains("approval" + "PromptMode"),
-            "Interactive approval prompts should not exist in iOS settings"
+            landscapeContent.contains("protected" + "Branches" + "Section"),
+            "Protected branch policy is not a primitive settings card"
         )
     }
 
-    func testAgentSettingsExposePlainGuardrails() throws {
+    func testAgentSettingsDeletesProductPolicySections() throws {
         let content = try settingsPageSource(named: "AgentSettingsPage.swift")
 
-        XCTAssertTrue(
-            content.contains("SettingsSectionHeader(title: AgentSettingsSection.guardrails.rawValue)"),
-            "Agent settings should expose Guardrails as a first-class plain section"
-        )
-        XCTAssertTrue(
-            content.contains("label: \"Run Unless Blocked\""),
-            "Guardrails copy should reinforce the default autonomous run-unless-blocked behavior"
-        )
-        XCTAssertTrue(content.contains("outside the configured authority envelope"))
-        XCTAssertLessThan(
-            try XCTUnwrap(content.range(of: "autonomySection")?.lowerBound),
-            try XCTUnwrap(content.range(of: "guardrailsSection")?.lowerBound),
-            "Guardrails should stay adjacent to the Autonomy section"
-        )
+        XCTAssertTrue(content.contains("quickSessionCard"))
+        XCTAssertTrue(content.contains("messageQueueCard"))
+        XCTAssertFalse(content.contains("autonomy" + "Section"))
+        XCTAssertFalse(content.contains("guard" + "rails" + "Section"))
+        XCTAssertFalse(content.contains("hooks" + "Section"))
+        XCTAssertFalse(content.contains("protected" + "Branches" + "Section"))
+        XCTAssertFalse(content.contains("approval" + "PromptMode"))
     }
 
     @MainActor
-    func testAgentSettingsAutonomyRendersForVisualQA() throws {
+    func testAgentSettingsPrimitiveCardsRenderForVisualQA() throws {
         let settingsState = SettingsState()
         settingsState.isLoaded = true
         settingsState.quickSessionWorkspace = URL(fileURLWithPath: NSTemporaryDirectory())
@@ -97,10 +75,6 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             .path
         settingsState.defaultModel = "gpt-5.5"
         settingsState.queueDrainMode = "batched"
-        settingsState.builtinHooks = [
-            BuiltinHookSetting(id: "builtin:title-gen", enabled: true),
-            BuiltinHookSetting(id: "builtin:suggest-prompts", enabled: true),
-        ]
         let content = AgentSettingsPage(
             settingsState: settingsState,
             selectedModelDisplayName: "GPT-5.5",
@@ -137,7 +111,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         let artifactRoot = ProcessInfo.processInfo.environment["TRON_VISUAL_ARTIFACT_DIR"]
             .map(URL.init(fileURLWithPath:))
             ?? documentsURL.appendingPathComponent("tron-visual-artifacts")
-        let outputURL = artifactRoot.appendingPathComponent("agent-settings-autonomy-render.png")
+        let outputURL = artifactRoot.appendingPathComponent("agent-settings-primitive-render.png")
         try FileManager.default.createDirectory(
             at: outputURL.deletingLastPathComponent(),
             withIntermediateDirectories: true
@@ -164,16 +138,12 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         )
         let landscapeContent = content[landscapeStart..<content.endIndex]
         let pairedIndex = try XCTUnwrap(landscapeContent.range(of: "pairedServersSection")?.lowerBound)
-        let transcriptionIndex = try XCTUnwrap(
-            landscapeContent.range(of: "transcriptionSection", range: pairedIndex..<landscapeContent.endIndex)?.lowerBound
-        )
         let diagnosticsIndex = try XCTUnwrap(
-            landscapeContent.range(of: "diagnosticsSection", range: transcriptionIndex..<landscapeContent.endIndex)?.lowerBound
+            landscapeContent.range(of: "diagnosticsSection", range: pairedIndex..<landscapeContent.endIndex)?.lowerBound
         )
         let updatesIndex = try XCTUnwrap(landscapeContent.range(of: "updatesSection")?.lowerBound)
 
-        XCTAssertLessThan(pairedIndex, transcriptionIndex)
-        XCTAssertLessThan(transcriptionIndex, diagnosticsIndex)
+        XCTAssertLessThan(pairedIndex, diagnosticsIndex)
         XCTAssertLessThan(diagnosticsIndex, updatesIndex)
         XCTAssertTrue(
             landscapeContent.contains("if settingsState.isLoaded && !activeServerUnavailable {\n                        updatesSection\n                    }"),
@@ -190,6 +160,10 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(
             landscapeContent.contains(".fixedSize(horizontal: false, vertical: true)"),
             "Compact left-column server sections should not stretch to the diagnostics column height"
+        )
+        XCTAssertFalse(
+            landscapeContent.contains("trans" + "cription" + "Section"),
+            "Server settings must not retain deleted media sidecar controls"
         )
     }
 

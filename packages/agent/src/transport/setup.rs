@@ -1,4 +1,4 @@
-//! Thin startup hook for server-owned engine domain registration.
+//! Thin startup entrypoint for server-owned engine domain registration.
 //!
 //! Transport setup delegates to `domains::registration` so the client
 //! protocol layer does not know individual domain workers, hidden apply

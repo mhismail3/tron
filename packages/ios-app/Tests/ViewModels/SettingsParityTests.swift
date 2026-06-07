@@ -30,21 +30,8 @@ final class SettingsParityTests: XCTestCase {
         // Context compaction
         "preserveRecentCount",
         "triggerTokenThreshold",
-        // Rules
-        "rulesDiscoverStandaloneFiles",
         // Message queue
         "queueDrainMode",
-        // Hooks
-        "hooksLlmModel",
-        "builtinHooks",
-        "hooksErrorPolicy",
-        // Memory
-        "autoRetainInterval",
-        "retainModel",
-        // Git safety
-        "gitProtectedBranches",
-        // plugin source
-        "mcpSchemaRefreshTtlMs",
         // Engine diagnostics
         "observabilityLogLevel",
         "observabilityPayloadCapture",
@@ -52,8 +39,6 @@ final class SettingsParityTests: XCTestCase {
         "observabilityMaxInlinePayloadBytes",
         "storageRetentionEnabled",
         "storageMaxDatabaseMb",
-        // Transcription (ConnectionSettingsPage.swift)
-        "transcriptionEnabled",
         // Update checks (ConnectionSettingsPage.swift)
         "updateEnabled",
         "updateChannel",
@@ -69,14 +54,6 @@ final class SettingsParityTests: XCTestCase {
         "isLoadingModels": "UI loading flag — not persisted",
         "loadError": "transient error state — surfaced inline in the UI, not a setting",
         "lastLoadedSettings": "rollback snapshot for failed sparse updates — not a setting",
-        "isolationMode": "session default still comes from server settings; new-session flow exposes the per-session isolation choice",
-        "gitTargetBranch": "runtime repo actions choose targets per action or let the server auto-detect the repository default",
-        "gitSessionBranchPolicy": "merge/finalize action sheets expose branch cleanup per action instead of a global settings sheet toggle",
-        "gitMergeStrategy": "merge/finalize action sheets expose strategy per action instead of a global settings sheet toggle",
-        "gitAutoSetUpstream": "push action sheet exposes upstream behavior per push; the server default remains decoded for action-sheet initialization",
-        "gitCrashRecoveryAbortTimeoutMs": "operational timeout kept server-side; not exposed as an end-user settings control",
-        "gitOpTimeoutNetworkMs": "operational timeout kept server-side; not exposed as an end-user settings control",
-        "gitOpTimeoutLocalMs": "operational timeout kept server-side; not exposed as an end-user settings control",
     ]
 
     /// Normalize a Mirror child label into the user-level field name.
