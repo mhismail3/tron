@@ -1040,6 +1040,83 @@ work is the engine-envelope/catalog-term audit, final fresh server/DB/trace
 proof, iPhone/iPad closeout screenshots, final diff hygiene, and final
 scorecard closeout.
 
+### PET-11 iOS Hook Suggestion State Flattening Addendum
+
+First-principles decision: the iOS shell should not carry a second workflow
+loop after `agent.complete`. Prompt suggestions, hook-result decoding, and a
+third `postProcessing` phase required the client and model to reason about
+state that is not primitive provider/session/execute infrastructure. The
+retained lifecycle is now `idle` or `processing`; all post-turn behavior must
+come from server events, durable trace/log evidence, or agent-authored runtime
+state.
+
+Changes:
+
+- deleted `LlmHookResultPlugin`, `ChatViewModel+HookEvents`,
+  `PullUpPanelState`, `PullUpPanelView`, and `InputAreaDragModifier`;
+- removed `hook.llm_result`/`suggest-prompts` handling from event type
+  registries, event summaries, reconstruction, event dispatch, pagination, and
+  tests;
+- collapsed `AgentPhase` to `idle` and `processing`, removed
+  `isPostProcessing`, `postProcessingTimeoutTask`, and suggestion latch state;
+- simplified `agent.complete`, `agent.ready`, abort, disconnect, and completed
+  reconstruction handling to clear directly to idle without a suggestion wait
+  window;
+- added SourceGuard coverage to keep the prompt-suggestion hook plane deleted;
+- cleaned stale comments that still described rules/hooks/Constitution
+  defaults instead of primitive context/profile defaults.
+
+Evidence:
+
+- Residue scan excluding the new guard:
+  `rg -n -g '!SourceGuardTests.swift' "PullUpPanelView|InputAreaDragModifier|pullUpPanelState|PullUpPanelState|onSuggestion|suggestions|awaitingSuggestions|postProcessing|isPostProcessing|postProcessingTimeoutTask|LlmHookResult|llmHookResult|hook\\.llm_result|hook\\.result|handleLlmHookResult|HookEventHandler|background hooks|suggest-prompts" packages/ios-app/Sources packages/ios-app/Tests packages/ios-app/project.yml packages/ios-app/TronMobile.xcodeproj`
+  -> exit 1/no matches.
+- Stale context language scan excluding the invariant file:
+  `rg -n -g '!primitive_engine_teardown_plan_invariants.rs' 'Project rules, memory snapshot, skill index|Dynamic rules, active skill bodies, job results|compiled by profile context policy|rules, system prompt|system prompt, rules|Volatile parts \\(memory|messages, rules, and token tracking|system prompt, capabilities, rules|background hooks|Constitution defaults|Tron Constitution|prompt/policy .*\\.md' README.md packages/agent/src packages/agent/tests packages/ios-app/Sources packages/ios-app/Tests`
+  -> exit 1/no matches.
+- `cd packages/ios-app && xcodegen generate` -> exit 0.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all` -> exit 0.
+- Context cleanup invariant:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants context_has_soul_and_agent_state_not_rules_skills_hooks_or_policy_planes`
+  -> exit 0, 1 test.
+- First iOS SourceGuard run after adding the guard failed because the deleted
+  Swift file was gone but the empty
+  `packages/ios-app/Sources/Core/Events/Plugins/Hook` directory remained.
+  Owner: iOS shell cleanup. Failing result bundle:
+  `~/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_11-51-33--0700.xcresult`.
+  Fixed by removing the empty directory.
+- Green iOS SourceGuard rerun:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`
+  -> exit 0, 27 Swift Testing tests passed; result bundle
+  `~/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_11-52-59--0700.xcresult`.
+- Rust compile proof:
+  `cargo check --manifest-path packages/agent/Cargo.toml --bin tron`
+  -> exit 0.
+- The first impacted iOS lifecycle/event run failed on
+  `TurnGroupingTests.interPromptEventsInheritPreviousTurnAcrossReset`: the
+  rewritten fixture was preserving behavior of a now-deleted unknown hook event
+  shape. Owner: test harness. Fixed by removing the artificial inter-prompt
+  product-event assertion and testing only retained prompt-cycle reset behavior.
+  Failing result bundle:
+  `~/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_11-53-48--0700.xcresult`.
+- Targeted TurnGrouping rerun:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/TurnGroupingTests`
+  -> exit 0, 27 Swift Testing tests passed; result bundle
+  `~/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_11-55-36--0700.xcresult`.
+- Full impacted iOS lifecycle/event rerun:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/AgentPhaseTests -only-testing:TronMobileTests/ChatViewModelEventRoutingTests -only-testing:TronMobileTests/MessagingCoordinatorTests -only-testing:TronMobileTests/ConnectionCoordinatorTests -only-testing:TronMobileTests/EventDispatchCoordinatorTests -only-testing:TronMobileTests/SessionStateInvariantsTests -only-testing:TronMobileTests/SheetReadOnlyTests -only-testing:TronMobileTests/TurnLifecycleCoordinatorTests -only-testing:TronMobileTests/UnifiedEventTransformerTests -only-testing:TronMobileTests/SessionEventSummaryTests -only-testing:TronMobileTests/TurnGroupingTests`
+  -> exit 0, 208 XCTest tests plus 27 Swift Testing tests passed; result bundle
+  `~/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_11-56-12--0700.xcresult`.
+- Full primitive teardown invariant suite:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants`
+  -> exit 0, 26 tests.
+- `git diff --check` -> exit 0.
+
+Residual risk: this closes the hook/suggestion/post-processing state plane.
+PET-11 still owns the final live primitive-loop proof, fresh DB/event/ledger
+and trace inspection, iPhone/iPad closeout screenshots, final retained-surface
+sweep, and final scorecard closeout.
+
 ## Required Final Evidence
 
 PET-11 must add:

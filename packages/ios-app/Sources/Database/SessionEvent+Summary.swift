@@ -179,14 +179,6 @@ extension SessionEvent {
         case .streamTextDelta, .streamThinkingDelta, .streamThinkingComplete:
             return "Streaming..."
 
-        case .llmHookResult:
-            let hookName = payload.string("hookName") ?? ""
-            let success = (payload["success"]?.value as? Bool) ?? true
-            if !hookName.isEmpty {
-                return success ? "Hook: \(hookName)" : "Hook failed: \(hookName)"
-            }
-            return success ? "Hook completed" : "Hook failed"
-
         case .turnFailed:
             let error = payload.string("error") ?? ""
             if !error.isEmpty {

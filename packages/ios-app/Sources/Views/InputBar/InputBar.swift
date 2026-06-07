@@ -39,7 +39,7 @@ struct InputBar: View {
 
     private var canSend: Bool {
         if config.agentPhase.isActive {
-            // During processing/postProcessing: allow send if has text
+            // During processing: allow send if has text
             // so the message can be queued (server rejects if queue full).
             // Async blockers like compaction / disconnect still prevent
             // queueing — nothing to queue into.

@@ -356,8 +356,8 @@ pub fn build_system_prompt_for_provider(context: &Context, prefix: Option<&str>)
 /// When `prefix` is `None` and there is no content, returns `None`.
 ///
 /// Cache breakpoints:
-/// - Breakpoint 2: Last stable block (rules, system prompt) → 1h TTL
-/// - Breakpoint 3: Last volatile block (memory) → 5m TTL (default)
+/// - Breakpoint 2: Last stable instruction block -> 1h TTL
+/// - Breakpoint 3: Last volatile state block -> 5m TTL (default)
 fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value> {
     let grouped = compose_context_parts_grouped(context);
 
@@ -371,12 +371,12 @@ fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value>
         0
     };
 
-    // Stable parts (system prompt, rules — cache at 1h)
+    // Stable instruction parts: cache at 1h.
     for part in &grouped.stable {
         blocks.push(SystemPromptBlock::text(part));
     }
 
-    // Volatile parts (memory — cache at 5m)
+    // Volatile state parts: cache at 5m.
     for part in &grouped.volatile {
         blocks.push(SystemPromptBlock::text(part));
     }

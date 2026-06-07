@@ -40,7 +40,6 @@ extension ChatViewModel {
         // 4a. Set agent phase from server-authoritative value
         switch result.agentPhase {
         case "processing": agentPhase = .processing
-        case "postProcessing": agentPhase = .postProcessing
         default: agentPhase = .idle
         }
 
@@ -121,15 +120,11 @@ extension ChatViewModel {
     /// completed reconstruction.
     ///
     /// `session::reconstruct` is the source of truth for history. When it says
-    /// the session is not running, no local phase, stale post-processing
-    /// timeout, or reconstructed half-open thinking/capability marker may keep the
-    /// chat in a processing UI state.
+    /// the session is not running, no local phase or reconstructed half-open
+    /// thinking/capability marker may keep the chat in a processing UI state.
     func reconcileCompletedReconstructionState() {
-        postProcessingTimeoutTask?.cancel()
-        postProcessingTimeoutTask = nil
         agentPhase = .idle
         runningCapabilityInvocationCount = 0
-        pullUpPanelState.awaitingSuggestions = false
         currentCapabilityInvocationMessages.removeAll()
         currentTurnCapabilityInvocations.removeAll()
         streamingManager.reset()

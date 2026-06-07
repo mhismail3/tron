@@ -770,6 +770,56 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Primitive shell has no prompt suggestion hook plane")
+    func testPrimitiveShellHasNoPromptSuggestionHookPlane() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let deletedPaths = [
+            "Sources/Core/Events/Plugins/Hook",
+            "Sources/ViewModels/Chat/ChatViewModel+" + "Hook" + "Events.swift",
+            "Sources/ViewModels/State/Pull" + "Up" + "Panel" + "State.swift",
+            "Sources/Views/InputBar/Input" + "Area" + "Drag" + "Modifier.swift",
+            "Sources/Views/InputBar/Pull" + "Up" + "Panel" + "View.swift",
+        ]
+        for relativePath in deletedPaths {
+            #expect(
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) belongs to the deleted prompt suggestion hook plane"
+            )
+        }
+
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+        let forbiddenNeedles: [(String, String)] = [
+            ("hook" + "." + "llm_result", "hook-result event type"),
+            ("Llm" + "Hook" + "Result", "hook-result plugin"),
+            ("handle" + "Llm" + "Hook" + "Result", "hook-result event handler"),
+            ("Pull" + "Up" + "Panel", "prompt suggestion panel"),
+            ("awaiting" + "Suggestions", "prompt suggestion latch"),
+            ("suggest" + "-" + "prompts", "prompt suggestion worker"),
+            ("post" + "Processing", "third lifecycle phase"),
+            ("is" + "Post" + "Processing", "third lifecycle convenience state"),
+            ("background " + "hooks", "hook lifecycle state"),
+        ]
+
+        for root in sourceRoots {
+            for url in try swiftFiles(in: root) {
+                if url.path == #filePath { continue }
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for (needle, reason) in forbiddenNeedles {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.path) contains deleted \(reason): `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
+
     @Test("iOS runtime contract is iOS 26 only")
     func testIOSRuntimeContractIsIOS26Only() throws {
         let fileURL = URL(fileURLWithPath: #filePath)

@@ -11,8 +11,8 @@ final class AgentPhaseTests: XCTestCase {
     }
 
     func testAllCasesExist() {
-        let cases: [AgentPhase] = [.idle, .processing, .postProcessing]
-        XCTAssertEqual(cases.count, 3)
+        let cases: [AgentPhase] = [.idle, .processing]
+        XCTAssertEqual(cases.count, 2)
     }
 
     // MARK: - Computed Property Tests
@@ -20,25 +20,16 @@ final class AgentPhaseTests: XCTestCase {
     func testIsProcessingTrueOnlyWhenProcessing() {
         XCTAssertFalse(AgentPhase.idle.isProcessing)
         XCTAssertTrue(AgentPhase.processing.isProcessing)
-        XCTAssertFalse(AgentPhase.postProcessing.isProcessing)
-    }
-
-    func testIsPostProcessingTrueOnlyWhenPostProcessing() {
-        XCTAssertFalse(AgentPhase.idle.isPostProcessing)
-        XCTAssertFalse(AgentPhase.processing.isPostProcessing)
-        XCTAssertTrue(AgentPhase.postProcessing.isPostProcessing)
     }
 
     func testIsIdleTrueOnlyWhenIdle() {
         XCTAssertTrue(AgentPhase.idle.isIdle)
         XCTAssertFalse(AgentPhase.processing.isIdle)
-        XCTAssertFalse(AgentPhase.postProcessing.isIdle)
     }
 
     func testIsActiveFalseOnlyWhenIdle() {
         XCTAssertFalse(AgentPhase.idle.isActive)
         XCTAssertTrue(AgentPhase.processing.isActive)
-        XCTAssertTrue(AgentPhase.postProcessing.isActive)
     }
 
     // MARK: - Equatable Tests
@@ -46,9 +37,7 @@ final class AgentPhaseTests: XCTestCase {
     func testEquatable() {
         XCTAssertEqual(AgentPhase.idle, AgentPhase.idle)
         XCTAssertEqual(AgentPhase.processing, AgentPhase.processing)
-        XCTAssertEqual(AgentPhase.postProcessing, AgentPhase.postProcessing)
         XCTAssertNotEqual(AgentPhase.idle, AgentPhase.processing)
-        XCTAssertNotEqual(AgentPhase.processing, AgentPhase.postProcessing)
     }
 
     // MARK: - Sendable Tests

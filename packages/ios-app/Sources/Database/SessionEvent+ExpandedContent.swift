@@ -158,24 +158,6 @@ extension SessionEvent {
             }
             return lines.isEmpty ? nil : lines.joined(separator: "\n")
 
-        case .llmHookResult:
-            var lines: [String] = []
-            if let hookName = payload.string("hookName") {
-                lines.append("Hook: \(hookName)")
-            }
-            if let model = payload.string("model") {
-                lines.append("Model: \(model)")
-            }
-            if let duration = payload.int("durationMs") {
-                lines.append("Duration: \(formatLatency(duration))")
-            }
-            let success = (payload["success"]?.value as? Bool) ?? true
-            lines.append("Status: \(success ? "Success" : "Failed")")
-            if let error = payload.string("error") {
-                lines.append("Error: \(error)")
-            }
-            return lines.isEmpty ? nil : lines.joined(separator: "\n")
-
         default:
             return nil
         }

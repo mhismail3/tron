@@ -36,9 +36,9 @@ pub enum ContextCacheClass {
     Foundation,
     /// Active profile and user behavior overlays.
     Profile,
-    /// Project rules, memory snapshot, skill index, and environment.
+    /// Session history, environment, and agent-owned state summaries.
     Session,
-    /// Dynamic rules, active skill bodies, job results, and latest turn.
+    /// Latest turn input, pending execute results, and volatile stream output.
     Turn,
     /// Secrets, vault values, and unsafe/volatile material.
     None,
@@ -308,7 +308,7 @@ fn validate_active_profile(home: &Path) -> io::Result<()> {
     super::profile::resolve_profile_at(home, &active).map(|_| ())
 }
 
-/// Create a context block from rendered text and constitutional metadata.
+/// Create a context block from rendered text and Tron Home metadata.
 #[must_use]
 pub fn context_block_for_text(
     id: impl Into<String>,
@@ -328,7 +328,7 @@ pub fn context_block_for_text(
         hash: sha256_hex(text.as_bytes()),
         token_estimate: estimate_tokens(&text),
         sensitivity: ContextSensitivity::Public,
-        inclusion_reason: "compiled by profile context policy".into(),
+        inclusion_reason: "compiled by primitive context assembly".into(),
         precedence,
         cache_class,
         provider_surface: ProviderSurface::Instructions,

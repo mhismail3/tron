@@ -12,9 +12,7 @@ final class ChatViewModel {
     // MARK: - Observable State
 
     var messages: [ChatMessage] = []
-    /// Agent lifecycle phase (idle → processing → postProcessing → idle).
-    /// Replaces the previous `isProcessing` / `isPostProcessing` booleans
-    /// which could get into invalid states (both true simultaneously).
+    /// Agent lifecycle phase for the primitive chat loop.
     var agentPhase: AgentPhase = .idle
     /// Compaction is in progress (LLM summarizer call running).
     /// While true: send button disabled, spinning compaction pill shown.
@@ -72,8 +70,6 @@ final class ChatViewModel {
     var showAbortConfirmation = false
     /// Model picker state (cached models, optimistic updates, switching)
     let modelPickerState: ModelPickerState
-    /// Pull-up panel state (suggestions, position, drag)
-    let pullUpPanelState = PullUpPanelState()
     // MARK: - Protocol Conformance (Context Protocols)
 
     /// Make a capability visible for rendering (CapabilityInvocationContext)
@@ -140,10 +136,6 @@ final class ChatViewModel {
     var streamingRecoverySnapshot: StreamingRecoverySnapshot?
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
     var compactionInProgressMessageId: UUID?
-    /// Safety-net timeout: if agent.ready never arrives after agent.complete, warn at 15s, recover at 30s
-    @ObservationIgnored
-    var postProcessingTimeoutTask: Task<Void, Never>?
-
     // MARK: - Sub-Managers
 
     /// Coordinates pill morph animations, message cascade timing, and capability staggering
@@ -258,8 +250,7 @@ final class ChatViewModel {
         observationTasks.append(Self.observeLoop({ self.engineClient.connectionState }) { [self] state in
             self.connectionState = state
 
-            // Clear stale processing state on disconnect — server may have
-            // crashed during post-processing, so agent_ready will never arrive.
+            // Clear stale processing state on disconnect.
             if case .disconnected = state {
                 if self.agentPhase != .idle {
                     self.agentPhase = .idle
@@ -270,7 +261,6 @@ final class ChatViewModel {
                 self.runningCapabilityInvocationCount = 0
                 self.clearDisplayStreamState()
                 self.prunedLiveMessages.removeAll()
-                self.pullUpPanelState.awaitingSuggestions = false
             }
         })
 

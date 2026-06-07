@@ -43,8 +43,7 @@ protocol SessionIdentifiable: AnyObject {
 /// Valid transitions:
 /// ```
 /// idle → processing          (turn start / send message)
-/// processing → postProcessing (agent.complete)
-/// postProcessing → idle       (agent.ready)
+/// processing → idle          (agent.complete / agent.ready)
 /// any → idle                  (agent.error / disconnect)
 /// ```
 ///
@@ -52,12 +51,10 @@ protocol SessionIdentifiable: AnyObject {
 enum AgentPhase: Equatable, Sendable {
     case idle
     case processing
-    case postProcessing
 
     var isIdle: Bool { self == .idle }
     var isActive: Bool { self != .idle }
     var isProcessing: Bool { self == .processing }
-    var isPostProcessing: Bool { self == .postProcessing }
 }
 
 // MARK: - Processing State
@@ -79,11 +76,6 @@ extension ProcessingTrackable {
         set { agentPhase = newValue ? .processing : .idle }
     }
 
-    /// Whether background hooks are running after completion (convenience).
-    var isPostProcessing: Bool {
-        get { agentPhase == .postProcessing }
-        set { agentPhase = newValue ? .postProcessing : .idle }
-    }
 }
 
 // MARK: - Streaming Management

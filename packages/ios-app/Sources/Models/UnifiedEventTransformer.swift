@@ -351,7 +351,7 @@ extension UnifiedEventTransformer {
                     state.lastTurnInputTokens = parsed.estimatedContextTokens ?? parsed.compactedTokens
                 }
 
-            case .metadataUpdate, .metadataTag, .llmHookResult:
+            case .metadataUpdate, .metadataTag:
                 handleMetadataEvent(eventType, payload: event.payload,
                                     timestamp: event.timestamp, state: &state)
 
@@ -421,18 +421,6 @@ extension UnifiedEventTransformer {
                 } else if parsed.action == "remove" {
                     state.tags.removeAll { $0 == parsed.tag }
                 }
-            }
-        case .llmHookResult:
-            if let hookId = payload["hookId"]?.value as? String,
-               hookId.contains("suggest-prompts"),
-               let success = payload["success"]?.value as? Bool,
-               success,
-               let output = payload["output"]?.value as? String {
-                let suggestions = output
-                    .components(separatedBy: .newlines)
-                    .map { $0.trimmingCharacters(in: .whitespaces) }
-                    .filter { !$0.isEmpty && $0.count < 80 }
-                state.suggestions = Array(suggestions.prefix(5))
             }
         default:
             break

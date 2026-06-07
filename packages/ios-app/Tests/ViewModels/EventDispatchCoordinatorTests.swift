@@ -453,9 +453,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
     // Display streaming
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result) {}
 
-    // Hook events
-    func handleLlmHookResult(_ result: LlmHookResultPlugin.Result) {}
-
     // Queue events
     func handleMessageQueued(_ result: MessageQueuedPlugin.Result) {}
     func handleMessageDequeued(_ result: MessageDequeuedPlugin.Result) {}

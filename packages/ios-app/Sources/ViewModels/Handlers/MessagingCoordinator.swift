@@ -59,9 +59,6 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Called on abort to remove the thinking caption
     func clearThinkingCaption()
 
-    /// Mark that we're expecting suggestions from the hook (called on abort).
-    func markAwaitingSuggestions()
-
     /// Draft store for clearing persisted drafts after send
     var draftStore: DraftStore? { get }
 }
@@ -172,14 +169,12 @@ final class MessagingCoordinator {
         do {
             try await context.abortAgentOnServer(idempotencyKey: .userAction("agent.abort"))
             context.isProcessing = false
-            context.isPostProcessing = false
             context.setSessionProcessing(false)
             context.updateSessionDashboardInfo(lastUserPrompt: nil, lastAssistantResponse: "Interrupted")
             context.finalizeStreamingMessage()
             context.finalizeThinkingMessage()
             context.clearThinkingCaption()
             context.appendInterruptedMessage()
-            context.markAwaitingSuggestions()
             context.logInfo("Agent aborted successfully")
         } catch {
             context.logError("Failed to abort agent: \(error.localizedDescription)")

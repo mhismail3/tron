@@ -382,6 +382,28 @@ fn context_has_soul_and_agent_state_not_rules_skills_hooks_or_policy_planes() {
         "provider context composition",
     );
 
+    let home_and_runner_context = [
+        read_repo_file("packages/agent/src/shared/foundation/constitution.rs"),
+        read_repo_file("packages/agent/src/domains/model/providers/anthropic/message_converter.rs"),
+        read_repo_file("packages/agent/src/domains/agent/runner/agent/turn_runner.rs"),
+        read_repo_file("packages/agent/src/domains/agent/runner/profile_runtime.rs"),
+    ]
+    .join("\n");
+    assert_absent(
+        &home_and_runner_context,
+        &[
+            "Project rules, memory snapshot, skill index",
+            "Dynamic rules, active skill bodies, job results",
+            "compiled by profile context policy",
+            "rules, system prompt",
+            "system prompt, rules",
+            "Volatile parts (memory",
+            "messages, rules, and token tracking",
+            "prompt/policy `.md` files",
+        ],
+        "home/profile/provider context comments",
+    );
+
     let soul = read_repo_file("packages/agent/src/domains/agent/runner/context/soul.rs");
     assert!(
         soul.contains("pub const AGENT_SOUL")

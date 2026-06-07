@@ -132,10 +132,8 @@ extension ChatViewModel {
 
     func handleTurnStart(_ pluginResult: TurnStartPlugin.Result) {
         // A turn starting means the agent is actively processing.
-        // Also clears any stale postProcessing state from a previous cycle.
         agentPhase = .processing
         runningCapabilityInvocationCount = 0
-        pullUpPanelState.awaitingSuggestions = false
 
         if isCompacting {
             if let inProgressId = compactionInProgressMessageId,
@@ -161,7 +159,7 @@ extension ChatViewModel {
     }
 
     func handleComplete() {
-        // Only transition from .processing → .postProcessing.
+        // Only transition from .processing -> .idle.
         // After abort, agentPhase is already .idle — skip to prevent flicker.
         guard agentPhase == .processing else { return }
 
@@ -179,36 +177,12 @@ extension ChatViewModel {
         // Delegate to coordinator for all completion handling
         turnLifecycleCoordinator.handleComplete(streamingText: finalStreamingText, context: self)
 
-        // Enter post-processing state: text field enabled, send button disabled.
-        // Cleared by agent_ready event when background hooks finish.
-        agentPhase = .postProcessing
-        pullUpPanelState.awaitingSuggestions = true
-
-        // Safety-net timeout: server guarantees agent.ready delivery (hooks are fail-open),
-        // so this only fires on network delivery failure (WebSocket drop during background).
-        // Warning at 15s to aid diagnostics, recovery at 30s.
-        postProcessingTimeoutTask?.cancel()
-        postProcessingTimeoutTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(15))
-            guard let self, !Task.isCancelled else { return }
-            if self.agentPhase == .postProcessing {
-                self.logWarning("Post-processing: 15s without agent.ready — server hooks may be slow or WebSocket dropped")
-            }
-
-            try? await Task.sleep(for: .seconds(15))
-            guard !Task.isCancelled else { return }
-            if self.agentPhase == .postProcessing {
-                self.logWarning("Post-processing timeout (30s) — agent.ready never arrived, recovering")
-                self.agentPhase = .idle
-            }
-        }
+        agentPhase = .idle
     }
 
     func handleAgentReady() {
-        postProcessingTimeoutTask?.cancel()
-        postProcessingTimeoutTask = nil
         agentPhase = .idle
-        logInfo("Agent ready - post-processing complete")
+        logInfo("Agent ready")
         // Queue drain is now server-side — no client-side drain needed.
     }
 
@@ -222,9 +196,6 @@ extension ChatViewModel {
         }
         isCompacting = false
         compactionInProgressMessageId = nil
-        postProcessingTimeoutTask?.cancel()
-        postProcessingTimeoutTask = nil
-        pullUpPanelState.awaitingSuggestions = false
         // Clear queue — server context is lost, queued messages are stale
         messageQueueState.clear()
     }
@@ -343,7 +314,6 @@ extension ChatViewModel {
         logger.error("Agent error: \(message)", category: .events)
 
         resetToIdleState(errorPreview: message)
-        pullUpPanelState.awaitingSuggestions = false
         appendToMessages(.error(message))
 
         // NOTE: Do NOT clear ThinkingState here - thinking caption should persist

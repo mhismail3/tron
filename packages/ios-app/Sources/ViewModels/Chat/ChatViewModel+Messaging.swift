@@ -40,10 +40,6 @@ extension ChatViewModel: MessagingContext {
         thinkingState.clearCurrentStreaming()
     }
 
-    func markAwaitingSuggestions() {
-        pullUpPanelState.awaitingSuggestions = true
-    }
-
     // Note: The following methods are already defined in other extensions:
     // - resetStreamingManager() in ChatViewModel+TurnLifecycleContext.swift
     // - setSessionProcessing(_:) in ChatViewModel+TurnLifecycleContext.swift

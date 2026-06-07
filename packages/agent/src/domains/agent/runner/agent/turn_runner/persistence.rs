@@ -747,7 +747,7 @@ mod tests {
         );
     }
 
-    // ── Persist-before-broadcast: response-complete + rules-activated ──────
+    // ── Persist-before-broadcast: response-complete events ─────────────────
 
     #[tokio::test]
     async fn persist_completed_assistant_message_returns_ok_on_success() {

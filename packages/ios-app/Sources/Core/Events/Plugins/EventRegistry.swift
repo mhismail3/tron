@@ -126,9 +126,6 @@ final class EventRegistry: @unchecked Sendable {
         // Display streaming events
         register(DisplayFramePlugin.self)
 
-        // Hook events
-        register(LlmHookResultPlugin.self)
-
         // Queue events
         register(MessageQueuedPlugin.self)
         register(MessageDequeuedPlugin.self)

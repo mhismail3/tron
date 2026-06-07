@@ -1,7 +1,6 @@
 import Foundation
 
 /// Plugin for handling agent ready events.
-/// Emitted after background hooks (compaction, memory) complete.
 /// Signals that the agent is ready to accept new input.
 enum AgentReadyPlugin: DispatchableEventPlugin {
     static let eventType = "agent.ready"

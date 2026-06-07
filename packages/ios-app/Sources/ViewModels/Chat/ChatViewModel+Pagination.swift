@@ -11,13 +11,10 @@ extension ChatViewModel {
         self.workspaceId = workspaceId
     }
 
-    /// Apply config state from reconstructed events (reasoning level, suggestions).
+    /// Apply config state from reconstructed events.
     func applyReconstructedConfig(_ state: ReconstructedState) {
         if let eventSourcedLevel = state.reasoningLevel {
             inputBarState.reasoningLevel = eventSourcedLevel
-        }
-        if !state.suggestions.isEmpty {
-            pullUpPanelState.suggestions = state.suggestions
         }
     }
 

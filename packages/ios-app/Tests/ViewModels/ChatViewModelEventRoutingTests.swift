@@ -381,15 +381,15 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.agentPhase, .processing)
     }
 
-    func test_turnStart_restoresProcessingFromStalePostProcessing() {
-        // Given - stale postProcessing from a previous cycle that never got agent_ready
-        viewModel.agentPhase = .postProcessing
+    func test_turnStart_keepsProcessingActive() {
+        // Given - a live cycle already marked processing
+        viewModel.agentPhase = .processing
 
         // When
         let result = TurnStartPlugin.Result(turnNumber: 2, agentPhase: "processing")
         viewModel.handleTurnStart(result)
 
-        // Then - should clear stale postProcessing and set to processing
+        // Then - should remain processing
         XCTAssertEqual(viewModel.agentPhase, .processing)
     }
 
@@ -401,9 +401,9 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         viewModel.handleTurnStart(TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing"))
         XCTAssertEqual(viewModel.agentPhase, .processing)
 
-        // When - complete: should transition to postProcessing
+        // When - complete: should transition directly to idle
         viewModel.handleComplete()
-        XCTAssertEqual(viewModel.agentPhase, .postProcessing)
+        XCTAssertEqual(viewModel.agentPhase, .idle)
 
         // When - agent ready: should transition to idle
         viewModel.handleAgentReady()
@@ -640,7 +640,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
 
     func test_agentReady_setsIdlePhase() {
         // Given
-        viewModel.agentPhase = .postProcessing
+        viewModel.agentPhase = .processing
 
         // When
         viewModel.handleAgentReady()

@@ -12,7 +12,7 @@
 //! - **Errors**: [`errors::TronError`] hierarchy via `thiserror`, capability error codes
 //! - **Events**: [`events::StreamEvent`] for LLM streaming, [`events::TronEvent`] for agent lifecycle
 //! - **Retry**: [`retry::RetryConfig`] and backoff calculation
-//! - **Profile Home**: [`constitution`] home migration/recovery and [`profile`] execution specs
+//! - **Tron Home**: [`constitution`] layout recovery and [`profile`] execution specs
 //! - **Memory**: [`memory::SessionMemory`]
 //!
 //! ## Module Position

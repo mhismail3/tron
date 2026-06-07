@@ -4,9 +4,8 @@ import Foundation
 
 /// Server-authoritative settings decoded from `settings::get`.
 ///
-/// This mirrors the primitive server settings surface. Deleted product planes
-/// such as hooks, rules, memory retainers, plugin sources, git workflow policy,
-/// and approval prompts are intentionally absent.
+/// This mirrors the primitive server settings surface. Product policy planes
+/// and fixed workflow settings are intentionally absent.
 struct ServerSettings: Decodable {
     let defaultModel: String
     let defaultWorkspace: String?

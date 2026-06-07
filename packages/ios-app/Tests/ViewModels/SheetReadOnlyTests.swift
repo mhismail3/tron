@@ -19,12 +19,6 @@ final class SheetReadOnlyTests: XCTestCase {
         )
     }
 
-    func testSheetReadOnly_postProcessingAndNotDeleted_isTrue() {
-        XCTAssertTrue(
-            SheetReadOnlyPolicy.isReadOnly(workspaceDeleted: false, agentPhase: .postProcessing)
-        )
-    }
-
     // MARK: - Workspace Deleted = Read Only
 
     func testSheetReadOnly_idleAndDeleted_isTrue() {

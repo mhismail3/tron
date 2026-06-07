@@ -107,8 +107,7 @@ impl ProfileRuntime {
 
     /// Spawn a lightweight profile watcher.
     ///
-    /// The watcher hashes the canonical profile control plane (`.toml` and
-    /// prompt/policy `.md` files under `profiles/`) and reloads through the
+    /// The watcher hashes canonical profile TOML files and reloads through the
     /// same strict compiler used at startup. Invalid edits are rejected and the
     /// last valid snapshot remains active.
     #[must_use]

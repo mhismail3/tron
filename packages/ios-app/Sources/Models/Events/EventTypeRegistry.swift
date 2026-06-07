@@ -64,9 +64,6 @@ enum PersistedEventType: String, CaseIterable {
     // Turn events
     case turnFailed = "turn.failed"
 
-    // Hooks
-    case llmHookResult = "hook.llm_result"
-
     // MARK: - Classification (single source of truth)
 
     /// All classification flags for this event type, consolidated into one switch.
@@ -119,8 +116,6 @@ enum PersistedEventType: String, CaseIterable {
         case .errorProvider:           return .init(true,    false,   false,   false,  "Provider error")
         // Turn events
         case .turnFailed:              return .init(true,    false,   false,   false,  "Turn failed")
-        // Hooks
-        case .llmHookResult:           return .init(false,   true,    false,   true,   "LLM hook result")
         }
     }
 

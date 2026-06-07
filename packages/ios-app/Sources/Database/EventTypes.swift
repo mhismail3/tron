@@ -116,9 +116,6 @@ enum SessionEventType: String, Codable, Sendable {
     // Turn events
     case turnFailed = "turn.failed"
 
-    // Hooks
-    case llmHookResult = "hook.llm_result"
-
     case unknown
 }
 

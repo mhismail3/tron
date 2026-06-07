@@ -653,8 +653,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
             .configModelSwitch, .configReasoningLevel,
             .fileRead, .fileWrite, .fileEdit,
             .compactBoundary,
-            .metadataUpdate, .metadataTag,
-            .llmHookResult
+            .metadataUpdate, .metadataTag
         ]
         let consumedThroughAssistantMessage: Set<PersistedEventType> = [
             .capabilityInvocationStarted,

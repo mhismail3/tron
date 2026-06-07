@@ -290,7 +290,7 @@ struct ChatView: View {
                         inputHistory: inputHistory,
                         animationCoordinator: viewModel.animationCoordinator,
                         readOnly: workspaceDeleted || !(interactionPolicy?.isConnected ?? false),
-                        showDragHint: viewModel.pullUpPanelState.isHoldActive && !viewModel.pullUpPanelState.isExpanded,
+                        showDragHint: false,
                         queuedMessages: viewModel.messageQueueState.queue
                     ),
                     actions: InputBarActions(
@@ -319,51 +319,6 @@ struct ChatView: View {
                     )
                 )
                 .id(sessionId)
-            }
-
-            // Suggestion row
-            if viewModel.pullUpPanelState.isExpanded {
-                PullUpPanelView(
-                    panelState: viewModel.pullUpPanelState,
-                    onSuggestionTapped: { [viewModel] suggestion in
-                        viewModel.inputBarState.text = suggestion
-                        withAnimation(.tronSnap) {
-                            viewModel.pullUpPanelState.position = .collapsed
-                        }
-                    }
-                )
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .modifier(InputAreaDragModifier(
-            panelState: viewModel.pullUpPanelState,
-            isDisabled: KeyboardObserver.shared.isKeyboardVisible,
-            onWillExpand: { [viewModel] in
-                UIApplication.shared.sendAction(
-                    #selector(UIResponder.resignFirstResponder),
-                    to: nil, from: nil, for: nil
-                )
-            }
-        ))
-        .animation(.tronSnap, value: viewModel.pullUpPanelState.isExpanded)
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: viewModel.pullUpPanelState.isHoldActive)
-        .onChange(of: KeyboardObserver.shared.isKeyboardVisible) { wasVisible, isVisible in
-            if !wasVisible && isVisible && viewModel.pullUpPanelState.isExpanded {
-                withAnimation(.tronSnap) {
-                    viewModel.pullUpPanelState.position = .collapsed
-                }
-            }
-        }
-        .onChange(of: viewModel.agentPhase) { _, newPhase in
-            if newPhase != .idle {
-                withAnimation(.tronSnap) {
-                    viewModel.pullUpPanelState.position = .collapsed
-                }
-                viewModel.pullUpPanelState.isDragDisabled = true
-                viewModel.pullUpPanelState.isHoldActive = false
-                viewModel.pullUpPanelState.suggestions = []
-            } else {
-                viewModel.pullUpPanelState.isDragDisabled = false
             }
         }
     }
@@ -482,12 +437,6 @@ struct ChatView: View {
                     }
                     scrollCoordinator.scrollPhaseChanged(from: oldPhase, to: newPhase)
 
-                    // Dismiss suggestion row when user starts scrolling
-                    if case .interacting = newPhase, viewModel.pullUpPanelState.isExpanded {
-                        withAnimation(.tronSnap) {
-                            viewModel.pullUpPanelState.position = .collapsed
-                        }
-                    }
                 }
                 // Track near-bottom geometry — fires only when the Bool changes.
                 // Threshold includes contentInsets.bottom to account for the input

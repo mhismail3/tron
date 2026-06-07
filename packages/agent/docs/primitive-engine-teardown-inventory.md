@@ -64,6 +64,8 @@ PET-11 control deletion removed `control::*`, its trace graph helpers, and the
 iOS control DTO. The public catalog readout checkpoint removed ordinary
 hello/response/discover/inspect/promote/catalog-list/worker-list catalog
 revision fields; retained revisions are now cursor truth or execution evidence.
+The iOS hook/suggestion checkpoint deleted the prompt-suggestion hook event
+plane, pull-up panel state/views, and third `postProcessing` lifecycle state.
 Remaining PET-11 successor rows below still need final retain/delete proof
 before closeout.
 
@@ -254,7 +256,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `Components` | retain | Shared generic UI components only. |
 | `DynamicSurfaces` | retain | Generic runtime surface rendering for agent-authored UI state. PET-11 must verify no fixed product target leaks through this retained renderer. |
 | `EngineApproval` | delete | Product approval prompts; infrastructure blocked state can render as plain message. |
-| `InputBar` | retain | Keep prompt composer and attachment entry points. Skills, prompt-library, voice/audio, and fixed action product buttons are deleted. |
+| `InputBar` | retain | Keep prompt composer and attachment entry points. Skills, prompt-library, voice/audio, pull-up prompt suggestions, post-processing state, and fixed action product buttons are deleted. |
 | `MessageBubble` | retain | Keep message rendering and generic runtime output. Delete capability/product-specific cards. |
 | `Notifications` | delete | Product notification surface. |
 | `Onboarding` | retain | Keep server pairing/provider setup needed to reach the loop. |

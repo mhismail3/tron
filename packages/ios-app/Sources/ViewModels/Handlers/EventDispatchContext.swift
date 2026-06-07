@@ -40,10 +40,6 @@ import Foundation
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result)
 }
 
-@MainActor protocol HookEventHandler: AnyObject {
-    func handleLlmHookResult(_ result: LlmHookResultPlugin.Result)
-}
-
 @MainActor protocol QueueEventHandler: AnyObject {
     func handleMessageQueued(_ result: MessageQueuedPlugin.Result)
     func handleMessageDequeued(_ result: MessageDequeuedPlugin.Result)
@@ -63,5 +59,5 @@ import Foundation
     StreamingEventHandler, CapabilityInvocationEventHandler, TurnLifecycleEventHandler,
     ContextEventHandler,
     ServerEventHandler,
-    DisplayStreamEventHandler, HookEventHandler,
+    DisplayStreamEventHandler,
     QueueEventHandler, EventDispatchLogger {}

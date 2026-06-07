@@ -220,7 +220,7 @@ struct TurnGroupingTests {
 
     // MARK: - Realistic Scenario
 
-    @Test("Full session with setup, multiple turns, hooks, and lifecycle events")
+    @Test("Full session with setup, multiple turns, capabilities, and lifecycle events")
     func realisticSession() {
         let events = [
             // Session setup
@@ -233,8 +233,8 @@ struct TurnGroupingTests {
             makeEvent(type: "capability.invocation.completed", sequence: 6, payload: makePayload(turn: 1)),
             makeEvent(type: "capability.invocation.started", sequence: 7, payload: makePayload(turn: 1)),
             makeEvent(type: "capability.invocation.completed", sequence: 8, payload: makePayload(turn: 1)),
-            // Hook between turns (no turn in payload)
-            makeEvent(type: "hook.result", sequence: 9),
+            // Lifecycle event between turns (no turn in payload)
+            makeEvent(type: "compact.boundary", sequence: 9),
             makeEvent(type: "compact.boundary", sequence: 10),
             // Turn 2
             makeEvent(type: "message.user", sequence: 11, payload: ["content": AnyCodable("Now edit them")]),
@@ -250,7 +250,7 @@ struct TurnGroupingTests {
         #expect(groups[0].turnNumber == 0)
         #expect(groups[0].events.count == 2)
 
-        // Turn 1: user + assistant + 2 capability invocations + 2 capability results + hook + compact.boundary
+        // Turn 1: user + assistant + 2 capability invocations + 2 capability results + lifecycle events
         #expect(groups[1].turnNumber == 1)
         #expect(groups[1].events.count == 8)
         #expect(groups[1].userMessagePreview == "Create test files")
@@ -353,27 +353,25 @@ struct TurnGroupingTests {
         #expect(groups[2].turnNumber == 3)
     }
 
-    @Test("Inter-prompt events inherit previous cycle's last turn across reset")
-    func interPromptEventsInheritPreviousTurnAcrossReset() {
+    @Test("Prompt cycle reset continues from previous global turn")
+    func promptCycleResetContinuesFromPreviousGlobalTurn() {
         let events = [
             // Cycle 1
             makeEvent(type: "message.user", sequence: 1),
             makeEvent(type: "message.assistant", sequence: 2, payload: makePayload(turn: 1)),
             makeEvent(type: "message.assistant", sequence: 3, payload: makePayload(turn: 2)),
-            // Inter-prompt events (no turn in payload)
-            makeEvent(type: "hook.llm_result", sequence: 4),
             // Cycle 2: reset
             makeEvent(type: "message.user", sequence: 6),
             makeEvent(type: "message.assistant", sequence: 7, payload: makePayload(turn: 1)),
         ]
         let groups = TurnGrouping.group(events: events, currentSessionId: "current")
 
-        // Turn 1, Turn 2 (includes inter-prompt events), Turn 3 (new cycle)
+        // Turn 1, Turn 2, Turn 3 (new cycle)
         #expect(groups.count == 3)
         #expect(groups[0].turnNumber == 1)
         #expect(groups[0].events.count == 2) // user + assistant
         #expect(groups[1].turnNumber == 2)
-        #expect(groups[1].events.count == 3) // assistant + hook + process
+        #expect(groups[1].events.count == 1) // assistant
         #expect(groups[2].turnNumber == 3)
         #expect(groups[2].events.count == 2) // user + assistant
     }
@@ -557,7 +555,7 @@ struct TurnGroupingTests {
             makeEvent(type: "metadata.update", sequence: 1),
             // Prompt 1: 3 turns with capability invocations
             makeEvent(type: "message.user", sequence: 2, payload: ["content": AnyCodable("Ingest all of them into the knowledge base")]),
-            makeEvent(type: "hook.llm_result", sequence: 3),
+            makeEvent(type: "compact.boundary", sequence: 3),
             makeEvent(type: "message.assistant", sequence: 4, payload: makePayload(turn: 1)),
             makeEvent(type: "capability.invocation.started", sequence: 5, payload: makePayload(turn: 1)),
             makeEvent(type: "capability.invocation.completed", sequence: 6),
@@ -566,7 +564,7 @@ struct TurnGroupingTests {
             makeEvent(type: "capability.invocation.completed", sequence: 9),
             makeEvent(type: "message.assistant", sequence: 10, payload: makePayload(turn: 3)),
             // Inter-prompt events
-            makeEvent(type: "hook.llm_result", sequence: 11),
+            makeEvent(type: "compact.boundary", sequence: 11),
             // Prompt 2: 2 turns, turn numbers reset
             makeEvent(type: "message.user", sequence: 13, payload: ["content": AnyCodable("Now tag all bookmarks")]),
             makeEvent(type: "message.assistant", sequence: 14, payload: makePayload(turn: 1)),
@@ -574,7 +572,7 @@ struct TurnGroupingTests {
             makeEvent(type: "capability.invocation.completed", sequence: 17),
             makeEvent(type: "message.assistant", sequence: 18, payload: makePayload(turn: 2)),
             // Inter-prompt events
-            makeEvent(type: "hook.llm_result", sequence: 19),
+            makeEvent(type: "compact.boundary", sequence: 19),
             // Prompt 3: 1 turn, reset again
             makeEvent(type: "message.user", sequence: 20, payload: ["content": AnyCodable("Done. Commit everything")]),
             makeEvent(type: "message.assistant", sequence: 21, payload: makePayload(turn: 1)),
@@ -582,8 +580,8 @@ struct TurnGroupingTests {
         let groups = TurnGrouping.group(events: events, currentSessionId: "current")
 
         // Turn 0: setup (2 events)
-        // Turn 1-3: prompt 1 (user + hook + 3 assistants + 2 capabilities + 2 results + 2 inter-prompt)
-        // Turn 4-5: prompt 2 (user + 2 assistants + capability + notification + result + hook)
+        // Turn 1-3: prompt 1 (user + lifecycle events + 3 assistants + 2 capabilities + 2 results + inter-prompt event)
+        // Turn 4-5: prompt 2 (user + 2 assistants + capability + result + lifecycle event)
         // Turn 6: prompt 3 (user + assistant)
         #expect(groups[0].turnNumber == 0)
         #expect(groups[0].events.count == 2) // session.start + metadata.update

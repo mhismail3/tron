@@ -60,7 +60,7 @@ fn run_base(session_id: &str, run_context: &RunContext) -> BaseEvent {
 pub struct TurnParams<'a> {
     /// Current turn number (1-indexed).
     pub turn: u32,
-    /// Context manager owning messages, rules, and token tracking.
+    /// Context manager owning messages, agent state summaries, and token tracking.
     pub context_manager: &'a mut ContextManager,
     /// LLM provider for streaming.
     pub provider: &'a Arc<dyn Provider>,

@@ -69,7 +69,7 @@ final class ConnectionCoordinatorTests: XCTestCase {
 
     func testConnectAndReconstructDoesNotSetProcessingWhenIdle() async {
         mockContext.isConnected = true
-        mockContext.agentPhase = .postProcessing
+        mockContext.agentPhase = .processing
         mockContext.reconstructResultIsRunning = false
         await coordinator.connectAndReconstruct(context: mockContext)
         XCTAssertFalse(mockContext.isProcessing)

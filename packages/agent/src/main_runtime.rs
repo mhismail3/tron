@@ -99,10 +99,10 @@ pub(crate) fn auth_path() -> PathBuf {
     tron::domains::settings::loader::auth_path()
 }
 
-/// Ensure `~/.tron/` obeys the Tron Constitution.
+/// Ensure `~/.tron/` has the primitive Tron Home layout.
 pub(crate) fn init_directories() -> Result<tron::shared::constitution::SeedReport> {
     tron::shared::constitution::ensure_tron_home()
-        .context("Failed to initialize Tron Constitution home")
+        .context("Failed to initialize primitive Tron Home")
 }
 
 /// Open the SQLite database, run migrations, and return the pool + resolved path.

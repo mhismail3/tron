@@ -53,9 +53,6 @@ struct ReconstructedState {
     /// Session tags
     var tags: [String]
 
-    /// Suggested follow-up prompts from the latest suggest-prompts hook result
-    var suggestions: [String]
-
     // MARK: - Initialization
 
     init() {
@@ -71,7 +68,6 @@ struct ReconstructedState {
         self.metadata = MetadataState()
         self.sessionInfo = SessionInfo()
         self.tags = []
-        self.suggestions = []
     }
 }
 

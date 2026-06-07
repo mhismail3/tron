@@ -397,10 +397,8 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
     }
 
     func testCompleteDoesNotSetAgentPhaseDirectly() {
-        // The coordinator should NOT modify agentPhase — the caller
-        // (ChatViewModel+Events.handleComplete) sets .postProcessing after
-        // the coordinator returns. Previously the coordinator set
-        // isProcessing = false (→ .idle), causing a transient .idle flash.
+        // The coordinator should NOT modify agentPhase; ChatViewModel owns the
+        // terminal transition after the coordinator clears streaming state.
         mockContext.agentPhase = .processing
 
         coordinator.handleComplete(streamingText: "", context: mockContext)

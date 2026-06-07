@@ -99,7 +99,7 @@ enum SendBlockReason: Equatable, Sendable {
 /// Read-only configuration for the InputBar component
 struct InputBarConfig {
     // MARK: - Processing State
-    /// Agent lifecycle phase (idle / processing / postProcessing)
+    /// Agent lifecycle phase (idle / processing)
     let agentPhase: AgentPhase
     /// Compaction in progress (send blocked, spinning pill shown)
     let isCompacting: Bool
@@ -108,8 +108,6 @@ struct InputBarConfig {
 
     /// Whether the agent is currently processing (convenience).
     var isProcessing: Bool { agentPhase.isProcessing }
-    /// Whether background hooks are running after completion (convenience).
-    var isPostProcessing: Bool { agentPhase.isPostProcessing }
 
     /// Why the send button would be unavailable even with non-empty input.
     /// `nil` means no async blocker; input emptiness is the only remaining gate.

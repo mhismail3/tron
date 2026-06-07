@@ -310,17 +310,6 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.isProcessing)
     }
 
-    func testAbortAgentClearsIsPostProcessing() async {
-        // Given: Currently in post-processing
-        mockContext.isPostProcessing = true
-
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: isPostProcessing should be cleared
-        XCTAssertFalse(mockContext.isPostProcessing)
-    }
-
     func testAbortAgentFinalizesStreamingMessage() async {
         // When: Aborting agent
         await coordinator.abortAgent(context: mockContext)
@@ -345,14 +334,6 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.setSessionProcessingCalled)
         XCTAssertFalse(mockContext.lastSessionProcessingValue ?? true)
         XCTAssertEqual(mockContext.lastDashboardResponse, "Interrupted")
-    }
-
-    func testAbortAgentMarksAwaitingSuggestions() async {
-        // When: Aborting agent
-        await coordinator.abortAgent(context: mockContext)
-
-        // Then: Should mark awaiting suggestions so the hook result is accepted
-        XCTAssertTrue(mockContext.markAwaitingSuggestionsCalled)
     }
 
     func testAbortAgentHandlesServerError() async {
@@ -506,11 +487,6 @@ final class MockMessagingContext: MessagingContext {
 
     func clearThinkingCaption() {
         // No-op for tests
-    }
-
-    var markAwaitingSuggestionsCalled = false
-    func markAwaitingSuggestions() {
-        markAwaitingSuggestionsCalled = true
     }
 
     func flushPendingTextUpdates() {

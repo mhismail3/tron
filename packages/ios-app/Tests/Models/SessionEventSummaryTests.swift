@@ -21,34 +21,6 @@ final class SessionEventSummaryTests: XCTestCase {
         )
     }
 
-    // MARK: - LLM Hook Result
-
-    func testLlmHookResult_withHookName_showsHookName() {
-        let event = makeEvent(type: "hook.llm_result", payload: [
-            "hookName": AnyCodable("suggest-prompts"),
-        ])
-        XCTAssertEqual(event.summary, "Hook: suggest-prompts")
-    }
-
-    func testLlmHookResult_withDifferentHookName_showsHookName() {
-        let event = makeEvent(type: "hook.llm_result", payload: [
-            "hookName": AnyCodable("generate-title"),
-        ])
-        XCTAssertEqual(event.summary, "Hook: generate-title")
-    }
-
-    func testLlmHookResult_withoutHookName_showsFallback() {
-        let event = makeEvent(type: "hook.llm_result")
-        XCTAssertEqual(event.summary, "Hook completed")
-    }
-
-    func testLlmHookResult_withEmptyHookName_showsFallback() {
-        let event = makeEvent(type: "hook.llm_result", payload: [
-            "hookName": AnyCodable(""),
-        ])
-        XCTAssertEqual(event.summary, "Hook completed")
-    }
-
     // MARK: - Turn Failed
 
     func testTurnFailed_withError_showsError() {

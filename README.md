@@ -862,7 +862,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles signed helpers under `Contents/Library/LoginItems/` (`Tron Server.app` for production/local Release and `Tron Server Dev.app` for isolated Debug install testing), bundled LaunchAgent plists, and Constitution defaults under `Contents/Resources/Constitution/`. Each helper app contains the `tron` agent binary. The wizard registers the active helper through `SMAppService`, confirms permissions, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles signed helpers under `Contents/Library/LoginItems/` (`Tron Server.app` for production/local Release and `Tron Server Dev.app` for isolated Debug install testing), bundled LaunchAgent plists, and profile defaults under `Contents/Resources/Constitution/`. Each helper app contains the `tron` agent binary. The wizard registers the active helper through `SMAppService`, confirms permissions, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
 
 ```
 packages/mac-app/Sources/
@@ -1055,7 +1055,7 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 6. `xcodegen generate` inside `packages/mac-app/`.
 7. Create an isolated release keychain from the signing/notarization secrets, or fall back to dry-run ad-hoc signing when secrets are absent.
 8. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
-9. Verify the bundled helper app, both helper executables, LaunchAgent plist, and Constitution defaults are present in the archive.
+9. Verify the bundled helper app, both helper executables, LaunchAgent plist, and profile defaults are present in the archive.
 10. Sign the helper apps first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.
 11. `xcrun notarytool submit` the signed `Tron.app` with `$NOTARIZE_PROFILE` (`tron-notarize`); staple the app on success.
 12. Build the DMG with `create-dmg`, sign the DMG, submit that signed DMG to `notarytool`, then staple the DMG. The app and DMG require separate notary tickets.
