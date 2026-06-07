@@ -44,21 +44,31 @@ protocol response handling.
 
 The repository includes `.codex/environments/environment.toml` for Codex app
 toolbar actions. `Dev Server` starts `scripts/tron dev -bdt` from the project
-root, and `Stop Dev Server` runs `scripts/tron dev --stop`. `Rebuild + Install
-iOS Beta on iPhone` and `Rebuild + Install iOS Beta on iPad` run
-`scripts/tron-ios-beta install` with generic device-name selectors; the helper
-regenerates the Xcode project, preflights the active Xcode toolchain, builds the
-`Tron Beta` scheme for a physical iOS destination, writes a full log plus
-`.xcresult` bundle, installs the resulting app bundle with `xcrun devicectl`,
-and launches the resolved bundle ID with a bounded `devicectl` launch timeout.
-`Rebuild + Launch iOS Prod Fast on iPhone` uses the same helper with
-`TRON_IOS_SCHEME='Tron Fast'` and `TRON_IOS_CONFIGURATION=ProdDebug`, so it
-builds the fast production-bundle app and launches it on the selected iPhone.
-After each build, the helper installs the requested configuration's `iphoneos` product
-so stale Beta or Prod app bundles left in DerivedData cannot be launched by a
-different action.
-The matching launch actions run `scripts/tron-ios-beta launch` for the
-already-installed app without rebuilding.
+root, and `Stop Dev Server` runs `scripts/tron dev --stop`.
+`Rebuild + Install + Launch iOS Beta on iPhone` and `Rebuild + Install + Launch
+iOS Beta on iPad` run `scripts/tron-ios-beta install` with generic device-name
+selectors; the helper regenerates the Xcode project, preflights the active
+Xcode toolchain, builds the `Tron Beta` scheme for a physical iOS destination,
+writes a full log plus `.xcresult` bundle, installs the resulting app bundle
+with `xcrun devicectl`, and launches the resolved bundle ID with a bounded
+`devicectl` launch timeout.
+`Rebuild + Install + Launch iOS Prod Fast Debug on iPhone` uses the same helper
+with `TRON_IOS_SCHEME='Tron Fast'` and `TRON_IOS_CONFIGURATION=ProdDebug`, so
+it builds the fast production-bundle app and launches it on the selected iPhone.
+`Rebuild + Install + Launch iOS Prod Release on iPhone` uses
+`TRON_IOS_SCHEME=Tron` and
+`TRON_IOS_CONFIGURATION=Prod`, so it builds the optimized production app,
+installs the fresh product, and then launches it through the same helper.
+After each build, the helper installs the requested configuration's `iphoneos`
+product so stale Beta or Prod app bundles left in DerivedData cannot be launched
+by a different action.
+Production rebuild actions call `install`, not `launch`, so local source changes
+are compiled before the app is reinstalled.
+The matching `Just Launch Installed ...` actions run `scripts/tron-ios-beta
+launch` for the already-installed app without rebuilding. The iPhone launch
+actions are deduplicated by bundle ID: Beta has its own launch action, and the
+single production launch action opens whichever `com.tron.mobile` binary is
+currently installed, whether it came from Prod Fast Debug or Prod Release.
 
 Keep device-specific values out of the repo. The Codex app actions use generic
 `TRON_IOS_DEVICE_NAME=iPhone` and `TRON_IOS_DEVICE_NAME=iPad` selectors. For

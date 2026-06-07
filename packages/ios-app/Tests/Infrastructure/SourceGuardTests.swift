@@ -890,8 +890,8 @@ struct SourceGuardTests {
         #expect(rootReadme.contains("Tron Fast"))
     }
 
-    @Test("Codex iPhone action builds and launches fast production scheme")
-    func testCodexIPhoneActionBuildsAndLaunchesFastProductionScheme() throws {
+    @Test("Codex iPhone actions rebuild and install production variants")
+    func testCodexIPhoneActionsRebuildAndInstallProductionVariants() throws {
         let fileURL = URL(fileURLWithPath: #filePath)
         let iosRoot = fileURL
             .deletingLastPathComponent()
@@ -918,11 +918,44 @@ struct SourceGuardTests {
             encoding: .utf8
         )
 
-        #expect(environment.contains(#"name = "Rebuild + Launch iOS Prod Fast on iPhone""#))
+        #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Beta on iPhone""#))
+        #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Prod Fast Debug on iPhone""#))
         #expect(environment.contains("TRON_IOS_DEVICE_NAME=iPhone"))
         #expect(environment.contains(#"TRON_IOS_SCHEME='Tron Fast'"#))
         #expect(environment.contains("TRON_IOS_CONFIGURATION=ProdDebug"))
         #expect(environment.contains("scripts/tron-ios-beta install"))
+        #expect(environment.contains(#"name = "Rebuild + Install + Launch iOS Prod Release on iPhone""#))
+        #expect(environment.contains("TRON_IOS_SCHEME=Tron"))
+        #expect(environment.contains("TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta install"))
+        #expect(environment.contains(#"name = "Just Launch Installed iOS Beta on iPhone""#))
+        #expect(environment.contains(#"name = "Just Launch Installed iOS Prod on iPhone""#))
+        #expect(!environment.contains(#"name = "Just Launch Installed iOS Prod Fast on iPhone""#))
+        #expect(environment.contains("TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta launch"))
+
+        var actionNames: [String] = []
+        var inAction = false
+        for line in environment.split(separator: "\n").map(String.init) {
+            if line == "[[actions]]" {
+                inAction = true
+                continue
+            }
+            if line.hasPrefix("[") && line != "[[actions]]" {
+                inAction = false
+            }
+            if inAction && line.hasPrefix(#"name = ""#) && line.hasSuffix(#"""#) {
+                let name = line
+                    .dropFirst(#"name = ""#.count)
+                    .dropLast()
+                actionNames.append(String(name))
+            }
+        }
+        #expect(Set(actionNames).count == actionNames.count)
+        #expect(actionNames
+            .filter { $0.hasPrefix("Rebuild") }
+            .allSatisfy { $0.hasPrefix("Rebuild + Install + Launch") })
+        #expect(actionNames
+            .filter { $0.hasPrefix("Just Launch Installed iOS Prod") }
+            == ["Just Launch Installed iOS Prod on iPhone"])
 
         #expect(installScript.contains(#"SCHEME="${TRON_IOS_SCHEME:-Tron Beta}""#))
         #expect(installScript.contains(#"CONFIG="${TRON_IOS_CONFIGURATION:-Beta}""#))
@@ -931,10 +964,15 @@ struct SourceGuardTests {
         #expect(installScript.contains(#"app="$DERIVED_DATA/Build/Products/${CONFIG}-iphoneos/TronMobile.app""#))
         #expect(!installScript.contains(#"find "$DERIVED_DATA/Build/Products" -name "TronMobile.app" -path "*iphoneos*" -type d | head -1"#))
 
-        #expect(developmentDoc.contains("Rebuild + Launch iOS Prod Fast on iPhone"))
-        #expect(developmentDoc.contains("installs the requested configuration's `iphoneos` product"))
-        #expect(rootReadme.contains("Rebuild + Launch iOS Prod Fast on iPhone"))
-        #expect(rootReadme.contains("installs the requested configuration's `iphoneos` product"))
+        #expect(developmentDoc.contains("Rebuild + Install + Launch iOS Prod Fast Debug on iPhone"))
+        #expect(developmentDoc.contains("Rebuild + Install + Launch iOS Prod Release on iPhone"))
+        #expect(developmentDoc.contains("Just Launch Installed"))
+        #expect(developmentDoc.contains("deduplicated by bundle ID"))
+        #expect(developmentDoc.contains("installs the requested configuration's `iphoneos`"))
+        #expect(rootReadme.contains("Rebuild + Install + Launch"))
+        #expect(rootReadme.contains("Just Launch Installed"))
+        #expect(rootReadme.contains("deduplicated production"))
+        #expect(rootReadme.contains("installs the requested configuration's `iphoneos`"))
     }
 
     @Test("iOS 26 cleanup hooks stay removed")

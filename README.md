@@ -305,14 +305,23 @@ a Mac through onboarding.
 Codex app local actions are checked in under
 `.codex/environments/environment.toml`. Open this project root in the Codex app
 to get toolbar actions for starting `scripts/tron dev -bdt`, stopping the dev
-server with `scripts/tron dev --stop`, rebuilding/installing/launching the local
-iOS beta on iPhone or iPad with `scripts/tron-ios-beta install`, rebuilding and
-launching the production-bundle debug build on iPhone with the
-`Rebuild + Launch iOS Prod Fast on iPhone` action, and launching the
-already-installed beta on iPhone or iPad with `scripts/tron-ios-beta launch`.
+server with `scripts/tron dev --stop`, and clear physical-device iOS actions.
+`Rebuild + Install + Launch ...` actions call `scripts/tron-ios-beta install`,
+which regenerates the Xcode project, builds current source, installs the fresh
+app bundle, and launches it. `Just Launch Installed ...` actions call
+`scripts/tron-ios-beta launch`, so they only open the app that is already on
+the device.
 The install helper installs the requested configuration's `iphoneos` product, so
-the prod-fast action does not accidentally launch a stale Beta build from
-DerivedData.
+production actions do not accidentally launch a stale Beta or ProdDebug build
+from DerivedData. Production rebuild actions call `install`, not `launch`, so
+source changes are built into the app before it is installed and post-install
+launched.
+The iPhone environments are Beta (`Tron Beta`/`Beta`), Prod Fast (`Tron
+Fast`/`ProdDebug`), and Prod Release (`Tron`/`Prod`). Because the two
+production builds share `com.tron.mobile`, there is one deduplicated production
+just-launch action; it opens whichever production-bundle binary is currently
+installed. iPad currently has Beta rebuild/install/launch and just-launch
+actions.
 The iOS actions pass generic `TRON_IOS_DEVICE_NAME=iPhone` or
 `TRON_IOS_DEVICE_NAME=iPad` selectors so the repo does not store personal device
 details. Post-install launch is bounded by the helper's launch timeout so a

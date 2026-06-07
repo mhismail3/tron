@@ -19,7 +19,8 @@ scripts/tron-ios-beta status
 `Beta` configuration by default for a physical iOS destination, installs the app
 with `xcrun devicectl`, and launches the resolved bundle ID unless `--no-launch`
 is provided. Set `TRON_IOS_SCHEME` and `TRON_IOS_CONFIGURATION` to build a local
-variant such as `Tron Fast` / `ProdDebug`.
+variant such as `Tron Fast` / `ProdDebug` or the full production `Tron` /
+`Prod` build.
 
 `launch` launches the already-installed app for the selected scheme/configuration
 without rebuilding. Launch is bounded by `TRON_IOS_LAUNCH_TIMEOUT_SECONDS`,
@@ -33,8 +34,10 @@ Codex app toolbar actions are split by generic device class:
 ```bash
 env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta install
 env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME='Tron Fast' TRON_IOS_CONFIGURATION=ProdDebug scripts/tron-ios-beta install
+env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta install
 env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta install
 env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta launch
+env TRON_IOS_DEVICE_NAME=iPhone TRON_IOS_SCHEME=Tron TRON_IOS_CONFIGURATION=Prod scripts/tron-ios-beta launch
 env TRON_IOS_DEVICE_NAME=iPad scripts/tron-ios-beta launch
 ```
 
