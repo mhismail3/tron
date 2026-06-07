@@ -430,7 +430,7 @@ async fn ui_surface_for_target_supports_core_substrate_targets() {
                     "expectedOutputKinds": ["ui_surface"],
                     "constraints": {},
                     "riskBudget": {"maxRisk": "low"},
-                    "approvalPolicy": {"required": false},
+                    "authorityPolicy": {"requiredScopes": []},
                     "retentionPolicy": {"mode": "keep"},
                     "completionCondition": "manual"
                 }
@@ -707,7 +707,10 @@ async fn ui_surface_for_target_authors_source_control_session_surface() {
         .iter()
         .find(|action| action["actionId"] == "commit-worktree")
         .unwrap();
-    assert_eq!(commit["approvalPolicy"]["required"], true);
+    assert_eq!(
+        commit["authorityPolicy"]["requiredScopes"],
+        json!(["worktree.write"])
+    );
     assert_eq!(commit["payloadTemplate"]["sessionId"], session_id);
     assert_eq!(commit["payloadTemplate"]["message"], "${input.message}");
     assert_eq!(commit["payloadTemplate"]["stageAll"], "${input.stageAll}");
@@ -853,7 +856,7 @@ async fn ui_surface_for_target_authors_prompt_library_resource_collections() {
     }));
     assert!(snippet_actions.iter().any(|action| {
         action["targetFunctionId"] == "prompt_library::snippet_delete"
-            && action["approvalPolicy"]["required"] == true
+            && action["authorityPolicy"]["requiredScopes"] == json!(["prompt_library.write"])
     }));
 
     let histories = handle
@@ -881,7 +884,7 @@ async fn ui_surface_for_target_authors_prompt_library_resource_collections() {
     assert!(history_actions.iter().any(|action| {
         action["actionId"] == "clear-history"
             && action["targetFunctionId"] == "prompt_library::history_clear"
-            && action["approvalPolicy"]["required"] == true
+            && action["authorityPolicy"]["requiredScopes"] == json!(["prompt_library.write"])
     }));
     assert!(history_actions.iter().any(|action| {
         action["targetFunctionId"] == "prompt_library::history_delete"

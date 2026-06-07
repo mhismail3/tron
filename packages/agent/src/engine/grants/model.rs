@@ -77,8 +77,6 @@ pub struct EngineGrant {
     pub expires_at: Option<DateTime<Utc>>,
     /// Whether this grant can derive child grants.
     pub can_delegate: bool,
-    /// Whether this grant requires approval for derived/autonomous work.
-    pub approval_required: bool,
     /// Provenance payload.
     pub provenance: Value,
     /// Trace that created the grant.
@@ -126,8 +124,6 @@ pub struct DeriveGrant {
     pub expires_at: Option<DateTime<Utc>>,
     /// Delegation.
     pub can_delegate: bool,
-    /// Approval requirement.
-    pub approval_required: bool,
     /// Provenance.
     pub provenance: Value,
     /// Trace id.
@@ -189,8 +185,6 @@ pub(super) const TEST_BOOTSTRAP_GRANT_IDS: &[&str] = &[
     "manual-grant",
     "external-grant",
     "agent-grant",
-    "approval-agent",
-    "approval-admin",
     "admin-grant",
 ];
 
@@ -214,7 +208,6 @@ pub(super) fn bootstrap_grant(grant_id: &str) -> EngineGrant {
         budget: json!({"class": "bootstrap"}),
         expires_at: None,
         can_delegate: true,
-        approval_required: false,
         provenance: json!({"source": "engine.bootstrap"}),
         trace_id: TraceId::new("bootstrap").expect("valid bootstrap trace id"),
         revision: 1,
@@ -247,7 +240,6 @@ pub(super) fn grant_from_request(
         budget: request.budget,
         expires_at: request.expires_at,
         can_delegate: request.can_delegate,
-        approval_required: request.approval_required,
         provenance: request.provenance,
         trace_id: request.trace_id,
         revision,

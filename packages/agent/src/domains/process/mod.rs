@@ -4,9 +4,9 @@
 //! receives a shell-specific capability; it discovers and invokes `process::run`
 //! through the capability primitives.
 //!
-//! The broad `process::run` contract has conditional approval instead of a
-//! blanket approval bit. Payload-sensitive approval classification lives in
-//! [`approval`], including the pre-approval check that rejects write-like
+//! The broad `process::run` contract has payload-sensitive isolation instead of a
+//! blanket runtime pause. Payload-sensitive execution classification lives in
+//! [`execution_policy`], including the pre-execution check that rejects write-like
 //! commands submitted as `executionMode = "read_only"`. Schema validation,
 //! including rejection of empty commands, idempotency, lease, audit, and actual
 //! execution remain on the normal
@@ -20,14 +20,14 @@
 //! materialize those outputs through resource capabilities. Each
 //! `expectedOutputs[].path` is a relative path inside the isolated process
 //! sandbox; absolute, home-relative, and parent-escaping paths are rejected
-//! before approval so an impossible host path cannot pause for approval and
-//! fail only after execution. Shell redirection and `tee` targets in the command
+//! before isolated execution so impossible host paths fail before any child
+//! process runs. Shell redirection and `tee` targets in the command
 //! must match declared expected outputs; parent directories for declared outputs
 //! are prepared inside the sandbox before execution. Duplicate sandbox output
 //! paths and duplicate resolved materialization targets are rejected before
-//! approval/spawn so one command cannot race two files into the same resource
+//! execution/spawn so one command cannot race two files into the same resource
 //! destination. Relative materialization targets resolve to the active session
-//! worktree so approved sandbox output never leaks into the server process cwd.
+//! worktree so sandbox output never leaks into the server process cwd.
 //! Every `process::run` invocation requires active session worktree truth.
 //! Read-only command cwd/path operands and materialized output targets are
 //! bounded to that worktree, and child processes receive an allowlisted
@@ -36,7 +36,7 @@
 //! active session worktree, so common shell checks stay fast without leaving the
 //! capability architecture.
 
-pub(crate) mod approval;
+pub(crate) mod execution_policy;
 mod bounds;
 pub(crate) mod contract;
 pub(crate) mod deps;
@@ -91,7 +91,7 @@ async fn process_run_value(invocation: &Invocation, deps: &Deps) -> Result<Value
         opt_string(params, "executionMode").ok_or_else(|| CapabilityError::InvalidParams {
             message: "process::run requires executionMode".to_owned(),
         })?;
-    if let Err(message) = approval::validate_run_payload_before_approval(&invocation.payload) {
+    if let Err(message) = execution_policy::validate_run_payload_before_execution(&invocation.payload) {
         return Err(CapabilityError::InvalidParams {
             message: message.to_owned(),
         });

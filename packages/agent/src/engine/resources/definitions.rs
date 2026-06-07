@@ -59,7 +59,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "expectedOutputKinds": {"type": "array", "items": {"type": "string"}},
                     "constraints": {"type": "object"},
                     "riskBudget": {"type": "object"},
-                    "approvalPolicy": {"type": "object"},
+                    "authorityPolicy": {"type": "object"},
                     "retentionPolicy": {"type": "object"},
                     "completionCondition": {"type": "string"}
                 }

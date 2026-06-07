@@ -26,7 +26,6 @@
 //!   isRunning: bool,
 //!   runId: string?,          // active run id, null when idle
 //!   metadata: {...},
-//!   approvalItems: [...],    // durable engine approvals scoped to session
 //! }
 //! ```
 
@@ -227,27 +226,7 @@ impl SessionReconstructService {
             None
         };
 
-        // 3. Load engine-owned approval records for durable approval chips.
-        let approval_items = deps
-            .engine_host
-            .list_approvals(None, Some(&session_id), 500)
-            .await
-            .map(|items| {
-                items
-                    .into_iter()
-                    .map(|record| {
-                        json!({
-                            "id": format!("engine-approval:{}", record.approval_id),
-                            "approval": record,
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .map_err(|error| CapabilityError::Internal {
-                message: format!("Failed to load engine approvals: {error}"),
-            })?;
-
-        // 4. Get lastSequence from the session's sequence counter
+        // 3. Get lastSequence from the session's sequence counter
         // Falls back to the last event's sequence if counter not initialized
         let last_sequence = orchestrator
             .current_sequence(&session_id)
@@ -255,7 +234,7 @@ impl SessionReconstructService {
 
         let oldest_event_id = events.first().map(|e| e.id.clone());
 
-        // 5. Convert events to wire format
+        // 4. Convert events to wire format
         let resolved_payloads =
             deps.event_store
                 .resolve_event_payloads(&events)
@@ -268,7 +247,7 @@ impl SessionReconstructService {
             .map(|(event, payload)| event_row_to_wire_with_payload(event, Some(payload)))
             .collect();
 
-        // 5a. Enrich agent::ask_user capability.invocation.started events with server-parsed
+        // 4a. Enrich agent::ask_user capability.invocation.started events with server-parsed
         // status so iOS can render them without scanning event history.
         crate::domains::capability_support::interactive_enrichment::enrich_interactive_capability_statuses(
             &mut wire_events,
@@ -295,7 +274,6 @@ impl SessionReconstructService {
             // tracked by the orchestrator, so reconnection during that brief window shows "idle".
             "agentPhase": if is_running { "processing" } else { "idle" },
             "metadata": session_metadata,
-            "approvalItems": approval_items,
         }))
     }
 

@@ -27,7 +27,6 @@ fn base_child_grant_payload(grant_id: &str, parent_grant_id: &str, root: &str) -
         "budget": {"remainingInvocations": 5, "maxTokens": 100},
         "expiresAt": (Utc::now() + ChronoDuration::minutes(30)).to_rfc3339(),
         "canDelegate": false,
-        "approvalRequired": true,
         "provenance": {"source": "grant-authority-test"}
     })
 }
@@ -125,7 +124,6 @@ async fn grant_derive_rejects_child_expansion_by_authority_dimension() {
             "budget": {"remainingInvocations": 10, "maxTokens": 100},
             "expiresAt": parent_expiry.to_rfc3339(),
             "canDelegate": true,
-            "approvalRequired": true,
             "provenance": {"source": "grant-authority-test"}
         }),
         "grant-authority-parent",
@@ -180,7 +178,6 @@ async fn grant_derive_rejects_child_expansion_by_authority_dimension() {
             json!({"expiresAt": (parent_expiry + ChronoDuration::minutes(1)).to_rfc3339()}),
             "expiry",
         ),
-        ("approval", json!({"approvalRequired": false}), "approval"),
         (
             "empty-selector",
             json!({"resourceSelectors": []}),

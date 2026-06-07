@@ -26,7 +26,7 @@ pub(super) fn surface_for_target_schema() -> Value {
         "properties": {
             "targetType": {
                 "type": "string",
-                "enum": ["worker", "capability", "goal", "resource_collection", "source_control", "agent_control", "decision", "resource", "invocation", "grant", "approval", "queue", "lease", "storage", "integrity"]
+                "enum": ["worker", "capability", "goal", "resource_collection", "source_control", "agent_control", "decision", "resource", "invocation", "grant", "queue", "lease", "storage", "integrity"]
             },
             "targetId": {"type": "string"},
             "purpose": {"type": "string"},

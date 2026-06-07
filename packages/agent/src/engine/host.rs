@@ -19,12 +19,6 @@ use futures::FutureExt as _;
 use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
 
-use crate::shared::logging::{LogQueryOptions, LogStore};
-
-use super::approval::{
-    ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
-    EngineApprovalTargetMetadata, EngineAutoApprovalOutcome,
-};
 use super::compensation::{EngineCompensationRecord, compensation_record};
 use super::discovery::{ActorContext, ActorKind, FunctionQuery};
 use super::errors::{EngineError, Result};
@@ -37,10 +31,7 @@ use super::ledger::{
     EngineLedgerStore, IdempotencyReservation, SqliteEngineLedgerStore, StoredEngineError,
 };
 use super::primitives;
-use super::primitives::{
-    APPROVAL_REQUEST_FUNCTION, APPROVAL_RESOLVE_FUNCTION, PrimitiveStores,
-    approval_request_from_invocation, primitive_function_definitions, primitive_workers,
-};
+use super::primitives::{PrimitiveStores, primitive_function_definitions, primitive_workers};
 use super::queue::{EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation};
 use super::registry::{
     InvocationIdempotencyDecision, LiveCatalog, PreparedSyncInvocation,
@@ -492,8 +483,6 @@ impl EngineHost {
         };
         let child = if child.function_id.as_str() == primitives::ui::SUBMIT_ACTION_FUNCTION {
             PreparedDelegatedChild::UiSubmit(Box::new(child))
-        } else if child.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
-            PreparedDelegatedChild::Sync(self.catalog.prepare_sync_invocation(child))
         } else if is_host_dispatched_primitive_function(&child.function_id) {
             PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Finished(Box::new(
                 self.invoke_sync_host_dispatched_primitive(child),

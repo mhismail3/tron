@@ -233,9 +233,7 @@ async fn host_invocation_enforces_resource_lease_and_records_compensation() {
         .register_function_for_setup(
             write_function("alpha::write", "alpha")
                 .with_risk(RiskLevel::High)
-                .with_required_authority(
-                    AuthorityRequirement::scope("alpha.write").with_approval_required(),
-                )
+                .with_required_authority(AuthorityRequirement::scope("alpha.write"))
                 .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
                     "session",
                     "session:{sessionId}:write",
@@ -296,9 +294,7 @@ async fn resource_lease_template_uses_causal_session_when_payload_omits_session_
         .register_function_for_setup(
             write_function("alpha::write", "alpha")
                 .with_risk(RiskLevel::High)
-                .with_required_authority(
-                    AuthorityRequirement::scope("alpha.write").with_approval_required(),
-                )
+                .with_required_authority(AuthorityRequirement::scope("alpha.write"))
                 .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
                     "session",
                     "session:{sessionId}:write",
@@ -347,9 +343,7 @@ async fn resource_lease_template_rejects_payload_session_that_conflicts_with_cau
         .register_function_for_setup(
             write_function("alpha::write", "alpha")
                 .with_risk(RiskLevel::High)
-                .with_required_authority(
-                    AuthorityRequirement::scope("alpha.write").with_approval_required(),
-                )
+                .with_required_authority(AuthorityRequirement::scope("alpha.write"))
                 .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
                     "session",
                     "session:{sessionId}:write",
@@ -390,9 +384,7 @@ async fn host_resource_lease_conflict_fails_before_handler_execution() {
         .register_function_for_setup(
             write_function("alpha::locked", "alpha")
                 .with_risk(RiskLevel::High)
-                .with_required_authority(
-                    AuthorityRequirement::scope("alpha.write").with_approval_required(),
-                )
+                .with_required_authority(AuthorityRequirement::scope("alpha.write"))
                 .with_resource_lease(ResourceLeaseRequirement::exclusive_template(
                     "session",
                     "session:{sessionId}:locked",
@@ -489,7 +481,7 @@ fn module_write_functions() -> Vec<&'static str> {
         "module::recover_activation",
         "module::verify_source",
         "module::approve_source",
-        "module::revoke_source_approval",
+        "module::revoke_source_trust",
         "module::run_conformance",
         "module::register_source",
         "module::verify_signature",
@@ -591,8 +583,7 @@ fn package_manifest(package_id: &str, namespace: &str, worker_id: &str) -> Value
             "fileRoots": ["*"],
             "networkPolicy": "none",
             "maxRisk": "medium",
-            "canDelegate": false,
-            "approvalRequired": false
+            "canDelegate": false
         },
         "configSchema": {
             "type": "object",
@@ -629,7 +620,7 @@ fn manifest_digest(manifest: &Value) -> String {
             "signatureKeyRef",
             "signatureVerification",
             "sourceEvidenceRefs",
-            "sourceApprovalRefs",
+            "sourceTrustRefs",
             "conformanceEvidenceRefs",
             "policyDiagnostics",
         ] {

@@ -380,22 +380,6 @@ pub(in crate::engine::primitives::ui) fn target_projection(
                 graph: bounded_json(json!({"grant": grant}), request.max_preview_bytes),
             })
         }
-        "approval" => {
-            let record = host
-                .approval_records(None, invocation.causal_context.session_id.as_deref(), 500)?
-                .into_iter()
-                .find(|record| record.approval_id == request.target_id)
-                .ok_or_else(|| EngineError::NotFound {
-                    kind: "approval",
-                    id: request.target_id.clone(),
-                })?;
-            Ok(TargetProjection {
-                title: format!("Approval {}", record.approval_id),
-                summary: format!("{:?} {}", record.status, record.function_id.as_str()),
-                revision: host.catalog_revision().0,
-                graph: bounded_json(json!({"approval": record}), request.max_preview_bytes),
-            })
-        }
         "queue" => {
             let item = host
                 .queue_items("engine", 500)?

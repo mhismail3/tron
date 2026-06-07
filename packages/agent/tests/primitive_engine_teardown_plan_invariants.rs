@@ -994,6 +994,270 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
 }
 
 #[test]
+fn approval_and_observability_planes_are_not_engine_primitives() {
+    for (path, label) in [
+        (
+            "packages/agent/src/engine/approval.rs",
+            "engine approval record/store module",
+        ),
+        (
+            "packages/agent/src/engine/approval",
+            "engine approval store support directory",
+        ),
+        (
+            "packages/agent/src/engine/primitives/approval.rs",
+            "approval primitive worker",
+        ),
+        (
+            "packages/agent/src/engine/primitives/observability.rs",
+            "observability primitive worker",
+        ),
+        (
+            "packages/agent/src/engine/tests/approval.rs",
+            "approval primitive tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/approval_autonomy.rs",
+            "approval autonomy tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/trace_observability.rs",
+            "old observability trace tests",
+        ),
+    ] {
+        assert_repo_path_absent(path, label);
+    }
+
+    let engine_mod = read_repo_file("packages/agent/src/engine/mod.rs");
+    assert_absent(
+        &engine_mod,
+        &[
+            "pub mod approval;",
+            "pub use approval",
+            "EngineApprovalRecord",
+            "EngineApprovalRequest",
+            "SqliteEngineApprovalStore",
+        ],
+        "engine root exports",
+    );
+
+    let primitives = read_repo_file("packages/agent/src/engine/primitives/mod.rs");
+    assert_absent(
+        &primitives,
+        &[
+            "mod approval;",
+            "mod observability;",
+            "APPROVAL_WORKER_ID",
+            "OBSERVABILITY_WORKER_ID",
+            "APPROVAL_REQUEST_FUNCTION",
+            "APPROVAL_RESOLVE_FUNCTION",
+            "approval::registrations",
+            "observability::registrations",
+            "ApprovalStoreBackend",
+            "parse_approval_status",
+        ],
+        "engine primitive registrations",
+    );
+
+    let capability_client = read_repo_file("packages/agent/src/engine/capabilities.rs");
+    assert_absent(
+        &capability_client,
+        &[
+            "AutonomyApprovalPromptMode",
+            "EngineApprovalRequest",
+            "EngineApprovalTargetMetadata",
+            "approval_required",
+            "request_approval",
+            "auto_approve_and_invoke",
+            "approval primitives are owned",
+        ],
+        "agent capability client",
+    );
+
+    let host = read_repo_file("packages/agent/src/engine/host.rs");
+    assert_absent(
+        &host,
+        &[
+            "EngineApprovalRecord",
+            "EngineApprovalRequest",
+            "EngineApprovalTargetMetadata",
+            "EngineAutoApprovalOutcome",
+            "APPROVAL_REQUEST_FUNCTION",
+            "APPROVAL_RESOLVE_FUNCTION",
+        ],
+        "engine host root",
+    );
+
+    for (path, label) in [
+        (
+            "packages/agent/src/engine/host/invocation_handle.rs",
+            "engine host invocation path",
+        ),
+        (
+            "packages/agent/src/engine/host/substrate_handle.rs",
+            "engine host substrate methods",
+        ),
+        (
+            "packages/agent/src/engine/primitives/runtime.rs",
+            "engine primitive runtime",
+        ),
+        (
+            "packages/agent/src/domains/session/reconstruct.rs",
+            "session reconstruction",
+        ),
+        ("README.md", "README"),
+    ] {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "approval::",
+                "approval.pending",
+                "approval.resolved",
+                "engine_approvals",
+                "approvalItems",
+                "observability::",
+                "OBSERVABILITY",
+                "requiresApproval",
+            ],
+            label,
+        );
+    }
+
+    for (path, label) in [
+        ("README.md", "README primitive branch docs"),
+        ("packages/agent/src/domains/catalog.rs", "domain catalog"),
+        (
+            "packages/agent/src/domains/registration.rs",
+            "domain registration",
+        ),
+        (
+            "packages/agent/src/domains/session/reconstruct.rs",
+            "session reconstruction",
+        ),
+        (
+            "packages/agent/src/domains/settings/implementation/types/server.rs",
+            "server settings",
+        ),
+        (
+            "packages/agent/src/engine/capabilities.rs",
+            "capability client",
+        ),
+        ("packages/agent/src/engine/grants.rs", "grant store"),
+        ("packages/agent/src/engine/grants/model.rs", "grant model"),
+        (
+            "packages/agent/src/engine/grants/sqlite_codec.rs",
+            "grant sqlite codec",
+        ),
+        ("packages/agent/src/engine/mod.rs", "engine docs/root"),
+        ("packages/agent/src/engine/policy.rs", "engine policy"),
+        (
+            "packages/agent/src/engine/primitives/action_summary.rs",
+            "action summary projection",
+        ),
+        (
+            "packages/agent/src/engine/primitives/control/actions.rs",
+            "control action projection",
+        ),
+        (
+            "packages/agent/src/engine/primitives/grant.rs",
+            "grant primitive",
+        ),
+        (
+            "packages/agent/src/engine/primitives/runtime.rs",
+            "runtime primitive",
+        ),
+        (
+            "packages/agent/src/engine/primitives/ui.rs",
+            "ui primitive target validation",
+        ),
+        (
+            "packages/agent/src/engine/primitives/ui/authoring/actions.rs",
+            "generated ui action authoring",
+        ),
+        (
+            "packages/agent/src/engine/primitives/ui/authoring/source_control.rs",
+            "source-control ui authoring",
+        ),
+        (
+            "packages/agent/src/engine/primitives/worker.rs",
+            "worker primitive",
+        ),
+        (
+            "packages/agent/src/engine/resources/definitions.rs",
+            "resource definitions",
+        ),
+        (
+            "packages/agent/src/engine/resources/ui_surface.rs",
+            "ui surface resource validation",
+        ),
+        (
+            "packages/agent/src/engine/tests/catalog_discovery.rs",
+            "catalog tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/external_worker.rs",
+            "external worker tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/generated_ui.rs",
+            "generated ui tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/grant_authority.rs",
+            "grant tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/leases_compensation.rs",
+            "lease/compensation tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/meta_primitives.rs",
+            "meta primitive tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/resource_kernel.rs",
+            "resource tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/restart_chaos.rs",
+            "restart tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/state_queue.rs",
+            "state/queue tests",
+        ),
+        (
+            "packages/agent/src/engine/tests/support.rs",
+            "engine test support",
+        ),
+        ("packages/agent/src/engine/types.rs", "engine core types"),
+        ("packages/agent/src/transport/engine.rs", "engine transport"),
+    ] {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "approval",
+                "Approval",
+                "approvalPolicy",
+                "approvalRequired",
+                "approval_required",
+                "approvalPromptMode",
+                "with_approval_required",
+                "AutonomyApprovalPromptMode",
+                "ApprovalStatus",
+                "engine_approvals",
+                "approvalItems",
+                "requiresApproval",
+                "observability::",
+            ],
+            label,
+        );
+    }
+}
+
+#[test]
 fn fresh_session_store_has_no_product_tables_or_old_shape_migrations() {
     let migration = read_repo_file(
         "packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql",

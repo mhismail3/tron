@@ -191,7 +191,6 @@ impl SqliteEngineGrantStore {
                 budget_json TEXT NOT NULL,
                 expires_at TEXT,
                 can_delegate INTEGER NOT NULL,
-                approval_required INTEGER NOT NULL,
                 provenance_json TEXT NOT NULL,
                 trace_id TEXT NOT NULL,
                 revision INTEGER NOT NULL,
@@ -371,9 +370,9 @@ impl SqliteEngineGrantStore {
                     allowed_namespaces_json, allowed_authority_scopes_json,
                     allowed_resource_kinds_json, resource_selectors_json, file_roots_json,
                     network_policy, max_risk, budget_json, expires_at, can_delegate,
-                    approval_required, provenance_json, trace_id, revision, created_at, updated_at
+                    provenance_json, trace_id, revision, created_at, updated_at
                  ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13,
-                           ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
+                           ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
                 params![
                     grant.grant_id.as_str(),
                     parent_grant_id,
@@ -392,7 +391,6 @@ impl SqliteEngineGrantStore {
                     budget,
                     expires_at,
                     grant.can_delegate as i64,
-                    grant.approval_required as i64,
                     provenance,
                     grant.trace_id.as_str(),
                     grant.revision as i64,
@@ -809,11 +807,6 @@ fn ensure_child_narrows_parent(parent: &EngineGrant, child: &DeriveGrant) -> Res
     if child.can_delegate && !parent.can_delegate {
         return Err(EngineError::PolicyViolation(
             "child grant delegation exceeds parent".to_owned(),
-        ));
-    }
-    if parent.approval_required && !child.approval_required {
-        return Err(EngineError::PolicyViolation(
-            "child grant cannot relax approval requirement".to_owned(),
         ));
     }
     Ok(())

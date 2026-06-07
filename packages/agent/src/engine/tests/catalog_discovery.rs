@@ -116,7 +116,7 @@ fn mutating_function_requires_idempotency() {
 }
 
 #[test]
-fn irreversible_agent_visible_function_requires_approval_metadata() {
+fn high_risk_agent_visible_function_requires_compensation_metadata() {
     let mut catalog = LiveCatalog::new();
     catalog
         .register_worker(worker("w1", "alpha"), true)
@@ -131,10 +131,10 @@ fn irreversible_agent_visible_function_requires_approval_metadata() {
     .with_idempotency(IdempotencyContract::caller_session());
     assert!(matches!(
         catalog.register_function(irreversible, Some(handler()), true),
-        Err(EngineError::PolicyViolation(message)) if message.contains("approval")
+        Err(EngineError::PolicyViolation(message)) if message.contains("compensation")
     ));
 
-    let approved = FunctionDefinition::new(
+    let compensated = FunctionDefinition::new(
         fid("alpha::delete_forever"),
         wid("w1"),
         "irreversible",
@@ -142,9 +142,13 @@ fn irreversible_agent_visible_function_requires_approval_metadata() {
         EffectClass::IrreversibleSideEffect,
     )
     .with_idempotency(IdempotencyContract::caller_session())
-    .with_required_authority(AuthorityRequirement::scope("delete").with_approval_required());
+    .with_required_authority(AuthorityRequirement::scope("delete"))
+    .with_compensation(CompensationContract::new(
+        CompensationKind::ManualOnly,
+        "test irreversible operation requires manual recovery notes",
+    ));
     catalog
-        .register_function(approved, Some(handler()), true)
+        .register_function(compensated, Some(handler()), true)
         .unwrap();
 }
 

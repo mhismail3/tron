@@ -7,8 +7,6 @@ mod support;
 
 pub(in crate::engine::tests) use support::*;
 
-mod approval;
-mod approval_autonomy;
 mod catalog_discovery;
 mod external_worker;
 mod grant_authority;
@@ -26,5 +24,4 @@ mod restart_chaos;
 mod state_queue;
 mod streams;
 mod subagent_lineage;
-mod trace_observability;
 mod triggers;

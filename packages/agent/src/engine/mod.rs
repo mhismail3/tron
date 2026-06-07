@@ -26,16 +26,12 @@
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
 //! - model-facing agents act through the capability-domain `execute` primitive;
 //!   retained registration policy checks infrastructure contracts such as
-//!   idempotency, schema shape, resource leases, and compensation, not product
-//!   approval metadata;
+//!   idempotency, schema shape, resource leases, and compensation;
 //! - registered domain functions are loop infrastructure only; retired product
 //!   domains are not part of startup registration on this branch;
-//! - stream, state, queue, catalog, grant, worker, observability, and generated-UI
-//!   workers plus the generic `resource` kernel are retained only where still
-//!   needed by the primitive loop or awaiting their teardown scorecard rows;
-//!   observability traces correlate invocation, catalog, stream, queue,
-//!   resource-event, lease, and compensation records by durable ids rather than
-//!   timestamp adjacency;
+//! - stream, state, queue, catalog, grant, worker, trace records, generated UI,
+//!   and the generic `resource` kernel are retained only where still needed by
+//!   the primitive loop or awaiting their teardown scorecard rows;
 //! - resource leases and compensation contracts are first-class primitives for
 //!   shared-state mutations, so the host can acquire/release one domain resource
 //!   from payload fields plus causal context such as `sessionId`, record
@@ -101,7 +97,6 @@
 
 #![deny(unsafe_code)]
 
-pub mod approval;
 pub mod capabilities;
 pub mod compensation;
 pub mod discovery;
@@ -125,10 +120,6 @@ pub mod streams;
 pub mod triggers;
 pub mod types;
 
-pub use approval::{
-    ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
-    EngineApprovalTargetMetadata, InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
-};
 pub use capabilities::AgentCapabilityClient;
 pub use compensation::{
     EngineCompensationRecord, EngineCompensationStatus, InMemoryEngineCompensationStore,

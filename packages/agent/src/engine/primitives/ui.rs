@@ -779,7 +779,6 @@ fn ensure_supported_target_type(target_type: &str) -> Result<()> {
             | "resource"
             | "invocation"
             | "grant"
-            | "approval"
             | "queue"
             | "lease"
             | "storage"

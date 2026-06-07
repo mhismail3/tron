@@ -257,8 +257,6 @@ mod tests {
             "catalog.changes",
             "queue.lifecycle",
             "resource.leases",
-            "approval.pending",
-            "approval.resolved",
             "compensation.records",
         ];
 

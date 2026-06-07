@@ -56,9 +56,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                 "worker.write",
             )
             .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
-            .with_required_authority(
-                AuthorityRequirement::scope("worker.write").with_approval_required(),
-            )
+            .with_required_authority(AuthorityRequirement::scope("worker.write"))
             .with_risk(RiskLevel::High)
             .with_compensation(primitive_compensation(
                 CompensationKind::ManualOnly,

@@ -1,4 +1,4 @@
-//! Shared invocation helpers for leases, retry policy, panic projection, and approval resolution.
+//! Shared invocation helpers for leases, retry policy, and panic projection.
 
 use super::*;
 
@@ -333,8 +333,4 @@ pub(super) fn panic_payload_message(payload: Box<dyn Any + Send>) -> String {
     } else {
         "non-string panic payload".to_owned()
     }
-}
-
-pub(super) fn can_resolve_approval(actor_kind: &ActorKind) -> bool {
-    actor_kind.is_admin_like() || matches!(actor_kind, ActorKind::User)
 }

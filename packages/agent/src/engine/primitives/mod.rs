@@ -30,10 +30,6 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 use serde_json::{Value, json};
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::approval::{
-    ApprovalDecision, ApprovalStatus, EngineApprovalRecord, EngineApprovalRequest,
-    EngineApprovalRequestOutcome, InMemoryEngineApprovalStore, SqliteEngineApprovalStore,
-};
 use super::compensation::{
     EngineCompensationRecord, InMemoryEngineCompensationStore, SqliteEngineCompensationStore,
 };
@@ -69,11 +65,9 @@ use super::types::{
 };
 
 pub(crate) mod action_summary;
-pub(crate) mod approval;
 pub(crate) mod catalog;
 pub(crate) mod control;
 pub(crate) mod grant;
-pub(crate) mod observability;
 pub(crate) mod queue;
 pub(crate) mod resource;
 pub(in crate::engine) mod runtime;
@@ -90,20 +84,13 @@ pub(crate) const QUEUE_WORKER_ID: &str = "queue";
 pub(crate) const RESOURCE_WORKER_ID: &str = "resource";
 pub(crate) const TRIGGER_WORKER_ID: &str = "trigger";
 pub(crate) const GRANT_WORKER_ID: &str = "grant";
-pub(crate) const APPROVAL_WORKER_ID: &str = "approval";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
 pub(crate) const CONTROL_WORKER_ID: &str = "control";
 pub(crate) const WORKER_WORKER_ID: &str = "worker";
-pub(crate) const OBSERVABILITY_WORKER_ID: &str = "observability";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";
 pub(crate) const UI_WORKER_ID: &str = "ui";
 const ENGINE_OWNER_ACTOR: &str = "system";
 const ENGINE_AUTHORITY_GRANT: &str = "engine-system";
-
-pub(crate) const APPROVAL_REQUEST_FUNCTION: &str = "approval::request";
-pub(crate) const APPROVAL_RESOLVE_FUNCTION: &str = "approval::resolve";
-pub(crate) const APPROVAL_GET_FUNCTION: &str = "approval::get";
-pub(crate) const APPROVAL_LIST_FUNCTION: &str = "approval::list";
 
 /// One primitive function registration.
 pub(crate) struct PrimitiveFunctionRegistration {
@@ -404,65 +391,6 @@ impl QueueStoreBackend {
     }
 }
 
-pub(in crate::engine) enum ApprovalStoreBackend {
-    InMemory(InMemoryEngineApprovalStore),
-    Sqlite(SqliteEngineApprovalStore),
-}
-
-impl ApprovalStoreBackend {
-    pub(in crate::engine) fn request(
-        &mut self,
-        request: EngineApprovalRequest,
-    ) -> Result<EngineApprovalRequestOutcome> {
-        match self {
-            Self::InMemory(store) => store.request(request),
-            Self::Sqlite(store) => store.request(request),
-        }
-    }
-
-    pub(in crate::engine) fn get(&self, approval_id: &str) -> Result<Option<EngineApprovalRecord>> {
-        match self {
-            Self::InMemory(store) => store.get(approval_id),
-            Self::Sqlite(store) => store.get(approval_id),
-        }
-    }
-
-    pub(in crate::engine) fn list(
-        &self,
-        status: Option<ApprovalStatus>,
-        session_id: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<EngineApprovalRecord>> {
-        match self {
-            Self::InMemory(store) => store.list(status, session_id, limit),
-            Self::Sqlite(store) => store.list(status, session_id, limit),
-        }
-    }
-
-    pub(in crate::engine) fn resolve(
-        &mut self,
-        approval_id: &str,
-        decision: ApprovalDecision,
-        actor_id: ActorId,
-    ) -> Result<EngineApprovalRecord> {
-        match self {
-            Self::InMemory(store) => store.resolve(approval_id, decision, actor_id),
-            Self::Sqlite(store) => store.resolve(approval_id, decision, actor_id),
-        }
-    }
-
-    pub(in crate::engine) fn complete(
-        &mut self,
-        approval_id: &str,
-        result: &super::invocation::InvocationResult,
-    ) -> Result<EngineApprovalRecord> {
-        match self {
-            Self::InMemory(store) => store.complete(approval_id, result),
-            Self::Sqlite(store) => store.complete(approval_id, result),
-        }
-    }
-}
-
 pub(in crate::engine) enum ResourceLeaseStoreBackend {
     InMemory(InMemoryEngineResourceLeaseStore),
     Sqlite(SqliteEngineResourceLeaseStore),
@@ -627,7 +555,6 @@ pub(in crate::engine) struct PrimitiveStores {
     pub(in crate::engine) streams: Arc<StdMutex<StreamStoreBackend>>,
     pub(in crate::engine) state: Arc<StdMutex<StateStoreBackend>>,
     pub(in crate::engine) queue: Arc<StdMutex<QueueStoreBackend>>,
-    pub(in crate::engine) approvals: Arc<StdMutex<ApprovalStoreBackend>>,
     pub(in crate::engine) leases: Arc<StdMutex<ResourceLeaseStoreBackend>>,
     pub(in crate::engine) resources: Arc<StdMutex<ResourceStoreBackend>>,
     pub(in crate::engine) grants: Arc<StdMutex<EngineGrantStoreBackend>>,
@@ -646,9 +573,6 @@ impl PrimitiveStores {
             ))),
             queue: Arc::new(StdMutex::new(QueueStoreBackend::InMemory(
                 InMemoryEngineQueueStore::new(),
-            ))),
-            approvals: Arc::new(StdMutex::new(ApprovalStoreBackend::InMemory(
-                InMemoryEngineApprovalStore::new(),
             ))),
             leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::InMemory(
                 InMemoryEngineResourceLeaseStore::new(),
@@ -680,9 +604,6 @@ impl PrimitiveStores {
             ))),
             queue: Arc::new(StdMutex::new(QueueStoreBackend::Sqlite(
                 SqliteEngineQueueStore::open(path)?,
-            ))),
-            approvals: Arc::new(StdMutex::new(ApprovalStoreBackend::Sqlite(
-                SqliteEngineApprovalStore::open(path)?,
             ))),
             leases: Arc::new(StdMutex::new(ResourceLeaseStoreBackend::Sqlite(
                 SqliteEngineResourceLeaseStore::open(path)?,
@@ -755,12 +676,10 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         resource_worker,
         primitive_worker(TRIGGER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(GRANT_WORKER_ID, WorkerKind::System)?,
-        primitive_worker(APPROVAL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CONTROL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(UI_WORKER_ID, WorkerKind::System)?,
         primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
-        primitive_worker(OBSERVABILITY_WORKER_ID, WorkerKind::System)?,
         primitive_worker(STORAGE_WORKER_ID, WorkerKind::System)?,
     ])
 }
@@ -775,12 +694,10 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(resource::registrations(stores)?);
     registrations.extend(trigger::registrations(stores)?);
     registrations.extend(grant::registrations(stores)?);
-    registrations.extend(approval::registrations(stores)?);
     registrations.extend(catalog::registrations()?);
     registrations.extend(control::registrations()?);
     registrations.extend(ui::registrations()?);
     registrations.extend(worker::registrations()?);
-    registrations.extend(observability::registrations()?);
     registrations.extend(storage::registrations()?);
     Ok(registrations)
 }
@@ -834,24 +751,6 @@ pub(super) fn handled_registration(
         definition,
         handler: Some(handler),
     }
-}
-
-pub(in crate::engine) fn approval_request_from_invocation(
-    invocation: &Invocation,
-) -> Result<EngineApprovalRequest> {
-    let function_id = function_id(required_str(&invocation.payload, "functionId")?)?;
-    let payload = invocation
-        .payload
-        .get("payload")
-        .cloned()
-        .unwrap_or(Value::Null);
-    Ok(EngineApprovalRequest {
-        function_id,
-        payload,
-        causal_context: invocation.causal_context.clone(),
-        delivery_mode: invocation.delivery_mode,
-        target_metadata: None,
-    })
 }
 
 pub(super) fn state_scope_from_payload(invocation: &Invocation) -> Result<EngineStateScope> {
@@ -914,19 +813,6 @@ pub(in crate::engine) fn optional_u64(value: Option<&Value>) -> Result<Option<u6
             })
         })
         .transpose()
-}
-
-pub(super) fn parse_approval_status(value: &str) -> Result<ApprovalStatus> {
-    match value {
-        "pending" => Ok(ApprovalStatus::Pending),
-        "approved" => Ok(ApprovalStatus::Approved),
-        "denied" => Ok(ApprovalStatus::Denied),
-        "executed" => Ok(ApprovalStatus::Executed),
-        "failed" => Ok(ApprovalStatus::Failed),
-        other => Err(EngineError::PolicyViolation(format!(
-            "unsupported approval status {other}"
-        ))),
-    }
 }
 
 pub(super) fn optional_visibility(value: Option<&Value>) -> Result<Option<VisibilityScope>> {

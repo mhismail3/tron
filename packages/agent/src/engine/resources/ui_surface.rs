@@ -251,7 +251,6 @@ fn validate_ui_bindings(value: Option<&Value>) -> Result<()> {
                     | "resource"
                     | "invocation"
                     | "trace"
-                    | "approval"
                     | "queue"
                     | "lease"
                     | "storage"
@@ -323,9 +322,9 @@ fn validate_ui_actions(value: Option<&Value>) -> Result<()> {
             ));
         }
         validate_ui_payload_template_placeholders(payload_template, input_schema)?;
-        if !object.get("approvalPolicy").is_some_and(Value::is_object) {
+        if !object.get("authorityPolicy").is_some_and(Value::is_object) {
             return Err(EngineError::PolicyViolation(
-                "ui action requires approvalPolicy".to_owned(),
+                "ui action requires authorityPolicy".to_owned(),
             ));
         }
         if object

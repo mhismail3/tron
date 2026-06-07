@@ -5,39 +5,48 @@ use serde_json::{Value, json};
 use crate::engine::primitives::action_summary::operator_action_summary;
 
 pub(super) fn substrate_actions() -> Vec<Value> {
+    let no_scopes: Vec<String> = Vec::new();
+    let grant_write = vec!["grant.write".to_owned()];
+    let worker_write = vec!["worker.write".to_owned()];
+    let agent_write = vec!["agent.write".to_owned()];
     vec![
-        action_summary("ui::surface_for_target", "*", "targetId", "medium", false),
+        action_summary(
+            "ui::surface_for_target",
+            "*",
+            "targetId",
+            "medium",
+            &no_scopes,
+        ),
         action_summary(
             "ui::refresh_surface",
             "*",
             "surfaceResourceId",
             "medium",
-            false,
+            &no_scopes,
         ),
-        action_summary("grant::revoke", "grant", "grantId", "high", true),
-        action_summary("worker::disconnect", "worker", "workerId", "high", true),
+        action_summary("grant::revoke", "grant", "grantId", "high", &grant_write),
+        action_summary(
+            "worker::disconnect",
+            "worker",
+            "workerId",
+            "high",
+            &worker_write,
+        ),
         action_summary(
             "resource::link",
             "resource",
             "sourceResourceId",
             "medium",
-            false,
+            &no_scopes,
         ),
         action_summary(
             "artifact::promote",
             "resource",
             "resourceId",
             "medium",
-            false,
+            &no_scopes,
         ),
-        action_summary(
-            "approval::resolve",
-            "approval",
-            "approvalId",
-            "medium",
-            false,
-        ),
-        action_summary("agent::abort", "goal", "sessionId", "high", true),
+        action_summary("agent::abort", "goal", "sessionId", "high", &agent_write),
     ]
 }
 
@@ -75,7 +84,7 @@ fn action_summary(
     target_type: &str,
     target_field: &str,
     risk: &str,
-    approval_required: bool,
+    authority_scopes: &[String],
 ) -> Value {
     operator_action_summary(
         function_id,
@@ -83,6 +92,6 @@ fn action_summary(
         target_field,
         Value::Null,
         risk,
-        approval_required,
+        authority_scopes,
     )
 }

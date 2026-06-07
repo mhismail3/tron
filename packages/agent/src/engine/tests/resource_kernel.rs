@@ -797,23 +797,9 @@ async fn converted_filesystem_outputs_have_no_audit_projection() {
         .unwrap();
     assert_eq!(refs[0]["kind"], "materialized_file");
 
-    let trace = handle
-        .invoke(host_invocation(
-            "observability::trace_get",
-            json!({"traceId": result.trace_id.as_str()}),
-            CausalContext::new(
-                actor("system"),
-                ActorKind::System,
-                grant("grant"),
-                trace("materialized-output-trace"),
-            )
-            .with_scope("observability.read"),
-        ))
-        .await;
-    assert_eq!(trace.error, None);
     assert!(
-        trace.value.as_ref().unwrap().get("outputAudit").is_none(),
-        "output audit must not remain an active trace projection"
+        !result.trace_id.as_str().is_empty(),
+        "resource-backed writes still carry primitive trace identity"
     );
 }
 

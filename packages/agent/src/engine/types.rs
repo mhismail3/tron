@@ -510,8 +510,6 @@ impl Default for DurableOutputContract {
 pub struct AuthorityRequirement {
     /// Required authority scopes.
     pub scopes: Vec<String>,
-    /// Whether explicit approval is required.
-    pub approval_required: bool,
 }
 
 impl AuthorityRequirement {
@@ -526,15 +524,7 @@ impl AuthorityRequirement {
     pub fn scope(scope: impl Into<String>) -> Self {
         Self {
             scopes: vec![scope.into()],
-            approval_required: false,
         }
-    }
-
-    /// Mark this requirement as requiring explicit approval.
-    #[must_use]
-    pub fn with_approval_required(mut self) -> Self {
-        self.approval_required = true;
-        self
     }
 }
 

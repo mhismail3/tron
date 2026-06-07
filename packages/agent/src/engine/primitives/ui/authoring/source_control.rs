@@ -309,7 +309,7 @@ pub(super) fn source_control_session_layout(
             }})]
         } else {
             vec![json!({"type": "Table", "props": {
-                "columns": ["label", "risk", "approval"],
+                "columns": ["label", "risk", "authority"],
                 "rows": action_rows
             }})]
         }
@@ -385,7 +385,7 @@ pub(super) fn source_control_session_layout(
             }},
             {"type": "Confirmation", "props": {
                 "title": "Push branch",
-                "message": "Push through the canonical git capability with approval and policy checks.",
+                "message": "Push through the canonical git capability with authority checks.",
                 "confirmActionId": "push-branch"
             }},
             {"type": "Confirmation", "props": {
@@ -412,15 +412,22 @@ fn source_control_action_rows(actions: &[Value]) -> Vec<Value> {
             Some(json!({
                 "label": label,
                 "risk": action.get("requiredRisk").cloned().unwrap_or_else(|| json!("unknown")),
-                "approval": if action
-                    .get("approvalPolicy")
-                    .and_then(|policy| policy.get("required"))
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false) {
-                    "approval required"
-                } else {
-                    "ready"
-                },
+                "authority": action
+                    .get("authorityPolicy")
+                    .and_then(|policy| policy.get("requiredScopes"))
+                    .and_then(Value::as_array)
+                    .map(|scopes| {
+                        let values = scopes
+                            .iter()
+                            .filter_map(Value::as_str)
+                            .collect::<Vec<_>>();
+                        if values.is_empty() {
+                            "none".to_owned()
+                        } else {
+                            values.join(", ")
+                        }
+                    })
+                    .unwrap_or_else(|| "none".to_owned()),
             }))
         })
         .collect()

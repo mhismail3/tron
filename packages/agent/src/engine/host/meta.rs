@@ -362,16 +362,6 @@ pub(super) fn optional_string(value: Option<&Value>) -> Result<Option<String>> {
         .transpose()
 }
 
-pub(super) fn parse_approval_decision(value: &str) -> Result<ApprovalDecision> {
-    match value {
-        "approve" => Ok(ApprovalDecision::Approve),
-        "deny" => Ok(ApprovalDecision::Deny),
-        other => Err(EngineError::PolicyViolation(format!(
-            "unsupported approval decision {other}"
-        ))),
-    }
-}
-
 pub(super) fn required_u64(payload: &Value, field: &str) -> Result<u64> {
     payload.get(field).and_then(Value::as_u64).ok_or_else(|| {
         EngineError::PolicyViolation(format!("required field {field} must be an integer"))
@@ -660,7 +650,7 @@ pub(super) fn grant_id(value: &str) -> Result<AuthorityGrantId> {
 pub(super) fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {
     matches!(
         namespace,
-        "catalog" | "worker" | "control" | "observability" | "storage" | "ui"
+        "catalog" | "worker" | "control" | "storage" | "ui"
     )
 }
 

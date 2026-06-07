@@ -14,7 +14,7 @@ pub(crate) fn operator_action_summary(
     target_field: &str,
     target: Value,
     risk: &str,
-    approval_required: bool,
+    authority_scopes: &[String],
 ) -> Value {
     json!({
         "functionId": function_id,
@@ -23,11 +23,11 @@ pub(crate) fn operator_action_summary(
         "targetField": target_field,
         "target": target,
         "requiredRisk": risk,
-        "approvalRequired": approval_required,
+        "authorityPolicy": {"requiredScopes": authority_scopes},
         "targetRevision": Value::Null,
         "state": "available",
-        "consequence": action_consequence(function_id, risk, approval_required, Value::Null),
-        "presentation": action_presentation(function_id, None, risk, approval_required),
+        "consequence": action_consequence(function_id, risk, authority_scopes, Value::Null),
+        "presentation": action_presentation(function_id, None, risk),
     })
 }
 
@@ -43,11 +43,18 @@ pub(crate) fn with_stored_action_consequence(mut action: Value) -> Value {
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_owned();
-    let approval_required = action
-        .get("approvalPolicy")
-        .and_then(|policy| policy.get("required"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let authority_scopes = action
+        .get("authorityPolicy")
+        .and_then(|policy| policy.get("requiredScopes"))
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(ToOwned::to_owned)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let target_revision = action.get("targetRevision").cloned().unwrap_or(Value::Null);
     let action_id = action
         .get("actionId")
@@ -56,22 +63,17 @@ pub(crate) fn with_stored_action_consequence(mut action: Value) -> Value {
     action["consequence"] = action_consequence(
         &target_function_id,
         &risk,
-        approval_required,
+        &authority_scopes,
         target_revision,
     );
-    action["presentation"] = action_presentation(
-        &target_function_id,
-        action_id.as_deref(),
-        &risk,
-        approval_required,
-    );
+    action["presentation"] = action_presentation(&target_function_id, action_id.as_deref(), &risk);
     action
 }
 
 fn action_consequence(
     target_function_id: &str,
     risk: &str,
-    approval_required: bool,
+    authority_scopes: &[String],
     target_revision: Value,
 ) -> Value {
     json!({
@@ -80,7 +82,7 @@ fn action_consequence(
         "recommendedCanonicalAction": target_function_id,
         "targetRevision": target_revision,
         "requiredRisk": risk,
-        "approvalRequired": approval_required,
+        "requiredAuthorityScopes": authority_scopes,
         "state": "available",
         "blockedReason": Value::Null,
         "staleReason": Value::Null,
@@ -88,12 +90,7 @@ fn action_consequence(
     })
 }
 
-fn action_presentation(
-    target_function_id: &str,
-    action_id: Option<&str>,
-    risk: &str,
-    approval_required: bool,
-) -> Value {
+fn action_presentation(target_function_id: &str, action_id: Option<&str>, risk: &str) -> Value {
     let key = format!("{target_function_id} {}", action_id.unwrap_or_default()).to_lowercase();
     let (tone, button_role, icon) = if contains_any(
         &key,
@@ -128,7 +125,7 @@ fn action_presentation(
         ("primary", "primary", "checkmark")
     } else if contains_any(&key, &["inspect", "audit", "status", "snapshot", "health"]) {
         ("neutral", "neutral", "magnifyingglass")
-    } else if approval_required || matches!(risk, "high" | "critical") {
+    } else if matches!(risk, "high" | "critical") {
         ("neutral", "neutral", "exclamationmark.triangle")
     } else {
         ("neutral", "neutral", "arrow.right")

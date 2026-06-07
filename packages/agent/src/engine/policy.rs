@@ -2,7 +2,7 @@
 //!
 //! This layer protects primitive runtime integrity: idempotency, schemas,
 //! resource leases, compensation metadata, delivery modes, visibility, and
-//! routability. It does not encode product approval policy.
+//! routability. It does not encode product prompt policy.
 
 use super::discovery::{ActorContext, ActorKind};
 use super::errors::{EngineError, Result};
@@ -340,7 +340,7 @@ mod tests {
     }
 
     #[test]
-    fn high_risk_registration_requires_compensation_not_approval_metadata() {
+    fn high_risk_registration_requires_compensation_not_prompt_metadata() {
         let function = high_risk_process_function();
 
         validate_function_registration(&function)

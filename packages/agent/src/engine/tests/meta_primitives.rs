@@ -61,102 +61,6 @@ async fn storage_primitives_report_and_checkpoint_unified_sqlite_file() {
 }
 
 #[tokio::test]
-async fn observability_log_query_reads_storage_logs_and_expands_payloads_only_when_requested() {
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("tron.sqlite");
-    let handle = EngineHostHandle::open_sqlite(&path).unwrap();
-    {
-        let runtime = crate::shared::storage::StorageRuntime::new(&path);
-        let conn = runtime.open_connection().unwrap();
-        conn.execute_batch(
-            "CREATE TABLE logs (
-                id INTEGER PRIMARY KEY,
-                timestamp TEXT NOT NULL,
-                level TEXT NOT NULL,
-                level_num INTEGER NOT NULL,
-                component TEXT NOT NULL DEFAULT '',
-                message TEXT DEFAULT '',
-                session_id TEXT,
-                workspace_id TEXT,
-                event_id TEXT,
-                turn INTEGER,
-                trace_id TEXT,
-                parent_trace_id TEXT,
-                depth INTEGER,
-                data TEXT,
-                error_message TEXT,
-                error_stack TEXT,
-                origin TEXT
-            );",
-        )
-        .unwrap();
-        let data = crate::shared::storage::store_json_bytes(
-            &conn,
-            serde_json::json!({"items": vec!["logged"; 2048]})
-                .to_string()
-                .as_bytes(),
-            &crate::shared::storage::StorePayloadOptions::new(
-                "log_entry",
-                "log-query-row",
-                "data",
-                "diagnostic_verbose",
-            )
-            .with_scope(
-                Some("trace-log".to_owned()),
-                Some("session-log".to_owned()),
-                Some("workspace-log".to_owned()),
-            )
-            .with_inline_threshold(1),
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO logs (
-                timestamp, level, level_num, component, message, session_id,
-                workspace_id, trace_id, data, origin
-             ) VALUES (?1, 'debug', 20, 'StorageTest', 'large log payload',
-                       'session-log', 'workspace-log', 'trace-log', ?2, 'test')",
-            rusqlite::params![chrono::Utc::now().to_rfc3339(), data],
-        )
-        .unwrap();
-    }
-
-    let compact = handle
-        .invoke(Invocation::new_sync(
-            fid("observability::log_query"),
-            json!({"traceId": "trace-log", "includeFullPayloads": false}),
-            causal().with_scope("observability.read"),
-        ))
-        .await;
-    assert_eq!(compact.error, None);
-    let compact_logs = compact.value.as_ref().unwrap()["logs"].as_array().unwrap();
-    assert_eq!(compact_logs.len(), 1);
-    assert!(
-        compact_logs[0]["data"]
-            .get(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY)
-            .is_some()
-    );
-
-    let expanded = handle
-        .invoke(Invocation::new_sync(
-            fid("observability::log_query"),
-            json!({"traceId": "trace-log", "includeFullPayloads": true}),
-            causal().with_scope("observability.read"),
-        ))
-        .await;
-    assert_eq!(expanded.error, None);
-    let expanded_logs = expanded.value.as_ref().unwrap()["logs"].as_array().unwrap();
-    assert_eq!(expanded_logs.len(), 1);
-    assert_eq!(
-        expanded_logs[0]["data"]["items"]
-            .as_array()
-            .unwrap()
-            .first()
-            .and_then(Value::as_str),
-        Some("logged")
-    );
-}
-
-#[tokio::test]
 async fn engine_meta_discover_and_inspect_are_live_and_scope_checked() {
     let mut host = EngineHost::new().unwrap();
     host.catalog_mut()
@@ -230,7 +134,7 @@ async fn engine_meta_discover_and_inspect_are_live_and_scope_checked() {
 }
 
 #[tokio::test]
-async fn primitive_catalog_worker_and_observability_functions_share_engine_path() {
+async fn primitive_catalog_and_worker_functions_share_engine_path() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let system_context = |trace_id: &str, scope: &str| {
         CausalContext::new(
@@ -255,7 +159,7 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
             .as_array()
             .unwrap()
             .iter()
-            .any(|function| function["id"] == "observability::trace_get")
+            .any(|function| function["id"] == "worker::protocol_guide")
     );
 
     let workers = handle
@@ -271,7 +175,7 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
             .as_array()
             .unwrap()
             .iter()
-            .any(|worker| worker["id"] == "observability")
+            .any(|worker| worker["id"] == "worker")
     );
 
     let guide = handle
@@ -343,166 +247,6 @@ async fn primitive_catalog_worker_and_observability_functions_share_engine_path(
             .as_str()
             .unwrap()
             .contains("demo::echo")
-    );
-
-    let trace_id = trace("primitive-trace");
-    let parent_invocation_id = InvocationId::generate();
-    let lease = handle
-        .acquire_resource_lease(AcquireResourceLease {
-            resource_kind: "test-resource".to_owned(),
-            resource_id: "primitive-trace-resource".to_owned(),
-            holder_invocation_id: parent_invocation_id.clone(),
-            function_id: fid("test::write"),
-            actor_id: actor("system"),
-            authority_grant_id: grant("system-grant"),
-            trace_id: trace_id.clone(),
-            parent_invocation_id: Some(parent_invocation_id.clone()),
-            idempotency_key: Some("primitive-trace-lease".to_owned()),
-            ttl_ms: 30_000,
-        })
-        .await
-        .unwrap();
-    let stream_cursor = handle
-        .publish_stream_event(super::PublishStreamEvent {
-            topic: "test.observability".to_owned(),
-            payload: json!({"ok": true}),
-            visibility: VisibilityScope::System,
-            session_id: None,
-            workspace_id: None,
-            producer: "test".to_owned(),
-            trace_id: Some(trace_id),
-            parent_invocation_id: Some(parent_invocation_id),
-        })
-        .await
-        .unwrap();
-
-    let trace_get = handle
-        .invoke(host_invocation(
-            "observability::trace_get",
-            json!({"traceId": "primitive-trace"}),
-            system_context("observability-query", "observability.read"),
-        ))
-        .await;
-    assert_eq!(trace_get.error, None);
-    assert!(
-        trace_get.value.as_ref().unwrap()["summary"]["streamCount"]
-            .as_u64()
-            .unwrap()
-            >= 1
-    );
-    assert_eq!(
-        trace_get.value.as_ref().unwrap()["summary"]["leaseCount"],
-        1
-    );
-    let invocations = trace_get.value.as_ref().unwrap()["invocations"]
-        .as_array()
-        .unwrap();
-    assert!(
-        invocations
-            .iter()
-            .any(|record| record["functionId"] == "catalog::list")
-    );
-    assert!(
-        trace_get.value.as_ref().unwrap()["streams"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|event| event["cursor"] == stream_cursor.0)
-    );
-    assert!(
-        trace_get.value.as_ref().unwrap()["leases"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|record| record["leaseId"] == lease.lease_id)
-    );
-
-    let spans = handle
-        .invoke(host_invocation(
-            "observability::span_list",
-            json!({"traceId": "primitive-trace"}),
-            system_context("observability-query", "observability.read"),
-        ))
-        .await;
-    assert_eq!(spans.error, None);
-    assert!(
-        spans.value.as_ref().unwrap()["spans"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|span| span["functionId"] == "worker::list")
-    );
-    assert!(
-        spans.value.as_ref().unwrap()["spans"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|span| span["kind"] == "stream" && span["topic"] == "test.observability")
-    );
-    assert!(
-        spans.value.as_ref().unwrap()["spans"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|span| span["kind"] == "resource_lease"
-                && span["resourceId"] == "primitive-trace-resource")
-    );
-
-    let stream_logs = handle
-        .invoke(host_invocation(
-            "observability::log_query",
-            json!({"traceId": "primitive-trace", "text": "stream"}),
-            system_context("observability-query", "observability.read"),
-        ))
-        .await;
-    assert_eq!(stream_logs.error, None);
-    let logs = stream_logs.value.as_ref().unwrap()["logs"]
-        .as_array()
-        .unwrap();
-    assert!(
-        logs.iter()
-            .any(|log| log["kind"] == "stream" && log["topic"] == "test.observability")
-    );
-
-    let metrics = handle
-        .invoke(host_invocation(
-            "observability::metrics_snapshot",
-            json!({}),
-            system_context("observability-query", "observability.read"),
-        ))
-        .await;
-    assert_eq!(metrics.error, None);
-    assert!(
-        metrics.value.as_ref().unwrap()["metrics"]["workers"]
-            .as_u64()
-            .unwrap()
-            >= 1
-    );
-    assert!(
-        metrics.value.as_ref().unwrap()["metrics"]["traces"]
-            .as_u64()
-            .unwrap()
-            >= 1
-    );
-
-    let delegated_metrics = handle
-        .invoke(host_invocation(
-            "engine::invoke",
-            json!({
-                "functionId": "observability::metrics_snapshot",
-                "payload": {},
-            }),
-            system_context("observability-query-delegated", "observability.read"),
-        ))
-        .await;
-    assert_eq!(delegated_metrics.error, None);
-    let delegated_child = &delegated_metrics.value.as_ref().unwrap()["child"];
-    assert_eq!(delegated_child["error"], Value::Null);
-    assert!(
-        delegated_child["value"]["metrics"]["workers"]
-            .as_u64()
-            .unwrap()
-            >= 1
     );
 }
 

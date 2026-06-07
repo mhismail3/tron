@@ -35,7 +35,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             snapshot_schema(),
             json!({
                 "type": "object",
-                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "invocations", "grants", "queues", "leases", "approvals", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
+                "required": ["catalogRevision", "workers", "capabilities", "resourceTypes", "activeGoals", "invocations", "grants", "queues", "leases", "storage", "integrityWarnings", "availableActions", "uiSurfaceRefs"],
                 "additionalProperties": false,
                 "properties": {
                     "catalogRevision": {"type": "integer"},
@@ -47,7 +47,6 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                     "grants": {"type": "array"},
                     "queues": {"type": "array"},
                     "leases": {"type": "array"},
-                    "approvals": {"type": "array"},
                     "storage": {"type": ["object", "null"]},
                     "integrityWarnings": {"type": "array"},
                     "availableActions": {"type": "array"},
@@ -114,7 +113,7 @@ fn inspect_schema() -> Value {
         "properties": {
             "targetType": {
                 "type": "string",
-                "enum": ["worker", "capability", "grant", "goal", "resource", "invocation", "trace", "approval", "queue", "lease", "storage", "integrity"]
+                "enum": ["worker", "capability", "grant", "goal", "resource", "invocation", "trace", "queue", "lease", "storage", "integrity"]
             },
             "targetId": {"type": "string"},
             "includeFullPayloads": {"type": "boolean"}
@@ -164,8 +163,6 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         lifecycle: Some(EngineGrantLifecycle::Active),
         limit,
     })?;
-    let approvals =
-        host.approval_records(None, invocation.causal_context.session_id.as_deref(), limit)?;
     let queues = host.queue_items("engine", limit).unwrap_or_default();
     let storage = host.storage_stats().ok().map(|stats| json!(stats));
     Ok(json!({
@@ -178,7 +175,6 @@ fn control_snapshot(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) ->
         "grants": grants,
         "queues": queues,
         "leases": [],
-        "approvals": approvals,
         "storage": storage,
         "integrityWarnings": substrate_integrity_warnings(host)?,
         "availableActions": substrate_actions(),
@@ -240,17 +236,9 @@ fn control_inspect(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> 
                 "summary": trace_summary(target_id, &trace),
                 "invocations": trace.invocations.iter().map(|record| invocation_record_value(record, include_full_payloads)).collect::<Vec<_>>(),
                 "streams": trace.streams,
-                "approvals": trace.approvals,
                 "leases": trace.leases,
                 "compensation": trace.compensation,
             })
-        }
-        "approval" => {
-            let approval = host
-                .approval_records(None, invocation.causal_context.session_id.as_deref(), 500)?
-                .into_iter()
-                .find(|record| record.approval_id == target_id);
-            json!({ "approval": approval })
         }
         "queue" => {
             let item = host

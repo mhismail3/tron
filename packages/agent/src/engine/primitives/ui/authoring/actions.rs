@@ -31,7 +31,7 @@ pub(in crate::engine::primitives::ui::authoring) fn generated_actions(
         "idempotencyKeyTemplate": "${submission.idempotencyKey}",
         "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
         "requiredRisk": risk_label(&refresh.risk_level),
-        "approvalPolicy": {"required": refresh.required_authority.approval_required},
+        "authorityPolicy": {"requiredScopes": refresh.required_authority.scopes.clone()},
         "targetRevision": refresh.revision.0,
         "expiresAt": default_expires_at()
     })];
@@ -137,7 +137,7 @@ fn capability_invocation_action(
         "idempotencyKeyTemplate": "${submission.idempotencyKey}",
         "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
         "requiredRisk": risk_label(&target.risk_level),
-        "approvalPolicy": {"required": target.required_authority.approval_required},
+        "authorityPolicy": {"requiredScopes": target.required_authority.scopes.clone()},
         "targetRevision": target.revision.0,
         "expiresAt": default_expires_at()
     })))
@@ -224,7 +224,7 @@ pub(in crate::engine::primitives::ui::authoring) fn prompt_collection_action(
         "idempotencyKeyTemplate": "${submission.idempotencyKey}",
         "requiredGrant": invocation.causal_context.authority_grant_id.as_str(),
         "requiredRisk": risk_label(&target.risk_level),
-        "approvalPolicy": {"required": target.required_authority.approval_required},
+        "authorityPolicy": {"requiredScopes": target.required_authority.scopes.clone()},
         "targetRevision": target.revision.0,
         "expiresAt": default_expires_at()
     }))

@@ -1,9 +1,9 @@
-//! Conditional approval policy for process-owned capabilities.
+//! Process execution policy for process-owned capabilities.
 //!
 //! `process::run` is intentionally a broad capability: it can be a harmless
 //! read such as `date`, a normal developer check such as `cargo test`, or a
 //! host mutation such as deleting files. The contract therefore must not carry
-//! a blanket approval requirement. This module owns the payload-sensitive gate
+//! a blanket runtime pause. This module owns the payload-sensitive gate
 //! used by `capability::execute` before dispatching to the process worker.
 
 use serde_json::Value;
@@ -11,24 +11,24 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path};
 
 const READ_ONLY_LOW_RISK_MESSAGE: &str = "process::run read_only commands must be proven low-risk by the classifier; use executionMode=sandbox_materialized with expectedOutputs for mutating or unknown commands. To verify sandbox materialized output, use the returned materializedOutputs summary or read the returned materialized file path/resource instead of running an unknown interpreter";
-const SANDBOX_OUTPUTS_REQUIRED_MESSAGE: &str = "process::run sandbox_materialized commands require expectedOutputs: [{\"path\":\"<relative-output-path>\"}] before approval";
+const SANDBOX_OUTPUTS_REQUIRED_MESSAGE: &str = "process::run sandbox_materialized commands require expectedOutputs: [{\"path\":\"<relative-output-path>\"}] before isolated execution";
 const SANDBOX_OUTPUT_PATH_RELATIVE_MESSAGE: &str = "process::run sandbox_materialized expectedOutputs[].path must be a relative path inside the process sandbox; do not use absolute host paths, home-relative paths, or parent-directory escapes";
 const SANDBOX_COMMAND_OUTPUT_PATH_MESSAGE: &str = "process::run sandbox_materialized command write targets must be declared relative expectedOutputs paths; do not write absolute host paths, home-relative paths, parent-directory escapes, shell-expanded paths, or undeclared output paths";
 const SANDBOX_OUTPUT_COLLISION_MESSAGE: &str = "process::run sandbox_materialized expectedOutputs must not declare duplicate output paths or duplicate targetPath destinations";
 
-/// Return true when a `process::run` payload should pause for user approval.
-pub(crate) fn run_requires_approval(payload: &Value) -> bool {
+/// Return true when a `process::run` payload should use isolated execution.
+pub(crate) fn run_requires_isolated_execution(payload: &Value) -> bool {
     let Some(command) = payload.get("command").and_then(Value::as_str) else {
-        // Schema validation reports missing command before approval creation.
+        // Schema validation reports missing command before policy classification.
         return false;
     };
-    command_requires_approval(command)
+    command_requires_isolation(command)
 }
 
-/// Reject impossible process payloads before creating an approval request.
-pub(crate) fn validate_run_payload_before_approval(payload: &Value) -> Result<(), &'static str> {
+/// Reject impossible process payloads before creating an execution request.
+pub(crate) fn validate_run_payload_before_execution(payload: &Value) -> Result<(), &'static str> {
     if payload.get("executionMode").and_then(Value::as_str) == Some("read_only")
-        && run_requires_approval(payload)
+        && run_requires_isolated_execution(payload)
     {
         return Err(READ_ONLY_LOW_RISK_MESSAGE);
     }
@@ -50,14 +50,14 @@ pub(crate) fn sandbox_output_path_relative_message() -> &'static str {
     SANDBOX_OUTPUT_PATH_RELATIVE_MESSAGE
 }
 
-/// Return true when a validated `process::run` payload should pause for approval.
-pub(crate) fn run_execution_requires_approval(payload: &Value) -> bool {
-    validate_run_payload_before_approval(payload).is_ok()
+/// Return true when a validated `process::run` payload should require isolated execution.
+pub(crate) fn run_execution_requires_isolation(payload: &Value) -> bool {
+    validate_run_payload_before_execution(payload).is_ok()
         && payload.get("executionMode").and_then(Value::as_str) == Some("sandbox_materialized")
-        && run_requires_approval(payload)
+        && run_requires_isolated_execution(payload)
 }
 
-fn command_requires_approval(command: &str) -> bool {
+fn command_requires_isolation(command: &str) -> bool {
     let normalized = command.trim();
     if normalized.is_empty() {
         return false;
@@ -318,7 +318,7 @@ fn path_text_is_home_relative(path: &str) -> bool {
 
 fn has_redirection_or_mutating_pipe(command: &str) -> bool {
     // Redirects and `tee` create or mutate files through the shell. Treat them
-    // as approval-gated even when the command prefix is otherwise innocuous.
+    // as isolation-gated even when the command prefix is otherwise innocuous.
     command.contains(">")
         || command.contains(">>")
         || command.contains("2>")
@@ -638,7 +638,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn date_and_read_only_commands_do_not_require_approval() {
+    fn date_and_read_only_commands_do_not_require_isolation() {
         for command in [
             "date",
             "date +%Y-%m-%d",
@@ -662,14 +662,14 @@ mod tests {
             "cd . && git status --short && git log --oneline -3",
         ] {
             assert!(
-                !run_requires_approval(&json!({ "command": command })),
-                "{command} should not require approval"
+                !run_requires_isolated_execution(&json!({ "command": command })),
+                "{command} should not require isolation"
             );
         }
     }
 
     #[test]
-    fn mutating_or_privileged_commands_require_approval() {
+    fn mutating_or_privileged_commands_require_isolation() {
         for command in [
             "sudo date",
             "rm -rf target",
@@ -696,128 +696,128 @@ mod tests {
             "python -c 'open(\"x\", \"w\").write(\"no\")'",
         ] {
             assert!(
-                run_requires_approval(&json!({ "command": command })),
-                "{command} should require approval"
+                run_requires_isolated_execution(&json!({ "command": command })),
+                "{command} should require isolation"
             );
         }
     }
 
     #[test]
     fn missing_command_is_left_to_schema_validation() {
-        assert!(!run_requires_approval(&json!({})));
+        assert!(!run_requires_isolated_execution(&json!({})));
     }
 
     #[test]
     fn missing_execution_mode_is_left_to_schema_validation() {
         let payload = json!({"command": "rm -rf target"});
 
-        assert!(run_requires_approval(&payload));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(run_requires_isolated_execution(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn read_only_mutating_payload_is_invalid_before_approval() {
+    fn read_only_mutating_payload_is_invalid_before_execution() {
         let payload = json!({
             "command": "echo hi > should_not_exist.txt",
             "executionMode": "read_only"
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("sandbox_materialized"));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn sandbox_materialized_missing_outputs_is_invalid_before_approval() {
+    fn sandbox_materialized_missing_outputs_is_invalid_before_execution() {
         let payload = json!({
             "command": "echo hi > result.txt",
             "executionMode": "sandbox_materialized"
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("expectedOutputs"));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn sandbox_materialized_absolute_output_path_is_invalid_before_approval() {
+    fn sandbox_materialized_absolute_output_path_is_invalid_before_execution() {
         let payload = json!({
             "command": "echo hi > /tmp/result.txt",
             "executionMode": "sandbox_materialized",
             "expectedOutputs": [{"path": "/tmp/result.txt"}]
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("relative path inside the process sandbox"));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn sandbox_materialized_home_relative_output_path_is_invalid_before_approval() {
+    fn sandbox_materialized_home_relative_output_path_is_invalid_before_execution() {
         let payload = json!({
             "command": "echo hi > ~/.tron/result.txt",
             "executionMode": "sandbox_materialized",
             "expectedOutputs": [{"path": "~/.tron/result.txt"}]
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("home-relative paths"));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn sandbox_materialized_parent_output_path_is_invalid_before_approval() {
+    fn sandbox_materialized_parent_output_path_is_invalid_before_execution() {
         let payload = json!({
             "command": "echo hi > ../result.txt",
             "executionMode": "sandbox_materialized",
             "expectedOutputs": [{"path": "../result.txt"}]
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("parent-directory escapes"));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn sandbox_materialized_home_relative_command_write_is_invalid_before_approval() {
+    fn sandbox_materialized_home_relative_command_write_is_invalid_before_execution() {
         let payload = json!({
             "command": "printf 'hi\\n' > ~/.tron/workspace/reports/high-risk-test.txt",
             "executionMode": "sandbox_materialized",
             "expectedOutputs": [{"path": "reports/high-risk-test.txt"}]
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("command write targets"));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn sandbox_materialized_undeclared_command_write_is_invalid_before_approval() {
+    fn sandbox_materialized_undeclared_command_write_is_invalid_before_execution() {
         let payload = json!({
             "command": "printf 'hi\\n' > other.txt",
             "executionMode": "sandbox_materialized",
             "expectedOutputs": [{"path": "result.txt"}]
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("command write targets"));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn sandbox_materialized_declared_nested_command_write_is_valid_before_approval() {
+    fn sandbox_materialized_declared_nested_command_write_is_valid_before_execution() {
         let payload = json!({
             "command": "printf 'hi\\n' > reports/high-risk-test.txt",
             "executionMode": "sandbox_materialized",
             "expectedOutputs": [{"path": "reports/high-risk-test.txt"}]
         });
 
-        assert_eq!(validate_run_payload_before_approval(&payload), Ok(()));
-        assert!(run_execution_requires_approval(&payload));
+        assert_eq!(validate_run_payload_before_execution(&payload), Ok(()));
+        assert!(run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn sandbox_materialized_duplicate_output_path_is_invalid_before_approval() {
+    fn sandbox_materialized_duplicate_output_path_is_invalid_before_execution() {
         let payload = json!({
             "command": "printf 'hi\\n' > result.txt",
             "executionMode": "sandbox_materialized",
@@ -827,13 +827,13 @@ mod tests {
             ]
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("duplicate"));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
-    fn sandbox_materialized_duplicate_target_path_is_invalid_before_approval() {
+    fn sandbox_materialized_duplicate_target_path_is_invalid_before_execution() {
         let payload = json!({
             "command": "printf one > one.txt && printf two > two.txt",
             "executionMode": "sandbox_materialized",
@@ -843,9 +843,9 @@ mod tests {
             ]
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("duplicate"));
-        assert!(!run_execution_requires_approval(&payload));
+        assert!(!run_execution_requires_isolation(&payload));
     }
 
     #[test]
@@ -856,30 +856,30 @@ mod tests {
             "expectedOutputs": [{"path": "result.txt"}]
         });
 
-        let err = validate_run_payload_before_approval(&payload).unwrap_err();
+        let err = validate_run_payload_before_execution(&payload).unwrap_err();
         assert!(err.contains("command write targets"));
     }
 
     #[test]
-    fn sandbox_materialized_declared_tee_pipeline_is_valid_before_approval() {
+    fn sandbox_materialized_declared_tee_pipeline_is_valid_before_execution() {
         let payload = json!({
             "command": "printf 'hi\\n' | tee reports/result.txt | wc -c",
             "executionMode": "sandbox_materialized",
             "expectedOutputs": [{"path": "reports/result.txt"}]
         });
 
-        assert_eq!(validate_run_payload_before_approval(&payload), Ok(()));
+        assert_eq!(validate_run_payload_before_execution(&payload), Ok(()));
     }
 
     #[test]
-    fn sandbox_materialized_mutating_payload_still_requires_approval() {
+    fn sandbox_materialized_mutating_payload_still_requires_isolation() {
         let payload = json!({
             "command": "echo hi > result.txt",
             "executionMode": "sandbox_materialized",
             "expectedOutputs": [{"path": "result.txt"}]
         });
 
-        assert_eq!(validate_run_payload_before_approval(&payload), Ok(()));
-        assert!(run_execution_requires_approval(&payload));
+        assert_eq!(validate_run_payload_before_execution(&payload), Ok(()));
+        assert!(run_execution_requires_isolation(&payload));
     }
 }

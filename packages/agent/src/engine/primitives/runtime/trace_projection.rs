@@ -3,9 +3,6 @@ use std::collections::BTreeSet;
 use serde_json::{Value, json};
 
 use super::TraceComponents;
-use crate::engine::ids::InvocationId;
-use crate::engine::queue::{EngineQueueItem, QueueItemStatus};
-use crate::engine::resources::EngineResourceEvent;
 use crate::engine::types::CatalogChange;
 
 pub(in crate::engine::primitives) fn catalog_change_belongs_to_trace(
@@ -33,16 +30,6 @@ pub(in crate::engine::primitives) fn trace_summary(
         .iter()
         .filter(|record| !record.succeeded)
         .count();
-    let pending_approvals = trace
-        .approvals
-        .iter()
-        .filter(|record| matches!(record.status.as_str(), "pending" | "approved"))
-        .count();
-    let failed_approvals = trace
-        .approvals
-        .iter()
-        .filter(|record| matches!(record.status.as_str(), "denied" | "failed"))
-        .count();
     let mut timestamps = trace_timestamps(trace);
     timestamps.sort();
     let root_invocation_id = trace
@@ -53,10 +40,8 @@ pub(in crate::engine::primitives) fn trace_summary(
         .map(|record| record.invocation_id.as_str());
     json!({
         "traceId": trace_id,
-        "status": if failed_invocations > 0 || failed_approvals > 0 {
+        "status": if failed_invocations > 0 {
             "error"
-        } else if pending_approvals > 0 {
-            "pending"
         } else {
             "ok"
         },
@@ -67,8 +52,6 @@ pub(in crate::engine::primitives) fn trace_summary(
         "streamCount": trace.streams.len(),
         "queueItemCount": trace.queue_items.len(),
         "resourceEventCount": trace.resource_events.len(),
-        "approvalCount": trace.approvals.len(),
-        "pendingApprovalCount": pending_approvals,
         "leaseCount": trace.leases.len(),
         "compensationCount": trace.compensation.len(),
         "firstTimestamp": timestamps.first(),
@@ -110,12 +93,6 @@ fn trace_timestamps(trace: &TraceComponents) -> Vec<String> {
     );
     timestamps.extend(
         trace
-            .approvals
-            .iter()
-            .map(|record| record.updated_at.to_rfc3339()),
-    );
-    timestamps.extend(
-        trace
             .leases
             .iter()
             .map(|record| record.acquired_at.to_rfc3339()),
@@ -127,33 +104,4 @@ fn trace_timestamps(trace: &TraceComponents) -> Vec<String> {
             .map(ToOwned::to_owned)
     }));
     timestamps
-}
-
-pub(in crate::engine::primitives) fn queue_item_log_value(record: &EngineQueueItem) -> Value {
-    json!({
-        "timestamp": record.updated_at.to_rfc3339(),
-        "traceId": record.trace_id.as_str(),
-        "kind": "queue_item",
-        "level": if matches!(record.status, QueueItemStatus::DeadLettered) { "error" } else { "info" },
-        "receiptId": record.receipt_id,
-        "queue": record.queue,
-        "functionId": record.function_id.as_str(),
-        "status": &record.status,
-        "message": "engine queue item recorded",
-    })
-}
-
-pub(in crate::engine::primitives) fn resource_event_log_value(
-    record: &EngineResourceEvent,
-) -> Value {
-    json!({
-        "timestamp": record.occurred_at.to_rfc3339(),
-        "traceId": record.trace_id.as_str(),
-        "kind": "resource_event",
-        "level": "info",
-        "resourceId": record.resource_id,
-        "eventType": record.event_type,
-        "invocationId": record.invocation_id.as_ref().map(InvocationId::as_str),
-        "message": "engine resource event recorded",
-    })
 }

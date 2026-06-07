@@ -144,8 +144,6 @@ pub struct AgentRuntimeSettings {
     pub subagent_max_depth: u32,
     /// Default model for skill sub-agents.
     pub subagent_model: String,
-    /// Autonomy and human-escalation policy.
-    pub autonomy: AgentAutonomySettings,
 }
 
 impl Default for AgentRuntimeSettings {
@@ -154,37 +152,8 @@ impl Default for AgentRuntimeSettings {
             max_turns: 250,
             subagent_max_depth: 3,
             subagent_model: "claude-haiku-4-5-20251001".to_string(),
-            autonomy: AgentAutonomySettings::default(),
         }
     }
-}
-
-/// Agent autonomy and escalation policy.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct AgentAutonomySettings {
-    /// Whether approval-required autonomous work creates an interactive prompt.
-    pub approval_prompt_mode: AutonomyApprovalPromptMode,
-}
-
-impl Default for AgentAutonomySettings {
-    fn default() -> Self {
-        Self {
-            approval_prompt_mode: AutonomyApprovalPromptMode::Disabled,
-        }
-    }
-}
-
-/// Approval prompt behavior for autonomous agent invocations.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AutonomyApprovalPromptMode {
-    /// Do not prompt by default; create audit records and auto-decide unless a
-    /// guardrail blocks the work before execution.
-    #[default]
-    Disabled,
-    /// QA/testing mode that preserves interactive approval prompts.
-    Testing,
 }
 
 /// Log level for database logging.
@@ -569,10 +538,6 @@ mod tests {
         assert_eq!(a.max_turns, 250);
         assert_eq!(a.subagent_max_depth, 3);
         assert_eq!(a.subagent_model, "claude-haiku-4-5-20251001");
-        assert_eq!(
-            a.autonomy.approval_prompt_mode,
-            AutonomyApprovalPromptMode::Disabled
-        );
     }
 
     #[test]
@@ -581,27 +546,9 @@ mod tests {
         let a: AgentRuntimeSettings = serde_json::from_value(json).unwrap();
         assert_eq!(a.subagent_max_depth, 5);
         assert_eq!(a.max_turns, 250); // other fields default
-        assert_eq!(
-            a.autonomy.approval_prompt_mode,
-            AutonomyApprovalPromptMode::Disabled
-        );
 
         let roundtrip = serde_json::to_value(&a).unwrap();
         assert_eq!(roundtrip.get("subagentMaxDepth").unwrap(), 5);
-    }
-
-    #[test]
-    fn agent_autonomy_settings_deserialize_testing_prompt_mode() {
-        let json = serde_json::json!({
-            "autonomy": {
-                "approvalPromptMode": "testing"
-            }
-        });
-        let a: AgentRuntimeSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(
-            a.autonomy.approval_prompt_mode,
-            AutonomyApprovalPromptMode::Testing
-        );
     }
 
     #[test]

@@ -3,8 +3,8 @@
 //! Compensation is intentionally recorded before Tron attempts any automated
 //! rollback. High-risk functions describe their recovery semantics in
 //! [`CompensationContract`], and the host writes one durable record for each
-//! executed invocation so operators and future approval/rollback workers can
-//! inspect the exact resource leases and outcome.
+//! executed invocation so operators and future rollback workers can inspect the
+//! exact resource leases and outcome.
 
 use std::collections::BTreeMap;
 use std::path::Path;

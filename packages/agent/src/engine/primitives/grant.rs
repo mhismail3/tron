@@ -172,11 +172,6 @@ impl InProcessFunctionHandler for GrantPrimitiveHandler {
                         .get("canDelegate")
                         .and_then(Value::as_bool)
                         .unwrap_or(false),
-                    approval_required: invocation
-                        .payload
-                        .get("approvalRequired")
-                        .and_then(Value::as_bool)
-                        .unwrap_or(false),
                     provenance: invocation
                         .payload
                         .get("provenance")
@@ -243,7 +238,6 @@ fn derive_schema() -> Value {
             "budget": {"type": "object"},
             "expiresAt": {"type": "string"},
             "canDelegate": {"type": "boolean"},
-            "approvalRequired": {"type": "boolean"},
             "provenance": {"type": "object"}
         }
     })

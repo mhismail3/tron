@@ -12,12 +12,6 @@ impl EngineHostHandle {
         if invocation.function_id.as_str() == INVOKE_FUNCTION {
             return self.invoke_delegated_unlocked(invocation).await;
         }
-        if invocation.function_id.as_str() == APPROVAL_REQUEST_FUNCTION {
-            return self.invoke_approval_request_unlocked(invocation).await;
-        }
-        if invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
-            return self.invoke_approval_resolve_unlocked(invocation).await;
-        }
         if invocation.function_id.as_str() == primitives::ui::SUBMIT_ACTION_FUNCTION {
             return self.invoke_ui_submit_action_unlocked(invocation).await;
         }
@@ -50,8 +44,6 @@ impl EngineHostHandle {
         invocation: Invocation,
     ) -> QueueTargetInvocation {
         if invocation.function_id.as_str() == INVOKE_FUNCTION
-            || invocation.function_id.as_str() == APPROVAL_REQUEST_FUNCTION
-            || invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION
             || invocation.function_id.as_str() == primitives::ui::SUBMIT_ACTION_FUNCTION
             || invocation.function_id.namespace() == ENGINE_WORKER_ID
             || is_host_dispatched_primitive_function(&invocation.function_id)
@@ -101,62 +93,6 @@ impl EngineHostHandle {
         let prepared = {
             let mut host = self.inner.lock().await;
             host.catalog.prepare_trigger_target_invocation(invocation)
-        };
-        let prepared = match prepared {
-            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
-            PreparedSyncInvocationDecision::Finished(result) => return *result,
-        };
-        self.execute_prepared_regular(*prepared).await
-    }
-
-    async fn invoke_approval_request_unlocked(&self, invocation: Invocation) -> InvocationResult {
-        let prepared = {
-            let mut host = self.inner.lock().await;
-            host.catalog.prepare_sync_invocation(invocation)
-        };
-        let prepared = match prepared {
-            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
-            PreparedSyncInvocationDecision::Finished(result) => return *result,
-        };
-        let request = match approval_request_from_invocation(&prepared.invocation) {
-            Ok(request) => request,
-            Err(error) => {
-                return self
-                    .finish_prepared_approval_request(*prepared, Err(error))
-                    .await;
-            }
-        };
-        let result = self
-            .request_approval(request)
-            .await
-            .map(|record| json!({ "approval": record }));
-        self.finish_prepared_approval_request(*prepared, result)
-            .await
-    }
-
-    async fn finish_prepared_approval_request(
-        &self,
-        prepared: PreparedSyncInvocation,
-        result: Result<Value>,
-    ) -> InvocationResult {
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .finish_prepared_sync_invocation(prepared, result)
-    }
-
-    async fn invoke_approved_child_unlocked(&self, invocation: Invocation) -> InvocationResult {
-        if is_host_dispatched_primitive_function(&invocation.function_id) {
-            return self
-                .inner
-                .lock()
-                .await
-                .invoke_sync_host_dispatched_primitive(invocation);
-        }
-        let prepared = {
-            let mut host = self.inner.lock().await;
-            host.catalog.prepare_sync_invocation(invocation)
         };
         let prepared = match prepared {
             PreparedSyncInvocationDecision::Execute(prepared) => prepared,
@@ -329,10 +265,6 @@ impl EngineHostHandle {
     }
 
     /// Record an invocation that policy stopped before handler execution.
-    ///
-    /// Approval-required autonomous writes still need a durable target
-    /// invocation row so observability can show which canonical capability was
-    /// attempted, even though the domain handler never ran.
     pub async fn record_policy_stopped_invocation(
         &self,
         invocation: Invocation,
@@ -367,11 +299,7 @@ impl EngineHostHandle {
                 self.invoke_ui_submit_action_unlocked(*child).await
             }
             PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Execute(child)) => {
-                if child.invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
-                    self.execute_prepared_approval_resolve(*child).await
-                } else {
-                    self.execute_prepared_regular(*child).await
-                }
+                self.execute_prepared_regular(*child).await
             }
             PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Finished(result)) => {
                 *result
@@ -450,10 +378,7 @@ impl EngineHostHandle {
                 Ok(prepared) => prepared,
                 Err(result) => return result,
             };
-        let child = if child.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
-            let mut host = self.inner.lock().await;
-            host.catalog.prepare_sync_invocation(child)
-        } else if is_host_dispatched_primitive_function(&child.function_id) {
+        let child = if is_host_dispatched_primitive_function(&child.function_id) {
             PreparedSyncInvocationDecision::Finished(Box::new(
                 self.inner
                     .lock()
@@ -466,11 +391,7 @@ impl EngineHostHandle {
         };
         let child_result = match child {
             PreparedSyncInvocationDecision::Execute(child) => {
-                if child.invocation.function_id.as_str() == APPROVAL_RESOLVE_FUNCTION {
-                    self.execute_prepared_approval_resolve(*child).await
-                } else {
-                    self.execute_prepared_regular(*child).await
-                }
+                self.execute_prepared_regular(*child).await
             }
             PreparedSyncInvocationDecision::Finished(result) => *result,
         };
@@ -498,352 +419,4 @@ impl EngineHostHandle {
             compensation_contract,
         )
     }
-
-    async fn invoke_approval_resolve_unlocked(&self, invocation: Invocation) -> InvocationResult {
-        let prepared = {
-            let mut host = self.inner.lock().await;
-            host.catalog.prepare_sync_invocation(invocation)
-        };
-        let prepared = match prepared {
-            PreparedSyncInvocationDecision::Execute(prepared) => prepared,
-            PreparedSyncInvocationDecision::Finished(result) => return *result,
-        };
-        self.execute_prepared_approval_resolve(*prepared).await
-    }
-
-    /// Record an approval-required autonomous invocation as an audited
-    /// server-side decision, execute the preserved child invocation, and
-    /// publish only a resolved approval event.
-    pub async fn auto_approve_and_invoke(
-        &self,
-        mut request: EngineApprovalRequest,
-    ) -> Result<EngineAutoApprovalOutcome> {
-        if request.target_metadata.is_none() {
-            request.target_metadata = self
-                .inner
-                .lock()
-                .await
-                .catalog
-                .function(&request.function_id)
-                .map(EngineApprovalTargetMetadata::from_function);
-        }
-        let approval_store = self.inner.lock().await.primitives.approvals.clone();
-        let outcome = approval_store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
-            .request(request)?;
-        let created = outcome.created;
-        let mut resolved = outcome.record;
-        if let Some(child_result) = self.terminal_auto_approval_replay_result(&resolved).await {
-            return Ok(EngineAutoApprovalOutcome {
-                record: resolved,
-                child_result,
-                created,
-            });
-        }
-        if resolved.status == ApprovalStatus::Pending {
-            resolved = approval_store
-                .lock()
-                .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))
-                .and_then(|mut approvals| {
-                    approvals.resolve(
-                        &resolved.approval_id,
-                        ApprovalDecision::Approve,
-                        actor_id("system")?,
-                    )
-                })?;
-        }
-
-        let mut child_context = resolved.causal_context();
-        child_context = child_context.with_scope("approval.auto_decision");
-        let child_invocation = Invocation::new_sync(
-            resolved.function_id.clone(),
-            resolved.payload.clone(),
-            child_context,
-        )
-        .with_delivery_mode(resolved.delivery_mode);
-        let child_result = self.invoke_approved_child_unlocked(child_invocation).await;
-        let record = approval_store
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))
-            .and_then(|mut approvals| approvals.complete(&resolved.approval_id, &child_result))?;
-
-        let _ = self
-            .publish_stream_event(PublishStreamEvent {
-                topic: "approvals".to_owned(),
-                payload: json!({
-                    "type": "approval.resolved",
-                    "approval": record.clone(),
-                    "child": invocation_result_value(&child_result),
-                    "autoDecision": true,
-                }),
-                visibility: record
-                    .session_id
-                    .as_ref()
-                    .map_or(VisibilityScope::System, |_| VisibilityScope::Session),
-                session_id: record.session_id.clone(),
-                workspace_id: record.workspace_id.clone(),
-                producer: APPROVAL_RESOLVE_FUNCTION.to_owned(),
-                trace_id: Some(record.trace_id.clone()),
-                parent_invocation_id: record.parent_invocation_id.clone(),
-            })
-            .await;
-
-        Ok(EngineAutoApprovalOutcome {
-            record,
-            child_result,
-            created,
-        })
-    }
-
-    async fn terminal_auto_approval_replay_result(
-        &self,
-        record: &EngineApprovalRecord,
-    ) -> Option<InvocationResult> {
-        if !matches!(
-            record.status,
-            ApprovalStatus::Executed | ApprovalStatus::Failed | ApprovalStatus::Denied
-        ) {
-            return None;
-        }
-
-        let mut context = record.causal_context();
-        context = context.with_scope("approval.auto_decision");
-        let invocation =
-            Invocation::new_sync(record.function_id.clone(), record.payload.clone(), context)
-                .with_delivery_mode(record.delivery_mode);
-        let (worker_id, function_revision, catalog_revision, replayed_from) =
-            self.terminal_auto_approval_replay_metadata(record).await;
-        let (value, error) = match record.status {
-            ApprovalStatus::Executed => (Some(record.result.clone().unwrap_or(Value::Null)), None),
-            ApprovalStatus::Failed => (
-                None,
-                Some(record.error.as_ref().map_or_else(
-                    || EngineError::DomainFailure {
-                        domain: "approval".to_owned(),
-                        code: "APPROVAL_FAILED".to_owned(),
-                        message: format!(
-                            "auto-approved invocation of {} previously failed",
-                            record.function_id
-                        ),
-                        details: Some(terminal_approval_replay_details(record)),
-                    },
-                    StoredEngineError::to_replay_error,
-                )),
-            ),
-            ApprovalStatus::Denied => (
-                None,
-                Some(EngineError::DomainFailure {
-                    domain: "approval".to_owned(),
-                    code: "APPROVAL_DENIED".to_owned(),
-                    message: format!("approval denied for {}", record.function_id),
-                    details: Some(terminal_approval_replay_details(record)),
-                }),
-            ),
-            ApprovalStatus::Pending | ApprovalStatus::Approved => return None,
-        };
-
-        Some(InvocationResult {
-            invocation_id: invocation.id,
-            function_id: record.function_id.clone(),
-            worker_id,
-            function_revision,
-            catalog_revision,
-            trace_id: invocation.causal_context.trace_id,
-            value,
-            error,
-            replayed_from,
-        })
-    }
-
-    async fn terminal_auto_approval_replay_metadata(
-        &self,
-        record: &EngineApprovalRecord,
-    ) -> (
-        WorkerId,
-        FunctionRevision,
-        CatalogRevision,
-        Option<InvocationId>,
-    ) {
-        let host = self.inner.lock().await;
-        if let Some(invocation) = host
-            .catalog
-            .invocations()
-            .iter()
-            .rev()
-            .find(|invocation| approval_child_invocation_matches(record, invocation))
-        {
-            return (
-                invocation.worker_id.clone(),
-                invocation.function_revision,
-                invocation.catalog_revision,
-                Some(
-                    invocation
-                        .replayed_from
-                        .clone()
-                        .unwrap_or_else(|| invocation.invocation_id.clone()),
-                ),
-            );
-        }
-        if let Some(function) = host.catalog.function(&record.function_id) {
-            return (
-                function.owner_worker.clone(),
-                function.revision,
-                host.catalog.revision(),
-                None,
-            );
-        }
-        (
-            WorkerId::new(record.function_id.namespace())
-                .unwrap_or_else(|_| WorkerId::new("engine").expect("valid static worker id")),
-            FunctionRevision(0),
-            CatalogRevision(0),
-            None,
-        )
-    }
-
-    async fn execute_prepared_approval_resolve(
-        &self,
-        prepared: PreparedSyncInvocation,
-    ) -> InvocationResult {
-        let approval_id = match required_str(&prepared.invocation.payload, "approvalId") {
-            Ok(value) => value.to_owned(),
-            Err(error) => {
-                return self
-                    .finish_prepared_approval_resolve(prepared, Err(error))
-                    .await;
-            }
-        };
-        let decision = match required_str(&prepared.invocation.payload, "decision")
-            .and_then(parse_approval_decision)
-        {
-            Ok(decision) => decision,
-            Err(error) => {
-                return self
-                    .finish_prepared_approval_resolve(prepared, Err(error))
-                    .await;
-            }
-        };
-        if !can_resolve_approval(&prepared.invocation.causal_context.actor_kind) {
-            return self
-                .finish_prepared_approval_resolve(
-                    prepared,
-                    Err(EngineError::PolicyViolation(
-                        "approval resolution requires an admin, system, or user-authorized actor"
-                            .to_owned(),
-                    )),
-                )
-                .await;
-        }
-        let resolver = prepared.invocation.causal_context.actor_id.clone();
-        let approval_store = self.inner.lock().await.primitives.approvals.clone();
-        let mut resolved = match {
-            approval_store
-                .lock()
-                .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))
-                .and_then(|mut approvals| approvals.resolve(&approval_id, decision, resolver))
-        } {
-            Ok(record) => record,
-            Err(error) => {
-                return self
-                    .finish_prepared_approval_resolve(prepared, Err(error))
-                    .await;
-            }
-        };
-
-        let child_result = if decision == ApprovalDecision::Approve
-            && resolved.status == ApprovalStatus::Approved
-        {
-            let child_invocation = Invocation::new_sync(
-                resolved.function_id.clone(),
-                resolved.payload.clone(),
-                resolved.causal_context(),
-            )
-            .with_delivery_mode(resolved.delivery_mode);
-            let result = self.invoke_approved_child_unlocked(child_invocation).await;
-            let completed = approval_store
-                .lock()
-                .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))
-                .and_then(|mut approvals| approvals.complete(&approval_id, &result));
-            match completed {
-                Ok(record) => {
-                    resolved = record;
-                    Some(result)
-                }
-                Err(error) => {
-                    return self
-                        .finish_prepared_approval_resolve(prepared, Err(error))
-                        .await;
-                }
-            }
-        } else {
-            None
-        };
-
-        let child_value = child_result.as_ref().map(invocation_result_value);
-        let _ = self
-            .publish_stream_event(PublishStreamEvent {
-                topic: "approvals".to_owned(),
-                payload: json!({
-                    "type": "approval.resolved",
-                    "approval": resolved,
-                    "child": child_value,
-                }),
-                visibility: resolved
-                    .session_id
-                    .as_ref()
-                    .map_or(VisibilityScope::System, |_| VisibilityScope::Session),
-                session_id: resolved.session_id.clone(),
-                workspace_id: resolved.workspace_id.clone(),
-                producer: APPROVAL_RESOLVE_FUNCTION.to_owned(),
-                trace_id: Some(prepared.invocation.causal_context.trace_id.clone()),
-                parent_invocation_id: Some(prepared.invocation.id.clone()),
-            })
-            .await;
-
-        self.finish_prepared_approval_resolve(
-            prepared,
-            Ok(json!({
-                "approval": resolved,
-                "child": child_result.map(|result| invocation_result_value(&result)),
-            })),
-        )
-        .await
-    }
-
-    async fn finish_prepared_approval_resolve(
-        &self,
-        prepared: PreparedSyncInvocation,
-        result: Result<Value>,
-    ) -> InvocationResult {
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .finish_prepared_sync_invocation(prepared, result)
-    }
-}
-
-fn terminal_approval_replay_details(record: &EngineApprovalRecord) -> Value {
-    json!({
-        "approvalId": record.approval_id,
-        "status": record.status,
-        "functionId": record.function_id.as_str(),
-        "traceId": record.trace_id.as_str(),
-    })
-}
-
-fn approval_child_invocation_matches(
-    approval: &EngineApprovalRecord,
-    invocation: &crate::engine::invocation::InvocationRecord,
-) -> bool {
-    invocation.function_id == approval.function_id
-        && invocation.trace_id == approval.trace_id
-        && invocation.session_id == approval.session_id
-        && invocation.workspace_id == approval.workspace_id
-        && invocation.idempotency_key == approval.idempotency_key
-        && invocation
-            .authority_scopes
-            .iter()
-            .any(|scope| scope == "approval.granted")
 }

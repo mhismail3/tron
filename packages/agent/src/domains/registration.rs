@@ -85,12 +85,7 @@ fn validate_domain_stream_topics(module: &DomainWorkerModule) -> EngineResult<()
         }
         if matches!(
             *topic,
-            "catalog.changes"
-                | "queue.lifecycle"
-                | "resource.leases"
-                | "approval.pending"
-                | "approval.resolved"
-                | "compensation.records"
+            "catalog.changes" | "queue.lifecycle" | "resource.leases" | "compensation.records"
         ) {
             return Err(EngineError::PolicyViolation(format!(
                 "domain worker {} cannot claim engine-owned stream topic {topic}",

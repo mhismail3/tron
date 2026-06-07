@@ -868,21 +868,6 @@ async fn sqlite_primitive_stores_persist_stream_state_and_queue_records() {
         .as_str()
         .unwrap()
         .to_owned();
-    let approval = handle
-        .invoke(host_invocation(
-            "approval::request",
-            json!({
-                "functionId": "state::set",
-                "payload": {"scope": "system", "namespace": "agent", "key": "boot", "value": {"ready": false}}
-            }),
-            mutating_causal("sqlite-approval").with_scope("approval.request"),
-        ))
-        .await;
-    assert_eq!(approval.error, None);
-    let approval_id = approval.value.as_ref().unwrap()["approval"]["approvalId"]
-        .as_str()
-        .unwrap()
-        .to_owned();
     drop(handle);
 
     let reopened = EngineHostHandle::open_sqlite(&path).unwrap();
@@ -923,20 +908,5 @@ async fn sqlite_primitive_stores_persist_stream_state_and_queue_records() {
     assert_eq!(
         queue_get.value.as_ref().unwrap()["item"]["queue"],
         "durable"
-    );
-    let approval_get = reopened
-        .invoke(host_invocation(
-            "approval::get",
-            json!({"approvalId": approval_id}),
-            causal()
-                .with_scope("approval.read")
-                .with_session_id("session-a")
-                .with_workspace_id("workspace-a"),
-        ))
-        .await;
-    assert_eq!(approval_get.error, None);
-    assert_eq!(
-        approval_get.value.as_ref().unwrap()["approval"]["status"],
-        "pending"
     );
 }

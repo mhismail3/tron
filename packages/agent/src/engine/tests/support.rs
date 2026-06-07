@@ -1,7 +1,7 @@
 //! Shared fixtures for engine test modules.
 
 pub(in crate::engine::tests) use std::sync::{
-    Arc, MutexGuard,
+    Arc,
     atomic::{AtomicUsize, Ordering},
 };
 
@@ -35,12 +35,12 @@ pub(in crate::engine::tests) use crate::engine::types::{
     VisibilityScope, WorkerDefinition, WorkerKind,
 };
 pub(in crate::engine::tests) use crate::engine::{
-    AcquireResourceLease, AgentCapabilityClient, ApprovalStatus, CatalogWatchRequest,
-    EngineExternalWorkerRuntime, EngineHost, EngineHostHandle, EngineQueueDrainer,
-    EngineResourceLeaseStatus, EngineTriggerRuntime, PublishStreamEvent, RegisterFunction,
-    RegisterTrigger, SqliteEngineStreamStore, StreamActorScope, StreamCursor,
-    TriggerDispatchRequest, WorkerDisconnect, WorkerHello, WorkerInvocationResult, WorkerInvoke,
-    WorkerLifecycleState, WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish,
+    AcquireResourceLease, CatalogWatchRequest, EngineExternalWorkerRuntime, EngineHost,
+    EngineHostHandle, EngineQueueDrainer, EngineResourceLeaseStatus, EngineTriggerRuntime,
+    PublishStreamEvent, RegisterFunction, RegisterTrigger, SqliteEngineStreamStore,
+    StreamActorScope, StreamCursor, TriggerDispatchRequest, WorkerDisconnect, WorkerHello,
+    WorkerInvocationResult, WorkerInvoke, WorkerLifecycleState, WorkerProtocolMessage,
+    WorkerRegistrationMode, WorkerStreamPublish,
 };
 pub(in crate::engine::tests) use crate::engine::{external, host, ids, queue};
 
@@ -382,28 +382,6 @@ pub(in crate::engine::tests) fn host_invocation(
     Invocation::new_sync(fid(function_id), payload, context)
 }
 
-pub(in crate::engine::tests) struct SettingsModeGuard {
-    _guard: MutexGuard<'static, ()>,
-}
-
-impl Drop for SettingsModeGuard {
-    fn drop(&mut self) {
-        crate::domains::settings::reset_settings();
-    }
-}
-
-pub(in crate::engine::tests) fn set_agent_approval_prompt_mode(
-    mode: crate::domains::settings::AutonomyApprovalPromptMode,
-) -> SettingsModeGuard {
-    let guard = crate::domains::settings::test_settings_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let mut settings = crate::domains::settings::TronSettings::default();
-    settings.agent.autonomy.approval_prompt_mode = mode;
-    crate::domains::settings::init_settings(settings);
-    SettingsModeGuard { _guard: guard }
-}
-
 pub(in crate::engine::tests) fn valid_ui_surface(
     action_target: &str,
     target_revision: u64,
@@ -446,7 +424,7 @@ pub(in crate::engine::tests) fn valid_ui_surface(
                 "idempotencyKeyTemplate": "${submission.idempotencyKey}",
                 "requiredGrant": "grant",
                 "requiredRisk": "medium",
-                "approvalPolicy": {"required": false},
+                "authorityPolicy": {"requiredScopes": []},
                 "targetRevision": target_revision,
                 "expiresAt": "2100-01-01T00:00:00Z"
             }

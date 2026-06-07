@@ -75,7 +75,6 @@ pub(super) fn row_to_grant(row: &Row<'_>) -> rusqlite::Result<EngineGrant> {
             .map(|value| parse_datetime(&value, "expires_at"))
             .transpose()?,
         can_delegate: row.get::<_, i64>("can_delegate")? != 0,
-        approval_required: row.get::<_, i64>("approval_required")? != 0,
         provenance: json_value(row, "provenance_json")?,
         trace_id: TraceId::new(row.get::<_, String>("trace_id")?).map_err(sql_from_engine)?,
         revision: row.get::<_, i64>("revision")? as u64,

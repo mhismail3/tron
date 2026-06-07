@@ -1,7 +1,7 @@
 //! Host-dispatched primitive runtime implementation.
 //!
-//! Primitive functions need a narrow view of catalog, resources, approvals,
-//! streams, queues, grants, storage, and observability. This file owns the
+//! Primitive functions need a narrow view of catalog, resources, streams,
+//! queues, grants, and storage. This file owns the
 //! `PrimitiveRuntimeHost` implementation so the host root can focus on lock
 //! choreography and invocation flow.
 
@@ -54,20 +54,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
 
     fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
         self.catalog.ledger_catalog_changes()
-    }
-
-    fn approval_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineApprovalRecord>> {
-        self.primitives
-            .approvals
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
-            .list(None, None, 500)
-            .map(|records| {
-                records
-                    .into_iter()
-                    .filter(|record| record.trace_id.as_str() == trace_id)
-                    .collect()
-            })
     }
 
     fn stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineStreamEvent>> {
@@ -212,41 +198,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             .list(queue, limit)
     }
 
-    fn approval_records(
-        &self,
-        status: Option<ApprovalStatus>,
-        session_id: Option<&str>,
-        limit: usize,
-    ) -> Result<Vec<EngineApprovalRecord>> {
-        self.primitives
-            .approvals
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("approval store lock poisoned".to_owned()))?
-            .list(status, session_id, limit)
-    }
-
-    fn worker_count(&self) -> usize {
-        self.catalog.workers().len()
-    }
-
-    fn function_count(&self) -> usize {
-        self.catalog
-            .discover_functions(&FunctionQuery::default())
-            .len()
-    }
-
-    fn trigger_count(&self) -> usize {
-        self.catalog.triggers().len()
-    }
-
-    fn trigger_type_count(&self) -> usize {
-        self.catalog.trigger_types().len()
-    }
-
-    fn catalog_change_count(&self) -> usize {
-        self.catalog.changes().len()
-    }
-
     fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport> {
         self.storage_runtime()?.stats().map_err(storage_error)
     }
@@ -272,41 +223,5 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
         self.storage_runtime()?
             .retention_run(dry_run, verbose_retention_days)
             .map_err(storage_error)
-    }
-
-    fn stored_log_values(
-        &self,
-        query: &LogQueryOptions,
-        include_full_payloads: bool,
-    ) -> Result<Vec<Value>> {
-        let Some(path) = &self.storage_path else {
-            return Ok(Vec::new());
-        };
-        let runtime = crate::shared::storage::StorageRuntime::new(path.clone());
-        let conn = runtime.open_connection().map_err(storage_error)?;
-        let store = LogStore::new(&conn);
-        let mut values = Vec::new();
-        for entry in store.query(query) {
-            let mut value = json!(entry);
-            if include_full_payloads
-                && let Some(data) = value.get("data").cloned()
-                && data
-                    .get(crate::shared::storage::PAYLOAD_REF_ENVELOPE_KEY)
-                    .is_some()
-            {
-                let stored = serde_json::to_string(&data).map_err(|error| {
-                    EngineError::HandlerFailed(format!(
-                        "storage log payload expansion failed: {error}"
-                    ))
-                })?;
-                if let Ok(expanded) =
-                    crate::shared::storage::resolve_stored_json_value(&conn, &stored)
-                {
-                    value["data"] = expanded;
-                }
-            }
-            values.push(value);
-        }
-        Ok(values)
     }
 }

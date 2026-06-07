@@ -239,11 +239,6 @@ fn transport_actor_for_method(method: &str, payload: &Value) -> (ActorKind, &'st
         return (ActorKind::Agent, "engine-agent");
     }
     if method == "invoke"
-        && extract_string(payload, "functionId").as_deref() == Some("approval::resolve")
-    {
-        return (ActorKind::User, "engine-user");
-    }
-    if method == "invoke"
         && extract_string(payload, "functionId").as_deref() == Some("agent::submit_answers")
     {
         return (ActorKind::User, "engine-user");
@@ -288,7 +283,6 @@ fn target_authority_scopes_for_engine_invoke(payload: &Value) -> Vec<String> {
             "engine.promote.workspace".to_owned(),
             "engine.promote.system".to_owned(),
         ],
-        "approval" => vec!["approval.read".to_owned(), "approval.resolve".to_owned()],
         other => vec![format!("{other}.read"), format!("{other}.write")],
     }
 }
@@ -344,7 +338,7 @@ mod tests {
             public_method: "invoke".to_owned(),
             params_payload: json!({
                 "functionId": function_id,
-                "payload": {"approvalId": "approval-1", "decision": "approve"},
+                "payload": {"targetId": "target-1"},
                 "idempotencyKey": "idem-1",
                 "context": {"sessionId": "session-1"}
             }),
@@ -355,21 +349,6 @@ mod tests {
         })
         .expect("transport envelope builds")
         .expect("invoke maps to engine transport")
-    }
-
-    #[test]
-    fn approval_resolve_invoke_is_a_user_authorized_engine_action() {
-        let envelope = build_invoke("approval::resolve");
-
-        assert_eq!(envelope.causal_context.actor_kind, ActorKind::User);
-        assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-user");
-        assert!(
-            envelope
-                .causal_context
-                .authority_scopes
-                .iter()
-                .any(|scope| scope == "approval.resolve")
-        );
     }
 
     #[test]

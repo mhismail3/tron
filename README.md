@@ -537,7 +537,7 @@ TronAgent (run loop)  ->  EventEmitter  ->  Runtime event bus
 EngineStreamEventPump  <------------------------------------------+
     |
     v
-Engine stream (`events.session`, `approvals`, `catalog`, `jobs`, ...)
+Engine stream (`events.session`, `catalog`, `jobs`, ...)
     |
     v
 /engine subscriptions -> Per-connection WebSocket writers
@@ -557,33 +557,14 @@ child events arrive in one server-authored timeline. `tree::get_ancestors`
 returns resolved wire `events` for the same reason: clients inspect lineage
 without maintaining a second tree-only event shape.
 
-High-risk engine capabilities publish `approval.pending` records to the
-`approvals` stream only after the target payload and authority preflight pass.
-Approval records snapshot the target function's server catalog metadata in
-`targetMetadata`: effect class, risk level, required authority, idempotency
-contract, resource lease requirement, and compensation contract. Thin clients
-render those records and resolve them by invoking the canonical
-`approval::resolve` primitive; the decision, resumed child invocation, ledger
-entry, and `approval.resolved` stream event all remain engine-owned. If
-`approval::resolve` is absent or not routable, the pending record remains
-pending and the original high-risk child is not executed. Agents can not see or
-invoke `approval::*` functions in their live catalog. Approval-required
-capability invocations keep the originating turn open until the approval record
-is resolved, denied, failed, or timed out, then return that outcome to the model
-as the original `execute` result; executed approvals include explicit
-`approvalRequired`/`approvalExecuted` details and the resumed child invocation id
-so the agent can report lineage without consulting a separate approval surface.
-Approval idempotency uses the same causal scope as the engine ledger: target
-function, session, workspace, and caller key. A replay inside that scope returns
-the original approval record, while the same model-chosen key in another session
-does not collide with unrelated approval work.
-Broad first-party capabilities may declare a
-conditional approval contract: for example, `process::run` allows read-only
-checks such as `date`, `pwd`, `test -f`, `sed -n` printing, `git status`,
-`git log`, and test/build commands without a prompt, while privileged,
-destructive, package-installing, source-control mutating, `sed -i`/write-script,
-or file-redirection shell commands require the sandbox materialization request
-shape and may pause for user approval before execution.
+Agent authority is declared before the loop starts through the causal authority
+envelope and the one model-visible `execute` primitive. The engine does not
+create a runtime permission prompt or resumable permission ledger for autonomous work:
+schema, idempotency, resource leases, compensation contracts, allowed scopes,
+and the selected primitive operation either validate before execution or return
+a normal policy error. The trace record for that `execute` call captures the
+authority grant id, scopes, provider/model metadata, request/result hashes, and
+file/VCS attribution so the agent can inspect why an action did or did not run.
 
 The `EngineStreamEventPump` also routes browser CDP frames and `Display` capability frames when iOS clients are subscribed.
 
@@ -821,7 +802,7 @@ when available, and file attribution/content hashes after completion.
 | `engine_stream_events` | Engine stream publication history with cursor, topic, visibility, trace, and compact payload |
 | `engine_catalog_changes` | Live catalog audit trail for worker/function/trigger registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
-| `engine_state_entries`, `engine_queue_items`, `engine_approvals`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
+| `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
 | `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
@@ -943,7 +924,7 @@ packages/mac-app/Sources/
 
 1. **Welcome** — introduces Tron.
 2. **Tailscale prerequisite** — detects `/Applications/Tailscale.app` or the Tailscale CLI, then reads `tailscale status --peers=false --json` for a running backend and 100.x IPv4.
-3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system::ping` answers through `/engine` `invoke`. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles `requiresApproval` by opening Login Items settings, and polls `system::ping` after the initial `hello.ok` frame.
+3. **Install** — detects whether the bundled Login Item is registered, but treats that as registered-not-ready until the user presses Install/Start and `system::ping` answers through `/engine` `invoke`. It validates that release builds are running from `/Applications/Tron.app`, validates the helper/plist/signature, registers or refreshes `com.tron.server` through `SMAppService`, handles macOS Login Items authorization by opening Settings when needed, and polls `system::ping` after the initial `hello.ok` frame.
 4. **Permissions** — Full Disk Access, Screen Recording, and Accessibility. Deep-links to System Settings, labels the exact app entry to enable for each permission, polls wrapper-owned TCC state, starts a short-lived fast-probe watcher after wizard-opened Settings panes, and keeps Re-check as a non-restarting probe.
 5. **Transcription** — opt-in step for local voice transcription. The step copies `worker.py` and `requirements.txt` from the signed app bundle into `~/.tron/internal/transcription/` so the setting can be enabled later. Enabling writes `server.transcription.enabled = true`, restarts the helper once, and lets the Parakeet model download into `~/.tron/internal/transcription/models/hf/` when the sidecar starts. Skipping writes `enabled = false` and does not restart the server. Voice-note saves require this server transcription backend; if it is disabled or unloaded, the engine returns a visible error before writing any voice-note resources.
 6. **iOS Beta** — shows the public Tron TestFlight invite (`https://testflight.apple.com/join/xbuX1Grx`) as a QR code for the iPhone camera, with copy/open alternatives. TestFlight then owns beta availability and update selection.
@@ -1076,7 +1057,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- vault/                     Skill-owned local fast secret storage
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
-    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, approvals, leases, compensation, workers
+    |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, leases, compensation, workers
     |   +-- tron.sqlite.lock       OS-level flock sidecar; one Tron process owns it while running
     |   +-- archive/               One-way archive of retired or incompatible storage generations
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output
