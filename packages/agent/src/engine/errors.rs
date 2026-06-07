@@ -51,17 +51,6 @@ pub enum EngineError {
         function_id: String,
     },
 
-    /// A function revision expectation was stale.
-    #[error("function {function_id} revision mismatch: expected {expected}, actual {actual}")]
-    StaleFunctionRevision {
-        /// Function id.
-        function_id: String,
-        /// Expected revision.
-        expected: u64,
-        /// Actual revision.
-        actual: u64,
-    },
-
     /// A delivery mode is not implemented for execution in Phase 1.
     #[error("delivery mode {mode} is not executable in phase 1")]
     UnsupportedDeliveryMode {

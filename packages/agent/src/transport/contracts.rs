@@ -46,7 +46,7 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
             EffectClass::DelegatedInvocation,
             RiskLevel::Low,
         )
-        .request_schema(json!({"additionalProperties":true,"properties":{"context":{"additionalProperties":true,"type":"object"},"expectedRevision":{"type":"integer"},"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"payload":{"type":"object"}},"required":["functionId"],"type":"object"}))
+        .request_schema(json!({"additionalProperties":true,"properties":{"context":{"additionalProperties":true,"type":"object"},"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"payload":{"type":"object"}},"required":["functionId"],"type":"object"}))
         .response_schema(json!({"additionalProperties":true,"properties":{"invocationId":{"type":"string"},"result":{},"status":{"type":"string"}},"required":["status"],"type":"object"}))
         .build()?,
         public_spec(
@@ -56,7 +56,7 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Medium,
         )
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
-        .request_schema(json!({"additionalProperties":false,"properties":{"expectedFunctionRevision":{"type":"integer"},"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"targetVisibility":{"type":"string"},"workspaceId":{"type":"string"}},"required":["functionId","targetVisibility","expectedFunctionRevision","idempotencyKey"],"type":"object"}))
+        .request_schema(json!({"additionalProperties":false,"properties":{"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"targetVisibility":{"type":"string"},"workspaceId":{"type":"string"}},"required":["functionId","targetVisibility","idempotencyKey"],"type":"object"}))
         .response_schema(json!({"additionalProperties":false,"properties":{"catalogRevision":{"type":"integer"},"functionId":{"type":"string"},"revision":{"type":"integer"},"visibility":{"enum":["workspace","system"],"type":"string"}},"required":["functionId","revision","visibility","catalogRevision"],"type":"object"}))
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .compensation(crate::engine::CompensationContract::new(

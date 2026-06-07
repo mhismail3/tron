@@ -331,8 +331,7 @@ async fn execute_capability_primitive_via_engine(
         }
     }
     let function_id = target.function_id.clone();
-    let invocation = Invocation::new_sync(function_id.clone(), effective_args, causal_context)
-        .expecting_revision(target.function.revision);
+    let invocation = Invocation::new_sync(function_id.clone(), effective_args, causal_context);
     let result = engine_host.invoke(invocation).await;
 
     if let Some(error) = result.error {

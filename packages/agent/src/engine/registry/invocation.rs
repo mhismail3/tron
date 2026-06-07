@@ -115,27 +115,6 @@ impl LiveCatalog {
 
         invocation.causal_context.catalog_revision = self.revision;
 
-        if let Some(expected) = invocation.expected_function_revision {
-            if expected != function.revision {
-                let result = InvocationResult::error(
-                    &invocation,
-                    function.owner_worker.clone(),
-                    function.revision,
-                    self.revision,
-                    EngineError::StaleFunctionRevision {
-                        function_id: invocation.function_id.to_string(),
-                        expected: expected.0,
-                        actual: function.revision.0,
-                    },
-                );
-                return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
-                    &invocation,
-                    result,
-                    None,
-                )));
-            }
-        }
-
         if let Err(err) = validate_policy(&function, &invocation)
             .and_then(|_| self.validate_invocation_grant(&function, &invocation))
         {

@@ -322,9 +322,6 @@ impl EngineWsSession {
             "payload".to_owned(),
             message.payload.unwrap_or_else(|| json!({})),
         );
-        if let Some(revision) = message.expected_revision {
-            payload.insert("expectedFunctionRevision".to_owned(), json!(revision));
-        }
         if let Some(key) = message.idempotency_key {
             payload.insert("idempotencyKey".to_owned(), Value::String(key));
         }
@@ -352,10 +349,6 @@ impl EngineWsSession {
         payload.insert(
             "targetVisibility".to_owned(),
             Value::String(message.target_visibility),
-        );
-        payload.insert(
-            "expectedFunctionRevision".to_owned(),
-            json!(message.expected_function_revision),
         );
         payload.insert(
             "idempotencyKey".to_owned(),

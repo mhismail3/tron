@@ -48,7 +48,6 @@ fn external_worker_protocol_roundtrips_local_session_default_messages() {
         trace_id: trace("worker-trace"),
         parent_invocation_id: None,
         trigger_id: Some(TriggerId::new("manual:local.echo").unwrap()),
-        expected_function_revision: None,
         idempotency_key: None,
         session_id: Some("session-a".to_owned()),
         workspace_id: None,

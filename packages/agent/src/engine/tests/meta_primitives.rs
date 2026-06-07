@@ -455,7 +455,7 @@ async fn engine_invoke_reports_target_errors_in_child_envelope() {
 }
 
 #[tokio::test]
-async fn engine_promote_requires_authority_revision_and_session_ownership() {
+async fn engine_promote_requires_authority_and_session_ownership() {
     let mut host = EngineHost::new().unwrap();
     host.catalog_mut()
         .register_worker(worker("w1", "alpha"), true)
@@ -509,8 +509,7 @@ async fn engine_promote_requires_authority_revision_and_session_ownership() {
                 "functionId": "alpha::session",
                 "ownerWorker": "w1",
                 "targetVisibility": "workspace",
-                "workspaceId": "workspace-a",
-                "expectedFunctionRevision": 1
+                "workspaceId": "workspace-a"
             }),
             CausalContext::new(
                 actor("agent"),
@@ -531,24 +530,6 @@ async fn engine_promote_requires_authority_revision_and_session_ownership() {
                 || message.contains("does not allow required authority")
     ));
 
-    let stale = host
-        .invoke(host_invocation(
-            "engine::promote",
-            json!({
-                "functionId": "alpha::session",
-                "ownerWorker": "w1",
-                "targetVisibility": "workspace",
-                "workspaceId": "workspace-a",
-                "expectedFunctionRevision": 2
-            }),
-            mutating_causal("promote-stale").with_scope("engine.promote.workspace"),
-        ))
-        .await;
-    assert!(matches!(
-        stale.error,
-        Some(EngineError::StaleFunctionRevision { .. })
-    ));
-
     let cross_session = host
         .invoke(host_invocation(
             "engine::promote",
@@ -556,8 +537,7 @@ async fn engine_promote_requires_authority_revision_and_session_ownership() {
                 "functionId": "alpha::session",
                 "ownerWorker": "w1",
                 "targetVisibility": "workspace",
-                "workspaceId": "workspace-a",
-                "expectedFunctionRevision": 1
+                "workspaceId": "workspace-a"
             }),
             causal()
                 .with_session_id("session-b")
@@ -578,8 +558,7 @@ async fn engine_promote_requires_authority_revision_and_session_ownership() {
                 "functionId": "alpha::session",
                 "ownerWorker": "w1",
                 "targetVisibility": "workspace",
-                "workspaceId": "workspace-a",
-                "expectedFunctionRevision": 1
+                "workspaceId": "workspace-a"
             }),
             mutating_causal("promote-ok").with_scope("engine.promote.workspace"),
         ))
@@ -601,8 +580,7 @@ async fn engine_promote_requires_authority_revision_and_session_ownership() {
                 "functionId": "alpha::session",
                 "ownerWorker": "w1",
                 "targetVisibility": "workspace",
-                "workspaceId": "workspace-a",
-                "expectedFunctionRevision": 1
+                "workspaceId": "workspace-a"
             }),
             mutating_causal("promote-ok").with_scope("engine.promote.workspace"),
         ))
@@ -651,8 +629,7 @@ async fn engine_promote_conflicting_duplicate_key_does_not_mutate_new_target() {
                 "functionId": "alpha::one",
                 "ownerWorker": "w1",
                 "targetVisibility": "workspace",
-                "workspaceId": "workspace-a",
-                "expectedFunctionRevision": 1
+                "workspaceId": "workspace-a"
             }),
             mutating_causal("promote-shared-key").with_scope("engine.promote.workspace"),
         ))
@@ -666,8 +643,7 @@ async fn engine_promote_conflicting_duplicate_key_does_not_mutate_new_target() {
                 "functionId": "alpha::two",
                 "ownerWorker": "w1",
                 "targetVisibility": "workspace",
-                "workspaceId": "workspace-a",
-                "expectedFunctionRevision": 1
+                "workspaceId": "workspace-a"
             }),
             mutating_causal("promote-shared-key").with_scope("engine.promote.workspace"),
         ))

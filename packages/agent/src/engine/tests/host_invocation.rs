@@ -6,11 +6,10 @@ async fn sync_invocation_succeeds_and_records_revisions() {
     catalog
         .register_worker(worker("w1", "alpha"), true)
         .unwrap();
-    let function_revision = catalog
+    catalog
         .register_function(read_function("alpha::read", "w1"), Some(handler()), true)
         .unwrap();
-    let invocation = Invocation::new_sync(fid("alpha::read"), json!({"x": 1}), causal())
-        .expecting_revision(function_revision);
+    let invocation = Invocation::new_sync(fid("alpha::read"), json!({"x": 1}), causal());
 
     let result = catalog.invoke_sync(invocation).await;
     assert!(result.error.is_none());
@@ -314,21 +313,6 @@ async fn invocation_returns_structured_errors() {
         missing.error,
         Some(EngineError::NotFound {
             kind: "function",
-            ..
-        })
-    ));
-
-    let stale = catalog
-        .invoke_sync(
-            Invocation::new_sync(fid("alpha::read"), json!({}), causal())
-                .expecting_revision(FunctionRevision(99)),
-        )
-        .await;
-    assert!(matches!(
-        stale.error,
-        Some(EngineError::StaleFunctionRevision {
-            expected: 99,
-            actual: 1,
             ..
         })
     ));

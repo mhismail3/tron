@@ -65,19 +65,6 @@ impl StoredEngineError {
                     "functionId": function_id,
                 }),
             },
-            EngineError::StaleFunctionRevision {
-                function_id,
-                expected,
-                actual,
-            } => Self {
-                kind: "stale_function_revision".to_owned(),
-                message: error.to_string(),
-                details: serde_json::json!({
-                    "functionId": function_id,
-                    "expected": expected,
-                    "actual": actual,
-                }),
-            },
             EngineError::UnsupportedDeliveryMode { mode } => Self {
                 kind: "unsupported_delivery_mode".to_owned(),
                 message: error.to_string(),

@@ -213,7 +213,6 @@ mod tests {
             trace_id: TraceId::new("rwo-n16-trace").unwrap(),
             parent_invocation_id: None,
             trigger_id: None,
-            expected_function_revision: None,
             idempotency_key: Some("rwo-n16-target".to_owned()),
             session_id: Some("session-rwo-n16".to_owned()),
             workspace_id: None,

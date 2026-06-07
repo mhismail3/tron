@@ -165,8 +165,6 @@ pub struct Invocation {
     pub id: InvocationId,
     /// Target function id.
     pub function_id: FunctionId,
-    /// Optional expected function revision.
-    pub expected_function_revision: Option<FunctionRevision>,
     /// Delivery mode.
     pub delivery_mode: DeliveryMode,
     /// Payload.
@@ -186,18 +184,10 @@ impl Invocation {
         Self {
             id: InvocationId::generate(),
             function_id,
-            expected_function_revision: None,
             delivery_mode: DeliveryMode::Sync,
             payload,
             causal_context,
         }
-    }
-
-    /// Set an expected function revision.
-    #[must_use]
-    pub fn expecting_revision(mut self, revision: FunctionRevision) -> Self {
-        self.expected_function_revision = Some(revision);
-        self
     }
 
     /// Set delivery mode.

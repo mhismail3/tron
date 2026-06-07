@@ -874,7 +874,6 @@ impl InProcessFunctionHandler for ExternalFunctionProxyHandler {
                 trace_id: invocation.causal_context.trace_id.clone(),
                 parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
                 trigger_id: invocation.causal_context.trigger_id.clone(),
-                expected_function_revision: invocation.expected_function_revision,
                 idempotency_key: invocation.causal_context.idempotency_key.clone(),
                 session_id: invocation.causal_context.session_id.clone(),
                 workspace_id: invocation.causal_context.workspace_id.clone(),

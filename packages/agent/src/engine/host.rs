@@ -505,15 +505,6 @@ impl EngineHost {
             })?;
 
         invocation.causal_context.catalog_revision = self.catalog.revision();
-        if let Some(expected) = invocation.expected_function_revision {
-            if expected != function.revision {
-                return Err(EngineError::StaleFunctionRevision {
-                    function_id: invocation.function_id.to_string(),
-                    expected: expected.0,
-                    actual: function.revision.0,
-                });
-            }
-        }
         policy::validate_invocation(&function, invocation)?;
         self.primitives
             .grants
@@ -750,10 +741,6 @@ impl EngineHost {
     fn meta_promote(&mut self, invocation: &Invocation) -> Result<Value> {
         let function_id = function_id(required_str(&invocation.payload, "functionId")?)?;
         let target = required_visibility(&invocation.payload, "targetVisibility")?;
-        let expected_revision = FunctionRevision(required_u64(
-            &invocation.payload,
-            "expectedFunctionRevision",
-        )?);
         let workspace_id = optional_string(invocation.payload.get("workspaceId"))?;
 
         let function = self
@@ -768,13 +755,6 @@ impl EngineHost {
             Some(owner) => worker_id(&owner)?,
             None => function.owner_worker.clone(),
         };
-        if function.revision != expected_revision {
-            return Err(EngineError::StaleFunctionRevision {
-                function_id: function_id.to_string(),
-                expected: expected_revision.0,
-                actual: function.revision.0,
-            });
-        }
         if function.visibility != VisibilityScope::Session {
             return Err(EngineError::InvalidVisibilityPromotion {
                 function_id: function_id.to_string(),

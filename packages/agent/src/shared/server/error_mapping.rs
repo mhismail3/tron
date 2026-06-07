@@ -50,21 +50,6 @@ pub(crate) fn engine_error_to_capability_error(error: EngineError) -> Capability
                 "reason": reason,
             })),
         },
-        EngineError::StaleFunctionRevision {
-            function_id,
-            expected,
-            actual,
-        } => CapabilityError::Custom {
-            code: codes::STALE_FUNCTION_REVISION.to_owned(),
-            message: format!(
-                "stale function revision for {function_id}: expected {expected}, actual {actual}"
-            ),
-            details: Some(serde_json::json!({
-                "functionId": function_id,
-                "expected": expected,
-                "actual": actual,
-            })),
-        },
         EngineError::OwnerMismatch {
             kind,
             id,
@@ -208,21 +193,6 @@ mod tests {
     use crate::domains::auth::provider_credentials::errors::AuthError as A;
     use crate::domains::session::event_store::errors::EventStoreError as E;
     use crate::engine::EngineError;
-
-    #[test]
-    fn engine_stale_function_revision_is_typed() {
-        let mapped = engine_error_to_capability_error(EngineError::StaleFunctionRevision {
-            function_id: "demo::run".to_owned(),
-            expected: 4,
-            actual: 5,
-        });
-        assert_eq!(mapped.code(), "STALE_FUNCTION_REVISION");
-        assert!(mapped.to_string().contains("stale function revision"));
-        let details = mapped.details().expect("stale revision details");
-        assert_eq!(details["functionId"], "demo::run");
-        assert_eq!(details["expected"], 4);
-        assert_eq!(details["actual"], 5);
-    }
 
     #[test]
     fn engine_owner_mismatch_is_typed() {

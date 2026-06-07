@@ -54,8 +54,6 @@ pub(super) struct InvokeMessage {
     #[serde(default)]
     pub(super) payload: Option<Value>,
     #[serde(default)]
-    pub(super) expected_revision: Option<u64>,
-    #[serde(default)]
     pub(super) idempotency_key: Option<String>,
     #[serde(default)]
     pub(super) context: Option<WireContext>,
@@ -69,7 +67,6 @@ pub(super) struct PromoteMessage {
     pub(super) id: Option<String>,
     pub(super) function_id: String,
     pub(super) target_visibility: String,
-    pub(super) expected_function_revision: u64,
     #[serde(default)]
     pub(super) workspace_id: Option<String>,
     pub(super) idempotency_key: String,

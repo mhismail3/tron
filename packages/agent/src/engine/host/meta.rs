@@ -201,7 +201,6 @@ fn invoke_schema() -> Value {
         "properties": {
             "functionId": {"type": "string"},
             "payload": {},
-            "expectedFunctionRevision": {"type": "integer"},
             "deliveryMode": {"type": "string", "enum": ["sync"]},
             "idempotencyKey": {"type": "string"}
         }
@@ -211,13 +210,12 @@ fn invoke_schema() -> Value {
 fn promote_schema() -> Value {
     json!({
         "type": "object",
-        "required": ["functionId", "targetVisibility", "expectedFunctionRevision"],
+        "required": ["functionId", "targetVisibility"],
         "additionalProperties": false,
         "properties": {
             "functionId": {"type": "string"},
             "ownerWorker": {"type": "string"},
             "targetVisibility": {"type": "string", "enum": ["workspace", "system"]},
-            "expectedFunctionRevision": {"type": "integer"},
             "workspaceId": {"type": "string"}
         }
     })
@@ -321,8 +319,6 @@ pub(super) fn delegated_child_invocation(invocation: &Invocation) -> Result<Invo
         .get("payload")
         .cloned()
         .unwrap_or(Value::Null);
-    let expected_revision =
-        optional_u64(invocation.payload.get("expectedFunctionRevision"))?.map(FunctionRevision);
     let delivery_mode = optional_delivery_mode(invocation.payload.get("deliveryMode"))?
         .unwrap_or(DeliveryMode::Sync);
     let idempotency_key = optional_string(invocation.payload.get("idempotencyKey"))?;
@@ -331,10 +327,7 @@ pub(super) fn delegated_child_invocation(invocation: &Invocation) -> Result<Invo
     child_context.parent_invocation_id = Some(invocation.id.clone());
     child_context.idempotency_key = idempotency_key;
     child_context.delivery_mode = delivery_mode;
-    let mut child =
-        Invocation::new_sync(target_id, payload, child_context).with_delivery_mode(delivery_mode);
-    child.expected_function_revision = expected_revision;
-    Ok(child)
+    Ok(Invocation::new_sync(target_id, payload, child_context).with_delivery_mode(delivery_mode))
 }
 
 pub(super) fn error_value(error: &EngineError) -> Value {
@@ -360,12 +353,6 @@ pub(super) fn optional_string(value: Option<&Value>) -> Result<Option<String>> {
             })
         })
         .transpose()
-}
-
-pub(super) fn required_u64(payload: &Value, field: &str) -> Result<u64> {
-    payload.get(field).and_then(Value::as_u64).ok_or_else(|| {
-        EngineError::PolicyViolation(format!("required field {field} must be an integer"))
-    })
 }
 
 pub(super) fn optional_u64(value: Option<&Value>) -> Result<Option<u64>> {

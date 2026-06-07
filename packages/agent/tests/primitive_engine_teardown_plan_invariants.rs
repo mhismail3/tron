@@ -2015,6 +2015,41 @@ fn queue_trigger_and_prompt_envelopes_do_not_pin_preexecution_catalog_state() {
 }
 
 #[test]
+fn engine_invocation_and_transport_do_not_require_expected_revision_tokens() {
+    let retained_invocation_surface = [
+        read_repo_file("README.md"),
+        read_repo_file("packages/agent/src/engine/host.rs"),
+        read_repo_file("packages/agent/src/engine/host/meta.rs"),
+        read_repo_file("packages/agent/src/engine/invocation.rs"),
+        read_repo_file("packages/agent/src/engine/registry/invocation.rs"),
+        read_repo_file("packages/agent/src/engine/protocol.rs"),
+        read_repo_file("packages/agent/src/engine/external.rs"),
+        read_repo_file("packages/agent/src/engine/ledger/outcome.rs"),
+        read_repo_file("packages/agent/src/engine/errors.rs"),
+        read_repo_file("packages/agent/src/transport/engine_ws.rs"),
+        read_repo_file("packages/agent/src/transport/engine_ws/wire.rs"),
+        read_repo_file("packages/agent/src/transport/contracts.rs"),
+        read_repo_file("packages/agent/src/engine/tests/host_invocation.rs"),
+        read_repo_file("packages/agent/src/engine/tests/meta_primitives.rs"),
+        read_repo_file("packages/agent/src/engine/tests/external_worker.rs"),
+    ]
+    .join("\n");
+    assert_absent(
+        &retained_invocation_surface,
+        &[
+            "expectedFunctionRevision",
+            "expected_function_revision",
+            "expectedRevision",
+            "expected_revision",
+            "expecting_revision",
+            "StaleFunctionRevision",
+            "stale_function_revision",
+        ],
+        "retained engine invocation/transport surface",
+    );
+}
+
+#[test]
 fn user_interaction_pause_plane_is_deleted_from_retained_sources() {
     let retained_sources = read_repo_source_trees(&[
         "packages/agent/src",

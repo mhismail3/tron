@@ -41,7 +41,6 @@ fn invoke_message_maps_to_engine_invoke_payload() {
         "id": "i1",
         "functionId": "system::ping",
         "payload": {"protocolVersion": 1},
-        "expectedRevision": 3,
         "idempotencyKey": "idem-1",
         "context": {
             "sessionId": "s1",
@@ -52,7 +51,6 @@ fn invoke_message_maps_to_engine_invoke_payload() {
     });
     let message: InvokeMessage = serde_json::from_value(value).unwrap();
     assert_eq!(message.function_id, "system::ping");
-    assert_eq!(message.expected_revision, Some(3));
     let context = message.context.unwrap();
     assert_eq!(context.authority_scopes, vec!["system.read".to_owned()]);
     assert_eq!(

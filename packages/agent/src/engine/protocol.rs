@@ -14,9 +14,7 @@ use serde_json::Value;
 
 use super::discovery::ActorKind;
 use super::ids::{AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId};
-use super::types::{
-    FunctionDefinition, FunctionRevision, TriggerDefinition, VisibilityScope, WorkerDefinition,
-};
+use super::types::{FunctionDefinition, TriggerDefinition, VisibilityScope, WorkerDefinition};
 
 /// Protocol version used by the first local worker wire contract.
 pub const WORKER_PROTOCOL_VERSION: u16 = 1;
@@ -352,8 +350,6 @@ pub struct WorkerInvoke {
     pub parent_invocation_id: Option<InvocationId>,
     /// Optional trigger id.
     pub trigger_id: Option<TriggerId>,
-    /// Optional expected function revision.
-    pub expected_function_revision: Option<FunctionRevision>,
     /// Explicit idempotency key, when the target mutates.
     pub idempotency_key: Option<String>,
     /// Session scope.

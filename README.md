@@ -433,16 +433,16 @@ excludes them and the public transport cannot invoke them directly.
 The core request set is `hello`, `discover`, `inspect`, `watch`, `invoke`,
 `promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`. Every request
 translates into an internal `EngineTransportRequest`, carrying actor,
-authority, trace, scope, payload, expected revision, and explicit idempotency.
+authority, trace, scope, payload, and explicit idempotency.
 Correlation ids are never command ids or idempotency keys. Stream clients should
 persist delivered cursors locally and ACK the latest delivered cursor per
 subscription, not every event in a burst; ACK responses use normal engine
 backpressure so catch-up traffic does not become a socket-fatal overload.
 Public `promote` is a user-owned `engine::promote` path, not a client-side
-catalog edit: it requires `expectedFunctionRevision`, a non-empty
-`idempotencyKey`, workspace/system authority, and workspace context for
-workspace promotion. Stale revision, owner mismatch, and invalid visibility
-promotion failures return typed public error codes with structured details.
+catalog edit: it requires a non-empty `idempotencyKey`, workspace/system
+authority, and workspace context for workspace promotion. Owner mismatch,
+idempotency, and invalid visibility promotion failures return typed public
+error codes with structured details.
 
 `/engine/workers` is the local-first worker protocol. A worker performs a
 versioned hello with `WorkerIdentity`, auth policy, registration mode, visibility
