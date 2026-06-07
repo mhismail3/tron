@@ -9,12 +9,10 @@ protocol AgentRepository: AnyObject {
     /// Send a prompt to the agent.
     /// - Parameters:
     ///   - prompt: The text prompt to send
-    ///   - images: Optional image attachments
     ///   - attachments: Optional file attachments
     ///   - reasoningLevel: Optional reasoning level
     func sendPrompt(
         _ prompt: String,
-        images: [ImageAttachment]?,
         attachments: [FileAttachment]?,
         reasoningLevel: String?,
         idempotencyKey: EngineIdempotencyKey

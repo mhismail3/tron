@@ -15,7 +15,6 @@ final class AgentClient: EngineDomainClient {
 
     func sendPrompt(
         _ prompt: String,
-        images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
         reasoningLevel: String? = nil,
         idempotencyKey: EngineIdempotencyKey
@@ -25,7 +24,6 @@ final class AgentClient: EngineDomainClient {
         let params = AgentPromptParams(
             sessionId: sessionId,
             prompt: prompt,
-            images: images,
             attachments: attachments,
             reasoningLevel: reasoningLevel
         )

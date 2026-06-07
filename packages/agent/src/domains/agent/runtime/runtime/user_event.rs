@@ -6,44 +6,24 @@ use std::sync::Arc;
 
 /// Build the JSON payload for a `message.user` event.
 ///
-/// When the prompt includes images or attachments, the payload is enriched
-/// so that session resume can reconstruct client UI and the LLM can see
-/// previously-sent images in reconstructed history.
+/// When the prompt includes attachments, the payload is enriched so that
+/// session resume can reconstruct client UI and the LLM can see previously-sent
+/// images and documents in reconstructed history.
 ///
 /// The optional `extra_metadata` object is merged into the payload for
 /// event-source metadata that must travel with a queued prompt.
 pub fn build_user_event_payload(
     prompt: &str,
-    images: Option<&[Value]>,
     attachments: Option<&[Value]>,
     extra_metadata: Option<&Value>,
 ) -> Value {
-    let has_images = images.is_some_and(|v| !v.is_empty());
     let has_attachments = attachments.is_some_and(|v| !v.is_empty());
 
-    let (content, image_count) = if !has_images && !has_attachments {
+    let (content, image_count) = if !has_attachments {
         (Value::String(prompt.to_owned()), None)
     } else {
         let mut blocks = vec![serde_json::json!({"type": "text", "text": prompt})];
         let mut img_count: i64 = 0;
-
-        if let Some(imgs) = images {
-            for img in imgs {
-                let data = img.get("data").and_then(|v| v.as_str());
-                let mime = img
-                    .get("mediaType")
-                    .or_else(|| img.get("mimeType"))
-                    .and_then(|v| v.as_str());
-                if let (Some(d), Some(m)) = (data, mime) {
-                    blocks.push(serde_json::json!({
-                        "type": "image",
-                        "data": d,
-                        "mimeType": m,
-                    }));
-                    img_count += 1;
-                }
-            }
-        }
 
         if let Some(atts) = attachments {
             for att in atts {
@@ -97,34 +77,16 @@ pub fn build_user_event_payload(
 pub fn build_user_content_override(
     prompt: &str,
     model: &str,
-    images: Option<&[Value]>,
     attachments: Option<&[Value]>,
 ) -> Option<crate::shared::messages::UserMessageContent> {
-    let has_images = images.is_some_and(|v| !v.is_empty());
     let has_attachments = attachments.is_some_and(|v| !v.is_empty());
-    if !has_images && !has_attachments {
+    if !has_attachments {
         return None;
     }
 
     let mut blocks = vec![crate::shared::content::UserContent::Text {
         text: prompt.to_owned(),
     }];
-
-    if let Some(imgs) = images {
-        for img in imgs {
-            if let (Some(data), Some(media_type)) = (
-                img.get("data").and_then(|v| v.as_str()),
-                img.get("mediaType")
-                    .or_else(|| img.get("mimeType"))
-                    .and_then(|v| v.as_str()),
-            ) {
-                blocks.push(crate::shared::content::UserContent::Image {
-                    data: data.to_owned(),
-                    mime_type: media_type.to_owned(),
-                });
-            }
-        }
-    }
 
     if let Some(atts) = attachments {
         for att in atts {
@@ -178,4 +140,62 @@ pub async fn persist_user_message_event(
         Ok(())
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::shared::content::UserContent;
+    use crate::shared::messages::UserMessageContent;
+
+    #[test]
+    fn user_event_payload_projects_images_from_unified_attachments() {
+        let attachments = vec![
+            serde_json::json!({
+                "data": "aW1hZ2U=",
+                "mimeType": "image/png",
+                "fileName": "shot.png"
+            }),
+            serde_json::json!({
+                "data": "ZG9j",
+                "mimeType": "application/pdf",
+                "fileName": "note.pdf"
+            }),
+        ];
+
+        let payload = build_user_event_payload("hello", Some(&attachments), None);
+
+        assert_eq!(payload["imageCount"], 1);
+        let blocks = payload["content"].as_array().expect("content blocks");
+        assert_eq!(blocks[0]["type"], "text");
+        assert_eq!(blocks[1]["type"], "image");
+        assert_eq!(blocks[1]["mimeType"], "image/png");
+        assert_eq!(blocks[2]["type"], "document");
+        assert_eq!(blocks[2]["fileName"], "note.pdf");
+    }
+
+    #[test]
+    fn user_content_override_uses_unified_attachments_for_multimodal_blocks() {
+        let attachments = vec![
+            serde_json::json!({
+                "data": "aW1hZ2U=",
+                "mimeType": "image/png"
+            }),
+            serde_json::json!({
+                "data": "cGxhaW4gdGV4dA==",
+                "mimeType": "text/plain",
+                "fileName": "note.txt"
+            }),
+        ];
+
+        let Some(UserMessageContent::Blocks(blocks)) =
+            build_user_content_override("hello", "anthropic/claude-opus-4-6", Some(&attachments))
+        else {
+            panic!("expected multimodal content blocks");
+        };
+
+        assert!(matches!(blocks[0], UserContent::Text { .. }));
+        assert!(matches!(blocks[1], UserContent::Image { .. }));
+        assert!(matches!(blocks[2], UserContent::Document { .. }));
+    }
 }

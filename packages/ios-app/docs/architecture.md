@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-07 (PET-11 primitive capability identity cleanup).
+> Last verified: 2026-06-07 (PET-11 unified prompt attachment cleanup).
 
 ## Overview
 
@@ -24,8 +24,8 @@ source-control state, worker state, or product dashboards locally.
 - Connection, pairing, onboarding, and local paired-server selection.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
-- Session list, session creation/fork/resume, prompt composer, attachments,
-  and message rendering.
+- Session list, session creation/fork/resume, prompt composer, unified
+  attachments for images/documents, and message rendering.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Generic capability invocation chips and generic generated runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, and bounded local

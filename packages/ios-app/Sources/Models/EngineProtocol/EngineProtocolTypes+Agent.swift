@@ -5,32 +5,19 @@ import Foundation
 struct AgentPromptParams: Encodable {
     let sessionId: String
     let prompt: String
-    let images: [ImageAttachment]?
     let attachments: [FileAttachment]?
     let reasoningLevel: String?
 
     init(
         sessionId: String,
         prompt: String,
-        images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
         reasoningLevel: String? = nil
     ) {
         self.sessionId = sessionId
         self.prompt = prompt
-        self.images = images
         self.attachments = attachments
         self.reasoningLevel = reasoningLevel
-    }
-}
-
-struct ImageAttachment: Encodable {
-    let data: String  // base64 encoded
-    let mimeType: String
-
-    init(data: Data, mimeType: String = "image/jpeg") {
-        self.data = data.base64EncodedString()
-        self.mimeType = mimeType
     }
 }
 

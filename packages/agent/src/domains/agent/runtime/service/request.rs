@@ -6,7 +6,6 @@ pub struct PromptRequest {
     pub session_id: String,
     pub prompt: String,
     pub reasoning_level: Option<String>,
-    pub images: Option<Vec<Value>>,
     pub attachments: Option<Vec<Value>>,
     /// Optional structured metadata merged into the emitted `message.user`
     /// event payload. Queue drains use this for event-source metadata that

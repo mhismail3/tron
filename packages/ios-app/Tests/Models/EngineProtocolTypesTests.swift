@@ -254,17 +254,6 @@ final class EventTypesTests: XCTestCase {
 @MainActor
 final class AttachmentTypesTests: XCTestCase {
 
-    func testImageAttachmentEncoding() throws {
-        let imageData = "test image data".data(using: .utf8)!
-        let attachment = ImageAttachment(data: imageData, mimeType: "image/png")
-
-        let encoded = try JSONEncoder().encode(attachment)
-        let decoded = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
-
-        XCTAssertEqual(decoded["mimeType"] as? String, "image/png")
-        XCTAssertNotNil(decoded["data"] as? String)
-    }
-
     func testFileAttachmentEncoding() throws {
         let fileData = "test file data".data(using: .utf8)!
         let attachment = FileAttachment(data: fileData, mimeType: "application/pdf", fileName: "test.pdf")

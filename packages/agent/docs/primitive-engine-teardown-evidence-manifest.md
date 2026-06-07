@@ -39,7 +39,7 @@ without adding concrete evidence here.
 | PET-8 | passed_after_fix | Removed the fixed iOS product shell: Work, Audit Details, Source Control, Prompt Library, Voice Notes, Skills, Agent Control, Subagents, Worktree UI/state/client/plugin/test roots, stale prompt-library/voice-note/worktree/subagent DTOs, orphan analytics/event-card tests, and the retired `capability-ui.md` doc. Retained the chat/session/input/onboarding/settings shell, local event reconstruction, generic capability evidence rendering, and `GeneratedRuntimeSurfaceView`. Visual proof found a real primitive-shell issue: a clean launch requested push notification permission before an active server was paired. `TronMobileApp.registerPushIfAuthorized()` now returns unless `pairedServerStore.activeServer` exists, and SourceGuard records that invariant. Checkpoint commit: `d7b2e3735`. | Red guard proof `xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-pet8-red-suite -only-testing:TronMobileTests/SourceGuardTests` -> exit 65, fixed-product guard failed before deletion; result bundle `/tmp/tron-xcode-pet8-red-suite/Logs/Test/Test-Tron-2026.06.06_23-06-55--0700.xcresult`. Project regeneration `cd packages/ios-app && xcodegen generate` -> exit 0. Green proof `xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -derivedDataPath /tmp/tron-xcode-pet8-green-7 -only-testing:TronMobileTests/SourceGuardTests` -> exit 0, 18 Swift Testing tests passed; result bundle `/tmp/tron-xcode-pet8-green-7/Logs/Test/Test-Tron-2026.06.07_00-41-27--0700.xcresult`. Absence scan `rg -n "worktree|Worktree|subagent|Subagent|VoiceNotes|voiceNotes|VoiceNote|voice note|voice_notes|PromptLibrary|promptHistory|SourceControl|AuditDetails|AgentControl|useWorktree|agent::spawn_subagent|agent::subagent|canCommitWorktree|canManageSkills|ConsolidatedAnalytics|ProcessedEventItem|processEventsForTurn|CapabilityClient|SkillClient|SkillStore|PromptLibraryClient|VoiceNotesRecorder|GitClient" packages/ios-app/Sources packages/ios-app/Tests packages/ios-app/TronMobile.xcodeproj/project.pbxproj -g '!SourceGuardTests.swift'` -> exit 1/no matches. Simulator bundle id: `com.tron.mobile.beta`; app product `/tmp/tron-xcode-pet8-green-7/Build/Products/Beta-iphonesimulator/TronMobile.app`. iPhone proof on iPhone 17 Pro iOS 26.5 UDID `7BDA4AF9-1C40-47E3-A925-0F88C191F263`: boot rc 0, bootstatus rc 0, uninstall rc 0, install rc 0, `defaults write com.tron.mobile.beta onboardingComplete -bool YES` rc 0, launch rc 0, screenshot rc 0 at `/tmp/tron-pet8-ui/pet8-iphone17pro-ios265-shell-final.png`. iPad proof on iPad Pro 13-inch (M5) iOS 26.5 UDID `099FE1B6-28C6-4028-A60F-28BDE4849BE5`: boot rc 0, bootstatus rc 0, uninstall rc 0, install rc 0, onboarding defaults rc 0, launch rc 0, screenshot rc 0 at `/tmp/tron-pet8-ui/pet8-ipadpro13-ios265-shell-final.png`. | Some retained iOS domain clients/views outside the explicit PET-8 fixed product surfaces still need PET-10/PET-11 adversarial audit against the final one-capability model. Dynamic surface sophistication is successor work. |
 | PET-9 | passed_after_fix | Active documentation and managed assets now match the primitive branch surface. `packages/agent/docs/` contains only the active scorecard, evidence manifest, and inventory; `packages/agent/skills/` is physically absent; relay/APNs docs, product scorecards, product guides, and stale first-party skill assets were deleted instead of marked legacy. README, iOS docs, Mac docs, project guidance, and reset-db docs now describe retained primitive behavior or deletion evidence only. | `find packages/agent/docs -maxdepth 1 -type f | sort` -> exit 0, only active teardown docs; `test ! -d packages/agent/skills` -> exit 0; `test ! -d packages/relay` -> exit 0 after tracked relay sources and ignored generated relay output were removed; `test ! -f packages/ios-app/docs/apns.md` -> exit 0. README/iOS/Mac/project docs were updated in this checkpoint. | PET-11 still audits retained code-level surfaces and any doc language that might imply runnable deleted behavior. Deleted feature names may remain in active absence gates, inventories, and evidence. |
 | PET-10 | passed_after_fix | Traceability checkpoint plus dead-source cleanup now pass. Fresh storage includes `trace_records`; `capability::execute` writes running/success/failure trace records with request/result hashes, authority envelope, provider/model metadata, VCS revision when available, and file attribution/content hashes; `trace_list` and `trace_get` expose those records through the sole model-facing `execute` primitive. Follow-up teardown physically deleted the public `context::*` capability plane, capability-policy settings, push relay/APNs/device-token path, stale typed iOS clients, notification inbox/delivery surfaces, server file-browser/workspace validation, and Rust warning wrappers. | Earlier PET-10 red/green evidence is preserved below. Current cleanup proof: `cargo fmt --manifest-path packages/agent/Cargo.toml --all` -> exit 0; `cargo check --manifest-path packages/agent/Cargo.toml --bin tron` -> exit 0 with no warnings; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture` -> exit 0, 15 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test db_path_guard -- --nocapture` -> exit 0, 13 tests; `cargo test --manifest-path packages/agent/Cargo.toml capability_policy_settings_are_rejected -- --nocapture` -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml settings_tables_deep_merge_and_arrays_replace -- --nocapture` -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml default_settings_are_valid -- --nocapture` -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --lib -- --nocapture` -> exit 0, 2975 tests; `cd packages/ios-app && xcodegen generate` -> exit 0; `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests` -> exit 0, 19 Swift Testing tests passed, result bundle `~/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_06-53-25--0700.xcresult`; `git diff --check` -> exit 0; stale-symbol scans for context/settings/relay/APNs/typed-client leftovers returned no actionable matches outside absence tests/evidence. | PET-11 owns final adversarial retained-surface audit and end-to-end proof. No known PET-10 warning or full-lib-test blocker remains. |
-| PET-11 | running | Interim adversarial retained-surface passes removed non-primitive hosted-tool/computer-control residue, collapsed iOS capability identity/rendering to the primitive execution shape, removed the matching server-side resolved-catalog identity projection, deleted iOS draft-persistence skill/spell residue, removed the hard-coded iOS/Rust user-interaction pause/submit-answer plane, deleted unreferenced iOS repo/task engine protocol DTOs, and deleted the fixed iOS process dashboard/event projection. OpenAI Responses support now serializes only concrete function tools, drops `tool_search`/`defer_loading`/computer-call DTO and SSE variants, and no model catalog advertises hosted search or computer-use support. The iOS protocol/rendering slices deleted stale capability catalog/status/search/inspect/recipe/program/audit/policy DTOs, product-specific result summaries, the remaining contract/implementation/function/plugin/worker/schema/trust/risk/effect/binding/search/inspect presentation vocabulary, and the bespoke `process.*` lifecycle plugin/state/sheet path. The Rust slices deleted those same resolved-catalog fields from `CapabilityEventIdentity`, persisted capability invocation payloads, server activity summaries, primitive-surface stop tracking, runtime stream conversion, the dead `capability.resolution` event, `capability.pause.*` events, and `agent::submit_answers` transport actor special-casing. Draft persistence now stores only text, attachment metadata, and update time. The Mac onboarding slice now gates only Full Disk Access; Screen Recording, Accessibility, draggable app shortcut UI, fresh screen-recording probe command mode, deep links, tests, and docs were removed. | Rust proof: initial `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` -> exit 1 on OpenAI catalog formatting; `cargo fmt --manifest-path packages/agent/Cargo.toml --all` -> exit 0; rerun formatter check -> exit 0. `cargo check --manifest-path packages/agent/Cargo.toml --bin tron` -> exit 0. `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture` -> exit 0, now 17 tests after prompt-plane guard. `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution -- --nocapture` -> exit 0, 1 test. `cargo test --manifest-path packages/agent/Cargo.toml --lib openai -- --nocapture` -> exit 0, 230 tests. Earlier iOS proof: `cd packages/ios-app && xcodegen generate` -> exit 0; `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests` -> exit 0, 19 tests, result bundle `~/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_07-17-25--0700.xcresult`. Mac proof: `cd packages/mac-app && xcodegen generate` -> exit 0; first focused Mac run -> exit 65 because `WizardStepPreferredHeightTests.installStepConfirmationBand` still expected the three-card Permissions page to be taller than Install, result bundle `~/Library/Developer/Xcode/DerivedData/TronMac-fjgdtjmmbndhtwfqnfyaagtxvdvs/Logs/Test/Test-TronMac-2026.06.07_07-14-56--0700.xcresult`; after fixing the stale invariant, rerun focused Mac command -> exit 0, 34 tests, result bundle `~/Library/Developer/Xcode/DerivedData/TronMac-fjgdtjmmbndhtwfqnfyaagtxvdvs/Logs/Test/Test-TronMac-2026.06.07_07-15-46--0700.xcresult`. Latest iOS and server primitive-identity proofs plus draft-persistence, prompt-plane, repo/task DTO, and process-dashboard proofs are recorded in the addenda below. | PET-11 is not closed. Remaining audit targets include retained/successor iOS `Attachments`, `SessionTree`, retained `capability_support` host indirection/naming, update surfaces, diagnostics/logging, dynamic rendering, final fresh server/DB/trace proof, iPhone/iPad closeout screenshots, and any remaining engine-envelope/catalog terms that are not true primitive resource/version metadata. |
+| PET-11 | running | Interim adversarial retained-surface passes removed non-primitive hosted-tool/computer-control residue, collapsed iOS capability identity/rendering to the primitive execution shape, removed the matching server-side resolved-catalog identity projection, deleted iOS draft-persistence skill/spell residue, removed the hard-coded iOS/Rust user-interaction pause/submit-answer plane, deleted unreferenced iOS repo/task engine protocol DTOs, deleted the fixed iOS process dashboard/event projection, and deleted the legacy image-only prompt request path. OpenAI Responses support now serializes only concrete function tools, drops `tool_search`/`defer_loading`/computer-call DTO and SSE variants, and no model catalog advertises hosted search or computer-use support. The iOS protocol/rendering slices deleted stale capability catalog/status/search/inspect/recipe/program/audit/policy DTOs, product-specific result summaries, the remaining contract/implementation/function/plugin/worker/schema/trust/risk/effect/binding/search/inspect presentation vocabulary, and the bespoke `process.*` lifecycle plugin/state/sheet path. The Rust slices deleted those same resolved-catalog fields from `CapabilityEventIdentity`, persisted capability invocation payloads, server activity summaries, primitive-surface stop tracking, runtime stream conversion, the dead `capability.resolution` event, `capability.pause.*` events, `agent::submit_answers` transport actor special-casing, and the parallel prompt `images` schema/runtime field. Draft persistence stores only text, attachment metadata, and update time; prompt media now flows through one unified attachment primitive. The Mac onboarding slice now gates only Full Disk Access; Screen Recording, Accessibility, draggable app shortcut UI, fresh screen-recording probe command mode, deep links, tests, and docs were removed. | Rust proof: initial `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` -> exit 1 on OpenAI catalog formatting; `cargo fmt --manifest-path packages/agent/Cargo.toml --all` -> exit 0; rerun formatter check -> exit 0. `cargo check --manifest-path packages/agent/Cargo.toml --bin tron` -> exit 0. Latest prompt attachment proof: `cargo test --manifest-path packages/agent/Cargo.toml --lib unified_attachments -- --nocapture` -> exit 0, 2 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture` -> exit 0, now 18 tests after unified-attachment guard. `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution -- --nocapture` -> exit 0, 1 test. `cargo test --manifest-path packages/agent/Cargo.toml --lib openai -- --nocapture` -> exit 0, 230 tests. Latest iOS proof: `cd packages/ios-app && xcodegen generate` -> exit 0; focused prompt/attachment run `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/AgentClientTests -only-testing:TronMobileTests/DefaultAgentRepositoryTests -only-testing:TronMobileTests/AttachmentTypesTests -only-testing:TronMobileTests/MessagingCoordinatorTests -only-testing:TronMobileTests/AttachmentTests -only-testing:TronMobileTests/InputBarStateTests -only-testing:TronMobileTests/InputBarContentAreaChipTests` -> exit 0, 75 XCTest tests plus 31 Swift Testing tests passed, result bundle `~/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_09-02-50--0700.xcresult`. Earlier iOS proof: SourceGuard result bundle `~/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_07-17-25--0700.xcresult`. Mac proof: `cd packages/mac-app && xcodegen generate` -> exit 0; first focused Mac run -> exit 65 because `WizardStepPreferredHeightTests.installStepConfirmationBand` still expected the three-card Permissions page to be taller than Install, result bundle `~/Library/Developer/Xcode/DerivedData/TronMac-fjgdtjmmbndhtwfqnfyaagtxvdvs/Logs/Test/Test-TronMac-2026.06.07_07-14-56--0700.xcresult`; after fixing the stale invariant, rerun focused Mac command -> exit 0, 34 tests, result bundle `~/Library/Developer/Xcode/DerivedData/TronMac-fjgdtjmmbndhtwfqnfyaagtxvdvs/Logs/Test/Test-TronMac-2026.06.07_07-15-46--0700.xcresult`. Latest iOS and server primitive-identity proofs plus draft-persistence, prompt-plane, repo/task DTO, process-dashboard, and unified attachment proofs are recorded in the addenda below. | PET-11 is not closed. Remaining audit targets include retained/successor `SessionTree`, retained `capability_support` host indirection/naming, update surfaces, diagnostics/logging, dynamic rendering, final fresh server/DB/trace proof, iPhone/iPad closeout screenshots, and any remaining engine-envelope/catalog terms that are not true primitive resource/version metadata. |
 
 ### PET-11 Server Primitive Identity Teardown Addendum
 
@@ -271,12 +271,13 @@ Evidence:
   `rg -n "skills_json|spells_json|selectedSkills|SelectedSkill" packages/ios-app/Sources packages/ios-app/Tests -g '!SourceGuardTests.swift'`
   -> exit 1/no matches.
 
-Residual risk: this closes the draft-storage open loop only. PET-11 still owns
-retained/successor iOS `Attachments`, `SessionTree`, repo/task
-DTOs, retained `capability_support` host indirection/naming, update surfaces,
-diagnostics/logging, dynamic rendering, final fresh server/DB/trace proof,
-iPhone/iPad closeout screenshots, and any remaining engine-envelope/catalog
-terms that are not true primitive resource/version metadata.
+Residual risk: this closed the draft-storage open loop only. Later PET-11
+addenda close the repo/task DTO and `Attachments` loops; PET-11 still owns
+retained/successor `SessionTree`, retained `capability_support` host
+indirection/naming, update surfaces, diagnostics/logging, dynamic rendering,
+final fresh server/DB/trace proof, iPhone/iPad closeout screenshots, and any
+remaining engine-envelope/catalog terms that are not true primitive
+resource/version metadata.
 
 ### PET-11 User-Interaction Pause-Plane Teardown Addendum
 
@@ -357,13 +358,13 @@ Evidence:
   matches outside absence tests; formatter check, primitive invariant test,
   and `git diff --check` all returned exit 0.
 
-Residual risk: this closes the hard-coded user-interaction/pause/answer open
-loop only. PET-11 still owns retained/successor iOS `Attachments`,
-`SessionTree`, retained `capability_support` host indirection/naming, update
-surfaces, diagnostics/logging, dynamic rendering, final fresh server/DB/trace
-proof, iPhone/iPad closeout screenshots, and any remaining
-engine-envelope/catalog terms that are not true primitive resource/version
-metadata.
+Residual risk: this closed the hard-coded user-interaction/pause/answer open
+loop only. Later PET-11 addenda close the repo/task DTO and `Attachments`
+loops; PET-11 still owns retained/successor `SessionTree`, retained
+`capability_support` host indirection/naming, update surfaces,
+diagnostics/logging, dynamic rendering, final fresh server/DB/trace proof,
+iPhone/iPad closeout screenshots, and any remaining engine-envelope/catalog
+terms that are not true primitive resource/version metadata.
 
 ### PET-11 iOS Repo/Task DTO Teardown Addendum
 
@@ -408,12 +409,13 @@ Evidence:
 - `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture`
   -> exit 0, 17 tests.
 
-Residual risk: this closes only the repo/task DTO open loop. PET-11 still owns
-retained/successor iOS `Attachments`, `SessionTree`, retained
-`capability_support` host indirection/naming, update surfaces,
-diagnostics/logging, dynamic rendering, final fresh server/DB/trace proof,
-iPhone/iPad closeout screenshots, and any remaining engine-envelope/catalog
-terms that are not true primitive resource/version metadata.
+Residual risk: this closed only the repo/task DTO open loop. The later
+attachment addendum closes the `Attachments` loop; PET-11 still owns
+retained/successor `SessionTree`, retained `capability_support` host
+indirection/naming, update surfaces, diagnostics/logging, dynamic rendering,
+final fresh server/DB/trace proof, iPhone/iPad closeout screenshots, and any
+remaining engine-envelope/catalog terms that are not true primitive
+resource/version metadata.
 
 ### PET-11 iOS Process Dashboard Teardown Addendum
 
@@ -454,12 +456,72 @@ Evidence:
   `rg -n "ProcessListSheet|ProcessState|ProcessEventHandler|ProcessSpawnedPlugin|ProcessCompletedPlugin|ProcessStatusUpdatePlugin|JobBackgroundedPlugin|ManageProcessResultViewer|showProcessSheet|clearProcessState|handleProcessSpawned|handleProcessCompleted|handleProcessStatusUpdate|handleJobBackgrounded|process\\.spawned|process\\.completed|process\\.status_update|job\\.backgrounded|case processes" packages/ios-app/Sources packages/ios-app/Tests packages/ios-app/project.yml -g '!SourceGuardTests.swift'`
   -> exit 1/no matches.
 
-Residual risk: this closes only the fixed process dashboard open loop. PET-11
-still owns retained/successor iOS `Attachments`, `SessionTree`, retained
-`capability_support` host indirection/naming, update surfaces,
+Residual risk: this closed only the fixed process dashboard open loop at that
+checkpoint. The later attachment addendum closes the retained/successor
+`Attachments` loop; PET-11 still owns retained/successor `SessionTree`,
+retained `capability_support` host indirection/naming, update surfaces,
 diagnostics/logging, dynamic rendering, final fresh server/DB/trace proof,
 iPhone/iPad closeout screenshots, and any remaining engine-envelope/catalog
 terms that are not true primitive resource/version metadata.
+
+### PET-11 Unified Prompt Attachment Primitive Addendum
+
+This checkpoint audited retained iOS `Attachments` from first principles. The
+attachment UI/model path is bare prompt-input infrastructure: it lets the user
+send images, PDFs, and documents into the first model turn. The removable layer
+was the parallel image-only prompt API (`images`/`ImageAttachment`) that sat
+beside unified attachments and was already bypassed by the iOS send path.
+
+Changes:
+
+- removed `images` from Rust `agent::prompt`, `agent::prompt_apply`, and
+  `agent::run_turn` schemas;
+- removed `PromptSubmission.images`, `PromptRequest.images`, prompt validation
+  of the old array, runtime request propagation, and the separate image loop in
+  user event/content builders;
+- retained image support only through attachments whose `mimeType` starts with
+  `image/`, and retained document extraction for non-image attachments;
+- removed iOS `ImageAttachment`, `AgentPromptParams.images`, `AgentClient` and
+  repository `images` parameters, stale send comments, and image-only mock
+  state/tests;
+- added Rust and iOS SourceGuard coverage so the prompt transport path has one
+  attachment plane and no image-only field/DTO fallback.
+
+Evidence:
+
+- Targeted stale scans for legacy prompt image fields over the Rust prompt
+  contract/runtime path and the iOS prompt DTO/client/repository/test path
+  returned exit 1/no matches.
+- Initial new Rust invariant run:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture`
+  -> exit 101 because the new guard required the literal `attachments` string
+  in `EngineProtocolTypesTests.swift`; the file correctly proved
+  `FileAttachment` instead. Fixed the guard to accept the DTO type as the
+  primitive proof.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all` -> exit 0.
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib unified_attachments -- --nocapture`
+  -> exit 0, 2 tests proving unified attachments project to
+  `message.user` image/document blocks and provider-facing multimodal content
+  blocks.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture`
+  -> exit 0, 18 tests including
+  `prompt_media_uses_unified_attachment_primitive` and
+  `agent_trace_records_are_first_class_and_agent_visible`.
+- `cargo check --manifest-path packages/agent/Cargo.toml --bin tron`
+  -> exit 0.
+- `cd packages/ios-app && xcodegen generate` -> exit 0.
+- Focused iOS proof:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/AgentClientTests -only-testing:TronMobileTests/DefaultAgentRepositoryTests -only-testing:TronMobileTests/AttachmentTypesTests -only-testing:TronMobileTests/MessagingCoordinatorTests -only-testing:TronMobileTests/AttachmentTests -only-testing:TronMobileTests/InputBarStateTests -only-testing:TronMobileTests/InputBarContentAreaChipTests`
+  -> exit 0, 75 XCTest tests plus 31 Swift Testing tests passed; result bundle
+  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_09-02-50--0700.xcresult`.
+
+Residual risk: this closes the retained/successor iOS `Attachments` open loop
+and removes the legacy prompt image API. PET-11 still owns retained/successor
+`SessionTree`, retained `capability_support` host indirection/naming, update
+surfaces, diagnostics/logging, dynamic rendering, final fresh server/DB/trace
+proof, iPhone/iPad closeout screenshots, and any remaining
+engine-envelope/catalog terms that are not true primitive resource/version
+metadata.
 
 ## Required Final Evidence
 

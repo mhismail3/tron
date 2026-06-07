@@ -126,6 +126,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "`ios_primary_shell_has_no_fixed_product_modes`",
         "`no_legacy_fallback_compatibility_paths`",
         "`agent_trace_records_are_first_class`",
+        "`prompt_media_uses_unified_attachment_primitive`",
         "`primitive_loop_end_to_end`",
         "After PET-11 passes, create a separate self-adapting-agent scorecard",
     ] {
@@ -1106,6 +1107,67 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         &["observability::trace_get", "observability::trace_list"],
         "README model-visible trace documentation",
     );
+}
+
+#[test]
+fn prompt_media_uses_unified_attachment_primitive() {
+    let rust_files = [
+        "packages/agent/src/domains/agent/contract.rs",
+        "packages/agent/src/domains/agent/operations/prompt.rs",
+        "packages/agent/src/domains/agent/runtime/service/request.rs",
+        "packages/agent/src/domains/agent/runtime/service/execute.rs",
+        "packages/agent/src/domains/agent/runtime/service/queue.rs",
+        "packages/agent/src/domains/agent/runtime/runtime/user_event.rs",
+    ];
+    for path in rust_files {
+        let source = read_repo_file(path);
+        assert!(
+            source.contains("attachments") || source.contains("FileAttachment"),
+            "{path} must keep the unified prompt attachment primitive"
+        );
+        assert_absent(
+            &source,
+            &[
+                "\"images\"",
+                "opt_array(params, \"images\")",
+                "validate_attachment_arrays",
+                "pub images",
+                "images.as_deref()",
+                "mediaType",
+            ],
+            path,
+        );
+    }
+
+    let ios_files = [
+        "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift",
+        "packages/ios-app/Sources/Services/Network/Clients/AgentClient.swift",
+        "packages/ios-app/Sources/Services/Network/Clients/AgentClientProtocol.swift",
+        "packages/ios-app/Sources/Core/Repositories/Protocols/AgentRepository.swift",
+        "packages/ios-app/Sources/Core/Repositories/DefaultAgentRepository.swift",
+        "packages/ios-app/Sources/ViewModels/Chat/ChatViewModel+Messaging.swift",
+        "packages/ios-app/Tests/Services/AgentClientTests.swift",
+        "packages/ios-app/Tests/Repositories/DefaultAgentRepositoryTests.swift",
+        "packages/ios-app/Tests/Models/EngineProtocolTypesTests.swift",
+    ];
+    for path in ios_files {
+        let source = read_repo_file(path);
+        assert!(
+            source.contains("attachments") || source.contains("FileAttachment"),
+            "{path} must keep the unified prompt attachment primitive"
+        );
+        assert_absent(
+            &source,
+            &[
+                "ImageAttachment",
+                "lastImages",
+                "lastSendPromptImages",
+                "images:",
+                "\"images\"",
+            ],
+            path,
+        );
+    }
 }
 
 #[test]

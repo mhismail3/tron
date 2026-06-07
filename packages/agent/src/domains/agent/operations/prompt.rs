@@ -17,7 +17,6 @@ pub(crate) struct PromptSubmission {
     session_id: String,
     prompt: String,
     reasoning_level: Option<String>,
-    images: Option<Vec<Value>>,
     attachments: Option<Vec<Value>>,
 }
 
@@ -120,7 +119,6 @@ pub(crate) async fn run_turn_value(
             session_id: submission.session_id,
             prompt: submission.prompt,
             reasoning_level: submission.reasoning_level,
-            images: submission.images,
             attachments: submission.attachments,
             message_metadata: None,
             engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
@@ -147,9 +145,8 @@ pub(crate) async fn validate_prompt_submission(
     let session_id = require_string_param(params, "sessionId")?;
     let prompt = require_string_param(params, "prompt")?;
     validation::validate_string_param(&prompt, "prompt", validation::MAX_PROMPT_LENGTH)?;
-    let images = opt_array(params, "images").cloned();
     let attachments = opt_array(params, "attachments").cloned();
-    validate_attachment_arrays(images.as_deref(), attachments.as_deref())?;
+    validate_attachment_array(attachments.as_deref())?;
 
     if let Some(active_run_id) = deps.orchestrator.get_run_id(&session_id) {
         return Err(CapabilityError::Custom {
@@ -172,7 +169,6 @@ pub(crate) async fn validate_prompt_submission(
             session_id,
             prompt,
             reasoning_level: opt_string(params, "reasoningLevel"),
-            images,
             attachments,
         },
         session,
@@ -180,17 +176,9 @@ pub(crate) async fn validate_prompt_submission(
     ))
 }
 
-pub(crate) fn validate_attachment_arrays(
-    images: Option<&[Value]>,
+pub(crate) fn validate_attachment_array(
     attachments: Option<&[Value]>,
 ) -> Result<(), CapabilityError> {
-    if let Some(images) = images {
-        for image in images {
-            if let Some(data) = image.get("data").and_then(Value::as_str) {
-                validation::validate_attachment_size(data)?;
-            }
-        }
-    }
     if let Some(attachments) = attachments {
         for attachment in attachments {
             if let Some(data) = attachment.get("data").and_then(Value::as_str) {

@@ -18,14 +18,12 @@ final class DefaultAgentRepository: AgentRepository {
 
     func sendPrompt(
         _ prompt: String,
-        images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
         reasoningLevel: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws {
         try await agentClient.sendPrompt(
             prompt,
-            images: images,
             attachments: attachments,
             reasoningLevel: reasoningLevel,
             idempotencyKey: idempotencyKey

@@ -15,7 +15,7 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["agent.runtime"];
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     let mut specs = vec![
         CapabilityContract::new("agent::prompt", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"attachments":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"images":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"prompt":{"type":"string"},"reasoningLevel":{"type":"string"},"sessionId":{"type":"string"},"source":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","prompt"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"attachments":{"items":{"additionalProperties":true,"type":"object"},"type":"array"},"prompt":{"type":"string"},"reasoningLevel":{"type":"string"},"sessionId":{"type":"string"},"source":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","prompt"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"acknowledged":{"type":"boolean"},"runId":{"type":"string"}},"required":["acknowledged","runId"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::ManualOnly, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
@@ -80,7 +80,6 @@ fn agent_prompt_apply_request_schema() -> serde_json::Value {
             "sessionId": {"type": "string"},
             "prompt": {"type": "string"},
             "reasoningLevel": {"type": "string"},
-            "images": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
             "attachments": {"type": "array", "items": {"type": "object", "additionalProperties": true}},
             "source": {"type": "string"},
             "workspaceId": {"type": "string"}

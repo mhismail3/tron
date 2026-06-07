@@ -12,7 +12,6 @@ struct AgentClientTests {
     final class MockAgentClient: AgentClientProtocol {
         var sendPromptCallCount = 0
         var lastPrompt: String?
-        var lastImages: [ImageAttachment]?
         var lastAttachments: [FileAttachment]?
         var lastReasoningLevel: String?
         var sendPromptShouldThrow = false
@@ -30,14 +29,12 @@ struct AgentClientTests {
 
         func sendPrompt(
             _ prompt: String,
-            images: [ImageAttachment]?,
             attachments: [FileAttachment]?,
             reasoningLevel: String?,
             idempotencyKey: EngineIdempotencyKey
         ) async throws {
             sendPromptCallCount += 1
             lastPrompt = prompt
-            lastImages = images
             lastAttachments = attachments
             lastReasoningLevel = reasoningLevel
             if sendPromptShouldThrow { throw TestError.mockError }
@@ -75,7 +72,6 @@ struct AgentClientTests {
 
         #expect(mock.sendPromptCallCount == 1)
         #expect(mock.lastPrompt == "Hello")
-        #expect(mock.lastImages == nil)
         #expect(mock.lastAttachments == nil)
         #expect(mock.lastReasoningLevel == nil)
     }
@@ -86,7 +82,6 @@ struct AgentClientTests {
 
         try await mock.sendPrompt(
             "Hello",
-            images: nil,
             attachments: nil,
             reasoningLevel: "medium",
             idempotencyKey: .userAction("agent.prompt.test")

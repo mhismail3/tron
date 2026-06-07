@@ -1325,6 +1325,48 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Prompt transport has one attachment plane")
+    func testPromptTransportHasOneAttachmentPlane() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let checkedFiles = [
+            "Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift",
+            "Sources/Services/Network/Clients/AgentClient.swift",
+            "Sources/Services/Network/Clients/AgentClientProtocol.swift",
+            "Sources/Core/Repositories/Protocols/AgentRepository.swift",
+            "Sources/Core/Repositories/DefaultAgentRepository.swift",
+            "Sources/ViewModels/Chat/ChatViewModel+Messaging.swift",
+            "Tests/Services/AgentClientTests.swift",
+            "Tests/Repositories/DefaultAgentRepositoryTests.swift",
+            "Tests/Models/EngineProtocolTypesTests.swift",
+        ]
+        let forbiddenNeedles: [(String, String)] = [
+            ("Image" + "Attachment", "legacy image-only prompt DTO"),
+            ("last" + "Images", "legacy image-only mock state"),
+            ("last" + "Send" + "Prompt" + "Images", "legacy image-only repository mock state"),
+            ("images:", "legacy image-only prompt argument"),
+            (#""images""#, "legacy image-only encoded prompt field"),
+        ]
+
+        for relativePath in checkedFiles {
+            let url = iosRoot.appendingPathComponent(relativePath)
+            let content = try String(contentsOf: url, encoding: .utf8)
+            #expect(
+                content.contains("attachments") || content.contains("FileAttachment"),
+                "\(relativePath) should route prompt media through unified attachments"
+            )
+            for (needle, reason) in forbiddenNeedles {
+                #expect(
+                    !content.contains(needle),
+                    "\(relativePath) contains \(reason): `\(needle)`"
+                )
+            }
+        }
+    }
+
     private func swiftFiles(in root: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: root,

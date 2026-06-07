@@ -139,7 +139,6 @@ pub(crate) fn drain_prompt_queue(
             session_id: session_id.to_string(),
             prompt: prompt_text,
             reasoning_level: None,
-            images: None,
             attachments: None,
             message_metadata: drained_metadata,
             engine_causality,

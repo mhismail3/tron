@@ -8,7 +8,6 @@ final class MockAgentClientForRepository {
     // Send Prompt
     var sendPromptCallCount = 0
     var lastSendPromptText: String?
-    var lastSendPromptImages: [ImageAttachment]?
     var lastSendPromptAttachments: [FileAttachment]?
     var lastSendPromptReasoningLevel: String?
     var sendPromptError: Error?
@@ -19,13 +18,11 @@ final class MockAgentClientForRepository {
 
     func sendPrompt(
         _ prompt: String,
-        images: [ImageAttachment]?,
         attachments: [FileAttachment]?,
         reasoningLevel: String?
     ) async throws {
         sendPromptCallCount += 1
         lastSendPromptText = prompt
-        lastSendPromptImages = images
         lastSendPromptAttachments = attachments
         lastSendPromptReasoningLevel = reasoningLevel
         if let error = sendPromptError {
@@ -63,7 +60,6 @@ final class DefaultAgentRepositoryTests: XCTestCase {
         // When
         try await mockClient.sendPrompt(
             "Hello, Claude!",
-            images: nil,
             attachments: nil,
             reasoningLevel: "high"
         )
@@ -71,7 +67,6 @@ final class DefaultAgentRepositoryTests: XCTestCase {
         // Then
         XCTAssertEqual(mockClient.sendPromptCallCount, 1)
         XCTAssertEqual(mockClient.lastSendPromptText, "Hello, Claude!")
-        XCTAssertNil(mockClient.lastSendPromptImages)
         XCTAssertNil(mockClient.lastSendPromptAttachments)
         XCTAssertEqual(mockClient.lastSendPromptReasoningLevel, "high")
     }
@@ -80,7 +75,6 @@ final class DefaultAgentRepositoryTests: XCTestCase {
         // When
         try await mockClient.sendPrompt(
             "Simple message",
-            images: nil,
             attachments: nil,
             reasoningLevel: nil
         )
@@ -96,7 +90,7 @@ final class DefaultAgentRepositoryTests: XCTestCase {
 
         // When/Then
         do {
-            try await mockClient.sendPrompt("Hello", images: nil, attachments: nil, reasoningLevel: nil)
+            try await mockClient.sendPrompt("Hello", attachments: nil, reasoningLevel: nil)
             XCTFail("Expected error to be thrown")
         } catch {
             XCTAssertEqual(mockClient.sendPromptCallCount, 1)

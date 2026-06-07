@@ -13,7 +13,6 @@ extension ChatViewModel: MessagingContext {
     ) async throws {
         try await engineClient.agent.sendPrompt(
             text,
-            images: nil,  // Images sent via attachments instead
             attachments: attachments,
             reasoningLevel: reasoningLevel,
             idempotencyKey: idempotencyKey

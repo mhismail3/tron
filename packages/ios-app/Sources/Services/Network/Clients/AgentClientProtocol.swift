@@ -6,7 +6,6 @@ import Foundation
 protocol AgentClientProtocol {
     func sendPrompt(
         _ prompt: String,
-        images: [ImageAttachment]?,
         attachments: [FileAttachment]?,
         reasoningLevel: String?,
         idempotencyKey: EngineIdempotencyKey
@@ -21,14 +20,12 @@ protocol AgentClientProtocol {
 extension AgentClientProtocol {
     func sendPrompt(
         _ prompt: String,
-        images: [ImageAttachment]? = nil,
         attachments: [FileAttachment]? = nil,
         reasoningLevel: String? = nil,
         idempotencyKey: EngineIdempotencyKey
     ) async throws {
         try await sendPrompt(
             prompt,
-            images: images,
             attachments: attachments,
             reasoningLevel: reasoningLevel,
             idempotencyKey: idempotencyKey

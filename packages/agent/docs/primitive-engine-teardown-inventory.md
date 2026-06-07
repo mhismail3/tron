@@ -235,7 +235,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | View root | Class | Teardown decision |
 |-----------|-------|-------------------|
 | `AgentControl` | delete | Fixed product control surface. |
-| `Attachments` | successor | Retain only if PET-11 proves the files are bare prompt-input infrastructure. Any product attachment workflow must be deleted or recreated later as agent-authored runtime state. |
+| `Attachments` | retain | PET-11 proved this is bare prompt-input infrastructure for images, PDFs, and documents. The legacy image-only prompt DTO/request path is deleted; all media flows through unified attachments. |
 | `AuditDetails` | successor | Delete fixed audit/worker-pack views. Reuse only generic dynamic-surface rendering if it is decoupled from product targets. |
 | `Capabilities` | successor | Retained files must be generic invocation/runtime evidence for the one `execute` primitive. PET-11's interim checkpoint deleted catalog/status/search/inspect/recipe/program/audit/policy DTOs and product-specific result summaries; remaining capability identity/event/display fields still need final retain/delete proof. |
 | `Chat` | retain | Primary prompt and assistant output shell. |
@@ -294,10 +294,11 @@ server settings shape and iOS controls together.
 
 ## Open Loops After PET-10
 
-- PET-11 must audit retained iOS `Attachments`, `Capabilities`, and
-  `SessionTree` source from first principles. The hard-coded
-  `UserInteraction` prompt/answer plane and fixed process dashboard were
-  deleted during PET-11.
+- PET-11 proved retained iOS `Attachments` are prompt-input infrastructure and
+  deleted the legacy image-only prompt DTO/request path. PET-11 must still
+  audit retained iOS `Capabilities` and `SessionTree` source from first
+  principles. The hard-coded `UserInteraction` prompt/answer plane and fixed
+  process dashboard were deleted during PET-11.
 - PET-11 decided that `session_drafts.skills_json` was stale product DTO
   residue and deleted it from fresh iOS draft storage. PET-11 also deleted
   `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift` after
