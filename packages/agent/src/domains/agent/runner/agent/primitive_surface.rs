@@ -8,7 +8,6 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 use serde_json::Value;
 
 use crate::domains::capability::contract::EXECUTE_FUNCTION_ID;
-use crate::domains::capability_support::implementations::scheduling::ExecutionMode;
 use crate::engine::{
     ActorContext, ActorId, ActorKind, AuthorityGrantId, EngineHostHandle, FunctionDefinition,
     FunctionHealth, FunctionId, FunctionQuery,
@@ -17,8 +16,17 @@ use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapabili
 
 const PRIMITIVE_SURFACE_GRANT: &str = "agent-primitive-surface";
 
+/// Controls how one model protocol call is scheduled relative to others.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ExecutionMode {
+    /// Execute concurrently with all other parallel primitive calls.
+    Parallel,
+    /// Execute sequentially within a named group.
+    Serialized(String),
+}
+
 #[derive(Clone, Debug)]
-pub struct EngineCapabilityTarget {
+pub struct PrimitiveExecutionTarget {
     pub model_capability_id: String,
     pub function_id: FunctionId,
     pub function: FunctionDefinition,
@@ -27,19 +35,18 @@ pub struct EngineCapabilityTarget {
 }
 
 #[derive(Clone, Debug)]
-pub struct ResolvedCapabilitySurface {
+pub struct ResolvedPrimitiveSurface {
     pub capabilities: Vec<ModelCapability>,
-    pub targets_by_name: BTreeMap<String, EngineCapabilityTarget>,
+    pub targets_by_name: BTreeMap<String, PrimitiveExecutionTarget>,
     pub turn_stopping_capabilities: HashSet<String>,
 }
 
-pub(crate) async fn resolve_provider_capabilities(
+pub(crate) async fn resolve_provider_primitive_surface(
     host: &EngineHostHandle,
     session_id: &str,
     workspace_id: Option<&str>,
-) -> Result<ResolvedCapabilitySurface, String> {
-    let resolved =
-        resolve_capability_targets_with_lifecycle(host, session_id, workspace_id).await?;
+) -> Result<ResolvedPrimitiveSurface, String> {
+    let resolved = resolve_primitive_targets(host, session_id, workspace_id).await?;
     let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
     let mut turn_stopping_capabilities = resolved.turn_stopping_capabilities;
@@ -53,23 +60,23 @@ pub(crate) async fn resolve_provider_capabilities(
         capabilities.push(capability);
     }
 
-    Ok(ResolvedCapabilitySurface {
+    Ok(ResolvedPrimitiveSurface {
         capabilities,
         targets_by_name,
         turn_stopping_capabilities,
     })
 }
 
-struct ResolvedCapabilityTargets {
-    targets: Vec<EngineCapabilityTarget>,
+struct ResolvedPrimitiveTargets {
+    targets: Vec<PrimitiveExecutionTarget>,
     turn_stopping_capabilities: HashSet<String>,
 }
 
-async fn resolve_capability_targets_with_lifecycle(
+async fn resolve_primitive_targets(
     host: &EngineHostHandle,
     session_id: &str,
     workspace_id: Option<&str>,
-) -> Result<ResolvedCapabilityTargets, String> {
+) -> Result<ResolvedPrimitiveTargets, String> {
     let actor = primitive_surface_actor(session_id, workspace_id)?;
     let mut functions = host
         .discover(&FunctionQuery {
@@ -105,7 +112,7 @@ async fn resolve_capability_targets_with_lifecycle(
         if !authority_is_available(&function) || !seen_names.insert(model_capability_id.clone()) {
             continue;
         }
-        targets.push(EngineCapabilityTarget {
+        targets.push(PrimitiveExecutionTarget {
             stops_turn: metadata_bool(&function, "stopsTurn").unwrap_or(false),
             execution_mode: execution_mode(&function),
             model_capability_id,
@@ -113,7 +120,7 @@ async fn resolve_capability_targets_with_lifecycle(
             function,
         });
     }
-    Ok(ResolvedCapabilityTargets {
+    Ok(ResolvedPrimitiveTargets {
         targets,
         turn_stopping_capabilities,
     })
@@ -202,7 +209,7 @@ fn execution_mode(function: &FunctionDefinition) -> ExecutionMode {
     }
 }
 
-fn model_capability_schema(target: &EngineCapabilityTarget) -> ModelCapability {
+fn model_capability_schema(target: &PrimitiveExecutionTarget) -> ModelCapability {
     if let Some(capability) = target
         .function
         .metadata
@@ -299,7 +306,7 @@ mod tests {
         host.register_function_for_setup(old_builtin_like_function, None, false)
             .expect("nonprimitive function");
 
-        let surface = resolve_provider_capabilities(&host, "session-a", None)
+        let surface = resolve_provider_primitive_surface(&host, "session-a", None)
             .await
             .expect("surface");
         assert!(surface.targets_by_name.contains_key("execute"));
@@ -309,7 +316,7 @@ mod tests {
     async fn provider_prompt_surface_stays_tiny() {
         let host = EngineHostHandle::new_in_memory().expect("host");
         register_execute(&host);
-        let surface = resolve_provider_capabilities(&host, "session-a", None)
+        let surface = resolve_provider_primitive_surface(&host, "session-a", None)
             .await
             .expect("surface");
         assert_eq!(surface.capabilities.len(), 1);

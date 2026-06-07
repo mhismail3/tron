@@ -4,12 +4,12 @@ use std::sync::atomic::AtomicI64;
 
 use crate::domains::agent::runner::agent::capability_invocation_executor;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
+use crate::domains::agent::runner::agent::primitive_surface::ExecutionMode;
+use crate::domains::agent::runner::agent::primitive_surface::ResolvedPrimitiveSurface;
 use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::runner::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::runner::types::{CapabilityInvocationExecutionResult, StreamResult};
-use crate::domains::capability_support::implementations::primitive_surface::ResolvedCapabilitySurface;
-use crate::domains::capability_support::implementations::scheduling::ExecutionMode;
 use crate::domains::session::event_store::EventType;
 use crate::shared::content::CapabilityResultContent;
 use crate::shared::messages::{CapabilityResultMessageContent, Message};
@@ -21,7 +21,7 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub turn: u32,
     pub stream_result: &'a StreamResult,
     pub context_manager: &'a mut ContextManager,
-    pub primitive_surface: &'a ResolvedCapabilitySurface,
+    pub primitive_surface: &'a ResolvedPrimitiveSurface,
     pub session_id: &'a str,
     pub emitter: &'a Arc<EventEmitter>,
     pub cancel: &'a CancellationToken,
@@ -319,7 +319,7 @@ async fn process_capability_results(
 
 pub(super) fn build_execution_waves(
     capability_invocations: &[crate::shared::messages::CapabilityInvocationDraft],
-    primitive_surface: &ResolvedCapabilitySurface,
+    primitive_surface: &ResolvedPrimitiveSurface,
 ) -> Vec<Vec<usize>> {
     let modes: Vec<_> = capability_invocations
         .iter()

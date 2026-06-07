@@ -5,13 +5,13 @@ use std::sync::atomic::AtomicI64;
 use std::time::{Duration, Instant};
 
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
+use crate::domains::agent::runner::agent::primitive_surface::{
+    PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
+};
 use crate::domains::agent::runner::orchestrator::invocation_abort_registry::{
     InvocationAbortGuard, InvocationAbortRegistry,
 };
 use crate::domains::agent::runner::types::CapabilityInvocationExecutionResult;
-use crate::domains::capability_support::implementations::primitive_surface::{
-    EngineCapabilityTarget, ResolvedCapabilitySurface,
-};
 use crate::engine::invocation::{
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
     RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY,
@@ -114,7 +114,7 @@ fn capability_identity_from_result(
 }
 
 pub struct CapabilityInvocationExecutionContext<'a> {
-    pub primitive_surface: &'a ResolvedCapabilitySurface,
+    pub primitive_surface: &'a ResolvedPrimitiveSurface,
     pub emitter: &'a Arc<EventEmitter>,
     pub cancel: &'a CancellationToken,
     pub workspace_id: Option<&'a str>,
@@ -266,7 +266,7 @@ fn with_agent_working_directory_metadata(
 #[allow(clippy::too_many_arguments)]
 async fn execute_capability_primitive_via_engine(
     engine_host: &EngineHostHandle,
-    target: &EngineCapabilityTarget,
+    target: &PrimitiveExecutionTarget,
     model_primitive_name: &str,
     invocation_id: &str,
     session_id: &str,

@@ -1,9 +1,9 @@
 use super::*;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
-use crate::domains::capability_support::implementations::primitive_surface::{
-    EngineCapabilityTarget, ResolvedCapabilitySurface, resolve_provider_capabilities,
+use crate::domains::agent::runner::agent::primitive_surface::ExecutionMode;
+use crate::domains::agent::runner::agent::primitive_surface::{
+    PrimitiveExecutionTarget, ResolvedPrimitiveSurface, resolve_provider_primitive_surface,
 };
-use crate::domains::capability_support::implementations::scheduling::ExecutionMode;
 use crate::engine::{
     AuthorityRequirement, EffectClass, FunctionDefinition, FunctionId, RiskLevel, VisibilityScope,
     WorkerDefinition, WorkerId, WorkerKind,
@@ -14,8 +14,8 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashSet};
 
-fn empty_surface() -> ResolvedCapabilitySurface {
-    ResolvedCapabilitySurface {
+fn empty_surface() -> ResolvedPrimitiveSurface {
+    ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name: BTreeMap::new(),
         turn_stopping_capabilities: HashSet::new(),
@@ -39,7 +39,7 @@ fn model_primitive_context_carries_trusted_working_directory_metadata() {
     );
 }
 
-fn surface_with_echo() -> ResolvedCapabilitySurface {
+fn surface_with_echo() -> ResolvedPrimitiveSurface {
     let function_id = FunctionId::new("capability::execute").expect("function id");
     let function = FunctionDefinition::new(
         function_id.clone(),
@@ -50,7 +50,7 @@ fn surface_with_echo() -> ResolvedCapabilitySurface {
     )
     .with_risk(RiskLevel::Low)
     .with_required_authority(AuthorityRequirement::scope("capability.execute"));
-    let target = EngineCapabilityTarget {
+    let target = PrimitiveExecutionTarget {
         model_capability_id: "execute".to_owned(),
         function_id,
         function,
@@ -59,7 +59,7 @@ fn surface_with_echo() -> ResolvedCapabilitySurface {
     };
     let mut targets_by_name = BTreeMap::new();
     let _ = targets_by_name.insert("execute".to_owned(), target);
-    ResolvedCapabilitySurface {
+    ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::from(["execute".to_owned()]),
@@ -67,7 +67,7 @@ fn surface_with_echo() -> ResolvedCapabilitySurface {
 }
 
 fn capability_exec_ctx<'a>(
-    surface: &'a ResolvedCapabilitySurface,
+    surface: &'a ResolvedPrimitiveSurface,
     emitter: &'a Arc<EventEmitter>,
     cancel: &'a CancellationToken,
 ) -> CapabilityInvocationExecutionContext<'a> {
@@ -112,7 +112,7 @@ async fn catalog_target_requires_engine_host_for_execution() {
 #[tokio::test]
 async fn model_capability_invocation_invokes_execute_primitive_through_engine() {
     let server = crate::shared::server::test_support::make_test_context();
-    let surface = resolve_provider_capabilities(&server.engine_host, "s1", None)
+    let surface = resolve_provider_primitive_surface(&server.engine_host, "s1", None)
         .await
         .expect("provider capability surface");
     assert!(surface.targets_by_name.contains_key("execute"));
@@ -240,7 +240,7 @@ async fn engine_capability_result_stop_turn_pauses_runner_even_when_target_is_no
     let mut targets_by_name = BTreeMap::new();
     let _ = targets_by_name.insert(
         "execute".to_owned(),
-        EngineCapabilityTarget {
+        PrimitiveExecutionTarget {
             model_capability_id: "execute".to_owned(),
             function_id,
             function,
@@ -248,7 +248,7 @@ async fn engine_capability_result_stop_turn_pauses_runner_even_when_target_is_no
             execution_mode: ExecutionMode::Parallel,
         },
     );
-    let surface = ResolvedCapabilitySurface {
+    let surface = ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::new(),
@@ -312,7 +312,7 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
     let mut targets_by_name = BTreeMap::new();
     let _ = targets_by_name.insert(
         "execute".to_owned(),
-        EngineCapabilityTarget {
+        PrimitiveExecutionTarget {
             model_capability_id: "execute".to_owned(),
             function_id,
             function,
@@ -320,7 +320,7 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
             execution_mode: ExecutionMode::Parallel,
         },
     );
-    let surface = ResolvedCapabilitySurface {
+    let surface = ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::new(),
@@ -412,7 +412,7 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
     let mut targets_by_name = BTreeMap::new();
     let _ = targets_by_name.insert(
         "execute".to_owned(),
-        EngineCapabilityTarget {
+        PrimitiveExecutionTarget {
             model_capability_id: "execute".to_owned(),
             function_id,
             function,
@@ -420,7 +420,7 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
             execution_mode: ExecutionMode::Parallel,
         },
     );
-    let surface = ResolvedCapabilitySurface {
+    let surface = ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::new(),

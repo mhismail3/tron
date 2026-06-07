@@ -186,7 +186,7 @@ uses; `handlers.rs` binds operation keys to local handler structs; `operations/`
 contains executable operation bodies. Runtime support is split the same way in
 domain-owned folders such as `domains/agent/runner/*`,
 `domains/agent/runtime/*`, `domains/session/event_store/*`, and
-`domains/capability_support/implementations/*`. Provider-native stream/function-call
+`domains/agent/runner/agent/primitive_surface.rs`. Provider-native stream/function-call
 argument parsing and provider-specific invocation id remapping are isolated
 under `domains/model/provider_protocol/*` before any canonical capability
 history reaches the runner, ledger, registry, audit, or iOS DTO layers.

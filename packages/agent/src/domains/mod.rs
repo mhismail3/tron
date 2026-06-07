@@ -41,7 +41,6 @@ pub mod auth;
 pub mod bindings;
 pub mod blob;
 pub mod capability;
-pub mod capability_support;
 pub mod catalog;
 pub mod contract;
 pub mod logs;

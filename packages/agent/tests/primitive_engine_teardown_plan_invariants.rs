@@ -510,7 +510,7 @@ fn prompt_loop_internals_have_no_hidden_policy_or_worker_planes() {
         ),
         (
             "primitive surface resolver",
-            "packages/agent/src/domains/capability_support/implementations/primitive_surface.rs",
+            "packages/agent/src/domains/agent/runner/agent/primitive_surface.rs",
         ),
     ] {
         if !repo_path(path).exists() {
@@ -1044,9 +1044,8 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         "primitive execute trace path",
     );
 
-    let primitive_surface = read_repo_file(
-        "packages/agent/src/domains/capability_support/implementations/primitive_surface.rs",
-    );
+    let primitive_surface =
+        read_repo_file("packages/agent/src/domains/agent/runner/agent/primitive_surface.rs");
     assert!(
         primitive_surface.contains("\"capability.execute\""),
         "primitive surface resolver must authorize the one execute primitive"
@@ -1055,6 +1054,10 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         &primitive_surface,
         &["capability.search", "capability.inspect"],
         "primitive surface resolver",
+    );
+    assert_repo_path_absent(
+        "packages/agent/src/domains/capability_support",
+        "top-level capability_support domain abstraction",
     );
 
     let executor = read_repo_file(

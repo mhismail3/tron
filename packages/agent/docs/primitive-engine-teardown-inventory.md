@@ -44,16 +44,18 @@ inventory file.
 ## Rust Domain Inventory
 
 PET-1 recorded the product-era domain map before deletion. After PET-10, the
-current retained domain roots are `agent`, `auth`, `blob`, `capability`,
-`capability_support`, `logs`, `message`, `model`, `session`, `settings`, and
-`system`. Rows for deleted product domains remain here only as deletion evidence
-and PET-11 re-audit targets.
+current retained domain roots are `agent`, `auth`, `blob`, `capability`, `logs`,
+`message`, `model`, `session`, `settings`, and `system`. Rows for deleted
+product domains and collapsed support boundaries remain here only as deletion
+evidence and PET-11 re-audit targets.
 
 PET-11's interim hosted-tool/computer-use checkpoint further removed the
 OpenAI hosted search/computer-call DTO and stream variants, stale iOS capability
 catalog DTO/rendering support, the fixed iOS SessionTree projection, and Mac
-Screen Recording/Accessibility onboarding gates. Remaining PET-11 successor rows
-below still need final retain/delete proof before closeout.
+Screen Recording/Accessibility onboarding gates. It also collapsed the
+top-level `capability_support` domain into the agent runner's primitive surface
+resolver. Remaining PET-11 successor rows below still need final retain/delete
+proof before closeout.
 
 | Domain | Class | Teardown decision |
 |--------|-------|-------------------|
@@ -62,7 +64,7 @@ below still need final retain/delete proof before closeout.
 | `blob` | retain | Keep payload/blob resolution for event, resource, and invocation evidence. |
 | `browser` | delete | First-party browser/computer-use product capability. Any future browser helper must be agent-authored runtime state. |
 | `capability` | retain | Keep only the model-facing `execute` primitive. Delete search, inspect, status, registry snapshot, bindings, plugins, conformance, recipes, vector search, and policy-profile orchestration. |
-| `capability_support` | retain | Keep only the primitive execute provider surface and scheduling support required by `capability::execute`; old catalog recipes, bindings, conformance, target routing, and registry support are deleted. |
+| `capability_support` | delete | PET-11 collapsed this non-domain support boundary into `domains/agent/runner/agent/primitive_surface.rs`. The provider-visible `execute` surface and per-call scheduling remain agent-runner primitives; the top-level domain root and separate scheduling module are deleted. |
 | `context` | delete | The public `context::*` capability plane is deleted. Minimal prompt context assembly, budgeting, compaction, and state/session summaries survive only under the agent runner infrastructure. |
 | `cron` | delete | Hard-coded scheduling/automation product plane. Future scheduling must be agent-owned state. |
 | `device` | delete | Push/device product workflow. APNs, device-token registration, and relay delivery are deleted; pairing and transport safety remain outside this domain if needed. |
@@ -305,9 +307,10 @@ server settings shape and iOS controls together.
   residue and deleted it from fresh iOS draft storage. PET-11 also deleted
   `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift` after
   proving they were unreferenced product DTO residue.
-- PET-11 must re-audit retained `capability_support`, `update.rs`, Mac update
-  docs, local diagnostics/logging surfaces, and dynamic-surface rendering for
-  hidden product policy.
+- PET-11 collapsed the former `capability_support` row into agent-runner
+  `primitive_surface`. PET-11 must still re-audit `update.rs`, Mac update docs,
+  local diagnostics/logging surfaces, and dynamic-surface rendering for hidden
+  product policy.
 - PET-11 may close only after a fresh end-to-end loop proof and after no
   retained/successor row can be deleted without breaking
   boot/provider/session/execute/state/trace/client-shell primitives.

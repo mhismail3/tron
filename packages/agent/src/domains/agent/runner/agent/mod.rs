@@ -8,6 +8,7 @@
 //! | `turn_runner` | Single turn: resolve `execute` → build context → LLM call → process stream → primitive invocations |
 //! | `stream_processor` | Consumes `Stream<StreamEvent>`, drives the select loop |
 //! | `stream_state` | Accumulator struct + event handlers for stream processing |
+//! | `primitive_surface` | Resolves the one provider-visible `execute` primitive at the model-call boundary |
 //! | `capability_invocation_executor` | Execute model-emitted primitive calls through the engine host with cancellation and session event projection |
 //! | `event_emitter` | Broadcast channel wrapper for agent lifecycle events |
 //! | `compaction_handler` | Pre-turn compaction trigger, deterministic summarizer, committed boundary events, and terminal no-op live progress |
@@ -27,6 +28,7 @@
 pub mod capability_invocation_executor;
 pub mod compaction_handler;
 pub mod event_emitter;
+pub mod primitive_surface;
 pub mod stream_processor;
 mod stream_state;
 pub mod tron_agent;

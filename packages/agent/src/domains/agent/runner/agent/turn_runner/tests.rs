@@ -1,12 +1,12 @@
 use super::*;
-use crate::domains::capability_support::implementations::primitive_surface::{
-    EngineCapabilityTarget, ResolvedCapabilitySurface,
+use crate::domains::agent::runner::agent::primitive_surface::ExecutionMode;
+use crate::domains::agent::runner::agent::primitive_surface::{
+    PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
-use crate::domains::capability_support::implementations::scheduling::ExecutionMode;
 use crate::engine::{EffectClass, FunctionDefinition, FunctionId, VisibilityScope, WorkerId};
 use std::collections::{BTreeMap, HashSet};
 
-fn surface(mode: ExecutionMode) -> ResolvedCapabilitySurface {
+fn surface(mode: ExecutionMode) -> ResolvedPrimitiveSurface {
     let mut targets_by_name = BTreeMap::new();
     let function_id = FunctionId::new("capability::execute").expect("function id");
     let function = FunctionDefinition::new(
@@ -18,7 +18,7 @@ fn surface(mode: ExecutionMode) -> ResolvedCapabilitySurface {
     );
     let _ = targets_by_name.insert(
         "execute".to_owned(),
-        EngineCapabilityTarget {
+        PrimitiveExecutionTarget {
             model_capability_id: "execute".to_owned(),
             function_id,
             function,
@@ -26,7 +26,7 @@ fn surface(mode: ExecutionMode) -> ResolvedCapabilitySurface {
             execution_mode: mode,
         },
     );
-    ResolvedCapabilitySurface {
+    ResolvedPrimitiveSurface {
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::new(),

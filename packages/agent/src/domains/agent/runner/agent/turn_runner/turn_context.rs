@@ -1,10 +1,8 @@
 //! Turn context construction and primitive capability resolution.
 
+use crate::domains::agent::runner::agent::primitive_surface::{self, ResolvedPrimitiveSurface};
 use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::types::RunContext;
-use crate::domains::capability_support::implementations::primitive_surface::{
-    self, ResolvedCapabilitySurface,
-};
 use crate::shared::messages::Context;
 use tracing::debug;
 
@@ -38,16 +36,20 @@ pub(super) async fn resolve_provider_primitive_surface(
     engine_host: Option<&crate::engine::EngineHostHandle>,
     session_id: &str,
     workspace_id: Option<&str>,
-) -> Result<ResolvedCapabilitySurface, String> {
+) -> Result<ResolvedPrimitiveSurface, String> {
     if let Some(host) = engine_host {
-        return primitive_surface::resolve_provider_capabilities(host, session_id, workspace_id)
-            .await;
+        return primitive_surface::resolve_provider_primitive_surface(
+            host,
+            session_id,
+            workspace_id,
+        )
+        .await;
     }
 
     #[cfg(test)]
     {
         let _ = (session_id, workspace_id);
-        return Ok(ResolvedCapabilitySurface {
+        return Ok(ResolvedPrimitiveSurface {
             capabilities: Vec::new(),
             targets_by_name: Default::default(),
             turn_stopping_capabilities: Default::default(),
