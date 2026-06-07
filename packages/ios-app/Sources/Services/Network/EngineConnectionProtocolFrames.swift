@@ -26,7 +26,6 @@ struct EngineFunctionCallFrame<P: Encodable>: Encodable {
     let id: String
     let functionId: String
     let payload: P
-    let expectedRevision: UInt64?
     let idempotencyKey: String?
     let context: EngineInvocationContext?
 }

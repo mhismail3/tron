@@ -58,9 +58,10 @@ resolver. The queue/trigger/prompt envelope checkpoint then removed
 pre-execution target revision, expected function revision, target function id,
 and catalog revision state from retained queue, trigger, and prompt handoff
 surfaces. The invocation transport checkpoint removed expected function revision
-tokens from public invoke/promote, external-worker invocation, the capability
-executor, and stale function revision errors. Remaining PET-11 successor rows
-below still need final retain/delete proof before closeout.
+tokens from public invoke/promote, external-worker invocation, iOS invoke
+frames, the capability executor, and stale function revision errors. Remaining
+PET-11 successor rows below still need final retain/delete proof before
+closeout.
 
 | Domain | Class | Teardown decision |
 |--------|-------|-------------------|

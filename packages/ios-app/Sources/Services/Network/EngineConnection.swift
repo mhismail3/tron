@@ -488,7 +488,6 @@ final class EngineConnection {
             id: requestId,
             functionId: functionId.rawValue,
             payload: payload,
-            expectedRevision: options.expectedRevision,
             idempotencyKey: idempotencyKey?.rawValue,
             context: options.context
         )

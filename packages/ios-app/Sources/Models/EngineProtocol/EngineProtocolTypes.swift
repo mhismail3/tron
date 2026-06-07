@@ -68,16 +68,13 @@ struct EngineInvocationContext: Codable, Equatable, Sendable {
 }
 
 struct EngineInvocationOptions: Sendable {
-    var expectedRevision: UInt64?
     var context: EngineInvocationContext?
     var timeout: TimeInterval?
 
     init(
-        expectedRevision: UInt64? = nil,
         context: EngineInvocationContext? = nil,
         timeout: TimeInterval? = nil
     ) {
-        self.expectedRevision = expectedRevision
         self.context = context
         self.timeout = timeout
     }
