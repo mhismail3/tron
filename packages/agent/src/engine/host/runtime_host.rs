@@ -8,10 +8,6 @@
 use super::*;
 
 impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
-    fn catalog_revision(&self) -> CatalogRevision {
-        self.catalog.revision()
-    }
-
     fn discover_functions(&self, query: &FunctionQuery) -> Vec<FunctionDefinition> {
         self.catalog.discover_functions(query)
     }

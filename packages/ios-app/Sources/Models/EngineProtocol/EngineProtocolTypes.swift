@@ -144,11 +144,9 @@ struct EngineProtocolResponseFrame: Decodable {
     let result: AnyCodable?
     let error: EngineProtocolError?
     let traceId: String?
-    let catalogRevision: UInt64?
 }
 
 struct EngineFunctionCallEnvelope<R: Decodable>: Decodable {
-    let catalogRevision: UInt64?
     let child: EngineChildInvocation<R>
 }
 

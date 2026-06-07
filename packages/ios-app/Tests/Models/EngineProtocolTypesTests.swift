@@ -443,7 +443,7 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
         }
 
         let json = """
-        {"type":"response","id":"123","ok":true,"result":{"catalogRevision":7,"child":{"value":{"data":"hello"}}},"error":null}
+        {"type":"response","id":"123","ok":true,"result":{"child":{"value":{"data":"hello"}}},"error":null}
         """.data(using: .utf8)!
 
         let response = try JSONDecoder().decode(Response<EngineFunctionCallEnvelope<TestResult>>.self, from: json)

@@ -61,8 +61,11 @@ surfaces. The invocation transport checkpoint removed expected function revision
 tokens from public invoke/promote, external-worker invocation, iOS invoke
 frames, the capability executor, and stale function revision errors. Remaining
 PET-11 control deletion removed `control::*`, its trace graph helpers, and the
-iOS control DTO. Remaining PET-11 successor rows below still need final
-retain/delete proof before closeout.
+iOS control DTO. The public catalog readout checkpoint removed ordinary
+hello/response/discover/inspect/promote/catalog-list/worker-list catalog
+revision fields; retained revisions are now cursor truth or execution evidence.
+Remaining PET-11 successor rows below still need final retain/delete proof
+before closeout.
 
 | Domain | Class | Teardown decision |
 |--------|-------|-------------------|
@@ -118,9 +121,9 @@ PET-3/PET-5/PET-7 must collapse them to loop infrastructure.
 | `trigger` | retain | Keep only transport/queue trigger infrastructure required by the loop. PET-11 removed trigger target-revision pins and target/catalog identity from dispatch responses. Delete cron/product trigger registrations. |
 | `grant` | retain | Keep minimal host integrity and scoped authority records. Delete product trust-tier and worker-pack policy assumptions. |
 | `approval` | delete | Approval prompts and policy workflow are product-coded. Keep no approval prompt plane unless reduced to a hard infrastructure block for irreversible host risk. |
-| `catalog` | retain | Keep internal registry mechanics only if needed by host dispatch; do not expose model-facing catalog discovery. PET-11 removed caller-held expected function revision tokens; remaining catalog revisions must justify themselves only as resource/version truth or ledger evidence. |
+| `catalog` | retain | Keep internal registry mechanics only if needed by host dispatch; do not expose model-facing catalog discovery. PET-11 removed caller-held expected function revision tokens and ordinary public catalog readout fields; remaining catalog revisions are catalog-watch cursor truth or invocation/trace evidence. |
 | `control` | delete | Product operator dashboard/control snapshot. PET-11 deletes the primitive worker, `control::*` functions, trace graph projection helpers, and stale iOS control DTO. |
-| `worker` | successor | Retain only if PET-7 reduces it to generic helper connection/disconnection substrate. |
+| `worker` | successor | Retain only if PET-7 reduces it to generic helper connection/disconnection substrate. PET-11 removed redundant `worker::list` catalog revision readouts. |
 | `observability` | retain | Invocation records, Agent Trace-style records, retained logs, and failure evidence for proof and debugging. |
 | `storage` | retain | SQLite stats/checkpoint/snapshot infrastructure. Delete product storage controls. |
 | `ui` | successor | Keep or replace only as a tiny generic dynamic-surface resource renderer. Delete fixed generated UI targets tied to product domains. |

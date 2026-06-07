@@ -24,10 +24,9 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             list_schema(),
             json!({
                 "type": "object",
-                "required": ["catalogRevision", "functions", "workers", "triggers", "triggerTypes"],
+                "required": ["functions", "workers", "triggers", "triggerTypes"],
                 "additionalProperties": false,
                 "properties": {
-                    "catalogRevision": {"type": "integer"},
                     "functions": {"type": "array"},
                     "workers": {"type": "array"},
                     "triggers": {"type": "array"},
@@ -41,10 +40,9 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             inspect_schema(),
             json!({
                 "type": "object",
-                "required": ["catalogRevision", "kind", "definition"],
+                "required": ["kind", "definition"],
                 "additionalProperties": false,
                 "properties": {
-                    "catalogRevision": {"type": "integer"},
                     "kind": {"type": "string"},
                     "definition": {}
                 }

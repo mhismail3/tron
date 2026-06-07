@@ -21,7 +21,7 @@ fn test_session() -> (EngineWsSession, mpsc::Receiver<String>) {
 }
 
 #[tokio::test]
-async fn hello_sets_defaults_and_returns_catalog_revision() {
+async fn hello_sets_defaults() {
     let (mut session, _rx) = test_session();
     assert!(
         session

@@ -28,10 +28,9 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
             .with_request_schema(list_schema())
             .with_response_schema(json!({
                 "type": "object",
-                "required": ["catalogRevision", "workers"],
+                "required": ["workers"],
                 "additionalProperties": false,
                 "properties": {
-                    "catalogRevision": {"type": "integer"},
                     "workers": {"type": "array"}
                 }
             })),

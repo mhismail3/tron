@@ -30,11 +30,11 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
     let specs = vec![
         public_spec("discover", "engine::discover", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"effectClass":{"type":"string"},"health":{"type":"string"},"maxRisk":{"type":"string"},"namespacePrefix":{"type":"string"},"text":{"type":"string"},"visibility":{"type":"string"}},"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"catalogRevision":{"type":"integer"},"functions":{"items":{"type":"object"},"type":"array"}},"required":["functions","catalogRevision"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"functions":{"items":{"type":"object"},"type":"array"}},"required":["functions"],"type":"object"}))
             .build()?,
         public_spec("inspect", "engine::inspect", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"id":{"type":"string"},"kind":{"enum":["function","worker","trigger_type","trigger"],"type":"string"}},"required":["kind","id"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"catalogRevision":{"type":"integer"},"definition":{"type":"object"},"kind":{"type":"string"}},"required":["catalogRevision","kind","definition"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":false,"properties":{"definition":{"type":"object"},"kind":{"type":"string"}},"required":["kind","definition"],"type":"object"}))
             .build()?,
         public_spec("watch", "engine::watch", EffectClass::PureRead, RiskLevel::Low)
             .request_schema(json!({"additionalProperties":false,"properties":{"cursor":{"type":"integer"},"topic":{"type":"string"}},"type":"object"}))
@@ -57,7 +57,7 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
         )
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
         .request_schema(json!({"additionalProperties":false,"properties":{"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"targetVisibility":{"type":"string"},"workspaceId":{"type":"string"}},"required":["functionId","targetVisibility","idempotencyKey"],"type":"object"}))
-        .response_schema(json!({"additionalProperties":false,"properties":{"catalogRevision":{"type":"integer"},"functionId":{"type":"string"},"revision":{"type":"integer"},"visibility":{"enum":["workspace","system"],"type":"string"}},"required":["functionId","revision","visibility","catalogRevision"],"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"functionId":{"type":"string"},"revision":{"type":"integer"},"visibility":{"enum":["workspace","system"],"type":"string"}},"required":["functionId","revision","visibility"],"type":"object"}))
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .compensation(crate::engine::CompensationContract::new(
             crate::engine::CompensationKind::InverseCommandAvailable,
@@ -221,7 +221,7 @@ mod tests {
 
         assert_eq!(
             schema["required"],
-            json!(["functionId", "revision", "visibility", "catalogRevision"])
+            json!(["functionId", "revision", "visibility"])
         );
         assert!(schema["properties"]["newVisibility"].is_null());
         assert!(schema["properties"]["promoted"].is_null());

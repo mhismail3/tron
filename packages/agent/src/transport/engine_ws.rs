@@ -272,14 +272,12 @@ impl EngineWsSession {
             session_id: message.session_id,
             workspace_id: message.workspace_id,
         });
-        let revision = self.ctx.engine_host.catalog_revision().await;
         self.send_value(json!({
             "type": "hello.ok",
             "id": message.id,
             "protocolVersion": PROTOCOL_VERSION,
             "minimumSupportedVersion": MIN_PROTOCOL_VERSION,
             "serverId": "tron-engine",
-            "currentCatalogRevision": revision.0,
         }))
     }
 
@@ -398,10 +396,7 @@ impl EngineWsSession {
         };
         let trace_id = envelope.causal_context.trace_id.to_string();
         match dispatch_engine_transport_request(&self.ctx, envelope).await {
-            Ok(result) => {
-                let revision = self.ctx.engine_host.catalog_revision().await;
-                self.send_success(id, result, Some(trace_id), Some(revision.0))
-            }
+            Ok(result) => self.send_success(id, result, Some(trace_id)),
             Err(error) => self.send_error_with_trace(id, error, Some(trace_id)),
         }
     }
@@ -475,7 +470,6 @@ impl EngineWsSession {
                         "cursor": subscription.cursor.0,
                         "limit": limit,
                     }),
-                    None,
                     None,
                 )
             }
@@ -629,7 +623,6 @@ impl EngineWsSession {
                         "hasMore": page.has_more,
                     }),
                     None,
-                    None,
                 )
             }
             Err(error) => self.send_error(id, engine_error_to_capability_error(error)),
@@ -679,7 +672,6 @@ impl EngineWsSession {
                 "cursor": message.cursor,
             }),
             None,
-            None,
         )
         .await
     }
@@ -715,20 +707,13 @@ impl EngineWsSession {
         }
     }
 
-    fn send_success(
-        &self,
-        id: Option<String>,
-        result: Value,
-        trace_id: Option<String>,
-        catalog_revision: Option<u64>,
-    ) -> bool {
+    fn send_success(&self, id: Option<String>, result: Value, trace_id: Option<String>) -> bool {
         self.send_value(json!({
             "type": "response",
             "id": id,
             "ok": true,
             "result": result,
             "traceId": trace_id,
-            "catalogRevision": catalog_revision,
         }))
     }
 
@@ -737,7 +722,6 @@ impl EngineWsSession {
         id: Option<String>,
         result: Value,
         trace_id: Option<String>,
-        catalog_revision: Option<u64>,
     ) -> bool {
         send_engine_ws_value_async(
             &self.out_tx,
@@ -748,7 +732,6 @@ impl EngineWsSession {
                 "ok": true,
                 "result": result,
                 "traceId": trace_id,
-                "catalogRevision": catalog_revision,
             }),
         )
         .await

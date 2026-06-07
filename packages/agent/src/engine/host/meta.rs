@@ -302,12 +302,8 @@ pub(super) fn invocation_result_value(result: &InvocationResult) -> Value {
     })
 }
 
-pub(super) fn delegated_invoke_value(
-    catalog_revision: CatalogRevision,
-    child_result: &InvocationResult,
-) -> Value {
+pub(super) fn delegated_invoke_value(child_result: &InvocationResult) -> Value {
     json!({
-        "catalogRevision": catalog_revision.0,
         "child": invocation_result_value(child_result),
     })
 }

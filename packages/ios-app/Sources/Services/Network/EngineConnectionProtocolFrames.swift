@@ -18,7 +18,6 @@ struct EngineHelloResult: Decodable, Equatable, Sendable {
     let protocolVersion: UInt64
     let minimumSupportedVersion: UInt64
     let serverId: String
-    let currentCatalogRevision: UInt64
 }
 
 struct EngineFunctionCallFrame<P: Encodable>: Encodable {
@@ -65,7 +64,6 @@ struct EngineResponseEnvelope<R: Decodable>: Decodable {
     let result: R?
     let error: EngineProtocolError?
     let traceId: String?
-    let catalogRevision: UInt64?
 }
 
 // MARK: - URLSession Delegate

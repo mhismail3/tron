@@ -632,7 +632,6 @@ impl EngineHost {
         };
         let functions = self.catalog.discover_functions(&query);
         Ok(json!({
-            "catalogRevision": self.catalog.revision().0,
             "functions": functions,
         }))
     }
@@ -701,7 +700,6 @@ impl EngineHost {
             }
         };
         Ok(json!({
-            "catalogRevision": self.catalog.revision().0,
             "kind": kind,
             "definition": definition,
         }))
@@ -731,10 +729,7 @@ impl EngineHost {
         } else {
             self.catalog.invoke_sync(child).await
         };
-        Ok(delegated_invoke_value(
-            self.catalog.revision(),
-            &child_result,
-        ))
+        Ok(delegated_invoke_value(&child_result))
     }
 
     fn meta_promote(&mut self, invocation: &Invocation) -> Result<Value> {
@@ -791,7 +786,6 @@ impl EngineHost {
             "functionId": function_id.as_str(),
             "revision": revision.0,
             "visibility": target.as_str(),
-            "catalogRevision": self.catalog.revision().0,
         }))
     }
 

@@ -2086,6 +2086,70 @@ fn control_projection_primitive_is_deleted() {
 }
 
 #[test]
+fn public_catalog_readout_state_is_not_client_envelope_state() {
+    let transport_surface = [
+        read_repo_file("packages/agent/src/transport/contracts.rs"),
+        read_repo_file("packages/agent/src/transport/engine_ws.rs"),
+        read_repo_file(
+            "packages/ios-app/Sources/Services/Network/EngineConnectionProtocolFrames.swift",
+        ),
+    ]
+    .join("\n");
+    assert_absent(
+        &transport_surface,
+        &[
+            "currentCatalogRevision",
+            "\"catalogRevision\": catalog_revision",
+            "let catalogRevision: UInt64?",
+            "let currentCatalogRevision",
+        ],
+        "public engine transport envelope catalog readout surface",
+    );
+    let swift_protocol =
+        read_repo_file("packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes.swift");
+    let response_frame = swift_protocol
+        .split("struct EngineProtocolResponseFrame")
+        .nth(1)
+        .and_then(|tail| tail.split("struct EngineFunctionCallEnvelope").next())
+        .expect("EngineProtocolResponseFrame section should exist");
+    assert_absent(
+        response_frame,
+        &["catalogRevision"],
+        "iOS top-level response frame",
+    );
+    let function_call_envelope = swift_protocol
+        .split("struct EngineFunctionCallEnvelope")
+        .nth(1)
+        .and_then(|tail| tail.split("struct EngineChildInvocation").next())
+        .expect("EngineFunctionCallEnvelope section should exist");
+    assert_absent(
+        function_call_envelope,
+        &["catalogRevision"],
+        "iOS function-call envelope",
+    );
+
+    let public_catalog_read_surface = [
+        read_repo_file("packages/agent/src/engine/host.rs"),
+        read_repo_file("packages/agent/src/engine/host/meta.rs"),
+        read_repo_file("packages/agent/src/engine/primitives/catalog.rs"),
+        read_repo_file("packages/agent/src/engine/primitives/runtime.rs"),
+        read_repo_file("packages/agent/src/engine/primitives/worker.rs"),
+    ]
+    .join("\n");
+    assert_absent(
+        &public_catalog_read_surface,
+        &[
+            "\"catalogRevision\": self.catalog.revision().0",
+            "\"catalogRevision\": host.catalog_revision().0",
+            "\"catalogRevision\": catalog_revision.0",
+            "\"required\": [\"catalogRevision\"",
+            "\"catalogRevision\": {\"type\": \"integer\"}",
+        ],
+        "public catalog/meta/worker readout catalog revision surface",
+    );
+}
+
+#[test]
 fn user_interaction_pause_plane_is_deleted_from_retained_sources() {
     let retained_sources = read_repo_source_trees(&[
         "packages/agent/src",

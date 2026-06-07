@@ -300,7 +300,7 @@ impl EngineHostHandle {
         };
 
         let mut host = self.inner.lock().await;
-        let value = delegated_invoke_value(host.catalog.revision(), &child_result);
+        let value = delegated_invoke_value(&child_result);
         host.finish_meta_invocation(
             prepared.meta_invocation,
             prepared.meta_function,

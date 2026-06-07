@@ -15,13 +15,11 @@ use crate::engine::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion, UpdateResource,
 };
 use crate::engine::types::{
-    CatalogRevision, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope,
-    WorkerDefinition,
+    FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
 };
 
 /// Narrow host interface required by host-dispatched primitive workers.
 pub(in crate::engine) trait PrimitiveRuntimeHost {
-    fn catalog_revision(&self) -> CatalogRevision;
     fn discover_functions(&self, query: &FunctionQuery) -> Vec<FunctionDefinition>;
     fn visible_workers(&self, actor: &ActorContext) -> Vec<WorkerDefinition>;
     fn visible_triggers(&self, actor: &ActorContext) -> Vec<TriggerDefinition>;
@@ -94,7 +92,6 @@ fn catalog_list(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Res
             .unwrap_or(false),
     };
     Ok(json!({
-        "catalogRevision": host.catalog_revision().0,
         "functions": host.discover_functions(&query),
         "workers": host.visible_workers(&actor),
         "triggers": host.visible_triggers(&actor),
@@ -135,7 +132,6 @@ fn catalog_watch_snapshot(
 fn worker_list(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result<Value> {
     let actor = actor_context(&invocation.causal_context);
     Ok(json!({
-        "catalogRevision": host.catalog_revision().0,
         "workers": host.visible_workers(&actor),
     }))
 }
