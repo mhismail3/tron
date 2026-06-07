@@ -25,8 +25,8 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
-        "Current score: **5/100**",
-        "Status: **active planning artifact**",
+        "Current score: **13/100**",
+        "Status: **active execution artifact**",
         "Branch: `codex/primitive-engine-teardown`",
         "There are no users and no compatibility obligations.",
         "No backward compatibility",
@@ -35,7 +35,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "Target Bare Loop",
         "Agent Soul Seed",
         "| PET-0 | Branch, baseline, and plan formalization | 5 | passed_after_fix |",
-        "| PET-1 | Primitive taxonomy and deletion inventory | 8 | pending |",
+        "| PET-1 | Primitive taxonomy and deletion inventory | 8 | passed_after_fix |",
         "| PET-2 | Server domain registration teardown | 12 | pending |",
         "| PET-3 | Single execute primitive | 12 | pending |",
         "| PET-4 | Soul and agent-owned state workspace | 10 | pending |",
@@ -63,11 +63,12 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Evidence Manifest",
-        "Current score: **5/100**",
-        "Status: **active planning artifact**",
+        "Current score: **13/100**",
+        "Status: **active execution artifact**",
         "New teardown branch: `codex/primitive-engine-teardown`",
         "Compatibility assumption: none.",
         "| PET-0 | passed_after_fix |",
+        "| PET-1 | passed_after_fix |",
         "| PET-11 | pending |",
         "provider model-facing tool export proof",
         "iOS simulator target name, UDID, bundle id, launch return code",
@@ -85,5 +86,162 @@ fn primitive_engine_teardown_plan_stays_formalized() {
             && readme
                 .contains("packages/agent/docs/primitive-engine-teardown-evidence-manifest.md"),
         "README living-doc map must link the active primitive teardown scorecard and evidence manifest"
+    );
+}
+
+#[test]
+fn primitive_engine_teardown_inventory_stays_exhaustive() {
+    let inventory = read_repo_file("packages/agent/docs/primitive-engine-teardown-inventory.md");
+    let readme = read_repo_file("README.md");
+
+    for required in [
+        "# Primitive Engine Teardown Inventory",
+        "PET-1 status: `passed_after_fix`",
+        "Classification vocabulary: `retain`, `delete`, `successor`.",
+        "Source Audit Commands",
+        "Rust Domain Inventory",
+        "Engine Primitive Worker Inventory",
+        "Runner Context Plane Inventory",
+        "First-Party Managed Skill Inventory",
+        "Documentation Inventory",
+        "iOS Top-Level Source Inventory",
+        "iOS Primary View Inventory",
+        "Settings Surface Inventory",
+        "Deletion Checkpoint Order",
+    ] {
+        assert!(
+            inventory.contains(required),
+            "primitive teardown inventory missing required text: {required}"
+        );
+    }
+
+    for domain in [
+        "agent",
+        "auth",
+        "blob",
+        "browser",
+        "capability",
+        "capability_support",
+        "context",
+        "cron",
+        "device",
+        "display",
+        "events",
+        "filesystem",
+        "git",
+        "import",
+        "job",
+        "logs",
+        "mcp",
+        "memory",
+        "message",
+        "model",
+        "notifications",
+        "plan",
+        "process",
+        "program",
+        "prompt_library",
+        "repo",
+        "sandbox",
+        "self_extension",
+        "session",
+        "settings",
+        "skills",
+        "system",
+        "transcription",
+        "tree",
+        "voice_notes",
+        "web",
+        "worktree",
+    ] {
+        assert!(
+            inventory.contains(&format!("| `{domain}` |")),
+            "primitive teardown inventory missing Rust domain row for {domain}"
+        );
+    }
+
+    for worker in [
+        "stream",
+        "state",
+        "queue",
+        "resource",
+        "trigger",
+        "grant",
+        "approval",
+        "catalog",
+        "control",
+        "worker",
+        "observability",
+        "storage",
+        "ui",
+        "module",
+    ] {
+        assert!(
+            inventory.contains(&format!("| `{worker}` |")),
+            "primitive teardown inventory missing primitive worker row for {worker}"
+        );
+    }
+
+    for skill in [
+        "browse-the-web",
+        "explore",
+        "find-skill",
+        "generate",
+        "git-sync",
+        "google-workspace",
+        "heal-skill",
+        "humanizer",
+        "knowledge",
+        "manage-automations",
+        "old-english",
+        "plan",
+        "publish-website",
+        "sandbox",
+        "self-deploy",
+        "self-extend",
+        "self-inspect",
+        "twitter",
+        "vault",
+    ] {
+        assert!(
+            inventory.contains(&format!("| `{skill}` |")),
+            "primitive teardown inventory missing managed skill row for {skill}"
+        );
+    }
+
+    for view in [
+        "AgentControl",
+        "Attachments",
+        "AuditDetails",
+        "Capabilities",
+        "Chat",
+        "Components",
+        "EngineApproval",
+        "InputBar",
+        "MessageBubble",
+        "Notifications",
+        "Onboarding",
+        "Process",
+        "PromptLibrary",
+        "Session",
+        "SessionTree",
+        "Settings",
+        "Skills",
+        "SourceChanges",
+        "Subagents",
+        "System",
+        "UserInteraction",
+        "VoiceNotes",
+        "Work",
+    ] {
+        assert!(
+            inventory.contains(&format!("| `{view}` |")),
+            "primitive teardown inventory missing iOS view row for {view}"
+        );
+    }
+
+    assert!(
+        readme.contains("packages/agent/docs/primitive-engine-teardown-inventory.md"),
+        "README living-doc map must link the PET-1 primitive teardown inventory"
     );
 }

@@ -137,6 +137,10 @@ Current living entry points:
 - `packages/agent/docs/primitive-engine-teardown-evidence-manifest.md`:
   companion evidence manifest for the active primitive engine teardown
   scorecard.
+- `packages/agent/docs/primitive-engine-teardown-inventory.md`: PET-1
+  source-audited deletion map for every current Rust domain, engine primitive
+  worker, runner context plane, managed skill, doc, iOS source/view root, and
+  settings surface.
 - `packages/agent/docs/self-extending-local-product-user-guide.md`: user guide
   for worker-led autonomous work, the Work dashboard, Worker Packs, Generated
   Controls, Audit Details, trust labels, and model presets.

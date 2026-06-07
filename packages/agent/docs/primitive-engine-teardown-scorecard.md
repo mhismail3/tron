@@ -4,9 +4,9 @@ Created: 2026-06-06
 
 Initial score: **0/100**
 
-Current score: **5/100**
+Current score: **13/100**
 
-Status: **active planning artifact**
+Status: **active execution artifact**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -159,7 +159,7 @@ PET-4 and PET-6 must fail if it grows into those shapes.
 | ID | Area | Weight | Status | Owner | Evidence contract | Residual risk | Checkpoint |
 |----|------|--------|--------|-------|-------------------|---------------|------------|
 | PET-0 | Branch, baseline, and plan formalization | 5 | passed_after_fix | docs_or_scorecard | New branch exists from the worker-first checkpoint; scorecard, evidence manifest, README link, static plan gate, and current branch status are recorded. | None for planning. PET-1 owns the first source inventory before behavior deletion. | this checkpoint |
-| PET-1 | Primitive taxonomy and deletion inventory | 8 | pending | engine_architecture | Source audit lists every Rust domain, primitive worker, runner context plane, first-party skill, managed doc, iOS top-level mode/client/view, and settings surface as retain/delete/successor with grep-backed evidence. | Classification mistakes can preserve product code; final audit must revisit. | pending |
+| PET-1 | Primitive taxonomy and deletion inventory | 8 | passed_after_fix | engine_architecture | Added [`primitive-engine-teardown-inventory.md`](primitive-engine-teardown-inventory.md), a source-audited deletion map covering every current Rust domain, primitive worker, runner context plane, first-party managed skill, agent doc, iOS source/view root, and settings surface as retain/delete/successor. The covering invariant was added first and failed red on the missing inventory before the artifact was created. | Classification mistakes can preserve product code; PET-2 through PET-10 must execute against this map and PET-11 must adversarially revisit every `retain` and `successor` classification. | PET-1 inventory checkpoint |
 | PET-2 | Server domain registration teardown | 12 | pending | engine_architecture | `domains::registration` stops registering product/tool domain workers by default. Tests prove removed namespaces are absent from startup catalog and no old capability names are routable. Retained domains are documented as boot/provider/session infrastructure. | Some retained session/model code may still mention old capability events until PET-5/PET-10. | pending |
 | PET-3 | Single execute primitive | 12 | pending | engine_architecture | Provider tool export exposes exactly one model-facing tool. `execute` no longer depends on registry recipes, policy profiles, vector search, plugin/binding/conformance tables, or target-specific route heuristics. Integration proof shows a prompt can call `execute`, receive an observation, and continue the loop. | The bootstrap host access shape may need one user decision before implementation. | pending |
 | PET-4 | Soul and agent-owned state workspace | 10 | pending | agent_runtime | Context assembly contains soul plus session/state summaries, not rules/skills/worker guides. Tests prove agent-owned state persists across turns and can be inspected/updated through `execute`. The soul file/resource is short and static-gated against toolbox creep. | Self-adapting behavior beyond state persistence is successor work. | pending |
@@ -177,7 +177,8 @@ Total weight: **100**
 
 1. PET-0: commit the plan on `codex/primitive-engine-teardown`. **Closed in
    this checkpoint.**
-2. PET-1: commit the inventory and deletion map before deleting code.
+2. PET-1: commit the inventory and deletion map before deleting code. **Closed
+   in the PET-1 inventory checkpoint.**
 3. PET-2/PET-3: commit the first backend slice where startup catalog and the
    single-tool provider loop agree.
 4. PET-4/PET-6: commit the context/soul/state slice only after rules, skills,
