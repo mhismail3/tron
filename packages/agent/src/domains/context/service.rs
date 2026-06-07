@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Duration;
 
 use crate::domains::agent::runner::context::context_manager::ContextManager;
@@ -6,25 +5,19 @@ use crate::domains::agent::runner::context::summarizer::{KeywordSummarizer, Summ
 use crate::domains::agent::runner::context::types::{CompactionConfig, ContextManagerConfig};
 use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
 use crate::domains::session::event_store::sqlite::contention::{self, BusyRetryPolicy};
-use crate::domains::skills::registry::SkillRegistry;
 use crate::shared::model_capabilities::ModelCapability;
-use parking_lot::RwLock;
 
 use crate::domains::context::Deps;
-use crate::domains::session::context::SessionContextArtifacts;
 use crate::shared::server::errors::{self, CapabilityError};
 
 pub(crate) struct PreparedSessionContext {
     pub(crate) session: crate::domains::session::event_store::sqlite::row_types::SessionRow,
-    pub(crate) artifacts: SessionContextArtifacts,
     pub(crate) context_manager: ContextManager,
 }
 
 pub(crate) fn build_context_manager_for_session(
     session_id: &str,
     session_manager: &SessionManager,
-    event_store: &crate::domains::session::event_store::EventStore,
-    context_artifacts: &crate::domains::session::context::ContextArtifactsService,
     profile_runtime: &crate::domains::agent::runner::ProfileRuntime,
     model_capability_definitions: Vec<ModelCapability>,
 ) -> Result<PreparedSessionContext, CapabilityError> {
@@ -59,16 +52,6 @@ pub(crate) fn build_context_manager_for_session(
             message: format!("invalid session profile `{profile_name}`: {error}"),
         })?;
     let settings = session_plan.settings.clone();
-    let is_chat = profile_name == crate::shared::profile::CHAT_PROFILE
-        || session.source.as_deref() == Some("chat");
-    let artifacts = if is_chat {
-        SessionContextArtifacts::default()
-    } else {
-        context_artifacts
-            .load(event_store, &session.working_directory, &settings)
-            .session
-    };
-
     let context_limit = crate::domains::model::providers::model_context_window(&state.model);
     let compactor_settings = &settings.context.compactor;
     let mut context_manager = ContextManager::new(ContextManagerConfig {
@@ -91,10 +74,8 @@ pub(crate) fn build_context_manager_for_session(
                 .as_ref()
                 .map(|prompt| prompt.content.clone())
         },
-        context_policy: session_plan.runtime_context_policy(),
         working_directory: state.working_directory.clone(),
         capabilities: model_capability_definitions,
-        rules_content: artifacts.rules.merged_content.clone(),
         compaction: CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
             preserve_recent_turns: compactor_settings.preserve_recent_count,
@@ -113,7 +94,6 @@ pub(crate) fn build_context_manager_for_session(
 
     Ok(PreparedSessionContext {
         session,
-        artifacts,
         context_manager,
     })
 }
@@ -158,52 +138,12 @@ fn is_busy_capability_error(error: &CapabilityError) -> bool {
         || message.contains("database schema is locked")
 }
 
-pub(crate) fn build_active_skill_context(
-    skill_names: &[String],
-    skill_registry: &Arc<RwLock<SkillRegistry>>,
-) -> Option<String> {
-    if skill_names.is_empty() {
-        return None;
-    }
-
-    let registry = skill_registry.read();
-    let name_refs: Vec<&str> = skill_names.iter().map(String::as_str).collect();
-    let (found, _) = registry.get_many(&name_refs);
-    if found.is_empty() {
-        return None;
-    }
-
-    let context = crate::domains::skills::injector::build_skill_context(&found);
-    if context.is_empty() {
-        None
-    } else {
-        Some(context)
-    }
-}
-
 pub(crate) fn build_summarizer(
-    deps: &Deps,
-    session_id: &str,
-    working_directory: &str,
+    _deps: &Deps,
+    _session_id: &str,
+    _working_directory: &str,
 ) -> Box<dyn Summarizer> {
-    if let Some(manager) = deps.subagent_manager.as_ref() {
-        let process_plan = manager.plan_process("compaction").ok();
-        let spawner =
-            crate::domains::agent::runner::agent::compaction_handler::SubagentManagerSpawner {
-                manager: manager.clone(),
-                parent_session_id: session_id.to_owned(),
-                working_directory: working_directory.to_owned(),
-                system_prompt: process_plan
-                    .and_then(|plan| plan.prompt.map(|prompt| prompt.content))
-                    .unwrap_or_default(),
-                model: None,
-            };
-        Box::new(
-            crate::domains::agent::runner::context::llm_summarizer::LlmSummarizer::new(spawner),
-        )
-    } else {
-        Box::new(KeywordSummarizer::new())
-    }
+    Box::new(KeywordSummarizer::new())
 }
 
 pub(crate) async fn model_capability_definitions(

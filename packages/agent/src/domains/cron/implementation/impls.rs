@@ -106,7 +106,7 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
         model_preset: Option<ModelPreset>,
         workspace_id: Option<&str>,
         system_prompt: Option<&str>,
-        capability_restrictions: Option<&crate::domains::cron::CapabilityRestrictions>,
+        _capability_restrictions: Option<&crate::domains::cron::CapabilityRestrictions>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> Result<crate::domains::cron::AgentTurnResult, CronError> {
         // Resolve model and profile from the current compiled profile runtime.
@@ -214,43 +214,17 @@ impl crate::domains::cron::executor::AgentTurnExecutor for CronAgentTurnExecutor
             ..crate::domains::agent::runner::AgentConfig::default()
         };
 
-        let mut capability_execution_policy = session_plan.capability_execution_policy.clone();
-        if let Some(restrictions) = capability_restrictions
-            && let Some(allowed_contracts) = restrictions.allowed_contracts.clone()
-        {
-            capability_execution_policy.allowed_contracts = Some(allowed_contracts);
-        }
-        // Interactive primitives such as `agent::ask_user` are removed automatically
-        // by AgentFactory when is_unattended=true.
-
         // 6. Create agent via factory
         let mut agent = crate::domains::agent::runner::AgentFactory::create_agent(
             agent_config,
             session_id.clone(),
             crate::domains::agent::runner::CreateAgentOpts {
                 provider,
-                context_policy: session_plan.runtime_context_policy(),
-                primitive_surface_policy: session_plan.primitive_surface_policy.clone(),
-                capability_execution_policy,
-                guardrails: None,
-                hooks: None,
-                is_unattended: true,
-                denied_primitives: Vec::new(),
-                subagent_depth: 0,
-                subagent_max_depth: 0,
-                rules_content: None,
                 initial_messages: vec![],
-                memory_content: None,
-                rules_index: None,
-                pre_activated_rules: vec![],
                 initial_turn_count: 0,
-                subagent_manager: self.subagent_manager.clone(),
                 compaction_trigger_config:
                     crate::domains::agent::runner::context::types::CompactionTriggerConfig::default(
                     ),
-                process_manager: None,
-                job_manager: None,
-                output_buffer_registry: None,
                 engine_host: Some(self.engine_host.clone()),
             },
         );

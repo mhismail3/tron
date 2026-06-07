@@ -4,17 +4,12 @@ use tracing::{debug, warn};
 
 use super::agent_build::{BuiltPromptAgent, build_prompt_agent};
 use super::completion::{PromptRunCompletion, finalize_prompt_run};
-use super::context::load_prompt_context_bundle;
-use super::hooks::{
-    apply_user_prompt_submit_hook, build_prompt_hooks, fire_session_start_hook,
-    fire_worktree_acquired_hook,
-};
+use super::context::load_agent_state_context;
 use super::worktree::{emit_prompt_worktree_failure, resolve_prompt_worktree};
 use super::{
     PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, ShutdownCancelForwarder,
-    build_user_content_override, build_user_event_payload, collect_pending_skill_payloads,
-    persist_user_message_event, prepare_skill_context_from_session, resume_prompt_session,
-    run_agent, should_acquire_worktree_for_source,
+    build_user_content_override, build_user_event_payload, persist_user_message_event,
+    resume_prompt_session, run_agent, should_acquire_worktree_for_source,
 };
 
 pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
@@ -24,20 +19,11 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         session_manager,
         broadcast,
         provider_factory,
-        guardrails,
         health_tracker,
         event_store,
-        context_artifacts,
-        skill_registry,
-        memory_registry,
         profile_runtime,
-        subagent_manager,
         shutdown_token,
         worktree_coordinator,
-        process_manager,
-        job_manager,
-        output_buffer_registry,
-        hook_abort_tracker,
         engine_host,
         engine_causality,
         sequence_counter,
@@ -48,6 +34,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         model,
         working_dir,
         request,
+        ..
     } = plan;
 
     let session_plan =
@@ -98,15 +85,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         engine_causality: _,
     } = request;
 
-    let hooks = build_prompt_hooks(
-        &subagent_manager,
-        &broadcast,
-        &event_store,
-        &worktree_coordinator,
-        &hook_abort_tracker,
-        &working_dir,
-    );
-
     let _ = session_manager.mark_processing(&session_id);
     let mut run_cleanup =
         PromptRunCleanup::new(started_run, session_manager.clone(), session_id.clone());
@@ -154,26 +132,15 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             return;
         }
     };
-    let worktree_info = worktree_resolution.worktree_info;
     let working_dir = worktree_resolution.working_dir;
-    let freshly_acquired_worktree = worktree_resolution.freshly_acquired;
-
-    let context_policy = session_plan.runtime_context_policy();
-    let prompt_context = load_prompt_context_bundle(
-        context_artifacts.clone(),
-        engine_host.clone(),
-        event_store.clone(),
-        memory_registry.clone(),
-        &session_id,
-        &working_dir,
-        settings.as_ref().clone(),
-        !state.messages.is_empty(),
-        source.clone(),
-        &context_policy,
-        worktree_info.as_ref(),
-        &resolved_profile,
-    )
-    .await;
+    let resolved_workspace_id = event_store
+        .get_session(&session_id)
+        .ok()
+        .flatten()
+        .map(|session| session.workspace_id)
+        .filter(|id| !id.is_empty());
+    let agent_state_context =
+        load_agent_state_context(&engine_host, &session_id, resolved_workspace_id.as_deref()).await;
 
     let messages = state.messages.clone();
     let initial_turn_count = event_store
@@ -189,29 +156,17 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         provider_type,
     } = match build_prompt_agent(
         provider_factory,
-        guardrails,
         health_tracker,
-        process_manager,
-        job_manager,
-        output_buffer_registry,
-        subagent_manager.clone(),
-        hooks.clone(),
         engine_host.clone(),
         &broadcast,
         settings.as_ref(),
-        &session_plan,
         &session_id,
-        &profile,
         &model,
         &working_dir,
         server_origin,
-        prompt_context.combined_rules.clone(),
         messages,
         initial_turn_count,
-        prompt_context.memory.clone(),
-        prompt_context.rules_index.clone(),
-        prompt_context.pre_activated_rules.clone(),
-        prompt_context.resolved_workspace_id.clone(),
+        resolved_workspace_id.clone(),
     )
     .await
     {
@@ -223,16 +178,11 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     agent.set_persister(Some(persister.clone()));
     agent.set_invocation_abort_registry(orchestrator.invocation_abort_registry().clone());
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
-    let skills_payload = {
-        let registry = skill_registry.read();
-        collect_pending_skill_payloads(&event_store, &session_id, Some(&*registry))
-    };
     let mut user_event_payload = build_user_event_payload(
         &prompt,
         images.as_deref(),
         attachments.as_deref(),
         message_metadata.as_ref(),
-        skills_payload.as_ref(),
     );
     if let Some(object) = user_event_payload.as_object_mut() {
         object.insert("runId".to_owned(), serde_json::json!(run_id.clone()));
@@ -270,56 +220,14 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     let user_content_override =
         build_user_content_override(&prompt, &model, images.as_deref(), attachments.as_deref());
 
-    {
-        let mut registry = skill_registry.write();
-        let _ = registry.refresh_if_stale(&working_dir);
-    }
-    let skill_result = match prepare_skill_context_from_session(
-        skill_registry.clone(),
-        event_store.clone(),
-        session_id.clone(),
-    )
-    .await
-    {
-        Ok(result) => result,
-        Err(error) => {
-            warn!(
-                session_id = %session_id,
-                error = %error,
-                "failed to build skill context from session"
-            );
-            crate::domains::agent::runtime::runtime::SkillContextResult {
-                skill_activation_context: None,
-                skill_context: None,
-                skill_removal_context: None,
-            }
-        }
-    };
-
-    let skill_index_context = build_skill_index_context(
-        &skill_registry,
-        skill_result.skill_context.as_ref(),
-        &context_policy,
-    );
-    let volatile_tokens = prompt_context.volatile_tokens(
-        skill_result.skill_context.as_ref(),
-        skill_result.skill_removal_context.as_ref(),
-        &context_policy,
-    );
-
-    let mut run_context = RunContext {
+    let run_context = RunContext {
         reasoning_level: reasoning_level.and_then(|level| {
             crate::domains::agent::runner::types::ReasoningLevel::from_str_loose(&level)
         }),
-        skill_index_context,
-        skill_activation_context: skill_result.skill_activation_context,
-        skill_context: skill_result.skill_context,
-        skill_removal_context: skill_result.skill_removal_context,
-        job_results: prompt_context.job_results_context.clone(),
+        agent_state_context,
         profile_name: Some(profile.clone()),
         resolved_profile: Some(resolved_profile.clone()),
         user_content_override,
-        volatile_tokens,
         run_id: Some(run_id.clone()),
         engine_trace_id: engine_causality
             .as_ref()
@@ -333,24 +241,12 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         ..Default::default()
     };
 
-    fire_worktree_acquired_hook(
-        &hooks,
-        &session_id,
-        worktree_info.as_ref(),
-        freshly_acquired_worktree,
-    )
-    .await;
-    fire_session_start_hook(&hooks, &session_id, &working_dir).await;
-    let (effective_prompt, hook_context) =
-        apply_user_prompt_submit_hook(&hooks, &session_id, &prompt).await;
-    run_context.hook_context = hook_context;
-
-    debug!(session_id = %session_id, "[hooks] all hooks returned, calling run_agent");
+    debug!(session_id = %session_id, "calling primitive agent loop");
     let result = run_agent(
         &mut agent,
-        &effective_prompt,
+        &prompt,
         run_context,
-        &hooks,
+        &None,
         &broadcast,
         sequence_counter,
     )
@@ -372,29 +268,4 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         model_for_error,
     })
     .await;
-}
-
-fn build_skill_index_context(
-    skill_registry: &Arc<parking_lot::RwLock<crate::domains::skills::registry::SkillRegistry>>,
-    skill_context: Option<&String>,
-    context_policy: &crate::domains::agent::runner::context::local_policy::ContextPolicy,
-) -> Option<String> {
-    if context_policy.strip_skill_index() {
-        return None;
-    }
-
-    let settings = crate::domains::settings::get_settings();
-    let should_show = match &settings.skills.show_index {
-        crate::domains::settings::types::ShowIndex::Always => true,
-        crate::domains::settings::types::ShowIndex::Never => false,
-        crate::domains::settings::types::ShowIndex::WhenNoActiveSkills => skill_context.is_none(),
-    };
-    if !should_show {
-        return None;
-    }
-
-    let registry = skill_registry.read();
-    let all_skills = registry.list(None);
-    let index = crate::domains::skills::injector::build_skill_index(&all_skills);
-    if index.is_empty() { None } else { Some(index) }
 }

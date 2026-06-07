@@ -16,6 +16,15 @@ fn read_repo_file(path: &str) -> String {
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
 }
 
+fn assert_absent(haystack: &str, banned: &[&str], label: &str) {
+    for needle in banned {
+        assert!(
+            !haystack.contains(needle),
+            "{label} must not retain primitive-teardown-banned text `{needle}`"
+        );
+    }
+}
+
 #[test]
 fn primitive_engine_teardown_plan_stays_formalized() {
     let scorecard = read_repo_file("packages/agent/docs/primitive-engine-teardown-scorecard.md");
@@ -25,7 +34,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
-        "Current score: **37/100**",
+        "Current score: **47/100**",
         "Status: **active execution artifact**",
         "Branch: `codex/primitive-engine-teardown`",
         "There are no users and no compatibility obligations.",
@@ -38,9 +47,9 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-1 | Primitive taxonomy and deletion inventory | 8 | passed_after_fix |",
         "| PET-2 | Server domain registration teardown | 12 | passed_after_fix |",
         "| PET-3 | Single execute primitive | 12 | passed_after_fix |",
-        "| PET-4 | Soul and agent-owned state workspace | 10 | pending |",
+        "| PET-4 | Soul and agent-owned state workspace | 10 | passed_after_fix |",
         "| PET-5 | Session, event, ledger, and resource collapse | 8 | pending |",
-        "| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | pending |",
+        "| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | running |",
         "| PET-7 | Self-authored worker/capability substrate | 8 | pending |",
         "| PET-8 | iOS primitive shell | 10 | pending |",
         "| PET-9 | Documentation and managed asset rewrite | 5 | pending |",
@@ -63,7 +72,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Evidence Manifest",
-        "Current score: **37/100**",
+        "Current score: **47/100**",
         "Status: **active execution artifact**",
         "New teardown branch: `codex/primitive-engine-teardown`",
         "Compatibility assumption: none.",
@@ -71,6 +80,8 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-1 | passed_after_fix |",
         "| PET-2 | passed_after_fix |",
         "| PET-3 | passed_after_fix |",
+        "| PET-4 | passed_after_fix |",
+        "| PET-6 | running |",
         "| PET-11 | pending |",
         "provider model-facing tool export proof",
         "iOS simulator target name, UDID, bundle id, launch return code",
@@ -246,4 +257,223 @@ fn primitive_engine_teardown_inventory_stays_exhaustive() {
         readme.contains("packages/agent/docs/primitive-engine-teardown-inventory.md"),
         "README living-doc map must link the PET-1 primitive teardown inventory"
     );
+}
+
+#[test]
+fn context_has_soul_and_agent_state_not_rules_skills_hooks_or_policy_planes() {
+    let messages = read_repo_file("packages/agent/src/shared/protocol/messages.rs");
+    assert!(
+        messages.contains("pub agent_state_context: Option<String>"),
+        "provider Context must expose agent-owned state as the only durable behavior context"
+    );
+    assert_absent(
+        &messages,
+        &[
+            "rules_content",
+            "memory_content",
+            "skill_index_context",
+            "skill_activation_context",
+            "skill_context",
+            "skill_removal_context",
+            "job_results_context",
+            "dynamic_rules_context",
+            "capability_primer_context",
+            "hook_context",
+        ],
+        "provider Context",
+    );
+
+    let composition =
+        read_repo_file("packages/agent/src/domains/model/providers/shared/context_composition.rs");
+    assert!(
+        composition.contains("\"agent.soul\"")
+            && composition.contains("\"agent.state\"")
+            && composition.contains("Agent State"),
+        "provider context composition must be soul plus agent-owned state"
+    );
+    assert_absent(
+        &composition,
+        &[
+            "project.rules",
+            "memory.root",
+            "dynamic.rules",
+            "capabilities.primer",
+            "skills.",
+            "jobs.results",
+            "hooks.addContext",
+            "Worker Guide",
+            "Project Rules",
+            "Active Rules",
+            "Skill Index",
+            "Hook Context",
+        ],
+        "provider context composition",
+    );
+
+    let soul = read_repo_file("packages/agent/src/domains/agent/runner/context/soul.rs");
+    assert!(
+        soul.contains("pub const AGENT_SOUL")
+            && soul.contains("learn from the environment")
+            && soul.contains("agent-owned state")
+            && soul.contains("one capability: `execute`"),
+        "agent soul seed must be a small audited primitive instruction"
+    );
+    assert_absent(
+        &soul,
+        &[
+            "toolbox",
+            "recipe pack",
+            "worker guide",
+            "Available Skills",
+            "AGENTS.md",
+            "CLAUDE.md",
+            "hook",
+            "guardrail",
+        ],
+        "agent soul seed",
+    );
+
+    let run_context = read_repo_file("packages/agent/src/domains/agent/runner/types.rs");
+    assert_absent(
+        &run_context,
+        &[
+            "skill_index_context",
+            "skill_activation_context",
+            "skill_context",
+            "skill_removal_context",
+            "job_results",
+            "dynamic_rules_context",
+            "capability_primer_context",
+            "hook_context",
+            "subagent_depth",
+            "subagent_max_depth",
+        ],
+        "RunContext",
+    );
+
+    let execute = read_repo_file("packages/agent/src/domains/agent/runtime/service/execute.rs");
+    assert!(
+        execute.contains("load_agent_state_context"),
+        "prompt runtime must load agent-owned state through the primitive state namespace"
+    );
+    assert_absent(
+        &execute,
+        &[
+            "build_prompt_hooks",
+            "apply_user_prompt_submit_hook",
+            "fire_session_start_hook",
+            "fire_worktree_acquired_hook",
+            "prepare_skill_context_from_session",
+            "collect_pending_skill_payloads",
+            "build_skill_index_context",
+            "skill_registry",
+            "hook_abort_tracker",
+            "job_manager",
+            "subagent_manager",
+            "guardrails",
+        ],
+        "prompt runtime execute path",
+    );
+
+    let agent_build =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/agent_build.rs");
+    assert_absent(
+        &agent_build,
+        &[
+            "GuardrailEngine",
+            "guardrails",
+            "HookEngine",
+            "hooks",
+            "subagent_manager",
+            "job_manager",
+            "rules_content",
+            "memory_content",
+            "rules_index",
+            "pre_activated_rules",
+            "load_system_prompt_from_file",
+            "load_global_system_prompt",
+            "context_policy",
+            "capability_execution_policy",
+            "primitive_surface_policy",
+            "denied_primitives",
+        ],
+        "prompt agent builder",
+    );
+}
+
+#[test]
+fn prompt_loop_internals_have_no_hidden_policy_or_worker_planes() {
+    for (label, path) in [
+        (
+            "agent factory",
+            "packages/agent/src/domains/agent/runner/orchestrator/agent_factory.rs",
+        ),
+        (
+            "tron agent",
+            "packages/agent/src/domains/agent/runner/agent/tron_agent.rs",
+        ),
+        (
+            "turn runner",
+            "packages/agent/src/domains/agent/runner/agent/turn_runner.rs",
+        ),
+        (
+            "capability phase",
+            "packages/agent/src/domains/agent/runner/agent/turn_runner/capability_invocations.rs",
+        ),
+        (
+            "capability executor",
+            "packages/agent/src/domains/agent/runner/agent/capability_invocation_executor.rs",
+        ),
+        (
+            "compaction handler",
+            "packages/agent/src/domains/agent/runner/agent/compaction_handler.rs",
+        ),
+        (
+            "context manager",
+            "packages/agent/src/domains/agent/runner/context/context_manager.rs",
+        ),
+        (
+            "context manager types",
+            "packages/agent/src/domains/agent/runner/context/types.rs",
+        ),
+        (
+            "primitive surface resolver",
+            "packages/agent/src/domains/capability_support/implementations/primitive_surface.rs",
+        ),
+    ] {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "GuardrailEngine",
+                "guardrail",
+                "HookEngine",
+                "hook",
+                "subagent",
+                "job_manager",
+                "process_manager",
+                "output_buffer_registry",
+                "ContextPolicy",
+                "context_policy",
+                "PrimitiveSurfacePolicy",
+                "primitive_surface_policy",
+                "CapabilityExecutionPolicy",
+                "capability_execution_policy",
+                "denied_primitives",
+                "is_unattended",
+                "rules_content",
+                "dynamic_rules",
+                "RulesTracker",
+                "rules_tracker",
+                "RulesIndex",
+                "memory_content",
+                "session_memories",
+                "skill",
+                "approval",
+                "selectedTarget",
+                "bindingDecision",
+            ],
+            label,
+        );
+    }
 }

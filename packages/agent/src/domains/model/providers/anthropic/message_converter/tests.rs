@@ -11,16 +11,7 @@ fn simple_context() -> Context {
         messages: vec![Message::user("hello")].into(),
         capabilities: None,
         working_directory: None,
-        rules_content: None,
-        memory_content: None,
-        skill_index_context: None,
-        skill_activation_context: None,
-        skill_context: None,
-        skill_removal_context: None,
-        job_results_context: None,
-        dynamic_rules_context: None,
-        hook_context: None,
-        capability_primer_context: None,
+        agent_state_context: None,
         server_origin: None,
     }
 }
@@ -223,8 +214,7 @@ fn system_prompt_no_prefix_none_when_empty() {
 fn system_prompt_no_prefix_with_volatile_has_two_tiers() {
     let ctx = Context {
         system_prompt: Some("You are helpful.".into()),
-        rules_content: Some("Rule 1".into()),
-        skill_context: Some("Available skill: /commit".into()),
+        agent_state_context: Some("state".into()),
         ..Default::default()
     };
     let system = build_system_prompt(&ctx, None).unwrap();
@@ -264,7 +254,6 @@ fn system_prompt_with_prefix_returns_array() {
 fn system_prompt_with_prefix_has_cache_control() {
     let ctx = Context {
         system_prompt: Some("You are helpful.".into()),
-        rules_content: Some("Rule 1".into()),
         ..Default::default()
     };
     let system = build_system_prompt(&ctx, Some(OAUTH_SYSTEM_PROMPT_PREFIX)).unwrap();
@@ -278,8 +267,7 @@ fn system_prompt_with_prefix_has_cache_control() {
 fn system_prompt_with_prefix_volatile_has_two_cache_tiers() {
     let ctx = Context {
         system_prompt: Some("You are helpful.".into()),
-        rules_content: Some("Rule 1".into()),
-        skill_context: Some("Available skill: /commit".into()),
+        agent_state_context: Some("state".into()),
         ..Default::default()
     };
     let system = build_system_prompt(&ctx, Some(OAUTH_SYSTEM_PROMPT_PREFIX)).unwrap();

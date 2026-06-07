@@ -1,8 +1,7 @@
 use super::*;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
 use crate::domains::capability_support::implementations::primitive_surface::{
-    EngineCapabilityTarget, PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
-    resolve_provider_capabilities,
+    EngineCapabilityTarget, ResolvedCapabilitySurface, resolve_provider_capabilities,
 };
 use crate::domains::capability_support::implementations::traits::ExecutionMode;
 use crate::engine::{
@@ -14,17 +13,6 @@ use crate::shared::model_capabilities::CapabilityResultBody;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashSet};
-
-fn default_execution_spec() -> crate::shared::profile::AgentExecutionSpec {
-    let tempdir = tempfile::tempdir().expect("profile tempdir");
-    let home = tempdir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).expect("seed profile home");
-    let profile =
-        crate::shared::profile::resolve_profile_at(&home, crate::shared::profile::NORMAL_PROFILE)
-            .expect("normal profile");
-    std::mem::forget(tempdir);
-    profile.spec
-}
 
 fn empty_surface() -> ResolvedCapabilitySurface {
     ResolvedCapabilitySurface {
@@ -87,27 +75,13 @@ fn capability_exec_ctx<'a>(
     surface: &'a ResolvedCapabilitySurface,
     emitter: &'a Arc<EventEmitter>,
     cancel: &'a CancellationToken,
-    execution_spec: &'a crate::shared::profile::AgentExecutionSpec,
 ) -> CapabilityInvocationExecutionContext<'a> {
     CapabilityInvocationExecutionContext {
         primitive_surface: surface,
-        primitive_surface_policy: &DEFAULT_PRIMITIVE_SURFACE_POLICY,
-        capability_execution_policy: &execution_spec.capability_execution_policies["default"],
-        guardrails: &None,
-        hooks: &None,
         emitter,
         cancel,
-        subagent_depth: 0,
-        subagent_max_depth: 0,
         workspace_id: None,
-        process_manager: None,
-        job_manager: None,
-        output_buffer_registry: None,
         sequence_counter: None,
-        provider_type: Provider::Anthropic,
-        execution_spec: Some(execution_spec),
-        profile_spec_hash: Some("test-profile-hash"),
-        event_persister: None,
         turn: 1,
         invocation_abort_registry: None,
         engine_host: None,
@@ -117,16 +91,12 @@ fn capability_exec_ctx<'a>(
     }
 }
 
-static DEFAULT_PRIMITIVE_SURFACE_POLICY: std::sync::LazyLock<PrimitiveSurfacePolicy> =
-    std::sync::LazyLock::new(PrimitiveSurfacePolicy::default);
-
 #[tokio::test]
 async fn unknown_model_primitive_fails_before_execution() {
     let surface = empty_surface();
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
-    let spec = default_execution_spec();
-    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &spec);
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel);
     let call = CapabilityInvocationDraft::new("tc1", "Missing", Default::default());
     let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
     assert!(result.result.is_error.unwrap_or(false));
@@ -137,8 +107,7 @@ async fn catalog_target_requires_engine_host_for_execution() {
     let surface = surface_with_echo();
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
-    let spec = default_execution_spec();
-    let ctx = capability_exec_ctx(&surface, &emitter, &cancel, &spec);
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel);
     let call = CapabilityInvocationDraft::new("tc1", "execute", Default::default());
     let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
     assert!(result.result.is_error.unwrap_or(false));
@@ -148,22 +117,9 @@ async fn catalog_target_requires_engine_host_for_execution() {
 #[tokio::test]
 async fn model_capability_invocation_invokes_execute_primitive_through_engine() {
     let server = crate::shared::server::test_support::make_test_context();
-    let spec = default_execution_spec();
-    let context_policy =
-        crate::domains::agent::runner::context::local_policy::ContextPolicy::from_provider_with_spec(
-            Provider::Anthropic,
-            &spec,
-        );
-    let surface = resolve_provider_capabilities(
-        &server.engine_host,
-        "s1",
-        None,
-        Provider::Anthropic,
-        &context_policy,
-        &PrimitiveSurfacePolicy::default(),
-    )
-    .await
-    .expect("provider capability surface");
+    let surface = resolve_provider_capabilities(&server.engine_host, "s1", None)
+        .await
+        .expect("provider capability surface");
     assert_eq!(surface.all_model_capability_ids, vec!["execute"]);
     assert!(surface.targets_by_name.contains_key("execute"));
 
@@ -173,7 +129,7 @@ async fn model_capability_invocation_invokes_execute_primitive_through_engine() 
 
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &spec);
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
     ctx.engine_host = Some(&server.engine_host);
 
     let mut args = serde_json::Map::new();
@@ -308,8 +264,7 @@ async fn engine_capability_result_stop_turn_pauses_runner_even_when_target_is_no
     };
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
-    let spec = default_execution_spec();
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &spec);
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
     ctx.engine_host = Some(&engine_host);
 
     let call = CapabilityInvocationDraft::new("capability-invocation-1", "execute", {
@@ -384,8 +339,7 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
     };
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
-    let spec = default_execution_spec();
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &spec);
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
     let trace_id = TraceId::new("agent-trace").expect("trace id");
     let parent_invocation_id = InvocationId::new("agent-run-turn").expect("invocation id");
     ctx.engine_host = Some(&engine_host);
@@ -488,8 +442,7 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
     };
     let emitter = Arc::new(EventEmitter::new());
     let cancel = CancellationToken::new();
-    let spec = default_execution_spec();
-    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel, &spec);
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
     ctx.engine_host = Some(&engine_host);
 
     let payload = json!({

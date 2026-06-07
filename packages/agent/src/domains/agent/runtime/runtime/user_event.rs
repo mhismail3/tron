@@ -18,7 +18,6 @@ pub fn build_user_event_payload(
     images: Option<&[Value]>,
     attachments: Option<&[Value]>,
     extra_metadata: Option<&Value>,
-    skills: Option<&Value>,
 ) -> Value {
     let has_images = images.is_some_and(|v| !v.is_empty());
     let has_attachments = attachments.is_some_and(|v| !v.is_empty());
@@ -92,9 +91,6 @@ pub fn build_user_event_payload(
                 let _ = obj.insert(k.clone(), v.clone());
             }
         }
-    }
-    if let Some(s) = skills {
-        payload["skills"] = s.clone();
     }
     payload
 }

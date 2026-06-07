@@ -1,9 +1,8 @@
 use super::{
     ActorContext, ActorId, ActorKind, AuthorityGrantId, ENGINE_INTERNAL_INVOKE_SCOPE,
     EngineQueueDrainer, EnqueueInvocation, FunctionId, FunctionRevision, PromptDrainOutcome,
-    PromptEngineCausality, PromptRequest, PromptRunPlan, RwLock, TraceId, execute_prompt_run,
+    PromptEngineCausality, PromptRequest, PromptRunPlan, TraceId, execute_prompt_run,
 };
-use crate::domains::skills::registry::SkillRegistry;
 use crate::engine::queue::publish_queue_lifecycle_event;
 use crate::shared::server::errors::CapabilityError;
 use std::sync::Arc;
@@ -24,29 +23,10 @@ pub(crate) fn drain_prompt_queue(
     working_dir: &str,
     broadcast: Arc<crate::domains::agent::runner::EventEmitter>,
     provider_factory: Arc<dyn crate::domains::model::providers::provider::ProviderFactory>,
-    guardrails: Option<
-        Arc<parking_lot::Mutex<crate::domains::agent::runner::guardrails::GuardrailEngine>>,
-    >,
     health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
-    context_artifacts: Arc<crate::domains::session::context::ContextArtifactsService>,
-    skill_registry: Arc<RwLock<SkillRegistry>>,
-    memory_registry: Arc<parking_lot::Mutex<crate::domains::agent::runner::memory::MemoryRegistry>>,
     profile_runtime: Arc<crate::domains::agent::runner::ProfileRuntime>,
-    subagent_manager: Option<
-        Arc<crate::domains::agent::runner::orchestrator::subagent_manager::SubagentManager>,
-    >,
     shutdown_token: Option<tokio_util::sync::CancellationToken>,
     worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
-    process_manager: Option<
-        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
-    >,
-    job_manager: Option<
-        Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>,
-    >,
-    output_buffer_registry: Option<
-        Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
-    >,
-    hook_abort_tracker: Arc<crate::domains::agent::runner::hooks::abort_tracker::HookAbortTracker>,
     server_origin: String,
     engine_host: crate::engine::EngineHostHandle,
     engine_causality: Option<PromptEngineCausality>,
@@ -149,20 +129,11 @@ pub(crate) fn drain_prompt_queue(
         session_manager: session_manager.clone(),
         broadcast,
         provider_factory,
-        guardrails,
         health_tracker,
         event_store: event_store.clone(),
-        context_artifacts,
-        skill_registry,
-        memory_registry,
         profile_runtime,
-        subagent_manager,
         shutdown_token: shutdown_token.clone(),
         worktree_coordinator,
-        process_manager,
-        job_manager,
-        output_buffer_registry,
-        hook_abort_tracker,
         engine_host,
         engine_causality: engine_causality.clone(),
         sequence_counter,

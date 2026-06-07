@@ -220,24 +220,23 @@ fn system_param_oauth_cache_breakpoints_stable_and_volatile() {
     let provider = AnthropicProvider::new(config);
     let ctx = Context {
         system_prompt: Some("System".into()),
-        rules_content: Some("Rules".into()),
-        skill_context: Some("Skills".into()),
+        agent_state_context: Some("State".into()),
         ..Context::default()
     };
     let param = provider.build_system_param(&ctx).unwrap();
     let blocks: Vec<Value> = serde_json::from_value(param).unwrap();
 
-    // Prefix + system + rules (stable) + skills (volatile)
-    assert_eq!(blocks.len(), 4);
+    // Prefix + system (stable) + agent state (volatile)
+    assert_eq!(blocks.len(), 3);
 
-    // Breakpoint 2: last stable block (index 2 = rules) → 1h
-    assert_eq!(blocks[2]["cache_control"]["ttl"], "1h");
+    // Breakpoint 2: last stable block (index 1 = system) -> 1h
+    assert_eq!(blocks[1]["cache_control"]["ttl"], "1h");
 
-    // Breakpoint 3: last volatile block (index 3 = skills) → ephemeral (no ttl)
-    assert_eq!(blocks[3]["cache_control"]["type"], "ephemeral");
+    // Breakpoint 3: last volatile block (index 2 = state) -> ephemeral (no ttl)
+    assert_eq!(blocks[2]["cache_control"]["type"], "ephemeral");
     assert!(
-        blocks[3]["cache_control"].get("ttl").is_none()
-            || blocks[3]["cache_control"]["ttl"].is_null()
+        blocks[2]["cache_control"].get("ttl").is_none()
+            || blocks[2]["cache_control"]["ttl"].is_null()
     );
 }
 

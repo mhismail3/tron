@@ -343,16 +343,7 @@ fn context_serde_roundtrip() {
         messages: vec![Message::user("hi")].into(),
         capabilities: None,
         working_directory: Some("/tmp".into()),
-        rules_content: None,
-        memory_content: None,
-        skill_index_context: None,
-        skill_activation_context: None,
-        skill_context: None,
-        skill_removal_context: None,
-        job_results_context: None,
-        dynamic_rules_context: None,
-        capability_primer_context: None,
-        hook_context: None,
+        agent_state_context: None,
         server_origin: None,
     };
     let json = serde_json::to_string(&ctx).unwrap();

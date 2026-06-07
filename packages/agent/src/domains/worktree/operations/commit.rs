@@ -38,19 +38,13 @@ impl CommitOperation {
             .commit_for_session(&session_id, Some(Path::new(&working_dir)), &message, opts)
             .await
         {
-            Ok(Some(result)) => {
-                // Record worktree.commit event for compaction progress signal detection.
-                if let Some(handler) = deps.orchestrator.get_compaction_handler(&session_id) {
-                    handler.record_event_type("worktree::commit");
-                }
-                Ok(serde_json::json!({
-                    "commitHash": result.commit_hash,
-                    "message": message,
-                    "filesChanged": result.files_changed,
-                    "insertions": result.insertions,
-                    "deletions": result.deletions,
-                }))
-            }
+            Ok(Some(result)) => Ok(serde_json::json!({
+                "commitHash": result.commit_hash,
+                "message": message,
+                "filesChanged": result.files_changed,
+                "insertions": result.insertions,
+                "deletions": result.deletions,
+            })),
             Ok(None) => Ok(serde_json::json!({
                 "commitHash": null,
                 "message": "nothing to commit",

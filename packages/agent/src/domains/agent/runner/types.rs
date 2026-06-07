@@ -157,12 +157,6 @@ pub struct AgentConfig {
     /// Server origin (e.g. `"localhost:9847"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_origin: Option<String>,
-    /// Current subagent nesting depth (0 = root agent).
-    #[serde(default)]
-    pub subagent_depth: u32,
-    /// Maximum nesting depth allowed for spawning children.
-    #[serde(default)]
-    pub subagent_max_depth: u32,
     /// Retry configuration for provider stream failures.
     #[serde(skip)]
     pub retry: Option<crate::shared::retry::RetryConfig>,
@@ -193,8 +187,6 @@ impl Default for AgentConfig {
             compaction: CompactionConfig::default(),
             working_directory: None,
             server_origin: None,
-            subagent_depth: 0,
-            subagent_max_depth: 0,
             retry: None,
             health_tracker: None,
             workspace_id: None,
@@ -205,14 +197,7 @@ impl Default for AgentConfig {
 /// Per-turn volatile token estimates for context accounting.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct VolatileTokens {
-    /// Active skill content tokens.
-    pub skill_context: u64,
-    /// Skill deactivation notice tokens.
-    pub skill_removal: u64,
-    /// Background job results tokens.
-    pub job_results: u64,
-}
+pub struct VolatileTokens {}
 
 /// Per-prompt execution context.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -232,21 +217,6 @@ pub struct RunContext {
     /// Catalog revision captured by the hidden `agent::run_turn` invocation.
     #[serde(skip)]
     pub engine_catalog_revision: Option<crate::engine::CatalogRevision>,
-    /// Lightweight skill index context (auto-generated from registry).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_index_context: Option<String>,
-    /// Skill activation directive ("follow these active skills").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_activation_context: Option<String>,
-    /// Skill context to inject (full content of explicitly invoked skills).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_context: Option<String>,
-    /// Skill removal notice (one-turn "stop following" instruction).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_removal_context: Option<String>,
-    /// Completed background job results to inject (unified processes + subagents).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub job_results: Option<String>,
     /// Session execution profile name used for this turn.
     #[serde(skip)]
     pub profile_name: Option<String>,
@@ -256,15 +226,9 @@ pub struct RunContext {
     /// Reasoning level override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning_level: Option<ReasoningLevel>,
-    /// Dynamic rules context from path-scoped files.
+    /// Compact projection of agent-owned state loaded through engine state primitives.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub dynamic_rules_context: Option<String>,
-    /// Generated compact Worker Guide for this turn.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub capability_primer_context: Option<String>,
-    /// Hook-injected context, kept separate for audit/context policy.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hook_context: Option<String>,
+    pub agent_state_context: Option<String>,
     /// Override user message content (e.g., multimodal blocks with images).
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]
@@ -371,9 +335,8 @@ impl Default for RunResult {
     }
 }
 
-/// Result of capability invocation pipeline.
+/// Result of a primitive capability invocation.
 #[derive(Clone, Debug)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct CapabilityInvocationExecutionResult {
     /// Capability invocation ID.
     pub invocation_id: String,
@@ -381,10 +344,6 @@ pub struct CapabilityInvocationExecutionResult {
     pub result: crate::shared::model_capabilities::CapabilityResult,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
-    /// Whether a hook blocked execution.
-    pub blocked_by_hook: bool,
-    /// Whether a guardrail blocked execution.
-    pub blocked_by_guardrail: bool,
     /// Whether this capability requested a turn stop.
     pub stops_turn: bool,
     /// Whether this capability is interactive.
@@ -457,29 +416,20 @@ mod tests {
     #[test]
     fn run_context_default() {
         let ctx = RunContext::default();
-        assert!(ctx.skill_index_context.is_none());
-        assert!(ctx.skill_context.is_none());
-        assert!(ctx.job_results.is_none());
+        assert!(ctx.agent_state_context.is_none());
         assert!(ctx.reasoning_level.is_none());
-        assert!(ctx.dynamic_rules_context.is_none());
-        assert!(ctx.capability_primer_context.is_none());
     }
 
     #[test]
     fn run_context_serde_roundtrip() {
         let ctx = RunContext {
-            skill_index_context: Some("# Available Skills\n".into()),
-            skill_context: Some("skill ctx".into()),
+            agent_state_context: Some("state ctx".into()),
             reasoning_level: Some(ReasoningLevel::High),
             ..Default::default()
         };
         let json = serde_json::to_string(&ctx).unwrap();
         let back: RunContext = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            back.skill_index_context.as_deref(),
-            Some("# Available Skills\n")
-        );
-        assert_eq!(back.skill_context.as_deref(), Some("skill ctx"));
+        assert_eq!(back.agent_state_context.as_deref(), Some("state ctx"));
         assert_eq!(back.reasoning_level, Some(ReasoningLevel::High));
     }
 

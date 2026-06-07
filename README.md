@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. A Rust server handles LLM communication, autonomous work orchestration, capability execution, grants, typed resources, and event-sourced session persistence. A native iOS app provides thin chat plus a Work dashboard over the server-owned worker/autonomy/audit projection; low-level engine inspection remains behind Audit Details.
+Tron is a local-first AI coding agent that runs as a persistent background service. On the primitive teardown branch, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The native iOS app is being reduced to a thin chat and generic runtime shell; fixed product dashboards are teardown targets, not supported branch behavior.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -48,10 +48,10 @@ This README is the single, canonical reference for the project and is expected t
 |                                                                             |
 |  +-------------+  +------------+  +------------+  +------------------------+ |
 |  |  Providers  |  | Capability |  |  Context   |  |     Orchestrator       | |
-|  |  Anthropic  |  | execute    |  |  loader    |  |  Session lifecycle     | |
-|  |  OpenAI     |  | registry   |  |  compaction|  |  Turn management       | |
-|  |  Google     |  | recipes    |  |  skills    |  |  Event routing         | |
-|  |  MiniMax    |  | workers    |  |  rules     |  |  Subagent coordination | |
+|  |  Anthropic  |  | execute    |  |  soul      |  |  Session lifecycle     | |
+|  |  OpenAI     |  | state ops  |  |  state     |  |  Turn management       | |
+|  |  Google     |  | file ops   |  |  compaction|  |  Event routing         | |
+|  |  MiniMax    |  | process op |  |  messages  |  |  Queue recovery        | |
 |  +-------------+  +------------+  +------------+  +------------------------+ |
 +------------------------------------+----------------------------------------+
                                      |
@@ -90,45 +90,8 @@ Current living entry points:
 - `packages/agent/src/engine/mod.rs`: engine fabric ownership.
 - `packages/agent/src/engine/resources/mod.rs`: resource substrate ownership.
 - `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
-- `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`,
-  registry, recipes, and provider export.
-- `packages/agent/docs/post-100-operating-conditions-scorecard.md`: completed
-  post-100 operating conditions and UI/UX regression scorecard at 100/100.
-- `packages/agent/docs/post-scorecard-gap-hardening-scorecard.md`: completed
-  recent-gap hardening campaign at 100/100 for token accounting, Agent Control
-  fast-load, Source Control workflows, scorecard drift, and iPad UI closeout.
-- `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md`: completed
-  iPad-specific post-100 UI regression scorecard at 100/100, folded into the
-  recent-gap hardening campaign.
-- `packages/agent/docs/ipad-action-time-followup-scorecard.md`: active
-  successor for confirmation-gated iPad archive, approval, generated UI,
-  source-control, fork, Voice Note, pointer, and keyboard action flows.
-- `packages/agent/docs/collapsed-engine-hardening-scorecard.md`: completed
-  collapsed-engine hardening scorecard and scenario ledger at 100/100.
-- `packages/agent/docs/codebase-cleanup-scorecard.md`: completed repo-local
-  cleanup scorecard, large-file budget ledger, and module-by-module
-  maintainability plan at 100/100.
-- `packages/agent/docs/legacy-fallback-cleanup-pass-scorecard.md`: completed
-  post-closeout static pass for cleanup debt, production naming cleanup, and
-  large-file budget drift.
-- `packages/agent/docs/hyper-modular-agent-architecture-scorecard.md`:
-  completed planning scorecard for the iii-informed hyper modular agent harness
-  north star and its successor execution scorecard portfolio.
-- `packages/agent/docs/hyper-modular-agent-harness-execution-scorecards.md`:
-  active execution scorecard portfolio for proving the recursive agent/human
-  plug-and-play harness loop from the current baseline.
-- `packages/agent/docs/tron-productization-scorecard.md`: completed master
-  productization scorecard at 100/100 for the chat-led, self-extending local
-  agent product campaign.
-- `packages/agent/docs/tron-productization-evidence-manifest.md`: companion
-  command/source/UI/soak evidence manifest for the completed productization
-  scorecard.
-- `packages/agent/docs/worker-first-product-scorecard.md`: completed
-  worker-first product scorecard at 100/100 for Work, Workers, Worker Packs,
-  Autonomy, Guardrails, Audit, default no-prompt autonomy, and replacement of
-  the old technical console as the primary product surface.
-- `packages/agent/docs/worker-first-product-evidence-manifest.md`: companion
-  evidence manifest for the completed worker-first product scorecard.
+- `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`
+  primitive and provider export.
 - `packages/agent/docs/primitive-engine-teardown-scorecard.md`: active
   clean-break primitive engine teardown scorecard for stripping hard-coded
   capabilities, policies, skills, rules, worker packs, and fixed iOS product
@@ -141,19 +104,6 @@ Current living entry points:
   source-audited deletion map for every current Rust domain, engine primitive
   worker, runner context plane, managed skill, doc, iOS source/view root, and
   settings surface.
-- `packages/agent/docs/self-extending-local-product-user-guide.md`: user guide
-  for worker-led autonomous work, the Work dashboard, Worker Packs, Generated
-  Controls, Audit Details, trust labels, and model presets.
-- `packages/agent/docs/self-extending-local-product-operator-guide.md`:
-  operator guide for local worker creation, Worker Pack lifecycle, source
-  trust, Generated Controls, and evidence refs.
-- `packages/agent/docs/self-extending-local-product-release-notes.md`:
-  product notes for the completed self-extending local product campaign,
-  expressed through the worker-first vocabulary and without rollout steps.
-- `packages/agent/docs/self-extending-local-product-troubleshooting.md`:
-  troubleshooting guide for workspace autonomy, worker registration,
-  source/conformance evidence, Generated Controls, trust labels, and worker
-  routing.
 - `packages/agent/docs/token-accounting-hardening-scorecard.md`: completed
   server-authoritative token accounting, pricing, provider-cache, and
   iPhone-only UI hardening scorecard with final evidence caveats.
@@ -165,6 +115,10 @@ Current living entry points:
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 - `packages/agent/tests/threat_model_invariants.rs`: absence gates and
   cross-cutting architectural invariants.
+
+Older product campaign scorecards and guides under `packages/agent/docs/` are
+evidence artifacts only on this branch. PET-9 owns deleting or rewriting any
+remaining retired docs before closeout.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -442,9 +396,10 @@ Deleted product routes such as `agent::run_goal`, `agent::work_snapshot`,
 public queue management are not registered.
 
 The teardown is not complete yet. Unregistered product source modules and some
-old tests/docs remain compiled while PET-4 through PET-10 remove rules, skills,
-hooks, policy planes, product storage, fixed iOS modes, and dead source files.
-Those leftovers are residual teardown work, not supported branch behavior.
+old tests/docs remain compiled while PET-5 through PET-10 remove product
+storage, generated-helper lifecycle code, fixed iOS modes, and dead source
+files. Those leftovers are residual teardown work, not supported branch
+behavior.
 
 ## Engine Protocol API
 
@@ -475,13 +430,11 @@ Engine protocol messages are JSON objects with a `type`, optional correlation
 `agent::prompt`, or `settings::get`. Mutating calls must include an explicit
 idempotency key. Message ids are correlation ids only.
 
-When Audit Details or test clients invoke `capability::execute` directly, the
-transport dispatches it as the profile-backed agent actor, then the server
-derives capability execution scopes and capability runtime metadata from the
-active profile. Clients may pass session, workspace, trace, and ordinary target
-context, but `contract.allow:*`, `implementation.allow:*`, `plugin.allow:*`,
-and `capability.*` runtime metadata are rejected so execute policy remains
-server-owned.
+When test clients invoke `capability::execute` directly, the transport dispatches
+it as the agent actor and passes only the envelope's session, workspace, trace,
+authority scopes, and explicit runtime metadata through to the engine. The
+transport does not derive profile policy scopes or capability runtime metadata;
+`execute` is the primitive operation boundary.
 
 Hidden functions remain in the engine catalog for queue, cron, runtime, and
 domain side effects such as agent apply/run-turn, prompt-history capture, and
@@ -581,20 +534,9 @@ response shaping for these privileged primitive workers lives under
 catalog, ledger, stream, queue, resource, lease, approval, and compensation access
 without owning primitive response contracts.
 
-Subagent orchestration is also engine-native. `agent::spawn_subagent` returns a
-child handle immediately when `blockingTimeoutMs` is omitted or `null`, so
-fan-out callers can spawn all children before polling `agent::subagent_status`
-or collecting `agent::subagent_result`. Completed capability subagents always
-write deterministic `agent_result:subagent:{session}` resources in the parent
-session scope, regardless of whether the caller asked the spawn call to block.
-The parent/child lineage, status/result invocations, resource versions, and
-stream events are therefore reconstructable from substrate records rather than
-in-memory runner state or client-owned bookkeeping. Subagents may request a
-server-owned `modelPreset` (`localWhenPossible`, `balanced`, or `deep`) and a
-validated `taskProfile`; the runner resolves the concrete model from active
-profile settings, records the selected route and any hosted route, and
-projects that same route/profile into events, result resources, generated
-lineage UI, and iOS chips.
+Subagent routes are not registered on the primitive teardown branch. Any future
+parallel helper behavior must be created by the agent through `execute` and
+recorded as agent-owned state or generic runtime artifacts.
 
 Sandbox-created capabilities enter through the high-risk `worker::spawn`
 capability. It requires explicit idempotency, `worker.write` authority, a
@@ -647,22 +589,11 @@ The event enum is generated by the `define_events!` macro in `packages/agent/src
 | `capability` | `capability.invocation.generating`, `capability.invocation.started`, `capability.invocation.progress`, `capability.invocation.completed` |
 | `stream` | `stream.text_delta`, `stream.thinking_delta`, `stream.turn_start`, `stream.turn_end` |
 | `config` | `config.model_switch`, `config.prompt_update`, `config.reasoning_level` |
-| `notification` | `notification.interrupted`, `notification.process_result`, `notification.user_job_action` |
 | `compact` | `compact.boundary`, `compact.summary_staging`; live `agent.compaction_started` / `agent.compaction` stream events show pre-turn compaction progress and terminal no-op/failure state |
 | `context` | `context.cleared` |
-| `skill` | `skill.activated`, `skill.deactivated`, `skills.cleared` |
-| `rules` | `rules.loaded`, `rules.indexed`, `rules.activated` |
 | `metadata` | `metadata.update`, `metadata.tag` |
-| `file` | `file.read`, `file.write`, `file.edit` |
-| `worktree` | `worktree.acquired`, `worktree.commit`, `worktree.released`, `worktree.merged`, `worktree.renamed`, `worktree.main_synced`, `worktree.session_finalized`, `worktree.merge_started`, `worktree.conflict_detected`, `worktree.conflict_resolved`, `worktree.merge_continued`, `worktree.merge_aborted`, `worktree.pushed`, `worktree.pending_merge_detected`, `worktree.rebased_on_main`, `worktree.post_rebase_stash_conflict`, `worktree.auto_recovered_commits` |
-| `repo` | `repo.lock_acquired`, `repo.lock_released`, `repo.main_advanced` |
 | `error` | `error.agent`, `error.capability`, `error.provider` |
-| `subagent` | `subagent.spawned`, `subagent.status_update`, `subagent.completed`, `subagent.failed` (spawn/completion/failure payloads may include server-owned `taskProfile` and `modelRouting`) |
-| `process` / `user_job_actions` | `process.results_consumed`, `user_job_actions.consumed` |
 | `todo` / `turn` | `todo.write`, `turn.failed` |
-| `hook` | `hook.triggered`, `hook.completed`, `hook.background_started`, `hook.background_completed`, `hook.llm_result` |
-| `memory` | `memory.retained`, `memory.auto_retain_triggered`, `memory.auto_retain_failed` |
-| `device` | `device.token_invalidated` |
 | `server.update` | `server.update_available` |
 
 Worktree merge/rebase conflict events carry a server-authored `origin`
@@ -788,12 +719,7 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
   },
 
   "agent": {
-    "maxTurns": 250,
-    "subagentMaxDepth": 3,
-    "subagentModel": "claude-haiku-4-5-20251001", // Default hosted route for subagent preset routing
-    "autonomy": {
-      "approvalPromptMode": "disabled" // "disabled" runs independently with audited auto-decisions; "testing" restores QA prompts
-    }
+    "maxTurns": 250
   },
 
   "context": {
@@ -803,26 +729,13 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
       "targetTokens": 10000,        // Target token count after compaction
       "charsPerToken": 4,           // Token estimation factor
       "bufferTokens": 4000,         // Response buffer
-      "triggerTokenThreshold": 0.70,// Soft threshold for proactive compaction (also used as preserved-turn budget)
+      "triggerTokenThreshold": 0.70,// Soft threshold for proactive compaction
       "preserveRecentCount": 5      // Always preserve N most recent messages
-    },
-    "rules": {
-      "discoverStandaloneFiles": true  // Pick up AGENTS.md / CLAUDE.md outside .claude/rules/
     }
   },
 
   "capabilities": {
     "process": { "defaultTimeoutMs": 120000 }
-  },
-
-  "skills": {
-    "compactionPolicy": "clearAll",   // "clearAll" | "autoRestore" | "askUser"
-    "showIndex": "always"             // "always" | "never" | "whenNoActiveSkills"
-  },
-
-  "memory": {
-    "autoRetainInterval": 10,                   // Turns between auto-retentions. 0 disables.
-    "retainModel": "claude-sonnet-4-6"          // Model used by the retain summarizer subagent.
   },
 
   "observability": {
@@ -838,14 +751,6 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
   },
 
   "retry":  { "maxRetries": 1 },
-  "hooks":  { "defaultTimeoutMs": 5000, "discoveryTimeoutMs": 10000, "extensions": [".prompt", ".ts", ".js", ".mjs", ".sh"] },
-
-  "promptLibrary": {
-    "historyEnabled": true,         // Auto-save interactive prompts to history
-    "historyMaxEntries": 10000,     // 0 = unlimited
-    "historyMaxAgeDays": 0,         // 0 = unlimited
-    "historyAutoPrune": true        // Opportunistic pruning on record + startup
-  },
 
   "git": {
     "targetBranch": null,                       // null → auto-detect via init.defaultBranch / main / master
@@ -855,8 +760,7 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
     "autoSetUpstream": true,
     "crashRecoveryAbortTimeoutMs": 1800000,     // 30 min — auto-abort a pending merge recovered at startup
     "opTimeoutNetworkMs": 60000,                // Timeout for fetch / push / ls-remote
-    "opTimeoutLocalMs": 30000,                  // Timeout for local git ops
-    "subagentConflictResolutionEnabled": true   // Spawn a child subagent to resolve merge conflicts
+    "opTimeoutLocalMs": 30000                   // Timeout for local git ops
   },
 
   "pluginSources": {
@@ -930,7 +834,11 @@ See [`packages/agent/src/app/onboarding/mod.rs`](packages/agent/src/app/onboardi
 
 ## Context and Compaction
 
-The context system manages the LLM's input window. Each turn assembles: system prompt + rules + generated Worker Guide + skills + conversation history + worker results.
+The context system manages the LLM's input window for the primitive loop. Each
+turn assembles only the agent soul/system prompt, the compact agent-owned state
+projection, environment metadata, conversation history, and any pending
+`execute` results. Built-in rules, skills, worker guides, hooks, and profile
+policy primers are not model-context planes on this branch.
 
 `context::get_snapshot` and `context::get_detailed_snapshot` report the
 server-owned context total. Before a provider call this is the chars/4 local
@@ -940,15 +848,13 @@ of local sections, the response includes `breakdown.providerAdjustment` so the
 UI can show the attributed sections plus the provider tokenizer delta without
 guessing.
 
-For the full source-grounded map of what can enter model context, how it is constructed, where it is persisted, and which Constitution/config surfaces are still incomplete, see [`packages/agent/docs/context-architecture.md`](packages/agent/docs/context-architecture.md).
-
 ### Compaction Pipeline
 
 When context crosses the proactive trigger (default
 `triggerTokenThreshold: 0.70` of the model context window), compaction runs
 before the next provider call:
 
-1. **Summarize**: A subagent condenses older messages into a summary.
+1. **Summarize**: A deterministic keyword summarizer condenses older messages.
 2. **Stage**: A `compact.summary_staging` event durably records the summary before commit.
 3. **Boundary**: A `compact.boundary` event commits the cutoff and carries the summary used by server-side reconstruction.
 4. **Trim**: Messages before the boundary are replaced with the summary on runtime reconstruction.
@@ -965,42 +871,12 @@ Compaction is observable via the canonical `context::should_compact`, `context::
 ### Context Assembly Order
 
 ```
-System prompt    (stable, per-model)
-  + Rules        (path-scoped from .claude/rules/, project-relative AGENTS.md / CLAUDE.md)
-  + Worker Guide (generated from the live registry; core first-party by default)
-  + Skills       (@skill references from prompt + always-on skills)
-  + History      (messages reconstructed from the latest committed compaction boundary)
-  + Pending      (current user prompt + capability results)
+Agent soul / system prompt
+  + Agent-owned state summary
+  + Environment metadata
+  + History reconstructed from session truth
+  + Pending user prompt and execute results
 ```
-
-The internal `capabilities.primer` block id renders the Worker Guide after
-active rules and before skill context. The default `coreFirstParty` policy
-includes compact recipe-style schemas and examples for trusted first-party
-worker abilities, using `contractId` execute templates. `allVisibleCompact` is
-available as an opt-in profile policy for every visible
-worker/plugin/plugin source/OpenAPI/session ability under a strict budget. The
-renderer reserves space for a compact `harness_doc` resource pointer; the full
-guide body is stored as a session-scoped versioned resource tied to the live
-catalog revision.
-
-### Skills
-
-Reusable context packages stored as `SKILL.md` files with optional YAML frontmatter.
-
-**Locations** — scanned across every service folder in `SKILL_SERVICE_DIRS` (currently `tron`, `claude`):
-- `~/.tron/skills/`, `~/.claude/skills/` — Global (all projects). First-party skills under `packages/agent/skills/` are bundled into the Mac app at `Contents/Resources/Skills/` and synced into `~/.tron/skills/` by the Mac installer/menu-bar start path, `tron dev`, and `tron install`. The Mac wrapper serializes its managed-skill sync and skips already-current directories so idle menu-bar launches do not rewrite this tree. Managed skills carry a `.managed` sentinel file; user-owned same-name directories are preserved. `~/.claude/skills/` is read-only to Tron (Claude Code owns that tree) but its contents are detected automatically.
-- `.tron/skills/` or `.claude/skills/` under the working directory (any depth) — Project-local (higher precedence than globals). `.tron/skills/` wins over `.claude/skills/` on same-name collision within a single scope.
-
-**Usage:** Reference with `@skill-name` in prompts. The injector extracts references, resolves them from the registry, and prepends the skill content as `<skills>` XML context. Session-scoped activation is also exposed via the canonical `skills::activate` / `skills::deactivate` capabilities.
-
-### Hooks
-
-Async lifecycle hooks execute before/after capability invocations and around prompts:
-
-- **Discovery:** `.agent/hooks/` (project), `~/.config/tron/hooks/` (global)
-- **Extensions:** configurable via `hooks.extensions` (default `.prompt`, `.ts`, `.js`, `.mjs`, `.sh`)
-- **Background hooks:** drained before accepting a new prompt and before session reconstruction (see Core Invariant #7)
-- **AddContext budget:** fixed at 16384 characters per event inside `HookEngine`; over-budget context is dropped all-or-nothing and is not a user-facing setting
 
 ---
 
@@ -1042,7 +918,7 @@ Engine ledger rows, grants, streams, state, queues, typed resources, approvals, 
 | `constitution_resolution_audit` | Settings, instruction, context, provider-payload, vault, automation, and outcome resolution records with effective hashes and blob refs |
 | `constitution_context_blocks` | Typed model-context blocks for replay: source home/path/blob, hash, sensitivity, cache class, inclusion reason, precedence, and provider surface |
 
-The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)` — most other access patterns are intentionally allowed to scan/filter at our volumes. Cron schedule truth is stored as `decision:cron-schedule:*` decision resources and completed run observations are stored as `evidence:cron-run:*` resources; the cron tables are scheduler runtime cache only. Prompt Library history/snippets are resource-backed `artifact:prompt-*` resources, and notification inbox/read truth is resource/decision backed; fresh modular-engine-v4 databases no longer create retired prompt-library tables or the retired notification read-state table. Session/task views are reconstructed from the canonical event log.
+The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)`; most other access patterns are intentionally allowed to scan/filter at our volumes. Session views are reconstructed from the canonical event log. Some product-derived resource and cache tables still exist in the fresh schema while PET-5 collapses storage to loop-owned session, invocation, resource, and agent-state truth; they are not public capabilities on this branch.
 
 ---
 
@@ -1083,10 +959,9 @@ packages/ios-app/Sources/
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
-- **Worker-first chat action UI**: active work renders as one high-signal Work chip/action detail per server invocation. The default detail path shows what happened, why it ran, the worker, status, result, and compact inputs; raw request/result/schema/trace/policy payloads stay behind Audit Details. Retired capability descriptors, old built-in names, and plugin source-specific capability sheets are not active UI routes.
+- **Primitive chat shell**: PET-8 is reducing the app to connection/onboarding/settings, prompt input, message rendering, and generic runtime surfaces. Fixed Work/Audit Details product modes are teardown targets.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
-- **Work dashboard mode**: A top-level `NavigationMode.work` surface reads `agent::work_snapshot` through `AgentClient` and renders autonomy, active work, workers, recent results, guardrails, and a single Audit Details entry point. Worker detail sheets show server-supplied health, trust, generated controls, selected-worker guardrails, abilities, recent work, and audit refs. The iOS app does not stitch product truth from registry/catalog/approval/policy internals.
-- **Audit Details**: The audit-only operator surface sits behind the Work dashboard's Audit Details entry point. It uses `CapabilityClient` and `AuditDetailsState` to inspect live registry/catalog/control/audit/program/primer state, generated `ui_surface` refs, local pack/action resources, plugin/binding/policy details, and read-only disconnected cache snapshots. Generated UI surface writes and action submissions remain leased under the server's `ui_surface` lifecycle contract, and disconnected approval decisions remain pending until server truth advances.
+- **Generic runtime rendering**: fixed capability-specific sheets must be removed or replaced with server/agent-authored generic runtime data in PET-8.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
 - **Local paired-server model**: `PairedServerStore` keeps the paired Mac list and active server id in iOS storage, while `PairedServerTokenStore` stores each server's bearer token in Keychain. The server never stores the iOS pair list in `profiles/user/profile.toml`.
 - **Live engine stream state**: `EngineClient` treats subscription ids as WebSocket-local. It clears active subscriptions when the transport disconnects, recreates the current session subscription at the live topic tail after reconnect/reconstruction, and coalesces stream ACKs to the latest cursor so turn bursts stay inside the engine stream protocol.
@@ -1426,9 +1301,9 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 
 5. **Event ordering (iOS send button)**: `agent.ready` is emitted AFTER `agent.complete`. iOS `handleComplete()` sets `isPostProcessing=true`, `handleAgentReady()` clears it. Three independent send-button concerns: `isPostProcessing`, `isCompacting`, and ledger (fully async).
 
-6. **Compaction before ledger**: Memory manager runs compaction then ledger sequentially. `compact.boundary` events always precede `memory.ledger` events in the event log.
+6. **Primitive context boundary**: model context contains soul, agent-owned state, environment, session history, and pending `execute` results. Built-in rules, skills, hooks, worker guides, and profile policy primers are not prompt planes.
 
-7. **Hook drain ordering**: Background hooks are drained before accepting a new prompt (pre-run) and before session reconstruction (resume). Prevents stale hook state from interfering.
+7. **Compaction before provider calls**: threshold-triggered compaction runs before the next provider call and only persists a boundary when it reduces durable context.
 
 8. **Database path guard**: Startup validates the database path is exactly `<resolved-tron-home>/internal/database/tron.sqlite`. Rejects alternate filenames, wrong directories, and symlinked paths.
 

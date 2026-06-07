@@ -7,10 +7,6 @@
 //! explicit idempotency. Protocol message ids stay outside engine semantics as
 //! correlation ids.
 //!
-//! Direct public `capability::execute` calls dispatch as the profile-backed
-//! agent actor and still use server-owned execution policy. The transport
-//! derives policy scopes and metadata from the active profile and rejects
-//! client-authored capability policy context.
 //! Public transport authority scopes are assembled into a deduped causal scope
 //! list so trace/ledger evidence reflects the authority set, not construction
 //! order artifacts.
@@ -18,18 +14,12 @@
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use crate::domains::capability_support::implementations::primitive_surface::{
-    CONTRACT_ALLOW_SCOPE_PREFIX, CONTRACT_DENY_SCOPE_PREFIX, IMPLEMENTATION_ALLOW_SCOPE_PREFIX,
-    IMPLEMENTATION_DENY_SCOPE_PREFIX, PLUGIN_ALLOW_SCOPE_PREFIX, PLUGIN_DENY_SCOPE_PREFIX,
-    capability_execution_policy_scopes, capability_execution_runtime_metadata,
-};
 use crate::domains::catalog;
 use crate::domains::catalog::TransportIdempotencyMode;
 use crate::engine::{
     ActorKind, CausalContext, EngineTriggerRuntime, FunctionId, InvocationId, TraceId,
     TriggerDispatchRequest, TriggerId,
 };
-use crate::shared::profile::{AgentExecutionSpec, CapabilityExecutionPolicySpec};
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
@@ -94,7 +84,6 @@ pub fn build_engine_transport_request(
         return Ok(None);
     };
     reject_noncanonical_target(spec.operation_key.as_str(), &input.params_payload)?;
-    reject_client_owned_execute_policy_context(&input)?;
     let domain_authority_scope = spec
         .authority_scope
         .ok_or_else(|| CapabilityError::Internal {
@@ -172,10 +161,7 @@ pub async fn dispatch_engine_transport_request(
     ctx: &ServerRuntimeContext,
     envelope: EngineTransportRequest,
 ) -> Result<Value, CapabilityError> {
-    let mut causal_context = envelope.causal_context;
-    if is_public_capability_execute_invoke(&envelope.payload) {
-        attach_active_profile_execute_context(ctx, &mut causal_context)?;
-    }
+    let causal_context = envelope.causal_context;
     let actor_id = causal_context.actor_id.clone();
     let actor_kind = causal_context.actor_kind;
     let authority_scopes = causal_context.authority_scopes.clone();
@@ -289,41 +275,6 @@ fn reject_noncanonical_target(method: &str, payload: &Value) -> Result<(), Capab
     Ok(())
 }
 
-fn reject_client_owned_execute_policy_context(
-    input: &EngineTransportBuildRequest,
-) -> Result<(), CapabilityError> {
-    if input.public_method != "invoke"
-        || !is_public_capability_execute_invoke(&input.params_payload)
-    {
-        return Ok(());
-    }
-    if let Some(scope) = input
-        .context
-        .authority_scopes
-        .iter()
-        .find(|scope| is_capability_execution_policy_scope(scope))
-    {
-        return Err(CapabilityError::InvalidParams {
-            message: format!(
-                "capability::execute transport context cannot supply capability execution policy scope '{scope}'; the server derives execute policy from the active profile"
-            ),
-        });
-    }
-    if let Some(key) = input
-        .context
-        .runtime_metadata
-        .keys()
-        .find(|key| key.starts_with("capability."))
-    {
-        return Err(CapabilityError::InvalidParams {
-            message: format!(
-                "capability::execute transport context cannot supply capability runtime metadata '{key}'; the server derives execute policy from the active profile"
-            ),
-        });
-    }
-    Ok(())
-}
-
 fn target_authority_scopes_for_engine_invoke(payload: &Value) -> Vec<String> {
     let Some(function_id) = extract_string(payload, "functionId") else {
         return Vec::new();
@@ -342,49 +293,6 @@ fn target_authority_scopes_for_engine_invoke(payload: &Value) -> Vec<String> {
     }
 }
 
-fn attach_active_profile_execute_context(
-    ctx: &ServerRuntimeContext,
-    causal_context: &mut CausalContext,
-) -> Result<(), CapabilityError> {
-    let current = ctx.profile_runtime.current();
-    let (policy_id, policy) = main_capability_execution_policy(current.execution_spec())?;
-    for scope in capability_execution_policy_scopes(policy) {
-        push_scope_once(causal_context, scope);
-    }
-    for (key, value) in capability_execution_runtime_metadata(
-        current.execution_spec(),
-        &policy_id,
-        policy,
-        Some(current.spec_hash()),
-    )
-    .map_err(|message| CapabilityError::Internal { message })?
-    {
-        causal_context.runtime_metadata.entry(key).or_insert(value);
-    }
-    Ok(())
-}
-
-fn main_capability_execution_policy(
-    spec: &AgentExecutionSpec,
-) -> Result<(String, &CapabilityExecutionPolicySpec), CapabilityError> {
-    let entrypoint = spec
-        .entrypoints
-        .get("main")
-        .ok_or_else(|| CapabilityError::Internal {
-            message: "active profile is missing entrypoints.main".to_owned(),
-        })?;
-    let policy_id = spec
-        .context_policy(&entrypoint.context_policy)
-        .and_then(|policy| policy.capability_execution_policy.clone())
-        .unwrap_or_else(|| entrypoint.capability_execution_policy.clone());
-    let policy = spec
-        .capability_execution_policy(&policy_id)
-        .ok_or_else(|| CapabilityError::Internal {
-            message: format!("active profile is missing capability execution policy '{policy_id}'"),
-        })?;
-    Ok((policy_id, policy))
-}
-
 fn push_scope_once(causal_context: &mut CausalContext, scope: String) {
     if !causal_context
         .authority_scopes
@@ -393,23 +301,6 @@ fn push_scope_once(causal_context: &mut CausalContext, scope: String) {
     {
         causal_context.authority_scopes.push(scope);
     }
-}
-
-fn is_public_capability_execute_invoke(payload: &Value) -> bool {
-    extract_string(payload, "functionId").as_deref() == Some("capability::execute")
-}
-
-fn is_capability_execution_policy_scope(scope: &str) -> bool {
-    [
-        CONTRACT_ALLOW_SCOPE_PREFIX,
-        CONTRACT_DENY_SCOPE_PREFIX,
-        IMPLEMENTATION_ALLOW_SCOPE_PREFIX,
-        IMPLEMENTATION_DENY_SCOPE_PREFIX,
-        PLUGIN_ALLOW_SCOPE_PREFIX,
-        PLUGIN_DENY_SCOPE_PREFIX,
-    ]
-    .iter()
-    .any(|prefix| scope.starts_with(prefix))
 }
 
 fn strip_transport_only_fields(method: &str, mut payload: Value) -> Value {
@@ -513,101 +404,15 @@ mod tests {
     }
 
     #[test]
-    fn capability_execute_invoke_rejects_client_owned_policy_scopes() {
-        let error = build_engine_transport_request(EngineTransportBuildRequest {
-            correlation_id: "request-1".to_owned(),
-            public_method: "invoke".to_owned(),
-            params_payload: json!({
-                "functionId": "capability::execute",
-                "payload": {"target": {"capabilityId": "process::run"}}
-            }),
-            context: EngineTransportContext {
-                authority_scopes: vec!["contract.allow:*".to_owned()],
-                ..EngineTransportContext::default()
-            },
-        })
-        .expect_err("client-authored execute policy scope must be rejected");
-
-        assert!(error.to_string().contains("server derives execute policy"));
-    }
-
-    #[test]
-    fn capability_execute_invoke_rejects_client_owned_policy_metadata() {
-        let mut runtime_metadata = BTreeMap::new();
-        let _ = runtime_metadata.insert(
-            "capability.searchPolicy".to_owned(),
-            r#"{"lexical":false}"#.to_owned(),
-        );
-        let error = build_engine_transport_request(EngineTransportBuildRequest {
-            correlation_id: "request-1".to_owned(),
-            public_method: "invoke".to_owned(),
-            params_payload: json!({
-                "functionId": "capability::execute",
-                "payload": {"target": {"capabilityId": "process::run"}}
-            }),
-            context: EngineTransportContext {
-                runtime_metadata,
-                ..EngineTransportContext::default()
-            },
-        })
-        .expect_err("client-authored execute runtime metadata must be rejected");
-
-        assert!(error.to_string().contains("server derives execute policy"));
-    }
-
-    #[test]
-    fn active_profile_execute_context_supplies_policy_scopes_and_metadata() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let home = dir.path().join(".tron");
-        crate::shared::constitution::ensure_tron_home_at(&home).expect("seed tron home");
-        let runtime = crate::domains::agent::runner::profile_runtime::ProfileRuntime::load(&home)
-            .expect("profile runtime");
-        let current = runtime.current();
-        let (policy_id, policy) =
-            main_capability_execution_policy(current.execution_spec()).expect("main policy");
-        let scopes = capability_execution_policy_scopes(policy);
-        let metadata: BTreeMap<_, _> = capability_execution_runtime_metadata(
-            current.execution_spec(),
-            &policy_id,
-            policy,
-            Some(current.spec_hash()),
-        )
-        .expect("runtime metadata")
-        .into_iter()
-        .collect();
-
-        assert_eq!(policy_id, "default");
-        assert!(scopes.iter().any(|scope| scope == "contract.allow:*"));
-        assert!(scopes.iter().any(|scope| scope == "implementation.allow:*"));
-        assert!(scopes.iter().any(|scope| scope == "plugin.allow:*"));
-        assert_eq!(
-            metadata.get("capability.executionPolicyId"),
-            Some(&"default".to_owned())
-        );
-        assert_eq!(
-            metadata.get("capability.searchPolicyId"),
-            Some(&"hybridLocal".to_owned())
-        );
-        assert!(metadata.contains_key("capability.searchPolicy"));
-        assert_eq!(
-            metadata.get("capability.profileSpecHash"),
-            Some(&current.spec_hash().to_owned())
-        );
-    }
-
-    #[test]
     fn transport_context_runtime_metadata_reaches_causal_context() {
         let mut runtime_metadata = BTreeMap::new();
-        let _ = runtime_metadata.insert(
-            "capability.searchPolicyId".to_owned(),
-            "operatorConsoleHybridLexical".to_owned(),
-        );
+        let _ = runtime_metadata.insert("runtime.trace".to_owned(), "ui-shell".to_owned());
         let envelope = build_engine_transport_request(EngineTransportBuildRequest {
             correlation_id: "request-1".to_owned(),
             public_method: "invoke".to_owned(),
             params_payload: json!({
-                "functionId": "capability::search",
-                "payload": {"query": "read file"}
+                "functionId": "capability::execute",
+                "payload": {"operation": "observe", "input": {"text": "read file"}}
             }),
             context: EngineTransportContext {
                 runtime_metadata,
@@ -618,10 +423,8 @@ mod tests {
         .expect("invoke maps to engine transport");
 
         assert_eq!(
-            envelope
-                .causal_context
-                .runtime_metadata("capability.searchPolicyId"),
-            Some("operatorConsoleHybridLexical")
+            envelope.causal_context.runtime_metadata("runtime.trace"),
+            Some("ui-shell")
         );
     }
 }

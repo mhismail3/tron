@@ -3,8 +3,8 @@
 //! Capability result content is the only provider-portable channel back into
 //! the model. Engine/UI/audit metadata stays in `details`, but model-facing
 //! `execute` observations are projected into result text here so every provider
-//! can reason about selected targets, child invocations, approvals, and
-//! resource refs without gaining a second capability API.
+//! can reason about direct primitive results without gaining a second
+//! capability API.
 
 mod capability_invocations;
 mod persistence;
@@ -17,10 +17,6 @@ use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 
 use crate::domains::agent::runner::context::context_manager::ContextManager;
-use crate::domains::agent::runner::context::local_policy;
-use crate::domains::agent::runner::guardrails::GuardrailEngine;
-use crate::domains::agent::runner::hooks::engine::HookEngine;
-use crate::domains::capability_support::implementations::primitive_surface::PrimitiveSurfacePolicy;
 use crate::domains::model::providers::ProviderHealthTracker;
 use crate::domains::model::providers::provider::Provider;
 use crate::shared::events::{BaseEvent, TronEvent};
@@ -33,14 +29,11 @@ use self::persistence::{
     add_assistant_message_to_context, build_completed_assistant_payload,
     build_interrupted_message_payload, build_token_record_json, emit_response_complete,
     emit_turn_end, emit_turn_start, persist_completed_assistant_message,
-    persist_interrupted_message, persist_rules_activated,
+    persist_interrupted_message,
 };
 use self::provider::{build_stream_options, open_stream};
 use self::result::determine_turn_stop_reason;
-use self::turn_context::{
-    build_capability_primer_context, build_turn_context, resolve_provider_primitive_surface,
-    resolved_turn_policy_ids,
-};
+use self::turn_context::{build_turn_context, resolve_provider_primitive_surface};
 use crate::domains::agent::runner::agent::compaction_handler::CompactionHandler;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
 use crate::domains::agent::runner::agent::stream_processor;
@@ -71,14 +64,6 @@ pub struct TurnParams<'a> {
     pub context_manager: &'a mut ContextManager,
     /// LLM provider for streaming.
     pub provider: &'a Arc<dyn Provider>,
-    /// Provider-facing primitive surface policy.
-    pub primitive_surface_policy: &'a PrimitiveSurfacePolicy,
-    /// Worker capability execution policy.
-    pub capability_execution_policy: &'a crate::shared::profile::CapabilityExecutionPolicySpec,
-    /// Optional guardrail engine for capability argument validation.
-    pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-    /// Optional hook engine for pre/post capability invocation hooks.
-    pub hooks: &'a Option<Arc<HookEngine>>,
     /// Compaction handler for pre-turn context checks.
     pub compaction: &'a CompactionHandler,
     /// Session identifier.
@@ -87,20 +72,12 @@ pub struct TurnParams<'a> {
     pub emitter: &'a Arc<EventEmitter>,
     /// Cancellation token for aborting the turn.
     pub cancel: &'a tokio_util::sync::CancellationToken,
-    /// Run-scoped context (skill, reasoning level, subagent results).
+    /// Run-scoped context for reasoning level, trace ids, and agent-owned state.
     pub run_context: &'a RunContext,
     /// Optional event persister for inline event storage.
     pub persister: Option<&'a EventPersister>,
-    /// Borrowed `Arc<EventPersister>` for cheap cloning into capability contexts.
-    /// Must refer to the same persister as `persister`. Capabilities that emit
-    /// progress events clone this Arc so they can persist progress durably.
-    pub persister_arc: Option<&'a Arc<EventPersister>>,
     /// Previous turn's context window token count (for delta tracking).
     pub previous_context_baseline: u64,
-    /// Current subagent nesting depth.
-    pub subagent_depth: u32,
-    /// Maximum allowed subagent nesting depth.
-    pub subagent_max_depth: u32,
     /// Optional retry configuration for provider stream retries.
     pub retry_config: Option<&'a crate::shared::retry::RetryConfig>,
     /// Optional provider health tracker for circuit-breaking.
@@ -109,18 +86,6 @@ pub struct TurnParams<'a> {
     pub workspace_id: Option<&'a str>,
     /// Server origin (e.g. `"localhost:9847"`) for system prompt.
     pub server_origin: Option<&'a str>,
-    /// Optional process manager for background process execution.
-    pub process_manager: Option<
-        &'a Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
-    >,
-    /// Optional unified job manager for process + subagent lifecycle.
-    pub job_manager: Option<
-        &'a Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>,
-    >,
-    /// Optional output buffer registry for process output streaming.
-    pub output_buffer_registry: Option<
-        &'a Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
-    >,
     /// Optional per-session sequence counter for monotonic event ordering.
     pub sequence_counter: Option<&'a AtomicI64>,
     /// Optional per-invocation abort registry. Threaded into `CapabilityInvocationExecutionContext`
@@ -139,27 +104,17 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         turn,
         context_manager,
         provider,
-        primitive_surface_policy,
-        capability_execution_policy,
-        guardrails,
-        hooks,
         compaction,
         session_id,
         emitter,
         cancel,
         run_context,
         persister,
-        persister_arc,
         previous_context_baseline,
-        subagent_depth,
-        subagent_max_depth,
         retry_config,
         health_tracker,
         workspace_id,
         server_origin,
-        process_manager,
-        job_manager,
-        output_buffer_registry,
         sequence_counter,
         invocation_abort_registry,
         engine_host,
@@ -176,13 +131,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
 
     // 1. Check context capacity (compact if needed)
     match compaction
-        .check_and_compact(
-            context_manager,
-            hooks,
-            session_id,
-            emitter,
-            sequence_counter,
-        )
+        .check_and_compact(context_manager, session_id, emitter, sequence_counter)
         .await
     {
         Err(e) => {
@@ -194,9 +143,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 ..Default::default()
             };
         }
-        Ok(true) => {
-            context_manager.clear_dynamic_rules();
-        }
+        Ok(true) => {}
         Ok(false) => {}
     }
 
@@ -213,75 +160,36 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     .await;
     debug!(session_id, turn, "turn started");
 
-    let resolved_profile = run_context
-        .resolved_profile
-        .as_deref()
-        .expect("RunContext.resolved_profile must be set from the session execution plan");
-    let context_policy = local_policy::ContextPolicy::from_entrypoint_with_spec(
-        provider.provider_type(),
-        &resolved_profile.spec,
-        "main",
-    );
-    let primitive_surface = match resolve_provider_primitive_surface(
-        engine_host,
-        session_id,
-        workspace_id,
-        provider.provider_type(),
-        &context_policy,
-        primitive_surface_policy,
-    )
-    .await
-    {
-        Ok(capabilities) => capabilities,
-        Err(error) => {
-            let error_msg = format!("failed to resolve live engine capability surface: {error}");
-            error!(session_id, turn, error = %error_msg);
-            let _ = emitter.emit(TronEvent::TurnFailed {
-                base: run_base(session_id, run_context),
-                turn,
-                error: error_msg.clone(),
-                code: Some("ENGINE_TOOL_SURFACE_FAILED".into()),
-                category: Some("engine".into()),
-                recoverable: true,
-                partial_content: None,
-            });
-            return TurnResult {
-                success: false,
-                error: Some(error_msg),
-                stop_reason: Some(StopReason::Error),
-                ..Default::default()
-            };
-        }
-    };
-    let capability_primer_context = match build_capability_primer_context(
-        engine_host,
-        session_id,
-        workspace_id,
-        &resolved_profile.spec,
-        &context_policy,
-    )
-    .await
-    {
-        Ok(context) => context,
-        Err(error) => {
-            warn!(
-                session_id,
-                turn,
-                error = %error,
-                "capability primer generation failed; continuing without primer"
-            );
-            None
-        }
-    };
-
+    let primitive_surface =
+        match resolve_provider_primitive_surface(engine_host, session_id, workspace_id).await {
+            Ok(capabilities) => capabilities,
+            Err(error) => {
+                let error_msg =
+                    format!("failed to resolve live engine capability surface: {error}");
+                error!(session_id, turn, error = %error_msg);
+                let _ = emitter.emit(TronEvent::TurnFailed {
+                    base: run_base(session_id, run_context),
+                    turn,
+                    error: error_msg.clone(),
+                    code: Some("ENGINE_TOOL_SURFACE_FAILED".into()),
+                    category: Some("engine".into()),
+                    recoverable: true,
+                    partial_content: None,
+                });
+                return TurnResult {
+                    success: false,
+                    error: Some(error_msg),
+                    stop_reason: Some(StopReason::Error),
+                    ..Default::default()
+                };
+            }
+        };
     // 3. Build context (base from CM, external fields from RunContext/params)
     let context = build_turn_context(
         context_manager,
         run_context,
         server_origin,
-        &context_policy,
         primitive_surface.capabilities.clone(),
-        capability_primer_context,
     );
 
     // 4. Build stream options (thinking always enabled — provider handles model-specific config)
@@ -301,23 +209,14 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             .clone()
             .unwrap_or_else(|| resolved_profile.name.clone());
         let profile = Some(active_profile_name.as_str());
-        let (
-            context_policy_id,
-            primitive_surface_policy_id,
-            capability_execution_policy_id,
-            cache_policy_id,
-        ) = resolved_turn_policy_ids(&resolved_profile, provider.provider_type());
         let metadata = serde_json::json!({
             "messageCount": context.messages.len(),
             "capabilityCount": context.capabilities.as_ref().map_or(0, Vec::len),
             "catalogRevision": primitive_surface.catalog_revision.0,
             "streamOptions": &stream_options,
-            "providerSurface": "preProjection",
+            "providerSurface": "execute",
                 "profileChain": resolved_profile.profile_chain.clone(),
                 "profileSpecHash": resolved_profile.spec_hash.clone(),
-            "contextPolicy": context_policy_id,
-            "primitiveSurfacePolicy": primitive_surface_policy_id,
-            "capabilityExecutionPolicy": capability_execution_policy_id,
         });
         let audit = crate::domains::session::event_store::sqlite::repositories::constitution::ContextResolutionAudit {
             session_id: Some(session_id),
@@ -384,7 +283,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 metadata: serde_json::json!({
                     "contextResolutionId": context_resolution_id,
                     "profileSpecHash": resolved_profile.spec_hash.clone(),
-                    "cachePolicy": cache_policy_id,
                     "exactProviderEnvelope": provider_payload
                         .get("exactProviderEnvelope")
                         .and_then(serde_json::Value::as_bool)
@@ -717,32 +615,12 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             stream_result: &stream_result,
             context_manager,
             primitive_surface: &primitive_surface,
-            primitive_surface_policy,
-            capability_execution_policy,
-            guardrails,
-            hooks,
-            compaction,
             session_id,
             emitter,
             cancel,
-            subagent_depth,
-            subagent_max_depth,
             workspace_id,
             persister,
-            persister_arc,
-            process_manager,
-            job_manager,
-            output_buffer_registry,
             sequence_counter,
-            provider_type: provider.provider_type(),
-            execution_spec: run_context
-                .resolved_profile
-                .as_deref()
-                .map(|profile| &profile.spec),
-            profile_spec_hash: run_context
-                .resolved_profile
-                .as_deref()
-                .map(|profile| profile.spec_hash.as_str()),
             invocation_abort_registry,
             engine_host,
             run_id: run_context.run_id.as_deref(),
@@ -751,47 +629,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         },
     )
     .await;
-
-    // 9b. Persist + broadcast batched rules.activated if any new rules activated.
-    //
-    // INVARIANT: persist BEFORE broadcasting. On persist failure the
-    // rules-activated broadcast is skipped (turn continues — the rules are
-    // already applied to the in-process context manager; only the
-    // notification to iOS is lost). Unlike the assistant message path, this
-    // is a secondary signal and does not warrant a hard turn failure.
-    if !invocation_phase.activated_rules.is_empty() {
-        let total = context_manager
-            .rules_tracker()
-            .activated_scoped_rules_count() as u32;
-        if persist_rules_activated(
-            persister,
-            session_id,
-            turn,
-            &invocation_phase.activated_rules,
-            total,
-            sequence_counter,
-        )
-        .await
-        .is_ok()
-        {
-            if let Some(counter) = sequence_counter {
-                let _ = emitter.emit_sequenced(
-                    TronEvent::RulesActivated {
-                        base: run_base(session_id, run_context),
-                        rules: invocation_phase.activated_rules.clone(),
-                        total_activated: total,
-                    },
-                    counter,
-                );
-            } else {
-                let _ = emitter.emit(TronEvent::RulesActivated {
-                    base: run_base(session_id, run_context),
-                    rules: invocation_phase.activated_rules.clone(),
-                    total_activated: total,
-                });
-            }
-        }
-    }
 
     // 10. Emit TurnEnd
     let duration = turn_start.elapsed().as_millis() as u64;

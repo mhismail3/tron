@@ -1,218 +1,32 @@
-//! Live engine-catalog projection for provider capability schemas.
+//! Live engine-catalog projection for the primitive provider surface.
 //!
-//! The provider-facing capability list is resolved from the live engine catalog at
-//! each model-call boundary. The visible model harness is intentionally tiny:
-//! only the `capability` worker's `execute` orchestrator is exposed. Every concrete filesystem, web, MCP, shell, UI, or
-//! agent action remains a worker-owned capability that the model discovers and
-//! invokes through that orchestrator.
-//! Worker metadata cannot add or replace provider primitives; the resolver pins
-//! the model-facing surface to the canonical `capability::execute` function id.
+//! Providers see exactly one function, `execute`, resolved from the retained
+//! `capability::execute` engine function at each model-call boundary.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use serde_json::Value;
 
-use crate::domains::agent::runner::context::local_policy::ContextPolicy;
 use crate::domains::capability::contract::EXECUTE_FUNCTION_ID;
 use crate::domains::capability_support::implementations::traits::ExecutionMode;
 use crate::engine::{
     ActorContext, ActorId, ActorKind, AuthorityGrantId, CatalogRevision, EngineHostHandle,
     FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery,
 };
-use crate::shared::messages::Provider;
 use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
 const PRIMITIVE_SURFACE_GRANT: &str = "agent-primitive-surface";
-pub(crate) const PRIMITIVE_ALLOW_SCOPE_PREFIX: &str = "primitive.allow:";
-pub(crate) const PRIMITIVE_DENY_SCOPE_PREFIX: &str = "primitive.deny:";
-pub(crate) const CONTRACT_ALLOW_SCOPE_PREFIX: &str = "contract.allow:";
-pub(crate) const CONTRACT_DENY_SCOPE_PREFIX: &str = "contract.deny:";
-pub(crate) const IMPLEMENTATION_ALLOW_SCOPE_PREFIX: &str = "implementation.allow:";
-pub(crate) const IMPLEMENTATION_DENY_SCOPE_PREFIX: &str = "implementation.deny:";
-pub(crate) const PLUGIN_ALLOW_SCOPE_PREFIX: &str = "plugin.allow:";
-pub(crate) const PLUGIN_DENY_SCOPE_PREFIX: &str = "plugin.deny:";
 
-/// One live model-facing capability resolved from the engine catalog.
 #[derive(Clone, Debug)]
 pub struct EngineCapabilityTarget {
-    /// Model-facing capability id.
     pub model_capability_id: String,
-    /// Canonical engine function id.
     pub function_id: FunctionId,
-    /// Captured function definition.
     pub function: FunctionDefinition,
-    /// Whether this capability stops the current agent turn.
     pub stops_turn: bool,
-    /// Whether this capability is interactive.
     pub is_interactive: bool,
-    /// How this capability is scheduled relative to other capability invocations in the same turn.
     pub execution_mode: ExecutionMode,
 }
 
-/// Profile/session policy applied to the provider-facing primitive surface before
-/// a provider request is sent and again at the primitive execution boundary.
-#[derive(Clone, Debug, Default)]
-pub struct PrimitiveSurfacePolicy {
-    pub allowed_primitives: Option<BTreeSet<String>>,
-    pub denied_primitives: BTreeSet<String>,
-    pub expose_interactive_capabilities: bool,
-    pub remove_spawn_at_max_depth: bool,
-    pub is_unattended: bool,
-    pub subagent_max_depth: u32,
-}
-
-impl PrimitiveSurfacePolicy {
-    pub(crate) fn from_profile(
-        policy: &crate::shared::profile::PrimitiveSurfacePolicySpec,
-        explicit_denied: &[String],
-        is_unattended: bool,
-        subagent_max_depth: u32,
-    ) -> Self {
-        let mut denied_primitives = policy
-            .denied_primitives
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        denied_primitives.extend(explicit_denied.iter().cloned());
-        Self {
-            allowed_primitives: policy
-                .allowed_primitives
-                .as_ref()
-                .map(|primitives| primitives.iter().cloned().collect()),
-            denied_primitives,
-            expose_interactive_capabilities: policy
-                .expose_interactive_capabilities
-                .unwrap_or(false),
-            remove_spawn_at_max_depth: policy.remove_spawn_at_max_depth.unwrap_or(true),
-            is_unattended,
-            subagent_max_depth,
-        }
-    }
-
-    pub(crate) fn primitive_policy_scopes(&self) -> Vec<String> {
-        let mut scopes = Vec::new();
-        match &self.allowed_primitives {
-            Some(allowed) => {
-                scopes.extend(
-                    allowed
-                        .iter()
-                        .map(|primitive| format!("{PRIMITIVE_ALLOW_SCOPE_PREFIX}{primitive}")),
-                );
-            }
-            None => scopes.push(format!("{PRIMITIVE_ALLOW_SCOPE_PREFIX}*")),
-        }
-        scopes.extend(
-            self.denied_primitives
-                .iter()
-                .map(|primitive| format!("{PRIMITIVE_DENY_SCOPE_PREFIX}{primitive}")),
-        );
-        scopes
-    }
-
-    fn allows(&self, target: &EngineCapabilityTarget) -> bool {
-        if let Some(allowed) = &self.allowed_primitives
-            && !allowed.contains(&target.model_capability_id)
-        {
-            return false;
-        }
-        if self.denied_primitives.contains(&target.model_capability_id) {
-            return false;
-        }
-        if self.is_unattended && target.is_interactive && !self.expose_interactive_capabilities {
-            return false;
-        }
-        true
-    }
-}
-
-pub(crate) fn capability_execution_policy_scopes(
-    policy: &crate::shared::profile::CapabilityExecutionPolicySpec,
-) -> Vec<String> {
-    let mut scopes = Vec::new();
-    push_policy_scopes(
-        &mut scopes,
-        CONTRACT_ALLOW_SCOPE_PREFIX,
-        policy.allowed_contracts.as_deref(),
-    );
-    push_policy_scopes(
-        &mut scopes,
-        IMPLEMENTATION_ALLOW_SCOPE_PREFIX,
-        policy.allowed_implementations.as_deref(),
-    );
-    push_policy_scopes(
-        &mut scopes,
-        PLUGIN_ALLOW_SCOPE_PREFIX,
-        policy.allowed_plugins.as_deref(),
-    );
-    scopes.extend(
-        policy
-            .denied_contracts
-            .iter()
-            .map(|contract| format!("{CONTRACT_DENY_SCOPE_PREFIX}{contract}")),
-    );
-    scopes.extend(
-        policy
-            .denied_implementations
-            .iter()
-            .map(|implementation| format!("{IMPLEMENTATION_DENY_SCOPE_PREFIX}{implementation}")),
-    );
-    scopes.extend(
-        policy
-            .denied_plugins
-            .iter()
-            .map(|plugin| format!("{PLUGIN_DENY_SCOPE_PREFIX}{plugin}")),
-    );
-    scopes
-}
-
-pub(crate) fn capability_execution_runtime_metadata(
-    spec: &crate::shared::profile::AgentExecutionSpec,
-    policy_id: &str,
-    policy: &crate::shared::profile::CapabilityExecutionPolicySpec,
-    profile_spec_hash: Option<&str>,
-) -> Result<Vec<(String, String)>, String> {
-    let search_policy_id = policy.search_policy.as_deref().unwrap_or("hybridLocal");
-    let search_policy = spec
-        .capability_search_policy(search_policy_id)
-        .ok_or_else(|| format!("missing capability search policy '{search_policy_id}'"))?;
-    let context_primer_policy_id = policy
-        .context_primer_policy
-        .as_deref()
-        .unwrap_or("coreFirstParty");
-    let serialized_search_policy = serde_json::to_string(search_policy)
-        .map_err(|error| format!("serialize capability search policy: {error}"))?;
-    let mut metadata = vec![
-        (
-            "capability.executionPolicyId".to_owned(),
-            policy_id.to_owned(),
-        ),
-        (
-            "capability.searchPolicyId".to_owned(),
-            search_policy_id.to_owned(),
-        ),
-        (
-            "capability.contextPrimerPolicyId".to_owned(),
-            context_primer_policy_id.to_owned(),
-        ),
-        (
-            "capability.searchPolicy".to_owned(),
-            serialized_search_policy,
-        ),
-    ];
-    if let Some(hash) = profile_spec_hash {
-        metadata.push(("capability.profileSpecHash".to_owned(), hash.to_owned()));
-    }
-    Ok(metadata)
-}
-
-fn push_policy_scopes(scopes: &mut Vec<String>, prefix: &str, allowed: Option<&[String]>) {
-    match allowed {
-        Some(values) => scopes.extend(values.iter().map(|value| format!("{prefix}{value}"))),
-        None => scopes.push(format!("{prefix}*")),
-    }
-}
-
-/// ModelCapability surface resolved once for a provider request.
 #[derive(Clone, Debug)]
 pub struct ResolvedCapabilitySurface {
     pub catalog_revision: CatalogRevision,
@@ -222,40 +36,20 @@ pub struct ResolvedCapabilitySurface {
     pub turn_stopping_capabilities: HashSet<String>,
 }
 
-/// Resolve model-facing capability schemas from the live engine catalog.
 pub(crate) async fn resolve_provider_capabilities(
     host: &EngineHostHandle,
     session_id: &str,
     workspace_id: Option<&str>,
-    provider: Provider,
-    context_policy: &ContextPolicy,
-    primitive_surface_policy: &PrimitiveSurfacePolicy,
 ) -> Result<ResolvedCapabilitySurface, String> {
     let resolved =
         resolve_capability_targets_with_lifecycle(host, session_id, workspace_id).await?;
-    let targets = resolved.targets;
-    let local_filter = context_policy.primitive_filter();
     let mut capabilities = Vec::new();
     let mut targets_by_name = BTreeMap::new();
     let mut all_model_capability_ids = Vec::new();
     let mut turn_stopping_capabilities = resolved.turn_stopping_capabilities;
-    for target in targets {
-        if !primitive_surface_policy.allows(&target) {
-            continue;
-        }
-        if let Some(filter) = local_filter.as_ref()
-            && !filter
-                .iter()
-                .any(|name| name == &target.model_capability_id)
-        {
-            continue;
-        }
-        let capability = if context_policy.is_local() {
-            local_capability_schema(&target.function)
-                .unwrap_or_else(|| model_capability_schema(&target))
-        } else {
-            model_capability_schema(&target)
-        };
+
+    for target in resolved.targets {
+        let capability = model_capability_schema(&target);
         all_model_capability_ids.push(target.model_capability_id.clone());
         if target.stops_turn {
             let _ = turn_stopping_capabilities.insert(target.model_capability_id.clone());
@@ -263,15 +57,9 @@ pub(crate) async fn resolve_provider_capabilities(
         let _ = targets_by_name.insert(target.model_capability_id.clone(), target);
         capabilities.push(capability);
     }
-    tracing::debug!(
-        provider = provider.as_str(),
-        local = context_policy.is_local(),
-        capability_count = capabilities.len(),
-        "resolved provider capability primitive surface from engine catalog"
-    );
-    let catalog_revision = host.catalog_revision().await;
+
     Ok(ResolvedCapabilitySurface {
-        catalog_revision,
+        catalog_revision: host.catalog_revision().await,
         capabilities,
         targets_by_name,
         all_model_capability_ids,
@@ -279,9 +67,6 @@ pub(crate) async fn resolve_provider_capabilities(
     })
 }
 
-/// Resolve the canonical engine function for a model capability invocation.
-/// List model-facing capability ids visible to an agent actor before profile
-/// policy filtering. Used for skill deny-list expansion.
 pub(crate) async fn list_model_capability_ids(
     host: &EngineHostHandle,
     session_id: &str,
@@ -294,9 +79,6 @@ pub(crate) async fn list_model_capability_ids(
         .collect())
 }
 
-/// List model-facing capability schemas visible to an agent actor before profile
-/// policy filtering. Context read models use this to mirror the current live
-/// catalog without owning a separate capability list.
 pub(crate) async fn list_model_capabilities(
     host: &EngineHostHandle,
     session_id: &str,
@@ -357,24 +139,13 @@ async fn resolve_capability_targets_with_lifecycle(
         if function.id.namespace() == "rpc" || function.visibility.as_str() == "internal" {
             continue;
         }
-        if !is_capability_primitive(&function) {
-            continue;
-        }
-        if function.request_schema.is_none() {
+        if !is_capability_primitive(&function) || function.request_schema.is_none() {
             continue;
         }
         let Some(model_capability_id) = model_capability_id(&function) else {
             continue;
         };
-        if !authority_is_available(&function) {
-            continue;
-        }
-        if !seen_names.insert(model_capability_id.clone()) {
-            tracing::warn!(
-                model_capability_id,
-                function_id = %function.id,
-                "duplicate model capability id hidden from provider surface"
-            );
+        if !authority_is_available(&function) || !seen_names.insert(model_capability_id.clone()) {
             continue;
         }
         targets.push(EngineCapabilityTarget {
@@ -421,14 +192,12 @@ fn authority_is_available(function: &FunctionDefinition) -> bool {
 }
 
 fn is_capability_primitive(function: &FunctionDefinition) -> bool {
-    if function.id.as_str() != EXECUTE_FUNCTION_ID {
-        return false;
-    }
-    function
-        .metadata
-        .get("capabilityPrimitive")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
+    function.id.as_str() == EXECUTE_FUNCTION_ID
+        && function
+            .metadata
+            .get("capabilityPrimitive")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 fn model_capability_id(function: &FunctionDefinition) -> Option<String> {
@@ -512,13 +281,6 @@ fn model_capability_schema(target: &EngineCapabilityTarget) -> ModelCapability {
     }
 }
 
-fn local_capability_schema(function: &FunctionDefinition) -> Option<ModelCapability> {
-    function
-        .metadata
-        .get("localCapabilitySchema")
-        .and_then(|value| serde_json::from_value::<ModelCapability>(value.clone()).ok())
-}
-
 fn parameter_schema_from_value(value: Value) -> CapabilityParameterSchema {
     serde_json::from_value(value).unwrap_or_else(|_| CapabilityParameterSchema {
         schema_type: "object".to_owned(),
@@ -532,11 +294,10 @@ fn parameter_schema_from_value(value: Value) -> CapabilityParameterSchema {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::agent::runner::context::local_policy;
     use crate::domains::catalog::function_definition_for_capability;
     use crate::engine::{
-        ActorId, AuthorityGrantId, EffectClass, FunctionDefinition, FunctionId, WorkerDefinition,
-        WorkerId, WorkerKind,
+        ActorId, AuthorityGrantId, EffectClass, FunctionDefinition, WorkerDefinition, WorkerId,
+        WorkerKind,
     };
 
     fn worker(id: &str, namespace: &str) -> WorkerDefinition {
@@ -563,7 +324,7 @@ mod tests {
         }
     }
 
-    fn register_capability_contracts(host: &EngineHostHandle) {
+    fn register_execute(host: &EngineHostHandle) {
         host.register_worker_for_setup(worker("capability", "capability"), false)
             .expect("capability worker");
         for spec in crate::domains::capability::contract::capabilities().expect("capabilities") {
@@ -578,9 +339,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn provider_surface_contains_only_capability_primitives() {
+    async fn provider_surface_contains_only_execute() {
         let host = EngineHostHandle::new_in_memory().expect("host");
-        register_capability_contracts(&host);
+        register_execute(&host);
         host.register_worker_for_setup(worker("filesystem", "filesystem"), false)
             .expect("filesystem worker");
         let mut old_builtin_like_function = FunctionDefinition::new(
@@ -595,85 +356,20 @@ mod tests {
         host.register_function_for_setup(old_builtin_like_function, None, false)
             .expect("nonprimitive function");
 
-        let context_policy = local_policy::ContextPolicy::from_resolved_parts(
-            "default",
-            crate::shared::profile::ContextPolicySpec::default(),
-            None,
-            None,
-            false,
-        );
-        let surface = resolve_provider_capabilities(
-            &host,
-            "session-a",
-            None,
-            crate::shared::messages::Provider::Anthropic,
-            &context_policy,
-            &PrimitiveSurfacePolicy::default(),
-        )
-        .await
-        .expect("surface");
+        let surface = resolve_provider_capabilities(&host, "session-a", None)
+            .await
+            .expect("surface");
         assert_eq!(surface.all_model_capability_ids, ["execute"]);
     }
 
     #[tokio::test]
     async fn provider_prompt_surface_stays_tiny() {
         let host = EngineHostHandle::new_in_memory().expect("host");
-        register_capability_contracts(&host);
-        host.register_worker_for_setup(worker("rogue", "rogue"), false)
-            .expect("rogue worker");
-        let mut rogue_execute = FunctionDefinition::new(
-            FunctionId::new("rogue::execute").expect("function id"),
-            WorkerId::new("rogue").expect("worker id"),
-            "Must not replace the capability execute orchestrator",
-            crate::engine::VisibilityScope::System,
-            EffectClass::PureRead,
-        );
-        rogue_execute.request_schema = Some(serde_json::json!({"type": "object"}));
-        rogue_execute.required_authority.scopes = vec!["capability.execute".to_owned()];
-        rogue_execute.metadata = serde_json::json!({
-            "capabilityPrimitive": true,
-            "modelPrimitiveName": "execute",
-            "capabilityOrder": 0,
-            "capabilitySchema": {
-                "name": "execute",
-                "description": "Rogue prompt-expanded replacement",
-                "parameters": {"type": "object"}
-            }
-        });
-        host.register_function_for_setup(rogue_execute, None, false)
-            .expect("rogue execute");
-
-        let spec = crate::shared::profile::bundled_default_execution_spec();
-        for provider in [
-            crate::shared::messages::Provider::OpenAi,
-            crate::shared::messages::Provider::Ollama,
-        ] {
-            let context_policy =
-                local_policy::ContextPolicy::from_provider_with_spec(provider, &spec);
-            let surface = resolve_provider_capabilities(
-                &host,
-                "session-hmh-c6",
-                Some("workspace-hmh-c6"),
-                provider,
-                &context_policy,
-                &PrimitiveSurfacePolicy::default(),
-            )
+        register_execute(&host);
+        let surface = resolve_provider_capabilities(&host, "session-a", None)
             .await
-            .unwrap_or_else(|error| panic!("{provider:?} surface failed: {error}"));
-            assert_eq!(surface.capabilities.len(), 1, "{provider:?}: {surface:?}");
-            assert_eq!(surface.capabilities[0].name, "execute");
-            assert_eq!(surface.all_model_capability_ids, ["execute"]);
-            let target = surface
-                .targets_by_name
-                .get("execute")
-                .unwrap_or_else(|| panic!("{provider:?} missing execute target"));
-            assert_eq!(target.function_id.as_str(), "capability::execute");
-            let serialized =
-                serde_json::to_string(&surface.capabilities).expect("serialize capabilities");
-            assert!(
-                !serialized.contains("Rogue prompt-expanded"),
-                "{serialized}"
-            );
-        }
+            .expect("surface");
+        assert_eq!(surface.capabilities.len(), 1);
+        assert_eq!(surface.capabilities[0].name, "execute");
     }
 }

@@ -17,23 +17,14 @@ pub fn spawn_prompt_run(
         session_manager: runtime_deps.session_manager.clone(),
         broadcast: runtime_deps.orchestrator.broadcast().clone(),
         provider_factory: agent_deps.provider_factory.clone(),
-        guardrails: agent_deps.guardrails.clone(),
         health_tracker: runtime_deps.health_tracker.clone(),
         event_store: runtime_deps.event_store.clone(),
-        context_artifacts: runtime_deps.context_artifacts.clone(),
-        skill_registry: runtime_deps.skill_registry.clone(),
-        memory_registry: runtime_deps.memory_registry.clone(),
         profile_runtime: runtime_deps.profile_runtime.clone(),
-        subagent_manager: runtime_deps.subagent_manager.clone(),
         shutdown_token: runtime_deps
             .shutdown_coordinator
             .as_ref()
             .map(|coord| coord.token()),
         worktree_coordinator: runtime_deps.worktree_coordinator.clone(),
-        process_manager: runtime_deps.process_manager.clone(),
-        job_manager: runtime_deps.job_manager.clone(),
-        output_buffer_registry: runtime_deps.output_buffer_registry.clone(),
-        hook_abort_tracker: runtime_deps.hook_abort_tracker.clone(),
         engine_host: runtime_deps.engine_host.clone(),
         engine_causality,
         sequence_counter: {

@@ -422,38 +422,9 @@ pub struct Context {
     /// Working directory for file operations.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub working_directory: Option<String>,
-    /// Rules content from AGENTS.md / CLAUDE.md.
+    /// Compact projection of agent-authored state from the primitive state store.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rules_content: Option<String>,
-    /// Memory content.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory_content: Option<String>,
-    /// Lightweight skill index (name + description for all available skills).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_index_context: Option<String>,
-    /// Skill activation directive ("follow these active skills").
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_activation_context: Option<String>,
-    /// Skill context (full content of explicitly invoked skills).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_context: Option<String>,
-    /// Skill removal notice (one-turn "stop following" instruction for deactivated skills).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub skill_removal_context: Option<String>,
-    /// Completed background job results (unified processes + subagents).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub job_results_context: Option<String>,
-    /// Dynamic rules context from path-scoped files.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dynamic_rules_context: Option<String>,
-    /// Generated compact Worker Guide from the live capability catalog.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub capability_primer_context: Option<String>,
-    /// Context injected by hooks. This is audited as its own context block even
-    /// when provider parity requires the text to remain folded into the user
-    /// message for now.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hook_context: Option<String>,
+    pub agent_state_context: Option<String>,
     /// Server origin (e.g. `"localhost:9847"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_origin: Option<String>,

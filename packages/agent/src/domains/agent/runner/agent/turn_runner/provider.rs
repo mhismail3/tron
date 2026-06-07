@@ -28,13 +28,7 @@ pub(super) fn build_stream_options(
             .reasoning_level
             .as_ref()
             .map(|r| r.as_gemini_thinking_level().to_owned()),
-        provider_instructions: run_context.resolved_profile.as_ref().and_then(|profile| {
-            profile
-                .spec
-                .provider_prompts
-                .get("openaiCodex")
-                .map(|prompt| prompt.content.clone())
-        }),
+        provider_instructions: None,
         prompt_cache_key: Some(format!("tron-session-{session_id}")),
         ..Default::default()
     }

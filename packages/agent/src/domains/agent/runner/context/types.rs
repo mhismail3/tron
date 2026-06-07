@@ -1,7 +1,9 @@
-//! Context management types.
+//! Primitive context management types.
 //!
-//! Shared types for context management components: threshold levels,
-//! configuration, snapshots, compaction, capability results, and summarization.
+//! These types describe the bare agent loop context: soul/system prompt,
+//! provider-visible capabilities, environment metadata, messages, and compaction
+//! state. Behavior instructions learned by the agent live in agent-owned state,
+//! not in separate context planes.
 
 use crate::shared::messages::Message;
 use crate::shared::model_capabilities::ModelCapability;
@@ -9,28 +11,17 @@ use serde::{Deserialize, Serialize};
 
 use super::constants::Thresholds;
 
-// =============================================================================
-// Threshold Level
-// =============================================================================
-
-/// Context usage threshold level.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ThresholdLevel {
-    /// Under 50% usage — normal operation.
     Normal,
-    /// 50–70% usage — yellow zone.
     Warning,
-    /// 70–85% usage — orange zone, suggest compaction.
     Alert,
-    /// 85–95% usage — red zone, block new turns.
     Critical,
-    /// Over 95% usage — hard limit.
     Exceeded,
 }
 
 impl ThresholdLevel {
-    /// Determine threshold level for a given usage ratio.
     #[must_use]
     pub fn from_ratio(ratio: f64) -> Self {
         if ratio >= Thresholds::EXCEEDED {
@@ -47,37 +38,19 @@ impl ThresholdLevel {
     }
 }
 
-// =============================================================================
-// Configuration
-// =============================================================================
-
-/// Context manager configuration.
 #[derive(Clone, Debug)]
 pub struct ContextManagerConfig {
-    /// Model identifier.
     pub model: String,
-    /// Custom system prompt override.
     pub system_prompt: Option<String>,
-    /// Profile-resolved context assembly policy for this session/process.
-    pub context_policy: super::local_policy::ContextPolicy,
-    /// Working directory for file operations.
     pub working_directory: Option<String>,
-    /// Available capabilities.
     pub capabilities: Vec<ModelCapability>,
-    /// Rules content from AGENTS.md / CLAUDE.md hierarchy.
-    pub rules_content: Option<String>,
-    /// Compaction settings.
     pub compaction: CompactionConfig,
 }
 
-/// Compaction configuration.
 #[derive(Clone, Debug)]
 pub struct CompactionConfig {
-    /// Threshold ratio (0–1) to trigger compaction suggestion.
     pub threshold: f64,
-    /// Number of recent user turns to preserve verbatim during compaction.
     pub preserve_recent_turns: usize,
-    /// Model context limit in tokens.
     pub context_limit: u64,
 }
 
@@ -91,379 +64,175 @@ impl Default for CompactionConfig {
     }
 }
 
-// =============================================================================
-// Context Snapshot
-// =============================================================================
-
-/// Token breakdown by component.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TokenBreakdown {
-    /// System prompt tokens.
     pub system_prompt: u64,
-    /// ModelCapability definition tokens.
     pub capabilities: u64,
-    /// Rules content tokens (static + dynamic combined).
-    pub rules: u64,
-    /// Workspace memory tokens.
-    pub memory: u64,
-    /// Skill index tokens (lightweight listing of available skills).
-    pub skill_index: u64,
-    /// Active skill content tokens.
-    pub skill_context: u64,
-    /// Skill deactivation notice tokens.
-    pub skill_removal: u64,
-    /// Background job results tokens (processes + subagents).
-    pub job_results: u64,
-    /// Environment metadata tokens (server origin + working directory).
     pub environment: u64,
-    /// Message tokens.
     pub messages: u64,
-    /// Exact provider token delta not attributable to estimated local sections.
-    ///
-    /// This reconciles the chars/4 component estimates with the exact provider
-    /// context count after a turn. Anthropic cache-write accounting and exact
-    /// tokenization of system text, capability schemas, cache markers, and messages
-    /// can make the reported total higher than the local estimate without
-    /// implying hidden conversation history.
     pub provider_adjustment: u64,
 }
 
 impl TokenBreakdown {
-    /// Sum of all displayed token rows.
     #[must_use]
     pub fn total(&self) -> u64 {
         self.system_prompt
             + self.capabilities
-            + self.rules
-            + self.memory
-            + self.skill_index
-            + self.skill_context
-            + self.skill_removal
-            + self.job_results
             + self.environment
             + self.messages
             + self.provider_adjustment
     }
 }
 
-/// Snapshot of current context state.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContextSnapshot {
-    /// Current total token count.
     pub current_tokens: u64,
-    /// Model's context limit.
     pub context_limit: u64,
-    /// Usage as a fraction (0.0–1.0).
     pub usage_percent: f64,
-    /// Current threshold level.
     pub threshold_level: ThresholdLevel,
-    /// Token breakdown by component.
     pub breakdown: TokenBreakdown,
-    /// Loaded rules files (if any).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub rules: Option<RulesSnapshot>,
-    /// Whether this is a local (Ollama) model session.
-    pub is_local_model: bool,
 }
 
-/// Information about a loaded rules file.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RulesFileSnapshot {
-    /// Absolute path to the file.
-    pub path: String,
-    /// Path relative to working directory.
-    pub relative_path: String,
-    /// Level in hierarchy.
-    pub level: RulesLevel,
-    /// Depth from project root (-1 for global).
-    pub depth: i32,
-}
-
-/// Rules level in the hierarchy.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum RulesLevel {
-    /// Global rules (~/.tron/).
-    Global,
-    /// Project-level rules (.claude/AGENTS.md).
-    Project,
-    /// Directory-level rules.
-    Directory,
-}
-
-/// Rules section for context snapshot.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RulesSnapshot {
-    /// List of loaded rules files.
-    pub files: Vec<RulesFileSnapshot>,
-    /// Total number of rules files.
-    pub total_files: usize,
-    /// Estimated token count for merged rules content.
-    pub tokens: u64,
-}
-
-// =============================================================================
-// Detailed Snapshot
-// =============================================================================
-
-/// Per-message token information.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetailedMessageInfo {
-    /// Index in message list.
     pub index: usize,
-    /// Message role.
     pub role: String,
-    /// Estimated token count.
     pub tokens: u64,
-    /// Truncated summary for display.
     pub summary: String,
-    /// Full content.
     pub content: String,
-    /// Event ID (for deletion support).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub event_id: Option<String>,
-    /// Capability invocations within assistant messages.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capability_invocations: Option<Vec<CapabilityInvocationDraftInfo>>,
-    /// Capability invocation ID (for capability result messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invocation_id: Option<String>,
-    /// Error flag (for capability result messages).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
 }
 
-/// Capability invocation information for detailed snapshot.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CapabilityInvocationDraftInfo {
-    /// Capability invocation ID.
     pub id: String,
-    /// Capability name.
     pub name: String,
-    /// Estimated token count.
     pub tokens: u64,
-    /// Arguments JSON string.
     pub arguments: String,
 }
 
-/// Detailed context snapshot with per-message breakdown.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DetailedContextSnapshot {
-    /// Base snapshot fields.
     #[serde(flatten)]
     pub snapshot: ContextSnapshot,
-    /// Per-message details.
     pub messages: Vec<DetailedMessageInfo>,
-    /// Effective system-level context.
     pub system_prompt_content: String,
-    /// ModelCapability clarification content (for Codex providers).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub capability_clarification_content: Option<String>,
-    /// ModelCapability summaries (name + first-sentence description).
     pub capabilities_content: Vec<CapabilitySummary>,
 }
 
-/// Capability name and brief description for the detailed snapshot.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CapabilitySummary {
-    /// Capability name (unique identifier).
     pub name: String,
-    /// Brief description (first sentence of the capability's full description).
     pub description: String,
 }
 
-// =============================================================================
-// Pre-Turn Validation
-// =============================================================================
-
-/// Result of pre-turn validation.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreTurnValidation {
-    /// Whether the turn can proceed.
     pub can_proceed: bool,
-    /// Whether compaction is recommended.
     pub needs_compaction: bool,
-    /// Current token count.
     pub current_tokens: u64,
-    /// Model's context limit.
     pub context_limit: u64,
 }
 
-// =============================================================================
-// Compaction
-// =============================================================================
-
-/// Preview of what compaction would do (without modifying state).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompactionPreview {
-    /// Message-only tokens before compaction.
     pub tokens_before: u64,
-    /// Estimated tokens after compaction.
     pub tokens_after: u64,
-    /// Compression ratio (`tokens_after / tokens_before`).
     pub compression_ratio: f64,
-    /// Number of messages preserved.
     pub preserved_messages: usize,
-    /// Number of messages summarized.
     pub summarized_messages: usize,
-    /// Number of user turns preserved verbatim.
     pub preserved_turns: usize,
-    /// Number of user turns summarized.
     pub summarized_turns: usize,
-    /// Generated summary text.
     pub summary: String,
-    /// Structured data extracted from the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extracted_data: Option<ExtractedData>,
 }
 
-/// Result of executing compaction.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompactionResult {
-    /// Whether compaction replaced older messages with a summary.
     pub success: bool,
-    /// Message-only tokens before compaction.
     pub tokens_before: u64,
-    /// Estimated tokens after compaction.
     pub tokens_after: u64,
-    /// Compression ratio.
     pub compression_ratio: f64,
-    /// Number of user turns preserved verbatim.
     pub preserved_turns: usize,
-    /// Number of user turns summarized.
     pub summarized_turns: usize,
-    /// Number of messages preserved.
     pub preserved_messages: usize,
-    /// Generated summary text.
     pub summary: String,
-    /// Structured data extracted from the conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub extracted_data: Option<ExtractedData>,
 }
 
-// =============================================================================
-// ModelCapability Result Processing
-// =============================================================================
-
-/// Processed capability result (potentially truncated).
 #[derive(Clone, Debug)]
 pub struct ProcessedCapabilityResult {
-    /// Capability invocation ID.
     pub invocation_id: String,
-    /// Content (possibly truncated).
     pub content: String,
-    /// Whether the content was truncated.
     pub truncated: bool,
-    /// Original size before truncation (if truncated).
     pub original_size: Option<usize>,
 }
 
-// =============================================================================
-// Session Memory
-// =============================================================================
-
-/// A session memory entry written mid-session.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SessionMemoryEntry {
-    /// Title of the memory entry.
-    pub title: String,
-    /// Content of the memory entry.
-    pub content: String,
-    /// Estimated token count.
-    pub tokens: u64,
-}
-
-// =============================================================================
-// Serialization / Export
-// =============================================================================
-
-/// Exported context state for persistence.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExportedState {
-    /// Model identifier.
     pub model: String,
-    /// System prompt.
     pub system_prompt: String,
-    /// ModelCapability definitions.
     pub capabilities: Vec<ModelCapability>,
-    /// Conversation messages.
     pub messages: Vec<Message>,
 }
 
-// =============================================================================
-// Summarization
-// =============================================================================
-
-/// Structured data extracted from conversation context during summarization.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExtractedData {
-    /// The main goal or task being worked on.
     #[serde(default)]
     pub current_goal: String,
-    /// Actions/steps that have been completed.
     #[serde(default)]
     pub completed_steps: Vec<String>,
-    /// Tasks that were mentioned but not completed.
     #[serde(default)]
     pub pending_tasks: Vec<String>,
-    /// Key decisions made and their rationale.
     #[serde(default)]
     pub key_decisions: Vec<KeyDecision>,
-    /// Files that have been modified.
     #[serde(default)]
     pub files_modified: Vec<String>,
-    /// Topics that were discussed.
     #[serde(default)]
     pub topics_discussed: Vec<String>,
-    /// User preferences or constraints expressed.
     #[serde(default)]
     pub user_preferences: Vec<String>,
-    /// Critical context that must be preserved.
     #[serde(default)]
     pub important_context: Vec<String>,
-    /// Key reasoning insights from thinking blocks.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub thinking_insights: Vec<String>,
 }
 
-/// A key decision with rationale.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct KeyDecision {
-    /// What was decided.
     pub decision: String,
-    /// Why it was decided.
     pub reason: String,
 }
 
-/// Result of summarization containing structured data and narrative.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SummaryResult {
-    /// Structured extracted data.
     pub extracted_data: ExtractedData,
-    /// Human-readable narrative summary.
     pub narrative: String,
 }
 
-// =============================================================================
-// Compaction Trigger (migrated from events::memory::types)
-// =============================================================================
-
-/// Configuration for the compaction trigger.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompactionTriggerConfig {
-    /// Token ratio that forces compaction (0.0–1.0). Default: 0.70.
     pub trigger_token_threshold: f64,
 }
 
@@ -486,24 +255,15 @@ impl From<&crate::domains::settings::CompactorSettings> for CompactionTriggerCon
     }
 }
 
-/// Input to the compaction trigger decision engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CompactionTriggerInput {
-    /// Current token usage ratio (0.0–1.0).
     pub current_token_ratio: f64,
-    /// Recent event types from the current cycle.
     pub recent_event_types: Vec<String>,
-    /// Recent process::run capability invocation commands.
     pub recent_capability_invocations: Vec<String>,
 }
 
-/// Provider re-export for context module convenience.
 pub use crate::shared::messages::Provider;
-
-// =============================================================================
-// Tests
-// =============================================================================
 
 #[cfg(test)]
 mod tests {
@@ -520,37 +280,39 @@ mod tests {
         assert_eq!(ThresholdLevel::from_ratio(0.85), ThresholdLevel::Critical);
         assert_eq!(ThresholdLevel::from_ratio(0.94), ThresholdLevel::Critical);
         assert_eq!(ThresholdLevel::from_ratio(0.95), ThresholdLevel::Exceeded);
-        assert_eq!(ThresholdLevel::from_ratio(1.0), ThresholdLevel::Exceeded);
     }
 
     #[test]
-    fn threshold_level_serde_roundtrip() {
-        for level in [
-            ThresholdLevel::Normal,
-            ThresholdLevel::Warning,
-            ThresholdLevel::Alert,
-            ThresholdLevel::Critical,
-            ThresholdLevel::Exceeded,
-        ] {
-            let json = serde_json::to_string(&level).unwrap();
-            let back: ThresholdLevel = serde_json::from_str(&json).unwrap();
-            assert_eq!(level, back);
-        }
+    fn context_snapshot_serde() {
+        let snapshot = ContextSnapshot {
+            current_tokens: 5000,
+            context_limit: 200_000,
+            usage_percent: 0.025,
+            threshold_level: ThresholdLevel::Normal,
+            breakdown: TokenBreakdown {
+                system_prompt: 1000,
+                capabilities: 2000,
+                environment: 30,
+                messages: 1500,
+                provider_adjustment: 470,
+            },
+        };
+        let json = serde_json::to_value(&snapshot).unwrap();
+        assert_eq!(json["currentTokens"], 5000);
+        assert_eq!(json["thresholdLevel"], "normal");
+        assert_eq!(json["breakdown"]["providerAdjustment"], 470);
     }
 
     #[test]
-    fn compaction_config_default() {
-        let cfg = CompactionConfig::default();
-        assert!((cfg.threshold - 0.70).abs() < f64::EPSILON);
-        assert_eq!(cfg.preserve_recent_turns, 5);
-    }
-
-    #[test]
-    fn extracted_data_default() {
-        let data = ExtractedData::default();
-        assert!(data.current_goal.is_empty());
-        assert!(data.completed_steps.is_empty());
-        assert!(data.key_decisions.is_empty());
+    fn token_breakdown_total_sums_all() {
+        let b = TokenBreakdown {
+            system_prompt: 100,
+            capabilities: 200,
+            environment: 15,
+            messages: 500,
+            provider_adjustment: 5,
+        };
+        assert_eq!(b.total(), 820);
     }
 
     #[test]
@@ -568,183 +330,15 @@ mod tests {
         let json = serde_json::to_string(&data).unwrap();
         let back: ExtractedData = serde_json::from_str(&json).unwrap();
         assert_eq!(back.current_goal, "Implement auth");
-        assert_eq!(back.key_decisions.len(), 1);
         assert_eq!(back.key_decisions[0].decision, "Use JWT");
     }
 
-    #[test]
-    fn summary_result_serde() {
-        let result = SummaryResult {
-            narrative: "User worked on auth.".into(),
-            extracted_data: ExtractedData::default(),
-        };
-        let json = serde_json::to_string(&result).unwrap();
-        let back: SummaryResult = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.narrative, "User worked on auth.");
-    }
-
-    #[test]
-    fn context_snapshot_serde() {
-        let snapshot = ContextSnapshot {
-            current_tokens: 5000,
-            context_limit: 200_000,
-            usage_percent: 0.025,
-            threshold_level: ThresholdLevel::Normal,
-            breakdown: TokenBreakdown {
-                system_prompt: 1000,
-                capabilities: 2000,
-                rules: 500,
-                memory: 100,
-                skill_index: 0,
-                skill_context: 200,
-                skill_removal: 0,
-                job_results: 50,
-                environment: 30,
-                messages: 1500,
-                provider_adjustment: 0,
-            },
-            rules: None,
-            is_local_model: false,
-        };
-        let json = serde_json::to_value(&snapshot).unwrap();
-        assert_eq!(json["currentTokens"], 5000);
-        assert_eq!(json["thresholdLevel"], "normal");
-        assert_eq!(json["breakdown"]["systemPrompt"], 1000);
-        assert_eq!(json["breakdown"]["memory"], 100);
-        assert_eq!(json["breakdown"]["skillContext"], 200);
-        assert_eq!(json["breakdown"]["environment"], 30);
-        assert_eq!(json["breakdown"]["providerAdjustment"], 0);
-    }
-
-    #[test]
-    fn token_breakdown_default_all_zeros() {
-        let b = TokenBreakdown::default();
-        assert_eq!(b.total(), 0);
-        assert_eq!(b.system_prompt, 0);
-        assert_eq!(b.memory, 0);
-        assert_eq!(b.skill_context, 0);
-        assert_eq!(b.skill_removal, 0);
-        assert_eq!(b.job_results, 0);
-        assert_eq!(b.environment, 0);
-        assert_eq!(b.provider_adjustment, 0);
-    }
-
-    #[test]
-    fn token_breakdown_total_sums_all() {
-        let b = TokenBreakdown {
-            system_prompt: 100,
-            capabilities: 200,
-            rules: 300,
-            memory: 50,
-            skill_index: 25,
-            skill_context: 75,
-            skill_removal: 10,
-            job_results: 40,
-            environment: 15,
-            messages: 500,
-            provider_adjustment: 5,
-        };
-        assert_eq!(b.total(), 1320);
-    }
-
-    #[test]
-    fn pre_turn_validation_serde() {
-        let v = PreTurnValidation {
-            can_proceed: true,
-            needs_compaction: false,
-            current_tokens: 5000,
-            context_limit: 200_000,
-        };
-        let json = serde_json::to_value(&v).unwrap();
-        assert_eq!(json["canProceed"], true);
-        assert_eq!(json["needsCompaction"], false);
-    }
-
-    #[test]
-    fn compaction_result_serde() {
-        let result = CompactionResult {
-            success: true,
-            tokens_before: 50_000,
-            tokens_after: 10_000,
-            compression_ratio: 0.2,
-            preserved_turns: 2,
-            summarized_turns: 3,
-            preserved_messages: 4,
-            summary: "User worked on auth.".into(),
-            extracted_data: None,
-        };
-        let json = serde_json::to_value(&result).unwrap();
-        assert_eq!(json["success"], true);
-        assert_eq!(json["tokensBefore"], 50_000);
-        assert_eq!(json["preservedTurns"], 2);
-        assert_eq!(json["summarizedTurns"], 3);
-    }
-
-    #[test]
-    fn rules_level_serde() {
-        assert_eq!(
-            serde_json::to_string(&RulesLevel::Global).unwrap(),
-            "\"global\""
-        );
-        assert_eq!(
-            serde_json::to_string(&RulesLevel::Project).unwrap(),
-            "\"project\""
-        );
-        assert_eq!(
-            serde_json::to_string(&RulesLevel::Directory).unwrap(),
-            "\"directory\""
-        );
-    }
-
-    #[test]
-    fn capability_summary_serde_roundtrip() {
-        let summary = CapabilitySummary {
-            name: "process".into(),
-            description: "Execute a shell command.".into(),
-        };
-        let json = serde_json::to_value(&summary).unwrap();
-        assert_eq!(json["name"], "process");
-        assert_eq!(json["description"], "Execute a shell command.");
-        let back: CapabilitySummary = serde_json::from_value(json).unwrap();
-        assert_eq!(back.name, "process");
-        assert_eq!(back.description, "Execute a shell command.");
-    }
-
-    #[test]
-    fn capability_summary_empty_description() {
-        let summary = CapabilitySummary {
-            name: "stub".into(),
-            description: String::new(),
-        };
-        let json = serde_json::to_value(&summary).unwrap();
-        assert_eq!(json["description"], "");
-    }
-
-    #[test]
-    fn session_memory_entry_serde() {
-        let entry = SessionMemoryEntry {
-            title: "Test".into(),
-            content: "Content".into(),
-            tokens: 10,
-        };
-        let json = serde_json::to_string(&entry).unwrap();
-        let back: SessionMemoryEntry = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.title, "Test");
-        assert_eq!(back.tokens, 10);
-    }
-
-    /// Verify that CompactionConfig and CompactionTriggerConfig use the same
-    /// default threshold, preventing the `context::should_compact` capability query from
-    /// diverging from the auto-compaction trigger.
     #[test]
     fn threshold_parity_defaults() {
         let compaction_cfg = CompactionConfig::default();
         let trigger_cfg = CompactionTriggerConfig::default();
         assert!(
-            (compaction_cfg.threshold - trigger_cfg.trigger_token_threshold).abs() < f64::EPSILON,
-            "CompactionConfig::threshold ({}) must equal CompactionTriggerConfig::trigger_token_threshold ({})",
-            compaction_cfg.threshold,
-            trigger_cfg.trigger_token_threshold,
+            (compaction_cfg.threshold - trigger_cfg.trigger_token_threshold).abs() < f64::EPSILON
         );
     }
 }

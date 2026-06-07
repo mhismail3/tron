@@ -1,5 +1,4 @@
-use super::{CausalContext, FunctionId, FunctionRevision, InvocationId, RwLock};
-use crate::domains::skills::registry::SkillRegistry;
+use super::{CausalContext, FunctionId, FunctionRevision, InvocationId};
 use crate::engine::Invocation;
 use serde::Serialize;
 use std::sync::Arc;
@@ -10,26 +9,10 @@ pub struct PromptRuntimeDeps {
     pub session_manager:
         Arc<crate::domains::agent::runner::orchestrator::session_manager::SessionManager>,
     pub event_store: Arc<crate::domains::session::event_store::EventStore>,
-    pub context_artifacts: Arc<crate::domains::session::context::ContextArtifactsService>,
-    pub skill_registry: Arc<RwLock<SkillRegistry>>,
-    pub memory_registry:
-        Arc<parking_lot::Mutex<crate::domains::agent::runner::memory::MemoryRegistry>>,
     pub profile_runtime: Arc<crate::domains::agent::runner::ProfileRuntime>,
     pub health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
     pub shutdown_coordinator: Option<Arc<crate::app::shutdown::ShutdownCoordinator>>,
-    pub subagent_manager:
-        Option<Arc<crate::domains::agent::runner::orchestrator::subagent_manager::SubagentManager>>,
     pub worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
-    pub process_manager: Option<
-        Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
-    >,
-    pub job_manager:
-        Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
-    pub output_buffer_registry: Option<
-        Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
-    >,
-    pub hook_abort_tracker:
-        Arc<crate::domains::agent::runner::hooks::abort_tracker::HookAbortTracker>,
     pub engine_host: crate::engine::EngineHostHandle,
     pub origin: String,
 }

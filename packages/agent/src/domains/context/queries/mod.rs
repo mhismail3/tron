@@ -4,20 +4,14 @@
 //! modules own snapshot rendering, audit trace reads, payload preview
 //! redaction, and blocking context-manager preparation.
 
-use std::path::Path;
-
-use crate::domains::skills::tracker::SkillTracker;
-use crate::domains::skills::types::{SkillAddMethod, SkillSource};
-use parking_lot::RwLock;
 use rusqlite::params;
 use serde_json::{Value, json};
 
 use crate::domains::context::Deps;
 use crate::domains::context::service::{
-    PreparedSessionContext, build_active_skill_context, build_context_manager_for_session,
-    build_summarizer, model_capability_definitions, retry_context_read,
+    PreparedSessionContext, build_context_manager_for_session, build_summarizer,
+    model_capability_definitions, retry_context_read,
 };
-use crate::domains::session::context::{RuleFileLevel, collect_dynamic_rule_paths};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
@@ -28,8 +22,7 @@ mod snapshot;
 
 use audit::load_audit_trace;
 pub(crate) use prepare::prepare_session_context;
-use prepare::set_volatile_tokens_from_session;
-use snapshot::{build_added_skills, build_detailed_snapshot_response, snapshot_response};
+use snapshot::{build_detailed_snapshot_response, snapshot_response};
 
 pub(crate) struct ContextQueryService;
 
@@ -39,11 +32,7 @@ impl ContextQueryService {
         session_id: String,
     ) -> Result<Value, CapabilityError> {
         let session_manager = deps.session_manager.clone();
-        let event_store = deps.event_store.clone();
-        let context_artifacts = deps.context_artifacts.clone();
         let profile_runtime = deps.profile_runtime.clone();
-        let skill_registry = deps.skill_registry.clone();
-        let memory_registry = deps.memory_registry.clone();
         let capabilities_for_model = model_capability_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.get_snapshot", move || {
@@ -51,45 +40,12 @@ impl ContextQueryService {
                 let mut prepared = build_context_manager_for_session(
                     &session_id_for_query,
                     session_manager.as_ref(),
-                    event_store.as_ref(),
-                    context_artifacts.as_ref(),
                     profile_runtime.as_ref(),
                     capabilities_for_model.clone(),
                 )?;
-                // Skill index + memory content: skip for local models (stripped at turn time)
-                if !prepared.context_manager.is_local_model() {
-                    let skill_index_content = {
-                        let mut registry = skill_registry.write();
-                        let _ = registry.refresh_if_stale(&prepared.session.working_directory);
-                        let skills = registry.list(None);
-                        let index = crate::domains::skills::injector::build_skill_index(&skills);
-                        if index.is_empty() { None } else { Some(index) }
-                    };
-                    prepared
-                        .context_manager
-                        .set_skill_index_content(skill_index_content);
-
-                    let memory_content = {
-                        let mut reg = memory_registry.lock();
-                        Some(reg.content(&crate::shared::paths::home_dir()).to_string())
-                    };
-                    prepared.context_manager.set_memory_content(memory_content);
-                }
-
-                // Reconstruct volatile token estimates from session state
-                // (runs for all models — users can manually activate skills)
-                let added_skills = build_added_skills(
-                    event_store.as_ref(),
-                    &session_id_for_query,
-                    &skill_registry,
-                )?;
-                set_volatile_tokens_from_session(
-                    &mut prepared.context_manager,
-                    &added_skills,
-                    &skill_registry,
-                    prepared.session.origin.as_deref(),
-                );
-
+                prepared
+                    .context_manager
+                    .set_server_origin(prepared.session.origin.clone());
                 let snapshot = prepared.context_manager.get_snapshot();
                 Ok(snapshot_response(&snapshot))
             })
@@ -102,11 +58,7 @@ impl ContextQueryService {
         session_id: String,
     ) -> Result<Value, CapabilityError> {
         let session_manager = deps.session_manager.clone();
-        let event_store = deps.event_store.clone();
-        let context_artifacts = deps.context_artifacts.clone();
         let profile_runtime = deps.profile_runtime.clone();
-        let skill_registry = deps.skill_registry.clone();
-        let memory_registry = deps.memory_registry.clone();
         let capabilities_for_model = model_capability_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.get_detailed_snapshot", move || {
@@ -114,18 +66,10 @@ impl ContextQueryService {
                 let prepared = build_context_manager_for_session(
                     &session_id_for_query,
                     session_manager.as_ref(),
-                    event_store.as_ref(),
-                    context_artifacts.as_ref(),
                     profile_runtime.as_ref(),
                     capabilities_for_model.clone(),
                 )?;
-                build_detailed_snapshot_response(
-                    event_store.as_ref(),
-                    &session_id_for_query,
-                    prepared,
-                    &skill_registry,
-                    &memory_registry,
-                )
+                build_detailed_snapshot_response(&session_id_for_query, prepared)
             })
         })
         .await
@@ -163,8 +107,6 @@ impl ContextQueryService {
         session_id: String,
     ) -> Result<Value, CapabilityError> {
         let session_manager = deps.session_manager.clone();
-        let event_store = deps.event_store.clone();
-        let context_artifacts = deps.context_artifacts.clone();
         let profile_runtime = deps.profile_runtime.clone();
         let capabilities_for_model = model_capability_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
@@ -173,8 +115,6 @@ impl ContextQueryService {
                 let prepared = build_context_manager_for_session(
                     &session_id_for_query,
                     session_manager.as_ref(),
-                    event_store.as_ref(),
-                    context_artifacts.as_ref(),
                     profile_runtime.as_ref(),
                     capabilities_for_model.clone(),
                 )?;
@@ -218,8 +158,6 @@ impl ContextQueryService {
         session_id: String,
     ) -> Result<Value, CapabilityError> {
         let session_manager = deps.session_manager.clone();
-        let event_store = deps.event_store.clone();
-        let context_artifacts = deps.context_artifacts.clone();
         let profile_runtime = deps.profile_runtime.clone();
         let capabilities_for_model = model_capability_definitions(deps, &session_id).await;
         let session_id_for_query = session_id.clone();
@@ -228,8 +166,6 @@ impl ContextQueryService {
                 let prepared = build_context_manager_for_session(
                     &session_id_for_query,
                     session_manager.as_ref(),
-                    event_store.as_ref(),
-                    context_artifacts.as_ref(),
                     profile_runtime.as_ref(),
                     capabilities_for_model.clone(),
                 )?;

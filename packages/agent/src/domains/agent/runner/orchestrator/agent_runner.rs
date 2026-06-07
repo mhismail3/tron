@@ -206,36 +206,21 @@ mod tests {
     ) -> (TronAgent, JournalCleanup) {
         let session_id = unique_test_session_id();
         let cleanup = JournalCleanup::new(&session_id);
-        let spec = crate::shared::profile::bundled_default_execution_spec();
         let agent = TronAgent::new(
             AgentConfig::default(),
             AgentDeps {
                 provider,
-                primitive_surface_policy:
-                    crate::domains::capability_support::implementations::primitive_surface::PrimitiveSurfacePolicy::default(),
-                capability_execution_policy:
-                    spec.capability_execution_policies["default"].clone(),
-                guardrails: None,
-                hooks: None,
                 context_manager: ContextManager::new(ContextManagerConfig {
                     model: "mock".into(),
                     system_prompt: Some("You are helpful.".into()),
-                    context_policy:
-                        crate::domains::agent::runner::context::local_policy::ContextPolicy::from_provider_with_spec(
-                            Provider::Anthropic,
-                            &spec,
-                        ),
                     working_directory: None,
                     capabilities: vec![],
-                    rules_content: None,
-                    compaction: crate::domains::agent::runner::context::types::CompactionConfig::default(),
+                    compaction:
+                        crate::domains::agent::runner::context::types::CompactionConfig::default(),
                 }),
-                subagent_manager: None,
                 compaction_trigger_config:
-                    crate::domains::agent::runner::context::types::CompactionTriggerConfig::default(),
-                process_manager: None,
-                job_manager: None,
-                output_buffer_registry: None,
+                    crate::domains::agent::runner::context::types::CompactionTriggerConfig::default(
+                    ),
                 engine_host: None,
             },
             session_id,
@@ -298,30 +283,27 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn run_agent_with_skill_context() {
+    async fn run_agent_with_agent_state_context() {
         let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
 
         let ctx = RunContext {
-            skill_context: Some("You are a code reviewer.".into()),
+            agent_state_context: Some("agent-owned note".into()),
             ..run_context()
         };
 
-        let result = run_agent(&mut agent, "Review code", ctx, &None, &broadcast, None).await;
+        let result = run_agent(&mut agent, "Use state", ctx, &None, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
     }
 
     #[tokio::test]
-    async fn run_agent_with_process_results() {
+    async fn run_agent_without_agent_state_context() {
         let (mut agent, _journal) = make_agent();
         let broadcast = Arc::new(EventEmitter::new());
 
-        let ctx = RunContext {
-            job_results: Some("# Completed Background Jobs\n\nProcess done.".into()),
-            ..run_context()
-        };
+        let ctx = RunContext { ..run_context() };
 
-        let result = run_agent(&mut agent, "Check results", ctx, &None, &broadcast, None).await;
+        let result = run_agent(&mut agent, "No state", ctx, &None, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
     }
 

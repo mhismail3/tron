@@ -26,8 +26,9 @@ pub(crate) mod types;
 pub use cache::ContextArtifactsService;
 #[cfg(test)]
 pub(crate) use cache::load_session_context_artifacts_with_home;
+#[cfg(test)]
 pub(crate) use dynamic::collect_dynamic_rule_paths;
-pub(crate) use types::{RuleFileLevel, SessionContextArtifacts};
+pub(crate) use types::RuleFileLevel;
 
 #[cfg(test)]
 mod tests;

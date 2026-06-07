@@ -2,69 +2,34 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
-use crate::domains::capability_support::implementations::primitive_surface::{
-    PrimitiveSurfacePolicy, ResolvedCapabilitySurface,
-};
-use crate::domains::capability_support::implementations::traits::ExecutionMode;
-use crate::shared::content::CapabilityResultContent;
-use crate::shared::events::ActivatedRuleInfo;
-use crate::shared::messages::{CapabilityResultMessageContent, Message};
-use serde_json::{Map, Value, json};
-use tokio_util::sync::CancellationToken;
-use tracing::{error, warn};
-
 use crate::domains::agent::runner::agent::capability_invocation_executor;
-use crate::domains::agent::runner::agent::compaction_handler::CompactionHandler;
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
 use crate::domains::agent::runner::context::context_manager::ContextManager;
-use crate::domains::agent::runner::guardrails::GuardrailEngine;
-use crate::domains::agent::runner::hooks::engine::HookEngine;
 use crate::domains::agent::runner::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::runner::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::runner::types::{CapabilityInvocationExecutionResult, StreamResult};
+use crate::domains::capability_support::implementations::primitive_surface::ResolvedCapabilitySurface;
+use crate::domains::capability_support::implementations::traits::ExecutionMode;
 use crate::domains::session::event_store::EventType;
-
-use super::persistence;
+use crate::shared::content::CapabilityResultContent;
+use crate::shared::messages::{CapabilityResultMessageContent, Message};
+use serde_json::{Value, json};
+use tokio_util::sync::CancellationToken;
+use tracing::{error, warn};
 
 pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub turn: u32,
     pub stream_result: &'a StreamResult,
     pub context_manager: &'a mut ContextManager,
     pub primitive_surface: &'a ResolvedCapabilitySurface,
-    pub primitive_surface_policy: &'a PrimitiveSurfacePolicy,
-    pub capability_execution_policy: &'a crate::shared::profile::CapabilityExecutionPolicySpec,
-    pub guardrails: &'a Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-    pub hooks: &'a Option<Arc<HookEngine>>,
-    pub compaction: &'a CompactionHandler,
     pub session_id: &'a str,
     pub emitter: &'a Arc<EventEmitter>,
     pub cancel: &'a CancellationToken,
-    pub subagent_depth: u32,
-    pub subagent_max_depth: u32,
     pub workspace_id: Option<&'a str>,
     pub persister: Option<&'a EventPersister>,
-    /// Same persister as `persister`, but kept as a borrowed `Arc` so
-    /// domain-owned capabilities can persist progress events. The dual surface
-    /// avoids changing every existing `Option<&EventPersister>` signature upstream.
-    pub persister_arc: Option<&'a Arc<EventPersister>>,
-    pub process_manager: Option<
-        &'a Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>,
-    >,
-    pub job_manager: Option<
-        &'a Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>,
-    >,
-    pub output_buffer_registry: Option<
-        &'a Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
-    >,
     pub sequence_counter: Option<&'a AtomicI64>,
-    pub provider_type: crate::shared::messages::Provider,
-    pub execution_spec: Option<&'a crate::shared::profile::AgentExecutionSpec>,
-    pub profile_spec_hash: Option<&'a str>,
-    /// Optional per-invocation abort registry (see `TurnParams::invocation_abort_registry`).
     pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
-    /// Optional engine host used to route model-facing capability primitives.
     pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
-    /// Stable run id used for runtime capability-invocation idempotency.
     pub run_id: Option<&'a str>,
     pub trace_id: Option<&'a crate::engine::TraceId>,
     pub parent_invocation_id: Option<&'a crate::engine::InvocationId>,
@@ -74,7 +39,6 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
 pub(super) struct CapabilityInvocationPhaseOutcome {
     pub capability_invocations_executed: usize,
     pub stop_turn_requested: bool,
-    pub activated_rules: Vec<ActivatedRuleInfo>,
 }
 
 fn target_identity_json(
@@ -97,12 +61,8 @@ fn target_identity_json(
     let function_id = function.id.as_str().to_owned();
     json!({
         "modelPrimitiveName": model_primitive_name,
-        "contractId": metadata_string("contractId")
-            .or_else(|| metadata_string("capabilityContractId"))
-            .unwrap_or_else(|| function_id.clone()),
-        "implementationId": metadata_string("implementationId")
-            .or_else(|| metadata_string("capabilityImplementationId"))
-            .unwrap_or_else(|| format!("function:{function_id}")),
+        "contractId": metadata_string("contractId").unwrap_or_else(|| function_id.clone()),
+        "implementationId": metadata_string("implementationId").unwrap_or_else(|| format!("function:{function_id}")),
         "functionId": function_id,
         "pluginId": metadata_string("pluginId"),
         "workerId": function.owner_worker.as_str(),
@@ -126,51 +86,24 @@ fn result_identity_json(
     result: &CapabilityInvocationExecutionResult,
 ) -> Value {
     let mut identity = base_identity.as_object().cloned().unwrap_or_default();
-    let Some(details) = result.result.details.as_ref() else {
-        return Value::Object(identity);
-    };
-    if let Some(binding) = details.get("bindingDecision") {
-        for (from, to) in [
-            ("contractId", "contractId"),
-            ("selectedImplementation", "implementationId"),
-            ("selectedFunctionId", "functionId"),
-            ("schemaDigest", "schemaDigest"),
-            ("catalogRevision", "catalogRevision"),
-            ("decisionId", "bindingDecisionId"),
+    if let Some(details) = result.result.details.as_ref() {
+        for key in [
+            "schemaDigest",
+            "catalogRevision",
+            "traceId",
+            "rootInvocationId",
+            "functionId",
         ] {
-            if let Some(value) = binding.get(from) {
-                identity.insert(to.to_owned(), value.clone());
+            if let Some(value) = details.get(key) {
+                identity.insert(key.to_owned(), value.clone());
             }
         }
-    }
-    for key in [
-        "schemaDigest",
-        "catalogRevision",
-        "traceId",
-        "rootInvocationId",
-    ] {
-        if let Some(value) = details.get(key) {
-            identity.insert(key.to_owned(), value.clone());
+        if let Some(value) = details
+            .get("presentationHints")
+            .and_then(|hints| hints.get("themeColor"))
+        {
+            identity.insert("themeColor".to_owned(), value.clone());
         }
-    }
-    if let Some(value) = details.get("selectedImplementation") {
-        identity.insert("implementationId".to_owned(), value.clone());
-    }
-    if let Some(value) = details.get("functionId") {
-        identity.insert("functionId".to_owned(), value.clone());
-    }
-    if let Some(value) = details
-        .get("presentationHints")
-        .and_then(|hints| hints.get("themeColor"))
-    {
-        identity.insert("themeColor".to_owned(), value.clone());
-    }
-    if let Some(plugin) = details
-        .get("pluginVersions")
-        .and_then(Value::as_array)
-        .and_then(|plugins| plugins.first())
-    {
-        identity.insert("pluginId".to_owned(), plugin.clone());
     }
     identity.insert("modelPrimitiveName".to_owned(), json!(model_primitive_name));
     Value::Object(identity)
@@ -184,11 +117,6 @@ pub(super) async fn execute_capability_invocation_phase(
     }
 
     let working_dir = params.context_manager.get_working_directory().to_owned();
-
-    // INVARIANT: persist capability.invocation.started events BEFORE broadcasting CapabilityInvocationBatch
-    // so iOS subscribers cannot see a batch of capability invocations that are missing
-    // from session history. Synchronous append surfaces any DB failure here
-    // instead of deferring it to a background warning.
     let mut persist_failed = false;
     for capability_invocation in &params.stream_result.capability_invocations {
         if let Some(persister) = params.persister {
@@ -229,7 +157,7 @@ pub(super) async fn execute_capability_invocation_phase(
                     turn = params.turn,
                     invocation_id = %capability_invocation.id,
                     error = %error,
-                    "failed to persist capability-invocation event; skipping broadcast + execution"
+                    "failed to persist capability-invocation event; skipping execution"
                 );
                 persist_failed = true;
                 break;
@@ -238,13 +166,10 @@ pub(super) async fn execute_capability_invocation_phase(
     }
 
     if persist_failed {
-        // Don't execute capabilities whose call events failed to persist; iOS
-        // would see no history of them, and the agent would see results
-        // for calls that don't exist. Surface the failure upward.
         return CapabilityInvocationPhaseOutcome::default();
     }
 
-    persistence::emit_capability_invocation_batch(
+    super::persistence::emit_capability_invocation_batch(
         params.emitter,
         params.session_id,
         &params.stream_result.capability_invocations,
@@ -269,27 +194,13 @@ pub(super) async fn execute_capability_invocation_phase(
             .iter()
             .map(|&idx| {
                 let capability_invocation = &params.stream_result.capability_invocations[idx];
-                let working_dir = &working_dir;
                 let capability_ctx =
                     capability_invocation_executor::CapabilityInvocationExecutionContext {
                         primitive_surface: params.primitive_surface,
-                        primitive_surface_policy: params.primitive_surface_policy,
-                        capability_execution_policy: params.capability_execution_policy,
-                        guardrails: params.guardrails,
-                        hooks: params.hooks,
                         emitter: params.emitter,
                         cancel: params.cancel,
-                        subagent_depth: params.subagent_depth,
-                        subagent_max_depth: params.subagent_max_depth,
                         workspace_id: params.workspace_id,
-                        process_manager: params.process_manager,
-                        job_manager: params.job_manager,
-                        output_buffer_registry: params.output_buffer_registry,
                         sequence_counter: params.sequence_counter,
-                        provider_type: params.provider_type,
-                        execution_spec: params.execution_spec,
-                        profile_spec_hash: params.profile_spec_hash,
-                        event_persister: params.persister_arc,
                         turn: i64::from(params.turn),
                         invocation_abort_registry: params.invocation_abort_registry,
                         engine_host: params.engine_host,
@@ -297,6 +208,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         trace_id: params.trace_id,
                         parent_invocation_id: params.parent_invocation_id,
                     };
+                let working_dir = working_dir.as_str();
                 async move {
                     let result = capability_invocation_executor::execute_capability_invocation(
                         capability_invocation,
@@ -306,20 +218,6 @@ pub(super) async fn execute_capability_invocation_phase(
                     )
                     .await;
 
-                    // Persist capability.invocation.completed synchronously (await the DB write)
-                    // so failures surface immediately and the agent sees a
-                    // consistent history when it resumes after a crash. A
-                    // background fire-and-forget here could silently drop
-                    // the result under pressure or on DB error, leaving iOS
-                    // with a live-stream CapabilityInvocationCompleted event that has no
-                    // matching row in session history.
-                    //
-                    // The broadcast-vs-persist ordering (broadcast is
-                    // inside capability_invocation_executor, persist is here) is not
-                    // fully inverted — fully inverting would require
-                    // plumbing the persister into capability_invocation_executor.
-                    // Switching to sync persist makes the failure
-                    // visible while keeping the change surgical.
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
                         let model_context_content = extract_model_context_result_text(&result);
@@ -391,18 +289,14 @@ pub(super) async fn execute_capability_invocation_phase(
         }
     }
 
-    process_capability_results(results, &working_dir, params).await
+    process_capability_results(results, params).await
 }
 
 async fn process_capability_results(
     mut results: Vec<Option<CapabilityInvocationExecutionResult>>,
-    working_dir: &str,
     params: CapabilityInvocationPhaseParams<'_>,
 ) -> CapabilityInvocationPhaseOutcome {
-    let mut outcome = CapabilityInvocationPhaseOutcome {
-        activated_rules: Vec::with_capacity(8),
-        ..Default::default()
-    };
+    let mut outcome = CapabilityInvocationPhaseOutcome::default();
 
     for (idx, capability_invocation) in params
         .stream_result
@@ -414,52 +308,15 @@ async fn process_capability_results(
             continue;
         };
         outcome.capability_invocations_executed += 1;
-
-        let result_content = extract_result_content(&exec_result);
         let is_error = exec_result.result.is_error.unwrap_or(false);
 
-        // capability.invocation.completed persistence is handled per-invocation inside the execution future
-        // (before join_all) so the DB reflects completion immediately.
-
-        // Add full content (including images) to LLM conversation context
         params
             .context_manager
             .add_message(Message::CapabilityResult {
                 invocation_id: capability_invocation.id.clone(),
-                content: result_content,
+                content: extract_result_content(&exec_result),
                 is_error: if is_error { Some(true) } else { None },
             });
-
-        let touched_paths =
-            crate::domains::agent::runner::context::path_extractor::extract_touched_paths(
-                &capability_invocation.name,
-                &capability_invocation.arguments,
-                std::path::Path::new(working_dir),
-                std::path::Path::new(working_dir),
-            );
-        for path in &touched_paths {
-            outcome
-                .activated_rules
-                .extend(params.context_manager.touch_file_path(path));
-        }
-
-        if capability_invocation.name == "execute"
-            && matches!(
-                capability_invocation
-                    .arguments
-                    .get("contractId")
-                    .and_then(serde_json::Value::as_str),
-                Some("process::run")
-            )
-            && let Some(command) = capability_invocation
-                .arguments
-                .get("payload")
-                .and_then(serde_json::Value::as_object)
-                .and_then(|payload| payload.get("command"))
-                .and_then(serde_json::Value::as_str)
-        {
-            params.compaction.record_process_command(command);
-        }
 
         if exec_result.stops_turn {
             outcome.stop_turn_requested = true;
@@ -469,11 +326,6 @@ async fn process_capability_results(
     outcome
 }
 
-/// Build execution waves from capability invocations, respecting serialization groups.
-///
-/// - Parallel capabilities all go in wave 0
-/// - Serialized capabilities in the same group spread across ascending waves
-/// - Returns `Vec<Vec<usize>>` where each inner vec is indices into `capability_invocations`
 pub(super) fn build_execution_waves(
     capability_invocations: &[crate::shared::messages::CapabilityInvocationDraft],
     primitive_surface: &ResolvedCapabilitySurface,
@@ -516,17 +368,14 @@ pub(super) fn build_execution_waves(
     waves
 }
 
-/// Extract text-only content from a capability result (for event persistence — no images in DB).
 fn extract_result_text(exec_result: &CapabilityInvocationExecutionResult) -> String {
     match &exec_result.result.content {
         crate::shared::model_capabilities::CapabilityResultBody::Text(text) => text.clone(),
         crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => blocks
             .iter()
             .filter_map(|block| match block {
-                crate::shared::content::CapabilityResultContent::Text { text } => {
-                    Some(text.as_str())
-                }
-                crate::shared::content::CapabilityResultContent::Image { .. } => None,
+                CapabilityResultContent::Text { text } => Some(text.as_str()),
+                CapabilityResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -539,287 +388,40 @@ fn extract_model_context_result_text(exec_result: &CapabilityInvocationExecution
         CapabilityResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|block| match block {
-                crate::shared::content::CapabilityResultContent::Text { text } => {
-                    Some(text.as_str())
-                }
-                crate::shared::content::CapabilityResultContent::Image { .. } => None,
+                CapabilityResultContent::Text { text } => Some(text.as_str()),
+                CapabilityResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
     }
 }
 
-/// Extract full content from a capability result, preserving image blocks for the LLM.
-///
-/// If no images are present, flattens to `Text` for efficiency.
-/// When images exist, returns `Blocks` so the LLM can see them.
 fn extract_result_content(
     exec_result: &CapabilityInvocationExecutionResult,
 ) -> CapabilityResultMessageContent {
-    let execute_observation = execute_observation_text(exec_result.result.details.as_ref());
     match &exec_result.result.content {
         crate::shared::model_capabilities::CapabilityResultBody::Text(text) => {
-            CapabilityResultMessageContent::Text(prefix_execute_observation(
-                execute_observation.as_deref(),
-                text,
-            ))
+            CapabilityResultMessageContent::Text(text.clone())
         }
         crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
-            let has_images = blocks.iter().any(|b| {
-                matches!(
-                    b,
-                    crate::shared::content::CapabilityResultContent::Image { .. }
-                )
-            });
+            let has_images = blocks
+                .iter()
+                .any(|b| matches!(b, CapabilityResultContent::Image { .. }));
             if has_images {
-                let mut projected = Vec::new();
-                if let Some(observation) = execute_observation {
-                    projected.push(CapabilityResultContent::text(observation));
-                }
-                projected.extend(blocks.clone());
-                CapabilityResultMessageContent::Blocks(projected)
+                CapabilityResultMessageContent::Blocks(blocks.clone())
             } else {
-                let text = blocks
-                    .iter()
-                    .filter_map(|b| match b {
-                        crate::shared::content::CapabilityResultContent::Text { text } => {
-                            Some(text.as_str())
-                        }
-                        crate::shared::content::CapabilityResultContent::Image { .. } => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                CapabilityResultMessageContent::Text(prefix_execute_observation(
-                    execute_observation.as_deref(),
-                    &text,
-                ))
+                CapabilityResultMessageContent::Text(
+                    blocks
+                        .iter()
+                        .filter_map(|b| match b {
+                            CapabilityResultContent::Text { text } => Some(text.as_str()),
+                            CapabilityResultContent::Image { .. } => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
             }
         }
-    }
-}
-
-fn prefix_execute_observation(observation: Option<&str>, text: &str) -> String {
-    match observation {
-        Some(observation) if !text.is_empty() => {
-            let mut result =
-                format!("[execute result - exact target output or status text]\n{text}");
-            if !text.ends_with('\n') {
-                result.push('\n');
-            }
-            result.push_str("[/execute result]\n\n");
-            result.push_str(observation);
-            result
-        }
-        Some(observation) => observation.to_owned(),
-        None => text.to_owned(),
-    }
-}
-
-fn execute_observation_text(details: Option<&Value>) -> Option<String> {
-    let details = details?;
-    let orchestration = details.get("orchestration")?;
-    let selected_target = details
-        .get("functionId")
-        .or_else(|| orchestration.pointer("/phaseDetails/selectedTarget/functionId"))
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let selected_implementation = details
-        .get("selectedImplementation")
-        .or_else(|| orchestration.pointer("/phaseDetails/selectedTarget/implementationId"))
-        .and_then(Value::as_str);
-    let child_invocation_ids = details
-        .get("childInvocations")
-        .or_else(|| details.get("childInvocationIds"))
-        .or_else(|| orchestration.get("childInvocationIds"))
-        .cloned()
-        .unwrap_or_else(|| json!([]));
-    let resource_refs = details
-        .get("resourceRefs")
-        .or_else(|| details.pointer("/output/resourceRefs"))
-        .cloned()
-        .unwrap_or_else(|| json!([]));
-    let approval = execute_approval_state(details);
-    let approval_decision = details.get("approvalDecision").cloned().unwrap_or_else(|| {
-        json!({
-            "status": approval,
-            "approvalRequired": false,
-            "approvalCreated": false,
-            "approvalExecuted": false,
-            "approvalReplayed": false
-        })
-    });
-    let execute_invocation_id = details
-        .get("executeInvocationId")
-        .or_else(|| details.get("primitiveInvocationId"))
-        .or_else(|| orchestration.get("executeInvocationId"))
-        .or_else(|| orchestration.get("primitiveInvocationId"))
-        .cloned()
-        .unwrap_or(Value::Null);
-    let replay_idempotency_key = details
-        .get("idempotencyKey")
-        .or_else(|| approval_decision.get("idempotencyKey"))
-        .or_else(|| details.pointer("/approvalState/idempotencyKey"))
-        .or_else(|| details.pointer("/approvalReplay/idempotencyKey"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned);
-    let mut observation = Map::new();
-    observation.insert(
-        "status".to_owned(),
-        json!(
-            details
-                .get("status")
-                .or_else(|| orchestration.get("status"))
-                .and_then(Value::as_str)
-                .unwrap_or("unknown")
-        ),
-    );
-    if let Some(idempotency_key) = replay_idempotency_key.as_deref() {
-        observation.insert("idempotencyKey".to_owned(), json!(idempotency_key));
-        observation.insert(
-            "replay".to_owned(),
-            json!({
-                "idempotencyKey": idempotency_key,
-                "topLevelExecuteField": "idempotencyKey",
-                "reuseExactly": true,
-                "expectedChildInvocationCreated": false
-            }),
-        );
-    }
-    observation.insert("executeInvocationId".to_owned(), execute_invocation_id);
-    observation.insert("selectedTarget".to_owned(), json!(selected_target));
-    observation.insert(
-        "selectedImplementation".to_owned(),
-        json!(selected_implementation),
-    );
-    observation.insert("childInvocationIds".to_owned(), child_invocation_ids);
-    observation.insert("approval".to_owned(), json!(approval));
-    observation.insert("approvalDecision".to_owned(), approval_decision);
-    observation.insert("resourceRefs".to_owned(), resource_refs);
-    observation.insert(
-        "correctionsApplied".to_owned(),
-        details
-            .get("correctionsApplied")
-            .or_else(|| orchestration.get("correctionsApplied"))
-            .cloned()
-            .unwrap_or_else(|| json!([])),
-    );
-    observation.insert("guidance".to_owned(), execute_guidance_summary(details));
-    let observation = Value::Object(observation);
-    let observation = serde_json::to_string_pretty(&observation).ok()?;
-    let replay_hint = replay_idempotency_key.map(|idempotency_key| {
-        format!(
-            "[execute replay - use this exact top-level execute idempotencyKey]\n\
-idempotencyKey: {idempotency_key}\n\
-topLevelExecuteField: idempotencyKey\n\
-expectedChildInvocationCreated: false\n\
-[/execute replay]\n"
-        )
-    });
-    Some(format!(
-        "[execute observation - metadata for reasoning]\n{}{observation}\n[/execute observation]",
-        replay_hint.unwrap_or_default()
-    ))
-}
-
-fn execute_guidance_summary(details: &Value) -> Value {
-    let guidance = details.get("guidance");
-    let error_details = details.pointer("/error/details");
-    let missing_fields = guidance
-        .and_then(|value| value.get("missingFields"))
-        .or_else(|| error_details.and_then(|value| value.get("missingFields")))
-        .cloned();
-    let missing_argument_paths = guidance
-        .and_then(|value| value.get("missingArgumentPaths"))
-        .or_else(|| error_details.and_then(|value| value.get("missingArgumentPaths")))
-        .cloned();
-
-    let mut summary = serde_json::Map::new();
-    if let Some(kind) = guidance
-        .and_then(|value| value.get("kind"))
-        .and_then(Value::as_str)
-    {
-        summary.insert("kind".to_owned(), json!(kind));
-    }
-    if let Some(fields) = missing_fields {
-        summary.insert("missingFields".to_owned(), fields);
-    }
-    if let Some(paths) = missing_argument_paths {
-        summary.insert("missingArgumentPaths".to_owned(), paths);
-    }
-    if let Some(validation_kind) = error_details
-        .and_then(|value| value.get("validationKind"))
-        .and_then(Value::as_str)
-    {
-        summary.insert("validationKind".to_owned(), json!(validation_kind));
-    }
-    if let Some(proposed_shape) = details
-        .get("proposedCapabilityShape")
-        .or_else(|| details.pointer("/orchestration/phaseDetails/proposedCapabilityShape"))
-        .cloned()
-    {
-        summary.insert("proposedCapabilityShape".to_owned(), proposed_shape);
-    }
-    if let Some(candidates) = details
-        .get("candidates")
-        .or_else(|| details.pointer("/orchestration/phaseDetails/candidates"))
-        .filter(|value| value.as_array().is_some())
-        .cloned()
-    {
-        summary.insert("candidates".to_owned(), candidates);
-    }
-
-    Value::Object(summary)
-}
-
-fn execute_approval_state(details: &Value) -> &'static str {
-    if let Some(decision) = details.get("approvalDecision") {
-        if decision
-            .get("approvalExecuted")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-            || decision.get("status").and_then(Value::as_str) == Some("executed")
-        {
-            return "approved_executed";
-        }
-        if decision
-            .get("approvalCreated")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-            || matches!(
-                decision.get("status").and_then(Value::as_str),
-                Some("pending" | "created")
-            )
-        {
-            return "pending";
-        }
-        if decision
-            .get("approvalRequired")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
-            return "required";
-        }
-    }
-    if details
-        .get("approvalExecuted")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        "approved_executed"
-    } else if details
-        .get("approvalCreated")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        "pending"
-    } else if details
-        .get("approvalRequired")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        "required"
-    } else {
-        "not_required"
     }
 }
 
