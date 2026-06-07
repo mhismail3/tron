@@ -25,7 +25,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
-        "Current score: **13/100**",
+        "Current score: **37/100**",
         "Status: **active execution artifact**",
         "Branch: `codex/primitive-engine-teardown`",
         "There are no users and no compatibility obligations.",
@@ -36,8 +36,8 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "Agent Soul Seed",
         "| PET-0 | Branch, baseline, and plan formalization | 5 | passed_after_fix |",
         "| PET-1 | Primitive taxonomy and deletion inventory | 8 | passed_after_fix |",
-        "| PET-2 | Server domain registration teardown | 12 | pending |",
-        "| PET-3 | Single execute primitive | 12 | pending |",
+        "| PET-2 | Server domain registration teardown | 12 | passed_after_fix |",
+        "| PET-3 | Single execute primitive | 12 | passed_after_fix |",
         "| PET-4 | Soul and agent-owned state workspace | 10 | pending |",
         "| PET-5 | Session, event, ledger, and resource collapse | 8 | pending |",
         "| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | pending |",
@@ -63,12 +63,14 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Evidence Manifest",
-        "Current score: **13/100**",
+        "Current score: **37/100**",
         "Status: **active execution artifact**",
         "New teardown branch: `codex/primitive-engine-teardown`",
         "Compatibility assumption: none.",
         "| PET-0 | passed_after_fix |",
         "| PET-1 | passed_after_fix |",
+        "| PET-2 | passed_after_fix |",
+        "| PET-3 | passed_after_fix |",
         "| PET-11 | pending |",
         "provider model-facing tool export proof",
         "iOS simulator target name, UDID, bundle id, launch return code",

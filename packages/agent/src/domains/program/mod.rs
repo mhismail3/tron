@@ -41,7 +41,6 @@ pub(crate) use deps::Deps;
 
 use serde_json::{Value, json};
 
-use crate::domains::capability::types::CapabilityProgramRunRecord;
 use crate::domains::worker::{DomainRegistrationContext, DomainWorkerModule};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
@@ -71,9 +70,6 @@ pub(crate) async fn run_javascript_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let request = runtime::ProgramRunRequest::from_payload(&invocation.payload)?;
-    let limits = request.limits_value();
-    let allowed_contracts = request.allowed_contracts.clone();
-    let allowed_implementations = request.allowed_implementations.clone();
     let tool_host = runtime::EngineProgramToolHost::new(
         deps.engine_host.clone(),
         invocation
@@ -119,43 +115,6 @@ pub(crate) async fn run_javascript_value(
         });
     }
     let resource_refs = create_execution_output_resource(deps, invocation, &result).await?;
-    deps.record_program_run(CapabilityProgramRunRecord {
-        program_run_id: result.program_run_id.clone(),
-        parent_invocation_id: parent_invocation_id.clone(),
-        root_invocation_id: root_invocation_id.clone(),
-        binding_decision_id: binding_decision_id.clone(),
-        status: result.status.clone(),
-        trace_id: result.trace_id.clone(),
-        code_hash: result.code_hash.clone(),
-        args_hash: result.args_hash.clone(),
-        limits,
-        allowed_contracts,
-        allowed_implementations,
-        child_invocations: result.child_invocations.clone(),
-        selected_implementations: result.selected_implementations.clone(),
-        approval_state: result.approval_state.clone(),
-        artifacts: result.artifacts.clone(),
-        logs: result.logs.clone(),
-        error: result.error.clone(),
-        compensation_attempts: Vec::new(),
-    })
-    .await?;
-    deps.registry_audit(
-        "program.run_javascript",
-        Some(&trace_id),
-        json!({
-            "programRunId": result.program_run_id,
-            "status": result.status,
-            "codeHash": result.code_hash,
-            "argsHash": result.args_hash,
-            "childInvocations": result.child_invocations,
-            "selectedImplementations": result.selected_implementations,
-            "approvalState": result.approval_state,
-            "rootInvocationId": root_invocation_id,
-            "bindingDecisionId": binding_decision_id,
-        }),
-    )
-    .await?;
     let mut result_value =
         serde_json::to_value(result).map_err(|error| CapabilityError::Internal {
             message: format!("serialize program execution result: {error}"),

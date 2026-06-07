@@ -1,22 +1,12 @@
 //! Domain worker registration.
 //!
-//! This module registers canonical in-process domain workers, their functions,
-//! hidden apply functions and trigger definitions. Transport
-//! startup calls this module once; individual domain workers own the executable
-//! behavior and metadata.
+//! This module registers the retained in-process workers for the primitive
+//! engine branch. Startup intentionally excludes product domains such as
+//! skills, filesystem, browser, sandbox, MCP, cron, and worktree; those surfaces
+//! are being torn down to the checked-in primitives documented by the scorecard.
 //!
-//! Domain workers such as `capability`, `skills`, `filesystem`, `events`, `notifications`, `plan`, `settings`,
-//! `logs`, `prompt_library`, `model`, `session`, `context`, `job`, `agent`,
-//! `git`, `worktree`, `auth`, `device`, `voice_notes`, `transcription`,
-//! `browser`, `display`, `sandbox`, `self_extension`, `mcp`, `process`, `web`, and `system` own
-//! executable function contracts and behavior metadata. Provider requests now
-//! resolve schemas from the live catalog, so first-party, MCP, sandbox, and
-//! external capabilities are all surfaced through the same agent-facing
-//! capability fabric.
-//! `capability` is the collapsed model-facing harness worker: providers see
-//! only `execute`, and that orchestrator routes back into live worker-owned
-//! catalog entries. `engine_ws` trigger records capture public engine protocol messages.
-//! `cron_schedule` trigger records capture scheduled automation fires.
+//! `capability` owns the only model-facing tool, `capability::execute`, and
+//! that tool performs direct primitive operations rather than catalog routing.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface
 //!
@@ -28,15 +18,11 @@ use std::collections::BTreeSet;
 use crate::engine::{EngineError, Result as EngineResult};
 use crate::shared::server::context::ServerRuntimeContext;
 
-use crate::domains::catalog;
 use crate::domains::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, auth, blob, browser, capability, context, cron, device, display, events, filesystem,
-    git, import, job, logs, mcp, memory, message, model, notifications, plan, process, program,
-    prompt_library, repo, sandbox, self_extension, session, settings, skills, system,
-    transcription, tree, voice_notes, web, worktree,
+    agent, auth, blob, capability, context, logs, message, model, session, settings, system,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
@@ -57,10 +43,6 @@ fn register_domain_workers(ctx: &ServerRuntimeContext) -> EngineResult<()> {
             )?;
         }
     }
-    handle.register_trigger_type_for_setup(catalog::cron_schedule_trigger_type()?, false)?;
-    let deps = DomainRegistrationContext::from_context(ctx);
-    let cron_deps = cron::Deps::from_engine(&deps);
-    cron::project_all_cron_triggers_for_setup(handle, &cron_deps)?;
     Ok(())
 }
 
@@ -71,37 +53,12 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         capability::worker_module(&deps)?,
         blob::worker_module(&deps)?,
         message::worker_module(&deps)?,
-        cron::worker_module(&deps)?,
         settings::worker_module(&deps)?,
         auth::worker_module(&deps)?,
-        skills::worker_module(&deps)?,
         agent::worker_module(&deps)?,
-        mcp::worker_module(&deps)?,
         logs::worker_module(&deps)?,
-        memory::worker_module(&deps)?,
-        events::worker_module(&deps)?,
-        filesystem::worker_module(&deps)?,
         session::worker_module(&deps)?,
         context::worker_module(&deps)?,
-        job::worker_module(&deps)?,
-        notifications::worker_module(&deps)?,
-        plan::worker_module(&deps)?,
-        process::worker_module(&deps)?,
-        program::worker_module(&deps)?,
-        prompt_library::worker_module(&deps)?,
-        tree::worker_module(&deps)?,
-        repo::worker_module(&deps)?,
-        import::worker_module(&deps)?,
-        browser::worker_module(&deps)?,
-        display::worker_module(&deps)?,
-        device::worker_module(&deps)?,
-        transcription::worker_module(&deps)?,
-        voice_notes::worker_module(&deps)?,
-        web::worker_module(&deps)?,
-        self_extension::worker_module(&deps)?,
-        sandbox::worker_module(&deps)?,
-        git::worker_module(&deps)?,
-        worktree::worker_module(&deps)?,
     ];
     modules.extend(model::worker_modules(&deps)?);
     Ok(modules)
@@ -188,8 +145,9 @@ mod tests {
     use std::sync::Arc;
 
     use crate::engine::{
-        AuthorityGrantId, EffectClass, FunctionDefinition, FunctionId, InProcessFunctionHandler,
-        Invocation, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
+        ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, EffectClass,
+        FunctionDefinition, FunctionId, FunctionQuery, InProcessFunctionHandler, Invocation,
+        TraceId, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
     };
 
     #[derive(Debug)]
@@ -256,5 +214,127 @@ mod tests {
             panic!("undeclared topic must fail");
         };
         assert!(error.to_string().contains("undeclared domain stream topic"));
+    }
+
+    #[tokio::test]
+    async fn primitive_teardown_startup_catalog_excludes_deleted_product_domains() {
+        let ctx = crate::shared::server::test_support::make_test_context();
+        let functions = ctx
+            .engine_host
+            .discover(&FunctionQuery {
+                actor: Some(system_actor()),
+                include_internal: true,
+                ..FunctionQuery::default()
+            })
+            .await;
+        let function_ids = functions
+            .iter()
+            .map(|function| function.id.as_str().to_owned())
+            .collect::<Vec<_>>();
+
+        assert!(
+            function_ids
+                .iter()
+                .any(|function_id| function_id == "capability::execute"),
+            "primitive execute must stay registered: {function_ids:?}"
+        );
+        for retired_prefix in [
+            "agent::run_goal",
+            "agent::work_snapshot",
+            "agent::ask_user",
+            "agent::submit_answers",
+            "agent::spawn_subagent",
+            "agent::subagent_",
+            "agent::cancel_subagent",
+            "browser::",
+            "cron::",
+            "display::",
+            "events::",
+            "filesystem::",
+            "git::",
+            "import::",
+            "job::",
+            "mcp::",
+            "memory::",
+            "notifications::",
+            "plan::",
+            "process::",
+            "program::",
+            "prompt_library::",
+            "repo::",
+            "sandbox::",
+            "self_extension::",
+            "skills::",
+            "transcription::",
+            "tree::",
+            "voice_notes::",
+            "web::",
+            "worktree::",
+            "worker::spawn",
+            "capability::search",
+            "capability::inspect",
+            "capability::status",
+            "capability::registry_snapshot",
+            "capability::binding_",
+            "capability::plugin_",
+            "capability::conformance_",
+            "capability::policy_",
+            "capability::program_run_list",
+        ] {
+            assert!(
+                !function_ids
+                    .iter()
+                    .any(|function_id| function_id.starts_with(retired_prefix)),
+                "retired startup function prefix {retired_prefix} still registered in {function_ids:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn primitive_execute_observes_without_registry_routing() {
+        let ctx = crate::shared::server::test_support::make_test_context();
+        let invocation = Invocation::new_sync(
+            FunctionId::new("capability::execute").expect("function id"),
+            json!({
+                "operation": "observe",
+                "input": "hello primitive loop"
+            }),
+            CausalContext::new(
+                ActorId::new("agent:primitive-test").expect("actor id"),
+                ActorKind::Agent,
+                AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
+                TraceId::generate(),
+            )
+            .with_scope("capability.execute")
+            .with_session_id("primitive-test")
+            .with_idempotency_key("primitive-execute-observe"),
+        );
+        let result = ctx.engine_host.invoke(invocation).await;
+        assert!(
+            result.error.is_none(),
+            "primitive execute returned engine error: {:?}",
+            result.error
+        );
+        let value = result.value.expect("capability result value");
+        assert_eq!(value["isError"], false, "{value}");
+        assert_eq!(value["details"]["primitiveOperation"], "observe", "{value}");
+        assert!(
+            value["content"][0]["text"]
+                .as_str()
+                .is_some_and(|text| text.contains("hello primitive loop")),
+            "{value}"
+        );
+        assert!(
+            value["details"].get("bindingDecision").is_none(),
+            "primitive execute must not route through capability registry: {value}"
+        );
+    }
+
+    fn system_actor() -> ActorContext {
+        ActorContext::new(
+            ActorId::new("system:test").expect("actor id"),
+            ActorKind::System,
+            AuthorityGrantId::new("engine-system").expect("grant id"),
+        )
     }
 }

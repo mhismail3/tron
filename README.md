@@ -398,463 +398,53 @@ cargo clippy -- -D warnings        # Lint with warnings as errors
 
 ## Capabilities
 
-The model-facing harness is intentionally collapsed to one provider-visible
-capability primitive registered by the `domains::capability` worker:
+This branch is in the primitive-engine teardown path. The server-side model
+surface is intentionally collapsed to one provider-visible function:
 
-| Primitive | Description |
-|-----------|-------------|
-| `execute` | Resolve an intent or target hint, prepare the selected capability, pause for freshness/approval when needed, run through the engine ledger, and observe child invocation/resource results. |
+| Provider tool | Engine function | Purpose |
+|---------------|-----------------|---------|
+| `execute` | `capability::execute` | Run one primitive host operation and return a bounded observation/result to the turn loop. |
 
-`capability::search` and `capability::inspect` remain canonical
-operator/internal catalog functions for Audit Details, diagnostics, and program
-composition. Provider models do not receive them as separate tools.
+`capability::execute` is not a catalog router. It does not search worker packs,
+inspect capability recipes, select plugins, apply binding policies, request
+approval, or forward to retired first-party tool namespaces. Its request schema
+requires an `operation` field and accepts only operation-specific primitive
+fields such as `input`, `scope`, `namespace`, `key`, `value`, `path`, `content`,
+`command`, `timeoutMs`, `maxOutputBytes`, `idempotencyKey`, and `reason`.
 
-Filesystem, code search, shell/process, web, plugin source, iOS/app interaction, display,
-notifications, subagents, and sandbox workers are not provider-facing built-ins.
-They are worker-owned capabilities discovered and invoked through the single
-`execute` Work router. Provider integrations do not expose their implementation
-names directly. Hosted and local model profiles receive the same provider-facing
-contract: one `execute` primitive plus the compact Worker Guide/resource
-pointer; local profiles strip heavier context blocks without dropping the
-autonomous worker-extension recipe.
-Workspace-local self-extension starts with the approval-required
-`self_extension::grant_workspace_autonomy` capability. That capability derives a
-bounded grant through `grant::derive`, returns product text such as
-`Safe in this workspace`, returns the workspace id to reuse as execute context
-for workspace-visible helper work, and keeps grant ids, traces, raw schemas, and
-authority fields available for Audit instead of putting them in the chat copy.
+Current primitive operations:
 
-The default `coreFirstParty` Worker Guide is generated from registry metadata
-and includes the high-use first-party worker abilities the agent should know
-without a separate discovery turn. The same registry projection also generates
-`AgentCapabilityRecipe` records for operator search/inspect and execute
-resolution, so ability discovery returns copyable `execute` templates,
-required argument fields, approval behavior, lifecycle notes, and result
-expectations instead of bare ids. Each rendered guide is also materialized as a
-versioned `harness_doc` resource keyed by guide policy, catalog revision, and
-content hash; the guide includes the resource id/version and `resource::inspect`
-target so the agent can retrieve the full worker guide through server-owned
-Audit evidence instead of depending on repo prose.
-The model-facing contract is intent-first: use `intent` alone for unfamiliar
-tasks or capability matching, add `target` only when the user supplied an exact
-id, a prior `execute` result selected it, or a primed recipe makes it
-unambiguous, and put target capability fields inside `arguments`. When
-`target` is omitted, the resolver uses both the semantic intent and the supplied
-argument shape against the live catalog, so schema-valid target arguments such
-as `{"command":"date","executionMode":"read_only"}` can select `process::run`
-even if semantic ranking alone would be noisy.
-For resilience across providers, `execute` also accepts flattened target
-argument fields at the execute root and moves them into `arguments` before
-target validation; the correction is audited and never bypasses target schema,
-grant, idempotency, freshness, or approval checks. It also canonicalizes target
-argument property names against the selected target schema when the match is
-unique, so harmless casing/separator mistakes such as `functionid` versus
-`functionId` do not force a retry. Conflicting aliases remain visible and fail
-closed in schema validation.
-If an intent is too broad but clearly names a known capability namespace, such
-as “do something useful with files,” `execute` returns `needs_selection` with
-bounded top-level candidate summaries and structured `select_target` guidance.
-It does not fabricate a target, create a child invocation, request approval, or
-produce durable refs until the agent re-runs `execute` with the intended
-target. The same result surface carries repair guidance for stale revision or
-schema guards, trigger ids used as targets, missing target fields, missing
-idempotency keys, and approval-required states, including the approval id when
-one exists.
-Important parity anchors are:
+| Operation | Effect |
+|-----------|--------|
+| `observe` | Record text as an assistant-visible observation. |
+| `state_get` | Read an agent-owned state value. |
+| `state_set` | Write an agent-owned state value. |
+| `state_list` | List agent-owned state entries for a scope/namespace. |
+| `file_read` | Read a UTF-8 file under the current working directory. |
+| `file_write` | Write UTF-8 content under the current working directory. |
+| `process_run` | Run a bounded local shell command with timeout and output limits. |
 
-| Previous surface | Capability contract |
-|------------------|---------------------|
-| file read/write/edit/list/find/search/diff | `filesystem::read_file`, `filesystem::write_file`, `filesystem::edit_file`, `filesystem::list_dir`, `filesystem::find`, `filesystem::glob`, `filesystem::search_text`, `filesystem::diff`, `filesystem::apply_patch` |
-| shell/process | `process::run` |
-| web search/fetch | `web::search`, `web::fetch` |
-| app notification | `notifications::send` |
-| voice note save/list/delete | `voice_notes::save`, `voice_notes::list`, `voice_notes::delete` |
-| prompt history/snippets | `prompt_library::history_*`, `prompt_library::snippet_*` |
-| capability orchestration | model-facing `capability::execute`; operator/internal catalog views remain `capability::search` and `capability::inspect` |
+Startup registration currently keeps only loop infrastructure domains: `system`,
+`capability`, `blob`, `message`, `settings`, `auth`, `agent`, `logs`, `session`,
+`context`, and model-provider modules. Product/tool domains such as `filesystem`,
+`process`, `program`, `web`, `git`, `worktree`, `browser`, `display`, `plan`,
+`prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
+`worker`, `notifications`, `voice_notes`, and transcription/import surfaces are
+not registered by default on this branch.
 
-When filesystem capabilities are invoked through the model-facing capability
-primitive, relative paths resolve against the active session working
-directory/worktree carried as engine runtime metadata. Absolute paths are
-accepted only when they resolve inside that active working directory; host-wide
-filesystem browsing remains limited to internal/operator picker paths rather
-than model-facing file capabilities.
-File-content mutation idempotency (`write_file`, `edit_file`, `apply_patch`)
-is session-scoped so the same caller key cannot replay a materialized path from
-another isolated worktree. Mutating filesystem contracts also acquire a
-session-scoped filesystem lease and record compensation notes, so file writes,
-edits, patches, and directory creation are visible in the lease/compensation
-ledger instead of relying on per-handler locks.
-When a session acquires an isolated git worktree, Tron seeds that worktree from
-the operator-visible working copy: tracked edits/deletions and untracked
-non-ignored files are overlaid on top of `HEAD`, while ignored files and
-internal worktree directories stay out of the session snapshot.
-`filesystem::search_text` is bounded for repo-scale discovery: `pattern` is
-literal text by default, regex search is opt-in with `regex: true`, and
-repo-root searches skip generated/heavy directories such as `.git`, `target`,
-`node_modules`, and `.worktrees` by default. To inspect those generated
-directories deliberately, make the generated directory the explicit `path`.
-`filesystem::list_dir` is for known directories. Agents should use
-`filesystem::find`, `filesystem::glob`, or `filesystem::search_text` before
-listing a module/file/folder path that is only a guess.
-`filesystem::read_file` accepts optional 1-based `startLine` and `endLine`
-bounds so requests like “read the first 20 lines of README.md” do not require a
-shell command or schema guess.
-`filesystem::write_file` creates new files and overwrites exact file contents.
-Agents should use it for new scratch or docs-sandbox files, and should read or
-diff before overwriting important existing files.
-`filesystem::apply_patch` accepts exact replacement patches with `oldString`
-and `newString` on an existing file. For intentional append-only edits to an
-existing file, pass `oldString: ""` and the exact bytes to append in
-`newString`; the orchestrator also normalizes a missing `oldString` plus
-non-empty `newString` into that append shape before target validation so the
-agent does not need to probe with a failing call. New files must use
-`filesystem::write_file`.
+The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
+Public registered functions are limited to `agent::prompt`, `agent::abort`,
+`agent::abort_invocation`, and `agent::status`. Hidden internal functions
+`agent::prompt_apply`, `agent::run_turn`, and `agent::prompt_queue_drain` serialize
+accepted prompts into the provider loop and keep session truth consistent.
+Deleted product routes such as `agent::run_goal`, `agent::work_snapshot`,
+`agent::ask_user`, `agent::spawn_subagent`, subagent status/result/cancel, and
+public queue management are not registered.
 
-`process::run` and `notifications::send` both have direct, low-overhead paths
-for safe/default use. `process::run` requires a non-empty `command` and an
-`executionMode`: classifier-approved read-only checks such as `date`, `pwd`,
-`test -f`, bounded `sed -n`
-printing, `git status`, and `git log` run directly with
-`executionMode = "read_only"`, while write-like commands must use
-`executionMode = "sandbox_materialized"` with declared `expectedOutputs` that
-are materialized back through resource refs. Relative materialized outputs land
-in the active session worktree by default, and the response includes bounded
-`materializedOutputs` summaries for exact content verification without a second
-shell command. Shell redirection and `tee` targets in sandbox-materialized
-commands must match declared relative `expectedOutputs` paths; absolute,
-home-relative, shell-expanded, parent-escaping, or undeclared command output
-paths are rejected before approval. Nested declared output paths are allowed, and
-their parent directories are prepared inside the isolated sandbox before
-execution. `process::run` requires active session worktree truth. Read-only
-process cwd/path operands and sandbox materialization targets must stay inside
-the active session worktree, symlink escapes are rejected, and child processes
-receive an allowlisted environment rather than inherited server secrets. It
-defaults to the active session worktree when `cwd` is omitted and accepts bounded
-timeout fields in milliseconds. The
-model-facing `capability::execute` primitive is the only
-provider-visible capability tool: callers provide a natural-language `intent`,
-an optional `target` such as `process::run`, target-only `arguments`, optional
-constraints, and `idempotencyKey` for mutating work. Each `execute` call
-prepares at most one canonical target invocation; multi-step work is expressed
-as multiple `execute` calls so each child invocation remains explicit in the
-ledger. If an intent spans multiple target invocations, `execute` returns
-`needs_decomposition` with suggested calls instead of silently running a partial
-request. The engine resolves the catalog entry, prepares freshness when
-required, corrects harmless shape mistakes, and routes through the same
-approval/child-invocation/resource-output path. If a provider or model
-accidentally sets `target` to `capability::execute` itself, the execute boundary
-records a correction, removes that self-target, and resolves the real target
-from intent; it never recursively wraps another execute call. Recipe examples
-are templates
-only: agents must not run
-warm-up/probe/example commands such as `date` or `git status` unless that is the
-requested action, and an exact user-supplied target argument payload should be
-invoked exactly once. If a call returns `needs_input`, agents retry the same
-selected target with the missing fields instead of probing an unrelated
-capability. If a call returns `needs_decomposition`, agents follow the suggested
-calls one by one when the user still wants the underlying work performed; if
-the user asked only to test or report decomposition, the agent reports the
-decomposition result without running the suggestions. For portability across
-providers, the exported schema is
-plain object-shaped while still accepting direct target aliases such as
-`contractId`, `capabilityId`, `functionId`, and `implementationId` when the
-caller already knows them. Agents should omit `constraints` by default; fields
-such as `riskMax` and `effect` are hard bounds, not hints. For example,
-`web::search` and `web::fetch` are pure reads but medium risk because they touch
-the network, so `riskMax=low` intentionally rejects them. Target schema, policy,
-and idempotency preflight
-rejections return structured `isError=true` capability results with no child
-invocation, approval, or resource refs, so expected contract failures stay
-inspectable without becoming engine-level execution failures. Missing
-idempotency returns a stable `provide_idempotency_key` guidance object so the
-agent can retry the same intended mutation without guessing wrapper shape.
-Session-scoped capabilities do not require the model to invent the active
-session id: `execute` binds trusted causal-context fields such as the current
-`sessionId` into selected target arguments when the target schema requires
-them, records that correction, and leaves conflicting or arbitrary path
-arguments visible so schema validation still fails closed.
-`notifications::send` sends through the first-party notification delegate and
-persists operator-visible notification truth as `notification` resources with
-delivery `evidence`; read and mark-all-read state is stored as `decision`
-resources rather than per-event table rows. Optional `sheetContent` is Markdown
-text for native detail sheets, not an arbitrary object. `notifications::mark_read`
-and `notifications::mark_all_read` return the server global `unreadCount`;
-scoped mark-all accepts `sessionId`, while unscoped Read All remains a global
-inbox action with notification-owned resource write context.
-`voice_notes::save` transcribes audio into resource-backed `artifact` and
-`materialized_file` outputs; `voice_notes::list` and `voice_notes::delete` read
-and discard resource state rather than treating Markdown files as source truth.
-Prompt Library history and snippets are also resource-backed `artifact`
-records; generated `ui_surface` resource-collection surfaces own management
-actions, while the iOS sheet remains only a selection-only local draft composer
-insertion affordance. Fresh modular-engine-v4 storage does not create
-prompt-library SQLite tables.
-
-Capability identity is projected from the live catalog:
-
-| Shape | Meaning |
-|-------|---------|
-| `contractId` | Stable abstract interface. First-party functions default to their canonical engine id unless richer plugin manifests provide explicit contracts. |
-| `implementationId` | Concrete provider. First-party catalog functions default to `first_party.<worker>.v<revision>.<function>`, while external/session workers must register implementation metadata within their namespace claims. |
-| `pluginId` | Owning package/domain. Existing first-party workers default to `first_party.<worker>`, while plugin source defaults to `external.pluginSources`. |
-
-`search` runs through the durable capability registry in the engine ledger
-database, not a handwritten capability list. The registry stores projected
-contracts, implementations, plugin manifests, bindings, inspection handles,
-binding decisions, audit events, index documents, and `sqlite-vec` vector
-metadata over the live runnable catalog. Semantic ranking is local-only via the
-first-party `fastembed` ONNX/tokenizer bundle embedded in the Rust agent binary
-plus a persistent `sqlite-vec` `vec0` index in `tron.sqlite`, with deterministic
-lexical/vector fusion. The default `hybridLocal` policy prefers local vectors
-and explicitly reports degraded lexical status while the vector index is
-warming or unavailable, rather than failing the agent's catalog search. Profile
-TOML can opt into strict vector-required behavior for tests or specialized
-profiles. Profile TOML v3 keeps runtime-shaping policy separate: provider
-primitive exposure lives in `primitiveSurfacePolicies.*`, concrete execution
-constraints live in `capabilityExecutionPolicies.*`, search behavior lives in
-`capabilitySearchPolicies.*`, and generated first-party recipe context lives in
-`capabilityContextPrimerPolicies.*`. See
-[`packages/agent/docs/profile-control-plane.md`](packages/agent/docs/profile-control-plane.md)
-for the profile v3 control-plane schema and invariants.
-Audit status refreshes synchronously update registry metadata,
-then warm the persistent vector index on a detached path. Agent search skips
-metadata resync when the durable registry already matches the live catalog
-revision; meaningful catalog/plugin/schema changes update metadata once and
-warm missing vectors in the background. Operator search can request an explicit
-degraded lexical mode while the local model or vector rows warm up; the response
-reports `ready`, `unavailable`, or degraded status so the
-UI never silently pretends semantic search ran. Search kind filters accept the
-public document kinds plus `function` as the runnable implementation view, so
-agents can ask for worker functions without knowing the registry document name.
-The search request path never re-embeds the whole catalog: registry document
-rows carry text hashes and vector rows are refreshed only when a document is new
-or changed. Warm searches embed the query once, read the persistent
-`sqlite-vec` rows, fuse lexical/vector hits, and return. Operator search still
-accepts a bounded `queries` array for related lookups against one registry
-snapshot, and operator inspection accepts bounded `targets` so Audit Details
-can compare candidate capabilities without serial round trips.
-Audit mutations such as plugin state changes, conformance runs,
-binding edits, and policy updates are system-idempotent operator actions. They
-do not require a chat session id, but they still go through normal capability
-schema validation, approval, audit, trace, and compensation records.
-`capability::conformance_run` also writes an `evidence` resource whose payload
-links the checked plugin implementations to the catalog function ids and worker
-ids, and its response is runtime-guarded to include `resourceRefs`.
-
-Provider models see one capability primitive: `execute`. The request is
-intent-shaped: `intent`, optional `target` or direct target alias, target-only
-`arguments`, optional `constraints`, plus wrapper fields such as
-`idempotencyKey` and `reason`. The
-capability worker owns the internal resolve, prepare, approval, run, and observe
-phases. It searches/ranks candidates, records fresh inspection handles when a
-mutating or elevated-risk target needs one, uses supplied `arguments` to prefer
-schema-compatible candidates, validates target arguments, corrects safe
-wrapper-shape mistakes such as `payload` versus `arguments` and unique
-schema-property casing aliases, and only then routes through the same approval
-and child-invocation substrate. Mutating calls still require stable target
-idempotency. The model-facing wrapper always uses a
-provider-call-scoped idempotency key so repeated orchestration attempts can
-reach the target capability; the supplied `idempotencyKey` belongs to the
-prepared child invocation and drives target replay, approval replay, and durable
-output deduplication. Every orchestration attempt records bounded audit
-diagnostics with candidate scores, selected target, rejected candidates,
-corrections, freshness/approval decisions, child invocation ids, resource refs,
-replay source, and result classification.
-External/session workers connect with a scoped `workerToken` that bounds plugin
-id, namespace claims, authority grant id/revision/hash, resource selectors,
-visibility ceiling, trust tier, scope binding, expiry, and signature status
-before their functions can enter the capability registry.
-
-`execute` program mode is implemented by the first-party
-`program::run_javascript` worker. The parent engine spawns the
-`tron-program-worker` OS process with a stripped environment and a temporary
-working directory, then communicates over the program JSON-line protocol. The
-child process owns QuickJS, freezes the JavaScript host surface to the single
-`tools.execute` composition API, and exposes no filesystem,
-network, process, import, environment, secret, mutable-clock, native-module,
-or arbitrary host-object access. Program requests carry explicit limits for
-timeout, memory, stack, output/log bytes, child-call count, recursion depth,
-allowed contracts/implementations, and risk budget. Child approvals pause the
-run; programs cannot self-approve or recursively invoke program mode. Every run
-is recorded in the capability registry store with parent/root invocation ids,
-binding decision id, code/args hashes, limits, child invocations, selected
-implementations, approval state, retained `execution_output` resource refs,
-logs, compensation attempts, trace id, and final status. Loose program
-`artifacts` are rejected; durable outputs must be created by child resource or
-materialization capabilities.
-
-Source-control operations are canonical engine capabilities as well as iOS Source Control sheet actions. Read-only worktree and git inspection should use `worktree::get_status`, `worktree::get_diff_summary`, `worktree::get_diff`, `worktree::is_git_repo`, and `git::list_local_branches` before shell-style checks are considered. `worktree::get_diff_summary` is the lightweight card/list path for branch-level file/addition/deletion counts; `worktree::get_diff` remains the bounded full unified-diff path for drill-down file review. iOS treats server-reported git checkouts as actionable source-control surfaces whether the session owns an isolated worktree (`worktree.isolated=true`) or runs directly on the selected branch (`worktree.isolated=false`): commits, diffs, repo metadata, and direct-branch push controls use server truth in both cases. Isolated-only workflows such as merge-to-base, rebase-on-main, finalize, sibling session branch coordination, and conflict automation remain gated to server-owned session worktrees. Safe worktree operations such as acquire/release/stage/unstage are agent-visible only with explicit idempotency and resource leases; destructive, merge/rebase, push, clone, finalize, discard, delete, and conflict-automation capabilities require approval for autonomous agents. Read-only shell checks such as `git status`, `git diff`, `git show`, and `git log` may still run through `process::run` with `executionMode = "read_only"` without a prior inspect turn; `process::run` defaults to the active session worktree/workspace and also treats composed checks like `pwd && test -f README.md && sed -n '1,3p' README.md` as read-only when every segment is otherwise safe and stays inside the active session worktree. Mutating or publishing git commands still require execute preparation/freshness and approval, and write-like process commands must run in sandbox materialization mode with declared relative outputs that materialize through resource refs and bounded `materializedOutputs` summaries.
-
-The same capability worker also registers operator/admin functions for native
-clients and the Audit Details. These are normal engine catalog functions, not
-provider-facing primitives:
-
-| Function family | Functions |
-|-----------------|-----------|
-| Status/snapshot/audit | `capability::status`, `capability::registry_snapshot`, `catalog::list`, `catalog::inspect`, `catalog::watch_snapshot`, `capability::audit_query`, `capability::program_run_list` |
-| Bindings | `capability::binding_list`, `capability::binding_set` |
-| Plugins/conformance | `capability::plugin_list`, `capability::plugin_inspect`, `capability::plugin_install`, `capability::plugin_update`, `capability::plugin_set_state`, `capability::plugin_promote`, `capability::conformance_run` |
-| Implementations/policy | `capability::implementation_set_state`, `capability::policy_get`, `capability::policy_validate`, `capability::policy_update` |
-
-Admin mutations carry high-risk capability metadata, approval requirements,
-idempotency, policy evaluation, tracing, and audit records. Read paths return
-redacted audit data by default; reveal behavior remains server-authoritative.
-Capability conformance runs are resource-backed and return evidence refs.
-
-Engine-owned primitive workers additionally expose the substrate control and
-generated UI surfaces. `control::snapshot` and `control::inspect` are read-only
-projections over catalog, invocation, grant, resource, queue, lease, approval,
-storage, module, and worker truth; they may include `uiSurfaceRefs`,
-`modulePackages`, `moduleConfigs`, `activationRecords`, `moduleHealth`,
-`moduleSourceTrust`, and server-advertised module action summaries, but do not
-inline large layouts or stored action templates. `moduleSourceTrust` rows carry
-server-owned `trustPresentation` labels for source, signature, approval,
-conformance, revocation, promotion, and cleanup state, derived from resource
-evidence rather than client-side trust mapping.
-Generated UI is persisted as
-`Resource(kind = "ui_surface")` and managed by `ui::catalog`,
-`ui::create_surface`, `ui::surface_for_target`, `ui::validate_surface`,
-`ui::refresh_surface`, `ui::expire_surface`, `ui::update_surface`,
-`ui::inspect_surface`, `ui::discard_surface`, and `ui::submit_action`. iOS
-submits only the stored
-surface/version/action coordinates, user input, and idempotency key; the server
-reconstructs and authorizes the canonical target invocation.
-Generated authoring currently covers substrate targets, session-created
-capability invoke surfaces with renderable request schemas, local pack and
-activation operator surfaces, prompt-library, notification, subagent-lineage,
-source-control, and AgentControl review surfaces. Pack surfaces derive
-configure/activate/remove actions from the package manifest/config resources;
-activation surfaces derive disable/upgrade/rollback/quarantine actions from
-current and prior activation versions. Capability, pack, source-control, and
-review mutations remain stored canonical actions; clients render fixed-catalog
-native controls and never construct target function ids or payload templates.
-Source-control review surfaces use the same fixed catalog to show preview,
-plain diff preview, allowed action metadata, validation/Inspect cues, and
-review controls without adding target-specific client screens.
-
-The module package lifecycle is also resource-native. `module::register_package`
-validates manifest digest, provenance, namespace ownership, declared capability
-effects/risks/idempotency/output contracts, config schema, and grant ceiling
-before creating a normalized `worker_package`. The normalized package payload
-stores engine-owned source trust fields such as `sourceTrustStatus`,
-`effectiveTrustTier`, `sourceEvidenceRefs`, `sourceApprovalRefs`,
-`conformanceEvidenceRefs`, and bounded `policyDiagnostics`; the manifest's
-declared `trustTier` is never permission truth. `module::configure` validates
-config and rejects raw secret-like values unless they are `secret_ref`/vault
-handles. `module::remove_package` is a high-risk local pack lifecycle action:
-it requires live activations to be disabled, quarantined, damaged, discarded, or
-removed first, honors an optional expected current version, marks the pack and
-matching config resources discarded with removal reason/timestamp fields, and
-prevents later configure/activate calls until the pack is registered again.
-There is no generic `module::act` or package mutation multiplexer; operator
-controls are server-advertised summaries over canonical `module::*` functions.
-Product example Worker Packs live under `packages/agent/examples/local-packs/`:
-Tron Maintainer, Everyday Organizer, and Creative Knowledge. They are
-local-process templates with `local_digest_pinned` manifests, executable worker
-entrypoints, and Generated Controls coverage; they do not implement remote
-package discovery.
-
-Package source trust is explicit. `module::verify_source` verifies unsigned
-digest-pinned package provenance, materialized file refs/hashes, and redaction,
-then writes bounded `evidence` and CAS-updates the package source trust fields.
-`module::register_source` records local source registrations, local Ed25519
-public-key trust roots, and revocations as `decision`/`evidence` resources; it
-does not fetch remote bytes or create a package/source table.
-`module::verify_signature` verifies signed local package manifests against
-registered trust roots using the exact message
-`tron.module.package_manifest.v1\n{packageDigest}` and CAS-updates
-`signatureVerification`, `sourceEvidenceRefs`, `effectiveTrustTier`, and
-bounded policy diagnostics. Unsupported algorithms, unknown/revoked/expired
-trust roots, raw secret material, digest drift, stale package versions, and
-out-of-policy selectors fail closed. `module::approve_source` records a scoped
-operator `decision` for an unsigned local digest-pinned package digest/version/
-scope, trust ceiling, grant ceiling, file/network bounds, and expiry.
-`module::revoke_source_approval` archives that decision and writes evidence.
-`module::policy_decide` and `module::audit_policy` are pure read projections
-over package source evidence, signature evidence, trust-root decisions, approval
-decisions, requested child grants, conformance refs, activations, health, and
-revocations. `module::record_policy_audit` persists the same bounded audit as
-`evidence`; `module::reconcile_trust` writes evidence and recommendations for
-packages/activations affected by revoked or expired trust without disabling,
-quarantining, killing workers, or revoking grants. `module::inspect_trust`
-returns a bounded dependency graph for trust/source/approval/revocation
-decisions, packages, and activations. `module::renew_trust_root` creates a new
-same-key trust-root decision with required `supersedes` lineage;
-`module::rotate_signature_key` records rotation evidence only and never
-re-signs packages or fabricates signature verification;
-`module::expire_trust_decision` archives source/trust/approval decisions and
-writes evidence; and `module::enforce_revocation` is the explicit high-risk
-operator mutation that composes canonical `module::disable` or
-`module::quarantine` child invocations for proven affected activations. Local
-unsigned `local_process` packages cannot activate until source verification and an
-unexpired scoped source approval decision pass policy; signed local packages
-require current signature evidence from an active trust root that permits the
-requested activation authority.
-
-Operator trust review is also capability-driven. `module::simulate_trust_change`
-is pure read and explains the affected packages, activations, grants, workers,
-generated UI surfaces, policy deltas, missing prerequisites, and canonical
-actions for renewal, rotation, expiry, revocation, source approval, trust
-reconciliation, and revocation enforcement scenarios. `module::record_trust_review`
-recomputes the simulation server-side and stores bounded `evidence` without
-changing live authority. `module::schedule_trust_audit` stores daily or weekly
-fixed wall-clock audit schedules as `decision` resources, and
-`module::trust_audit_status` projects current due buckets, queued/completed
-buckets, missed windows, evidence refs, affected package/activation refs, and
-retention warnings from substrate truth. `module::run_scheduled_trust_audit`
-writes bounded audit evidence for a requested due bucket, while
-`module::record_trust_audit_retention` records advisory retention-review
-evidence for old audit evidence without deleting bytes or rewriting history.
-Scheduled audits never approve trust, disable workers, quarantine activations,
-or enforce revocation.
-
-`module::activate`, `module::disable`, `module::upgrade`,
-`module::rollback`, and `module::quarantine` produce `activation_record`
-versions, derive or revoke engine grants, and never rely on a package table,
-`control::act`, or client-side policy. Activation binds existing/built-in
-workers directly and launches `local_process` packages only by creating a child
-`worker::spawn` invocation with manifest-derived command, expected function ids,
-grant bounds, file roots, network policy, visibility, timeout, and idempotency.
-The activation record stores spawn lineage, spawn result, integrity diagnostics,
-worker lifecycle, health status, registered capability evidence, source-policy
-state, and the derived grant hash. Upgrade and rollback require the activation
-version being replaced. Existing/built-in replacements create the replacement
-activation before revoking superseded authority; local-process replacements
-stop the superseded sandbox worker first so the replacement can register the
-same package function ids, then persist the replacement activation and record
-the superseded grant/worker lineage. If replacement spawn or persistence fails
-after the superseded local-process worker has been stopped, the superseded
-activation is CAS-updated to `failed` with `failed_closed` runtime diagnostics
-and linked recovery evidence.
-
-Runtime package integrity is also capability-driven. `module::run_conformance`
-writes bounded evidence for static manifest rules, grant simulation,
-registration bounds, health policy, resource-output contracts, redaction, and
-cleanup behavior. `module::check_health` writes bounded `evidence` and updates
-the activation record through CAS using either catalog/heartbeat inspection or a
-manifest-declared read-only health function invoked under the activation grant.
-`module::verify_integrity` recomputes package digests, materialized file hashes,
-config validation hashes, grant state, worker registration bounds,
-visibility/risk/file/network policy, and redaction invariants without rewriting
-damaged bytes. `module::recover_activation` reconstructs incomplete or unsafe
-activations from invocation, grant, worker, and resource records, revokes leaked
-derived grants, disconnects volatile workers through canonical lifecycle APIs,
-and persists failed/quarantined activation evidence. Scheduled checks are
-derived from active `activation_record` resources and enqueued through the
-existing `module` queue. Scheduled trust audits are derived from active
-`module_trust_audit_schedule` decision resources and enqueued through the same
-queue/invocation substrate. Queue items keep their logical idempotency key, but
-retry attempts execute with attempt-scoped target keys so a transient handler
-failure can be retried without becoming a permanent replay result. Worker
-transport loss before a non-mutating queued target returns is classified as
-queue delivery failure, so `queue.lifecycle` carries the retry state without
-storing a failed target invocation row. The host queue projection uses
-module-owned due-bucket helpers, enqueues at most the current bucket, skips
-queued or completed buckets, and surfaces missed buckets through
-`module::trust_audit_status` rather than backfilling mutation work. There is no
-package, health, policy, conformance, trust, audit, or recovery table.
-
----
+The teardown is not complete yet. Unregistered product source modules and some
+old tests/docs remain compiled while PET-4 through PET-10 remove rules, skills,
+hooks, policy planes, product storage, fixed iOS modes, and dead source files.
+Those leftovers are residual teardown work, not supported branch behavior.
 
 ## Engine Protocol API
 

@@ -4,7 +4,7 @@ Created: 2026-06-06
 
 Initial score: **0/100**
 
-Current score: **13/100**
+Current score: **37/100**
 
 Status: **active execution artifact**
 
@@ -160,8 +160,8 @@ PET-4 and PET-6 must fail if it grows into those shapes.
 |----|------|--------|--------|-------|-------------------|---------------|------------|
 | PET-0 | Branch, baseline, and plan formalization | 5 | passed_after_fix | docs_or_scorecard | New branch exists from the worker-first checkpoint; scorecard, evidence manifest, README link, static plan gate, and current branch status are recorded. | None for planning. PET-1 owns the first source inventory before behavior deletion. | this checkpoint |
 | PET-1 | Primitive taxonomy and deletion inventory | 8 | passed_after_fix | engine_architecture | Added [`primitive-engine-teardown-inventory.md`](primitive-engine-teardown-inventory.md), a source-audited deletion map covering every current Rust domain, primitive worker, runner context plane, first-party managed skill, agent doc, iOS source/view root, and settings surface as retain/delete/successor. The covering invariant was added first and failed red on the missing inventory before the artifact was created. | Classification mistakes can preserve product code; PET-2 through PET-10 must execute against this map and PET-11 must adversarially revisit every `retain` and `successor` classification. | PET-1 inventory checkpoint |
-| PET-2 | Server domain registration teardown | 12 | pending | engine_architecture | `domains::registration` stops registering product/tool domain workers by default. Tests prove removed namespaces are absent from startup catalog and no old capability names are routable. Retained domains are documented as boot/provider/session infrastructure. | Some retained session/model code may still mention old capability events until PET-5/PET-10. | pending |
-| PET-3 | Single execute primitive | 12 | pending | engine_architecture | Provider tool export exposes exactly one model-facing tool. `execute` no longer depends on registry recipes, policy profiles, vector search, plugin/binding/conformance tables, or target-specific route heuristics. Integration proof shows a prompt can call `execute`, receive an observation, and continue the loop. | The bootstrap host access shape may need one user decision before implementation. | pending |
+| PET-2 | Server domain registration teardown | 12 | passed_after_fix | engine_architecture | `domains::registration` now registers only loop infrastructure domains (`system`, `capability`, `blob`, `message`, `settings`, `auth`, `agent`, `logs`, `session`, `context`, and model providers). The red startup-catalog test proved retired namespaces were still registered; the green rerun proves product/tool domains and deleted `agent::*` product routes are absent while `capability::execute` remains. README capability docs were rewritten for the branch surface. | Product source modules are still declared/compiled and generate dead-code warnings because PET-10 owns full dead-source deletion. Some session/UI tests still mention old product event names until PET-5/PET-8/PET-10. | PET-2/PET-3 backend checkpoint |
+| PET-3 | Single execute primitive | 12 | passed_after_fix | engine_architecture | Provider tool export now exposes exactly one function named `execute`, never hosted `tool_search`/`defer_loading`. `capability::execute` uses direct primitive operations (`observe`, `state_get`, `state_set`, `state_list`, `file_read`, `file_write`, `process_run`) instead of registry recipes, plugin/binding/conformance/policy tables, vector search, or target routing. Direct engine proof covers `observe`; run-loop proof shows a mock provider calls `execute`, receives the observation as a capability result in the next turn context, and continues to final text. | Context assembly still contains old policy/rules/skills/hooks/subagent/job abstractions that are not model tools but remain architectural planes. PET-4/PET-6 must remove them before the branch can claim a true primitive context. | PET-2/PET-3 backend checkpoint |
 | PET-4 | Soul and agent-owned state workspace | 10 | pending | agent_runtime | Context assembly contains soul plus session/state summaries, not rules/skills/worker guides. Tests prove agent-owned state persists across turns and can be inspected/updated through `execute`. The soul file/resource is short and static-gated against toolbox creep. | Self-adapting behavior beyond state persistence is successor work. | pending |
 | PET-5 | Session, event, ledger, and resource collapse | 8 | pending | storage | Retained stores are minimal and loop-owned. Removed product tables/resources/events are gone from fresh DB migrations and README schema docs. Reconstruction still works for new bare sessions. | Old local databases are disposable on this branch. | pending |
 | PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | pending | agent_runtime | Built-in skills/rules/hooks/core guardrails/approval product policy are removed from context and startup. Static gates reject prompt-expanded skill/rule/guardrail planes. The loop still records failures and blocked states as infrastructure evidence. | Host-level irreversible-risk handling may remain only if classified as infrastructure. | pending |
@@ -180,7 +180,8 @@ Total weight: **100**
 2. PET-1: commit the inventory and deletion map before deleting code. **Closed
    in the PET-1 inventory checkpoint.**
 3. PET-2/PET-3: commit the first backend slice where startup catalog and the
-   single-tool provider loop agree.
+   single-tool provider loop agree. **Closed in the PET-2/PET-3 backend
+   checkpoint.**
 4. PET-4/PET-6: commit the context/soul/state slice only after rules, skills,
    hooks, and guardrails are actually absent from the model context.
 5. PET-5/PET-7: commit storage and self-authored substrate only after fresh DB

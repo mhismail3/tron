@@ -11,9 +11,6 @@ operation_bindings! {
         "prompt" => |invocation, deps| {
             prompt_value(invocation, deps).await
         },
-        "run_goal" => |invocation, deps| {
-            run_goal_value(invocation, deps).await
-        },
         "prompt_apply" => |invocation, deps| {
             prompt_apply_value(Some(&invocation.payload), invocation, deps).await
         },
@@ -26,41 +23,11 @@ operation_bindings! {
         "status" => |invocation, deps| {
             status_value(Some(&invocation.payload), deps).await
         },
-        "work_snapshot" => |invocation, deps| {
-            work_snapshot_value(Some(&invocation.payload), invocation, deps).await
-        },
         "abort" => |invocation, deps| {
             abort_value(Some(&invocation.payload), deps).await
         },
         "abort_invocation" => |invocation, deps| {
             abort_invocation_value(Some(&invocation.payload), deps).await
-        },
-        "queue_prompt" => |invocation, deps| {
-            queue_prompt_value(Some(&invocation.payload), invocation, deps).await
-        },
-        "dequeue_prompt" => |invocation, deps| {
-            dequeue_prompt_value(Some(&invocation.payload), invocation, deps).await
-        },
-        "clear_queue" => |invocation, deps| {
-            clear_queue_value(Some(&invocation.payload), invocation, deps).await
-        },
-        "ask_user" => |invocation, deps| {
-            ask_user_value(Some(&invocation.payload), invocation, deps).await
-        },
-        "submit_answers" => |invocation, deps| {
-            submit_answers_value(Some(&invocation.payload), invocation, deps).await
-        },
-        "spawn_subagent" => |invocation, deps| {
-            spawn_subagent_value(Some(&invocation.payload), invocation, deps).await
-        },
-        "subagent_status" => |invocation, deps| {
-            subagent_status_value(Some(&invocation.payload), invocation, deps).await
-        },
-        "subagent_result" => |invocation, deps| {
-            subagent_result_value(Some(&invocation.payload), invocation, deps).await
-        },
-        "cancel_subagent" => |invocation, deps| {
-            cancel_subagent_value(Some(&invocation.payload), invocation, deps).await
         },
     ];
 }

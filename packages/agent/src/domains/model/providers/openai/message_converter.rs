@@ -57,17 +57,15 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
 
 /// Convert Tron capabilities to Responses API tool entries.
 ///
-/// When `enable_tool_search` is `true`, marks all functions with `defer_loading: true`
-/// and appends a `ToolSearch` sentinel. This enables the model to dynamically discover
-/// which capabilities to use, reducing prompt tokens for large tool sets.
-///
-/// When `false`, produces standard function entries with no `defer_loading` field.
+/// The primitive branch always exports concrete function entries. Hosted
+/// tool-search/deferred loading is intentionally ignored so provider requests
+/// match the single checked-in `execute` surface.
 #[must_use]
 pub fn convert_tools_v2(
     capabilities: &[ModelCapability],
-    enable_tool_search: bool,
+    _enable_tool_search: bool,
 ) -> Vec<ResponsesToolEntry> {
-    let mut entries: Vec<ResponsesToolEntry> = capabilities
+    capabilities
         .iter()
         .map(|t| {
             let schema = serde_json::to_value(&t.parameters).unwrap_or_default();
@@ -76,16 +74,10 @@ pub fn convert_tools_v2(
                 name: t.name.clone(),
                 description: t.description.clone(),
                 parameters: params,
-                defer_loading: if enable_tool_search { Some(true) } else { None },
+                defer_loading: None,
             }
         })
-        .collect();
-
-    if enable_tool_search {
-        entries.push(ResponsesToolEntry::ToolSearch {});
-    }
-
-    entries
+        .collect()
 }
 
 /// Normalize a JSON schema for the `OpenAI` API.
@@ -750,6 +742,26 @@ mod tests {
     }
 
     #[test]
+    fn convert_tools_v2_never_exports_hosted_tool_search_for_primitive_branch() {
+        use crate::domains::model::providers::openai::types::ResponsesToolEntry;
+        let capabilities = vec![make_tool("execute", "Run primitive host operations")];
+        let result = convert_tools_v2(&capabilities, true);
+
+        assert_eq!(result.len(), 1);
+        match &result[0] {
+            ResponsesToolEntry::Function {
+                name,
+                defer_loading,
+                ..
+            } => {
+                assert_eq!(name, "execute");
+                assert!(defer_loading.is_none());
+            }
+            other => panic!("expected execute function entry, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn convert_tools_v2_with_tool_search() {
         use crate::domains::model::providers::openai::types::ResponsesToolEntry;
         let capabilities = vec![
@@ -758,21 +770,15 @@ mod tests {
         ];
         let result = convert_tools_v2(&capabilities, true);
 
-        // 2 functions + 1 tool_search sentinel
-        assert_eq!(result.len(), 3);
-
-        // All functions should have defer_loading: true
-        for entry in &result[..2] {
+        assert_eq!(result.len(), 2);
+        for entry in &result {
             match entry {
                 ResponsesToolEntry::Function { defer_loading, .. } => {
-                    assert_eq!(*defer_loading, Some(true));
+                    assert!(defer_loading.is_none());
                 }
                 _ => panic!("expected Function entry"),
             }
         }
-
-        // Last entry should be ToolSearch
-        assert!(matches!(&result[2], ResponsesToolEntry::ToolSearch {}));
     }
 
     #[test]
@@ -782,21 +788,16 @@ mod tests {
         let json = serde_json::to_value(&result).unwrap();
         let arr = json.as_array().unwrap();
 
-        // Function with defer_loading
+        assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["type"], "function");
-        assert_eq!(arr[0]["defer_loading"], true);
+        assert!(arr[0].get("defer_loading").is_none());
         assert_eq!(arr[0]["name"], "execute");
-
-        // ModelCapability search sentinel
-        assert_eq!(arr[1]["type"], "tool_search");
     }
 
     #[test]
     fn convert_tools_v2_empty_tools_with_search() {
-        use crate::domains::model::providers::openai::types::ResponsesToolEntry;
         let result = convert_tools_v2(&[], true);
-        assert_eq!(result.len(), 1);
-        assert!(matches!(&result[0], ResponsesToolEntry::ToolSearch {}));
+        assert!(result.is_empty());
     }
 
     // ── generate_capability_clarification_message ─────────────────────────

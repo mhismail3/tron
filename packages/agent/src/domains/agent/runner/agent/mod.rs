@@ -4,25 +4,25 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `tron_agent` | Core agent struct — owns provider, capabilities, context manager |
-//! | `turn_runner` | Single turn: resolve live engine capability surface → build context → LLM call → process stream → invocations |
+//! | `tron_agent` | Core agent struct — owns provider, primitive surface, and context manager |
+//! | `turn_runner` | Single turn: resolve `execute` → build context → LLM call → process stream → primitive invocations |
 //! | `stream_processor` | Consumes `Stream<StreamEvent>`, drives the select loop |
 //! | `stream_state` | Accumulator struct + event handlers for stream processing |
-//! | `capability_invocation_executor` | Execute capability invocations with policy/hooks/cancellation, derive stable engine idempotency from model-facing `execute.idempotencyKey` when supplied, then route actual execution through canonical engine functions; production fails closed if the live catalog target is unavailable |
+//! | `capability_invocation_executor` | Execute model-emitted primitive calls through the engine host with cancellation and session event projection |
 //! | `event_emitter` | Broadcast channel wrapper for agent lifecycle events |
 //! | `compaction_handler` | Pre-turn compaction trigger, subagent summarizer, committed boundary events, and terminal no-op live progress |
 //!
 //! ## Data Flow
 //!
-//! `turn_runner` → live catalog capability projection → LLM provider →
-//! `stream_processor` → `capability_invocation_executor` → canonical engine invocation → loop
+//! `turn_runner` → primitive `execute` projection → LLM provider →
+//! `stream_processor` → `capability_invocation_executor` → engine invocation → loop
 //!
 //! `TronAgent` receives the persisted session turn count when resumed. Runtime
 //! events and token records use `persisted_turn_count + run_turn`, while
 //! `RunResult.turns_executed` stays scoped to the current prompt run.
-//! Hosted and local providers both receive the live `execute` primitive plus
-//! the bounded worker guide; local policy strips heavier context blocks without
-//! removing the autonomous worker-extension recipe or `harness_doc` pointer.
+//! Hosted and local providers both receive the live `execute` primitive. PET-4
+//! and PET-6 own removal of the remaining rules, hooks, skills, guardrails, and
+//! context policy planes around this loop.
 
 pub mod capability_invocation_executor;
 pub mod compaction_handler;

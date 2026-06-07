@@ -7,7 +7,7 @@ use crate::engine::{
     EngineHostHandle, Invocation, InvocationId, PublishStreamEvent, TraceId, VisibilityScope,
 };
 
-/// Typed publisher for agent runtime and queue topics.
+/// Typed publisher for agent runtime events.
 pub(crate) struct AgentStreamPublisher<'a> {
     engine_host: &'a EngineHostHandle,
 }
@@ -47,41 +47,6 @@ impl<'a> AgentStreamPublisher<'a> {
                 session_id: Some(session_id.to_owned()),
                 workspace_id: invocation.causal_context.workspace_id.clone(),
                 producer: "agent::prompt".to_owned(),
-                trace_id: Some(invocation.causal_context.trace_id.clone()),
-                parent_invocation_id: Some(invocation.id.clone()),
-            })
-            .await;
-    }
-
-    pub(crate) async fn queue(
-        &self,
-        invocation: &Invocation,
-        session_id: &str,
-        action: &str,
-        payload: Value,
-    ) {
-        let _ = self
-            .engine_host
-            .publish_stream_event(PublishStreamEvent {
-                topic: contract::STREAM_TOPICS[1].to_owned(),
-                payload: json!({
-                    "action": action,
-                    "sessionId": session_id,
-                    "traceId": invocation.causal_context.trace_id.as_str(),
-                    "invocationId": invocation.id.as_str(),
-                    "parentInvocationId": invocation
-                        .causal_context
-                        .parent_invocation_id
-                        .as_ref()
-                        .map(|id| id.as_str()),
-                    "catalogRevision": invocation.causal_context.catalog_revision.0,
-                    "idempotencyKey": invocation.causal_context.idempotency_key.clone(),
-                    "payload": payload,
-                }),
-                visibility: VisibilityScope::Session,
-                session_id: Some(session_id.to_owned()),
-                workspace_id: invocation.causal_context.workspace_id.clone(),
-                producer: "agent::queue".to_owned(),
                 trace_id: Some(invocation.causal_context.trace_id.clone()),
                 parent_invocation_id: Some(invocation.id.clone()),
             })

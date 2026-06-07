@@ -106,39 +106,13 @@ pub(super) fn build_turn_context(
 }
 
 pub(super) async fn build_capability_primer_context(
-    engine_host: Option<&crate::engine::EngineHostHandle>,
-    session_id: &str,
-    workspace_id: Option<&str>,
-    execution_spec: &crate::shared::profile::AgentExecutionSpec,
-    context_policy: &local_policy::ContextPolicy,
+    _engine_host: Option<&crate::engine::EngineHostHandle>,
+    _session_id: &str,
+    _workspace_id: Option<&str>,
+    _execution_spec: &crate::shared::profile::AgentExecutionSpec,
+    _context_policy: &local_policy::ContextPolicy,
 ) -> Result<Option<String>, crate::shared::server::errors::CapabilityError> {
-    let Some(host) = engine_host else {
-        return Ok(None);
-    };
-    let capability_execution_policy_id = context_policy
-        .capability_execution_policy_id()
-        .unwrap_or("default");
-    let Some(capability_execution_policy) =
-        execution_spec.capability_execution_policy(capability_execution_policy_id)
-    else {
-        return Ok(None);
-    };
-    let primer_policy_id = capability_execution_policy
-        .context_primer_policy
-        .as_deref()
-        .unwrap_or("coreFirstParty");
-    let Some(profile_policy) = execution_spec.context_primer_policy(primer_policy_id) else {
-        return Ok(None);
-    };
-    let policy = crate::domains::capability::registry::CapabilityContextPrimerPolicy {
-        enabled: profile_policy.enabled,
-        mode: profile_policy.mode.clone(),
-        max_tokens: profile_policy.max_tokens,
-        include_examples: profile_policy.include_examples,
-        include_compact_schemas: profile_policy.include_compact_schemas,
-    };
-    crate::domains::capability::render_capability_primer(host, session_id, workspace_id, &policy)
-        .await
+    Ok(None)
 }
 
 pub(super) async fn resolve_provider_primitive_surface(

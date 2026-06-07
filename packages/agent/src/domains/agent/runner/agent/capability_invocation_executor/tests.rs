@@ -146,7 +146,7 @@ async fn catalog_target_requires_engine_host_for_execution() {
 }
 
 #[tokio::test]
-async fn model_capability_invocation_invokes_capability_primitive_through_engine() {
+async fn model_capability_invocation_invokes_execute_primitive_through_engine() {
     let server = crate::shared::server::test_support::make_test_context();
     let spec = default_execution_spec();
     let context_policy =
@@ -178,17 +178,10 @@ async fn model_capability_invocation_invokes_capability_primitive_through_engine
 
     let mut args = serde_json::Map::new();
     args.insert(
-        "intent".to_owned(),
-        Value::String("Read the fixture file through the capability system".to_owned()),
+        "operation".to_owned(),
+        Value::String("file_read".to_owned()),
     );
-    args.insert(
-        "target".to_owned(),
-        Value::String("filesystem::read_file".to_owned()),
-    );
-    args.insert(
-        "arguments".to_owned(),
-        json!({"path": file_path.to_string_lossy()}),
-    );
+    args.insert("path".to_owned(), Value::String("note.txt".to_owned()));
     let call = CapabilityInvocationDraft::new("tc1", "execute", args);
     let result = execute_capability_invocation(
         &call,
@@ -198,43 +191,8 @@ async fn model_capability_invocation_invokes_capability_primitive_through_engine
     )
     .await;
 
-    assert_eq!(result.result.is_error, None);
+    assert_eq!(result.result.is_error, Some(false));
     match result.result.content {
-        CapabilityResultBody::Text(text) => assert!(text.contains("hello from engine")),
-        CapabilityResultBody::Blocks(blocks) => {
-            let rendered = blocks
-                .iter()
-                .map(|block| format!("{block:?}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            assert!(rendered.contains("hello from engine"));
-        }
-    }
-
-    let mut intent_only_args = serde_json::Map::new();
-    intent_only_args.insert(
-        "intent".to_owned(),
-        Value::String("Use the filesystem read file capability to read a file".to_owned()),
-    );
-    intent_only_args.insert(
-        "arguments".to_owned(),
-        json!({"path": file_path.to_string_lossy()}),
-    );
-    let intent_only_call = CapabilityInvocationDraft::new("tc2", "execute", intent_only_args);
-    let intent_only_result = execute_capability_invocation(
-        &intent_only_call,
-        "s1",
-        tempdir.path().to_str().expect("utf8 tempdir"),
-        &ctx,
-    )
-    .await;
-
-    assert_eq!(
-        intent_only_result.result.is_error, None,
-        "{:?}",
-        intent_only_result.result
-    );
-    match intent_only_result.result.content {
         CapabilityResultBody::Text(text) => assert!(text.contains("hello from engine")),
         CapabilityResultBody::Blocks(blocks) => {
             let rendered = blocks
