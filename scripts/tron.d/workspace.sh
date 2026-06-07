@@ -16,25 +16,18 @@ ensure_prod_binary() {
     print_warning "Contributor service binary is missing or corrupt"
 
     if [ -f "$CONTRIBUTOR_DIR/tron.bak" ] \
-        && [ -f "$CONTRIBUTOR_DIR/tron-program-worker.bak" ] \
-        && file "$CONTRIBUTOR_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O" \
-        && file "$CONTRIBUTOR_DIR/tron-program-worker.bak" 2>/dev/null | grep -q "Mach-O"; then
+        && file "$CONTRIBUTOR_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from backup..."
-        cp "$CONTRIBUTOR_DIR/tron-program-worker.bak" "$CONTRIBUTOR_DIR/tron-program-worker"
         if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
-            rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
             return 1
         fi
-        rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
         codesign_bundle "$INSTALLED_BUNDLE"
         print_success "Restored from backup"
         return 0
     fi
 
     if [ -f "$RELEASE_BINARY" ] \
-        && [ -f "$RELEASE_PROGRAM_WORKER" ] \
-        && file "$RELEASE_BINARY" 2>/dev/null | grep -q "Mach-O" \
-        && file "$RELEASE_PROGRAM_WORKER" 2>/dev/null | grep -q "Mach-O"; then
+        && file "$RELEASE_BINARY" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from release build..."
         create_app_bundle "$INSTALLED_BUNDLE" "$RELEASE_BINARY"
         codesign_bundle "$INSTALLED_BUNDLE"

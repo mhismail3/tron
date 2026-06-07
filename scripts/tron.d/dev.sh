@@ -188,7 +188,7 @@ dev_start_foreground() {
 
     # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
     prepare_dev_relay_env
-    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron --bin tron-program-worker
+    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
     local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
     create_app_bundle "$DEV_BUNDLE" "$dev_src"
     codesign_bundle "$DEV_BUNDLE"
@@ -233,7 +233,7 @@ dev_start_background() {
 
     # Build, then wrap in app bundle so macOS TCC permissions persist across rebuilds
     prepare_dev_relay_env
-    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron --bin tron-program-worker
+    cargo build --profile dev-server --manifest-path "$RUST_WORKSPACE/Cargo.toml" --bin tron
     local dev_src="$RUST_WORKSPACE/target/dev-server/tron"
     create_app_bundle "$DEV_BUNDLE" "$dev_src"
     codesign_bundle "$DEV_BUNDLE"

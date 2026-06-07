@@ -1,12 +1,11 @@
 //! Agent runner — wraps `TronAgent` with orchestrator integration.
 //!
-//! Handles skill injection, background hook draining, and
-//! the critical `agent.complete` → `agent.ready` ordering.
+//! Handles primitive run execution and the critical
+//! `agent.complete` → `agent.ready` ordering.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
-use crate::domains::agent::runner::hooks::engine::HookEngine;
 use crate::shared::events::{BaseEvent, TronEvent};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -20,18 +19,15 @@ use crate::domains::agent::runner::types::{RunContext, RunResult};
 /// Run an agent with orchestrator integration.
 ///
 /// This wraps `TronAgent::run` with:
-/// 1. Pre-run: drain background hooks from previous run
-/// 2. Build and inject `RunContext` (skills, tasks, subagent results)
-/// 3. Execute `agent.run(content, ctx)`
-/// 4. Post-run: emit `agent.complete`
-/// 5. Post-run: drain background hooks
-/// 6. Post-run: emit `agent.ready` (MUST be after `agent.complete`)
+/// 1. Build and inject the primitive `RunContext`
+/// 2. Execute `agent.run(content, ctx)`
+/// 3. Forward streamed agent events
+/// 4. Emit `agent.ready` after the forwarded `agent.complete`
 #[instrument(skip_all, fields(session_id = agent.session_id()))]
 pub async fn run_agent(
     agent: &mut TronAgent,
     content: &str,
     ctx: RunContext,
-    hooks: &Option<Arc<HookEngine>>,
     broadcast: &Arc<EventEmitter>,
     sequence_counter: Option<Arc<AtomicI64>>,
 ) -> RunResult {
@@ -43,19 +39,7 @@ pub async fn run_agent(
         agent.set_sequence_counter(counter.clone());
     }
 
-    // INVARIANT: drain background hooks before accepting a new prompt — prevents
-    // stale hook state from previous run interfering with the new run.
-    if let Some(hook_engine) = hooks {
-        let pending = hook_engine.pending_background_count();
-        debug!(
-            pending = pending,
-            "[agent_runner] draining background hooks"
-        );
-        hook_engine.wait_for_background().await;
-        debug!("[agent_runner] background hooks drained");
-    }
-
-    // 2. Forward agent events to broadcast channel
+    // Forward agent events to broadcast channel.
     let mut agent_rx = agent.subscribe();
     let broadcast_clone = broadcast.clone();
     let forward_cancel = CancellationToken::new();
@@ -83,7 +67,7 @@ pub async fn run_agent(
         }
     });
 
-    // 3. Run the agent
+    // Run the agent.
     let result = agent.run(content, ctx).await;
 
     // Signal the forward task to drain remaining buffered events and exit
@@ -101,11 +85,6 @@ pub async fn run_agent(
             "forward task did not drain within 100ms, aborting"
         );
         abort_handle.abort();
-    }
-
-    // 5. Drain background hooks
-    if let Some(hook_engine) = hooks {
-        hook_engine.wait_for_background().await;
     }
 
     debug!(session_id, stop_reason = ?result.stop_reason, turns = result.turns_executed, "agent run completed");
@@ -259,7 +238,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(&mut agent, "Hello", run_context(), &None, &broadcast, None).await;
+        let result = run_agent(&mut agent, "Hello", run_context(), &broadcast, None).await;
 
         assert_eq!(result.stop_reason, StopReason::EndTurn);
         assert_eq!(result.turns_executed, 1);
@@ -292,7 +271,7 @@ mod tests {
             ..run_context()
         };
 
-        let result = run_agent(&mut agent, "Use state", ctx, &None, &broadcast, None).await;
+        let result = run_agent(&mut agent, "Use state", ctx, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
     }
 
@@ -303,7 +282,7 @@ mod tests {
 
         let ctx = RunContext { ..run_context() };
 
-        let result = run_agent(&mut agent, "No state", ctx, &None, &broadcast, None).await;
+        let result = run_agent(&mut agent, "No state", ctx, &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
     }
 
@@ -313,7 +292,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let _ = run_agent(&mut agent, "Hello", run_context(), &None, &broadcast, None).await;
+        let _ = run_agent(&mut agent, "Hello", run_context(), &broadcast, None).await;
 
         // Count agent_end events — there should be exactly one (from TronAgent, forwarded)
         let mut agent_end_count = 0;
@@ -355,7 +334,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(&mut agent, "Hi", run_context(), &None, &broadcast, None).await;
+        let result = run_agent(&mut agent, "Hi", run_context(), &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::Error);
 
         // Should still emit agent_ready after error
@@ -413,7 +392,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(&mut agent, "Hi", run_context(), &None, &broadcast, None).await;
+        let result = run_agent(&mut agent, "Hi", run_context(), &broadcast, None).await;
         assert_eq!(result.stop_reason, StopReason::EndTurn);
 
         // Collect all forwarded events
@@ -450,7 +429,7 @@ mod tests {
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            run_agent(&mut agent, "Hello", run_context(), &None, &broadcast, None),
+            run_agent(&mut agent, "Hello", run_context(), &broadcast, None),
         )
         .await;
 
@@ -466,7 +445,7 @@ mod tests {
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
 
-        let result = run_agent(&mut agent, "Hello", run_context(), &None, &broadcast, None).await;
+        let result = run_agent(&mut agent, "Hello", run_context(), &broadcast, None).await;
 
         assert_eq!(result.stop_reason, StopReason::EndTurn);
 

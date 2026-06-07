@@ -27,13 +27,11 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?,
         CapabilityContract::new("system::shutdown", "system", EffectClass::IrreversibleSideEffect, RiskLevel::Critical, Some("system.write"))
-            .approval_required(true)
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"acknowledged":{"type":"boolean"}},"required":["acknowledged"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("system", "system:shutdown", 60000))
             .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "shutdown is irreversible for the current process; restart Tron manually"))
-            .high_risk_contract(json!({"approvalRequiredForAgentVisibility":true,"resourceLock":{"idTemplate":"system:shutdown","kind":"system","reason":"serializes the graceful server shutdown command","required":true,"ttlMs":60000},"rollbackOrCompensation":"shutdown is irreversible for the current process; restart Tron manually","streamTopics": STREAM_TOPICS,"version":1}))
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("system::check_for_updates", "system", EffectClass::PureRead, RiskLevel::Low, Some("system.read"))

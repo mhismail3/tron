@@ -24,29 +24,18 @@
 //! - `EngineHostHandle` gives server startup and runtime services an intent-shaped
 //!   boundary that prepares under lock, executes direct and delegated handlers
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
-//! - model-facing agents discover, inspect, and invoke live canonical
-//!   capabilities only through the capability-domain primitives; internal
-//!   clients preflight schema/authority before creating approval records, and
-//!   agents cannot resolve approvals themselves;
-//! - canonical domain functions such as `events::append`,
-//!   `filesystem::create_dir`, and `skills::activate` are the only executable
-//!   domain surface;
-//! - stream, state, queue, approval, catalog, grant, worker, observability, and
-//!   generated-UI workers plus the generic `resource` kernel are registered as
-//!   first-class primitive workers with in-memory and SQLite-backed stores
-//!   scoped outside the production event-store migration; observability traces
-//!   correlate invocation, catalog, stream, queue, resource-event, approval,
-//!   lease, and compensation records by durable ids rather than timestamp
-//!   adjacency;
-//! - approval is a first-class primitive: high-risk agent-visible functions can
-//!   pause into `approval::*` records and scoped stream events before execution,
-//!   each record snapshots target effect/risk/authority/idempotency/lease/
-//!   compensation metadata for human review, idempotency is scoped by target
-//!   function/session/workspace/caller key, and
-//!   `approval::resolve` remains a user/client-owned primitive routed through
-//!   `EngineHostHandle` so the stored invocation resumes in one trace; if that
-//!   resolve primitive is unavailable, the approval remains pending and the
-//!   child target is not executed;
+//! - model-facing agents act through the capability-domain `execute` primitive;
+//!   retained registration policy checks infrastructure contracts such as
+//!   idempotency, schema shape, resource leases, and compensation, not product
+//!   approval metadata;
+//! - registered domain functions are loop infrastructure only; retired product
+//!   domains are not part of startup registration on this branch;
+//! - stream, state, queue, catalog, grant, worker, observability, and generated-UI
+//!   workers plus the generic `resource` kernel are retained only where still
+//!   needed by the primitive loop or awaiting their teardown scorecard rows;
+//!   observability traces correlate invocation, catalog, stream, queue,
+//!   resource-event, lease, and compensation records by durable ids rather than
+//!   timestamp adjacency;
 //! - resource leases and compensation contracts are first-class primitives for
 //!   shared-state mutations, so the host can acquire/release one domain resource
 //!   from payload fields plus causal context such as `sessionId`, record

@@ -14,7 +14,6 @@ pub(crate) struct PromptRunPlan {
     pub(super) event_store: Arc<crate::domains::session::event_store::EventStore>,
     pub(super) profile_runtime: Arc<crate::domains::agent::runner::ProfileRuntime>,
     pub(super) shutdown_token: Option<tokio_util::sync::CancellationToken>,
-    pub(super) worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) engine_causality: Option<PromptEngineCausality>,
     pub(super) sequence_counter: Option<Arc<AtomicI64>>,

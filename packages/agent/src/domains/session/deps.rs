@@ -16,7 +16,6 @@ pub(crate) struct Deps {
     pub(super) profile_runtime: Arc<ProfileRuntime>,
     pub(super) session_manager: Arc<SessionManager>,
     pub(super) shutdown_coordinator: Option<Arc<crate::app::shutdown::ShutdownCoordinator>>,
-    pub(super) worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
 }
 
 impl Deps {
@@ -29,7 +28,6 @@ impl Deps {
             profile_runtime: deps.profile_runtime.clone(),
             session_manager: deps.session_manager.clone(),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
-            worktree_coordinator: deps.worktree_coordinator.clone(),
         }
     }
 

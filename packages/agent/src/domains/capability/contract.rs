@@ -3,8 +3,8 @@
 //! This worker is the model-facing harness collapse point: providers see one
 //! `execute` primitive that can observe, touch agent-owned state, read/write the
 //! workspace, and run bounded local commands. The primitive branch deliberately
-//! does not retain catalog search, target routing, plugin promotion, approval
-//! policy, worker-pack recipes, or administrative compatibility functions here.
+//! does not retain catalog search, target routing, plugin promotion, worker-pack
+//! recipes, or administrative compatibility functions here.
 
 use serde_json::json;
 
@@ -49,7 +49,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                 "description": concat!(
                     "Primitive host operation for the bare Tron loop. ",
                     "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, and run a bounded local command. ",
-                    "There is no built-in capability catalog, no search/inspect/approval side tool, no worker-pack recipe layer, and no target namespace routing. ",
+                    "There is no built-in capability catalog, no search/inspect side tool, no worker-pack recipe layer, and no target namespace routing. ",
                     "Choose one operation per call. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()

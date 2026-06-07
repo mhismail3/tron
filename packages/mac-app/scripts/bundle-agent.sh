@@ -13,9 +13,8 @@
 # Usage:
 #   bundle-agent.sh                 # default: build release + stage
 #   bundle-agent.sh --profile debug # build debug profile instead
-#   bundle-agent.sh --skip-build    # assume target/release/{tron,tron-program-worker} exist
-#   bundle-agent.sh --source PATH   # explicit path to prebuilt tron; worker is resolved as a sibling
-#   bundle-agent.sh --worker-source PATH # explicit path to a prebuilt program worker
+#   bundle-agent.sh --skip-build    # assume target/release/tron exists
+#   bundle-agent.sh --source PATH   # explicit path to prebuilt tron
 #   bundle-agent.sh --clean         # remove staged helper binaries and launch metadata
 #
 # Local push relay dogfood:
@@ -54,9 +53,7 @@ DEV_HELPER_MACOS="$DEV_HELPER_CONTENTS/MacOS"
 DEV_HELPER_RESOURCES="$DEV_HELPER_CONTENTS/Resources"
 LAUNCH_AGENT_DIR="$LIBRARY_DIR/LaunchAgents"
 STAGING_PATH="$HELPER_MACOS/tron"
-STAGING_WORKER_PATH="$HELPER_MACOS/tron-program-worker"
 DEV_STAGING_PATH="$DEV_HELPER_MACOS/tron"
-DEV_STAGING_WORKER_PATH="$DEV_HELPER_MACOS/tron-program-worker"
 HELPER_INFO_PLIST="$HELPER_CONTENTS/Info.plist"
 DEV_HELPER_INFO_PLIST="$DEV_HELPER_CONTENTS/Info.plist"
 LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.tron.server.plist"
@@ -66,7 +63,6 @@ DEV_LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.tron.server.dev.plist"
 
 profile="release"
 source_override=""
-worker_source_override=""
 skip_build=0
 do_clean=0
 
@@ -76,8 +72,6 @@ while [ $# -gt 0 ]; do
         --profile=*)  profile="${1#--profile=}"; shift ;;
         --source)     source_override="$2"; shift 2 ;;
         --source=*)   source_override="${1#--source=}"; shift ;;
-        --worker-source)   worker_source_override="$2"; shift 2 ;;
-        --worker-source=*) worker_source_override="${1#--worker-source=}"; shift ;;
         --skip-build) skip_build=1; shift ;;
         --clean)      do_clean=1; shift ;;
         --help|-h)
@@ -116,36 +110,7 @@ resolve_source() {
     esac
 }
 
-resolve_worker_source() {
-    if [ -n "$worker_source_override" ]; then
-        if [ ! -x "$worker_source_override" ]; then
-            echo "error: --worker-source path not executable: $worker_source_override" >&2
-            exit 2
-        fi
-        printf '%s\n' "$worker_source_override"
-        return
-    fi
-
-    if [ -n "$source_override" ]; then
-        local sibling
-        sibling="$(dirname "$source_override")/tron-program-worker"
-        if [ ! -x "$sibling" ]; then
-            echo "error: sibling tron-program-worker not executable beside --source: $sibling" >&2
-            exit 2
-        fi
-        printf '%s\n' "$sibling"
-        return
-    fi
-
-    case "$profile" in
-        release) printf '%s/target/release/tron-program-worker\n' "$AGENT_DIR" ;;
-        debug)   printf '%s/target/debug/tron-program-worker\n' "$AGENT_DIR" ;;
-        *) echo "error: unknown --profile '$profile' (expected release|debug)" >&2; exit 64 ;;
-    esac
-}
-
 source_bin="$(resolve_source)"
-worker_source_bin="$(resolve_worker_source)"
 
 # --- local build env -----------------------------------------------------
 
@@ -228,8 +193,8 @@ if [ "$skip_build" -eq 0 ] && [ -z "$source_override" ]; then
     # omit any flag, or use `--profile dev`). Only `--release` is a
     # shorthand. Branch explicitly so we never pass an invalid flag.
     case "$profile" in
-        release) cargo_args=(build --release --bin tron --bin tron-program-worker --locked) ;;
-        debug)   cargo_args=(build           --bin tron --bin tron-program-worker --locked) ;;
+        release) cargo_args=(build --release --bin tron --locked) ;;
+        debug)   cargo_args=(build           --bin tron --locked) ;;
         *)       echo "error: unknown profile '$profile' for cargo invocation" >&2; exit 64 ;;
     esac
     echo "==> cargo ${cargo_args[*]}"
@@ -238,10 +203,6 @@ fi
 
 if [ ! -x "$source_bin" ]; then
     echo "error: source binary not found or not executable: $source_bin" >&2
-    exit 2
-fi
-if [ ! -x "$worker_source_bin" ]; then
-    echo "error: program worker binary not found or not executable: $worker_source_bin" >&2
     exit 2
 fi
 
@@ -423,36 +384,22 @@ PLIST
 # Atomic stage: copy to tempfile then rename, matching the pattern used
 # by the Rust agent's own atomic-write helper.
 tmp="$HELPER_MACOS/.tron.tmp.$$"
-worker_tmp="$HELPER_MACOS/.tron-program-worker.tmp.$$"
 dev_tmp="$DEV_HELPER_MACOS/.tron.tmp.$$"
-dev_worker_tmp="$DEV_HELPER_MACOS/.tron-program-worker.tmp.$$"
-trap 'rm -f "$tmp" "$worker_tmp" "$dev_tmp" "$dev_worker_tmp"' EXIT
+trap 'rm -f "$tmp" "$dev_tmp"' EXIT
 cp "$source_bin" "$tmp"
 chmod 0755 "$tmp"
 mv -f "$tmp" "$STAGING_PATH"
-cp "$worker_source_bin" "$worker_tmp"
-chmod 0755 "$worker_tmp"
-mv -f "$worker_tmp" "$STAGING_WORKER_PATH"
 cp "$source_bin" "$dev_tmp"
 chmod 0755 "$dev_tmp"
 mv -f "$dev_tmp" "$DEV_STAGING_PATH"
-cp "$worker_source_bin" "$dev_worker_tmp"
-chmod 0755 "$dev_worker_tmp"
-mv -f "$dev_worker_tmp" "$DEV_STAGING_WORKER_PATH"
 trap - EXIT
 
 # --- report --------------------------------------------------------------
 
 size_bytes=$(wc -c < "$STAGING_PATH" | tr -d ' ')
 sha=$(shasum -a 256 "$STAGING_PATH" | awk '{print $1}')
-worker_size_bytes=$(wc -c < "$STAGING_WORKER_PATH" | tr -d ' ')
-worker_sha=$(shasum -a 256 "$STAGING_WORKER_PATH" | awk '{print $1}')
 echo "staged $STAGING_PATH"
 echo "  from:   $source_bin"
 echo "  size:   $size_bytes bytes"
 echo "  sha256: $sha"
-echo "staged $STAGING_WORKER_PATH"
-echo "  from:   $worker_source_bin"
-echo "  size:   $worker_size_bytes bytes"
-echo "  sha256: $worker_sha"
 echo "staged isolated helper bundle at $DEV_HELPER_BUNDLE"

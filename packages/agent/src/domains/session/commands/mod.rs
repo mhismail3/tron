@@ -27,23 +27,6 @@ pub(super) fn resolve_session_profile(
         })
 }
 
-/// Release worktree for a session if one is active.
-///
-/// Logs and swallows errors — archive/delete must not fail due to worktree issues.
-/// Mirrors the invariant in `SessionManager::end_session()`: worktree is released
-/// BEFORE the session is marked as ended.
-pub(super) async fn release_worktree_if_active(deps: &Deps, session_id: &str) {
-    if let Some(ref coord) = deps.worktree_coordinator {
-        if let Err(e) = coord.release(session_id).await {
-            tracing::warn!(
-                session_id,
-                error = %e,
-                "failed to release worktree during session cleanup"
-            );
-        }
-    }
-}
-
 pub(crate) struct CreateSessionRequest {
     pub(crate) working_directory: String,
     pub(crate) model: String,

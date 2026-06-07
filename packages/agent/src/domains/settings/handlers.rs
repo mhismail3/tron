@@ -16,7 +16,7 @@ operation_bindings! {
             })
         },
         "update" => |invocation, deps| {
-            settings_update_value(Some(&invocation.payload), invocation, deps).await
+            settings_update_value(Some(&invocation.payload), deps).await
         },
         "reset_to_defaults" => |_invocation, deps| {
             settings_reset_to_defaults_value(deps).await

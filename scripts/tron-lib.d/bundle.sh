@@ -5,12 +5,6 @@ create_app_bundle() {
     local bundle_path="$1"
     local binary_src="$2"
     local canonical_version="${3:-}"
-    local worker_src
-    worker_src="$(dirname "$binary_src")/tron-program-worker"
-    if [ ! -x "$worker_src" ]; then
-        print_error "Cannot create app bundle: sibling tron-program-worker missing or not executable at $worker_src"
-        return 1
-    fi
     if [ -z "$canonical_version" ]; then
         canonical_version="$(tron_version_env_value TRON_VERSION)" || {
             print_error "Cannot create app bundle without VERSION.env"
@@ -83,8 +77,6 @@ PLIST
 
     cp "$binary_src" "$bundle_path/Contents/MacOS/tron"
     chmod +x "$bundle_path/Contents/MacOS/tron"
-    cp "$worker_src" "$bundle_path/Contents/MacOS/tron-program-worker"
-    chmod +x "$bundle_path/Contents/MacOS/tron-program-worker"
 }
 
 codesign_bundle() {

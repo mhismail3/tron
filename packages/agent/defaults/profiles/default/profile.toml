@@ -110,27 +110,6 @@ maxInlinePayloadBytes = 8192
 retentionEnabled = true
 maxDatabaseMb = 512
 
-[settings.hooks]
-defaultTimeoutMs = 5000
-discoveryTimeoutMs = 10000
-projectDir = ".agent/hooks"
-userDir = ".config/tron/hooks"
-extensions = [".prompt", ".ts", ".js", ".mjs", ".sh"]
-llmModel = "claude-haiku-4-5-20251001"
-errorPolicy = "continue"
-
-[[settings.hooks.builtinHooks]]
-id = "builtin:title-gen"
-enabled = true
-
-[[settings.hooks.builtinHooks]]
-id = "builtin:branch-name-gen"
-enabled = true
-
-[[settings.hooks.builtinHooks]]
-id = "builtin:suggest-prompts"
-enabled = true
-
 [settings.server]
 heartbeatIntervalMs = 30000
 memoryDbPath = "memory.db"
@@ -220,10 +199,6 @@ normalVisibleLines = 20
 [settings.ui.menu]
 maxVisibleCommands = 5
 
-[settings.skills]
-compactionPolicy = "clearAll"
-showIndex = "always"
-
 [settings.memory]
 autoRetainInterval = 10
 retainModel = "claude-sonnet-4-6"
@@ -237,16 +212,6 @@ crashRecoveryAbortTimeoutMs = 1800000
 opTimeoutNetworkMs = 60000
 opTimeoutLocalMs = 30000
 subagentConflictResolutionEnabled = true
-
-[settings.promptLibrary]
-historyEnabled = true
-historyMaxEntries = 10000
-historyMaxAgeDays = 0
-historyAutoPrune = true
-
-[settings.mcp]
-servers = []
-schemaRefreshTtlMs = 30000
 
 # Provider credential registry/store paths. Raw secrets are never inlined here.
 [auth]

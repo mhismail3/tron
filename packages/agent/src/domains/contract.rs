@@ -1,9 +1,9 @@
 //! Generic capability-contract builders.
 //!
-//! Domain contracts are the first-party plugin manifest for in-process workers:
+//! Domain contracts are the primitive manifest for retained in-process workers:
 //! they declare the canonical function id, schema, authority, risk/effect, and
-//! capability metadata that the registry projects into contracts,
-//! implementations, search documents, and the generated Worker Guide.
+//! capability metadata that the registry projects into contracts and
+//! implementations.
 //!
 //! Domain `contract.rs` files own their function inventory, schemas, risk,
 //! authority, idempotency, lease, compensation, and stream metadata. This
@@ -37,8 +37,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) visibility: VisibilityScope,
     /// Required domain authority scope.
     pub(crate) authority_scope: Option<&'static str>,
-    /// Whether the required authority needs approval.
-    pub(crate) approval_required: bool,
     /// Transport-level idempotency mode for engine client protocol bindings.
     pub(crate) idempotency_mode: TransportIdempotencyMode,
     /// Domain module provenance.
@@ -55,8 +53,6 @@ pub(crate) struct CapabilityContract {
     pub(crate) compensation: Option<CompensationContract>,
     /// Durable output contract enforced after handler execution.
     pub(crate) output_contract: DurableOutputContract,
-    /// Discovery-visible high-risk contract metadata.
-    pub(crate) high_risk_contract: Option<Value>,
     /// Stream topics emitted by the function.
     pub(crate) stream_topics: Vec<&'static str>,
     /// Human-readable discovery description.
@@ -98,7 +94,6 @@ impl CapabilityContract {
             risk_level,
             visibility: VisibilityScope::System,
             authority_scope,
-            approval_required: false,
             idempotency_mode: TransportIdempotencyMode::NotRequired,
             domain_module: owner_worker,
             request_schema: None,
@@ -107,7 +102,6 @@ impl CapabilityContract {
             resource_lease: None,
             compensation: None,
             output_contract: DurableOutputContract::None,
-            high_risk_contract: None,
             stream_topics: Vec::new(),
             description: None,
             tags: Vec::new(),
@@ -126,12 +120,6 @@ impl CapabilityContract {
     /// Override the behavior-owning domain worker.
     pub(crate) fn domain_worker(mut self, domain_worker: &'static str) -> Self {
         self.domain_worker = domain_worker;
-        self
-    }
-
-    /// Mark the authority requirement as approval-gated.
-    pub(crate) fn approval_required(mut self, approval_required: bool) -> Self {
-        self.approval_required = approval_required;
         self
     }
 
@@ -186,12 +174,6 @@ impl CapabilityContract {
     /// Attach durable output contract metadata.
     pub(crate) fn output_contract(mut self, contract: DurableOutputContract) -> Self {
         self.output_contract = contract;
-        self
-    }
-
-    /// Attach high-risk discovery metadata.
-    pub(crate) fn high_risk_contract(mut self, contract: Value) -> Self {
-        self.high_risk_contract = Some(contract);
         self
     }
 
@@ -250,8 +232,6 @@ impl CapabilityContract {
             resource_lease: self.resource_lease,
             compensation: self.compensation,
             output_contract: self.output_contract,
-            approval_required: self.approval_required,
-            high_risk_contract: self.high_risk_contract,
             stream_topics: self.stream_topics,
             description: self.description,
             tags: self.tags,
@@ -277,11 +257,7 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
     .with_tags(spec.tags.iter().map(|tag| (*tag).to_owned()).collect())
     .with_provenance(Provenance::system());
     if let Some(scope) = spec.authority_scope {
-        let mut requirement = AuthorityRequirement::scope(scope);
-        if spec.approval_required {
-            requirement = requirement.with_approval_required();
-        }
-        definition = definition.with_required_authority(requirement);
+        definition = definition.with_required_authority(AuthorityRequirement::scope(scope));
     }
     if let Some(contract) = &spec.idempotency {
         definition = definition.with_idempotency(contract.clone());
@@ -371,7 +347,6 @@ pub(crate) fn function_definition_for_capability(spec: &CapabilitySpec) -> Funct
         "domainAuthorityScope": spec.authority_scope,
         "idempotencyMode": spec.idempotency_mode.as_str(),
         "domainModule": spec.domain_module,
-        "highRiskContract": spec.high_risk_contract,
         "outputContract": spec.output_contract,
         "streamTopics": spec.stream_topics,
         "lifecycle": spec.lifecycle,

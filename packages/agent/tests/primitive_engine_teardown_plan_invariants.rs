@@ -34,7 +34,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
-        "Current score: **47/100**",
+        "Current score: **55/100**",
         "Status: **active execution artifact**",
         "Branch: `codex/primitive-engine-teardown`",
         "There are no users and no compatibility obligations.",
@@ -49,7 +49,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-3 | Single execute primitive | 12 | passed_after_fix |",
         "| PET-4 | Soul and agent-owned state workspace | 10 | passed_after_fix |",
         "| PET-5 | Session, event, ledger, and resource collapse | 8 | pending |",
-        "| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | running |",
+        "| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | passed_after_fix |",
         "| PET-7 | Self-authored worker/capability substrate | 8 | pending |",
         "| PET-8 | iOS primitive shell | 10 | pending |",
         "| PET-9 | Documentation and managed asset rewrite | 5 | pending |",
@@ -72,7 +72,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Evidence Manifest",
-        "Current score: **47/100**",
+        "Current score: **55/100**",
         "Status: **active execution artifact**",
         "New teardown branch: `codex/primitive-engine-teardown`",
         "Compatibility assumption: none.",
@@ -81,7 +81,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-2 | passed_after_fix |",
         "| PET-3 | passed_after_fix |",
         "| PET-4 | passed_after_fix |",
-        "| PET-6 | running |",
+        "| PET-6 | passed_after_fix |",
         "| PET-11 | pending |",
         "provider model-facing tool export proof",
         "iOS simulator target name, UDID, bundle id, launch return code",
@@ -476,4 +476,144 @@ fn prompt_loop_internals_have_no_hidden_policy_or_worker_planes() {
             label,
         );
     }
+}
+
+#[test]
+fn startup_context_has_no_product_policy_or_worker_managers() {
+    for (label, path) in [
+        ("server startup", "packages/agent/src/main_runtime.rs"),
+        (
+            "server runtime context",
+            "packages/agent/src/shared/server/context.rs",
+        ),
+        (
+            "domain registration context",
+            "packages/agent/src/domains/worker.rs",
+        ),
+        (
+            "context domain deps",
+            "packages/agent/src/domains/context/deps.rs",
+        ),
+        (
+            "agent domain deps",
+            "packages/agent/src/domains/agent/deps.rs",
+        ),
+    ] {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "SkillRegistry",
+                "skill_registry",
+                "MemoryRegistry",
+                "memory_registry",
+                "GuardrailEngine",
+                "guardrail",
+                "HookAbortTracker",
+                "hook_abort_tracker",
+                "HookEngine",
+                "SubagentManager",
+                "subagent_manager",
+                "shared_subagent_manager",
+                "ProcessManagerOps",
+                "process_manager",
+                "JobManagerOps",
+                "job_manager",
+                "OutputBufferRegistry",
+                "output_buffer_registry",
+                "CronState",
+                "CronScheduler",
+                "init_cron",
+                "cron_scheduler",
+                "McpState",
+                "McpRouter",
+                "init_mcp",
+                "mcp_router",
+                "transcription_engine",
+                "CapabilityExecutionPolicy",
+                "capability_execution_policy",
+                "context_policy",
+            ],
+            label,
+        );
+    }
+}
+
+#[test]
+fn retained_registered_contracts_do_not_encode_approval_or_policy_planes() {
+    for (label, path) in [
+        (
+            "agent contract",
+            "packages/agent/src/domains/agent/contract.rs",
+        ),
+        (
+            "auth contract",
+            "packages/agent/src/domains/auth/contract.rs",
+        ),
+        (
+            "context contract",
+            "packages/agent/src/domains/context/contract.rs",
+        ),
+        (
+            "message contract",
+            "packages/agent/src/domains/message/contract.rs",
+        ),
+        (
+            "model contract",
+            "packages/agent/src/domains/model/contract.rs",
+        ),
+        (
+            "session contract",
+            "packages/agent/src/domains/session/contract.rs",
+        ),
+        (
+            "settings contract",
+            "packages/agent/src/domains/settings/contract.rs",
+        ),
+        (
+            "system contract",
+            "packages/agent/src/domains/system/contract.rs",
+        ),
+    ] {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                ".approval_required(",
+                ".high_risk_contract(",
+                "approvalRequired",
+                "approval required",
+                "guardrail",
+                "policy",
+            ],
+            label,
+        );
+    }
+}
+
+#[test]
+fn engine_registration_policy_has_no_approval_metadata_exceptions() {
+    let policy = read_repo_file("packages/agent/src/engine/policy.rs");
+    assert_absent(
+        &policy,
+        &[
+            "requires approval metadata",
+            "requires_approval_for_agent_visibility",
+            "sandboxAutonomy",
+            "conditionalApproval",
+            "approvalRequiredFor",
+            "highRiskContract",
+        ],
+        "engine registration policy",
+    );
+
+    let types = read_repo_file("packages/agent/src/engine/types.rs");
+    assert_absent(
+        &types,
+        &[
+            "requires_approval_for_agent_visibility",
+            "requires explicit approval metadata",
+        ],
+        "engine effect helpers",
+    );
 }

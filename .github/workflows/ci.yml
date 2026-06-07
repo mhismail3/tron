@@ -230,20 +230,19 @@ jobs:
         with:
           cache-workspaces: packages/agent
 
-      - name: Build agent helpers (debug, for embedding)
+      - name: Build agent helper (debug, for embedding)
         working-directory: packages/agent
-        run: cargo build --bin tron --bin tron-program-worker --locked
+        run: cargo build --bin tron --locked
 
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Stage agent helper binaries
+      - name: Stage agent helper binary
         run: ./scripts/bundle-agent.sh --skip-build --profile debug
 
-      - name: Validate staged helper binaries
+      - name: Validate staged helper binary
         run: |
           test -x "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
-          test -x "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron-program-worker"
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -296,7 +295,6 @@ jobs:
             exit 0
           fi
           test -x "$APP_PATH/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
-          test -x "$APP_PATH/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron-program-worker"
           mkdir -p dist
           # Minimal DMG — layout args can fail without a signing identity.
           create-dmg --volname "Tron Dry-Run" --hdiutil-quiet \

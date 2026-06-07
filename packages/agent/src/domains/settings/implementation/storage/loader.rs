@@ -422,7 +422,6 @@ authProfile = "default"
             settings.context.compactor.max_tokens,
             defaults.context.compactor.max_tokens
         );
-        assert!(settings.guardrails.is_none());
     }
 
     #[test]
@@ -607,7 +606,7 @@ heartbeatIntervalMs = 0
     }
 
     #[test]
-    fn load_with_guardrails() {
+    fn load_rejects_removed_guardrail_settings() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
         write_sparse_settings(
@@ -618,10 +617,10 @@ maxEntries = 500
 "#,
         );
 
-        let settings = load_settings_from_path(&path).unwrap();
-        assert!(settings.guardrails.is_some());
-        let g = settings.guardrails.unwrap();
-        assert_eq!(g.audit.unwrap().max_entries, 500);
+        let err = load_settings_from_path(&path).unwrap_err();
+
+        assert!(matches!(err, SettingsError::InvalidValue(_)));
+        assert!(err.to_string().contains("guardrails"));
     }
 
     #[test]

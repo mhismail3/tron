@@ -5,23 +5,16 @@ use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::domains::agent::runner::guardrails::GuardrailEngine;
-use crate::domains::agent::runner::memory::MemoryRegistry;
 use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
 use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
-use crate::domains::agent::runner::orchestrator::subagent_manager::SubagentManager;
 use crate::domains::model::providers::ProviderHealthTracker;
 use crate::domains::model::providers::provider::ProviderFactory;
 use crate::domains::session::event_store::EventStore;
-use crate::domains::skills::registry::SkillRegistry;
-use crate::domains::transcription::SharedTranscriptionEngine;
 use crate::engine::EngineHostHandle;
 use metrics::{counter, histogram};
-use parking_lot::{Mutex, RwLock};
 
 use crate::app::shutdown::{ShutdownCoordinator, ShutdownPhase};
 use crate::domains::session::context::ContextArtifactsService;
-use crate::platform::device_broker::DeviceRequestBroker;
 use crate::shared::server::errors::CapabilityError;
 
 const DEFAULT_BLOCKING_CONCURRENCY: usize = 16;
@@ -174,37 +167,6 @@ pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>
 pub struct AgentDeps {
     /// Factory that creates a fresh LLM provider per request (reads current model + auth).
     pub provider_factory: Arc<dyn ProviderFactory>,
-    /// Guardrail engine (optional).
-    pub guardrails: Option<Arc<parking_lot::Mutex<GuardrailEngine>>>,
-}
-
-/// Runtime dependencies used by the capabilities domain to construct built-in capability
-/// capability handlers.
-#[derive(Clone)]
-pub struct CapabilitySupportConfig {
-    /// Shared HTTP client (connection pool reused across web/MCP-related capabilities).
-    pub http_client: reqwest::Client,
-    /// Process sandbox settings from the active profile.
-    pub sandbox_settings: crate::domains::settings::ProcessSandboxSettings,
-    /// Computer-use settings from the active profile.
-    pub computer_use_settings: crate::domains::settings::ComputerUseSettings,
-    /// Notification delivery implementation. Production may be APNS-backed;
-    /// development/test contexts use the stub delegate.
-    pub notify_delegate:
-        Arc<dyn crate::domains::capability_support::implementations::traits::NotifyDelegate>,
-}
-
-impl Default for CapabilitySupportConfig {
-    fn default() -> Self {
-        Self {
-            http_client: reqwest::Client::new(),
-            sandbox_settings: crate::domains::settings::ProcessSandboxSettings::default(),
-            computer_use_settings: crate::domains::settings::ComputerUseSettings::default(),
-            notify_delegate: Arc::new(
-                crate::domains::capability_support::implementations::backends::StubNotifyDelegate,
-            ),
-        }
-    }
 }
 
 /// Broad server runtime context used at app setup and domain registration.
@@ -222,39 +184,20 @@ pub struct ServerRuntimeContext {
     pub event_store: Arc<EventStore>,
     /// Shared live capability engine host.
     pub engine_host: EngineHostHandle,
-    /// Skill registry (read/write).
-    pub skill_registry: Arc<RwLock<SkillRegistry>>,
-    /// User-memory registry. Loads `~/.tron/memory/MEMORY.md` + the
-    /// listing of `rules/*.md` files into every turn's context. `Mutex` (not
-    /// `RwLock`) because `content()` mutates the cache on fingerprint mismatch
-    /// — see `runtime::memory` module docs for the full invariant set.
-    pub memory_registry: Arc<Mutex<MemoryRegistry>>,
     /// Path to the sparse user profile settings overlay.
     pub settings_path: PathBuf,
     /// Compiled active profile runtime.
     pub profile_runtime: Arc<crate::domains::agent::runner::profile_runtime::ProfileRuntime>,
     /// Agent execution dependencies (None = prompt handler returns error).
     pub agent_deps: Option<AgentDeps>,
-    /// Domain-owned capability construction dependencies.
-    pub capability_support_config: CapabilitySupportConfig,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
-    /// Transcription engine (lazily loaded via `OnceLock`).
-    pub transcription_engine: SharedTranscriptionEngine,
-    /// Subagent manager for spawning subsessions (None = keyword summarizer mode).
-    pub subagent_manager: Option<Arc<SubagentManager>>,
     /// Provider health tracker for rolling-window error rate monitoring.
     pub health_tracker: Arc<ProviderHealthTracker>,
     /// Shutdown coordinator for registering background task handles.
     pub shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     /// Server origin (e.g. `"localhost:9847"`).
     pub origin: String,
-    /// Cron scheduler (None = cron not available).
-    pub cron_scheduler: Option<std::sync::Arc<crate::domains::cron::CronScheduler>>,
-    /// Worktree coordinator for session isolation (None = isolation disabled).
-    pub worktree_coordinator: Option<std::sync::Arc<crate::domains::worktree::WorktreeCoordinator>>,
-    /// Device request broker for iOS request/response round-trips.
-    pub device_request_broker: Option<Arc<DeviceRequestBroker>>,
     /// Shared rules/memory/rules-index artifact cache for session and prompt loading.
     pub context_artifacts: Arc<ContextArtifactsService>,
     /// Path to auth JSON file (`~/.tron/profiles/auth.json`).
@@ -265,24 +208,6 @@ pub struct ServerRuntimeContext {
             std::collections::HashMap<String, crate::domains::auth::flows::PendingOAuthFlow>,
         >,
     >,
-    /// MCP router for managing MCP servers. Production contexts always provide
-    /// one; isolated handler tests may leave it absent.
-    pub mcp_router: Option<Arc<tokio::sync::RwLock<crate::domains::mcp::router::McpRouter>>>,
-    /// Active display stream registry (shared with display capabilities for on-demand cancellation).
-    pub display_stream_registry:
-        Option<crate::domains::capability_support::implementations::ui::display_stream::ActiveStreamRegistry>,
-    /// Process manager for background process lifecycle (shared with capabilities).
-    pub process_manager:
-        Option<Arc<dyn crate::domains::capability_support::implementations::traits::ProcessManagerOps>>,
-    /// Unified job manager for waiting on and managing processes + subagents.
-    pub job_manager: Option<Arc<dyn crate::domains::capability_support::implementations::traits::JobManagerOps>>,
-    /// Output buffer registry for on-demand process output streaming.
-    pub output_buffer_registry: Option<
-        Arc<crate::domains::agent::runner::orchestrator::output_buffer::OutputBufferRegistry>,
-    >,
-    /// Shared abort tracker for cancelling stale hook subsessions across prompts.
-    pub hook_abort_tracker:
-        Arc<crate::domains::agent::runner::hooks::abort_tracker::HookAbortTracker>,
     /// WebSocket listening port. Surfaced via `system.getInfo` so iOS clients
     /// can render the connection display ("Tailscale 100.x:9847") without
     /// re-parsing user input. Initialized from config and updated after bind.
@@ -454,19 +379,6 @@ mod tests {
     }
 
     #[test]
-    fn context_has_skill_registry() {
-        let ctx = make_test_context();
-        let guard = ctx.skill_registry.read();
-        assert_eq!(guard.list(None).len(), 0);
-    }
-
-    #[test]
-    fn context_skill_registry_writable() {
-        let ctx = make_test_context();
-        let _guard = ctx.skill_registry.write();
-    }
-
-    #[test]
     fn context_has_settings_path() {
         let ctx = make_test_context();
         assert!(!ctx.settings_path.as_os_str().is_empty());
@@ -620,7 +532,6 @@ mod tests {
         assert!(ctx.orchestrator.can_accept_session());
         assert_eq!(ctx.session_manager.active_count(), 0);
         assert!(ctx.event_store.list_workspaces().is_ok());
-        assert_eq!(ctx.skill_registry.read().list(None).len(), 0);
         assert!(!ctx.settings_path.as_os_str().is_empty());
     }
 

@@ -161,7 +161,6 @@ pub(crate) async fn prompt_queue_drain_value(
         deps.shutdown_coordinator
             .as_ref()
             .map(|coord| coord.token()),
-        deps.worktree_coordinator.clone(),
         deps.origin.clone(),
         deps.engine_host.clone(),
         Some(PromptEngineCausality::from_invocation(invocation)),

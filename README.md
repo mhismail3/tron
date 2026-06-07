@@ -193,10 +193,8 @@ declared stream topics; `deps.rs` narrows setup into the handles that domain
 uses; `handlers.rs` binds operation keys to local handler structs; `operations/`
 contains executable operation bodies. Runtime support is split the same way in
 domain-owned folders such as `domains/agent/runner/*`,
-`domains/agent/runtime/*`, `domains/session/event_store/*`,
-`domains/capability_support/implementations/*`, and `domains/worktree/implementation/*`.
-`domains/program/*` owns the parent-side program capability plus the
-`tron-program-worker` OS process runtime. Provider-native stream/function-call
+`domains/agent/runtime/*`, `domains/session/event_store/*`, and
+`domains/capability_support/implementations/*`. Provider-native stream/function-call
 argument parsing and provider-specific invocation id remapping are isolated
 under `domains/model/provider_protocol/*` before any canonical capability
 history reaches the runner, ledger, registry, audit, or iOS DTO layers.
@@ -1003,7 +1001,7 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 **Minimum macOS:** 15 Sequoia | **Swift:** 6.0 | **Bundle ID:** `com.tron.mac` | **Build system:** XcodeGen
 
-`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles signed helpers under `Contents/Library/LoginItems/` (`Tron Server.app` for production/local Release and `Tron Server Dev.app` for isolated Debug install testing), bundled LaunchAgent plists, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. Each helper app contains both `tron` and its sibling `tron-program-worker`; the agent binary embeds the first-party capability-search ONNX/tokenizer bundle, and the program worker is required for `execute(mode: "program")` in dev and packaged flows. The wizard registers the active helper through `SMAppService`, syncs bundled managed skills into the active Tron home, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
+`Tron.app` is a SwiftUI wrapper around the headless Rust agent. It ships as a notarized DMG via `.github/workflows/release-mac.yml`; production installs run only from `/Applications/Tron.app`. The app bundles signed helpers under `Contents/Library/LoginItems/` (`Tron Server.app` for production/local Release and `Tron Server Dev.app` for isolated Debug install testing), bundled LaunchAgent plists, managed skills under `Contents/Resources/Skills/`, Constitution defaults under `Contents/Resources/Constitution/`, and the small transcription sidecar source files under `Contents/Resources/Transcription/`. Each helper app contains the `tron` agent binary. The wizard registers the active helper through `SMAppService`, syncs bundled managed skills into the active Tron home, confirms permissions, optionally enables local transcription, presents the Tron iOS Beta TestFlight QR, and reveals pairing info for iOS. After the wizard, the app transforms into a menu-bar icon (`LSUIElement = YES`) that checks server health by invoking `system::ping` through `/engine` `invoke`.
 
 ```
 packages/mac-app/Sources/
@@ -1209,9 +1207,9 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 
 1. Checkout + Rust toolchain/cache (`actions-rust-lang/setup-rust-toolchain`).
 2. `scripts/tron version check` verifies `VERSION.env`, Cargo, Cargo.lock, Mac/iOS `project.yml`, custom bundle canonical version keys, and release docs agree before any artifact is built. A tag push must equal `server-v$(TRON_VERSION)`.
-3. `cargo build --release --bin tron --bin tron-program-worker --locked` in `packages/agent/`, with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` supplied from GitHub secrets so push delivery is enabled for release users without local config.
+3. `cargo build --release --bin tron --locked` in `packages/agent/`, with `TRON_RELAY_URL`, `TRON_RELAY_SECRET`, and `TRON_RELAY_ENVIRONMENT=production` supplied from GitHub secrets so push delivery is enabled for release users without local config.
 4. Install XcodeGen + `create-dmg`.
-5. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` and its sibling `tron-program-worker` into both bundled helpers (`Tron Server.app` and `Tron Server Dev.app`) and writes both LaunchAgent plists.
+5. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` into both bundled helpers (`Tron Server.app` and `Tron Server Dev.app`) and writes both LaunchAgent plists.
 6. `xcodegen generate` inside `packages/mac-app/`.
 7. Create an isolated release keychain from the signing/notarization secrets, or fall back to dry-run ad-hoc signing when secrets are absent.
 8. `xcodebuild archive` with `-scheme TronMac -configuration Release`.

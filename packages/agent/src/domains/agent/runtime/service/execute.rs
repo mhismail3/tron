@@ -5,11 +5,10 @@ use tracing::{debug, warn};
 use super::agent_build::{BuiltPromptAgent, build_prompt_agent};
 use super::completion::{PromptRunCompletion, finalize_prompt_run};
 use super::context::load_agent_state_context;
-use super::worktree::{emit_prompt_worktree_failure, resolve_prompt_worktree};
 use super::{
     PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, ShutdownCancelForwarder,
     build_user_content_override, build_user_event_payload, persist_user_message_event,
-    resume_prompt_session, run_agent, should_acquire_worktree_for_source,
+    resume_prompt_session, run_agent,
 };
 
 pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
@@ -23,7 +22,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         event_store,
         profile_runtime,
         shutdown_token,
-        worktree_coordinator,
         engine_host,
         engine_causality,
         sequence_counter,
@@ -72,9 +70,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         };
     let resolved_profile = session_plan.resolved_profile.clone();
 
-    let is_chat = profile == crate::shared::profile::CHAT_PROFILE
-        || !should_acquire_worktree_for_source(source.as_deref());
-
     let PromptRequest {
         session_id,
         prompt,
@@ -116,23 +111,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         }
     };
 
-    let worktree_resolution = match resolve_prompt_worktree(
-        is_chat,
-        state.worktree_path.as_deref(),
-        &worktree_coordinator,
-        &event_store,
-        &session_id,
-        working_dir,
-    )
-    .await
-    {
-        Ok(resolution) => resolution,
-        Err(message) => {
-            emit_prompt_worktree_failure(broadcast.as_ref(), &session_id, &model, message);
-            return;
-        }
-    };
-    let working_dir = worktree_resolution.working_dir;
+    let working_dir = state.working_directory.clone().unwrap_or(working_dir);
     let resolved_workspace_id = event_store
         .get_session(&session_id)
         .ok()
@@ -246,7 +225,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         &mut agent,
         &prompt,
         run_context,
-        &None,
         &broadcast,
         sequence_counter,
     )

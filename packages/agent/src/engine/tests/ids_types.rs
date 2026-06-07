@@ -16,5 +16,5 @@ fn effect_class_helpers_classify_mutation() {
     assert!(!EffectClass::DeterministicCompute.is_mutating());
     assert!(!EffectClass::DelegatedInvocation.is_mutating());
     assert!(EffectClass::IdempotentWrite.is_mutating());
-    assert!(EffectClass::IrreversibleSideEffect.requires_approval_for_agent_visibility());
+    assert!(EffectClass::IrreversibleSideEffect.requires_idempotency_for_agent_visibility());
 }

@@ -38,10 +38,6 @@ impl AgentCommandService {
                     message: error.to_string(),
                 })?;
 
-        if aborted && let Some(ref broker) = deps.device_request_broker {
-            broker.cancel_session_pending(session_id);
-        }
-
         Ok(json!({ "aborted": aborted }))
     }
 

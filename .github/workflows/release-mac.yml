@@ -174,13 +174,13 @@ jobs:
         with:
           cache-workspaces: packages/agent
 
-      - name: Build agent helpers (release)
+      - name: Build agent helper (release)
         working-directory: packages/agent
         env:
           TRON_RELAY_URL: ${{ secrets.TRON_RELAY_URL }}
           TRON_RELAY_SECRET: ${{ secrets.TRON_RELAY_SECRET }}
           TRON_RELAY_ENVIRONMENT: production
-        run: cargo build --release --bin tron --bin tron-program-worker --locked
+        run: cargo build --release --bin tron --locked
 
       # ── Xcode toolchain ────────────────────────────────────────────
       - name: Pin Xcode
@@ -192,18 +192,17 @@ jobs:
         run: |
           brew install xcodegen create-dmg
 
-      - name: Stage agent helper binaries into embedded Login Item
+      - name: Stage agent helper binary into embedded Login Item
         working-directory: packages/mac-app
         run: |
           # --skip-build because we already built the release binaries above;
           # the script just copies + chmod + stages atomically.
           ./scripts/bundle-agent.sh --skip-build
 
-      - name: Validate staged helper binaries
+      - name: Validate staged helper binary
         working-directory: packages/mac-app
         run: |
           test -x "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
-          test -x "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron-program-worker"
 
       - name: Generate Xcode project
         working-directory: packages/mac-app
@@ -350,8 +349,6 @@ jobs:
           ls -la "$APP_PATH/Contents/MacOS"
           test -f "$APP_PATH/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron" \
             || { echo "::error::Tron Server.app helper missing"; exit 1; }
-          test -f "$APP_PATH/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron-program-worker" \
-            || { echo "::error::Tron Server.app program worker missing"; exit 1; }
           test -f "$APP_PATH/Contents/Library/LaunchAgents/com.tron.server.plist" \
             || { echo "::error::bundled LaunchAgent plist missing"; exit 1; }
           test -f "$APP_PATH/Contents/Resources/Transcription/worker.py" \

@@ -1,5 +1,5 @@
 use super::SessionCommandService;
-use super::{BaseEvent, TronEvent, release_worktree_if_active};
+use super::{BaseEvent, TronEvent};
 use crate::domains::session::Deps;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
@@ -8,8 +8,6 @@ use serde_json::json;
 
 impl SessionCommandService {
     pub(crate) async fn archive(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
-        release_worktree_if_active(deps, &session_id).await;
-
         let session_manager = deps.session_manager.clone();
         let session_id_for_archive = session_id.clone();
         run_blocking_task("session.archive", move || {
@@ -72,11 +70,8 @@ impl SessionCommandService {
     ///     point.
     ///
     /// Each candidate is archived one-at-a-time via the existing
-    /// `SessionCommandService::archive` path so worktree release,
-    /// sequence-counter cleanup, and broadcast semantics stay identical to
-    /// single-session archive. Batching transactionally would require holding
-    /// the session write lock across async worktree releases, which is
-    /// why the loop is explicit.
+    /// `SessionCommandService::archive` path so sequence-counter cleanup and
+    /// broadcast semantics stay identical to single-session archive.
     ///
     /// Returns `{ archivedCount, archivedSessionIds, skipped, cutoff }`.
     /// `skipped` captures any candidates that failed mid-batch so the caller

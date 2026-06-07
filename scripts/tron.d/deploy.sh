@@ -87,12 +87,10 @@ cmd_preflight() {
 
     # 3. Release binary exists
     if [ -f "$RELEASE_BINARY" ] \
-        && [ -f "$RELEASE_PROGRAM_WORKER" ] \
-        && file "$RELEASE_BINARY" | grep -q "Mach-O" \
-        && file "$RELEASE_PROGRAM_WORKER" | grep -q "Mach-O"; then
+        && file "$RELEASE_BINARY" | grep -q "Mach-O"; then
         print_success "Release binary exists ($(ls -lh "$RELEASE_BINARY" | awk '{print $5}'))"
     else
-        print_warning "Release helper binaries incomplete — build required"
+        print_warning "Release helper binary incomplete — build required"
     fi
 
     # 4. Service installed
@@ -238,17 +236,10 @@ cmd_deploy() {
     local previous_commit
     previous_commit=$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")
 
-    # Backup the current helper only when both required executables are present.
-    # Older local helpers that predate the program worker are incompatible with
-    # the current runtime contract and must be replaced as a pair.
-    if [ -f "$INSTALLED_BINARY" ] && [ -f "$INSTALLED_PROGRAM_WORKER" ]; then
-        print_status "Backing up current helper executables..."
+    if [ -f "$INSTALLED_BINARY" ]; then
+        print_status "Backing up current helper executable..."
         mkdir -p "$CONTRIBUTOR_DIR"
         cp "$INSTALLED_BINARY" "$CONTRIBUTOR_DIR/tron.bak"
-        cp "$INSTALLED_PROGRAM_WORKER" "$CONTRIBUTOR_DIR/tron-program-worker.bak"
-    elif [ -f "$INSTALLED_BINARY" ]; then
-        print_warning "Existing helper is missing tron-program-worker; no rollback backup will be created for this incompatible helper."
-        rm -f "$CONTRIBUTOR_DIR/tron.bak" "$CONTRIBUTOR_DIR/tron-program-worker.bak"
     fi
 
     # Stop service
@@ -326,7 +317,7 @@ SENTINEL
             print_success "Health check passed"
 
             # Remove backup (deploy succeeded)
-            rm -f "$CONTRIBUTOR_DIR/tron.bak" "$CONTRIBUTOR_DIR/tron-program-worker.bak"
+            rm -f "$CONTRIBUTOR_DIR/tron.bak"
 
             write_deployment_result "success"
         else
@@ -337,15 +328,13 @@ SENTINEL
         print_error "Service failed to start!"
 
         # Auto-rollback
-        if [ -f "$CONTRIBUTOR_DIR/tron.bak" ] && [ -f "$CONTRIBUTOR_DIR/tron-program-worker.bak" ]; then
+        if [ -f "$CONTRIBUTOR_DIR/tron.bak" ]; then
             print_status "Rolling back..."
-            cp "$CONTRIBUTOR_DIR/tron-program-worker.bak" "$CONTRIBUTOR_DIR/tron-program-worker"
             if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
-                rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
                 return 1
             fi
             codesign_bundle "$INSTALLED_BUNDLE"
-            rm -f "$CONTRIBUTOR_DIR/tron.bak" "$CONTRIBUTOR_DIR/tron-program-worker.bak" "$CONTRIBUTOR_DIR/tron-program-worker"
+            rm -f "$CONTRIBUTOR_DIR/tron.bak"
             launchd_start "$PLIST_NAME"
             sleep 2
             if service_is_running; then
@@ -416,15 +405,15 @@ cmd_install() {
     ensure_default_configs
     _emit_event configs ok ""
 
-    if [ ! -f "$RELEASE_BINARY" ] || [ ! -f "$RELEASE_PROGRAM_WORKER" ]; then
+    if [ ! -f "$RELEASE_BINARY" ]; then
         _emit_event build start "cargo build --release"
         if ! build_rust; then
             _emit_event build fail "cargo build exited non-zero"
             return 1
         fi
-        _emit_event build ok "$RELEASE_BINARY,$RELEASE_PROGRAM_WORKER"
+        _emit_event build ok "$RELEASE_BINARY"
     else
-        _emit_event build ok "prebuilt: $RELEASE_BINARY,$RELEASE_PROGRAM_WORKER"
+        _emit_event build ok "prebuilt: $RELEASE_BINARY"
     fi
 
     _emit_event bundle start "$INSTALLED_BUNDLE"

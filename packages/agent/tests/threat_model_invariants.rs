@@ -3067,7 +3067,7 @@ fn tron_cli_status_and_logs_are_agent_automation_ready() {
 }
 
 #[test]
-fn program_worker_binary_is_built_and_packaged_with_tron_helper() {
+fn tron_helper_is_built_and_packaged_as_single_binary() {
     let repo_root = repo_root();
     let script_path = repo_root.join("scripts").join("tron");
     let script = std::fs::read_to_string(&script_path)
@@ -3079,16 +3079,16 @@ fn program_worker_binary_is_built_and_packaged_with_tron_helper() {
     let deploy = std::fs::read_to_string(&deploy_path)
         .unwrap_or_else(|e| panic!("failed to read {deploy_path:?}: {e}"));
     assert!(
-        dev.contains("--bin tron --bin tron-program-worker"),
-        "tron dev/install flows must build the server and program-worker binaries together"
+        dev.contains("--bin tron") && !dev.contains("tron-program-worker"),
+        "tron dev/install flows must build the single server helper binary"
     );
     assert!(
-        script.contains("RELEASE_PROGRAM_WORKER="),
-        "workspace script must track the release program worker beside tron"
+        script.contains("RELEASE_BINARY=") && !script.contains("PROGRAM_WORKER"),
+        "workspace script must track only the release tron helper"
     );
     assert!(
-        deploy.contains("tron-program-worker.bak"),
-        "deploy rollback must back up the program worker with the server binary"
+        deploy.contains("tron.bak") && !deploy.contains("tron-program-worker"),
+        "deploy rollback must back up only the server binary"
     );
 
     let lib_path = repo_root.join("scripts").join("tron-lib.sh");
@@ -3101,10 +3101,11 @@ fn program_worker_binary_is_built_and_packaged_with_tron_helper() {
     let bundle = std::fs::read_to_string(&bundle_path)
         .unwrap_or_else(|e| panic!("failed to read {bundle_path:?}: {e}"));
     assert!(
-        lib.contains("INSTALLED_PROGRAM_WORKER=")
-            && lib.contains("tron-program-worker")
-            && bundle.contains("Cannot create app bundle: sibling tron-program-worker missing"),
-        "shared bundle creation must require and stage the sibling program-worker binary"
+        lib.contains("INSTALLED_BINARY=")
+            && !lib.contains("PROGRAM_WORKER")
+            && bundle.contains("Contents/MacOS/tron")
+            && !bundle.contains("tron-program-worker"),
+        "shared bundle creation must stage only the tron helper binary"
     );
 
     let bundle_script_path = repo_root
@@ -3115,10 +3116,11 @@ fn program_worker_binary_is_built_and_packaged_with_tron_helper() {
     let bundle_script = std::fs::read_to_string(&bundle_script_path)
         .unwrap_or_else(|e| panic!("failed to read {bundle_script_path:?}: {e}"));
     assert!(
-        bundle_script.contains("--bin tron --bin tron-program-worker")
-            && bundle_script.contains("STAGING_WORKER_PATH=")
-            && bundle_script.contains("--worker-source"),
-        "Mac helper staging must build and copy both helper executables"
+        bundle_script.contains("--bin tron")
+            && !bundle_script.contains("STAGING_WORKER_PATH=")
+            && !bundle_script.contains("--worker-source")
+            && !bundle_script.contains("tron-program-worker"),
+        "Mac helper staging must build and copy only the tron helper executable"
     );
 
     for workflow in [
@@ -3129,9 +3131,8 @@ fn program_worker_binary_is_built_and_packaged_with_tron_helper() {
         let content = std::fs::read_to_string(&path)
             .unwrap_or_else(|e| panic!("failed to read {path:?}: {e}"));
         assert!(
-            content.contains("--bin tron --bin tron-program-worker")
-                && content.contains("tron-program-worker"),
-            "{workflow} must build and validate the program-worker helper"
+            content.contains("--bin tron --locked") && !content.contains("tron-program-worker"),
+            "{workflow} must build and validate the single tron helper"
         );
     }
 }

@@ -1,4 +1,8 @@
-//! Non-bypassable Phase 1 engine policy checks.
+//! Engine substrate registration and invocation checks.
+//!
+//! This layer protects primitive runtime integrity: idempotency, schemas,
+//! resource leases, compensation metadata, delivery modes, visibility, and
+//! routability. It does not encode product approval policy.
 
 use super::discovery::{ActorContext, ActorKind};
 use super::errors::{EngineError, Result};
@@ -28,32 +32,6 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
             "function {} declares an invalid durable output contract",
             function.id
         )));
-    }
-
-    if function.visibility.is_agent_visible() {
-        if function
-            .effect_class
-            .requires_approval_for_agent_visibility()
-            && !function.required_authority.approval_required
-            && !has_sandbox_autonomy_contract(function)
-            && !has_conditional_approval_contract(function)
-        {
-            return Err(EngineError::PolicyViolation(format!(
-                "irreversible agent-visible function {} requires approval metadata",
-                function.id
-            )));
-        }
-        if function.effect_class.is_mutating()
-            && function.risk_level >= RiskLevel::High
-            && !function.required_authority.approval_required
-            && !has_sandbox_autonomy_contract(function)
-            && !has_conditional_approval_contract(function)
-        {
-            return Err(EngineError::PolicyViolation(format!(
-                "high-risk agent-visible function {} requires approval metadata",
-                function.id
-            )));
-        }
     }
 
     if function.effect_class.is_mutating() && function.risk_level >= RiskLevel::High {
@@ -113,52 +91,6 @@ pub fn validate_function_registration(function: &FunctionDefinition) -> Result<(
     }
 
     Ok(())
-}
-
-fn has_sandbox_autonomy_contract(function: &FunctionDefinition) -> bool {
-    let Some(contract) = function
-        .metadata
-        .pointer("/highRiskContract/sandboxAutonomy")
-    else {
-        return false;
-    };
-    contract
-        .get("withoutUserApproval")
-        .and_then(serde_json::Value::as_bool)
-        .unwrap_or(false)
-        && contract
-            .get("requiresIdempotency")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        && contract
-            .get("requiresLease")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        && contract
-            .get("requiresCompensation")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-}
-
-fn has_conditional_approval_contract(function: &FunctionDefinition) -> bool {
-    let Some(contract) = function
-        .metadata
-        .pointer("/highRiskContract/conditionalApproval")
-    else {
-        return false;
-    };
-    contract
-        .get("owner")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|value| !value.trim().is_empty())
-        && contract
-            .get("policy")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|value| !value.trim().is_empty())
-        && contract
-            .get("approvalRequiredFor")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|items| !items.is_empty())
 }
 
 /// Validate a trigger definition before registration.
@@ -383,10 +315,9 @@ mod tests {
         AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, FunctionId,
         IdempotencyContract, Provenance, ResourceLeaseRequirement, WorkerId,
     };
-    use serde_json::json;
 
-    fn high_risk_process_function(metadata: serde_json::Value) -> FunctionDefinition {
-        let mut function = FunctionDefinition::new(
+    fn high_risk_process_function() -> FunctionDefinition {
+        FunctionDefinition::new(
             FunctionId::new("process::run").expect("function id"),
             WorkerId::new("process").expect("worker id"),
             "Run process".to_owned(),
@@ -405,34 +336,14 @@ mod tests {
             CompensationKind::ManualOnly,
             "process output is the audit boundary",
         ))
-        .with_provenance(Provenance::system());
-        function.metadata = metadata;
-        function
+        .with_provenance(Provenance::system())
     }
 
     #[test]
-    fn conditional_approval_contract_satisfies_high_risk_registration_policy() {
-        let function = high_risk_process_function(json!({
-            "highRiskContract": {
-                "conditionalApproval": {
-                    "owner": "process",
-                    "policy": "process::run command classifier",
-                    "approvalRequiredFor": ["privileged commands"]
-                }
-            }
-        }));
+    fn high_risk_registration_requires_compensation_not_approval_metadata() {
+        let function = high_risk_process_function();
 
-        validate_function_registration(&function).expect("conditional approval is metadata");
-    }
-
-    #[test]
-    fn missing_conditional_approval_contract_is_rejected_for_high_risk_agent_visible_function() {
-        let function = high_risk_process_function(json!({}));
-
-        let error = validate_function_registration(&function).expect_err("missing approval");
-
-        assert!(
-            matches!(error, EngineError::PolicyViolation(message) if message.contains("requires approval metadata"))
-        );
+        validate_function_registration(&function)
+            .expect("high-risk registration relies on idempotency, lease, and compensation");
     }
 }

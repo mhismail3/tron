@@ -2,17 +2,16 @@
 //!
 //! Domain workers own their full canonical function contracts in local
 //! `contract.rs` modules. This file only collects those records, validates
-//! uniqueness, and exposes discovery, diagnostics, and guardrail views.
+//! uniqueness, and exposes discovery diagnostics for the retained primitive
+//! surface.
 
 use std::collections::BTreeSet;
 
-use serde_json::json;
-
 pub(crate) use super::contract::function_definition_for_capability;
 use crate::engine::{
-    ActorId, AuthorityGrantId, DeliveryMode, DurableOutputContract, EffectClass, EngineError,
-    FunctionId, IdempotencyContract, ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
-    TriggerTypeDefinition, TriggerTypeId, VisibilityScope, WorkerId,
+    ActorId, AuthorityGrantId, DurableOutputContract, EffectClass, EngineError, FunctionId,
+    IdempotencyContract, ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
+    VisibilityScope, WorkerId,
 };
 #[cfg(test)]
 use crate::engine::{WorkerDefinition, WorkerKind};
@@ -76,10 +75,6 @@ pub struct CapabilitySpec {
     pub compensation: Option<crate::engine::CompensationContract>,
     /// Durable output contract enforced after handler execution.
     pub output_contract: DurableOutputContract,
-    /// Explicit approval metadata for agent-visible risk.
-    pub approval_required: bool,
-    /// High-risk contract metadata exposed through discovery.
-    pub high_risk_contract: Option<serde_json::Value>,
     /// Stream topics emitted by this capability.
     pub stream_topics: Vec<&'static str>,
     /// Discovery description supplied by the owning domain.
@@ -105,7 +100,7 @@ pub struct CanonicalCapabilitySpec {
     pub visibility: VisibilityScope,
     /// Effect class enforced by the engine.
     pub effect_class: EffectClass,
-    /// Risk level used by approval and guardrail policy.
+    /// Risk level used by primitive diagnostics.
     pub risk_level: RiskLevel,
     /// Domain authority scope required for direct invocation.
     pub authority_scope: Option<&'static str>,
@@ -129,38 +124,14 @@ fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
     let mut specs = super::agent::contract::capabilities()?;
     specs.extend(super::auth::contract::capabilities()?);
     specs.extend(super::blob::contract::capabilities()?);
-    specs.extend(super::browser::contract::capabilities()?);
     specs.extend(super::capability::contract::capabilities()?);
     specs.extend(super::context::contract::capabilities()?);
-    specs.extend(super::cron::contract::capabilities()?);
-    specs.extend(super::device::contract::capabilities()?);
-    specs.extend(super::display::contract::capabilities()?);
-    specs.extend(super::events::contract::capabilities()?);
-    specs.extend(super::filesystem::contract::capabilities()?);
-    specs.extend(super::git::contract::capabilities()?);
-    specs.extend(super::import::contract::capabilities()?);
-    specs.extend(super::job::contract::capabilities()?);
     specs.extend(super::logs::contract::capabilities()?);
-    specs.extend(super::mcp::contract::capabilities()?);
-    specs.extend(super::memory::contract::capabilities()?);
     specs.extend(super::message::contract::capabilities()?);
     specs.extend(super::model::contract::capabilities()?);
-    specs.extend(super::notifications::contract::capabilities()?);
-    specs.extend(super::plan::contract::capabilities()?);
-    specs.extend(super::process::contract::capabilities()?);
-    specs.extend(super::program::contract::capabilities()?);
-    specs.extend(super::prompt_library::contract::capabilities()?);
-    specs.extend(super::repo::contract::capabilities()?);
-    specs.extend(super::sandbox::contract::capabilities()?);
     specs.extend(super::session::contract::capabilities()?);
     specs.extend(super::settings::contract::capabilities()?);
-    specs.extend(super::skills::contract::capabilities()?);
     specs.extend(super::system::contract::capabilities()?);
-    specs.extend(super::transcription::contract::capabilities()?);
-    specs.extend(super::tree::contract::capabilities()?);
-    specs.extend(super::voice_notes::contract::capabilities()?);
-    specs.extend(super::web::contract::capabilities()?);
-    specs.extend(super::worktree::contract::capabilities()?);
     Ok(specs)
 }
 
@@ -226,29 +197,6 @@ fn validate_seed_uniqueness() -> EngineResult<()> {
         }
     }
     Ok(())
-}
-
-pub(crate) fn cron_schedule_trigger_type() -> EngineResult<TriggerTypeDefinition> {
-    let mut definition = TriggerTypeDefinition::new(
-        TriggerTypeId::new("cron_schedule")?,
-        worker_id("cron")?,
-        "Cron schedule projection into an engine trigger",
-    );
-    definition.allowed_delivery_modes = vec![DeliveryMode::Sync];
-    definition.visibility = VisibilityScope::Internal;
-    definition.config_schema = Some(json!({
-        "type": "object",
-        "required": ["jobId", "jobName", "enabled", "payloadKind"],
-        "additionalProperties": true,
-        "properties": {
-            "jobId": {"type": "string"},
-            "jobName": {"type": "string"},
-            "enabled": {"type": "boolean"},
-            "payloadKind": {"type": "string"},
-            "workspaceId": {"type": "string"}
-        }
-    }));
-    Ok(definition)
 }
 
 pub(crate) fn worker_id(value: &str) -> EngineResult<WorkerId> {
@@ -324,27 +272,6 @@ mod tests {
                 assert!(
                     topic.contains('.'),
                     "{} stream topic {topic} must use domain-scoped dotted form",
-                    spec.function_id.as_str()
-                );
-            }
-
-            if let Some(contract) = &spec.high_risk_contract {
-                let metadata_topics = contract
-                    .get("streamTopics")
-                    .and_then(serde_json::Value::as_array)
-                    .expect("high-risk contract streamTopics must be an array");
-                let metadata_topics = metadata_topics
-                    .iter()
-                    .map(|topic| {
-                        topic
-                            .as_str()
-                            .expect("high-risk contract streamTopics must contain strings")
-                    })
-                    .collect::<Vec<_>>();
-                assert_eq!(
-                    metadata_topics,
-                    spec.stream_topics,
-                    "{} high-risk metadata must mirror its domain-owned stream topics",
                     spec.function_id.as_str()
                 );
             }

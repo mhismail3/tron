@@ -1,9 +1,9 @@
 //! settings domain worker.
 //!
 //! This module owns canonical function execution for the settings namespace and keeps
-//! domain contracts, services, and tests beside the worker that uses them.
-//! Settings changes that force MCP router reloads publish MCP health through
-//! the MCP domain stream publisher, so the stream topic owner remains explicit.
+//! domain contracts, services, and tests beside the worker that uses them. Settings
+//! updates persist the sparse profile overlay, then reload the profile runtime so
+//! subsequent turns use the new provider and loop settings.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
@@ -14,7 +14,6 @@ pub use implementation::*;
 
 use crate::domains::worker::DomainRegistrationContext;
 use crate::domains::worker::DomainWorkerModule;
-use crate::engine::Invocation;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::require_param;
@@ -42,51 +41,10 @@ fn settings_error(error: crate::domains::settings::SettingsError) -> CapabilityE
 
 async fn settings_update_value(
     params: Option<&Value>,
-    invocation: &Invocation,
     deps: &Deps,
 ) -> std::result::Result<Value, CapabilityError> {
     let updates = require_param(params, "settings")?.clone();
-    let has_mcp_changes = updates.get("mcp").is_some();
     let settings_path = deps.settings_path.clone();
-
-    if has_mcp_changes && let Some(ref router) = deps.mcp_router {
-        let mut router_guard = router.write().await;
-        let _operation_guard = crate::domains::settings::SettingsStore::operation_lock().await;
-        let previous_sparse = read_sparse_settings_snapshot(deps).await?;
-        run_blocking_task("settings::update", move || {
-            crate::domains::settings::SettingsStore::new(settings_path)
-                .update(updates)
-                .map_err(settings_error)
-        })
-        .await?;
-
-        if let Err(message) = router_guard.reload_from_settings().await {
-            rollback_sparse_settings(deps, previous_sparse, "settings.rollbackMcpUpdate").await?;
-            return Err(CapabilityError::Internal { message });
-        }
-        if let Err(error) = deps.profile_runtime.reload_now("settings::update") {
-            rollback_sparse_settings(
-                deps,
-                previous_sparse,
-                "settings.rollbackAfterProfileRuntimeFailure",
-            )
-            .await?;
-            if let Err(rollback_error) = router_guard.reload_from_settings().await {
-                tracing::warn!(
-                    error = %rollback_error,
-                    "MCP router failed to reload after profile-runtime rollback"
-                );
-            }
-            return Err(CapabilityError::Internal {
-                message: format!(
-                    "profile runtime rejected the updated settings; sparse settings were rolled back: {error}"
-                ),
-            });
-        }
-        drop(router_guard);
-        publish_mcp_status_changed(invocation, deps).await;
-        return Ok(json!({ "success": true }));
-    }
 
     let _operation_guard = crate::domains::settings::SettingsStore::operation_lock().await;
     let previous_sparse = read_sparse_settings_snapshot(deps).await?;
@@ -175,16 +133,4 @@ async fn reload_profile_runtime_or_rollback(
             })
         }
     }
-}
-
-async fn publish_mcp_status_changed(invocation: &Invocation, deps: &Deps) {
-    let Some(ref router_arc) = deps.mcp_router else {
-        return;
-    };
-
-    let router = router_arc.read().await;
-    let status = router.status();
-    crate::domains::mcp::stream::McpStreamPublisher::new(&deps.engine_host)
-        .status_changed(invocation, serde_json::to_value(status).unwrap_or_default())
-        .await;
 }

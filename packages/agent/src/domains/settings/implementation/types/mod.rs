@@ -11,11 +11,8 @@ mod api;
 mod capabilities;
 mod context;
 mod git;
-mod guardrails;
 mod memory;
-mod prompt_library;
 mod server;
-mod skills;
 mod ui;
 mod update;
 
@@ -23,11 +20,8 @@ pub use api::*;
 pub use capabilities::*;
 pub use context::*;
 pub use git::*;
-pub use guardrails::*;
 pub use memory::*;
-pub use prompt_library::*;
 pub use server::*;
-pub use skills::*;
 pub use ui::*;
 pub use update::*;
 
@@ -41,8 +35,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// # JSON Format
 ///
-/// All field names are camelCase. Optional sections (`guardrails`) are
-/// omitted when `None`. Example:
+/// All field names are camelCase. Example:
 ///
 /// ```json
 /// {
@@ -64,7 +57,7 @@ pub struct TronSettings {
     pub retry: RetrySettings,
     /// Capability-specific settings.
     pub capabilities: CapabilitySettings,
-    /// Context management settings (compaction, memory, rules, tasks).
+    /// Context management settings for compacting the primitive prompt loop.
     pub context: ContextSettings,
     /// Agent runtime settings (max turns, timeouts).
     pub agent: AgentRuntimeSettings,
@@ -74,8 +67,6 @@ pub struct TronSettings {
     pub observability: ObservabilitySettings,
     /// Unified storage retention and size settings.
     pub storage: StorageSettings,
-    /// Hook system configuration.
-    pub hooks: HookSettings,
     /// Server network settings.
     pub server: ServerSettings,
     /// Tmux integration settings.
@@ -84,20 +75,10 @@ pub struct TronSettings {
     pub session: SessionSettings,
     /// UI/TUI appearance settings.
     pub ui: UiSettings,
-    /// Skill system settings (compaction policy, index visibility).
-    pub skills: SkillsSettings,
     /// Memory retention settings (auto-retain interval, model).
     pub memory: MemorySettings,
     /// Git workflow settings (sync, push, switch, finalize, conflict resolution).
     pub git: GitWorkflowSettings,
-    /// Prompt Library settings (history capture + retention).
-    pub prompt_library: PromptLibrarySettings,
-    /// Optional guardrail safety rules.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub guardrails: Option<GuardrailSettings>,
-    /// MCP (Model Context Protocol) server configuration.
-    #[serde(default)]
-    pub mcp: crate::domains::mcp::types::McpSettings,
 }
 
 impl Default for TronSettings {
@@ -113,17 +94,12 @@ impl Default for TronSettings {
             logging: LoggingSettings::default(),
             observability: ObservabilitySettings::default(),
             storage: StorageSettings::default(),
-            hooks: HookSettings::default(),
             server: ServerSettings::default(),
             tmux: TmuxSettings::default(),
             session: SessionSettings::default(),
             ui: UiSettings::default(),
-            skills: SkillsSettings::default(),
             memory: MemorySettings::default(),
             git: GitWorkflowSettings::default(),
-            prompt_library: PromptLibrarySettings::default(),
-            guardrails: None,
-            mcp: crate::domains::mcp::types::McpSettings::default(),
         }
     }
 }
@@ -326,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn settings_with_guardrails() {
+    fn settings_reject_removed_guardrails_section() {
         let json = serde_json::json!({
             "guardrails": {
                 "audit": {
@@ -335,11 +311,9 @@ mod tests {
                 }
             }
         });
-        let settings: TronSettings = serde_json::from_value(json).unwrap();
-        assert!(settings.guardrails.is_some());
-        let g = settings.guardrails.unwrap();
-        assert!(g.audit.is_some());
-        assert_eq!(g.audit.unwrap().max_entries, 200);
+        let err = serde_json::from_value::<TronSettings>(json).unwrap_err();
+
+        assert!(err.to_string().contains("guardrails"));
     }
 
     // ── validate ───────────────────────────────────────────────────
@@ -449,28 +423,13 @@ mod tests {
     }
 
     #[test]
-    fn prompt_library_defaults_are_applied() {
-        let s = TronSettings::default();
-        assert!(s.prompt_library.history_enabled);
-        assert_eq!(s.prompt_library.history_max_entries, 10_000);
-    }
-
-    #[test]
-    fn prompt_library_partial_override() {
+    fn settings_reject_removed_prompt_library_section() {
         let json = serde_json::json!({
             "promptLibrary": { "historyEnabled": false }
         });
-        let s: TronSettings = serde_json::from_value(json).unwrap();
-        assert!(!s.prompt_library.history_enabled);
-        assert_eq!(s.prompt_library.history_max_entries, 10_000);
-    }
+        let err = serde_json::from_value::<TronSettings>(json).unwrap_err();
 
-    #[test]
-    fn prompt_library_camel_case_field_in_root() {
-        let s = TronSettings::default();
-        let json = serde_json::to_value(&s).unwrap();
-        assert!(json.get("promptLibrary").is_some());
-        assert!(json.get("prompt_library").is_none());
+        assert!(err.to_string().contains("promptLibrary"));
     }
 
     #[test]

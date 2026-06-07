@@ -12,7 +12,6 @@ pub struct PromptRuntimeDeps {
     pub profile_runtime: Arc<crate::domains::agent::runner::ProfileRuntime>,
     pub health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
     pub shutdown_coordinator: Option<Arc<crate::app::shutdown::ShutdownCoordinator>>,
-    pub worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
     pub engine_host: crate::engine::EngineHostHandle,
     pub origin: String,
 }

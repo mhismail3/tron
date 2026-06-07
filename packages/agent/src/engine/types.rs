@@ -165,12 +165,6 @@ impl EffectClass {
     pub fn requires_idempotency_for_agent_visibility(self) -> bool {
         self.requires_idempotency()
     }
-
-    /// Whether autonomous agent visibility requires explicit approval metadata.
-    #[must_use]
-    pub fn requires_approval_for_agent_visibility(self) -> bool {
-        matches!(self, Self::IrreversibleSideEffect)
-    }
 }
 
 /// Risk level for discovery and policy.

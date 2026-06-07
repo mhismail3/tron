@@ -24,7 +24,6 @@ pub fn spawn_prompt_run(
             .shutdown_coordinator
             .as_ref()
             .map(|coord| coord.token()),
-        worktree_coordinator: runtime_deps.worktree_coordinator.clone(),
         engine_host: runtime_deps.engine_host.clone(),
         engine_causality,
         sequence_counter: {

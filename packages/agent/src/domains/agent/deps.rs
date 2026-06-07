@@ -10,8 +10,6 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub(crate) struct Deps {
     pub(super) agent_deps: Option<crate::shared::server::context::AgentDeps>,
-    pub(super) device_request_broker:
-        Option<Arc<crate::platform::device_broker::DeviceRequestBroker>>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) event_store: Arc<EventStore>,
     pub(super) health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
@@ -20,14 +18,12 @@ pub(crate) struct Deps {
     pub(super) profile_runtime: Arc<ProfileRuntime>,
     pub(super) session_manager: Arc<SessionManager>,
     pub(super) shutdown_coordinator: Option<Arc<crate::app::shutdown::ShutdownCoordinator>>,
-    pub(super) worktree_coordinator: Option<Arc<crate::domains::worktree::WorktreeCoordinator>>,
 }
 
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
             agent_deps: deps.agent_deps.clone(),
-            device_request_broker: deps.device_request_broker.clone(),
             engine_host: deps.engine_host.clone(),
             event_store: deps.event_store.clone(),
             health_tracker: deps.health_tracker.clone(),
@@ -36,7 +32,6 @@ impl Deps {
             profile_runtime: deps.profile_runtime.clone(),
             session_manager: deps.session_manager.clone(),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
-            worktree_coordinator: deps.worktree_coordinator.clone(),
         }
     }
 
@@ -50,7 +45,6 @@ impl Deps {
             profile_runtime: self.profile_runtime.clone(),
             health_tracker: self.health_tracker.clone(),
             shutdown_coordinator: self.shutdown_coordinator.clone(),
-            worktree_coordinator: self.worktree_coordinator.clone(),
             engine_host: self.engine_host.clone(),
             origin: self.origin.clone(),
         }

@@ -58,9 +58,7 @@ get_service_pid() {
 
 validate_prod_binary() {
     [ -f "$INSTALLED_BINARY" ] \
-        && file "$INSTALLED_BINARY" 2>/dev/null | grep -q "Mach-O" \
-        && [ -f "$INSTALLED_PROGRAM_WORKER" ] \
-        && file "$INSTALLED_PROGRAM_WORKER" 2>/dev/null | grep -q "Mach-O"
+        && file "$INSTALLED_BINARY" 2>/dev/null | grep -q "Mach-O"
 }
 
 release_wrapper_available() {
@@ -75,16 +73,11 @@ ensure_prod_binary() {
     print_warning "Contributor service binary is missing or corrupt"
 
     if [ -f "$CONTRIBUTOR_DIR/tron.bak" ] \
-        && [ -f "$CONTRIBUTOR_DIR/tron-program-worker.bak" ] \
-        && file "$CONTRIBUTOR_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O" \
-        && file "$CONTRIBUTOR_DIR/tron-program-worker.bak" 2>/dev/null | grep -q "Mach-O"; then
+        && file "$CONTRIBUTOR_DIR/tron.bak" 2>/dev/null | grep -q "Mach-O"; then
         print_status "Restoring from backup..."
-        cp "$CONTRIBUTOR_DIR/tron-program-worker.bak" "$CONTRIBUTOR_DIR/tron-program-worker"
         if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
-            rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
             return 1
         fi
-        rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
         codesign_bundle "$INSTALLED_BUNDLE"
         print_success "Restored from backup"
         return 0
@@ -545,7 +538,7 @@ cmd_rollback() {
 
     print_header "Rolling Back to Previous Binary"
 
-    if [ ! -f "$CONTRIBUTOR_DIR/tron.bak" ] || [ ! -f "$CONTRIBUTOR_DIR/tron-program-worker.bak" ]; then
+    if [ ! -f "$CONTRIBUTOR_DIR/tron.bak" ]; then
         print_error "No backup found. Cannot rollback."
         echo "  A backup is only available immediately after a deploy."
         exit 1
@@ -565,12 +558,9 @@ cmd_rollback() {
 
     # Restore backup
     print_status "Restoring backup..."
-    cp "$CONTRIBUTOR_DIR/tron-program-worker.bak" "$CONTRIBUTOR_DIR/tron-program-worker"
     if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
-        rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
         exit 1
     fi
-    rm -f "$CONTRIBUTOR_DIR/tron-program-worker"
     codesign_bundle "$INSTALLED_BUNDLE"
 
     # Start service

@@ -4,7 +4,7 @@ Created: 2026-06-06
 
 Initial score: **0/100**
 
-Current score: **47/100**
+Current score: **55/100**
 
 Status: **active execution artifact**
 
@@ -164,7 +164,7 @@ PET-4 and PET-6 must fail if it grows into those shapes.
 | PET-3 | Single execute primitive | 12 | passed_after_fix | engine_architecture | Provider tool export now exposes exactly one function named `execute`, never hosted `tool_search`/`defer_loading`. `capability::execute` uses direct primitive operations (`observe`, `state_get`, `state_set`, `state_list`, `file_read`, `file_write`, `process_run`) instead of registry recipes, plugin/binding/conformance/policy tables, vector search, or target routing. Direct engine proof covers `observe`; run-loop proof shows a mock provider calls `execute`, receives the observation as a capability result in the next turn context, and continues to final text. | Startup/server context still wires product managers and dead source modules. PET-6/PET-7/PET-10 own deleting those planes; they are not model-facing tools after this row. | PET-2/PET-3 backend checkpoint |
 | PET-4 | Soul and agent-owned state workspace | 10 | passed_after_fix | agent_runtime | Context assembly now contains the static agent soul, compact agent-owned state, environment metadata, and session history/results. Provider `Context` exposes `agent_state_context` and no longer carries hard-coded rules, memory docs, skill index/context, hooks, job results, dynamic rules, or capability primers. `execute` state tests prove agent-owned state persists and is projected back into context. | Self-adapting behavior beyond state persistence is successor work. Startup still exposes old registries/managers outside the prompt context and remains PET-6/PET-10 work. | PET-4 context/soul checkpoint |
 | PET-5 | Session, event, ledger, and resource collapse | 8 | pending | storage | Retained stores are minimal and loop-owned. Removed product tables/resources/events are gone from fresh DB migrations and README schema docs. Reconstruction still works for new bare sessions. | Old local databases are disposable on this branch. | pending |
-| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | running | agent_runtime | Prompt-loop internals now reject rules/skills/hooks/guardrails/approval/policy planes via `prompt_loop_internals_have_no_hidden_policy_or_worker_planes`, and transport no longer injects profile-derived execute policy metadata. Startup/server context still wires skill registry, subagent manager, hook abort tracker, process/job/output managers, and guardrail-capable types, so no score is awarded yet. | Need delete startup/server context fields and remaining source modules instead of adapting them to the primitive constructor. | pending |
+| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | passed_after_fix | agent_runtime | Prompt-loop internals, startup/server context, retained domain registration context, retained contracts, and engine registration policy no longer carry rules, skills, hooks, guardrails, subagent managers, process/job/output managers, profile-derived execute policy metadata, approval-required contract metadata, or high-risk approval exceptions. Removed root settings for hooks/skills/prompt library/MCP/guardrails; obsolete guardrail and prompt-library settings are rejected rather than accepted as compatibility no-ops. Dev, CI, release, Mac bundle, backup, restore, and rollback scripts now build/package the single `tron` helper binary only. | PET-10 owns physical deletion of unregistered product source and warning cleanup; PET-5 owns removed product DB/resource/event surfaces; PET-7 owns remaining self-authored substrate teardown. | PET-6 startup/policy checkpoint |
 | PET-7 | Self-authored worker/capability substrate | 8 | pending | engine_architecture | Any retained external-worker or generated-helper path is generic substrate, not a first-party pack lifecycle. Tests prove the agent can create a minimal helper/state artifact through `execute` without hard-coded `module::*`, `worker pack`, or conformance workflows. | Full autonomous capability marketplace is successor work. | pending |
 | PET-8 | iOS primitive shell | 10 | pending | ios | iOS removes fixed Work/Audit Details/Source Control/Prompt Library/Voice Notes/Skills/Agent Control product surfaces from the primary branch UI. It keeps prompt input, sessions, connection/onboarding/settings, message rendering, and generic dynamic surface rendering. Simulator screenshots on iPhone and iPad prove the shell is simple, readable, and non-overlapping. | Dynamic UI sophistication after the shell is successor work. | pending |
 | PET-9 | Documentation and managed asset rewrite | 5 | pending | docs_or_scorecard | README, iOS docs, Mac docs if affected, first-party skill docs, examples, and scorecards stop documenting removed features as runnable behavior. Retired docs/assets are deleted rather than marked legacy. | Historical scorecards may remain only as evidence, not active guidance. | pending |
@@ -184,8 +184,8 @@ Total weight: **100**
    checkpoint.**
 4. PET-4/PET-6: commit the context/soul/state slice only after rules, skills,
    hooks, and guardrails are actually absent from the model context. **PET-4
-   is closed in the context/soul checkpoint; PET-6 remains running until
-   startup/server context and dead source no longer expose those planes.**
+   is closed in the context/soul checkpoint; PET-6 is closed in the
+   startup/policy checkpoint.**
 5. PET-5/PET-7: commit storage and self-authored substrate only after fresh DB
    proof and no old product migration requirements remain.
 6. PET-8: commit the iOS shell only after simulator screenshots and action-time
@@ -233,8 +233,8 @@ Every passed row must update
 These are execution decisions, not blockers for this plan:
 
 - Whether bootstrap `execute` should expose raw process/filesystem primitives
-  directly, or only a constrained program-worker API that can write and run
-  agent-authored helpers.
+  directly, or only a smaller in-process helper API that can write and run
+  agent-authored code.
 - Whether the soul is stored as a checked-in seed file, a seeded resource in the
   agent workspace, or both with one canonical source of truth.
 - Whether the first iOS dynamic renderer should consume the existing
