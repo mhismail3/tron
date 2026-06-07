@@ -12,13 +12,7 @@ struct ServerSettingsTests {
             "server": {
                 "defaultModel": "claude-opus-4-6",
                 "defaultWorkspace": "/projects",
-                "tailscaleIp": "100.64.0.7",
-                "update": {
-                    "enabled": true,
-                    "channel": "beta",
-                    "frequency": "hourly",
-                    "action": "notify"
-                }
+                "tailscaleIp": "100.64.0.7"
             },
             "context": {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
@@ -43,10 +37,6 @@ struct ServerSettingsTests {
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.defaultWorkspace == "/projects")
         #expect(settings.tailscaleIp == "100.64.0.7")
-        #expect(settings.updateEnabled == true)
-        #expect(settings.updateChannel == "beta")
-        #expect(settings.updateFrequency == "hourly")
-        #expect(settings.updateAction == "notify")
         #expect(settings.compaction.preserveRecentCount == 3)
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
         #expect(settings.queueDrainMode == "batched")
@@ -67,10 +57,6 @@ struct ServerSettingsTests {
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
         #expect(settings.queueDrainMode == "sequential")
-        #expect(settings.updateEnabled == false)
-        #expect(settings.updateChannel == "stable")
-        #expect(settings.updateFrequency == "daily")
-        #expect(settings.updateAction == "notify")
         #expect(settings.observabilityLogLevel == "info")
         #expect(settings.observabilityPayloadCapture == "normal")
         #expect(settings.observabilityVerboseRetentionDays == 7)
@@ -141,64 +127,4 @@ struct ServerSettingsTests {
         #expect(QueueDrainMode.from(nil) == nil)
     }
 
-    @Test("update settings defaults when server present but update missing")
-    func updateSettingsDefaultsWhenServerOnly() throws {
-        let json = #"{"server":{"defaultWorkspace":"/tmp"}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
-        #expect(settings.updateEnabled == false)
-        #expect(settings.updateChannel == "stable")
-        #expect(settings.updateFrequency == "daily")
-        #expect(settings.updateAction == "notify")
-    }
-
-    @Test("UpdateChannel/Frequency/Action enum from(_:) accepts wire values")
-    func updateEnumsFromString() {
-        #expect(UpdateChannel.from("stable") == .stable)
-        #expect(UpdateChannel.from("beta") == .beta)
-        #expect(UpdateChannel.from("garbage") == nil)
-        #expect(UpdateChannel.from(nil) == nil)
-
-        #expect(UpdateFrequency.from("manual") == .manual)
-        #expect(UpdateFrequency.from("startup") == .startup)
-        #expect(UpdateFrequency.from("hourly") == .hourly)
-        #expect(UpdateFrequency.from("daily") == .daily)
-        #expect(UpdateFrequency.from("weekly") == .weekly)
-
-        #expect(UpdateAction.from("notify") == .notify)
-        #expect(UpdateAction.from("download") == nil)
-        #expect(UpdateAction.from("install") == nil)
-    }
-
-    @Test("ServerSettingsUpdate encodes update block under server.update")
-    func updateSettingsUpdateEncode() throws {
-        var update = ServerSettingsUpdate()
-        update.server = .init(update: .init(
-            enabled: true,
-            channel: .beta,
-            frequency: .weekly,
-            action: .notify
-        ))
-        let data = try JSONEncoder().encode(update)
-        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-        let server = json["server"] as! [String: Any]
-        let updateBlock = server["update"] as! [String: Any]
-        #expect(updateBlock["enabled"] as? Bool == true)
-        #expect(updateBlock["channel"] as? String == "beta")
-        #expect(updateBlock["frequency"] as? String == "weekly")
-        #expect(updateBlock["action"] as? String == "notify")
-    }
-
-    @Test("ServerSettingsUpdate omits nil update fields")
-    func updateSettingsPartialEncode() throws {
-        var update = ServerSettingsUpdate()
-        update.server = .init(update: .init(enabled: true))
-        let data = try JSONEncoder().encode(update)
-        let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
-        let server = json["server"] as! [String: Any]
-        let updateBlock = server["update"] as! [String: Any]
-        #expect(updateBlock["enabled"] as? Bool == true)
-        #expect(updateBlock["channel"] == nil)
-        #expect(updateBlock["frequency"] == nil)
-        #expect(updateBlock["action"] == nil)
-    }
 }

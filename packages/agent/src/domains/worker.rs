@@ -37,10 +37,8 @@ pub(crate) struct DomainRegistrationContext {
             std::collections::HashMap<String, crate::domains::auth::flows::PendingOAuthFlow>,
         >,
     >,
-    pub(crate) release_fetcher: Option<Arc<dyn crate::platform::updater::ReleaseFetcher>>,
     pub(crate) ws_port: Arc<AtomicU16>,
     pub(crate) onboarded_marker_path: PathBuf,
-    pub(crate) updater_state_path: PathBuf,
     pub(crate) engine_host: crate::engine::EngineHostHandle,
 }
 
@@ -59,10 +57,8 @@ impl DomainRegistrationContext {
             settings_path: ctx.settings_path.clone(),
             auth_path: ctx.auth_path.clone(),
             oauth_flows: Arc::clone(&ctx.oauth_flows),
-            release_fetcher: ctx.release_fetcher.clone(),
             ws_port: Arc::clone(&ctx.ws_port),
             onboarded_marker_path: ctx.onboarded_marker_path.clone(),
-            updater_state_path: ctx.updater_state_path.clone(),
             engine_host: ctx.engine_host.clone(),
         }
     }

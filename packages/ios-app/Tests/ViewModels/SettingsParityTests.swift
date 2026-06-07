@@ -39,11 +39,6 @@ final class SettingsParityTests: XCTestCase {
         "observabilityMaxInlinePayloadBytes",
         "storageRetentionEnabled",
         "storageMaxDatabaseMb",
-        // Update checks (ConnectionSettingsPage.swift)
-        "updateEnabled",
-        "updateChannel",
-        "updateFrequency",
-        "updateAction",
     ]
 
     /// Explicit waivers — fields that exist on SettingsState but are

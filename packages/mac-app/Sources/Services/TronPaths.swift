@@ -80,10 +80,6 @@ enum TronPaths {
         runDir.appendingPathComponent(".onboarded", isDirectory: false)
     }
 
-    static var updaterStatePath: URL {
-        runDir.appendingPathComponent("updater-state.json", isDirectory: false)
-    }
-
     static var macAppVersionMarkerPath: URL {
         runDir.appendingPathComponent("mac-app-version.json", isDirectory: false)
     }

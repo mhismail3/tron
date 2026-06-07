@@ -1113,6 +1113,76 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
 }
 
 #[test]
+fn primitive_branch_has_no_product_update_surface() {
+    assert_repo_path_absent(
+        "packages/agent/src/platform/updater",
+        "server user-mode updater module",
+    );
+    assert_repo_path_absent(
+        "packages/agent/src/domains/settings/implementation/types/update.rs",
+        "server update settings schema",
+    );
+
+    let retained_source = read_repo_source_trees(&[
+        "packages/agent/src",
+        "packages/ios-app/Sources",
+        "packages/ios-app/Tests",
+        "packages/mac-app/Sources",
+        "packages/mac-app/Tests",
+    ]);
+    assert_absent(
+        &retained_source,
+        &[
+            "platform::updater",
+            "pub mod updater",
+            "system::check_for_updates",
+            "system::get_update_status",
+            "SystemCheckForUpdatesResult",
+            "SystemUpdateStatusResult",
+            "checkForUpdates",
+            "getUpdateStatus",
+            "UpdateSettings",
+            "UpdateChannel",
+            "UpdateFrequency",
+            "UpdateAction",
+            "updateEnabled",
+            "updateChannel",
+            "updateFrequency",
+            "updateAction",
+            "updater-state.json",
+            "auto-update.pause",
+            "server.update_available",
+            "release_fetcher",
+            "updater_state_path",
+        ],
+        "retained source product update surface",
+    );
+
+    let scripts = [
+        "scripts/tron",
+        "scripts/tron-lib.sh",
+        "scripts/tron.d/automation.sh",
+        "scripts/auto-deploy",
+    ]
+    .into_iter()
+    .map(read_repo_file)
+    .collect::<Vec<_>>()
+    .join("\n");
+    assert_absent(
+        &scripts,
+        &["self-update", "auto-update.pause", "updater-state.json"],
+        "CLI product update surface",
+    );
+
+    let bundled_profile = read_repo_file("packages/agent/defaults/profiles/default/profile.toml");
+    assert_absent(
+        &bundled_profile,
+        &["[settings.server.update]", "server.update"],
+        "bundled default profile update settings",
+    );
+}
+
+#[test]
 fn prompt_media_uses_unified_attachment_primitive() {
     let rust_files = [
         "packages/agent/src/domains/agent/contract.rs",

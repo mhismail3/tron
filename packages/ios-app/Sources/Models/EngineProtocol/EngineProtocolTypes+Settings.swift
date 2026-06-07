@@ -12,11 +12,6 @@ struct ServerSettings: Decodable {
     let defaultWorkspace: String?
     let tailscaleIp: String?
 
-    let updateEnabled: Bool
-    let updateChannel: String
-    let updateFrequency: String
-    let updateAction: String
-
     let compaction: CompactionSettings
     let queueDrainMode: String
 
@@ -32,11 +27,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum ServerKeys: String, CodingKey {
-        case defaultModel, defaultWorkspace, tailscaleIp, update
-    }
-
-    private enum UpdateKeys: String, CodingKey {
-        case enabled, channel, frequency, action
+        case defaultModel, defaultWorkspace, tailscaleIp
     }
 
     private enum ContextKeys: String, CodingKey {
@@ -62,26 +53,10 @@ struct ServerSettings: Decodable {
             defaultModel = (try? serverContainer.decodeIfPresent(String.self, forKey: .defaultModel)) ?? "claude-sonnet-4-6"
             defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
             tailscaleIp = try? serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
-
-            if let updateContainer = try? serverContainer.nestedContainer(keyedBy: UpdateKeys.self, forKey: .update) {
-                updateEnabled = (try? updateContainer.decodeIfPresent(Bool.self, forKey: .enabled)) ?? false
-                updateChannel = (try? updateContainer.decodeIfPresent(String.self, forKey: .channel)) ?? "stable"
-                updateFrequency = (try? updateContainer.decodeIfPresent(String.self, forKey: .frequency)) ?? "daily"
-                updateAction = (try? updateContainer.decodeIfPresent(String.self, forKey: .action)) ?? "notify"
-            } else {
-                updateEnabled = false
-                updateChannel = "stable"
-                updateFrequency = "daily"
-                updateAction = "notify"
-            }
         } else {
             defaultModel = "claude-sonnet-4-6"
             defaultWorkspace = nil
             tailscaleIp = nil
-            updateEnabled = false
-            updateChannel = "stable"
-            updateFrequency = "daily"
-            updateAction = "notify"
         }
 
         if let contextContainer = try? container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context) {
@@ -151,55 +126,6 @@ enum QueueDrainMode: String, Encodable {
     }
 }
 
-// MARK: - Update Enums
-
-enum UpdateChannel: String, Encodable, CaseIterable {
-    case stable, beta
-
-    static func from(_ raw: String?) -> Self? {
-        raw.flatMap { Self(rawValue: $0) }
-    }
-
-    var displayName: String {
-        switch self {
-        case .stable: return "Stable"
-        case .beta: return "Beta"
-        }
-    }
-}
-
-enum UpdateFrequency: String, Encodable, CaseIterable {
-    case manual, startup, hourly, daily, weekly
-
-    static func from(_ raw: String?) -> Self? {
-        raw.flatMap { Self(rawValue: $0) }
-    }
-
-    var displayName: String {
-        switch self {
-        case .manual: return "Manual"
-        case .startup: return "On startup"
-        case .hourly: return "Hourly"
-        case .daily: return "Daily"
-        case .weekly: return "Weekly"
-        }
-    }
-}
-
-enum UpdateAction: String, Encodable, CaseIterable {
-    case notify
-
-    static func from(_ raw: String?) -> Self? {
-        raw.flatMap { Self(rawValue: $0) }
-    }
-
-    var displayName: String {
-        switch self {
-        case .notify: return "Notify when available"
-        }
-    }
-}
-
 struct ServerSettingsUpdate: Encodable {
     var server: ServerUpdate?
     var context: ContextUpdate?
@@ -211,14 +137,6 @@ struct ServerSettingsUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
         var tailscaleIp: String?
-        var update: UpdateUpdate?
-
-        struct UpdateUpdate: Encodable {
-            var enabled: Bool?
-            var channel: UpdateChannel?
-            var frequency: UpdateFrequency?
-            var action: UpdateAction?
-        }
     }
 
     struct ContextUpdate: Encodable {

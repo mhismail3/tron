@@ -32,8 +32,6 @@ CONTRIBUTOR_DIR="$RUN_DIR"
 DEPLOY_LOCK_FILE="$RUN_DIR/deploy.lock"
 AUTO_DEPLOY_PAUSE_FILE="$RUN_DIR/auto-deploy.pause"
 AUTO_DEPLOY_LOCK_FILE="$RUN_DIR/auto-deploy.lock"
-SELF_UPDATE_PAUSE_FILE="$RUN_DIR/auto-update.pause"
-SELF_UPDATE_STATE_FILE="$RUN_DIR/updater-state.json"
 INSTALLED_BUNDLE="$CONTRIBUTOR_DIR/Tron-Deploy.app"
 INSTALLED_BINARY="$INSTALLED_BUNDLE/Contents/MacOS/tron"
 DEV_BUNDLE="$RUN_DIR/Tron-Dev.app"
@@ -155,8 +153,7 @@ print_status()  { echo -e "${BLUE}▸${NC} $1" >&2; }
 print_success() { echo -e "${GREEN}✓${NC} $1" >&2; }
 print_error()   { echo -e "${RED}✗${NC} $1" >&2; }
 print_warning() { echo -e "${YELLOW}!${NC} $1" >&2; }
-# Neutral informational tone — used by self-update CLI paths to explain
-# what's happening without implying an action started/succeeded.
+# Neutral informational tone for explanatory CLI output.
 print_info()    { echo -e "${DIM}ℹ${NC} $1" >&2; }
 print_header()  { echo -e "\n${CYAN}$1${NC}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2; }
 

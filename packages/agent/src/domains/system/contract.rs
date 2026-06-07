@@ -33,14 +33,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .resource_lease(ResourceLeaseRequirement::exclusive_template("system", "system:shutdown", 60000))
             .compensation(CompensationContract::new(CompensationKind::ExternalIrreversible, "shutdown is irreversible for the current process; restart Tron manually"))
             .stream_topics(STREAM_TOPICS.to_vec())
-            .build()?,
-        CapabilityContract::new("system::check_for_updates", "system", EffectClass::PureRead, RiskLevel::Low, Some("system.read"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .build()?,
-        CapabilityContract::new("system::get_update_status", "system", EffectClass::PureRead, RiskLevel::Low, Some("system.read"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?
     ])
 }

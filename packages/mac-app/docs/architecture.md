@@ -290,7 +290,7 @@ through `setup.pingServer`.
 
 Menu-bar uninstall and manager-mode `--tron-uninstall-and-quit` both call
 `SMAppService.unregister`, remove runtime state
-(`run/.onboarded`, `run/updater-state.json`, `run/auth.lock`, and
+(`run/.onboarded`, `run/auth.lock`, and
 the current `run/.mac-wrapper.<bundle-id>.lock`), and quit the wrapper. By default, auth,
 profile settings, databases, and workspace files remain intact, so the next app
 launch returns to the onboarding wizard instead of a broken menu-bar-only

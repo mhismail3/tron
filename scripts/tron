@@ -20,7 +20,6 @@
 #   rollback        Restore previous binary (--yes to skip confirmation)
 #   uninstall       Remove service and reset Mac onboarding (optionally reset settings/auth)
 #   auto-deploy     Contributor auto-deploy watcher (install|uninstall|status|pause|resume|logs)
-#   self-update     User GitHub Releases updater (check|status|pause|resume|logs|reset)
 #
 # Auth:
 #   login           Authenticate with a provider (--label for multi-account)
@@ -102,7 +101,6 @@ cmd_help() {
     echo "  install         Initial setup (launchd + CLI)"
     echo "  uninstall       Remove service and reset Mac onboarding (add --reset-settings and/or --reset-credentials)"
     echo "  auto-deploy     Contributor auto-deploy watcher (install|uninstall|status|pause|resume|logs)"
-    echo "  self-update     User GitHub Releases updater (check|status|pause|resume|logs|reset)"
     echo ""
     echo -e "${BOLD}Runtime:${NC}"
     echo "  start           Start launchd service"
@@ -152,6 +150,5 @@ case "$1" in
     auth)      shift; cmd_auth "$@" ;;
     uninstall) shift; cmd_uninstall "$@" ;;
     auto-deploy) shift; cmd_auto_deploy "$@" ;;
-    self-update) shift; cmd_self_update "$@" ;;
     *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;
 esac

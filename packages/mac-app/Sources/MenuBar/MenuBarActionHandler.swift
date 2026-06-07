@@ -60,9 +60,6 @@ final class MenuBarActionHandler {
         observe(.tronMenuBarSendFeedback, on: center) { [weak self] in
             await self?.sendFeedback()
         }
-        observe(.tronMenuBarCheckForUpdates, on: center) { [weak self] in
-            await self?.checkForUpdates()
-        }
         observe(.tronMenuBarUninstall, on: center) { [weak self] in
             await self?.confirmAndUninstall()
         }
@@ -234,12 +231,6 @@ final class MenuBarActionHandler {
     func sendFeedback() async {
         let snapshot = menuBarController?.snapshot ?? ServerStatusSnapshot.checking
         await MenuBarFeedbackAction.present(snapshot: snapshot)
-    }
-
-    func checkForUpdates() async {
-        if let url = URL(string: "https://github.com/mhismail3/tron/releases/latest") {
-            NSWorkspace.shared.open(url)
-        }
     }
 
     func confirmAndUninstall() async {

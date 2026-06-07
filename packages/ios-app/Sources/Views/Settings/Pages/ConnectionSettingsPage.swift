@@ -7,8 +7,6 @@ struct ConnectionSettingsPage: View {
 
     @Environment(\.dependencies) private var dependencies
     @State private var serverPendingRemoval: PairedServer?
-    @State private var isCheckingForUpdates = false
-    @State private var checkResultMessage: String?
 
     init(
         settingsState: SettingsState,
@@ -34,15 +32,6 @@ struct ConnectionSettingsPage: View {
         } message: { server in
             Text("Removes \(server.label) from this iPhone. Server settings and sessions on the Mac are unchanged.")
         }
-        .alert(
-            checkResultMessage ?? "",
-            isPresented: Binding(
-                get: { checkResultMessage != nil },
-                set: { if !$0 { checkResultMessage = nil } }
-            )
-        ) {
-            Button("OK", role: .cancel) { checkResultMessage = nil }
-        }
     }
 
     @ViewBuilder
@@ -60,18 +49,11 @@ struct ConnectionSettingsPage: View {
                 VStack(spacing: 16) {
                     pairedServersSection
                         .fixedSize(horizontal: false, vertical: true)
-                    if settingsState.isLoaded && !activeServerUnavailable {
-                        diagnosticsSection
-                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
 
                 VStack(spacing: 16) {
-                    if settingsState.isLoaded && !activeServerUnavailable {
-                        updatesSection
-                    } else if let status = serverControlsStatus {
-                        serverBackedSettingsStatusSection(status)
-                    }
+                    serverBackedContent
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
             }
@@ -102,10 +84,7 @@ struct ConnectionSettingsPage: View {
             pairedServerCount: dependencies.pairedServerStore.servers.count,
             activeServerUnavailable: activeServerUnavailable,
             isLoaded: settingsState.isLoaded,
-            loadError: settingsState.loadError,
-            updateEnabled: settingsState.updateEnabled,
-            updateChannel: settingsState.updateChannel,
-            updateFrequency: settingsState.updateFrequency
+            loadError: settingsState.loadError
         )
     }
 
@@ -300,8 +279,6 @@ struct ConnectionSettingsPage: View {
     @ViewBuilder
     private func serverBackedSection(_ section: ConnectionSettingsServerBackedSection) -> some View {
         switch section {
-        case .updates:
-            updatesSection
         case .diagnostics:
             diagnosticsSection
         }
@@ -330,19 +307,6 @@ struct ConnectionSettingsPage: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 14)
-            }
-        }
-    }
-
-    private var updatesSection: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: ServerUpdateSettingsItem.sectionTitle)
-
-            VStack(alignment: .leading, spacing: 16) {
-                updateChecksCard
-                channelCard
-                frequencyCard
-                manualCheckCard
             }
         }
     }
@@ -468,133 +432,6 @@ struct ConnectionSettingsPage: View {
             }
 
             SettingsCaption(text: "The server owns trace detail, payload capture, retention, compression, and storage cleanup. iOS only requests the policy.")
-        }
-    }
-
-    private var updateChecksCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsCard {
-                SettingsRow(
-                    icon: ServerUpdateSettingsItem.automaticChecks.icon,
-                    label: ServerUpdateSettingsItem.automaticChecks.title
-                ) {
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { settingsState.updateEnabled },
-                            set: { newValue in
-                                settingsState.updateEnabled = newValue
-                                updateServerSetting {
-                                    ServerSettingsUpdate(server: .init(update: .init(enabled: newValue)))
-                                }
-                            }
-                        )
-                    )
-                    .labelsHidden()
-                    .tint(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: ServerUpdateSettingsItem.automaticChecks.description)
-        }
-    }
-
-    private var channelCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsCard {
-                SettingsRow(
-                    icon: ServerUpdateSettingsItem.releaseChannel.icon,
-                    label: ServerUpdateSettingsItem.releaseChannel.title
-                ) {
-                    SettingsCycleToggle(
-                        options: UpdateChannel.allCases.map { ($0.rawValue, $0.displayName) },
-                        current: settingsState.updateChannel
-                    ) { newValue in
-                        settingsState.updateChannel = newValue
-                        if let channel = UpdateChannel.from(newValue) {
-                            updateServerSetting {
-                                ServerSettingsUpdate(server: .init(update: .init(channel: channel)))
-                            }
-                        }
-                    }
-                }
-            }
-
-            SettingsCaption(text: ServerUpdateSettingsItem.releaseChannel.description)
-        }
-    }
-
-    private var frequencyCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsCard {
-                SettingsRow(
-                    icon: ServerUpdateSettingsItem.checkFrequency.icon,
-                    label: ServerUpdateSettingsItem.checkFrequency.title
-                ) {
-                    SettingsCycleToggle(
-                        options: UpdateFrequency.allCases.map { ($0.rawValue, $0.displayName) },
-                        current: settingsState.updateFrequency
-                    ) { newValue in
-                        settingsState.updateFrequency = newValue
-                        if let frequency = UpdateFrequency.from(newValue) {
-                            updateServerSetting {
-                                ServerSettingsUpdate(server: .init(update: .init(frequency: frequency)))
-                            }
-                        }
-                    }
-                }
-            }
-
-            SettingsCaption(text: ServerUpdateSettingsItem.checkFrequency.description)
-        }
-    }
-
-    private var manualCheckCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsCard(interactive: true) {
-                Button {
-                    Task { await checkForUpdatesNow() }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: ServerUpdateSettingsItem.manualCheck.icon)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody))
-                            .foregroundStyle(.tronEmerald)
-                            .frame(width: 18)
-                        Text(ServerUpdateSettingsItem.manualCheck.title)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronTextPrimary)
-                        Spacer()
-                        if isCheckingForUpdates {
-                            ProgressView()
-                                .tint(.tronEmerald)
-                                .scaleEffect(0.7)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 12)
-                    .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .disabled(isCheckingForUpdates)
-            }
-
-            SettingsCaption(text: ServerUpdateSettingsItem.manualCheck.description)
-        }
-    }
-
-    private func checkForUpdatesNow() async {
-        isCheckingForUpdates = true
-        defer { isCheckingForUpdates = false }
-
-        do {
-            let result = try await dependencies.engineClient.misc.checkForUpdates()
-            if result.available, let latest = result.latestVersion {
-                checkResultMessage = "Update available: \(VersionDisplay.label(for: latest))"
-            } else {
-                checkResultMessage = "You're up to date."
-            }
-        } catch {
-            checkResultMessage = "Check failed: \(error.localizedDescription)"
         }
     }
 

@@ -81,8 +81,6 @@ async fn boot_server() -> TestServer {
         oauth_flows: Arc::new(Mutex::new(HashMap::new())),
         ws_port: Arc::new(AtomicU16::new(0)),
         onboarded_marker_path: temp.path().join(".onboarded"),
-        release_fetcher: None,
-        updater_state_path: temp.path().join("updater-state.json"),
     };
     tron::transport::setup::register_server_domains_for_context(&runtime_context)
         .expect("primitive domains register");

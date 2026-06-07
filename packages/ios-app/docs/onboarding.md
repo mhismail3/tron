@@ -219,9 +219,9 @@ clears server-backed controls immediately and reloads them from the newly active
 Mac.
 The Servers sheet starts with a dynamic summary card, then groups settings as:
 header, one or more glass containers with control titles, and optional
-description text below each container. Diagnostics and update checks live in
-this sheet because they are active Mac server settings; update controls sit at
-the bottom under one Updates header.
+description text below each container. Diagnostics live in this sheet because
+they are active Mac server settings; product update checks are not part of the
+primitive iOS shell.
 When the active paired server is unreachable, the Servers sheet keeps paired
 server rows visible for local switching and removal, turns the summary card
 warning-yellow with `<server name> not available`, and hides server-backed

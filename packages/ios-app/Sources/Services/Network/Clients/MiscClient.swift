@@ -27,31 +27,6 @@ final class MiscClient: EngineDomainClient {
         )
     }
 
-    // MARK: - Update Checks
-
-    /// Force an immediate GitHub Releases probe. Returns the latest release
-    /// info (if any); the server caches upstream responses 60s to avoid API
-    /// thrash.
-    func checkForUpdates() async throws -> SystemCheckForUpdatesResult {
-        _ = try requireTransport().requireConnection()
-
-        return try await invokeRead(
-            "system::check_for_updates",
-            EmptyParams()
-        )
-    }
-
-    /// Snapshot of the updater state + configured settings. Used by update
-    /// status surfaces such as the Mac menu bar.
-    func getUpdateStatus() async throws -> SystemUpdateStatusResult {
-        _ = try requireTransport().requireConnection()
-
-        return try await invokeRead(
-            "system::get_update_status",
-            EmptyParams()
-        )
-    }
-
     // MARK: - Message Methods
 
     /// Delete a message from a session.

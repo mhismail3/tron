@@ -15,4 +15,3 @@
 //!   it does not own push notification state or product delivery policy.
 
 pub mod device_broker;
-pub mod updater;

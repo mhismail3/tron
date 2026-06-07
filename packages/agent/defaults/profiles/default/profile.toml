@@ -61,12 +61,6 @@ heartbeatIntervalMs = 30000
 defaultModel = "claude-sonnet-4-6"
 defaultProvider = "anthropic"
 
-[settings.server.update]
-enabled = false
-channel = "stable"
-frequency = "daily"
-action = "notify"
-
 [settings.tmux]
 commandTimeoutMs = 30000
 pollingIntervalMs = 500

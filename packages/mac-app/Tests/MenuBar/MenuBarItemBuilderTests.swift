@@ -130,7 +130,6 @@ struct MenuBarItemBuilderTests {
             "Show pairing info",
             "Open Tron folder",
             "Show logs",
-            "Check for updates",
             "Send feedback",
             "—",
             "Pause server",
@@ -198,7 +197,7 @@ struct MenuBarItemBuilderTests {
         #expect(!titles.contains("Pause server"))
     }
 
-    @Test("menu always has pairing, folder, logs, updates, feedback, server controls, uninstall, quit")
+    @Test("menu always has pairing, folder, logs, feedback, server controls, uninstall, quit")
     func canonicalActionPresence() throws {
         let tmp = TestTempDir.make()
         defer { TestTempDir.cleanup(tmp) }
@@ -213,7 +212,6 @@ struct MenuBarItemBuilderTests {
             "Show logs",
             "Open Tron folder",
             "Send feedback",
-            "Check for updates",
             "Uninstall Tron",
             "Quit Tron",
         ] {
@@ -237,7 +235,6 @@ struct MenuBarItemBuilderTests {
             "Show pairing info",
             "Open Tron folder",
             "Show logs",
-            "Check for updates",
             "Send feedback",
             "—",
             "Pause server",

@@ -26,20 +26,6 @@ final class SettingsState {
     var storageRetentionEnabled: Bool = true
     var storageMaxDatabaseMb: UInt64 = 512
 
-    // MARK: - Update Checks
-
-    /// Master switch for user-mode update checks. Default `false` (opt-in).
-    var updateEnabled: Bool = false
-    /// Release channel: `"stable"` (latest GitHub release) or `"beta"`
-    /// (highest semver including pre-release tags).
-    var updateChannel: String = "stable"
-    /// How often the in-process scheduler checks GitHub Releases. One of
-    /// `"manual" | "startup" | "hourly" | "daily" | "weekly"`.
-    var updateFrequency: String = "daily"
-    /// What the server does when a newer release is found. One of
-    /// `"notify"`.
-    var updateAction: String = "notify"
-
     @ObservationIgnored
     private var lastLoadedSettings: ServerSettings?
 
@@ -158,9 +144,5 @@ final class SettingsState {
         storageRetentionEnabled = settings.storageRetentionEnabled
         storageMaxDatabaseMb = settings.storageMaxDatabaseMb
 
-        updateEnabled = settings.updateEnabled
-        updateChannel = settings.updateChannel
-        updateFrequency = settings.updateFrequency
-        updateAction = settings.updateAction
     }
 }

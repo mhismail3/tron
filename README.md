@@ -160,7 +160,7 @@ app/        Binary/server bootstrap, health, metrics, onboarding, shutdown
 transport/  /engine client protocol, /engine/workers socket transport, auth gate
 engine/     Live capability fabric: catalog, workers, triggers, ledger, streams, queues
 domains/    Every Tron worker: contracts, deps, handlers, operations, local services, tests
-platform/   OS/vendor integrations retained by the primitive loop, including updater
+platform/   OS/vendor integrations retained by the primitive loop
 shared/     Foundation IDs/errors/paths, protocol DTOs, unified storage helpers
 main.rs     Thin binary entry point
 main_cli.rs CLI parsing and auth subcommand dispatch
@@ -173,7 +173,7 @@ main_runtime.rs Server startup/runtime wiring
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
 | `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
-| `platform` | OS/vendor integrations | updater scheduler |
+| `platform` | OS/vendor integrations | paired-device broker |
 | `shared` | Foundation vocabulary, protocol DTOs, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
 The domain package is intentionally vertical. A domain root is only docs,
@@ -205,7 +205,7 @@ a capability by reading one domain folder instead of a central dispatch table.
 3. Launch `Tron.app`. The wizard handles Tailscale detection, required permissions, server install, and the iOS handoff.
 4. On iPhone, scan the wizard's Tron iOS Beta QR code to open the public TestFlight invite, install the latest available Tron beta, then scan the Mac pairing QR or enter the pairing fields manually.
 
-The wizard and menu bar surface everything else (`Check for updates`, `Send feedback`, `Restart server`, etc.) — you never need the CLI unless you want to.
+The wizard and menu bar surface runtime actions such as pairing info, logs, feedback, restart, pause, resume, and uninstall — you never need the CLI unless you want to.
 
 ### Contributors (build from source)
 
@@ -310,8 +310,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron deploy` | Build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive) |
 | `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 | `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
-| `tron auto-deploy` | Contributor-only auto-deploy watcher (`install`, `uninstall`, `status`, `pause`, `resume`, `logs`). Refuses to run outside a git repo — for DMG users, see `tron self-update` instead. |
-| `tron self-update` | User-mode GitHub Releases updater (`check`, `status`, `pause`, `resume`, `logs`, `reset`). Opt-in via `server.update.enabled`; gated by `~/.tron/internal/run/auto-update.pause` sentinel. |
+| `tron auto-deploy` | Contributor-only auto-deploy watcher (`install`, `uninstall`, `status`, `pause`, `resume`, `logs`). Refuses to run outside a git repo. |
 
 ### Runtime
 
@@ -590,13 +589,7 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
     "defaultProvider": "anthropic",
     "defaultModel": "claude-sonnet-4-6",
     "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
-    "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
-    "update": {                     // User-mode update checks. All fields off / safest by default.
-      "enabled": false,             // Master switch — false means the scheduler never runs + no GitHub API traffic
-      "channel": "stable",          // "stable" ignores pre-release tags; "beta" includes them
-      "frequency": "daily",         // "manual" | "startup" | "hourly" | "daily" | "weekly"
-      "action": "notify"            // notify-only; installing remains DMG replacement
-    }
+    "tailscaleIp": null             // Cached by the Mac wrapper after live Tailscale pairing resolution
   },
 
   "agent": {
@@ -915,7 +908,6 @@ packages/mac-app/Sources/
 | Stop dev server | Appears with the server controls whenever `Tron-Dev.app` owns port 9847; stops the dev process and resumes the installed Login Item through the same health-gated path. Pause, restart, and uninstall are disabled while dev takeover is active. |
 | Show logs | Opens the native logs window backed by the read-only `logs::recent` capability |
 | Send feedback | Opens a prefilled GitHub issue with app/server context and redacted recent logs |
-| Check for updates | Opens the latest GitHub Release |
 | Uninstall Tron | Confirm dialog + `SMAppService.unregister`; clears `internal/run/` runtime state; optional checkboxes remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. The database and workspace are always preserved. |
 | Quit Tron | Quits wrapper; server keeps running via LaunchAgent |
 
@@ -1027,12 +1019,10 @@ Base directories in the tree below are resolved through helpers in `packages/age
     |   +-- auth.lock              Auth-file refresh lock
     |   +-- auto-deploy.lock       Contributor deploy concurrency lock
     |   +-- auto-deploy.pause      Contributor deploy pause sentinel
-    |   +-- auto-update.pause      User-mode updater pause sentinel
     |   +-- deploy.lock            Manual deploy concurrency lock
     |   +-- .mac-wrapper.*.lock    Per-wrapper menu app lock
     |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`
     |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server
-    |   +-- updater-state.json     Update-check scheduler state
     |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle
         +-- worker.py              parakeet-mlx Python worker
         +-- requirements.txt       Pip deps for the venv
@@ -1076,25 +1066,6 @@ A parallel dry-run job runs on every PR that touches `packages/mac-app/**` or th
 The iOS TestFlight pipeline lives at `.github/workflows/release-ios.yml` and triggers on the same `server-v*` tag push. It regenerates `packages/ios-app/TronMobile.xcodeproj` from XcodeGen, verifies `VERSION.env` mirrors, runs the iOS simulator tests, archives the `Tron` scheme with the `Prod` configuration (`com.tron.mobile` / App ID `6761511764`), exports an App Store Connect IPA with Xcode's `app-store-connect` export method, uploads with `asc builds upload`, waits for the Apple build to become valid, resolves TestFlight export compliance, updates What to Test notes, submits TestFlight beta review when Apple requires it for external testing, and branches on the ASC review state. First external builds for a new marketing version normally enter `WAITING_FOR_BETA_REVIEW`; CI treats that as a successful pending-review checkpoint instead of timing out. Once Apple approves the version, rerunning the workflow or uploading later builds in the same version continues to group validation and assigns the build to the public external TestFlight group when one is configured or can be auto-discovered. The public group is the same TestFlight link shown by the Mac onboarding QR code. TestFlight group checks are warning-only after the build is uploaded and processed because successful public distribution must not be blocked by stale or renamed group variables that CI does not need to create the beta build. Reruns are idempotent: if the Apple build number already exists in App Store Connect, CI skips the binary upload and reuses that build for processing/distribution. Manual workflow runs default to `dry_run=true` and stop before ASC upload.
 
 Required iOS release credentials are GitHub Actions secrets `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_KEY_P8_BASE64`. `ASC_TESTFLIGHT_PUBLIC_GROUP_ID` and `ASC_TESTFLIGHT_INTERNAL_GROUP_ID` are optional repository variables used for group assignment diagnostics; CI can auto-discover a single public-link group and otherwise skips group assignment without failing an uploaded/processed build. CI can export with automatic Xcode cloud signing through the ASC key, or with local signing secrets when `IOS_DISTRIBUTION_CERT_P12_BASE64`, `IOS_DISTRIBUTION_CERT_PASSWORD`, `IOS_APPSTORE_PROFILE_BASE64`, and `IOS_SHARE_EXTENSION_APPSTORE_PROFILE_BASE64` are set. Local signing supports both manually managed App Store profiles and matching Xcode-managed App Store profiles. `ASC_KEY_ID` and the `.p8` path can be checked locally with `asc auth status --verbose` / `asc auth doctor`; `ASC_ISSUER_ID` is shown in App Store Connect under Users and Access -> Integrations -> App Store Connect API -> Team Keys. The iOS app and share extension declare `ITSAppUsesNonExemptEncryption=false`; CI verifies that key in the archive/export and can apply the same App Store Connect API build setting to already-uploaded builds that predate the plist key. TestFlight/App Store Connect remains the distribution and audit surface for iOS binaries. Do not create separate GitHub releases for iOS unless an iOS artifact is intentionally published through GitHub too; the shared `VERSION.env` keeps Mac/server and iOS version labels aligned without adding duplicate tags.
-
-### User-mode Update Checks
-
-For users installed via DMG (no git remote), the server can poll GitHub Releases and surface the notarized DMG URL per the `server.update.*` settings. The module lives at `packages/agent/src/platform/updater/mod.rs`. Installing an update remains a visible replacement of `/Applications/Tron.app` from the notarized DMG; the server does not mutate the signed app bundle or stage update artifacts under `~/.tron`.
-
-| Phase | Action | Effect |
-|-------|--------|--------|
-| Check | `system.checkForUpdates` | Queries `api.github.com/repos/mhismail3/tron/releases`; returns the highest semver allowed by `channel` (`stable` excludes pre-release tags, `beta` includes them). Cached 60s to avoid rate-limit thrash. |
-| Notify | `action: "notify"` | Emits `server.update_available`; iOS banner + menu-bar submenu surface the release and DMG URL. No server-side download. |
-
-Safety invariants (all test-covered):
-
-- No app-bundle mutation: runtime files stay outside `Tron.app`, and replacing the app is a user-visible DMG install.
-- Skipped if a dev server has taken over port 9847 (same guard as `auto-deploy`).
-- Pause-able via `~/.tron/internal/run/auto-update.pause` sentinel; `tron self-update pause|resume` manages it.
-
-**Contrast with `tron auto-deploy`**: the latter is contributor-only, pulls from `origin/main`, and refuses to run outside a git repo. Users on DMG-installed builds use `tron self-update` exclusively. See [CLI Reference → Deployment](#cli-reference) for the full command surface.
-
----
 
 ## Testing
 

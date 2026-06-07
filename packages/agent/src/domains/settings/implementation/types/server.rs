@@ -6,8 +6,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use super::{UpdateAction, UpdateChannel, UpdateFrequency};
-
 /// Server network and runtime settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default, deny_unknown_fields)]
@@ -24,9 +22,6 @@ pub struct ServerSettings {
     /// Default workspace path.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_workspace: Option<String>,
-    /// User-mode update-check configuration.
-    #[serde(default)]
-    pub update: UpdateSettings,
     /// Cached Tailscale IP address. Populated by the Mac wrapper / install
     /// scripts (or manually) so iOS clients can display "your Mac is at
     /// 100.x.y.z" without shelling out to the `tailscale` binary.
@@ -41,7 +36,6 @@ impl Default for ServerSettings {
             default_model: "claude-sonnet-4-6".to_string(),
             default_provider: "anthropic".to_string(),
             default_workspace: None,
-            update: UpdateSettings::default(),
             tailscale_ip: None,
         }
     }
@@ -67,49 +61,6 @@ impl ServerSettings {
             ));
         }
         Ok(())
-    }
-}
-
-/// User-mode update-check configuration.
-///
-/// Drives the updater module's behavior. Default is the safest possible
-/// combination — `enabled = false` means the
-/// updater is entirely dormant. Flipping `enabled = true` with the
-/// other fields at their defaults gives the gentlest behavior:
-/// daily checks on the `stable` channel, `notify`-only when a
-/// newer release is found (no automatic downloads).
-///
-/// All fields have 1:1 iOS UI counterparts per the project's
-/// Settings-parity rule.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct UpdateSettings {
-    /// Master switch. When `false`, no scheduler runs, no HTTP
-    /// requests hit GitHub, and `system.checkForUpdates` returns
-    /// `{ available: false, disabled: true }`. The safe default.
-    pub enabled: bool,
-    /// Release channel. `stable` ignores pre-release tags; `beta`
-    /// includes them.
-    pub channel: UpdateChannel,
-    /// How often the in-process scheduler fires an automatic check.
-    /// `manual` disables the scheduler entirely; checks only fire
-    /// on explicit engine invocation.
-    pub frequency: UpdateFrequency,
-    /// What to do when a newer release is found. `notify` reports
-    /// availability; `download` also stages and verifies the DMG.
-    /// Installing still means replacing `/Applications/Tron.app`
-    /// from the notarized DMG.
-    pub action: UpdateAction,
-}
-
-impl Default for UpdateSettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            channel: UpdateChannel::default(),
-            frequency: UpdateFrequency::default(),
-            action: UpdateAction::default(),
-        }
     }
 }
 
@@ -296,75 +247,6 @@ mod tests {
         assert!(s.default_workspace.is_none());
         // tailscaleIp defaults absent (populated by installer scripts).
         assert!(s.tailscale_ip.is_none());
-    }
-
-    #[test]
-    fn update_settings_defaults_are_safe() {
-        // The safe default is the full "dormant" state: no HTTP
-        // requests to GitHub and no downloads. Flipping just
-        // `enabled = true` gives the gentlest behavior: daily stable
-        // notify-only checks.
-        let s = UpdateSettings::default();
-        assert!(!s.enabled);
-        assert_eq!(
-            s.channel,
-            UpdateChannel::Stable,
-            "default channel must be stable"
-        );
-        assert_eq!(
-            s.frequency,
-            UpdateFrequency::Daily,
-            "default frequency must be daily"
-        );
-        assert_eq!(
-            s.action,
-            UpdateAction::Notify,
-            "default action must be notify"
-        );
-    }
-
-    #[test]
-    fn update_settings_default_when_section_missing() {
-        // Missing `update` blocks deserialize to the dormant default.
-        let s: ServerSettings = serde_json::from_str("{}").unwrap();
-        assert!(!s.update.enabled);
-    }
-
-    #[test]
-    fn update_settings_roundtrip() {
-        let json = serde_json::json!({
-            "update": {
-                "enabled": true,
-                "channel": "beta",
-                "frequency": "hourly",
-                "action": "notify"
-            }
-        });
-        let s: ServerSettings = serde_json::from_value(json).unwrap();
-        assert!(s.update.enabled);
-        assert_eq!(s.update.channel, UpdateChannel::Beta);
-        assert_eq!(s.update.frequency, UpdateFrequency::Hourly);
-        assert_eq!(s.update.action, UpdateAction::Notify);
-
-        // Roundtrip.
-        let back = serde_json::to_value(&s).unwrap();
-        assert_eq!(back["update"]["enabled"], true);
-        assert_eq!(back["update"]["channel"], "beta");
-        assert_eq!(back["update"]["frequency"], "hourly");
-        assert_eq!(back["update"]["action"], "notify");
-    }
-
-    #[test]
-    fn update_settings_partial_fills_from_defaults() {
-        // Only `enabled` specified — everything else must land on the
-        // safe defaults rather than fail to parse.
-        let json = serde_json::json!({
-            "update": { "enabled": true }
-        });
-        let s: ServerSettings = serde_json::from_value(json).unwrap();
-        assert!(s.update.enabled);
-        assert_eq!(s.update.channel, UpdateChannel::Stable);
-        assert_eq!(s.update.action, UpdateAction::Notify);
     }
 
     #[test]

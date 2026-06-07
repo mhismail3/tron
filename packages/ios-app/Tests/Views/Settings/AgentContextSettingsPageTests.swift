@@ -15,7 +15,7 @@ struct AgentContextSettingsPageTests {
         ])
 
         #expect(ServerSettingsCategory.server.title == "Servers")
-        #expect(ServerSettingsCategory.server.subtitle == "Paired servers, updates, and diagnostics")
+        #expect(ServerSettingsCategory.server.subtitle == "Paired servers and diagnostics")
         #expect(ServerSettingsCategory.providers.icon == "circle.hexagongrid")
         #expect(ServerSettingsCategory.agent.title == "Agent")
         #expect(ServerSettingsCategory.agent.subtitle == "Prompt defaults and queueing")
@@ -29,7 +29,7 @@ struct AgentContextSettingsPageTests {
         ])
         #expect(MainSettingsGridDestination.surfaceRow.map(\.description) == [
             "Appearance, notifications, local behavior",
-            "Paired servers, updates, diagnostics",
+            "Paired servers and diagnostics",
             "OAuth login and API keys",
         ])
         #expect(MainSettingsGridDestination.behaviorRow == [

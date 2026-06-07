@@ -174,8 +174,6 @@ pub fn make_test_context() -> ServerRuntimeContext {
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
         onboarded_marker_path: unique_test_path("onboarded", "marker"),
-        release_fetcher: None,
-        updater_state_path: unique_test_path("updater-state", "json"),
     };
     crate::transport::setup::register_server_domains_for_context(&ctx).unwrap();
     ctx

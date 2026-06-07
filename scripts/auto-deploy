@@ -10,8 +10,7 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 #
 # `tron auto-deploy` is the contributor workflow — it pulls from `origin/main`,
 # rebuilds from source, and runs `tron deploy --force`. It REQUIRES a cloned
-# git repository. End-users who installed Tron via the DMG have no repo and
-# should use the user-mode `tron self-update` updater instead (plan §H.2).
+# git repository.
 #
 # This guard refuses to run if we're not inside a git worktree so that the
 # script fails fast and loudly rather than silently doing nothing or — worse —
@@ -19,9 +18,6 @@ REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 if ! (cd "$REPO_DIR" && git rev-parse --show-toplevel) >/dev/null 2>&1; then
     echo "[auto-deploy] ERROR: $REPO_DIR is not a git repository." >&2
     echo "[auto-deploy] The contributor auto-deploy flow requires a cloned repo." >&2
-    echo "[auto-deploy] If you installed Tron via the DMG, use the user updater instead:" >&2
-    echo "[auto-deploy]   tron self-update status" >&2
-    echo "[auto-deploy]   tron self-update check" >&2
     echo "[auto-deploy] Uninstall this watcher with: tron auto-deploy uninstall" >&2
     exit 2
 fi

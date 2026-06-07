@@ -275,10 +275,10 @@ server settings shape and iOS controls together.
 | `guardrails.rs` | delete | Product guardrail rules/audit settings. |
 | `memory.rs` | delete | Auto-retain memory settings. Agent-owned state replaces it. |
 | `prompt_library.rs` | delete | Prompt-history/snippet settings. |
-| `server.rs` | retain | Provider/default model/default workspace/update/Tailscale bootstrap only; transcription bootstrap is deleted. |
+| `server.rs` | retain | Provider/default model/default workspace/Tailscale bootstrap only; transcription and product update bootstrap are deleted. |
 | `skills.rs` | delete | Skill discovery/injection settings. |
 | `ui.rs` | retain | Keep appearance/accessibility basics only. Delete product dashboard settings. |
-| `update.rs` | successor | Retain only if Mac/server bootstrap still needs update checks; otherwise delete during PET-11. |
+| `update.rs` | delete | PET-11 deleted the user-mode updater settings enums/schema. Product update checks are not needed before the first model call and are not primitive loop infrastructure. |
 | `SettingsState.swift` | retain | Keep only fields matching retained server settings. |
 | `EngineProtocolTypes+Settings.swift` | retain | Decode/update only retained server settings. |
 | `ConnectionSettingsPage.swift` | retain | Keep server pairing/provider/bootstrap controls. |
@@ -308,9 +308,10 @@ server settings shape and iOS controls together.
   `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift` after
   proving they were unreferenced product DTO residue.
 - PET-11 collapsed the former `capability_support` row into agent-runner
-  `primitive_surface`. PET-11 must still re-audit `update.rs`, Mac update docs,
-  local diagnostics/logging surfaces, and dynamic-surface rendering for hidden
-  product policy.
+  `primitive_surface` and deleted the product update-check surface from server,
+  iOS, Mac, scripts, docs, and bundled default settings. PET-11 must still
+  re-audit local diagnostics/logging surfaces and dynamic-surface rendering for
+  hidden product policy.
 - PET-11 may close only after a fresh end-to-end loop proof and after no
   retained/successor row can be deleted without breaking
   boot/provider/session/execute/state/trace/client-shell primitives.

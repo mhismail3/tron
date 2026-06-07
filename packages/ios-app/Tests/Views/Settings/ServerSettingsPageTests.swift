@@ -11,16 +11,13 @@ struct ServerSettingsPageTests {
         #expect(SettingsLabels.connectToNewServer == "Connect to a new server")
         #expect(SettingsLabels.connectedServerUnavailableDescription == "The connected server can't be reached.")
         #expect(SettingsLabels.loadingServerSettingsDescription == "Loading server settings from the active server.")
-        #expect(SettingsLabels.updates == "Updates")
     }
 
-    @Test("server-backed settings show updates then diagnostics")
+    @Test("server-backed settings show diagnostics")
     func serverBackedSettingsOrder() {
         #expect(ConnectionSettingsServerBackedSection.loadedOrder == [
-            .updates,
             .diagnostics,
         ])
-        #expect(ConnectionSettingsServerBackedSection.updates.title == "Updates")
         #expect(ConnectionSettingsServerBackedSection.diagnostics.title == "Engine Diagnostics")
     }
 
@@ -104,14 +101,11 @@ struct ServerSettingsPageTests {
             pairedServerCount: 0,
             activeServerUnavailable: false,
             isLoaded: false,
-            loadError: nil,
-            updateEnabled: false,
-            updateChannel: "stable",
-            updateFrequency: "daily"
+            loadError: nil
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Connect a Mac")
-        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to manage server-backed update and diagnostics settings from this iPhone.")
+        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to manage server-backed diagnostics from this iPhone.")
     }
 
     @Test("server summary explains unavailable active server settings")
@@ -121,10 +115,7 @@ struct ServerSettingsPageTests {
             pairedServerCount: 1,
             activeServerUnavailable: false,
             isLoaded: false,
-            loadError: "Connection timed out",
-            updateEnabled: false,
-            updateChannel: "stable",
-            updateFrequency: "daily"
+            loadError: "Connection timed out"
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
@@ -138,14 +129,11 @@ struct ServerSettingsPageTests {
             pairedServerCount: 1,
             activeServerUnavailable: false,
             isLoaded: false,
-            loadError: nil,
-            updateEnabled: false,
-            updateChannel: "stable",
-            updateFrequency: "daily"
+            loadError: nil
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Loading update and diagnostics settings.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Loading diagnostics settings.")
     }
 
     @Test("server summary warns when active server cannot be reached")
@@ -155,10 +143,7 @@ struct ServerSettingsPageTests {
             pairedServerCount: 1,
             activeServerUnavailable: true,
             isLoaded: false,
-            loadError: "Connection timed out",
-            updateEnabled: false,
-            updateChannel: "stable",
-            updateFrequency: "daily"
+            loadError: "Connection timed out"
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Test Server not available")
@@ -215,37 +200,18 @@ struct ServerSettingsPageTests {
         #expect(status.icon == "hourglass")
     }
 
-    @Test("server summary reflects loaded update settings")
+    @Test("server summary reflects loaded diagnostics settings")
     func serverSummaryReflectsLoadedSettings() {
         let context = ServerSettingsSummary.Context(
             activeServerLabel: "Test Server",
             pairedServerCount: 2,
             activeServerUnavailable: false,
             isLoaded: true,
-            loadError: nil,
-            updateEnabled: true,
-            updateChannel: "beta",
-            updateFrequency: "daily"
+            loadError: nil
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Update checks run daily on the beta channel.")
-    }
-
-    @Test("server summary reflects disabled automatic update checks")
-    func serverSummaryReflectsDisabledUpdateChecks() {
-        let context = ServerSettingsSummary.Context(
-            activeServerLabel: "Test Server",
-            pairedServerCount: 1,
-            activeServerUnavailable: false,
-            isLoaded: true,
-            loadError: nil,
-            updateEnabled: false,
-            updateChannel: "stable",
-            updateFrequency: "weekly"
-        )
-
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Automatic update checks are off.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Diagnostics settings are available.")
     }
 
     @Test("active unreachable row overrides stale connected status")
@@ -296,29 +262,8 @@ struct ServerSettingsPageTests {
         ])
     }
 
-    @Test("loaded server settings keep diagnostics after update controls")
-    func loadedServerSettingsKeepDiagnosticsAfterUpdateControls() {
-        #expect(ConnectionSettingsServerBackedSection.loadedOrder.suffix(2) == [
-            .updates,
-            .diagnostics,
-        ])
-    }
-
-    @Test("update settings share one section header with separate controls")
-    func updateSettingsShareOneSectionHeaderWithSeparateControls() {
-        #expect(ServerUpdateSettingsItem.sectionTitle == ConnectionSettingsServerBackedSection.updates.title)
-        #expect(ServerUpdateSettingsItem.allCases.map(\.title) == [
-            "Automatically check for updates",
-            "Release channel",
-            "Check for updates",
-            "Check now",
-        ])
-        #expect(ServerUpdateSettingsItem.allCases.map(\.icon) == [
-            "arrow.down.app",
-            "shippingbox",
-            "clock.arrow.2.circlepath",
-            "arrow.clockwise",
-        ])
-        #expect(ServerUpdateSettingsItem.allCases.map(\.description).allSatisfy { !$0.isEmpty })
+    @Test("loaded server settings keep only diagnostics")
+    func loadedServerSettingsKeepOnlyDiagnostics() {
+        #expect(ConnectionSettingsServerBackedSection.loadedOrder == [.diagnostics])
     }
 }

@@ -73,8 +73,6 @@ fn test_runtime() -> TestRuntime {
         oauth_flows: Arc::new(Mutex::new(HashMap::new())),
         ws_port: Arc::new(AtomicU16::new(9847)),
         onboarded_marker_path: temp.path().join(".onboarded"),
-        release_fetcher: None,
-        updater_state_path: temp.path().join("updater-state.json"),
     };
     tron::transport::setup::register_server_domains_for_context(&ctx).unwrap();
     TestRuntime { _temp: temp, ctx }

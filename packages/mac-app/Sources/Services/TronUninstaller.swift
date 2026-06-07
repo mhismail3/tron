@@ -47,7 +47,6 @@ enum TronUninstaller {
         let runDir = setup.onboardedMarkerPath.deletingLastPathComponent()
         return [
             setup.onboardedMarkerPath,
-            runDir.appendingPathComponent("updater-state.json", isDirectory: false),
             runDir.appendingPathComponent("auth.lock", isDirectory: false),
             setup.wrapperLockPath,
         ]

@@ -41,18 +41,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.displayQuickSessionWorkspace, "/tmp/workspace")
     }
 
-    // MARK: - Update Settings
-
-    func testUpdateSettingsInitialDefaults() {
-        let state = SettingsState()
-        // Defaults match the Rust UpdateSettings::default():
-        // opt-in (off), stable channel, daily check, notify-only.
-        XCTAssertFalse(state.updateEnabled)
-        XCTAssertEqual(state.updateChannel, "stable")
-        XCTAssertEqual(state.updateFrequency, "daily")
-        XCTAssertEqual(state.updateAction, "notify")
-    }
-
     func testApplyServerSettingsLoadsDiagnosticsFields() throws {
         let state = SettingsState()
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""

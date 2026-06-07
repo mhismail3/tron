@@ -78,17 +78,6 @@ pub mod files {
     /// the first successful engine authentication from any iOS device. The
     /// `system.getInfo` engine capability reports `paired: true` once it exists.
     pub const ONBOARDED_MARKER: &str = ".onboarded";
-    /// Persistent state for the user-mode auto-updater
-    /// (`server::updater`) — lastCheckAt, lastInstalledVersion,
-    /// latestAvailableVersion/latestDownloadUrl. Stored in
-    /// `~/.tron/internal/run/updater-state.json`
-    /// with mode `0o644` (non-secret, widely readable is fine). Atomic
-    /// writes mirror the `auth.json` pattern.
-    pub const UPDATER_STATE_JSON: &str = "updater-state.json";
-    /// Pause sentinel honoured by both the contributor `scripts/auto-deploy`
-    /// loop and the user-mode auto-updater. Presence of the file blocks
-    /// any further install actions without touching settings.
-    pub const AUTO_UPDATE_PAUSE: &str = "auto-update.pause";
 }
 
 // ── Core path functions ────────────────────────────────────────────────
@@ -318,23 +307,6 @@ pub fn mac_wrapper_lock_path_for(bundle_identifier: &str) -> PathBuf {
 /// wizard or `server::onboarding::mark_onboarded`.
 pub fn onboarded_marker_path() -> PathBuf {
     run_dir().join(files::ONBOARDED_MARKER)
-}
-
-/// `~/.tron/internal/run/updater-state.json` — auto-updater persistent state.
-///
-/// See [`files::UPDATER_STATE_JSON`] for purpose. Read/written by
-/// `server::updater`. Mode `0o644` (no secrets); atomic writes.
-pub fn updater_state_path() -> PathBuf {
-    run_dir().join(files::UPDATER_STATE_JSON)
-}
-
-/// `~/.tron/internal/run/auto-update.pause` — pause sentinel for the auto-updater.
-///
-/// Presence causes `server::updater` to skip any further install action
-/// without mutating settings. `tron self-update pause / resume` toggle
-/// the file.
-pub fn auto_update_pause_path() -> PathBuf {
-    run_dir().join(files::AUTO_UPDATE_PAUSE)
 }
 
 /// `~/.tron/profiles/user/profile.toml`

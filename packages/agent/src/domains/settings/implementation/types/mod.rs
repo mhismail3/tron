@@ -11,13 +11,11 @@ mod api;
 mod context;
 mod server;
 mod ui;
-mod update;
 
 pub use api::*;
 pub use context::*;
 pub use server::*;
 pub use ui::*;
-pub use update::*;
 
 use serde::{Deserialize, Serialize};
 

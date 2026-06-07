@@ -152,18 +152,6 @@ fn runtime_paths_live_under_internal_run() {
         dirs::RUN,
         files::ONBOARDED_MARKER
     )));
-    assert!(updater_state_path().ends_with(format!(
-        "{}/{}/{}",
-        dirs::INTERNAL,
-        dirs::RUN,
-        files::UPDATER_STATE_JSON
-    )));
-    assert!(auto_update_pause_path().ends_with(format!(
-        "{}/{}/{}",
-        dirs::INTERNAL,
-        dirs::RUN,
-        files::AUTO_UPDATE_PAUSE
-    )));
 }
 
 #[test]

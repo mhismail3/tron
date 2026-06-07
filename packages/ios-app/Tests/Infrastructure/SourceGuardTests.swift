@@ -1420,6 +1420,44 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Primitive shell has no fixed product update surface")
+    func testPrimitiveShellHasNoFixedProductUpdateSurface() throws {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        let iosRoot = fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+        let forbiddenNeedles: [(String, String)] = [
+            ("System" + "Check" + "For" + "Updates" + "Result", "fixed update-check response DTO"),
+            ("System" + "Update" + "Status" + "Result", "fixed update-status response DTO"),
+            ("check" + "For" + "Updates", "fixed update-check client call"),
+            ("get" + "Update" + "Status", "fixed update-status client call"),
+            ("Update" + "Channel", "fixed update channel setting enum"),
+            ("Update" + "Frequency", "fixed update frequency setting enum"),
+            ("Update" + "Action", "fixed update action setting enum"),
+            ("Server" + "Update" + "Settings" + "Item", "fixed update settings UI section"),
+            ("updates" + "Section", "fixed update settings section"),
+            ("Check" + " for " + "updates", "fixed user-facing update command"),
+        ]
+
+        for root in sourceRoots {
+            for url in try swiftFiles(in: root) {
+                if url.path == #filePath { continue }
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for (needle, reason) in forbiddenNeedles {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.path) contains \(reason): `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
+
     private func swiftFiles(in root: URL) throws -> [URL] {
         guard let enumerator = FileManager.default.enumerator(
             at: root,

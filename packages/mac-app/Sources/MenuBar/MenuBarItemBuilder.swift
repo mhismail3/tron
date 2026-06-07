@@ -60,10 +60,6 @@ enum MenuBarItemBuilder {
             NotificationCenter.default.post(name: .tronMenuBarViewLogs, object: nil)
         }))
 
-        items.append(.action(title: "Check for updates", isEnabled: true, handler: { @MainActor in
-            NotificationCenter.default.post(name: .tronMenuBarCheckForUpdates, object: nil)
-        }))
-
         items.append(.action(title: "Send feedback", isEnabled: true, handler: { @MainActor in
             NotificationCenter.default.post(name: .tronMenuBarSendFeedback, object: nil)
         }))
@@ -282,6 +278,5 @@ extension Notification.Name {
     static let tronMenuBarStopDevServer = Notification.Name("com.tron.mac.menu.stopDevServer")
     static let tronMenuBarViewLogs = Notification.Name("com.tron.mac.menu.viewLogs")
     static let tronMenuBarSendFeedback = Notification.Name("com.tron.mac.menu.feedback")
-    static let tronMenuBarCheckForUpdates = Notification.Name("com.tron.mac.menu.update")
     static let tronMenuBarUninstall = Notification.Name("com.tron.mac.menu.uninstall")
 }

@@ -478,8 +478,6 @@ async fn server_boots_and_responds() {
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
         onboarded_marker_path: dir.path().join(".onboarded"),
-        release_fetcher: None,
-        updater_state_path: dir.path().join("updater-state.json"),
     };
 
     let config = ServerConfig::default();
@@ -663,8 +661,6 @@ async fn server_graceful_shutdown() {
         oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
         onboarded_marker_path: dir.path().join(".onboarded"),
-        release_fetcher: None,
-        updater_state_path: dir.path().join("updater-state.json"),
     };
 
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()

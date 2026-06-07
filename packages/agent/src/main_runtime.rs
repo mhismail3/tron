@@ -311,14 +311,6 @@ fn build_server_runtime_context(
         // so handlers see the live values from the start of the first request.
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
         onboarded_marker_path: tron::app::onboarding::onboarded_marker_path(),
-        // User-mode updater wiring (Plan §H.2). Production uses the live
-        // GitHub Releases fetcher; `main_tests.rs` and `tests/integration.rs`
-        // construct their own `ServerRuntimeContext` directly and leave this `None`,
-        // which short-circuits `system.checkForUpdates` + skips the
-        // scheduler arm below. The state path is stable regardless so the
-        // `system.getUpdateStatus` handler can still render defaults.
-        release_fetcher: Some(Arc::new(tron::platform::updater::HttpReleaseFetcher::new())),
-        updater_state_path: tron::shared::paths::updater_state_path(),
     }
 }
 
@@ -460,29 +452,6 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     server
         .shutdown()
         .register_task(profile_runtime_for_watcher.spawn_watcher(server.shutdown().token()));
-    // User-mode auto-update scheduler (Plan §H.2, Phase 5.5). Spawned
-    // unconditionally; the task checks `server.update.enabled` on every
-    // iteration so a settings flip takes effect without restart. When
-    // the fetcher is `None` (embedded / test paths) the scheduler
-    // silently no-ops because `perform_tick` bails on `enabled = false`
-    // and tests never set enabled.
-    let updater_scheduler_handle =
-        if let Some(fetcher) = server.runtime_context().release_fetcher.as_ref().cloned() {
-            let deps = tron::platform::updater::SchedulerDeps {
-                fetcher,
-                engine_host: server.runtime_context().engine_host.clone(),
-                state_path: server.runtime_context().updater_state_path.clone(),
-                pause_path: tron::platform::updater::pause_sentinel_path(),
-                current_version: env!("CARGO_PKG_VERSION").to_string(),
-            };
-            Some(tron::platform::updater::scheduler::spawn(
-                deps,
-                server.shutdown().token(),
-            ))
-        } else {
-            None
-        };
-
     let (addr, server_handle) = server.listen().await.context("Failed to bind server")?;
     tracing::info!("{}", format_listening_log(&addr, &bind_host_label));
 
@@ -494,11 +463,8 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     let shutdown_signal = wait_for_shutdown_signal().await?;
 
     tracing::info!(signal = shutdown_signal, "Shutting down...");
-    let mut shutdown_handles: Vec<tokio::task::JoinHandle<()>> =
+    let shutdown_handles: Vec<tokio::task::JoinHandle<()>> =
         vec![server_handle, stream_event_pump_handle];
-    if let Some(h) = updater_scheduler_handle {
-        shutdown_handles.push(h);
-    }
     server
         .shutdown()
         .graceful_shutdown(shutdown_handles, None)

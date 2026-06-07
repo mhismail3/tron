@@ -10,7 +10,6 @@ enum SettingsLabels {
     static let connectToNewServer = "Connect to a new server"
     static let connectedServerUnavailableDescription = ConnectionStatusCopy.connectedServerUnavailableDescription
     static let loadingServerSettingsDescription = "Loading server settings from the active server."
-    static let updates = "Updates"
 }
 
 enum SettingsAdaptiveLayout {
@@ -66,7 +65,7 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
     var subtitle: String {
         switch self {
         case .server:
-            return "Paired servers, updates, and diagnostics"
+            return "Paired servers and diagnostics"
         case .providers:
             return "Login with OAuth and configure API keys"
         case .agent:
@@ -167,7 +166,7 @@ enum MainSettingsGridDestination: Hashable, Sendable {
     var description: String {
         switch self {
         case .server:
-            return "Paired servers, updates, diagnostics"
+            return "Paired servers and diagnostics"
         case .app:
             return "Appearance, notifications, local behavior"
         case .providers:
@@ -408,18 +407,14 @@ enum ServerOnboardingLauncher {
 }
 
 enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
-    case updates
     case diagnostics
 
     static let loadedOrder: [Self] = [
-        .updates,
         .diagnostics,
     ]
 
     var title: String {
         switch self {
-        case .updates:
-            return SettingsLabels.updates
         case .diagnostics:
             return "Engine Diagnostics"
         }
@@ -466,54 +461,6 @@ struct ConnectionSettingsServerControlsStatus: Equatable, Sendable {
     }
 }
 
-enum ServerUpdateSettingsItem: CaseIterable, Hashable, Sendable {
-    case automaticChecks
-    case releaseChannel
-    case checkFrequency
-    case manualCheck
-
-    static let sectionTitle = SettingsLabels.updates
-
-    var title: String {
-        switch self {
-        case .automaticChecks:
-            return "Automatically check for updates"
-        case .releaseChannel:
-            return "Release channel"
-        case .checkFrequency:
-            return "Check for updates"
-        case .manualCheck:
-            return "Check now"
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .automaticChecks:
-            return "arrow.down.app"
-        case .releaseChannel:
-            return "shippingbox"
-        case .checkFrequency:
-            return "clock.arrow.2.circlepath"
-        case .manualCheck:
-            return "arrow.clockwise"
-        }
-    }
-
-    var description: String {
-        switch self {
-        case .automaticChecks:
-            return "When off, the server never contacts GitHub Releases. Opt in to be notified of new versions."
-        case .releaseChannel:
-            return "Stable tracks only `latest` GitHub releases. Beta also includes pre-release tags, such as `server-v0.1.0-beta.1`."
-        case .checkFrequency:
-            return "Manual means only the button below and the Mac menu bar fire checks. Startup checks once per server launch."
-        case .manualCheck:
-            return "Contacts GitHub Releases now regardless of the schedule. Cached 60 seconds server-side to avoid API rate-limit thrash."
-        }
-    }
-}
-
 enum ServerSettingsSummary {
     struct Context: Equatable, Sendable {
         let activeServerLabel: String?
@@ -521,9 +468,6 @@ enum ServerSettingsSummary {
         let activeServerUnavailable: Bool
         let isLoaded: Bool
         let loadError: String?
-        let updateEnabled: Bool
-        let updateChannel: String
-        let updateFrequency: String
     }
 
     static func title(for context: Context) -> String {
@@ -538,7 +482,7 @@ enum ServerSettingsSummary {
 
     static func description(for context: Context) -> String {
         guard context.pairedServerCount > 0 else {
-            return "Pair a Mac to manage server-backed update and diagnostics settings from this iPhone."
+            return "Pair a Mac to manage server-backed diagnostics from this iPhone."
         }
 
         guard let label = cleaned(context.activeServerLabel), !label.isEmpty else {
@@ -555,39 +499,10 @@ enum ServerSettingsSummary {
             if let error = cleaned(context.loadError), !error.isEmpty {
                 return "\(label) is paired, but settings are unavailable: \(error)"
             }
-            return "\(label) is connected. Loading update and diagnostics settings."
+            return "\(label) is connected. Loading diagnostics settings."
         }
 
-        let updates = updateDescription(
-            enabled: context.updateEnabled,
-            channel: context.updateChannel,
-            frequency: context.updateFrequency
-        )
-        return "\(label) is connected. \(updates)."
-    }
-
-    private static func updateDescription(enabled: Bool, channel: String, frequency: String) -> String {
-        guard enabled else {
-            return "Automatic update checks are off"
-        }
-
-        return "Update checks run \(displayFrequency(frequency)) on the \(displayChannel(channel)) channel"
-    }
-
-    private static func displayChannel(_ rawValue: String) -> String {
-        if let channel = UpdateChannel.from(rawValue) {
-            return channel.displayName.lowercased()
-        }
-        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "selected" : trimmed
-    }
-
-    private static func displayFrequency(_ rawValue: String) -> String {
-        if let frequency = UpdateFrequency.from(rawValue) {
-            return frequency.displayName.lowercased()
-        }
-        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? "on the selected schedule" : trimmed
+        return "\(label) is connected. Diagnostics settings are available."
     }
 
     private static func cleaned(_ value: String?) -> String? {

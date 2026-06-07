@@ -141,17 +141,15 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         let diagnosticsIndex = try XCTUnwrap(
             landscapeContent.range(of: "diagnosticsSection", range: pairedIndex..<landscapeContent.endIndex)?.lowerBound
         )
-        let updatesIndex = try XCTUnwrap(landscapeContent.range(of: "updatesSection")?.lowerBound)
 
         XCTAssertLessThan(pairedIndex, diagnosticsIndex)
-        XCTAssertLessThan(diagnosticsIndex, updatesIndex)
         XCTAssertTrue(
-            landscapeContent.contains("if settingsState.isLoaded && !activeServerUnavailable {\n                        updatesSection\n                    }"),
-            "Updates should stay in the right landscape column without also stacking diagnostics below it"
+            landscapeContent.contains("serverBackedContent"),
+            "Server landscape should render the retained server-backed diagnostics content in the right column"
         )
         XCTAssertFalse(
-            landscapeContent.contains("updatesSection\n                        diagnosticsSection"),
-            "Server landscape should not stack Updates and Diagnostics in the same long column"
+            landscapeContent.contains("updates" + "Section"),
+            "Server landscape should not retain a fixed update-check section"
         )
         XCTAssertTrue(
             landscapeContent.contains("serverBackedSettingsStatusSection(status)"),
