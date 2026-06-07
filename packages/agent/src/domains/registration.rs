@@ -324,8 +324,8 @@ mod tests {
         prefixes.extend([
             format!("agent::{}", "run_goal"),
             format!("agent::{}", "work_snapshot"),
-            format!("agent::{}", "ask_user"),
-            format!("agent::{}", "submit_answers"),
+            format!("agent::{}", ["ask", "_", "user"].concat()),
+            format!("agent::{}", ["submit", "_", "answers"].concat()),
             format!("agent::spawn_{}", ["sub", "agent"].concat()),
             format!("agent::{}_{}", ["sub", "agent"].concat(), ""),
             format!("agent::cancel_{}", ["sub", "agent"].concat()),

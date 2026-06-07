@@ -20,13 +20,6 @@ struct UserMessagePayload {
     let isCapabilityResultContext: Bool
     /// Attachments to this message (images, PDFs, documents)
     let attachments: [Attachment]?
-    /// Server-provided structured message kind for interactive-capability responses.
-    /// Values: `"answered_questions"`. When present, iOS renders a chip instead
-    /// of the plain text content.
-    let messageKind: String?
-    /// Number of questions answered for `messageKind == "answered_questions"`.
-    let answerCount: Int?
-
     init?(from payload: [String: AnyCodable]) {
         var extractedAttachments: [Attachment] = []
 
@@ -102,8 +95,6 @@ struct UserMessagePayload {
         self.attachments = extractedAttachments.isEmpty ? nil : extractedAttachments
 
         // Structured interactive-capability response metadata (server-provided).
-        self.messageKind = payload.string("messageKind")
-        self.answerCount = payload.int("answerCount")
     }
 }
 

@@ -238,11 +238,6 @@ fn transport_actor_for_method(method: &str, payload: &Value) -> (ActorKind, &'st
     {
         return (ActorKind::Agent, "engine-agent");
     }
-    if method == "invoke"
-        && extract_string(payload, "functionId").as_deref() == Some("agent::submit_answers")
-    {
-        return (ActorKind::User, "engine-user");
-    }
     (ActorKind::Client, "engine-client")
 }
 
@@ -349,21 +344,6 @@ mod tests {
         })
         .expect("transport envelope builds")
         .expect("invoke maps to engine transport")
-    }
-
-    #[test]
-    fn submit_answers_invoke_is_a_user_authorized_engine_action() {
-        let envelope = build_invoke("agent::submit_answers");
-
-        assert_eq!(envelope.causal_context.actor_kind, ActorKind::User);
-        assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-user");
-        assert!(
-            envelope
-                .causal_context
-                .authority_scopes
-                .iter()
-                .any(|scope| scope == "agent.write")
-        );
     }
 
     #[test]

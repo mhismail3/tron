@@ -37,11 +37,6 @@ protocol CapabilityInvocationContext: LoggingContext, CapabilityInvocationStateT
     /// Enqueue a capability end for ordered processing
     func enqueueCapabilityInvocationEnd(_ data: UIUpdateQueue.CapabilityInvocationEndData)
 
-    // MARK: - UserInteraction
-
-    /// Open the UserInteraction sheet for a capability invocation
-    func openUserInteractionSheet(for data: UserInteractionInvocationData)
-
     // MARK: - Thinking State
 
     /// Reset thinking state for a new thinking block

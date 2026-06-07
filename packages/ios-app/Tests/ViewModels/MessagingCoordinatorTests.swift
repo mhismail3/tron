@@ -174,17 +174,6 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.appendedMessages.first?.role, .user)
     }
 
-    func testSendMessageMarksSupersededForRegularMessage() async {
-        // Given: Regular message text
-        mockContext.inputText = "Just a regular message"
-
-        // When: Sending message
-        await coordinator.sendMessage(context: mockContext)
-
-        // Then: Should mark questions as superseded
-        XCTAssertTrue(mockContext.markPendingQuestionsAsSupersededCalled)
-    }
-
     // MARK: - Dashboard Update Tests
 
     func testSendMessageUpdatesSessionProcessingState() async {
@@ -450,8 +439,6 @@ final class MockMessagingContext: MessagingContext {
     var lastSentReasoningLevel: String?
     var appendedMessages: [ChatMessage] = []
     var appendedInterruptedMessage = false
-    var markPendingQuestionsAsSupersededCalled = false
-    var markPendingConfirmationsAsSupersededCalled = false
     var streamingManagerResetCalled = false
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
@@ -511,14 +498,6 @@ final class MockMessagingContext: MessagingContext {
 
     func appendInterruptedMessage() {
         appendedInterruptedMessage = true
-    }
-
-    func markPendingQuestionsAsSuperseded() {
-        markPendingQuestionsAsSupersededCalled = true
-    }
-
-    func markPendingConfirmationsAsSuperseded() {
-        markPendingConfirmationsAsSupersededCalled = true
     }
 
     func finalizeThinkingMessage() {

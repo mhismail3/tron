@@ -27,9 +27,9 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
     func testLastActiveSheetTrackedOnPresent() {
         let coordinator = SheetCoordinator()
         coordinator.present(.settings)
-        coordinator.present(.userInteraction)
+        coordinator.present(.thinkingDetail("details"))
         XCTAssertEqual(coordinator.lastActiveSheet, .settings)
-        XCTAssertEqual(coordinator.activeSheet, .userInteraction)
+        XCTAssertEqual(coordinator.activeSheet, .thinkingDetail("details"))
     }
 
     func testLastActiveSheetTrackedOnDismiss() {
@@ -72,10 +72,10 @@ final class SheetCoordinatorLifecycleTests: XCTestCase {
         XCTAssertEqual(coordinator.activeSheet, .settings)
     }
 
-    func testShowUserInteraction() {
+    func testShowThinkingDetail() {
         let coordinator = SheetCoordinator()
-        coordinator.showUserInteraction()
-        XCTAssertEqual(coordinator.activeSheet, .userInteraction)
+        coordinator.showThinkingDetail("Thinking")
+        XCTAssertEqual(coordinator.activeSheet, .thinkingDetail("Thinking"))
     }
 
 }

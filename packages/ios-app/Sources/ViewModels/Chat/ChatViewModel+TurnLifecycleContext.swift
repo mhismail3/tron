@@ -11,7 +11,6 @@ extension ChatViewModel: TurnLifecycleContext {
     // - messages: [ChatMessage]
     // - currentCapabilityInvocationMessages: [UUID: ChatMessage]
     // - currentTurnCapabilityInvocations: [CapabilityInvocationRecord]
-    // - userInteractionCalledInTurn: Bool (via userInteractionState)
     // - thinkingMessageId: UUID?
     // - turnStartMessageIndex: Int?
     // - firstTextMessageIdForTurn: UUID?

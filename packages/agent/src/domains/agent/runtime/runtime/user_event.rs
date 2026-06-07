@@ -10,9 +10,8 @@ use std::sync::Arc;
 /// so that session resume can reconstruct client UI and the LLM can see
 /// previously-sent images in reconstructed history.
 ///
-/// The optional `extra_metadata` object is merged into the payload (top-level
-/// fields like `messageKind`, `confirmationDecision`, `answerCount` used by
-/// interactive capability handlers so iOS can render chips from structured data).
+/// The optional `extra_metadata` object is merged into the payload for
+/// event-source metadata that must travel with a queued prompt.
 pub fn build_user_event_payload(
     prompt: &str,
     images: Option<&[Value]>,

@@ -182,10 +182,6 @@ extension CapabilityIdentity {
         )
     }
 
-    var isUserInteractionCapability: Bool {
-        operationName == "ask_user" || modelPrimitiveName == "ask_user"
-    }
-
     var stableCapabilityId: String {
         operationName ?? modelPrimitiveName ?? "execute"
     }

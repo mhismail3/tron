@@ -16,10 +16,6 @@ enum MessageContent: Equatable {
     // System events (notifications) - consolidated
     case systemEvent(SystemEvent)
 
-    // Special capability invocations (rendered as interactive chips)
-    case userInteraction(UserInteractionInvocationData)
-    case answeredQuestions(questionCount: Int)
-
     // MARK: - Convenience Factories (forward to systemEvent)
     // These provide cleaner API for common system event patterns
 
@@ -83,10 +79,6 @@ enum MessageContent: Equatable {
             return "[\(count) \(count == 1 ? "attachment" : "attachments")]"
         case .systemEvent(let event):
             return event.textContent
-        case .userInteraction(let data):
-            return "[\(data.params.questions.count) questions]"
-        case .answeredQuestions(let count):
-            return "Answered \(count) \(count == 1 ? "question" : "questions")"
         }
     }
 
@@ -101,13 +93,6 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         if case .systemEvent = self {
-            return true
-        }
-        return false
-    }
-
-    var isUserInteraction: Bool {
-        if case .userInteraction = self {
             return true
         }
         return false

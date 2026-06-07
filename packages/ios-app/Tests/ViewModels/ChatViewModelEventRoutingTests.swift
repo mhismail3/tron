@@ -142,17 +142,6 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.streamingManager.streamingText, initialText + "Hello, world!")
     }
 
-    func test_textDelta_skippedWhenUserInteractionCalled() {
-        // Given - mark UserInteraction as called
-        viewModel.userInteractionCalledInTurn = true
-
-        // When
-        viewModel.handleTextDelta("Should be skipped")
-
-        // Then - text should NOT be added
-        XCTAssertEqual(viewModel.streamingManager.streamingText, "")
-    }
-
     func test_textDelta_multipleDeltas_accumulate() {
         // When
         viewModel.handleTextDelta("Hello, ")
@@ -248,36 +237,6 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.count, 1)
         XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.first?.invocationId, "toolu_read123")
         XCTAssertEqual(viewModel.currentTurnCapabilityInvocations.first?.modelPrimitiveName, "execute")
-    }
-
-    func test_capabilityInvocationStarted_userInteraction_setsFlag() {
-        // Given
-        XCTAssertFalse(viewModel.userInteractionCalledInTurn)
-
-        let result = makeCapabilityInvocationStartResult(
-            modelPrimitiveName: "execute",
-            invocationId: "toolu_ask123",
-            arguments: [
-                "questions": AnyCodable([
-                    [
-                        "question": "Which option?",
-                        "header": "Choice",
-                        "options": [
-                            ["label": "A", "description": "Option A"],
-                            ["label": "B", "description": "Option B"]
-                        ],
-                        "multiSelect": false
-                    ]
-                ])
-            ],
-            identity: testUserInteractionCapabilityIdentity()
-        )
-
-        // When
-        viewModel.handleCapabilityInvocationStarted(result)
-
-        // Then - flag should be set
-        XCTAssertTrue(viewModel.userInteractionCalledInTurn)
     }
 
     // MARK: - Capability Progress Routing Tests
@@ -465,18 +424,6 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         // Then - capability tracking should be cleared
         XCTAssertTrue(viewModel.currentTurnCapabilityInvocations.isEmpty)
         XCTAssertTrue(viewModel.currentCapabilityInvocationMessages.isEmpty)
-    }
-
-    func test_turnStart_resetsUserInteractionFlag() {
-        // Given
-        viewModel.userInteractionCalledInTurn = true
-
-        // When
-        let result = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
-        viewModel.handleTurnStart(result)
-
-        // Then
-        XCTAssertFalse(viewModel.userInteractionCalledInTurn)
     }
 
     func test_turnStart_clearsThinkingMessageId() {

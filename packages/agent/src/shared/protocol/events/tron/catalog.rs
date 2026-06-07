@@ -218,39 +218,6 @@ tron_events! {
         capability_identity: CapabilityEventIdentity,
     } => "capability.invocation.progress",
 
-    /// Capability execution paused for user/client/system input.
-    CapabilityPauseRequested {
-        #[serde(rename = "pauseId")]
-        pause_id: String,
-        #[serde(rename = "invocationId")]
-        invocation_id: String,
-        kind: String,
-        status: String,
-        #[serde(rename = "promptPayload")]
-        prompt_payload: Value,
-        #[serde(rename = "resumeSchema", skip_serializing_if = "Option::is_none")]
-        resume_schema: Option<Value>,
-        #[serde(rename = "answerAuthority")]
-        answer_authority: String,
-        #[serde(rename = "expiresAt", skip_serializing_if = "Option::is_none")]
-        expires_at: Option<String>,
-        #[serde(flatten)]
-        capability_identity: CapabilityEventIdentity,
-    } => "capability.pause.requested",
-
-    /// Capability pause resolved, denied, cancelled, or expired.
-    CapabilityPauseResolved {
-        #[serde(rename = "pauseId")]
-        pause_id: String,
-        #[serde(rename = "invocationId")]
-        invocation_id: String,
-        status: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        resolution: Option<Value>,
-        #[serde(flatten)]
-        capability_identity: CapabilityEventIdentity,
-    } => "capability.pause.resolved",
-
     /// Capability async run status update.
     CapabilityRunStatus {
         #[serde(rename = "runId")]
@@ -562,8 +529,6 @@ impl TronEvent {
             Self::CapabilityInvocationStarted { .. }
                 | Self::CapabilityInvocationOutput { .. }
                 | Self::CapabilityInvocationProgress { .. }
-                | Self::CapabilityPauseRequested { .. }
-                | Self::CapabilityPauseResolved { .. }
                 | Self::CapabilityRunStatus { .. }
                 | Self::CapabilityInvocationCompleted { .. }
         )

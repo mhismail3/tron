@@ -49,10 +49,9 @@ pub(crate) fn drain_prompt_queue(
 
     // Determine prompt text based on drain mode.
     //
-    // Metadata (messageKind/confirmationDecision/answerCount) is only
-    // carried in Sequential mode — batched drains combine multiple user
-    // messages into a single prompt, at which point the individual
-    // message kinds no longer apply to the merged content.
+    // Metadata is only carried in Sequential mode. Batched drains combine
+    // multiple user messages into one prompt, so per-message metadata no
+    // longer applies to the merged content.
     let (prompt_text, items_to_dequeue, drained_metadata) = match drain_mode {
         QueueDrainMode::Sequential => {
             // One message per turn

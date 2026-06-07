@@ -111,79 +111,6 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.messages.count, 1)
     }
 
-    func testCapabilityInvocationGeneratingCreatesGeneratingChipForUserInteraction() async throws {
-        let result = CapabilityInvocationGeneratingPlugin.Result(
-            modelPrimitiveName: "execute",
-            invocationId: "gen_ask",
-            identity: testUserInteractionCapabilityIdentity()
-        )
-
-        coordinator.handleCapabilityInvocationGenerating(result, context: mockContext)
-
-        // Should create a message with .generating status
-        XCTAssertEqual(mockContext.messages.count, 1)
-        if case .userInteraction(let data) = mockContext.messages[0].content {
-            XCTAssertEqual(data.invocationId, "gen_ask")
-            XCTAssertEqual(data.status, .generating)
-            XCTAssertTrue(data.params.questions.isEmpty)
-        } else {
-            XCTFail("Expected userInteraction content")
-        }
-        XCTAssertTrue(mockContext.visibleInvocationIds.contains("gen_ask"))
-    }
-
-    func testCapabilityInvocationStartUpdatesGeneratingUserInteractionChip() async throws {
-        // Given: capability.invocation.generating already created a .generating chip
-        let userInteractionIdentity = testUserInteractionCapabilityIdentity()
-        let genResult = CapabilityInvocationGeneratingPlugin.Result(
-            modelPrimitiveName: "execute",
-            invocationId: "gen_ask_update",
-            identity: userInteractionIdentity
-        )
-        coordinator.handleCapabilityInvocationGenerating(genResult, context: mockContext)
-        XCTAssertEqual(mockContext.messages.count, 1)
-
-        // When: capability.invocation.started arrives with real params encoded in formattedArguments
-        let params = UserInteractionParams(
-            questions: [
-                UserInteraction(
-                    id: "q1",
-                    question: "Pick one?",
-                    options: [
-                        UserInteractionOption(label: "A", value: nil, description: nil),
-                        UserInteractionOption(label: "B", value: nil, description: nil)
-                    ],
-                    mode: .single,
-                    allowOther: false,
-                    otherPlaceholder: nil
-                )
-            ],
-            context: nil
-        )
-        let paramsJson = String(data: try! JSONEncoder().encode(params), encoding: .utf8)!
-        let event = CapabilityInvocationStartedPlugin.Result(
-            modelPrimitiveName: "execute",
-            invocationId: "gen_ask_update",
-            arguments: nil,
-            formattedArguments: paramsJson,
-            identity: userInteractionIdentity
-        )
-        coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
-
-        // Then: No duplicate message (still just 1)
-        XCTAssertEqual(mockContext.messages.count, 1)
-        // Then: Status updated from .generating to .pending with real params
-        if case .userInteraction(let data) = mockContext.messages[0].content {
-            XCTAssertEqual(data.status, .pending)
-            XCTAssertEqual(data.params.questions.count, 1)
-            XCTAssertEqual(data.params.questions[0].question, "Pick one?")
-        } else {
-            XCTFail("Expected userInteraction content")
-        }
-        // Then: calledInTurn is set
-        XCTAssertTrue(mockContext.userInteractionCalledInTurn)
-    }
-
     func testCapabilityInvocationStartUpdatesDuplicateFromGenerating() async throws {
         // Given: capability.invocation.generating already created a chip with empty arguments
         let genResult = CapabilityInvocationGeneratingPlugin.Result(modelPrimitiveName: "execute", invocationId: "gen_first")
@@ -432,76 +359,6 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.enqueuedCapabilityStarts[0].invocationId, "inv_queue")
     }
 
-    // MARK: - UserInteraction Capability Tests
-
-    func testUserInteractionCapabilityInvocationStart() async throws {
-        // Given: An UserInteraction capability start with params encoded in formattedArguments
-        let params = UserInteractionParams(
-            questions: [
-                UserInteraction(
-                    id: "q1",
-                    question: "Pick one?",
-                    options: [
-                        UserInteractionOption(label: "A", value: nil, description: "Option A"),
-                        UserInteractionOption(label: "B", value: nil, description: "Option B")
-                    ],
-                    mode: .single,
-                    allowOther: false,
-                    otherPlaceholder: nil
-                )
-            ],
-            context: nil
-        )
-        let paramsJson = String(data: try! JSONEncoder().encode(params), encoding: .utf8)!
-        let event = CapabilityInvocationStartedPlugin.Result(
-            modelPrimitiveName: "execute",
-            invocationId: "ask_123",
-            arguments: nil,
-            formattedArguments: paramsJson,
-            identity: testUserInteractionCapabilityIdentity()
-        )
-
-        // When: Handling capability start
-        coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
-
-        // Then: Should create UserInteraction message
-        XCTAssertEqual(mockContext.messages.count, 1)
-        if case .userInteraction(let data) = mockContext.messages[0].content {
-            XCTAssertEqual(data.invocationId, "ask_123")
-            XCTAssertEqual(data.status, .pending)
-            XCTAssertEqual(data.params.questions.count, 1)
-        } else {
-            XCTFail("Expected userInteraction content")
-        }
-
-        // Then: Should mark calledInTurn
-        XCTAssertTrue(mockContext.userInteractionCalledInTurn)
-    }
-
-    func testUserInteractionCapabilityInvocationStartRendersErrorOnParseFailure() async throws {
-        // Given: An UserInteraction capability start with invalid JSON (parse will fail)
-        let event = CapabilityInvocationStartedPlugin.Result(
-            modelPrimitiveName: "execute",
-            invocationId: "ask_fail",
-            arguments: nil,
-            formattedArguments: "invalid json",
-            identity: testUserInteractionCapabilityIdentity()
-        )
-
-        // When: Handling capability start
-        coordinator.handleCapabilityInvocationStarted(event, context: mockContext)
-
-        // Then: Should render a capability error instead of inferring an old-name identity
-        XCTAssertEqual(mockContext.messages.count, 1)
-        if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
-            XCTAssertEqual(invocation.identity.operationName, "ask_user")
-            XCTAssertEqual(invocation.status, .error)
-            XCTAssertEqual(invocation.result, "Unable to parse interaction payload.")
-        } else {
-            XCTFail("Expected capability invocation content for malformed request")
-        }
-    }
-
     // MARK: - Capability End Tests
 
     func testCapabilityInvocationEndEnqueuesForProcessing() async throws {
@@ -548,50 +405,6 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.currentTurnCapabilityInvocations[0].isError)
     }
 
-    func testUserInteractionCapabilityInvocationEndOpensSheet() async throws {
-        // Given: An UserInteraction message exists
-        let askData = UserInteractionInvocationData(
-            invocationId: "ask_sheet_123",
-            params: UserInteractionParams(
-                questions: [
-                    UserInteraction(
-                        id: "q1",
-                        question: "Pick?",
-                        options: [
-                            UserInteractionOption(label: "A", value: nil, description: nil)
-                        ],
-                        mode: .single,
-                        allowOther: false,
-                        otherPlaceholder: nil
-                    )
-                ],
-                context: nil
-            ),
-            answers: [:],
-            status: .pending,
-            result: nil
-        )
-        mockContext.messages.append(ChatMessage(
-            role: .assistant,
-            content: .userInteraction(askData)
-        ))
-
-        // Given: Capability end arrives
-        let event = CapabilityInvocationCompletedPlugin.Result(
-            invocationId: "ask_sheet_123",
-            success: true,
-            displayResult: "",
-            durationMs: 100,
-            details: nil
-        )
-
-        // When: Handling capability end
-        coordinator.handleCapabilityInvocationCompleted(event, context: mockContext)
-
-        // Then: Sheet should be opened
-        XCTAssertTrue(mockContext.userInteractionSheetOpened)
-    }
-
     // MARK: - Thinking Block Boundary Tests
 
     func testCapabilityInvocationEndResetsThinkingStateForNewBlock() async throws {
@@ -629,93 +442,6 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
     }
 
-    func testUserInteractionCapabilityInvocationEndAlsoResetsThinkingState() async throws {
-        // Given: An UserInteraction message exists
-        let askData = UserInteractionInvocationData(
-            invocationId: "ask_thinking_reset",
-            params: UserInteractionParams(
-                questions: [
-                    UserInteraction(
-                        id: "q1",
-                        question: "Pick?",
-                        options: [
-                            UserInteractionOption(label: "A", value: nil, description: nil)
-                        ],
-                        mode: .single,
-                        allowOther: false,
-                        otherPlaceholder: nil
-                    )
-                ],
-                context: nil
-            ),
-            answers: [:],
-            status: .pending,
-            result: nil
-        )
-        mockContext.messages.append(ChatMessage(
-            role: .assistant,
-            content: .userInteraction(askData)
-        ))
-
-        // Given: Capability end arrives
-        let event = CapabilityInvocationCompletedPlugin.Result(
-            invocationId: "ask_thinking_reset",
-            success: true,
-            displayResult: "",
-            durationMs: 100,
-            details: nil
-        )
-
-        // When: Handling capability end (UserInteraction returns early, but should still reset)
-        coordinator.handleCapabilityInvocationCompleted(event, context: mockContext)
-
-        // Then: Thinking state should still be reset (called at start of handleCapabilityInvocationCompleted)
-        XCTAssertTrue(mockContext.resetThinkingForNewBlockCalled)
-    }
-
-    func testCapabilityInvocationEndDoesNotEnqueueForUserInteraction() async throws {
-        // Given: An UserInteraction message exists
-        let askData = UserInteractionInvocationData(
-            invocationId: "ask_no_enqueue",
-            params: UserInteractionParams(
-                questions: [
-                    UserInteraction(
-                        id: "q1",
-                        question: "Pick?",
-                        options: [
-                            UserInteractionOption(label: "A", value: nil, description: nil)
-                        ],
-                        mode: .single,
-                        allowOther: false,
-                        otherPlaceholder: nil
-                    )
-                ],
-                context: nil
-            ),
-            answers: [:],
-            status: .pending,
-            result: nil
-        )
-        mockContext.messages.append(ChatMessage(
-            role: .assistant,
-            content: .userInteraction(askData)
-        ))
-
-        // Given: Capability end arrives
-        let event = CapabilityInvocationCompletedPlugin.Result(
-            invocationId: "ask_no_enqueue",
-            success: true,
-            displayResult: "",
-            durationMs: 100,
-            details: nil
-        )
-
-        // When: Handling capability end
-        coordinator.handleCapabilityInvocationCompleted(event, context: mockContext)
-
-        // Then: Should NOT enqueue (UserInteraction returns early)
-        XCTAssertEqual(mockContext.enqueuedCapabilityEnds.count, 0)
-    }
 }
 
 // MARK: - Mock Context
@@ -730,17 +456,12 @@ final class MockCapabilityInvocationContext: CapabilityInvocationContext {
     var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
     var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
 
-    // MARK: - State Objects
-    var userInteractionCalledInTurn: Bool = false
-
     // MARK: - Tracking for Assertions
     var flushPendingTextUpdatesCalled = false
     var finalizeStreamingMessageCalled = false
     var visibleInvocationIds: Set<String> = []
     var enqueuedCapabilityStarts: [UIUpdateQueue.CapabilityInvocationStartData] = []
     var enqueuedCapabilityEnds: [UIUpdateQueue.CapabilityInvocationEndData] = []
-    var userInteractionSheetOpened = false
-    var openedUserInteractionData: UserInteractionInvocationData?
     var resetThinkingForNewBlockCalled = false
     var finalizeThinkingMessageIfNeededCalled = false
 
@@ -764,11 +485,6 @@ final class MockCapabilityInvocationContext: CapabilityInvocationContext {
 
     func enqueueCapabilityInvocationEnd(_ data: UIUpdateQueue.CapabilityInvocationEndData) {
         enqueuedCapabilityEnds.append(data)
-    }
-
-    func openUserInteractionSheet(for data: UserInteractionInvocationData) {
-        userInteractionSheetOpened = true
-        openedUserInteractionData = data
     }
 
     func resetThinkingForNewBlock() {

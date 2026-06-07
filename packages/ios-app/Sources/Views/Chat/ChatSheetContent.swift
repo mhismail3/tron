@@ -45,9 +45,6 @@ struct ChatSheetContent: View {
                 summarizedTurns: data.summarizedTurns
             )
 
-        case .userInteraction:
-            userInteractionSheet
-
         case .thinkingDetail(let content):
             ThinkingDetailSheet(
                 state: ThinkingDetailState(
@@ -77,24 +74,6 @@ struct ChatSheetContent: View {
             return snapshot
         }()
         CapabilityInvocationDetailSheet(data: liveData)
-    }
-
-    @ViewBuilder
-    private var userInteractionSheet: some View {
-        if let data = viewModel.userInteractionState.currentData {
-            UserInteractionSheet(
-                capabilityData: data,
-                onSubmit: { answers in
-                    viewModel.prepareUserInteractionSubmission(answers)
-                },
-                onDismiss: {
-                    viewModel.dismissUserInteractionSheet()
-                },
-                readOnly: data.status == .answered
-            )
-        } else {
-            EmptyView()
-        }
     }
 
 }

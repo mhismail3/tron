@@ -3,7 +3,6 @@ import Foundation
 /// Unified tap action enum for MessageBubble callbacks.
 /// Replaces 15 individual closure properties with a single `onTap` handler.
 enum MessageBubbleTapAction {
-    case userInteraction(UserInteractionInvocationData)
     case thinking(String)
     case compaction(tokensBefore: Int, tokensAfter: Int, reason: String, summary: String?, preservedTurns: Int?, summarizedTurns: Int?)
     case capabilityInvocation(CapabilityInvocationData)

@@ -130,11 +130,6 @@ struct AgentClientTests {
             case "agent::clear_queue":
                 #expect((payload as? ClearQueueParams)?.sessionId == sessionId)
                 return ClearQueueResult(cleared: 1)
-            case "agent::submit_answers":
-                #expect((payload as? SubmitAnswersParams)?.sessionId == sessionId)
-                #expect((payload as? SubmitAnswersParams)?.pauseId == "pause-1")
-                #expect((payload as? SubmitAnswersParams)?.invocationId == "inv-1")
-                return SubmitAnswersResponse(acknowledged: true, queued: false, runId: nil)
             case "agent::abort":
                 #expect((payload as? AgentAbortParams)?.sessionId == sessionId)
                 return EmptyParams()
@@ -149,12 +144,6 @@ struct AgentClientTests {
         _ = try await client.queuePrompt("queued", idempotencyKey: .userAction("agent.queuePrompt.test"))
         try await client.dequeuePrompt("queue-1", idempotencyKey: .userAction("agent.dequeuePrompt.test"))
         try await client.clearQueue(idempotencyKey: .userAction("agent.clearQueue.test"))
-        _ = try await client.submitAnswers(
-            pauseId: "pause-1",
-            invocationId: "inv-1",
-            questions: [],
-            idempotencyKey: .userAction("agent.submitAnswers.test")
-        )
         try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
         _ = try await client.abortCapabilityInvocation(invocationId: "capability-1", idempotencyKey: .userAction("agent.abortCapabilityInvocation.test"))
         #expect(transport.ensureSessionEventSubscriptionCallCount >= 1)
@@ -167,7 +156,6 @@ struct AgentClientTests {
             "agent::queue_prompt",
             "agent::dequeue_prompt",
             "agent::clear_queue",
-            "agent::submit_answers",
             "agent::abort",
             "agent::abort_invocation"
         ])

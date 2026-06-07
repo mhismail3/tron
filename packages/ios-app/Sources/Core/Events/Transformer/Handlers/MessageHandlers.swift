@@ -11,8 +11,6 @@ enum MessageHandlers {
     /// Transform message.user event into a ChatMessage.
     ///
     /// User messages contain the user's input to the agent.
-    /// Interactive-capability responses such as answered questions are identified
-    /// by the server-provided `messageKind` field and rendered as chips.
     static func transformUserMessage(
         _ payload: [String: AnyCodable],
         timestamp: Date
@@ -23,21 +21,6 @@ enum MessageHandlers {
         // not displayable user messages. Capability results are displayed via capability.invocation.completed events.
         if parsed.isCapabilityResultContext {
             return nil
-        }
-
-        // Server-provided structured chip rendering (see the capability domain
-        // interactive enrichment modules). No text scanning needed — the
-        // server tags these messages with `messageKind` on the live path
-        // and back-fills historical events during reconstruction.
-        switch parsed.messageKind {
-        case "answered_questions":
-            return ChatMessage(
-                role: .user,
-                content: .answeredQuestions(questionCount: max(1, parsed.answerCount ?? 1)),
-                timestamp: timestamp
-            )
-        default:
-            break
         }
 
         // Skip empty user messages unless they have attachments.

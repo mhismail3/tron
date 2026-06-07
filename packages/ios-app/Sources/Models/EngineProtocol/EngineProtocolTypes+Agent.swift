@@ -182,25 +182,3 @@ struct TokenUsage: Decodable, Equatable {
         (cacheReadTokens ?? 0) > 0 || (cacheCreationTokens ?? 0) > 0
     }
 }
-
-// MARK: - Answer Submission
-
-struct AnswerSubmission: Encodable {
-    let id: String
-    let question: String
-    let selectedValues: [String]
-    let otherValue: String?
-}
-
-struct SubmitAnswersParams: Encodable {
-    let sessionId: String
-    let pauseId: String
-    let invocationId: String
-    let questions: [AnswerSubmission]
-}
-
-struct SubmitAnswersResponse: Decodable {
-    let acknowledged: Bool
-    let queued: Bool
-    let runId: String?
-}

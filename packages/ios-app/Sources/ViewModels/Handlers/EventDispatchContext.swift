@@ -13,8 +13,6 @@ import Foundation
     func handleCapabilityInvocationOutput(_ result: CapabilityInvocationOutputPlugin.Result)
     func handleCapabilityInvocationProgress(_ result: CapabilityInvocationProgressPlugin.Result)
     func handleCapabilityInvocationCompleted(_ result: CapabilityInvocationCompletedPlugin.Result)
-    func handleCapabilityPauseRequested(_ result: CapabilityPauseRequestedPlugin.Result)
-    func handleCapabilityPauseResolved(_ result: CapabilityPauseResolvedPlugin.Result)
     func handleCapabilityRunStatus(_ result: CapabilityRunStatusPlugin.Result)
 }
 

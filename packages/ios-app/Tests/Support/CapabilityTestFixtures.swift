@@ -19,15 +19,6 @@ func testCapabilityIdentity(
     )
 }
 
-func testUserInteractionCapabilityIdentity(modelPrimitiveName: String = "execute") -> CapabilityIdentity {
-    CapabilityIdentity(
-        modelPrimitiveName: modelPrimitiveName,
-        operationName: "ask_user",
-        traceId: "trace-ask-user-test",
-        rootInvocationId: "invocation-ask-user-test"
-    )
-}
-
 func testCapabilityInvocation(
     id: String = "call_test",
     status: CapabilityInvocationStatus = .success,

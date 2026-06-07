@@ -48,9 +48,6 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
     /// Append the interrupted message
     func appendInterruptedMessage()
 
-    /// Mark pending UserInteraction chips as superseded
-    func markPendingQuestionsAsSuperseded()
-
     /// Handle agent error
     func handleAgentError(_ message: String)
 
@@ -73,7 +70,7 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 ///
 /// Responsibilities:
 /// - Sending messages with text, attachments, and reasoning levels
-/// - Creating appropriate user message UI (regular text or answered questions chip)
+/// - Creating appropriate user message UI
 /// - Managing agent abort with proper state cleanup
 /// - Attachment add/remove operations
 /// - Coordinating state updates (agentPhase, dashboard, streaming)
@@ -112,11 +109,6 @@ final class MessagingCoordinator {
             context.showError("Could not start live session stream: \(error.localizedDescription)")
             return
         }
-
-        // Answer submissions are delivered via dedicated engine protocols, not
-        // through sendMessage. Any regular user message sent here supersedes
-        // pending question capabilities.
-        context.markPendingQuestionsAsSuperseded()
 
         // Reset browser dismissal for new prompt - browser can auto-open again
 

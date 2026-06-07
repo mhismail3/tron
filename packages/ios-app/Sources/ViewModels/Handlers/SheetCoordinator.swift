@@ -84,11 +84,6 @@ final class SheetCoordinator {
         present(.providerErrorDetail(data))
     }
 
-    /// Show ask user question sheet
-    func showUserInteraction() {
-        present(.userInteraction)
-    }
-
     /// Show thinking detail sheet
     func showThinkingDetail(_ content: String) {
         present(.thinkingDetail(content))

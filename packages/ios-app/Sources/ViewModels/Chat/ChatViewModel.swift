@@ -60,8 +60,6 @@ final class ChatViewModel {
 
     // MARK: - Extracted State Objects
 
-    /// UserInteraction state (sheet, current data, answers)
-    let userInteractionState = UserInteractionState()
     /// Context tracking state (tokens, cost, context window)
     let contextState = ContextTrackingState()
     /// Process state (tracking background processes for process list UI)
@@ -81,12 +79,6 @@ final class ChatViewModel {
     /// Pull-up panel state (suggestions, position, drag)
     let pullUpPanelState = PullUpPanelState()
     // MARK: - Protocol Conformance (Context Protocols)
-
-    /// Whether UserInteraction was called in the current turn (CapabilityInvocationContext, TurnLifecycleContext)
-    var userInteractionCalledInTurn: Bool {
-        get { userInteractionState.calledInTurn }
-        set { userInteractionState.calledInTurn = newValue }
-    }
 
     /// Make a capability visible for rendering (CapabilityInvocationContext)
     func makeCapabilityInvocationVisible(_ invocationId: String) {
@@ -168,8 +160,6 @@ final class ChatViewModel {
     let capabilityInvocationCoordinator = CapabilityInvocationCoordinator()
     /// Coordinates turn lifecycle handling (start/end, complete)
     let turnLifecycleCoordinator = TurnLifecycleCoordinator()
-    /// Coordinates UserInteraction event handling and user interaction
-    let userInteractionCoordinator = UserInteractionCoordinator()
     /// Coordinates message sending, abort, and attachments
     let messagingCoordinator = MessagingCoordinator()
     /// Coordinates session connection, reconnection, and catch-up
@@ -284,7 +274,6 @@ final class ChatViewModel {
                 self.runningCapabilityInvocationCount = 0
                 self.clearDisplayStreamState()
                 self.clearProcessState()
-                self.userInteractionState.clearAll()
                 self.prunedLiveMessages.removeAll()
                 self.pullUpPanelState.awaitingSuggestions = false
             }

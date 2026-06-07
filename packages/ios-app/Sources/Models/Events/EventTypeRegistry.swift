@@ -24,8 +24,6 @@ enum PersistedEventType: String, CaseIterable {
     // Capability execution
     case capabilityInvocationStarted = "capability.invocation.started"
     case capabilityInvocationCompleted = "capability.invocation.completed"
-    case capabilityPauseRequested = "capability.pause.requested"
-    case capabilityPauseResolved = "capability.pause.resolved"
     case capabilityRunStatus = "capability.run.status"
 
     // Streaming (for real-time reconstruction)
@@ -91,8 +89,6 @@ enum PersistedEventType: String, CaseIterable {
         // Capability execution
         case .capabilityInvocationStarted: return .init(true, true, false, false, "Capability invocation")
         case .capabilityInvocationCompleted: return .init(true, true, false, false, "Capability result")
-        case .capabilityPauseRequested: return .init(false, true, false, true, "Capability paused")
-        case .capabilityPauseResolved: return .init(false, true, false, true, "Capability resumed")
         case .capabilityRunStatus: return .init(false, true, false, true, "Capability run status")
         // Streaming
         case .streamTextDelta:         return .init(false,   false,   true,    true,   "Text delta")

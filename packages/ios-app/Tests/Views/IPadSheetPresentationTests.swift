@@ -87,10 +87,6 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
             ),
             (
-                ["Sources", "Views", "UserInteraction", "UserInteractionSheet.swift"],
-                ".adaptivePresentationDetents([.medium, .large], ipadSizing: .compactForm)"
-            ),
-            (
                 ["Sources", "Views", "Process", "ProcessListSheet.swift"],
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             )

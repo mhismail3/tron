@@ -11,7 +11,6 @@ extension ChatViewModel: CapabilityInvocationContext {
     // - messages: [ChatMessage]
     // - currentCapabilityInvocationMessages: [UUID: ChatMessage]
     // - currentTurnCapabilityInvocations: [CapabilityInvocationRecord]
-    // - userInteractionCalledInTurn: Bool (via userInteractionState)
 
     // MARK: - Protocol Methods
 

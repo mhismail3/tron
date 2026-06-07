@@ -112,8 +112,6 @@ protocol CapabilityInvocationStateTracking: AnyObject {
     /// Capability invocations tracked for the current turn.
     var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] { get set }
 
-    /// Whether UserInteraction was called in the current turn.
-    var userInteractionCalledInTurn: Bool { get set }
 }
 
 // MARK: - Dashboard Updates

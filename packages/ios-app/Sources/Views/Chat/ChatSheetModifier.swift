@@ -27,13 +27,6 @@ struct ChatSheetModifier: ViewModifier {
                     sheetCoordinator.showSettings()
                 }
             }
-            .onChange(of: viewModel.userInteractionState.showSheet) { _, show in
-                if show, sheetCoordinator.activeSheet == nil {
-                    sheetCoordinator.showUserInteraction()
-                } else if !show {
-                    sheetCoordinator.dismissIfActive(.userInteraction)
-                }
-            }
     }
 
     private var sheetBinding: Binding<ChatSheet?> {
@@ -44,14 +37,6 @@ struct ChatSheetModifier: ViewModifier {
     }
 
     private func onDismiss() {
-        // Execute deferred submissions AFTER sheet dismiss animation completes.
-        // These were prepared synchronously before dismiss() was called, ensuring
-        // chip status updates are visible during the dismiss animation. The actual
-        // prompt send (which triggers isProcessing, keyboard resign, etc.) happens
-        // here to avoid concurrent state mutations that glitch the InputBar layout.
-        viewModel.executePendingUserInteractionSubmission()
-
-        viewModel.userInteractionState.showSheet = false
         viewModel.showSettings = false
         sheetCoordinator.onDismiss?()
     }

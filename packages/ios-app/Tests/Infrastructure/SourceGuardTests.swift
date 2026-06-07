@@ -639,6 +639,59 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Primitive shell has no user-interaction pause plane")
+    func testPrimitiveShellHasNoUserInteractionPausePlane() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let checkedPaths = [
+            "Sources",
+            "Tests",
+            "project.yml",
+        ]
+        let forbidden = [
+            "User" + "Interaction" + "Invocation",
+            "User" + "Interaction" + "Capability",
+            "User" + "Interaction" + "Coordinator",
+            "User" + "Interaction" + "State",
+            "User" + "Interaction" + "Sheet",
+            "User" + "Interaction" + "Viewer",
+            "case " + "user" + "Interaction",
+            "." + "user" + "Interaction",
+            "answered" + "Questions",
+            "submit" + "Answers",
+            "Submit" + "Answers",
+            "agent::" + "submit_answers",
+            "capability.pause.",
+            "Capability" + "Pause",
+            "pause" + "Id",
+            "prompt" + "Payload",
+            "answer" + "Authority",
+            "interaction" + "Status",
+            "parsed" + "Answers",
+            "ask" + "_user",
+            "is" + "User" + "Interaction" + "Capability",
+        ]
+
+        for relativePath in checkedPaths {
+            let url = iosRoot.appendingPathComponent(relativePath)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            let files: [URL]
+            if (try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                files = try swiftFiles(in: url)
+            } else {
+                files = [url]
+            }
+            for file in files where file.lastPathComponent != "SourceGuardTests.swift" {
+                let source = try String(contentsOf: file, encoding: .utf8)
+                for token in forbidden {
+                    #expect(!source.contains(token), "\(token) must stay deleted from primitive shell: \(file.path)")
+                }
+            }
+        }
+    }
+
     @Test("iOS runtime contract is iOS 26 only")
     func testIOSRuntimeContractIsIOS26Only() throws {
         let fileURL = URL(fileURLWithPath: #filePath)

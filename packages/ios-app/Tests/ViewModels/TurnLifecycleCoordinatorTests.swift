@@ -21,18 +21,6 @@ final class TurnLifecycleCoordinatorTests: XCTestCase {
 
     // MARK: - handleTurnStart Tests
 
-    func testTurnStartResetsUserInteractionCalledInTurn() {
-        // Given
-        mockContext.userInteractionCalledInTurn = true
-
-        // When
-        let pluginResult = TurnStartPlugin.Result(turnNumber: 1, agentPhase: "processing")
-        coordinator.handleTurnStart(pluginResult, context: mockContext)
-
-        // Then
-        XCTAssertFalse(mockContext.userInteractionCalledInTurn)
-    }
-
     func testTurnStartFinalizesStreamingIfNeeded() {
         // Given
         mockContext.hasActiveStreaming = true
@@ -512,7 +500,6 @@ final class MockTurnLifecycleContext: TurnLifecycleContext {
     let messageIndex = MessageIndex()
     var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
     var currentTurnCapabilityInvocations: [CapabilityInvocationRecord] = []
-    var userInteractionCalledInTurn: Bool = false
     var thinkingMessageId: UUID?
     var turnStartMessageIndex: Int?
     var firstTextMessageIdForTurn: UUID?

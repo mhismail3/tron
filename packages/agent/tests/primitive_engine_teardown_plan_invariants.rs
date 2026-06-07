@@ -1,6 +1,6 @@
 //! Static gates for the primitive engine teardown planning scorecard.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn repo_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -36,6 +36,54 @@ fn assert_absent(haystack: &str, banned: &[&str], label: &str) {
             "{label} must not retain primitive-teardown-banned text `{needle}`"
         );
     }
+}
+
+fn read_repo_source_trees(paths: &[&str]) -> String {
+    fn append_file(output: &mut String, path: &Path) {
+        if !matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("rs" | "swift" | "yml" | "yaml")
+        ) {
+            return;
+        }
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "SourceGuardTests.swift")
+        {
+            return;
+        }
+        let text = std::fs::read_to_string(path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        output.push_str("\n// FILE: ");
+        output.push_str(&path.display().to_string());
+        output.push('\n');
+        output.push_str(&text);
+    }
+
+    fn append_path(output: &mut String, path: &Path) {
+        if path.is_file() {
+            append_file(output, path);
+            return;
+        }
+        let entries = std::fs::read_dir(path)
+            .unwrap_or_else(|error| panic!("failed to enumerate {}: {error}", path.display()));
+        for entry in entries {
+            let entry = entry.expect("directory entry should be readable");
+            let path = entry.path();
+            if path.is_dir() {
+                append_path(output, &path);
+            } else {
+                append_file(output, &path);
+            }
+        }
+    }
+
+    let mut output = String::new();
+    for path in paths {
+        append_path(&mut output, &repo_path(path));
+    }
+    output
 }
 
 #[test]
@@ -1497,6 +1545,8 @@ fn retained_event_payload_surface_is_loop_owned() {
         read_repo_file("packages/agent/src/domains/session/event_store/types/payloads/mod.rs");
     let generated =
         read_repo_file("packages/agent/src/domains/session/event_store/types/generated.rs");
+    let pause_requested = ["Capability", "Pause", "Requested"].concat();
+    let pause_resolved = ["Capability", "Pause", "Resolved"].concat();
 
     assert_absent(
         &payloads,
@@ -1520,8 +1570,8 @@ fn retained_event_payload_surface_is_loop_owned() {
         &[
             "MessageQueued",
             "MessageDequeued",
-            "CapabilityPauseRequested",
-            "CapabilityPauseResolved",
+            pause_requested.as_str(),
+            pause_resolved.as_str(),
             "CapabilityRunStatus",
             "ConfigModelSwitch",
             "ConfigPromptUpdate",
@@ -1552,4 +1602,43 @@ fn retained_event_payload_surface_is_loop_owned() {
         ],
         "generated event type surface",
     );
+}
+
+#[test]
+fn user_interaction_pause_plane_is_deleted_from_retained_sources() {
+    let retained_sources = read_repo_source_trees(&[
+        "packages/agent/src",
+        "packages/ios-app/Sources",
+        "packages/ios-app/Tests",
+        "packages/ios-app/project.yml",
+    ]);
+    let forbidden = [
+        ["User", "Interaction", "Invocation"].concat(),
+        ["User", "Interaction", "Capability"].concat(),
+        ["User", "Interaction", "Coordinator"].concat(),
+        ["User", "Interaction", "State"].concat(),
+        ["User", "Interaction", "Sheet"].concat(),
+        ["User", "Interaction", "Viewer"].concat(),
+        ["answered", "Questions"].concat(),
+        ["submit", "Answers"].concat(),
+        ["Submit", "Answers"].concat(),
+        ["Answer", "Submission"].concat(),
+        ["agent::", "submit", "_", "answers"].concat(),
+        ["capability", ".", "pause", "."].concat(),
+        ["Capability", "Pause"].concat(),
+        ["pause", "Id"].concat(),
+        ["prompt", "Payload"].concat(),
+        ["answer", "Authority"].concat(),
+        ["resume", "Schema"].concat(),
+        ["interaction", "Status"].concat(),
+        ["parsed", "Answers"].concat(),
+        ["ask", "_", "user"].concat(),
+        ["mark", "Pending", "Questions", "As", "Superseded"].concat(),
+    ];
+    for token in forbidden {
+        assert!(
+            !retained_sources.contains(&token),
+            "retained primitive sources must not contain deleted user-interaction pause-plane token `{token}`"
+        );
+    }
 }

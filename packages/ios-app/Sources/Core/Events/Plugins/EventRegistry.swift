@@ -98,8 +98,6 @@ final class EventRegistry: @unchecked Sendable {
         register(CapabilityInvocationOutputPlugin.self)
         register(CapabilityInvocationProgressPlugin.self)
         register(CapabilityInvocationCompletedPlugin.self)
-        register(CapabilityPauseRequestedPlugin.self)
-        register(CapabilityPauseResolvedPlugin.self)
         register(CapabilityRunStatusPlugin.self)
 
         // Lifecycle events

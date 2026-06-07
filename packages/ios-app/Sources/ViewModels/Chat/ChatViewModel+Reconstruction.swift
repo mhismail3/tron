@@ -296,48 +296,6 @@ extension ChatViewModel {
             presentationHints: capabilityInvocation.presentationHints
         )
 
-        // UserInteraction: create interactive form instead of generic capability chip
-        if identity.isUserInteractionCapability {
-            // Dedup: if an UserInteraction message with this invocationId already exists
-            // from persisted events, skip creating a duplicate
-            if messages.contains(where: { msg in
-                if case .userInteraction(let data) = msg.content {
-                    return data.invocationId == capabilityInvocation.invocationId
-                }
-                return false
-            }) {
-                logger.info("[RECONSTRUCT] Skipping duplicate UserInteraction id=\(capabilityInvocation.invocationId)", category: .session)
-                return
-            }
-
-            let isActive = capabilityInvocation.status == CapabilityInvocationStatusDTO.running.rawValue
-                || capabilityInvocation.status == CapabilityInvocationStatusDTO.generating.rawValue
-                || capabilityInvocation.status == CapabilityInvocationStatusDTO.paused.rawValue
-
-            var params = UserInteractionParams(questions: [], context: nil)
-            if let argsData = argsString.data(using: .utf8),
-               let decoded = try? JSONDecoder().decode(UserInteractionParams.self, from: argsData) {
-                params = decoded
-            }
-
-            let capabilityData = UserInteractionInvocationData(
-                invocationId: capabilityInvocation.invocationId,
-                params: params,
-                answers: [:],
-                status: isActive ? .pending : .superseded,
-                result: nil
-            )
-            let message = ChatMessage(role: .assistant, content: .userInteraction(capabilityData))
-            messages.append(message)
-            currentCapabilityInvocationMessages[message.id] = message
-            animationCoordinator.makeCapabilityInvocationVisible(capabilityInvocation.invocationId)
-
-            if isActive {
-                userInteractionState.currentData = capabilityData
-            }
-            return
-        }
-
         // Create UI message for the capability invocation
         let messageId = UUID(uuidString: capabilityInvocation.invocationId) ?? UUID()
 

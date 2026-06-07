@@ -3,44 +3,6 @@ import XCTest
 
 final class CapabilityLifecyclePluginTests: XCTestCase {
 
-    func testPauseRequestedDecodesCapabilityIdentityAndPromptPayload() throws {
-        let json = """
-        {
-            "type": "capability.pause.requested",
-            "sessionId": "session-123",
-            "timestamp": "2026-05-14T10:00:00Z",
-            "data": {
-                "pauseId": "pause-1",
-                "invocationId": "inv-1",
-                "kind": "user_input",
-                "status": "pending",
-                "promptPayload": {
-                    "questions": [{ "id": "q1", "question": "Proceed?", "options": [] }]
-                },
-                "answerAuthority": "user_client",
-                "modelPrimitiveName": "execute",
-                "operationName": "ask_user",
-                "presentationHints": {
-                    "displayName": "Ask User",
-                    "chipTitle": "Ask",
-                    "icon": "question",
-                    "themeColor": "#F59E0B"
-                }
-            }
-        }
-        """.data(using: .utf8)!
-
-        let event = try CapabilityPauseRequestedPlugin.parse(from: json)
-        let result = CapabilityPauseRequestedPlugin.transform(event) as? CapabilityPauseRequestedPlugin.Result
-
-        XCTAssertEqual(result?.pauseId, "pause-1")
-        XCTAssertEqual(result?.kind, "user_input")
-        XCTAssertEqual(result?.identity.operationName, "ask_user")
-        XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "Ask User")
-        XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "Ask")
-        XCTAssertNotNil(result?.promptPayload?["questions"])
-    }
-
     func testRunStatusDecodesChildInvocationsAndIdentity() throws {
         let json = """
         {

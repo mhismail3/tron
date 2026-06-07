@@ -48,23 +48,9 @@ enum MessageFinder {
                 return invocation.id == invocationId
             case .capabilityResult(let result):
                 return result.id == invocationId
-            case .userInteraction(let data):
-                return data.invocationId == invocationId
             default:
                 return false
             }
-        })
-    }
-
-    // MARK: - By UserInteraction
-
-    /// Find LAST message index with matching invocationId in userInteraction content.
-    static func lastIndexOfUserInteraction(invocationId: String, in messages: [ChatMessage]) -> Int? {
-        messages.lastIndex(where: { message in
-            if case .userInteraction(let data) = message.content {
-                return data.invocationId == invocationId
-            }
-            return false
         })
     }
 

@@ -19,19 +19,6 @@ final class MessageFinderTests: XCTestCase {
         ChatMessage(role: .user, content: .capabilityResult(testCapabilityResult(id: invocationId)))
     }
 
-    private func makeUserInteractionMessage(invocationId: String) -> ChatMessage {
-        ChatMessage(role: .assistant, content: .userInteraction(UserInteractionInvocationData(
-            invocationId: invocationId,
-            params: UserInteractionParams(questions: [
-                UserInteraction(id: "q1", question: "Pick one", options: [
-                    UserInteractionOption(label: "A", value: nil, description: nil)
-                ], mode: .single, allowOther: nil, otherPlaceholder: nil)
-            ], context: nil),
-            answers: [:],
-            status: .pending
-        )))
-    }
-
     private func makeTextMessage(text: String = "Hello", eventId: String? = nil) -> ChatMessage {
         ChatMessage(role: .user, content: .text(text), eventId: eventId)
     }
@@ -112,10 +99,6 @@ final class MessageFinderTests: XCTestCase {
         XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeCapabilityResultMessage(invocationId: "tc-1")]))
     }
 
-    func testHasCapabilityMessageForUserInteraction() {
-        XCTAssertTrue(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeUserInteractionMessage(invocationId: "tc-1")]))
-    }
-
     func testHasCapabilityMessageReturnsFalseForText() {
         XCTAssertFalse(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: [makeTextMessage()]))
     }
@@ -126,17 +109,6 @@ final class MessageFinderTests: XCTestCase {
 
     func testHasCapabilityMessageEmptyArray() {
         XCTAssertFalse(MessageFinder.hasCapabilityInvocationMessage(invocationId: "tc-1", in: []))
-    }
-
-    // MARK: - lastIndexOfUserInteraction
-
-    func testLastIndexOfUserInteractionFound() {
-        let messages = [makeUserInteractionMessage(invocationId: "tc-1")]
-        XCTAssertEqual(MessageFinder.lastIndexOfUserInteraction(invocationId: "tc-1", in: messages), 0)
-    }
-
-    func testLastIndexOfUserInteractionNotFound() {
-        XCTAssertNil(MessageFinder.lastIndexOfUserInteraction(invocationId: "tc-x", in: [makeTextMessage()]))
     }
 
 }

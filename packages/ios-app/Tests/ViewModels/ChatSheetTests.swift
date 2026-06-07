@@ -29,13 +29,6 @@ struct ChatSheetTests {
         #expect(sheet1.id == "compaction")
     }
 
-    @Test("User interaction sheet has consistent id")
-    func testUserInteractionId() {
-        let sheet = ChatSheet.userInteraction
-
-        #expect(sheet.id == "userInteraction")
-    }
-
     @Test("Thinking detail has consistent id regardless of content")
     func testThinkingDetailId() {
         let sheet1 = ChatSheet.thinkingDetail("content 1")
@@ -63,7 +56,6 @@ struct ChatSheetTests {
         let sheets: [ChatSheet] = [
             .settings,
             .compactionDetail(compactionData),
-            .userInteraction,
             .thinkingDetail("content"),
             .capabilityInvocationDetail(capabilityData),
             .providerErrorDetail(providerErrorData)
@@ -177,9 +169,9 @@ struct SheetCoordinatorTests {
         let coordinator = SheetCoordinator()
 
         coordinator.present(.settings)
-        coordinator.present(.userInteraction)
+        coordinator.present(.thinkingDetail("second"))
 
-        #expect(coordinator.activeSheet == .userInteraction)
+        #expect(coordinator.activeSheet == .thinkingDetail("second"))
     }
 
     @Test("Present replaces onDismiss callback")
@@ -189,7 +181,7 @@ struct SheetCoordinatorTests {
         var secondCalled = false
 
         coordinator.present(.settings) { firstCalled = true }
-        coordinator.present(.userInteraction) { secondCalled = true }
+        coordinator.present(.thinkingDetail("second")) { secondCalled = true }
 
         coordinator.onDismiss?()
 
@@ -221,9 +213,9 @@ struct SheetCoordinatorTests {
     @Test("Dismiss if active clears matching sheet")
     func testDismissIfActiveClearsMatchingSheet() {
         let coordinator = SheetCoordinator()
-        coordinator.showUserInteraction()
+        coordinator.showThinkingDetail("active")
 
-        coordinator.dismissIfActive(.userInteraction)
+        coordinator.dismissIfActive(.thinkingDetail("active"))
 
         #expect(coordinator.activeSheet == nil)
     }
@@ -233,7 +225,7 @@ struct SheetCoordinatorTests {
         let coordinator = SheetCoordinator()
         coordinator.showSettings()
 
-        coordinator.dismissIfActive(.userInteraction)
+        coordinator.dismissIfActive(.thinkingDetail("inactive"))
 
         #expect(coordinator.activeSheet == .settings)
     }
@@ -281,15 +273,6 @@ struct SheetCoordinatorTests {
         } else {
             Issue.record("Expected compactionDetail sheet")
         }
-    }
-
-    @Test("showUserInteraction creates ask user question sheet")
-    func testShowUserInteractionCreatesSheet() {
-        let coordinator = SheetCoordinator()
-
-        coordinator.showUserInteraction()
-
-        #expect(coordinator.activeSheet == .userInteraction)
     }
 
     @Test("showThinkingDetail creates thinking sheet with content")

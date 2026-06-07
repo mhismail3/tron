@@ -118,8 +118,6 @@ extension ChatViewModel {
             return true
         case .capabilityResult(let data) where data.id == invocationId:
             return true
-        case .userInteraction(let data) where data.invocationId == invocationId:
-            return true
         default:
             return false
         }

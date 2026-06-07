@@ -2,8 +2,7 @@ import Foundation
 
 /// Extracts capability arguments from either a `CapabilityInvocationStartedPayload` or a content block dictionary.
 ///
-/// Used by `InterleavedContentProcessor`, `UserInteractionTransformer`, and
-/// `UserInteractionTransformer` to resolve capability arguments consistently.
+/// Used by `InterleavedContentProcessor` to resolve capability arguments consistently.
 enum CapabilityArgumentExtractor {
 
     /// Extract arguments JSON string from a capability invocation payload or content block.

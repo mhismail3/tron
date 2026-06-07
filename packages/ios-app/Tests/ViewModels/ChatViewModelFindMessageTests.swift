@@ -57,44 +57,6 @@ final class ChatViewModelFindMessageTests: XCTestCase {
         XCTAssertEqual(found, messageId)
     }
 
-    func testFindMessageIdForCapabilityInvocationInUserInteraction() {
-        // Given: A message with userInteraction content
-        let messageId = UUID()
-        let message = ChatMessage(
-            id: messageId,
-            role: .assistant,
-            content: .userInteraction(UserInteractionInvocationData(
-                invocationId: "toolu_question",
-                params: UserInteractionParams(
-                    questions: [
-                        UserInteraction(
-                            id: "q1",
-                            question: "Pick one?",
-                            options: [
-                                UserInteractionOption(label: "A", value: nil, description: nil),
-                                UserInteractionOption(label: "B", value: nil, description: nil)
-                            ],
-                            mode: .single,
-                            allowOther: nil,
-                            otherPlaceholder: nil
-                        )
-                    ],
-                    context: nil
-                ),
-                answers: [:],
-                status: .pending,
-                result: nil
-            ))
-        )
-        viewModel.messages = [message]
-
-        // When: Finding message for capability invocation
-        let found = viewModel.findMessageId(for: .capabilityInvocation(id: "toolu_question"))
-
-        // Then: Should return the message ID
-        XCTAssertEqual(found, messageId)
-    }
-
     func testFindMessageIdForCapabilityInvocationNotFound() {
         // Given: A message without matching capability invocation ID
         let message = ChatMessage(

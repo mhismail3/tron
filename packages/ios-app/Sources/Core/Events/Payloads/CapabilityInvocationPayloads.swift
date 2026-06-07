@@ -9,9 +9,8 @@ struct CapabilityInvocationStartedPayload {
     let arguments: String  // JSON string for display
     let turn: Int
     let identity: CapabilityIdentity
-    /// Full payload dict preserved so transformers can access
-    /// server-enriched fields such as `interactionStatus` and `parsedAnswers`
-    /// from `session::reconstruct` enrichment.
+    /// Full payload dict preserved so transformers can access primitive trace
+    /// and presentation metadata.
     let rawPayload: [String: AnyCodable]
 
     init?(from payload: [String: AnyCodable]) {

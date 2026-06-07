@@ -226,11 +226,6 @@ extension UnifiedEventTransformer {
     /// - Pass 1: Collect deleted event IDs, capability invocation maps, and config state
     /// - Pass 2: Build messages while filtering deleted events
     ///
-    /// **UserInteraction Status Detection**:
-    /// Events are passed to `InterleavedContentProcessor` to enable proper
-    /// status detection (pending/answered/superseded) by examining subsequent
-    /// user messages.
-    ///
     /// - Parameters:
     ///   - events: Events conforming to EventTransformable (RawEvent or SessionEvent)
     ///   - presorted: If true, events are already in correct chain order from getAncestors

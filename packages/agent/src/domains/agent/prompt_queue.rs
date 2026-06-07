@@ -22,10 +22,9 @@ pub struct PendingQueueItem {
     pub position: u32,
     pub timestamp: String,
     /// Optional structured metadata that should travel with the prompt
-    /// through the queue. Used to preserve `messageKind` +
-    /// confirmation/answer fields when interactive capability responses are
-    /// queued while the session is busy, so iOS renders the right chip
-    /// once the queued message is eventually drained.
+    /// through the queue. Sequential drains attach it to the emitted
+    /// `message.user` event; batched drains drop it because multiple queued
+    /// prompts are merged into one message.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<Value>,
 }

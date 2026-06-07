@@ -21,10 +21,6 @@ import Foundation
 /// - `text`: Regular text response
 /// - `capability_invocation`: Provider content block for a capability invocation (combined with capability.invocation.started/completed data)
 ///
-/// ## Interactive Capability Handling
-/// `agent::ask_user` is transformed via a dedicated interaction view only when
-/// the server-enriched capability identity says the invocation is that
-/// contract.
 enum InterleavedContentProcessor {
 
     /// Transform an assistant message's content blocks into ChatMessages.
@@ -81,26 +77,6 @@ enum InterleavedContentProcessor {
                 let result = completedInvocations[invocationId]
                 let modelPrimitiveName = started?.name ?? (block["name"] as? String) ?? "Unknown"
 
-                let resolvedIdentity = [result?.identity, started?.identity]
-                    .compactMap { $0 }
-                    .first { !$0.isEmpty }
-
-                if resolvedIdentity?.isUserInteractionCapability == true {
-                    if let userInteractionMessage = UserInteractionTransformer.transform(
-                        invocationId: invocationId,
-                        invocationStart: started,
-                        contentBlock: block,
-                        timestamp: timestamp,
-                        tokenRecord: nil,
-                        model: nil,
-                        turn: parsed.turn
-                    ) {
-                        messages.append(userInteractionMessage)
-                    }
-                    continue
-                }
-
-                // Regular capability handling
                 if let message = processCapabilityInvocationBlock(
                     block,
                     invocationId: invocationId,

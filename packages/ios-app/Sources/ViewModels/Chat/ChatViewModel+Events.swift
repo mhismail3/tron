@@ -17,13 +17,6 @@ extension ChatViewModel: CompactionContext {
 extension ChatViewModel {
 
     func handleTextDelta(_ delta: String) {
-        // Skip text if UserInteraction was called in this turn
-        // (UserInteraction should be the final visible entry when called)
-        guard !userInteractionState.calledInTurn else {
-            logger.verbose("Skipping text delta - UserInteraction was called in this turn", category: .events)
-            return
-        }
-
         // Once text starts streaming, thinking is no longer active
         markThinkingMessageCompleteIfNeeded()
 
@@ -106,66 +99,6 @@ extension ChatViewModel {
             if result.identity.stableCapabilityId != "capability" {
                 invocation.identity = result.identity
             }
-            messages[index].content = .capabilityInvocation(invocation)
-        }
-    }
-
-    func handleCapabilityPauseRequested(_ result: CapabilityPauseRequestedPlugin.Result) {
-        if let index = MessageFinder.lastIndexOfUserInteraction(invocationId: result.invocationId, in: messages),
-           case .userInteraction(var data) = messages[index].content {
-            data.pauseId = result.pauseId
-            data.status = .pending
-            messages[index].content = .userInteraction(data)
-            userInteractionState.currentData = data
-            openUserInteractionSheet(for: data)
-            return
-        }
-
-        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
-            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
-
-        if case .capabilityInvocation(var invocation) = messages[index].content {
-            invocation.status = .paused
-            invocation.progressMessage = lifecycleStatusMessage(kind: result.kind, status: result.status)
-            invocation.details = mergeCapabilityDetails(
-                invocation.details,
-                [
-                    "pauseId": AnyCodable(result.pauseId),
-                    "pauseKind": AnyCodable(result.kind),
-                    "pauseStatus": AnyCodable(result.status),
-                    "answerAuthority": AnyCodable(result.answerAuthority as Any),
-                    "expiresAt": AnyCodable(result.expiresAt as Any),
-                    "promptPayload": AnyCodable(result.promptPayload as Any)
-                ]
-            )
-            if !result.identity.isEmpty { invocation.identity = result.identity }
-            messages[index].content = .capabilityInvocation(invocation)
-        }
-    }
-
-    func handleCapabilityPauseResolved(_ result: CapabilityPauseResolvedPlugin.Result) {
-        if let index = MessageFinder.lastIndexOfUserInteraction(invocationId: result.invocationId, in: messages),
-           case .userInteraction(var data) = messages[index].content {
-            data.status = result.status == "resumed" ? .answered : .superseded
-            messages[index].content = .userInteraction(data)
-            return
-        }
-
-        guard let index = messageIndex.index(forCapabilityInvocationId: result.invocationId)
-            ?? MessageFinder.lastIndexOfCapabilityInvocation(id: result.invocationId, in: messages) else { return }
-
-        if case .capabilityInvocation(var invocation) = messages[index].content {
-            invocation.status = result.status == "resumed" ? .running : .unavailable
-            invocation.progressMessage = "Pause \(result.status)"
-            invocation.details = mergeCapabilityDetails(
-                invocation.details,
-                [
-                    "pauseId": AnyCodable(result.pauseId),
-                    "pauseStatus": AnyCodable(result.status),
-                    "resolution": AnyCodable(result.resolution as Any)
-                ]
-            )
-            if !result.identity.isEmpty { invocation.identity = result.identity }
             messages[index].content = .capabilityInvocation(invocation)
         }
     }
@@ -289,19 +222,11 @@ extension ChatViewModel {
         }
         isCompacting = false
         compactionInProgressMessageId = nil
-        userInteractionState.clearAll()
         postProcessingTimeoutTask?.cancel()
         postProcessingTimeoutTask = nil
         pullUpPanelState.awaitingSuggestions = false
         // Clear queue — server context is lost, queued messages are stale
         messageQueueState.clear()
-    }
-
-    private func lifecycleStatusMessage(kind: String, status: String) -> String {
-        switch kind {
-        case "user_input": return "Waiting for your response"
-        default: return "\(kind.replacingOccurrences(of: "_", with: " ")) \(status)"
-        }
     }
 
     private func capabilityStatus(
@@ -380,7 +305,6 @@ extension ChatViewModel {
         agentPhase = .idle
         isCompacting = false
         compactionInProgressMessageId = nil
-        userInteractionState.clearAll()
         eventStoreManager?.setSessionProcessing(sessionId, isProcessing: false)
         eventStoreManager?.updateSessionDashboardInfo(
             sessionId: sessionId,

@@ -40,8 +40,6 @@ enum ChatSheet: Identifiable, Equatable {
 
     case compactionDetail(CompactionDetailData)
 
-    // Capability sheets
-    case userInteraction
     case thinkingDetail(String)
     case providerErrorDetail(ProviderErrorDetailData)
 
@@ -55,8 +53,6 @@ enum ChatSheet: Identifiable, Equatable {
             return "settings"
         case .compactionDetail:
             return "compaction"
-        case .userInteraction:
-            return "userInteraction"
         case .thinkingDetail:
             return "thinking"
         case .capabilityInvocationDetail(let data):
@@ -74,8 +70,6 @@ enum ChatSheet: Identifiable, Equatable {
             return true
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
             return data1 == data2
-        case (.userInteraction, .userInteraction):
-            return true
         case (.thinkingDetail(let content1), .thinkingDetail(let content2)):
             return content1 == content2
         case (.capabilityInvocationDetail(let data1), .capabilityInvocationDetail(let data2)):

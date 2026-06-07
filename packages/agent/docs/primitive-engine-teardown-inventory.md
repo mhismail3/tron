@@ -255,7 +255,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `SourceChanges` | delete | Source-control product UI. |
 | `Subagents` | delete | Product subagent UI. |
 | `System` | retain | Keep minimal diagnostics/connection error sheets. Delete process/worktree/provider-product detail surfaces. |
-| `UserInteraction` | successor | Approval controls are deleted. PET-11 must decide whether retained blocked-state viewing is shell infrastructure or removable product residue. |
+| `UserInteraction` | delete | PET-11 deleted the bespoke prompt/answer sheet, transformer, coordinator, state, viewer, submit-answer client method, pause plugins, and tests. Future interaction must be agent-authored generated UI/action state, not a hard-coded mid-turn prompt plane. |
 | `VoiceNotes` | delete | Product voice note UI. |
 | `Work` | delete | Worker-first dashboard. |
 
@@ -295,7 +295,8 @@ server settings shape and iOS controls together.
 ## Open Loops After PET-10
 
 - PET-11 must audit retained iOS `Attachments`, `Capabilities`, `Process`,
-  `SessionTree`, and `UserInteraction` source from first principles.
+  and `SessionTree` source from first principles. The hard-coded
+  `UserInteraction` prompt/answer plane was deleted during PET-11.
 - PET-11 decided that `session_drafts.skills_json` was stale product DTO
   residue and deleted it from fresh iOS draft storage. PET-11 must still decide
   whether `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift`
