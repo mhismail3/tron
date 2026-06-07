@@ -22,9 +22,7 @@ struct ServerSettingsTests {
             },
             "observability": {
                 "logLevel": "debug",
-                "payloadCapture": "trace",
-                "verboseRetentionDays": 3,
-                "maxInlinePayloadBytes": 4096
+                "verboseRetentionDays": 3
             },
             "storage": {
                 "retentionEnabled": false,
@@ -41,9 +39,7 @@ struct ServerSettingsTests {
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
         #expect(settings.queueDrainMode == "batched")
         #expect(settings.observabilityLogLevel == "debug")
-        #expect(settings.observabilityPayloadCapture == "trace")
         #expect(settings.observabilityVerboseRetentionDays == 3)
-        #expect(settings.observabilityMaxInlinePayloadBytes == 4096)
         #expect(settings.storageRetentionEnabled == false)
         #expect(settings.storageMaxDatabaseMb == 256)
     }
@@ -58,9 +54,7 @@ struct ServerSettingsTests {
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
         #expect(settings.queueDrainMode == "sequential")
         #expect(settings.observabilityLogLevel == "info")
-        #expect(settings.observabilityPayloadCapture == "normal")
         #expect(settings.observabilityVerboseRetentionDays == 7)
-        #expect(settings.observabilityMaxInlinePayloadBytes == 8192)
         #expect(settings.storageRetentionEnabled == true)
         #expect(settings.storageMaxDatabaseMb == 512)
     }
@@ -100,7 +94,7 @@ struct ServerSettingsTests {
         var update = ServerSettingsUpdate()
         update.server = .init(defaultModel: "claude-opus-4-6")
         update.session = .init(queueDrainMode: .batched)
-        update.observability = .init(payloadCapture: "debug")
+        update.observability = .init(logLevel: "debug")
         update.storage = .init(retentionEnabled: false)
 
         let data = try JSONEncoder().encode(update)
@@ -113,7 +107,7 @@ struct ServerSettingsTests {
         #expect(session?["queueDrainMode"] as? String == "batched")
 
         let observability = json["observability"] as? [String: Any]
-        #expect(observability?["payloadCapture"] as? String == "debug")
+        #expect(observability?["logLevel"] as? String == "debug")
 
         let storage = json["storage"] as? [String: Any]
         #expect(storage?["retentionEnabled"] as? Bool == false)

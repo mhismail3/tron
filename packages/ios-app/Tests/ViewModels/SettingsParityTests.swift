@@ -34,9 +34,7 @@ final class SettingsParityTests: XCTestCase {
         "queueDrainMode",
         // Engine diagnostics
         "observabilityLogLevel",
-        "observabilityPayloadCapture",
         "observabilityVerboseRetentionDays",
-        "observabilityMaxInlinePayloadBytes",
         "storageRetentionEnabled",
         "storageMaxDatabaseMb",
     ]

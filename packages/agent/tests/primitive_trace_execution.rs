@@ -255,3 +255,120 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
             .starts_with("sha256:")
     );
 }
+
+#[tokio::test]
+async fn execute_log_recent_exposes_bounded_session_trace_logs() {
+    let runtime = test_runtime();
+    let workspace = tempfile::tempdir().unwrap();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "openai/gpt-4o",
+            workspace.path().to_str().unwrap(),
+            Some("log proof"),
+            Some("openai"),
+        )
+        .unwrap();
+    let trace_id = TraceId::generate();
+    {
+        let conn = runtime.ctx.event_store.pool().get().unwrap();
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message, session_id, trace_id) \
+             VALUES (?1, 'info', 30, 'agent.loop', 'current session evidence', ?2, ?3)",
+            rusqlite::params![
+                "2026-06-07T16:00:00.000Z",
+                created.session.id.as_str(),
+                trace_id.as_str()
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message, trace_id) \
+             VALUES (?1, 'warn', 40, 'agent.loop', 'global trace evidence', ?2)",
+            rusqlite::params!["2026-06-07T16:00:01.000Z", trace_id.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, level_num, component, message, session_id, trace_id) \
+             VALUES (?1, 'error', 50, 'agent.loop', 'other session evidence', 'sess_other', ?2)",
+            rusqlite::params!["2026-06-07T16:00:02.000Z", trace_id.as_str()],
+        )
+        .unwrap();
+    }
+
+    let logs_value = invoke_execute(
+        &runtime.ctx,
+        json!({
+            "operation": "log_recent",
+            "traceId": trace_id.as_str(),
+            "limit": 10
+        }),
+        causal_context(
+            trace_id.clone(),
+            &created.session.id,
+            &created.session.workspace_id,
+            workspace.path(),
+            "provider-call-logs-1",
+            "trace-logs-1",
+        ),
+    )
+    .await;
+    let logs_result: CapabilityResult = serde_json::from_value(logs_value).unwrap();
+    assert_eq!(
+        logs_result.details.as_ref().unwrap()["primitiveOperation"],
+        "log_recent"
+    );
+    let entries = logs_result.details.as_ref().unwrap()["entries"]
+        .as_array()
+        .expect("log entries array");
+    assert_eq!(entries.len(), 2);
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["message"] == "current session evidence")
+    );
+    assert!(
+        entries
+            .iter()
+            .any(|entry| entry["message"] == "global trace evidence")
+    );
+    assert!(
+        !entries
+            .iter()
+            .any(|entry| entry["message"] == "other session evidence")
+    );
+
+    let global_only_value = invoke_execute(
+        &runtime.ctx,
+        json!({
+            "operation": "log_recent",
+            "traceId": trace_id.as_str(),
+            "limit": 10
+        }),
+        CausalContext::new(
+            ActorId::new("agent:sessionless").unwrap(),
+            ActorKind::Agent,
+            AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+            trace_id,
+        )
+        .with_scope("capability.execute")
+        .with_runtime_metadata(
+            RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+            "provider-call-logs-2",
+        )
+        .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
+        .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, "run_trace_test")
+        .with_runtime_metadata(RUNTIME_METADATA_TURN, "1"),
+    )
+    .await;
+    let global_only_result: CapabilityResult = serde_json::from_value(global_only_value).unwrap();
+    let global_only_entries = global_only_result.details.as_ref().unwrap()["entries"]
+        .as_array()
+        .expect("global-only log entries array");
+    assert_eq!(global_only_entries.len(), 1);
+    assert_eq!(
+        global_only_entries[0]["message"], "global trace evidence",
+        "sessionless log_recent calls must not broaden to other sessions"
+    );
+}

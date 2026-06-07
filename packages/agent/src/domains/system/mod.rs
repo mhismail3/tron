@@ -8,8 +8,6 @@ pub(crate) mod deps;
 pub(crate) mod handlers;
 pub(crate) use deps::Deps;
 
-use std::collections::BTreeMap;
-
 use crate::domains::worker::DomainRegistrationContext;
 use crate::domains::worker::DomainWorkerModule;
 use crate::shared::server::errors::CLIENT_VERSION_UNSUPPORTED;
@@ -42,60 +40,6 @@ async fn system_shutdown_value(deps: &Deps) -> Result<Value, CapabilityError> {
             message: error.to_string(),
         })?;
     Ok(json!({ "acknowledged": true }))
-}
-
-fn system_diagnostics_value(deps: &Deps) -> Result<Value, CapabilityError> {
-    let uptime = deps.server_start_time.elapsed().as_secs();
-    let active_sessions = deps.orchestrator.active_session_count();
-    let active_runs = deps.orchestrator.active_run_count();
-    let transport_messages = ["discover", "inspect", "watch", "invoke", "promote"]
-        .into_iter()
-        .map(ToOwned::to_owned)
-        .collect::<Vec<_>>();
-    let total_messages = transport_messages.len();
-    let mut by_group: BTreeMap<String, usize> = BTreeMap::new();
-    for method in &transport_messages {
-        let prefix = method.split('.').next().unwrap_or(method).to_owned();
-        *by_group.entry(prefix).or_insert(0) += 1;
-    }
-    let canonical_functions = super::catalog::canonical_capability_specs()
-        .map(|specs| specs.len())
-        .unwrap_or_default();
-    let domain_workers = super::catalog::canonical_capability_specs()
-        .map(|specs| {
-            specs
-                .into_iter()
-                .map(|spec| spec.owner_worker.as_str().to_owned())
-                .collect::<std::collections::BTreeSet<_>>()
-                .len()
-        })
-        .unwrap_or_default();
-    Ok(json!({
-        "server": {
-            "version": env!("CARGO_PKG_VERSION"),
-            "protocolVersion": engine_transport_protocol::CURRENT_PROTOCOL_VERSION,
-            "minClientProtocolVersion": engine_transport_protocol::MIN_CLIENT_PROTOCOL_VERSION,
-            "platform": std::env::consts::OS,
-            "arch": std::env::consts::ARCH,
-            "pid": std::process::id(),
-            "uptimeSeconds": uptime,
-            "origin": deps.origin.clone(),
-        },
-        "sessions": {
-            "active": active_sessions,
-            "activeRuns": active_runs,
-        },
-        "engine": {
-            "canonicalFunctions": canonical_functions,
-            "workers": domain_workers,
-        },
-        "transport": {
-            "totalMessages": total_messages,
-            "messagesByGroup": by_group,
-            "messages": transport_messages,
-        },
-        "timestamp": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    }))
 }
 
 fn ping_value(params: Option<&Value>) -> Result<Value, CapabilityError> {

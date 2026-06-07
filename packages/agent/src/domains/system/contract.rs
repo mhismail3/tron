@@ -22,10 +22,6 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .request_schema(json!({"additionalProperties":false,"properties":{"__capabilityContext":{"additionalProperties":false,"properties":{"onboardedMarkerPath":{"type":"string"}},"type":"object"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"activeSessions":{"type":"integer"},"arch":{"type":"string"},"paired":{"type":"boolean"},"platform":{"type":"string"},"port":{"type":"integer"},"runtime":{"type":"string"},"tailscaleIp":{"type":["string","null"]},"uptime":{"type":"integer"},"version":{"type":"string"}},"required":["version","uptime","activeSessions","platform","arch","runtime","port","tailscaleIp","paired"],"type":"object"}))
             .build()?,
-        CapabilityContract::new("system::get_diagnostics", "system", EffectClass::PureRead, RiskLevel::Low, Some("system.read"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
-            .build()?,
         CapabilityContract::new("system::shutdown", "system", EffectClass::IrreversibleSideEffect, RiskLevel::Critical, Some("system.write"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"acknowledged":{"type":"boolean"}},"required":["acknowledged"],"type":"object"}))

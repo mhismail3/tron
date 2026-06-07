@@ -48,9 +48,7 @@ ort = "error"
 
 [settings.observability]
 logLevel = "info"
-payloadCapture = "normal"
 verboseRetentionDays = 7
-maxInlinePayloadBytes = 8192
 
 [settings.storage]
 retentionEnabled = true

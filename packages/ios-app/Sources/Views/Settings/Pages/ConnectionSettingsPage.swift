@@ -63,7 +63,7 @@ struct ConnectionSettingsPage: View {
     @ViewBuilder
     private var serverBackedContent: some View {
         if settingsState.isLoaded && !activeServerUnavailable {
-            loadedServerBackedSettingsSections
+            runtimeEvidenceSection
         } else if let status = serverControlsStatus {
             serverBackedSettingsStatusSection(status)
         }
@@ -270,20 +270,6 @@ struct ConnectionSettingsPage: View {
         }
     }
 
-    private var loadedServerBackedSettingsSections: some View {
-        ForEach(ConnectionSettingsServerBackedSection.loadedOrder, id: \.self) { section in
-            serverBackedSection(section)
-        }
-    }
-
-    @ViewBuilder
-    private func serverBackedSection(_ section: ConnectionSettingsServerBackedSection) -> some View {
-        switch section {
-        case .diagnostics:
-            diagnosticsSection
-        }
-    }
-
     private func serverBackedSettingsStatusSection(_ status: ConnectionSettingsServerControlsStatus) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Server Controls")
@@ -311,9 +297,9 @@ struct ConnectionSettingsPage: View {
         }
     }
 
-    private var diagnosticsSection: some View {
+    private var runtimeEvidenceSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: ConnectionSettingsServerBackedSection.diagnostics.title)
+            SettingsSectionHeader(title: "Runtime Evidence")
 
             SettingsCard {
                 SettingsRow(icon: "waveform.path.ecg", label: "Log level") {
@@ -336,24 +322,6 @@ struct ConnectionSettingsPage: View {
                     }
                 }
                 SettingsRowDivider()
-                SettingsRow(icon: "doc.zipper", label: "Payloads") {
-                    SettingsCycleToggle(
-                        options: [
-                            ("normal", "Normal"),
-                            ("debug", "Debug"),
-                            ("trace", "Trace"),
-                        ],
-                        current: settingsState.observabilityPayloadCapture
-                    ) { newValue in
-                        settingsState.observabilityPayloadCapture = newValue
-                        updateServerSetting {
-                            var update = ServerSettingsUpdate()
-                            update.observability = .init(payloadCapture: newValue)
-                            return update
-                        }
-                    }
-                }
-                SettingsRowDivider()
                 SettingsRow(icon: "calendar", label: "Verbose days") {
                     Stepper(value: Binding(
                         get: { Int(settingsState.observabilityVerboseRetentionDays) },
@@ -368,25 +336,6 @@ struct ConnectionSettingsPage: View {
                         }
                     ), in: 1...90) {
                         Text("\(settingsState.observabilityVerboseRetentionDays)d")
-                            .font(TronTypography.codeSM)
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-                }
-                SettingsRowDivider()
-                SettingsRow(icon: "text.badge.checkmark", label: "Inline bytes") {
-                    Stepper(value: Binding(
-                        get: { Int(settingsState.observabilityMaxInlinePayloadBytes) },
-                        set: { newValue in
-                            let clamped = UInt64(min(max(newValue, 1024), 65_536))
-                            settingsState.observabilityMaxInlinePayloadBytes = clamped
-                            updateServerSetting {
-                                var update = ServerSettingsUpdate()
-                                update.observability = .init(maxInlinePayloadBytes: clamped)
-                                return update
-                            }
-                        }
-                    ), in: 1024...65_536, step: 1024) {
-                        Text("\(settingsState.observabilityMaxInlinePayloadBytes / 1024) KB")
                             .font(TronTypography.codeSM)
                             .foregroundStyle(.tronTextSecondary)
                     }
@@ -431,7 +380,7 @@ struct ConnectionSettingsPage: View {
                 }
             }
 
-            SettingsCaption(text: "The server owns trace detail, payload capture, retention, compression, and storage cleanup. iOS only requests the policy.")
+            SettingsCaption(text: "The server owns trace records, retained logs, compression, and storage cleanup. iOS only requests the policy.")
         }
     }
 

@@ -74,7 +74,7 @@ proof before closeout.
 | `git` | delete | Source-control product capability. |
 | `import` | delete | Product import workflow. |
 | `job` | delete | Product job capability wrapper. Engine queue infrastructure remains. |
-| `logs` | retain | Keep compact diagnostics ingestion/query surfaces required for observability evidence. Trim product dashboards and upload policy. |
+| `logs` | retain | Keep compact retained-log storage/ingest as observability evidence and expose bounded reads only through `execute.log_recent`. Delete fixed diagnostics APIs, upload policy, and generic query abstractions not needed by the loop. |
 | `mcp` | delete | Product protocol and external tool catalog plane. |
 | `memory` | delete | Replace hard-coded memory retain/auto-retain with agent-owned state workspace. |
 | `message` | retain | Keep message/session truth needed for the chat loop. |
@@ -114,7 +114,7 @@ PET-3/PET-5/PET-7 must collapse them to loop infrastructure.
 | `catalog` | retain | Keep internal registry mechanics only if needed by host dispatch; do not expose model-facing catalog discovery. |
 | `control` | delete | Product operator dashboard/control snapshot. |
 | `worker` | successor | Retain only if PET-7 reduces it to generic helper connection/disconnection substrate. |
-| `observability` | retain | Invocation, trace, and diagnostics evidence for proof and debugging. |
+| `observability` | retain | Invocation records, Agent Trace-style records, retained logs, and failure evidence for proof and debugging. |
 | `storage` | retain | SQLite stats/checkpoint/snapshot infrastructure. Delete product storage controls. |
 | `ui` | successor | Keep or replace only as a tiny generic dynamic-surface resource renderer. Delete fixed generated UI targets tied to product domains. |
 | `module` | delete | Worker-pack package/config/activation/trust/conformance lifecycle is product-coded. |
@@ -226,7 +226,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `Models` | retain | Keep EngineProtocol, Messages, Tokens. Delete Dashboard, Features, product DTOs. |
 | `Protocols` | retain | Keep only shell/service protocols. |
 | `Resources` | retain | Keep required fonts/resources only. |
-| `Services` | retain | Keep Network, Storage, Settings, Events, Observability, Onboarding, local diagnostics, and paired-server bootstrap. Audio/transcription, plugin-source, APNs, notification-store, and push-relay clients are deleted. |
+| `Services` | retain | Keep Network, Storage, Settings, Events, Observability, Onboarding, and paired-server bootstrap. Audio/transcription, plugin-source, APNs, notification-store, push-relay clients, and fixed diagnostics RPCs are deleted. |
 | `Theme` | retain | Keep minimal accessible styling. |
 | `Utilities` | retain | Keep only generic shell utilities. |
 | `ViewModels` | retain | Keep chat/session/settings state. Delete fixed product handlers and projections. |
@@ -256,7 +256,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `Skills` | delete | Skill management UI. |
 | `SourceChanges` | delete | Source-control product UI. |
 | `Subagents` | delete | Product subagent UI. |
-| `System` | retain | Keep minimal diagnostics/connection error sheets. Delete process/worktree/provider-product detail surfaces. |
+| `System` | retain | Keep minimal connection/error sheets. Fixed diagnostics DTOs and RPCs are deleted; runtime evidence comes from trace records, retained logs, and generic capability evidence. |
 | `UserInteraction` | delete | PET-11 deleted the bespoke prompt/answer sheet, transformer, coordinator, state, viewer, submit-answer client method, pause plugins, and tests. Future interaction must be agent-authored generated UI/action state, not a hard-coded mid-turn prompt plane. |
 | `VoiceNotes` | delete | Product voice note UI. |
 | `Work` | delete | Worker-first dashboard. |
@@ -275,7 +275,7 @@ server settings shape and iOS controls together.
 | `guardrails.rs` | delete | Product guardrail rules/audit settings. |
 | `memory.rs` | delete | Auto-retain memory settings. Agent-owned state replaces it. |
 | `prompt_library.rs` | delete | Prompt-history/snippet settings. |
-| `server.rs` | retain | Provider/default model/default workspace/Tailscale bootstrap only; transcription and product update bootstrap are deleted. |
+| `server.rs` | retain | Provider/default model/default workspace/Tailscale/bootstrap and retained-log policy only. Transcription, product update bootstrap, payload capture level, and inline payload byte settings are deleted. |
 | `skills.rs` | delete | Skill discovery/injection settings. |
 | `ui.rs` | retain | Keep appearance/accessibility basics only. Delete product dashboard settings. |
 | `update.rs` | delete | PET-11 deleted the user-mode updater settings enums/schema. Product update checks are not needed before the first model call and are not primitive loop infrastructure. |
@@ -308,10 +308,11 @@ server settings shape and iOS controls together.
   `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift` after
   proving they were unreferenced product DTO residue.
 - PET-11 collapsed the former `capability_support` row into agent-runner
-  `primitive_surface` and deleted the product update-check surface from server,
-  iOS, Mac, scripts, docs, and bundled default settings. PET-11 must still
-  re-audit local diagnostics/logging surfaces and dynamic-surface rendering for
-  hidden product policy.
+  `primitive_surface`, deleted the product update-check surface from server,
+  iOS, Mac, scripts, docs, and bundled default settings, and flattened
+  diagnostics/logging to retained-log storage plus `execute.log_recent`.
+  PET-11 must still re-audit dynamic-surface rendering for hidden product
+  policy.
 - PET-11 may close only after a fresh end-to-end loop proof and after no
   retained/successor row can be deleted without breaking
   boot/provider/session/execute/state/trace/client-shell primitives.

@@ -16,9 +16,7 @@ struct ServerSettings: Decodable {
     let queueDrainMode: String
 
     let observabilityLogLevel: String
-    let observabilityPayloadCapture: String
     let observabilityVerboseRetentionDays: UInt64
-    let observabilityMaxInlinePayloadBytes: UInt64
     let storageRetentionEnabled: Bool
     let storageMaxDatabaseMb: UInt64
 
@@ -39,7 +37,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum ObservabilityKeys: String, CodingKey {
-        case logLevel, payloadCapture, verboseRetentionDays, maxInlinePayloadBytes
+        case logLevel, verboseRetentionDays
     }
 
     private enum StorageKeys: String, CodingKey {
@@ -73,14 +71,10 @@ struct ServerSettings: Decodable {
 
         if let observabilityContainer = try? container.nestedContainer(keyedBy: ObservabilityKeys.self, forKey: .observability) {
             observabilityLogLevel = (try? observabilityContainer.decodeIfPresent(String.self, forKey: .logLevel)) ?? "info"
-            observabilityPayloadCapture = (try? observabilityContainer.decodeIfPresent(String.self, forKey: .payloadCapture)) ?? "normal"
             observabilityVerboseRetentionDays = (try? observabilityContainer.decodeIfPresent(UInt64.self, forKey: .verboseRetentionDays)) ?? 7
-            observabilityMaxInlinePayloadBytes = (try? observabilityContainer.decodeIfPresent(UInt64.self, forKey: .maxInlinePayloadBytes)) ?? 8192
         } else {
             observabilityLogLevel = "info"
-            observabilityPayloadCapture = "normal"
             observabilityVerboseRetentionDays = 7
-            observabilityMaxInlinePayloadBytes = 8192
         }
 
         if let storageContainer = try? container.nestedContainer(keyedBy: StorageKeys.self, forKey: .storage) {
@@ -154,9 +148,7 @@ struct ServerSettingsUpdate: Encodable {
 
     struct ObservabilityUpdate: Encodable {
         var logLevel: String?
-        var payloadCapture: String?
         var verboseRetentionDays: UInt64?
-        var maxInlinePayloadBytes: UInt64?
     }
 
     struct StorageUpdate: Encodable {

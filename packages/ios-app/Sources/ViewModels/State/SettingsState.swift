@@ -20,9 +20,7 @@ final class SettingsState {
     // MARK: - Observability And Storage
 
     var observabilityLogLevel: String = "info"
-    var observabilityPayloadCapture: String = "normal"
     var observabilityVerboseRetentionDays: UInt64 = 7
-    var observabilityMaxInlinePayloadBytes: UInt64 = 8192
     var storageRetentionEnabled: Bool = true
     var storageMaxDatabaseMb: UInt64 = 512
 
@@ -138,9 +136,7 @@ final class SettingsState {
         queueDrainMode = settings.queueDrainMode
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
         observabilityLogLevel = settings.observabilityLogLevel
-        observabilityPayloadCapture = settings.observabilityPayloadCapture
         observabilityVerboseRetentionDays = settings.observabilityVerboseRetentionDays
-        observabilityMaxInlinePayloadBytes = settings.observabilityMaxInlinePayloadBytes
         storageRetentionEnabled = settings.storageRetentionEnabled
         storageMaxDatabaseMb = settings.storageMaxDatabaseMb
 

@@ -138,14 +138,14 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         )
         let landscapeContent = content[landscapeStart..<content.endIndex]
         let pairedIndex = try XCTUnwrap(landscapeContent.range(of: "pairedServersSection")?.lowerBound)
-        let diagnosticsIndex = try XCTUnwrap(
-            landscapeContent.range(of: "diagnosticsSection", range: pairedIndex..<landscapeContent.endIndex)?.lowerBound
+        let evidenceIndex = try XCTUnwrap(
+            landscapeContent.range(of: "runtimeEvidenceSection", range: pairedIndex..<landscapeContent.endIndex)?.lowerBound
         )
 
-        XCTAssertLessThan(pairedIndex, diagnosticsIndex)
+        XCTAssertLessThan(pairedIndex, evidenceIndex)
         XCTAssertTrue(
             landscapeContent.contains("serverBackedContent"),
-            "Server landscape should render the retained server-backed diagnostics content in the right column"
+            "Server landscape should render the retained server-backed runtime evidence content in the right column"
         )
         XCTAssertFalse(
             landscapeContent.contains("updates" + "Section"),

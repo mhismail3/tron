@@ -80,19 +80,4 @@ final class MiscClient: EngineDomainClient {
         return result
     }
 
-    // MARK: - Diagnostics (debug / beta only)
-
-    #if DEBUG || BETA
-    /// Fetch a structured snapshot of server identity, session counts,
-    /// and the full engine protocol method surface. Debug-only — the production
-    /// binary has no UI that consumes it.
-    func getDiagnostics() async throws -> SystemDiagnosticsResult {
-        _ = try requireTransport().requireConnection()
-
-        return try await invokeRead(
-            "system::get_diagnostics",
-            EmptyParams()
-        )
-    }
-    #endif
 }

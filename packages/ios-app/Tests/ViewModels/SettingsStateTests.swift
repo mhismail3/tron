@@ -18,9 +18,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertFalse(state.isLoadingModels)
         XCTAssertNil(state.loadError)
         XCTAssertEqual(state.observabilityLogLevel, "info")
-        XCTAssertEqual(state.observabilityPayloadCapture, "normal")
         XCTAssertEqual(state.observabilityVerboseRetentionDays, 7)
-        XCTAssertEqual(state.observabilityMaxInlinePayloadBytes, 8192)
         XCTAssertTrue(state.storageRetentionEnabled)
         XCTAssertEqual(state.storageMaxDatabaseMb, 512)
     }
@@ -47,9 +45,7 @@ final class SettingsStateTests: XCTestCase {
         {
           "observability": {
             "logLevel": "debug",
-            "payloadCapture": "trace",
-            "verboseRetentionDays": 3,
-            "maxInlinePayloadBytes": 4096
+            "verboseRetentionDays": 3
           },
           "storage": {
             "retentionEnabled": false,
@@ -61,9 +57,7 @@ final class SettingsStateTests: XCTestCase {
         state.applyServerSettings(settings)
 
         XCTAssertEqual(state.observabilityLogLevel, "debug")
-        XCTAssertEqual(state.observabilityPayloadCapture, "trace")
         XCTAssertEqual(state.observabilityVerboseRetentionDays, 3)
-        XCTAssertEqual(state.observabilityMaxInlinePayloadBytes, 4096)
         XCTAssertFalse(state.storageRetentionEnabled)
         XCTAssertEqual(state.storageMaxDatabaseMb, 256)
     }

@@ -65,7 +65,7 @@ enum ServerSettingsCategory: CaseIterable, Hashable, Sendable {
     var subtitle: String {
         switch self {
         case .server:
-            return "Paired servers and diagnostics"
+            return "Paired servers and evidence"
         case .providers:
             return "Login with OAuth and configure API keys"
         case .agent:
@@ -166,7 +166,7 @@ enum MainSettingsGridDestination: Hashable, Sendable {
     var description: String {
         switch self {
         case .server:
-            return "Paired servers and diagnostics"
+            return "Paired servers and evidence"
         case .app:
             return "Appearance, notifications, local behavior"
         case .providers:
@@ -406,21 +406,6 @@ enum ServerOnboardingLauncher {
     }
 }
 
-enum ConnectionSettingsServerBackedSection: CaseIterable, Hashable, Sendable {
-    case diagnostics
-
-    static let loadedOrder: [Self] = [
-        .diagnostics,
-    ]
-
-    var title: String {
-        switch self {
-        case .diagnostics:
-            return "Engine Diagnostics"
-        }
-    }
-}
-
 struct ConnectionSettingsServerControlsStatus: Equatable, Sendable {
     let title: String
     let description: String
@@ -482,7 +467,7 @@ enum ServerSettingsSummary {
 
     static func description(for context: Context) -> String {
         guard context.pairedServerCount > 0 else {
-            return "Pair a Mac to manage server-backed diagnostics from this iPhone."
+            return "Pair a Mac to manage runtime evidence from this iPhone."
         }
 
         guard let label = cleaned(context.activeServerLabel), !label.isEmpty else {
@@ -499,10 +484,10 @@ enum ServerSettingsSummary {
             if let error = cleaned(context.loadError), !error.isEmpty {
                 return "\(label) is paired, but settings are unavailable: \(error)"
             }
-            return "\(label) is connected. Loading diagnostics settings."
+            return "\(label) is connected. Loading runtime evidence settings."
         }
 
-        return "\(label) is connected. Diagnostics settings are available."
+        return "\(label) is connected. Runtime evidence settings are available."
     }
 
     private static func cleaned(_ value: String?) -> String? {

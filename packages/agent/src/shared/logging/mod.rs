@@ -2,8 +2,6 @@
 //!
 //! This module provides:
 //! - [`LogLevel`] enum with numeric values matching the TypeScript logging system
-//! - [`LogEntry`] for reading stored logs from `SQLite`
-//! - [`LogStore`] for querying persisted logs with filters and full-text search
 //! - [`init_subscriber`] for setting up the `tracing` subscriber
 //!
 //! # Architecture
@@ -17,15 +15,13 @@
 //!
 //! [`Layer`]: tracing_subscriber::Layer
 
-pub mod store;
 pub mod test_utils;
 pub mod transport;
 pub mod types;
 
-pub use store::LogStore;
 pub use test_utils::{CapturedLogs, capture_logs};
 pub use transport::{SqliteTransport, TransportConfig, TransportHandle};
-pub use types::{LogEntry, LogLevel, LogQueryOptions, SortOrder};
+pub use types::LogLevel;
 
 /// Initialize the global tracing subscriber with stderr output only.
 ///

@@ -13,14 +13,6 @@ struct ServerSettingsPageTests {
         #expect(SettingsLabels.loadingServerSettingsDescription == "Loading server settings from the active server.")
     }
 
-    @Test("server-backed settings show diagnostics")
-    func serverBackedSettingsOrder() {
-        #expect(ConnectionSettingsServerBackedSection.loadedOrder == [
-            .diagnostics,
-        ])
-        #expect(ConnectionSettingsServerBackedSection.diagnostics.title == "Engine Diagnostics")
-    }
-
     @Test("paired server menu uses server-specific actions")
     func pairedServerMenuUsesServerSpecificActions() {
         #expect(PairedServerMenuAction.allCases.map(\.title) == [
@@ -105,7 +97,7 @@ struct ServerSettingsPageTests {
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Connect a Mac")
-        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to manage server-backed diagnostics from this iPhone.")
+        #expect(ServerSettingsSummary.description(for: context) == "Pair a Mac to manage runtime evidence from this iPhone.")
     }
 
     @Test("server summary explains unavailable active server settings")
@@ -133,7 +125,7 @@ struct ServerSettingsPageTests {
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Loading diagnostics settings.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Loading runtime evidence settings.")
     }
 
     @Test("server summary warns when active server cannot be reached")
@@ -200,7 +192,7 @@ struct ServerSettingsPageTests {
         #expect(status.icon == "hourglass")
     }
 
-    @Test("server summary reflects loaded diagnostics settings")
+    @Test("server summary reflects loaded runtime evidence settings")
     func serverSummaryReflectsLoadedSettings() {
         let context = ServerSettingsSummary.Context(
             activeServerLabel: "Test Server",
@@ -211,7 +203,7 @@ struct ServerSettingsPageTests {
         )
 
         #expect(ServerSettingsSummary.title(for: context) == "Manage Test Server")
-        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Diagnostics settings are available.")
+        #expect(ServerSettingsSummary.description(for: context) == "Test Server is connected. Runtime evidence settings are available.")
     }
 
     @Test("active unreachable row overrides stale connected status")
@@ -262,8 +254,4 @@ struct ServerSettingsPageTests {
         ])
     }
 
-    @Test("loaded server settings keep only diagnostics")
-    func loadedServerSettingsKeepOnlyDiagnostics() {
-        #expect(ConnectionSettingsServerBackedSection.loadedOrder == [.diagnostics])
-    }
 }

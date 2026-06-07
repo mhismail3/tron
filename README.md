@@ -367,6 +367,7 @@ Current primitive operations:
 | `process_run` | Run a bounded local shell command with timeout and output limits. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
+| `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
 
 Startup registration currently keeps only loop infrastructure domains: `system`,
 `capability`, `blob`, `message`, `settings`, `auth`, `agent`, `logs`, `session`,
@@ -471,8 +472,10 @@ infrastructure rather than a checked-in product lifecycle.
 Engine substrate primitives still provide host infrastructure behind the loop:
 state, streams, queues, triggers, grants, generic resources, storage operations,
 and bounded internal projections. They are not exported as model tools. The
-agent-visible trace path is `execute` with `trace_list` and `trace_get`; those
-operations read durable `trace_records` emitted around every `execute` call.
+agent-visible evidence path is `execute` with `trace_list`, `trace_get`, and
+`log_recent`; trace operations read durable `trace_records` emitted around every
+`execute` call, while `log_recent` reads bounded retained logs through the same
+single tool.
 Each trace record carries the causal trace id, invocation id, provider tool-call
 id, session/workspace, turn, model id/provider, authority envelope, VCS revision
 when available, result/error hashes, and file attribution with content hashes.
@@ -610,9 +613,7 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
 
   "observability": {
     "logLevel": "info",                         // "trace" | "debug" | "info" | "warn" | "error"
-    "payloadCapture": "normal",                 // "normal" | "debug" | "trace"; full payloads use blob refs
-    "verboseRetentionDays": 7,                  // Short retention window for verbose diagnostics
-    "maxInlinePayloadBytes": 8192               // Larger payloads store a preview + blob ref
+    "verboseRetentionDays": 7                   // Short retention window for verbose diagnostics
   },
 
   "storage": {
@@ -749,11 +750,12 @@ Retained session rows, event rows, Agent Trace-style records, bounded
 server/iOS logs, and compressed content-addressed blobs share that same SQLite
 file. Large correctness and audit payloads flow through blob refs where the
 owning row needs them; compact rows keep human/agent-readable JSON inline. The
-model-visible trace read path is `capability::execute` with `trace_list` and
-`trace_get`, backed by `trace_records`. Every `execute` call inserts a running
-record before the effect runs and updates that same record with status,
-duration, result/error hashes, authority, provider/model metadata, VCS revision
-when available, and file attribution/content hashes after completion.
+model-visible evidence read path is `capability::execute` with `trace_list`,
+`trace_get`, and `log_recent`. Trace reads are backed by `trace_records`; every
+`execute` call inserts a running record before the effect runs and updates that
+same record with status, duration, result/error hashes, authority,
+provider/model metadata, VCS revision when available, and file
+attribution/content hashes after completion.
 
 ### Tables
 

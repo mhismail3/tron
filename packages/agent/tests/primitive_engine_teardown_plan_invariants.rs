@@ -999,7 +999,8 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
     for required in [
         "trace_list",
         "trace_get",
-        "inspect agent trace records",
+        "log_recent",
+        "inspect agent trace/log records",
         "\"traceRecordId\"",
         "\"traceId\"",
     ] {
@@ -1016,6 +1017,7 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         "execute_operation(&operation",
         "\"trace_list\" => trace_list",
         "\"trace_get\" => trace_get",
+        "\"log_recent\" => log_recent",
         "AgentTraceListOptions",
         "AGENT_TRACE_VERSION",
         "TRON_TRACE_METADATA_KEY",
@@ -1027,6 +1029,7 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         "\"content_hash\"",
         "\"model_id\"",
         "git_vcs",
+        "execute::log_recent",
     ] {
         assert!(
             operations.contains(required),
@@ -1084,8 +1087,10 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
     let integration_test = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
     for required in [
         "execute_file_write_records_agent_trace_and_trace_list_exposes_it",
+        "execute_log_recent_exposes_bounded_session_trace_logs",
         "\"operation\": \"trace_list\"",
         "\"operation\": \"trace_get\"",
+        "\"operation\": \"log_recent\"",
         "\"provider-call-write-1\"",
         "\"provider-call-get-1\"",
         "\"openai/gpt-4o\"",
@@ -1790,6 +1795,110 @@ fn retained_event_payload_surface_is_loop_owned() {
             "is_server_type",
         ],
         "generated event type surface",
+    );
+}
+
+#[test]
+fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
+    assert_repo_path_absent(
+        "packages/agent/src/shared/logging/store.rs",
+        "unused generic log query abstraction",
+    );
+
+    let logging_mod = read_repo_file("packages/agent/src/shared/logging/mod.rs");
+    let logging_types = read_repo_file("packages/agent/src/shared/logging/types.rs");
+    for (source, label) in [
+        (logging_mod.as_str(), "shared logging module"),
+        (logging_types.as_str(), "shared logging types"),
+    ] {
+        assert_absent(
+            source,
+            &["LogStore", "LogEntry", "LogQueryOptions", "SortOrder"],
+            label,
+        );
+    }
+
+    let system_surface = [
+        read_repo_file("packages/agent/src/domains/system/mod.rs"),
+        read_repo_file("packages/agent/src/domains/system/contract.rs"),
+        read_repo_file("packages/agent/src/domains/system/handlers.rs"),
+    ]
+    .join("\n");
+    assert_absent(
+        &system_surface,
+        &[
+            "system::get_diagnostics",
+            "get_diagnostics",
+            "system_diagnostics_value",
+        ],
+        "system debug diagnostics surface",
+    );
+
+    let settings_surface = [
+        read_repo_file("packages/agent/src/domains/settings/implementation/types/server.rs"),
+        read_repo_file("packages/agent/defaults/profiles/default/profile.toml"),
+        read_repo_file(
+            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Settings.swift",
+        ),
+        read_repo_file("packages/ios-app/Sources/ViewModels/State/SettingsState.swift"),
+        read_repo_file(
+            "packages/ios-app/Sources/Views/Settings/Pages/ConnectionSettingsPage.swift",
+        ),
+        read_repo_file("README.md"),
+    ]
+    .join("\n");
+    assert_absent(
+        &settings_surface,
+        &[
+            "payloadCapture",
+            "maxInlinePayloadBytes",
+            "PayloadCapture",
+            "observabilityPayloadCapture",
+            "observabilityMaxInlinePayloadBytes",
+            "Inline bytes",
+        ],
+        "retained observability settings surface",
+    );
+
+    let execute_contract = read_repo_file("packages/agent/src/domains/capability/contract.rs");
+    let execute_ops = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    let trace_proof = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
+    for (source, label) in [
+        (execute_contract.as_str(), "execute contract"),
+        (execute_ops.as_str(), "execute operations"),
+        (trace_proof.as_str(), "primitive trace/log proof"),
+    ] {
+        assert!(
+            source.contains("log_recent"),
+            "{label} must expose log evidence through the single execute primitive"
+        );
+    }
+
+    let ios_surface = [
+        read_repo_file("packages/ios-app/Sources/Services/Network/Clients/MiscClient.swift"),
+        read_repo_file(
+            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+System.swift",
+        ),
+        read_repo_file("packages/ios-app/Sources/Views/Settings/SettingsSupport.swift"),
+        read_repo_file(
+            "packages/ios-app/Sources/Views/Settings/Pages/ConnectionSettingsPage.swift",
+        ),
+    ]
+    .join("\n");
+    assert_absent(
+        &ios_surface,
+        &[
+            "SystemDiagnosticsResult",
+            "getDiagnostics",
+            "system::get_diagnostics",
+            "ConnectionSettingsServerBackedSection",
+            "diagnosticsSection",
+        ],
+        "retained iOS diagnostics settings surface",
+    );
+    assert!(
+        ios_surface.contains("runtimeEvidenceSection"),
+        "iOS settings should render the one retained evidence section directly"
     );
 }
 

@@ -12,7 +12,6 @@ use std::time::Instant;
 pub(crate) struct Deps {
     pub(super) onboarded_marker_path: PathBuf,
     pub(super) orchestrator: Arc<Orchestrator>,
-    pub(super) origin: String,
     pub(super) profile_runtime: Arc<ProfileRuntime>,
     pub(super) server_start_time: Instant,
     pub(super) ws_port: Arc<AtomicU16>,
@@ -23,7 +22,6 @@ impl Deps {
         Self {
             onboarded_marker_path: deps.onboarded_marker_path.clone(),
             orchestrator: deps.orchestrator.clone(),
-            origin: deps.origin.clone(),
             profile_runtime: deps.profile_runtime.clone(),
             server_start_time: deps.server_start_time,
             ws_port: deps.ws_port.clone(),

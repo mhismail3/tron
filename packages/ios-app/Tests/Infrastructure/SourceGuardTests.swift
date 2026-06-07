@@ -1038,10 +1038,12 @@ struct SourceGuardTests {
         #expect(app.contains("container.clientLogIngestionService.handleConnectionChange"))
         #expect(app.contains("container.clientLogIngestionService.handleScenePhaseChange"))
         #expect(miscClient.contains("func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult"))
+        #expect(!miscClient.contains("getDiagnostics"))
+        #expect(!miscClient.contains("system::get_diagnostics"))
+        #expect(!miscClient.contains("SystemDiagnosticsResult"))
 
         let ingestStart = try #require(miscClient.range(of: "func ingestLogs(entries: [ClientLogEntry]"))
-        let diagnosticsStart = try #require(miscClient.range(of: "// MARK: - Diagnostics (debug / beta only)"))
-        let ingestBlock = miscClient[ingestStart.lowerBound..<diagnosticsStart.lowerBound]
+        let ingestBlock = miscClient[ingestStart.lowerBound..<miscClient.endIndex]
         #expect(!ingestBlock.contains("#if DEBUG || BETA"))
         #expect(!ingestBlock.contains("logger.info"))
 
