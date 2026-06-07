@@ -1,7 +1,7 @@
-//! Live engine-catalog projection for the primitive provider surface.
+//! Live host projection for the primitive provider surface.
 //!
 //! Providers see exactly one function, `execute`, resolved from the retained
-//! `capability::execute` engine function at each model-call boundary.
+//! `capability::execute` host primitive at each model-call boundary.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 
@@ -10,8 +10,8 @@ use serde_json::Value;
 use crate::domains::capability::contract::EXECUTE_FUNCTION_ID;
 use crate::domains::capability_support::implementations::scheduling::ExecutionMode;
 use crate::engine::{
-    ActorContext, ActorId, ActorKind, AuthorityGrantId, CatalogRevision, EngineHostHandle,
-    FunctionDefinition, FunctionHealth, FunctionId, FunctionQuery,
+    ActorContext, ActorId, ActorKind, AuthorityGrantId, EngineHostHandle, FunctionDefinition,
+    FunctionHealth, FunctionId, FunctionQuery,
 };
 use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
@@ -28,7 +28,6 @@ pub struct EngineCapabilityTarget {
 
 #[derive(Clone, Debug)]
 pub struct ResolvedCapabilitySurface {
-    pub catalog_revision: CatalogRevision,
     pub capabilities: Vec<ModelCapability>,
     pub targets_by_name: BTreeMap<String, EngineCapabilityTarget>,
     pub turn_stopping_capabilities: HashSet<String>,
@@ -55,7 +54,6 @@ pub(crate) async fn resolve_provider_capabilities(
     }
 
     Ok(ResolvedCapabilitySurface {
-        catalog_revision: host.catalog_revision().await,
         capabilities,
         targets_by_name,
         turn_stopping_capabilities,
@@ -80,7 +78,7 @@ async fn resolve_capability_targets_with_lifecycle(
             ..FunctionQuery::default()
         })
         .await;
-    let turn_stopping_capabilities = turn_stopping_contract_ids(&functions);
+    let turn_stopping_capabilities = turn_stopping_primitive_names(&functions);
     functions.sort_by_key(|function| {
         (
             function
@@ -167,21 +165,11 @@ fn metadata_bool(function: &FunctionDefinition, key: &str) -> Option<bool> {
     function.metadata.get(key).and_then(Value::as_bool)
 }
 
-fn turn_stopping_contract_ids(functions: &[FunctionDefinition]) -> HashSet<String> {
+fn turn_stopping_primitive_names(functions: &[FunctionDefinition]) -> HashSet<String> {
     functions
         .iter()
         .filter(|function| function_stops_turn(function))
-        .flat_map(|function| {
-            [
-                function.id.as_str().to_owned(),
-                function
-                    .metadata
-                    .get("contractId")
-                    .and_then(Value::as_str)
-                    .unwrap_or(function.id.as_str())
-                    .to_owned(),
-            ]
-        })
+        .filter_map(model_capability_id)
         .collect()
 }
 

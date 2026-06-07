@@ -44,7 +44,8 @@ pub(super) fn extract_text_from_payload(payload_str: &str) -> String {
 }
 
 /// Activity summary line for dashboard card display.
-/// Lightweight: iOS enriches with its local capability presentation catalog.
+/// Lightweight: iOS enriches primitive operation lines with generic
+/// presentation helpers.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ActivitySummaryLine {
@@ -53,52 +54,25 @@ pub struct ActivitySummaryLine {
     /// Plain-text excerpt, present for prompt and assistant-text lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
-    /// Provider-visible primitive name or resolved capability id for capability lines.
+    /// Provider-visible primitive name for capability lines.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_primitive_name: Option<String>,
-    /// Resolved capability contract id, present when a wrapper primitive completed a concrete target.
+    /// Primitive operation requested inside `execute`.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub contract_id: Option<String>,
-    /// Resolved implementation id, present when the completion event exposed binding metadata.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub implementation_id: Option<String>,
-    /// Resolved engine function id, present when the completion event exposed binding metadata.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub function_id: Option<String>,
-    /// Source plugin id for the resolved target.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub plugin_id: Option<String>,
-    /// Worker id for the resolved target.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub worker_id: Option<String>,
-    /// Resolved target schema digest.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub schema_digest: Option<String>,
-    /// Catalog revision used for the resolved target.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub catalog_revision: Option<u64>,
-    /// Trust tier for the resolved target.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub trust_tier: Option<String>,
-    /// Risk level for the resolved target.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub risk_level: Option<String>,
-    /// Effect class for the resolved target.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effect_class: Option<String>,
+    pub operation_name: Option<String>,
     /// Trace id for Inspect/debug surfaces.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
     /// Root invocation id for Inspect/debug surfaces.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub root_invocation_id: Option<String>,
-    /// Binding decision id for Inspect/debug surfaces.
+    /// Runtime-owned theme color.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub binding_decision_id: Option<String>,
-    /// Product presentation hints owned by the resolved capability contract.
+    pub theme_color: Option<String>,
+    /// Runtime-owned presentation hints.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presentation_hints: Option<Value>,
-    /// Plain product summary for the dashboard chip.
+    /// Plain summary for the dashboard chip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     /// Capability invocation arguments, present for capability lines.
@@ -125,19 +99,10 @@ struct CapabilityCompletionSummary {
     is_error: bool,
     duration_ms: Option<i64>,
     model_primitive_name: Option<String>,
-    contract_id: Option<String>,
-    implementation_id: Option<String>,
-    function_id: Option<String>,
-    plugin_id: Option<String>,
-    worker_id: Option<String>,
-    schema_digest: Option<String>,
-    catalog_revision: Option<u64>,
-    trust_tier: Option<String>,
-    risk_level: Option<String>,
-    effect_class: Option<String>,
+    operation_name: Option<String>,
     trace_id: Option<String>,
     root_invocation_id: Option<String>,
-    binding_decision_id: Option<String>,
+    theme_color: Option<String>,
     presentation_hints: Option<Value>,
     summary: Option<String>,
 }
@@ -145,7 +110,6 @@ struct CapabilityCompletionSummary {
 impl CapabilityCompletionSummary {
     fn from_payload(payload: &Value) -> Self {
         let details = payload.get("details");
-        let binding = details.and_then(|value| value.get("bindingDecision"));
         let presentation_hints = payload
             .get("presentationHints")
             .cloned()
@@ -163,27 +127,18 @@ impl CapabilityCompletionSummary {
                 .unwrap_or(false),
             duration_ms: payload.get("duration").and_then(Value::as_i64),
             model_primitive_name: string_field(payload, "modelPrimitiveName"),
-            contract_id: string_field(payload, "contractId")
-                .or_else(|| string_field_opt(binding, "contractId")),
-            implementation_id: string_field(payload, "implementationId")
-                .or_else(|| string_field_opt(binding, "selectedImplementation")),
-            function_id: string_field(payload, "functionId")
-                .or_else(|| string_field_opt(binding, "selectedFunctionId")),
-            plugin_id: string_field(payload, "pluginId"),
-            worker_id: string_field(payload, "workerId"),
-            schema_digest: string_field(payload, "schemaDigest")
-                .or_else(|| string_field_opt(binding, "schemaDigest")),
-            catalog_revision: u64_field(payload, "catalogRevision")
-                .or_else(|| u64_field_opt(binding, "catalogRevision")),
-            trust_tier: string_field(payload, "trustTier"),
-            risk_level: string_field(payload, "riskLevel"),
-            effect_class: string_field(payload, "effectClass"),
+            operation_name: string_field(payload, "operationName")
+                .or_else(|| string_field_opt(details, "operationName"))
+                .or_else(|| string_field_opt(details, "operation")),
             trace_id: string_field(payload, "traceId")
                 .or_else(|| string_field_opt(details, "traceId")),
             root_invocation_id: string_field(payload, "rootInvocationId")
                 .or_else(|| string_field_opt(details, "rootInvocationId")),
-            binding_decision_id: string_field(payload, "bindingDecisionId")
-                .or_else(|| string_field_opt(binding, "decisionId")),
+            theme_color: string_field(payload, "themeColor").or_else(|| {
+                presentation_hints
+                    .as_ref()
+                    .and_then(|value| string_field(value, "themeColor"))
+            }),
             presentation_hints,
             summary,
         }
@@ -219,32 +174,24 @@ fn string_field_opt(value: Option<&Value>, key: &str) -> Option<String> {
     value.and_then(|value| string_field(value, key))
 }
 
-fn u64_field(value: &Value, key: &str) -> Option<u64> {
-    value.get(key).and_then(Value::as_u64)
-}
-
-fn u64_field_opt(value: Option<&Value>, key: &str) -> Option<u64> {
-    value.and_then(|value| u64_field(value, key))
-}
-
-fn display_capability_args(
-    model_primitive_name: &str,
-    input: Option<Value>,
-    completion: Option<&CapabilityCompletionSummary>,
-) -> Option<Value> {
+fn display_capability_args(input: Option<Value>) -> Option<Value> {
     let input = input?;
-    let resolved_target = completion
-        .and_then(|summary| summary.contract_id.as_deref())
-        .is_some_and(|contract_id| contract_id != "capability::execute");
-    if model_primitive_name == "execute" || resolved_target {
-        input
-            .get("arguments")
-            .cloned()
-            .or_else(|| input.get("payload").cloned())
-            .or(Some(input))
-    } else {
-        Some(input)
-    }
+    input
+        .get("arguments")
+        .cloned()
+        .or_else(|| input.get("payload").cloned())
+        .or(Some(input))
+}
+
+fn operation_name_from_value(value: &Value) -> Option<String> {
+    ["operationName", "operation"].iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|operation| !operation.is_empty())
+            .map(ToOwned::to_owned)
+    })
 }
 
 impl SessionRepo {
@@ -316,7 +263,7 @@ impl SessionRepo {
     /// Build activity summary lines for a session's dashboard card.
     ///
     /// Walks persisted events to produce a compact summary of recent activity.
-    /// iOS enriches each line with its local capability presentation catalog.
+    /// iOS renders each line with generic primitive presentation helpers.
     pub fn get_activity_summaries(
         conn: &Connection,
         session_id: &str,
@@ -401,8 +348,14 @@ impl SessionRepo {
                                         .or_else(|| block.get("arguments").cloned());
                                     let completion =
                                         invocation_id.and_then(|id| capability_results.get(id));
-                                    let display_args =
-                                        display_capability_args(name, input, completion);
+                                    let display_args = display_capability_args(input);
+                                    let operation_name = completion
+                                        .and_then(|summary| summary.operation_name.clone())
+                                        .or_else(|| {
+                                            display_args
+                                                .as_ref()
+                                                .and_then(operation_name_from_value)
+                                        });
 
                                     lines.push(ActivitySummaryLine {
                                         kind: "capability".into(),
@@ -411,33 +364,13 @@ impl SessionRepo {
                                                 summary.model_primitive_name.clone()
                                             })
                                             .or_else(|| Some(name.to_string())),
-                                        contract_id: completion
-                                            .and_then(|summary| summary.contract_id.clone()),
-                                        implementation_id: completion
-                                            .and_then(|summary| summary.implementation_id.clone()),
-                                        function_id: completion
-                                            .and_then(|summary| summary.function_id.clone()),
-                                        plugin_id: completion
-                                            .and_then(|summary| summary.plugin_id.clone()),
-                                        worker_id: completion
-                                            .and_then(|summary| summary.worker_id.clone()),
-                                        schema_digest: completion
-                                            .and_then(|summary| summary.schema_digest.clone()),
-                                        catalog_revision: completion
-                                            .and_then(|summary| summary.catalog_revision),
-                                        trust_tier: completion
-                                            .and_then(|summary| summary.trust_tier.clone()),
-                                        risk_level: completion
-                                            .and_then(|summary| summary.risk_level.clone()),
-                                        effect_class: completion
-                                            .and_then(|summary| summary.effect_class.clone()),
+                                        operation_name,
                                         trace_id: completion
                                             .and_then(|summary| summary.trace_id.clone()),
                                         root_invocation_id: completion
                                             .and_then(|summary| summary.root_invocation_id.clone()),
-                                        binding_decision_id: completion.and_then(|summary| {
-                                            summary.binding_decision_id.clone()
-                                        }),
+                                        theme_color: completion
+                                            .and_then(|summary| summary.theme_color.clone()),
                                         presentation_hints: completion
                                             .and_then(|summary| summary.presentation_hints.clone()),
                                         summary: completion

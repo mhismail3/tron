@@ -209,18 +209,10 @@ fn get_activity_summary_capability_invocation_uses_execute_identity() {
             payload: serde_json::json!({
                 "invocationId": "call_1",
                 "modelPrimitiveName": "execute",
-                "contractId": "capability::execute",
-                "implementationId": "primitive.execute",
-                "functionId": "capability::execute",
-                "pluginId": null,
-                "workerId": "capability",
-                "catalogRevision": 42,
-                "trustTier": "host_primitive",
-                "riskLevel": "High",
-                "effectClass": "ExternalSideEffect",
+                "operationName": "process_run",
                 "traceId": "trace-execute",
                 "rootInvocationId": "root-execute",
-                "bindingDecisionId": null,
+                "themeColor": "#10B981",
                 "presentationHints": {
                     "displayName": "Execute",
                     "summary": "Primitive process operation",
@@ -240,8 +232,10 @@ fn get_activity_summary_capability_invocation_uses_execute_identity() {
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].kind, "capability");
     assert_eq!(lines[0].model_primitive_name.as_deref(), Some("execute"));
-    assert_eq!(lines[0].contract_id.as_deref(), Some("capability::execute"));
-    assert_eq!(lines[0].function_id.as_deref(), Some("capability::execute"));
+    assert_eq!(lines[0].operation_name.as_deref(), Some("process_run"));
+    assert_eq!(lines[0].trace_id.as_deref(), Some("trace-execute"));
+    assert_eq!(lines[0].root_invocation_id.as_deref(), Some("root-execute"));
+    assert_eq!(lines[0].theme_color.as_deref(), Some("#10B981"));
     assert_eq!(
         lines[0].summary.as_deref(),
         Some("Primitive process operation")

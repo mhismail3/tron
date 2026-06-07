@@ -41,43 +41,23 @@ pub(super) struct CapabilityInvocationPhaseOutcome {
     pub stop_turn_requested: bool,
 }
 
-fn target_identity_json(
+fn primitive_identity_json(
     model_primitive_name: &str,
-    primitive_surface: &ResolvedCapabilitySurface,
+    arguments: &serde_json::Map<String, Value>,
     trace_id: Option<&crate::engine::TraceId>,
     parent_invocation_id: Option<&crate::engine::InvocationId>,
 ) -> Value {
-    let Some(target) = primitive_surface.targets_by_name.get(model_primitive_name) else {
-        return json!({ "modelPrimitiveName": model_primitive_name });
-    };
-    let function = &target.function;
-    let metadata_string = |key: &str| {
-        function
-            .metadata
-            .get(key)
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-    };
-    let function_id = function.id.as_str().to_owned();
-    json!({
+    let mut identity = json!({
         "modelPrimitiveName": model_primitive_name,
-        "contractId": metadata_string("contractId").unwrap_or_else(|| function_id.clone()),
-        "implementationId": metadata_string("implementationId").unwrap_or_else(|| format!("function:{function_id}")),
-        "functionId": function_id,
-        "pluginId": metadata_string("pluginId"),
-        "workerId": function.owner_worker.as_str(),
-        "catalogRevision": primitive_surface.catalog_revision.0,
-        "trustTier": metadata_string("trustTier"),
-        "riskLevel": format!("{:?}", function.risk_level),
-        "effectClass": format!("{:?}", function.effect_class),
         "traceId": trace_id.map(|id| id.as_str()),
         "rootInvocationId": parent_invocation_id.map(|id| id.as_str()),
-        "themeColor": function
-            .metadata
-            .get("presentationHints")
-            .and_then(|value| value.get("themeColor"))
-            .and_then(Value::as_str),
-    })
+    });
+    if let Some(operation) = operation_name_from_map(arguments)
+        && let Some(object) = identity.as_object_mut()
+    {
+        object.insert("operationName".to_owned(), json!(operation));
+    }
+    identity
 }
 
 fn result_identity_json(
@@ -87,16 +67,18 @@ fn result_identity_json(
 ) -> Value {
     let mut identity = base_identity.as_object().cloned().unwrap_or_default();
     if let Some(details) = result.result.details.as_ref() {
-        for key in [
-            "schemaDigest",
-            "catalogRevision",
-            "traceId",
-            "rootInvocationId",
-            "functionId",
-        ] {
+        for key in ["operationName", "operation", "traceId", "rootInvocationId"] {
             if let Some(value) = details.get(key) {
-                identity.insert(key.to_owned(), value.clone());
+                let identity_key = if key == "operation" {
+                    "operationName"
+                } else {
+                    key
+                };
+                identity.insert(identity_key.to_owned(), value.clone());
             }
+        }
+        if let Some(value) = details.get("themeColor") {
+            identity.insert("themeColor".to_owned(), value.clone());
         }
         if let Some(value) = details
             .get("presentationHints")
@@ -107,6 +89,17 @@ fn result_identity_json(
     }
     identity.insert("modelPrimitiveName".to_owned(), json!(model_primitive_name));
     Value::Object(identity)
+}
+
+fn operation_name_from_map(arguments: &serde_json::Map<String, Value>) -> Option<String> {
+    ["operationName", "operation"].iter().find_map(|key| {
+        arguments
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|operation| !operation.is_empty())
+            .map(ToOwned::to_owned)
+    })
 }
 
 pub(super) async fn execute_capability_invocation_phase(
@@ -128,13 +121,12 @@ pub(super) async fn execute_capability_invocation_phase(
                 "runId": params.run_id,
                 "traceId": params.trace_id.map(|id| id.as_str()),
                 "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-                "catalogRevision": params.primitive_surface.catalog_revision.0,
             });
             if let (Some(payload), Some(identity)) = (
                 payload.as_object_mut(),
-                target_identity_json(
+                primitive_identity_json(
                     &capability_invocation.name,
-                    params.primitive_surface,
+                    &capability_invocation.arguments,
                     params.trace_id,
                     params.parent_invocation_id,
                 )
@@ -222,9 +214,9 @@ pub(super) async fn execute_capability_invocation_phase(
                         let result_text = extract_result_text(&result);
                         let model_context_content = extract_model_context_result_text(&result);
                         let is_error = result.result.is_error.unwrap_or(false);
-                        let base_identity = target_identity_json(
+                        let base_identity = primitive_identity_json(
                             &capability_invocation.name,
-                            params.primitive_surface,
+                            &capability_invocation.arguments,
                             params.trace_id,
                             params.parent_invocation_id,
                         );
@@ -238,7 +230,6 @@ pub(super) async fn execute_capability_invocation_phase(
                             "runId": params.run_id,
                             "traceId": params.trace_id.map(|id| id.as_str()),
                             "parentInvocationId": params.parent_invocation_id.map(|id| id.as_str()),
-                            "catalogRevision": params.primitive_surface.catalog_revision.0,
                         });
                         if model_context_content != result_text
                             && let Some(payload) = payload.as_object_mut()

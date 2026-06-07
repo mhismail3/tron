@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashSet};
 
 fn empty_surface() -> ResolvedCapabilitySurface {
     ResolvedCapabilitySurface {
-        catalog_revision: crate::engine::CatalogRevision(0),
         capabilities: Vec::new(),
         targets_by_name: BTreeMap::new(),
         turn_stopping_capabilities: HashSet::new(),
@@ -61,7 +60,6 @@ fn surface_with_echo() -> ResolvedCapabilitySurface {
     let mut targets_by_name = BTreeMap::new();
     let _ = targets_by_name.insert("execute".to_owned(), target);
     ResolvedCapabilitySurface {
-        catalog_revision: crate::engine::CatalogRevision(0),
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::from(["execute".to_owned()]),
@@ -251,7 +249,6 @@ async fn engine_capability_result_stop_turn_pauses_runner_even_when_target_is_no
         },
     );
     let surface = ResolvedCapabilitySurface {
-        catalog_revision: crate::engine::CatalogRevision(42),
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::new(),
@@ -324,7 +321,6 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
         },
     );
     let surface = ResolvedCapabilitySurface {
-        catalog_revision: crate::engine::CatalogRevision(42),
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::new(),
@@ -425,7 +421,6 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
         },
     );
     let surface = ResolvedCapabilitySurface {
-        catalog_revision: crate::engine::CatalogRevision(42),
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::new(),

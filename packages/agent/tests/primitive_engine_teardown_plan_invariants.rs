@@ -505,6 +505,75 @@ fn prompt_loop_internals_have_no_hidden_policy_or_worker_planes() {
 }
 
 #[test]
+fn server_capability_identity_stays_primitive_only() {
+    let identity_paths = [
+        (
+            "capability event identity dto",
+            "packages/agent/src/shared/protocol/events/capability.rs",
+        ),
+        (
+            "capability invocation executor",
+            "packages/agent/src/domains/agent/runner/agent/capability_invocation_executor.rs",
+        ),
+        (
+            "capability invocation phase",
+            "packages/agent/src/domains/agent/runner/agent/turn_runner/capability_invocations.rs",
+        ),
+        (
+            "capability invocation stored payloads",
+            "packages/agent/src/domains/session/event_store/types/payloads/capability_invocation.rs",
+        ),
+        (
+            "session activity projection",
+            "packages/agent/src/domains/session/event_store/sqlite/repositories/session/projections.rs",
+        ),
+    ];
+    for (label, path) in identity_paths {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "contractId",
+                "implementationId",
+                "functionId",
+                "pluginId",
+                "workerId",
+                "schemaDigest",
+                "catalogRevision",
+                "trustTier",
+                "riskLevel",
+                "effectClass",
+                "bindingDecision",
+            ],
+            label,
+        );
+    }
+    for (label, path) in identity_paths
+        .into_iter()
+        .filter(|(_, path)| !path.ends_with("capability_invocation_executor.rs"))
+    {
+        let source = read_repo_file(path);
+        assert_absent(
+            &source,
+            &[
+                "contract_id",
+                "implementation_id",
+                "function_id",
+                "plugin_id",
+                "worker_id",
+                "schema_digest",
+                "catalog_revision",
+                "trust_tier",
+                "risk_level",
+                "effect_class",
+                "binding_decision",
+            ],
+            label,
+        );
+    }
+}
+
+#[test]
 fn startup_context_has_no_product_policy_or_worker_managers() {
     for (label, path) in [
         ("server startup", "packages/agent/src/main_runtime.rs"),

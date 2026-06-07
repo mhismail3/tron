@@ -218,22 +218,6 @@ tron_events! {
         capability_identity: CapabilityEventIdentity,
     } => "capability.invocation.progress",
 
-    /// Capability binding resolution update for an `execute` primitive call.
-    CapabilityResolution {
-        #[serde(rename = "invocationId")]
-        invocation_id: String,
-        #[serde(rename = "modelPrimitiveName")]
-        model_primitive_name: String,
-        #[serde(rename = "requestedContractId", skip_serializing_if = "Option::is_none")]
-        requested_contract_id: Option<String>,
-        #[serde(rename = "requestedImplementationId", skip_serializing_if = "Option::is_none")]
-        requested_implementation_id: Option<String>,
-        #[serde(rename = "requestedFunctionId", skip_serializing_if = "Option::is_none")]
-        requested_function_id: Option<String>,
-        #[serde(flatten)]
-        capability_identity: CapabilityEventIdentity,
-    } => "capability.resolution",
-
     /// Capability execution paused for user/client/system input.
     CapabilityPauseRequested {
         #[serde(rename = "pauseId")]
@@ -578,7 +562,6 @@ impl TronEvent {
             Self::CapabilityInvocationStarted { .. }
                 | Self::CapabilityInvocationOutput { .. }
                 | Self::CapabilityInvocationProgress { .. }
-                | Self::CapabilityResolution { .. }
                 | Self::CapabilityPauseRequested { .. }
                 | Self::CapabilityPauseResolved { .. }
                 | Self::CapabilityRunStatus { .. }

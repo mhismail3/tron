@@ -170,19 +170,9 @@ mod tests {
     fn full_identity() -> CapabilityEventIdentity {
         CapabilityEventIdentity {
             model_primitive_name: Some("execute".into()),
-            contract_id: Some("capability::execute".into()),
-            implementation_id: Some("first_party.capability.v1.execute".into()),
-            function_id: Some("capability::execute".into()),
-            plugin_id: Some("first_party.capability".into()),
-            worker_id: Some("capability-worker".into()),
-            schema_digest: Some("sha256:test".into()),
-            catalog_revision: Some(7),
-            trust_tier: Some("first_party_signed".into()),
-            risk_level: Some("low".into()),
-            effect_class: Some("read".into()),
+            operation_name: Some("file_write".into()),
             trace_id: Some("trace-test".into()),
             root_invocation_id: Some("root-test".into()),
-            binding_decision_id: Some("binding-test".into()),
             theme_color: Some("#10B981".into()),
             presentation_hints: Some(serde_json::json!({
                 "displayName": "Execute",
@@ -205,11 +195,9 @@ mod tests {
         let v = serde_json::to_value(&p).unwrap();
         assert_eq!(v["invocationId"], "call-1");
         assert_eq!(v["modelPrimitiveName"], "execute");
-        assert_eq!(v["contractId"], "capability::execute");
-        assert_eq!(v["implementationId"], "first_party.capability.v1.execute");
-        assert_eq!(v["schemaDigest"], "sha256:test");
-        assert_eq!(v["catalogRevision"], 7);
-        assert_eq!(v["bindingDecisionId"], "binding-test");
+        assert_eq!(v["operationName"], "file_write");
+        assert_eq!(v["traceId"], "trace-test");
+        assert_eq!(v["rootInvocationId"], "root-test");
         assert_eq!(v["presentationHints"]["displayName"], "Execute");
     }
 
@@ -231,8 +219,8 @@ mod tests {
         assert_eq!(v["invocationId"], "call-1");
         assert_eq!(v["modelContextContent"], "ok\nmetadata");
         assert_eq!(v["modelPrimitiveName"], "execute");
-        assert_eq!(v["contractId"], "capability::execute");
-        assert_eq!(v["bindingDecisionId"], "binding-test");
+        assert_eq!(v["operationName"], "file_write");
+        assert_eq!(v["traceId"], "trace-test");
         assert_eq!(v["presentationHints"]["icon"], "terminal");
     }
 

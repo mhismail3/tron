@@ -88,19 +88,9 @@ fn tron_event_capability_invocation_started() {
         arguments: None,
         capability_identity: CapabilityEventIdentity {
             model_primitive_name: Some("execute".into()),
-            contract_id: Some("capability::execute".into()),
-            implementation_id: Some("primitive.execute".into()),
-            function_id: Some("capability::execute".into()),
-            plugin_id: None,
-            worker_id: Some("capability".into()),
-            schema_digest: Some("sha256:test".into()),
-            catalog_revision: Some(7),
-            trust_tier: Some("host_primitive".into()),
-            risk_level: Some("high".into()),
-            effect_class: Some("external_side_effect".into()),
+            operation_name: Some("file_write".into()),
             trace_id: Some("trace-test".into()),
             root_invocation_id: Some("root-test".into()),
-            binding_decision_id: None,
             theme_color: Some("#10B981".into()),
             presentation_hints: Some(serde_json::json!({
                 "displayName": "Execute",
@@ -113,32 +103,12 @@ fn tron_event_capability_invocation_started() {
     assert!(e.is_capability_invocation());
     let json = serde_json::to_value(&e).unwrap();
     assert_eq!(json["modelPrimitiveName"], "execute");
-    assert_eq!(json["contractId"], "capability::execute");
-    assert_eq!(json["implementationId"], "primitive.execute");
-    assert_eq!(json["schemaDigest"], "sha256:test");
-    assert_eq!(json["catalogRevision"], 7);
+    assert_eq!(json["operationName"], "file_write");
+    assert_eq!(json["traceId"], "trace-test");
+    assert_eq!(json["rootInvocationId"], "root-test");
     assert_eq!(json["themeColor"], "#10B981");
     assert_eq!(json["presentationHints"]["displayName"], "Execute");
     assert_eq!(json["presentationHints"]["icon"], "terminal");
-}
-
-#[test]
-fn tron_event_binding_resolution_is_capability_invocation_event() {
-    let e = TronEvent::CapabilityResolution {
-        base: BaseEvent::now("s1"),
-        invocation_id: "tc-1".into(),
-        model_primitive_name: "execute".into(),
-        requested_contract_id: Some("capability::execute".into()),
-        requested_implementation_id: None,
-        requested_function_id: None,
-        capability_identity: CapabilityEventIdentity::with_model_primitive("execute"),
-    };
-    assert!(e.is_capability_invocation());
-    assert_eq!(e.event_type(), "capability.resolution");
-    let json = serde_json::to_value(&e).unwrap();
-    assert_eq!(json["type"], "capability.resolution");
-    assert_eq!(json["invocationId"], "tc-1");
-    assert_eq!(json["requestedContractId"], "capability::execute");
 }
 
 #[test]

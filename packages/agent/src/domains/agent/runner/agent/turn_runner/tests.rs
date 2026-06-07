@@ -27,7 +27,6 @@ fn surface(mode: ExecutionMode) -> ResolvedCapabilitySurface {
         },
     );
     ResolvedCapabilitySurface {
-        catalog_revision: crate::engine::CatalogRevision(0),
         capabilities: Vec::new(),
         targets_by_name,
         turn_stopping_capabilities: HashSet::new(),

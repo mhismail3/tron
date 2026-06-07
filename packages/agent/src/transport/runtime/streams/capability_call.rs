@@ -113,29 +113,6 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 Some(data),
             ))
         }
-        TronEvent::CapabilityResolution {
-            invocation_id,
-            model_primitive_name,
-            requested_contract_id,
-            requested_implementation_id,
-            requested_function_id,
-            capability_identity,
-            ..
-        } => {
-            let mut data = json!({
-                "invocationId": invocation_id,
-                "modelPrimitiveName": model_primitive_name,
-            });
-            set_opt(&mut data, "requestedContractId", requested_contract_id);
-            set_opt(
-                &mut data,
-                "requestedImplementationId",
-                requested_implementation_id,
-            );
-            set_opt(&mut data, "requestedFunctionId", requested_function_id);
-            set_identity(&mut data, capability_identity);
-            Some(session_scoped(event, "capability.resolution", Some(data)))
-        }
         TronEvent::CapabilityInvocationBatch {
             capability_invocations,
             ..

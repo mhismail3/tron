@@ -48,7 +48,6 @@ pub(super) async fn resolve_provider_primitive_surface(
     {
         let _ = (session_id, workspace_id);
         return Ok(ResolvedCapabilitySurface {
-            catalog_revision: crate::engine::CatalogRevision(0),
             capabilities: Vec::new(),
             targets_by_name: Default::default(),
             turn_stopping_capabilities: Default::default(),

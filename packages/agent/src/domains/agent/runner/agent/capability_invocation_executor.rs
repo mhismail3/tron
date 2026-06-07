@@ -46,54 +46,29 @@ fn traced_base(
     )
 }
 
-fn string_metadata(function: &crate::engine::FunctionDefinition, key: &str) -> Option<String> {
-    function
-        .metadata
-        .get(key)
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn presentation_theme_color(function: &crate::engine::FunctionDefinition) -> Option<String> {
-    function
-        .metadata
-        .get("presentationHints")
-        .and_then(|value| value.get("themeColor"))
-        .and_then(Value::as_str)
-        .map(ToOwned::to_owned)
-}
-
-fn presentation_hints(function: &crate::engine::FunctionDefinition) -> Option<Value> {
-    function.metadata.get("presentationHints").cloned()
+fn operation_name_from_value(value: &Value) -> Option<String> {
+    ["operationName", "operation"].iter().find_map(|key| {
+        value
+            .get(*key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|operation| !operation.is_empty())
+            .map(ToOwned::to_owned)
+    })
 }
 
 fn primitive_capability_identity(
     model_primitive_name: &str,
-    target: &EngineCapabilityTarget,
-    catalog_revision: u64,
+    arguments: &Value,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
 ) -> CapabilityEventIdentity {
-    let function = &target.function;
-    let function_id = function.id.as_str().to_owned();
     CapabilityEventIdentity {
         model_primitive_name: Some(model_primitive_name.to_owned()),
-        contract_id: string_metadata(function, "contractId").or_else(|| Some(function_id.clone())),
-        implementation_id: string_metadata(function, "implementationId")
-            .or_else(|| Some(format!("function:{function_id}"))),
-        function_id: Some(function_id),
-        plugin_id: string_metadata(function, "pluginId"),
-        worker_id: Some(function.owner_worker.as_str().to_owned()),
-        schema_digest: None,
-        catalog_revision: Some(catalog_revision),
-        trust_tier: string_metadata(function, "trustTier"),
-        risk_level: Some(format!("{:?}", function.risk_level)),
-        effect_class: Some(format!("{:?}", function.effect_class)),
+        operation_name: operation_name_from_value(arguments),
         trace_id: trace_id.map(|id| id.as_str().to_owned()),
         root_invocation_id: parent_invocation_id.map(|id| id.as_str().to_owned()),
-        binding_decision_id: None,
-        theme_color: presentation_theme_color(function),
-        presentation_hints: presentation_hints(function),
+        ..CapabilityEventIdentity::default()
     }
 }
 
@@ -107,20 +82,8 @@ fn capability_identity_from_result(
     };
     CapabilityEventIdentity {
         model_primitive_name: Some(model_primitive_name.to_owned()),
-        function_id: details
-            .get("functionId")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| base_identity.function_id.clone()),
-        schema_digest: details
-            .get("schemaDigest")
-            .and_then(Value::as_str)
-            .map(ToOwned::to_owned)
-            .or_else(|| base_identity.schema_digest.clone()),
-        catalog_revision: details
-            .get("catalogRevision")
-            .and_then(Value::as_u64)
-            .or(base_identity.catalog_revision),
+        operation_name: operation_name_from_value(details)
+            .or_else(|| base_identity.operation_name.clone()),
         trace_id: details
             .get("traceId")
             .and_then(Value::as_str)
@@ -132,9 +95,14 @@ fn capability_identity_from_result(
             .map(ToOwned::to_owned)
             .or_else(|| base_identity.root_invocation_id.clone()),
         theme_color: details
-            .get("presentationHints")
-            .and_then(|hints| hints.get("themeColor"))
+            .get("themeColor")
             .and_then(Value::as_str)
+            .or_else(|| {
+                details
+                    .get("presentationHints")
+                    .and_then(|hints| hints.get("themeColor"))
+                    .and_then(Value::as_str)
+            })
             .map(ToOwned::to_owned)
             .or_else(|| base_identity.theme_color.clone()),
         presentation_hints: details
@@ -187,14 +155,13 @@ pub async fn execute_capability_invocation(
     };
 
     let stops_turn = engine_target.stops_turn;
+    let effective_args = Value::Object(capability_invocation.arguments.clone());
     let primitive_identity = primitive_capability_identity(
         &model_primitive_name,
-        engine_target,
-        ctx.primitive_surface.catalog_revision.0,
+        &effective_args,
         ctx.trace_id,
         ctx.parent_invocation_id,
     );
-    let effective_args = Value::Object(capability_invocation.arguments.clone());
 
     let started = TronEvent::CapabilityInvocationStarted {
         base: traced_base(session_id, ctx.trace_id, ctx.parent_invocation_id),

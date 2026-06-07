@@ -82,15 +82,6 @@ fn tron_event_all_event_types() {
             percent: Some(0.5),
             capability_identity: CapabilityEventIdentity::default(),
         },
-        TronEvent::CapabilityResolution {
-            base: base.clone(),
-            invocation_id: "id".into(),
-            model_primitive_name: "execute".into(),
-            requested_contract_id: Some("capability::execute".into()),
-            requested_implementation_id: None,
-            requested_function_id: None,
-            capability_identity: CapabilityEventIdentity::with_model_primitive("execute"),
-        },
         TronEvent::CapabilityPauseRequested {
             base: base.clone(),
             pause_id: "pause-1".into(),
