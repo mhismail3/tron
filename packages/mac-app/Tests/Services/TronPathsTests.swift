@@ -30,8 +30,8 @@ struct TronPathsTests {
     func agentDisplayNameMatches() {
         // System Settings lists CFBundleDisplayName (fallback
         // CFBundleName). Calling the agent "Tron Server" keeps the
-        // Accessibility entry distinct from the responsible wrapper
-        // entry used by FDA / Screen Recording.
+        // helper entry distinct from the responsible wrapper entry
+        // used by Full Disk Access.
         #expect(TronPaths.agentDisplayName(environment: [:]) == "Tron Server")
     }
 

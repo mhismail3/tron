@@ -58,7 +58,7 @@ enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
         switch self {
         case .welcome: return 360
         case .tailscale: return 360
-        case .permissions: return 480
+        case .permissions: return 360
         case .iosBeta: return 420
         case .install: return 440
         case .pairingInfo: return 420
@@ -76,15 +76,11 @@ enum HeaderIcon: Equatable, Sendable {
     case symbol(String)
 }
 
-/// Permission categories the wizard probes during the Permissions step.
-///
-/// The Rust agent's screenshot path calls `screencapture(1)`, which
-/// requires Screen Recording. The primitive wrapper does not request a
-/// notification permission because the push/inbox product plane is gone.
+/// Permission category the wizard probes during the Permissions step.
+/// The primitive wrapper only preflights broad local file access; visual
+/// inspection and click/type control are no longer startup requirements.
 enum Permission: String, CaseIterable, Sendable {
     case fullDiskAccess
-    case screenRecording
-    case accessibility
 }
 
 /// Per-permission grant state. Mirrors TCC categories.

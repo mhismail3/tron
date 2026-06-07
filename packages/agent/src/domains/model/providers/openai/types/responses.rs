@@ -80,8 +80,8 @@ pub enum ResponsesInputItem {
 
 /// Polymorphic tool entry for the Responses API.
 ///
-/// Uses internally tagged serialization on `"type"` to discriminate variants.
-/// GPT 5.4+ supports `ToolSearch` and `Computer` entries alongside functions.
+/// The primitive branch exports only concrete function tools. Hosted tool
+/// search and computer-use entries are intentionally not represented here.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum ResponsesToolEntry {
@@ -94,23 +94,6 @@ pub enum ResponsesToolEntry {
         description: String,
         /// JSON Schema for parameters.
         parameters: Value,
-        /// When `true`, the tool is available but not loaded into the prompt
-        /// until the model's tool search selects it.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        defer_loading: Option<bool>,
-    },
-    /// ModelCapability search sentinel — enables the model to dynamically discover capabilities.
-    #[serde(rename = "tool_search")]
-    ToolSearch {},
-    /// Provider wire variant for future computer-use responses.
-    #[serde(rename = "computer")]
-    Computer {
-        /// Viewport width in pixels.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        viewport_width: Option<u32>,
-        /// Viewport height in pixels.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        viewport_height: Option<u32>,
     },
 }
 
@@ -308,15 +291,6 @@ pub enum SseEventType {
     /// Streaming function call arguments.
     #[serde(rename = "response.function_call_arguments.delta")]
     FunctionCallArgsDelta,
-    /// ModelCapability search call started (hosted tool search).
-    #[serde(rename = "response.tool_search_call.searching")]
-    ToolSearchCallSearching,
-    /// ModelCapability search call completed (hosted tool search).
-    #[serde(rename = "response.tool_search_call.completed")]
-    ToolSearchCallCompleted,
-    /// Provider wire variant for computer-call completion events.
-    #[serde(rename = "response.computer_call.completed")]
-    ComputerCallCompleted,
     /// Final complete response.
     #[serde(rename = "response.completed")]
     Completed,
@@ -336,12 +310,6 @@ pub enum OutputItemType {
     Message,
     /// Reasoning/thinking.
     Reasoning,
-    /// ModelCapability search call (hosted tool discovery).
-    ToolSearchCall,
-    /// ModelCapability search output (hosted tool discovery result).
-    ToolSearchOutput,
-    /// Computer call (screenshot + action loop).
-    ComputerCall,
     /// Forward-compatible catch-all for unknown item types.
     #[default]
     #[serde(other)]

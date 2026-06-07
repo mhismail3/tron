@@ -454,17 +454,6 @@ impl OpenAIProvider {
         input
     }
 
-    /// Whether hosted tool search is available for this provider instance.
-    ///
-    /// Requires both: the model declares support AND we're on the Platform endpoint.
-    /// ModelCapability search is not available on the Codex backend.
-    fn model_supports_tool_search(&self) -> bool {
-        self.api_endpoint == ApiEndpoint::Platform
-            && self
-                .active_profile()
-                .is_some_and(|profile| profile.supports_tool_search)
-    }
-
     /// Resolve and clamp max output tokens for the active profile.
     fn resolve_max_output_tokens(&self, options: &ProviderStreamOptions) -> Option<u32> {
         let requested = options.max_tokens.or(self.config.max_tokens)?;
@@ -498,12 +487,11 @@ impl OpenAIProvider {
         let supports_capabilities =
             active_profile.is_none_or(|profile| profile.supports_capabilities);
         let input = Self::build_input(context, supports_capabilities);
-        let enable_tool_search = self.model_supports_tool_search();
         let capabilities = context
             .capabilities
             .as_ref()
             .filter(|_| supports_capabilities)
-            .map(|t| convert_tools_v2(t, enable_tool_search));
+            .map(|t| convert_tools_v2(t));
         let reasoning = self
             .active_profile()
             .filter(|profile| profile.supports_reasoning)

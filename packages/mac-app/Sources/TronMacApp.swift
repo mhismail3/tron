@@ -182,12 +182,7 @@ struct CommandModeHostView: View {
         Color.clear
             .frame(width: 1, height: 1)
             .onAppear {
-                switch MacCommandLineMode.current {
-                case .probeScreenRecordingAndQuit:
-                    NSApp.setActivationPolicy(.prohibited)
-                case .startServerAndQuit, .uninstallAndQuit, .normal:
-                    NSApp.setActivationPolicy(.accessory)
-                }
+                NSApp.setActivationPolicy(.accessory)
                 for window in NSApp.windows {
                     window.orderOut(nil)
                 }
@@ -209,9 +204,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         case .uninstallAndQuit:
             uninstallAndQuit()
-            return
-        case .probeScreenRecordingAndQuit(let resultPath):
-            probeScreenRecordingAndQuit(resultPath: resultPath)
             return
         case .normal:
             break
@@ -312,15 +304,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 NSLog("[Tron] Command-mode uninstall missing helper: %@", path)
             }
         }
-    }
-
-    private func probeScreenRecordingAndQuit(resultPath: String?) {
-        NSApp.setActivationPolicy(.prohibited)
-        for window in NSApp.windows {
-            window.orderOut(nil)
-        }
-        MacPermissionProbe.writeCurrentScreenRecordingProbeResult(to: resultPath)
-        NSApp.terminate(nil)
     }
 
     func applicationWillTerminate(_ notification: Notification) {

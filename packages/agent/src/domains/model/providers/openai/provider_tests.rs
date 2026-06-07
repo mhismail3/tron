@@ -388,38 +388,6 @@ fn base_url_override_codex_preserves_path() {
 
 // ── ModelCapability search availability ─────────────────────────────────────
 
-#[test]
-fn tool_search_disabled_on_codex_even_for_54() {
-    // OAuth → Codex, even for GPT 5.4 which declares tool_search support.
-    let mut config = test_config();
-    config.model = "gpt-5.4".into();
-    let provider = OpenAIProvider::new(config);
-    assert!(!provider.model_supports_tool_search());
-}
-
-#[test]
-fn tool_search_enabled_on_platform_for_54() {
-    let config = OpenAIConfig {
-        model: "gpt-5.4".into(),
-        auth: OpenAIAuth::ApiKey {
-            api_key: "sk-test".into(),
-        },
-        max_tokens: None,
-        temperature: None,
-        base_url: None,
-        reasoning_effort: None,
-        provider_settings: OpenAIApiSettings::default(),
-    };
-    let provider = OpenAIProvider::new(config);
-    assert!(provider.model_supports_tool_search());
-}
-
-#[test]
-fn tool_search_disabled_for_codex_models() {
-    let provider = OpenAIProvider::new(test_config());
-    assert!(!provider.model_supports_tool_search());
-}
-
 // ── resolve_reasoning_effort ──────────────────────────────────────
 
 #[test]

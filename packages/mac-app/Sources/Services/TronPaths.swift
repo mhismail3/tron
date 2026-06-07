@@ -163,8 +163,8 @@ enum TronPaths {
     }
     /// User-facing display name for the agent in System Settings, Activity
     /// Monitor, and the Dock (if it ever surfaced). Kept separate from the
-    /// wrapper's "Tron" name so the three permission panes never show two
-    /// entries titled "Tron".
+    /// wrapper's "Tron" name so System Settings never shows two entries
+    /// titled "Tron".
     static var agentDisplayName: String {
         agentDisplayName(environment: ProcessInfo.processInfo.environment)
     }

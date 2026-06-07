@@ -48,9 +48,9 @@ final class WizardState {
     /// every time the view becomes active.
     var permissionStatuses: [Permission: PermissionStatus] = [:]
 
-    /// The helper is restarted once after all three TCC rows are
-    /// enabled so grants that macOS applies on next launch are visible
-    /// to the running server before pairing.
+    /// The helper is restarted once after Full Disk Access is enabled
+    /// so grants that macOS applies on next launch are visible to the
+    /// running server before pairing.
     var permissionsServerRestarted = false
 
     /// True while the Permissions Continue button is performing that

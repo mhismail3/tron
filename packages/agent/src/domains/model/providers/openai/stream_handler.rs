@@ -16,6 +16,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
 use crate::domains::model::providers::stream_common::StreamAccumulator;
 use crate::domains::model::providers::{
     CapabilityArgumentParseError, CapabilityCallContext, parse_capability_call_arguments,
@@ -23,9 +24,6 @@ use crate::domains::model::providers::{
 use crate::shared::content::AssistantContent;
 use crate::shared::events::{AssistantMessage, StreamEvent};
 use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
-use tracing::debug;
-
-use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
 
 /// State for tracking accumulated stream content.
 #[derive(Clone, Debug)]
@@ -81,18 +79,6 @@ pub fn process_stream_event(
             handle_reasoning_summary_text_delta(event, state)
         }
         SseEventType::FunctionCallArgsDelta => handle_function_call_args_delta(event, state),
-        SseEventType::ToolSearchCallSearching => {
-            debug!("ModelCapability search: model is searching for relevant tools");
-            Vec::new()
-        }
-        SseEventType::ToolSearchCallCompleted => {
-            debug!("ModelCapability search: completed — selected capabilities loaded into context");
-            Vec::new()
-        }
-        SseEventType::ComputerCallCompleted => {
-            debug!("Computer use event received but not implemented — ignoring");
-            Vec::new()
-        }
         SseEventType::Completed => handle_response_completed(event, state),
         SseEventType::Unknown => Vec::new(),
     }
@@ -368,12 +354,6 @@ fn merge_completed_output_items(
             OutputItemType::Message => merge_message_item(item, state),
             OutputItemType::Reasoning => merge_reasoning_item(item, state, events),
             OutputItemType::FunctionCall => merge_function_call_item(item, state),
-            OutputItemType::ToolSearchCall | OutputItemType::ToolSearchOutput => {
-                debug!(item_type = ?item.item_type, "ModelCapability search output item — transparent");
-            }
-            OutputItemType::ComputerCall => {
-                debug!("Computer call output item — not implemented");
-            }
             OutputItemType::Unknown => {}
         }
     }

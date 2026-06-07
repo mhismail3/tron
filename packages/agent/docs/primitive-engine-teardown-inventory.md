@@ -49,6 +49,12 @@ current retained domain roots are `agent`, `auth`, `blob`, `capability`,
 `system`. Rows for deleted product domains remain here only as deletion evidence
 and PET-11 re-audit targets.
 
+PET-11's interim hosted-tool/computer-use checkpoint further removed the
+OpenAI hosted search/computer-call DTO and stream variants, stale iOS capability
+catalog DTO/rendering support, and Mac Screen Recording/Accessibility onboarding
+gates. Remaining PET-11 successor rows below still need final retain/delete
+proof before closeout.
+
 | Domain | Class | Teardown decision |
 |--------|-------|-------------------|
 | `agent` | retain | Keep the minimal turn runner, prompt entry, queue handoff, and crash recovery needed for the provider loop. Delete Work dashboard, run-goal product flows, subagent product policy, worker guide projections, and fixed autonomy DTOs. |
@@ -231,7 +237,7 @@ runtime output. These package roots are the top-level source cleanup map.
 | `AgentControl` | delete | Fixed product control surface. |
 | `Attachments` | successor | Retain only if PET-11 proves the files are bare prompt-input infrastructure. Any product attachment workflow must be deleted or recreated later as agent-authored runtime state. |
 | `AuditDetails` | successor | Delete fixed audit/worker-pack views. Reuse only generic dynamic-surface rendering if it is decoupled from product targets. |
-| `Capabilities` | successor | Retained files must be generic invocation/runtime evidence for the one `execute` primitive. PET-11 must delete fixed capability catalog, display, process, or product-specific sheets that are not required by the shell. |
+| `Capabilities` | successor | Retained files must be generic invocation/runtime evidence for the one `execute` primitive. PET-11's interim checkpoint deleted catalog/status/search/inspect/recipe/program/audit/policy DTOs and product-specific result summaries; remaining capability identity/event/display fields still need final retain/delete proof. |
 | `Chat` | retain | Primary prompt and assistant output shell. |
 | `Components` | retain | Shared generic UI components only. |
 | `DynamicSurfaces` | retain | Generic runtime surface rendering for agent-authored UI state. PET-11 must verify no fixed product target leaks through this retained renderer. |

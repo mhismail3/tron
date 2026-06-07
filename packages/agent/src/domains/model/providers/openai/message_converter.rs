@@ -61,10 +61,7 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
 /// tool-search/deferred loading is intentionally ignored so provider requests
 /// match the single checked-in `execute` surface.
 #[must_use]
-pub fn convert_tools_v2(
-    capabilities: &[ModelCapability],
-    _enable_tool_search: bool,
-) -> Vec<ResponsesToolEntry> {
+pub fn convert_tools_v2(capabilities: &[ModelCapability]) -> Vec<ResponsesToolEntry> {
     capabilities
         .iter()
         .map(|t| {
@@ -74,7 +71,6 @@ pub fn convert_tools_v2(
                 name: t.name.clone(),
                 description: t.description.clone(),
                 parameters: params,
-                defer_loading: None,
             }
         })
         .collect()
@@ -707,81 +703,51 @@ mod tests {
     // ── convert_tools_v2 ────────────────────────────────────────────
 
     #[test]
-    fn convert_tools_v2_without_tool_search() {
+    fn convert_tools_v2_exports_function_entries() {
         use crate::domains::model::providers::openai::types::ResponsesToolEntry;
         let capabilities = vec![
             make_tool("execute", "Run commands"),
             make_tool("inspect", "Read file"),
         ];
-        let result = convert_tools_v2(&capabilities, false);
+        let result = convert_tools_v2(&capabilities);
 
         assert_eq!(result.len(), 2);
         for entry in &result {
             match entry {
-                ResponsesToolEntry::Function { defer_loading, .. } => {
-                    assert!(defer_loading.is_none());
-                }
-                _ => panic!("expected Function entry"),
+                ResponsesToolEntry::Function { .. } => {}
             }
         }
     }
 
     #[test]
-    fn convert_tools_v2_never_exports_hosted_tool_search_for_primitive_branch() {
+    fn convert_tools_v2_exports_single_execute_function_for_primitive_branch() {
         use crate::domains::model::providers::openai::types::ResponsesToolEntry;
         let capabilities = vec![make_tool("execute", "Run primitive host operations")];
-        let result = convert_tools_v2(&capabilities, true);
+        let result = convert_tools_v2(&capabilities);
 
         assert_eq!(result.len(), 1);
         match &result[0] {
-            ResponsesToolEntry::Function {
-                name,
-                defer_loading,
-                ..
-            } => {
+            ResponsesToolEntry::Function { name, .. } => {
                 assert_eq!(name, "execute");
-                assert!(defer_loading.is_none());
-            }
-            other => panic!("expected execute function entry, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn convert_tools_v2_with_tool_search() {
-        use crate::domains::model::providers::openai::types::ResponsesToolEntry;
-        let capabilities = vec![
-            make_tool("execute", "Run commands"),
-            make_tool("inspect", "Read file"),
-        ];
-        let result = convert_tools_v2(&capabilities, true);
-
-        assert_eq!(result.len(), 2);
-        for entry in &result {
-            match entry {
-                ResponsesToolEntry::Function { defer_loading, .. } => {
-                    assert!(defer_loading.is_none());
-                }
-                _ => panic!("expected Function entry"),
             }
         }
     }
 
     #[test]
-    fn convert_tools_v2_tool_search_json_shape() {
+    fn convert_tools_v2_json_shape() {
         let capabilities = vec![make_tool("execute", "Run commands")];
-        let result = convert_tools_v2(&capabilities, true);
+        let result = convert_tools_v2(&capabilities);
         let json = serde_json::to_value(&result).unwrap();
         let arr = json.as_array().unwrap();
 
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["type"], "function");
-        assert!(arr[0].get("defer_loading").is_none());
         assert_eq!(arr[0]["name"], "execute");
     }
 
     #[test]
-    fn convert_tools_v2_empty_tools_with_search() {
-        let result = convert_tools_v2(&[], true);
+    fn convert_tools_v2_empty_tools() {
+        let result = convert_tools_v2(&[]);
         assert!(result.is_empty());
     }
 

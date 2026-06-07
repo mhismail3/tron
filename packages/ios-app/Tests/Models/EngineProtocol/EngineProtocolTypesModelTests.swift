@@ -321,8 +321,6 @@ struct ModelInfoStrictDecodeTests {
         payload["defaultReasoningLevel"] = "medium"
         payload["supportsStreaming"] = true
         payload["supportsCapabilityPrimitives"] = true
-        payload["supportsCapabilitySearch"] = false
-        payload["supportsComputerUse"] = false
         payload["supportsVerbosity"] = true
         payload["defaultVerbosity"] = "low"
         payload["replacementModel"] = "gpt-5.5"
@@ -338,8 +336,6 @@ struct ModelInfoStrictDecodeTests {
         #expect(m.reasoningLevels == ["minimal", "low", "medium", "high", "xhigh"])
         #expect(m.supportsStreaming == true)
         #expect(m.supportsCapabilityPrimitives == true)
-        #expect(m.supportsCapabilitySearch == false)
-        #expect(m.supportsComputerUse == false)
         #expect(m.supportsVerbosity == true)
         #expect(m.defaultVerbosity == "low")
         #expect(m.isHidden == false)

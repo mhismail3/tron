@@ -143,12 +143,10 @@ struct InstallPipelineStageOrderingTests {
 
 @Suite("Permission ordering")
 struct PermissionOrderingTests {
-    @Test("FDA, screen recording, accessibility")
+    @Test("only FDA is required")
     func canonicalOrder() {
         #expect(Permission.allCases == [
             .fullDiskAccess,
-            .screenRecording,
-            .accessibility,
         ])
     }
 }
@@ -166,32 +164,33 @@ struct WizardStepPreferredHeightTests {
         }
     }
 
-    @Test("Permissions is the tallest step (three cards)")
-    func permissionsIsTallest() {
+    @Test("Install is the tallest step")
+    func installIsTallest() {
         let heights = WizardStep.allCases.map { $0.preferredHeight }
         let max = heights.max() ?? 0
-        #expect(WizardStep.permissions.preferredHeight == max,
-                "Permissions must be tallest so all three cards fit without scrolling")
+        #expect(WizardStep.install.preferredHeight == max,
+                "Install must be tallest so the explicit confirmation fits without scrolling")
     }
 
     @Test("opening gate steps share one lower-height band")
     func openingStepsShareLowerHeightBand() {
         let gateHeight = WizardStep.welcome.preferredHeight
         #expect(WizardStep.tailscale.preferredHeight == gateHeight)
+        #expect(WizardStep.permissions.preferredHeight == gateHeight)
         #expect(gateHeight < WizardLayout.height)
     }
 
-    @Test("install step leaves room for explicit confirmation without becoming tallest")
+    @Test("install step leaves room for explicit confirmation")
     func installStepConfirmationBand() {
         #expect(WizardStep.install.preferredHeight > WizardStep.tailscale.preferredHeight)
-        #expect(WizardStep.install.preferredHeight < WizardStep.permissions.preferredHeight)
+        #expect(WizardStep.install.preferredHeight == WizardLayout.height)
     }
 
     @Test("wizard canvas is fixed to the tallest step height")
     func wizardCanvasUsesTallestStepHeight() throws {
         let tallestStepHeight = try #require(WizardStep.allCases.map { $0.preferredHeight }.max())
         #expect(WizardLayout.height == tallestStepHeight)
-        #expect(WizardLayout.height == WizardStep.permissions.preferredHeight)
+        #expect(WizardLayout.height == WizardStep.install.preferredHeight)
 
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
@@ -437,7 +436,7 @@ struct WizardVisualLayoutTests {
         #expect(install.contains("alignment: .topLeading"))
     }
 
-    @Test("permissions page has no Required badges and aligns the re-check link")
+    @Test("permissions page has one FDA row and aligns the re-check link")
     func permissionsPageRemovesBadgesAndAlignsRecheck() throws {
         #expect(PermissionsStepLayout.recheckLeadingPadding > 0)
         #expect(PermissionsStepLayout.cardHorizontalPadding < WizardCardLayout.horizontalInset)
@@ -458,8 +457,6 @@ struct WizardVisualLayoutTests {
 
         #expect(!source.contains("Required"))
         #expect(source.contains("Lets Tron Server read and edit files."))
-        #expect(source.contains("Lets Tron Server see your screen."))
-        #expect(source.contains("Lets Tron Server click and type for you."))
         #expect(source.contains("permissionAppDisplayName"))
         #expect(!source.contains("setup.serverHelperBundle"))
         #expect(!source.contains("system.probePermissions"))
@@ -467,8 +464,6 @@ struct WizardVisualLayoutTests {
         #expect(!source.contains("setup.requestWrapperPermission"))
         #expect(source.contains("setup.probePermissions()"))
         #expect(source.contains("Enable \\\"\\(appName)\\\" in Full Disk Access."))
-        #expect(source.contains("Drag the icon into the list if \\\"\\(appName)\\\" is missing."))
-        #expect(source.contains("Enable \\\"\\(appName)\\\" in Accessibility."))
         #expect(source.contains("horizontalPadding: PermissionsStepLayout.cardHorizontalPadding"))
         #expect(source.contains("iconColumnWidth: PermissionsStepLayout.statusIconColumnWidth"))
         #expect(source.contains("iconTextSpacing: PermissionsStepLayout.iconTextSpacing"))
@@ -498,10 +493,9 @@ struct WizardVisualLayoutTests {
         #expect(source.contains("status == .probeUnavailable"))
         #expect(!source.contains("refreshAll(kickstart"))
         #expect(!source.contains("Restarting Tron Server"))
-        #expect(source.contains("if permission == .screenRecording"))
-        #expect(source.contains("ScreenRecordingAppShortcut"))
-        #expect(source.contains("NSDraggingItem"))
-        #expect(source.contains("NSFilenamesPboardType"))
+        #expect(!source.contains("ScreenRecordingAppShortcut"))
+        #expect(!source.contains("NSDraggingItem"))
+        #expect(!source.contains("NSFilenamesPboardType"))
         #expect(!source.contains("CGRequestScreenCaptureAccess"))
         #expect(!source.contains("AXIsProcessTrustedWithOptions"))
         #expect(!source.contains("MacPermissionRequester"))
@@ -590,8 +584,8 @@ struct WizardVisualLayoutTests {
         #expect(!source.contains("AXIsProcessTrustedWithOptions"))
     }
 
-    @Test("only Screen Recording exposes a draggable app shortcut")
-    func onlyScreenRecordingExposesDraggableAppShortcut() throws {
+    @Test("permissions page has no draggable app shortcut")
+    func permissionsPageHasNoDraggableAppShortcut() throws {
         let packageRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -600,15 +594,14 @@ struct WizardVisualLayoutTests {
         let source = try String(contentsOf: step, encoding: .utf8)
 
         #expect(!source.contains("PermissionAppShortcut"))
-        #expect(source.contains("if permission == .screenRecording"))
-        #expect(source.contains("ScreenRecordingAppShortcut"))
-        #expect(source.contains("NSViewRepresentable"))
+        #expect(!source.contains("ScreenRecordingAppShortcut"))
+        #expect(!source.contains("NSViewRepresentable"))
         #expect(!source.contains("DraggableAppShortcutView"))
-        #expect(source.contains("appShortcutHitSize"))
-        #expect(source.contains("mouseDownCanMoveWindow"))
-        #expect(source.contains("NSDraggingItem"))
-        #expect(source.contains("NSPasteboardItem"))
-        #expect(source.contains("NSFilenamesPboardType"))
+        #expect(!source.contains("appShortcutHitSize"))
+        #expect(!source.contains("mouseDownCanMoveWindow"))
+        #expect(!source.contains("NSDraggingItem"))
+        #expect(!source.contains("NSPasteboardItem"))
+        #expect(!source.contains("NSFilenamesPboardType"))
         #expect(!source.contains("activateFileViewerSelecting"))
     }
 

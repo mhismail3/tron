@@ -43,10 +43,10 @@ struct EnvironmentSetup: Sendable {
     /// returns at least one address.
     var probeTailscale: @Sendable () async -> TailscaleStatus
 
-    /// Probes all three wizard permissions from the wrapper process.
+    /// Probes wizard permissions from the wrapper process.
     /// The LaunchAgent associates the helper with the wrapper bundle IDs,
-    /// so macOS presents and evaluates these TCC rows under `Tron.app`
-    /// / `TronMac.app`. Keeping probes here avoids stale helper rows in
+    /// so macOS presents and evaluates the TCC row under `Tron.app`
+    /// / `TronMac.app`. Keeping probes here avoids a stale helper row in
     /// System Settings and makes Re-check instantaneous.
     var probePermissions: @Sendable () async -> [Permission: PermissionStatus]
 

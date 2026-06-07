@@ -576,115 +576,26 @@ fn tool_entry_function_serde() {
         name: "execute".into(),
         description: "Run commands".into(),
         parameters: json!({"type": "object"}),
-        defer_loading: None,
     };
     let json = serde_json::to_value(&entry).unwrap();
     assert_eq!(json["type"], "function");
     assert_eq!(json["name"], "execute");
-    assert!(json.get("defer_loading").is_none());
 
     let back: ResponsesToolEntry = serde_json::from_value(json).unwrap();
     assert!(matches!(back, ResponsesToolEntry::Function { .. }));
 }
 
 #[test]
-fn tool_entry_function_with_defer_loading() {
-    let entry = ResponsesToolEntry::Function {
-        name: "read_file".into(),
-        description: "Read a file".into(),
-        parameters: json!({"type": "object"}),
-        defer_loading: Some(true),
-    };
-    let json = serde_json::to_value(&entry).unwrap();
-    assert_eq!(json["defer_loading"], true);
-}
-
-#[test]
-fn tool_entry_tool_search_serde() {
-    let entry = ResponsesToolEntry::ToolSearch {};
-    let json = serde_json::to_value(&entry).unwrap();
-    assert_eq!(json["type"], "tool_search");
-
-    let back: ResponsesToolEntry = serde_json::from_value(json).unwrap();
-    assert!(matches!(back, ResponsesToolEntry::ToolSearch {}));
-}
-
-#[test]
-fn tool_entry_computer_serde() {
-    let entry = ResponsesToolEntry::Computer {
-        viewport_width: Some(1280),
-        viewport_height: Some(720),
-    };
-    let json = serde_json::to_value(&entry).unwrap();
-    assert_eq!(json["type"], "computer");
-    assert_eq!(json["viewport_width"], 1280);
-
-    let back: ResponsesToolEntry = serde_json::from_value(json).unwrap();
-    assert!(matches!(back, ResponsesToolEntry::Computer { .. }));
-}
-
-#[test]
-fn tool_entry_computer_minimal_serde() {
-    let entry = ResponsesToolEntry::Computer {
-        viewport_width: None,
-        viewport_height: None,
-    };
-    let json = serde_json::to_value(&entry).unwrap();
-    assert_eq!(json["type"], "computer");
-    assert!(json.get("viewport_width").is_none());
-}
-
-#[test]
 fn tool_entry_serde_roundtrip_all_variants() {
-    let entries = vec![
-        ResponsesToolEntry::Function {
-            name: "execute".into(),
-            description: "Run".into(),
-            parameters: json!({}),
-            defer_loading: Some(true),
-        },
-        ResponsesToolEntry::ToolSearch {},
-        ResponsesToolEntry::Computer {
-            viewport_width: Some(1024),
-            viewport_height: Some(768),
-        },
-    ];
+    let entries = vec![ResponsesToolEntry::Function {
+        name: "execute".into(),
+        description: "Run".into(),
+        parameters: json!({}),
+    }];
     let json = serde_json::to_string(&entries).unwrap();
     let back: Vec<ResponsesToolEntry> = serde_json::from_str(&json).unwrap();
-    assert_eq!(back.len(), 3);
+    assert_eq!(back.len(), 1);
     assert!(matches!(&back[0], ResponsesToolEntry::Function { .. }));
-    assert!(matches!(&back[1], ResponsesToolEntry::ToolSearch {}));
-    assert!(matches!(&back[2], ResponsesToolEntry::Computer { .. }));
-}
-
-// ── SSE event types for tool search ──────────────────────────────
-
-#[test]
-fn sse_tool_search_event_deserializes() {
-    let json = json!({ "type": "response.tool_search_call.searching" });
-    let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
-    assert_eq!(event.event_type, SseEventType::ToolSearchCallSearching);
-}
-
-#[test]
-fn sse_tool_search_completed_deserializes() {
-    let json = json!({ "type": "response.tool_search_call.completed" });
-    let event: ResponsesSseEvent = serde_json::from_value(json).unwrap();
-    assert_eq!(event.event_type, SseEventType::ToolSearchCallCompleted);
-}
-
-#[test]
-fn output_item_type_tool_search_call() {
-    let json = json!({ "type": "tool_search_call" });
-    let item: ResponsesOutputItem = serde_json::from_value(json).unwrap();
-    assert_eq!(item.item_type, OutputItemType::ToolSearchCall);
-}
-
-#[test]
-fn output_item_type_computer_call() {
-    let json = json!({ "type": "computer_call" });
-    let item: ResponsesOutputItem = serde_json::from_value(json).unwrap();
-    assert_eq!(item.item_type, OutputItemType::ComputerCall);
 }
 
 #[test]

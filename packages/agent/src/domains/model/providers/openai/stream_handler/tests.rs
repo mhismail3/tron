@@ -632,41 +632,6 @@ fn duplicate_output_item_added_emits_toolcall_start_once() {
     assert_eq!(state.capability_invocations.len(), 1);
 }
 
-// ── ModelCapability search events ────────────────────────────────────────
-
-#[test]
-fn tool_search_searching_returns_empty() {
-    let mut state = create_stream_state();
-    let event = ResponsesSseEvent {
-        event_type: SseEventType::ToolSearchCallSearching,
-        ..Default::default()
-    };
-    let events = process_stream_event(&event, &mut state);
-    assert!(events.is_empty());
-}
-
-#[test]
-fn tool_search_completed_returns_empty() {
-    let mut state = create_stream_state();
-    let event = ResponsesSseEvent {
-        event_type: SseEventType::ToolSearchCallCompleted,
-        ..Default::default()
-    };
-    let events = process_stream_event(&event, &mut state);
-    assert!(events.is_empty());
-}
-
-#[test]
-fn computer_call_completed_returns_empty() {
-    let mut state = create_stream_state();
-    let event = ResponsesSseEvent {
-        event_type: SseEventType::ComputerCallCompleted,
-        ..Default::default()
-    };
-    let events = process_stream_event(&event, &mut state);
-    assert!(events.is_empty());
-}
-
 // ── Unknown events ─────────────────────────────────────────────
 
 #[test]

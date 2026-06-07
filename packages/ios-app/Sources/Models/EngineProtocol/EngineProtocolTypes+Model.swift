@@ -63,12 +63,9 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
     let defaultVerbosity: String?
     /// Whether the active OpenAI profile supports streaming Responses.
     let supportsStreaming: Bool?
-    /// Whether the active profile supports provider-native capability invocation.
+    /// Whether the active profile supports provider-native function invocation
+    /// for the single primitive `execute` surface.
     let supportsCapabilityPrimitives: Bool?
-    /// Whether the active OpenAI profile supports hosted capability search.
-    let supportsCapabilitySearch: Bool?
-    /// Whether the active OpenAI profile supports computer use.
-    let supportsComputerUse: Bool?
     /// For Gemini models: default thinking level
     let thinkingLevel: String?
     /// For Gemini models: available thinking levels
@@ -113,7 +110,7 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         case retirementDate = "deprecationDate"
         case supportsReasoning, reasoningLevels, defaultReasoningLevel
         case supportsVerbosity, defaultVerbosity
-        case supportsStreaming, supportsCapabilityPrimitives, supportsCapabilitySearch, supportsComputerUse
+        case supportsStreaming, supportsCapabilityPrimitives
         case thinkingLevel, supportedThinkingLevels
         case family, maxOutput, recommended, releaseDate, sortOrder
         case providerDisplayName, providerSortOrder
@@ -155,8 +152,6 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         defaultVerbosity: String? = nil,
         supportsStreaming: Bool? = nil,
         supportsCapabilityPrimitives: Bool? = nil,
-        supportsCapabilitySearch: Bool? = nil,
-        supportsComputerUse: Bool? = nil,
         thinkingLevel: String? = nil,
         supportedThinkingLevels: [String]? = nil,
         family: String? = nil,
@@ -198,8 +193,6 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
         self.defaultVerbosity = defaultVerbosity
         self.supportsStreaming = supportsStreaming
         self.supportsCapabilityPrimitives = supportsCapabilityPrimitives
-        self.supportsCapabilitySearch = supportsCapabilitySearch
-        self.supportsComputerUse = supportsComputerUse
         self.thinkingLevel = thinkingLevel
         self.supportedThinkingLevels = supportedThinkingLevels
         self.family = family

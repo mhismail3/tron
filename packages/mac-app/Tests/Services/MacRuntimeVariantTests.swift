@@ -63,13 +63,6 @@ struct MacCommandLineModeTests {
         #expect(MacCommandLineMode.parse(["Tron", "--tron-uninstall-and-quit"]) == .uninstallAndQuit)
         #expect(MacCommandLineMode.parse([
             "Tron",
-            "--tron-probe-screen-recording-and-quit",
-            "--tron-probe-result-path",
-            "/tmp/result",
-        ]) == .probeScreenRecordingAndQuit(resultPath: "/tmp/result"))
-        #expect(MacCommandLineMode.probeScreenRecordingAndQuit(resultPath: nil).isCommand)
-        #expect(MacCommandLineMode.parse([
-            "Tron",
             "--tron-start-server-and-quit",
             "--tron-uninstall-and-quit",
         ]) == .uninstallAndQuit)

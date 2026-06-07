@@ -124,7 +124,7 @@ user's normal dashboard or jump the visible Simulator without an explicit flag.
 The completed post-100 UI/UX scorecard lives at
 `packages/agent/docs/post-100-operating-conditions-scorecard.md`; use that
 scenario ledger as the archived iPhone/mac evidence model for owner
-classification and Computer Use confirmation.
+classification and cross-client confirmation.
 The completed recent-gap campaign lives at
 `packages/agent/docs/post-scorecard-gap-hardening-scorecard.md`. Its iPad rows
 use `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md` for the

@@ -528,7 +528,6 @@
 		D34FC8500E2EDA84DC3FE10E /* EngineProtocolTypes+Settings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76A9D3B44125D34A1C717F36 /* EngineProtocolTypes+Settings.swift */; };
 		D3875139A83430A017C45B11 /* StreamSheetView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCCFCFF3D2413D39709ADFF3 /* StreamSheetView.swift */; };
 		D3C21C8ED3D566A32B9806D2 /* ManageProcessDetailSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFB3D9AC996DDF0DA6093252 /* ManageProcessDetailSheet.swift */; };
-		D648AB0CA994754B4B95CAB2 /* CapabilityDTOTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8E9DFC08932E47A40AF6EC5 /* CapabilityDTOTests.swift */; };
 		D87A2FDE217076C80382BF8F /* ProtocolConstants.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44D12A2E23AC38038A74B661 /* ProtocolConstants.swift */; };
 		D87AE30BAC6E6924B0C7C507 /* EventStoreManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F2EBC0031AC3D96E60D41D /* EventStoreManagerTests.swift */; };
 		D89B68A67C2E6BF7B273951E /* MarkdownBlockParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A6C7DE4E24E7749673B343F /* MarkdownBlockParser.swift */; };
@@ -1228,7 +1227,6 @@
 		E758218431728DFD5FF139DE /* ForkNavigationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ForkNavigationTests.swift; sourceTree = "<group>"; };
 		E77B9AF0AC517199CE916844 /* NewSessionFlowComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionFlowComponents.swift; sourceTree = "<group>"; };
 		E8402228A0E801A01CDF39FB /* CompactionPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactionPlugin.swift; sourceTree = "<group>"; };
-		E8E9DFC08932E47A40AF6EC5 /* CapabilityDTOTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityDTOTests.swift; sourceTree = "<group>"; };
 		E9A5CB888BDEE9CA027F9C39 /* EngineProtocolTypes+Reconstruct.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineProtocolTypes+Reconstruct.swift"; sourceTree = "<group>"; };
 		E9AFDD42B83DB990FC1C14C7 /* StreamingRecoverySnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingRecoverySnapshot.swift; sourceTree = "<group>"; };
 		EB4490089E98C4FEF950443B /* CapabilityInvocationOutputPluginTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationOutputPluginTests.swift; sourceTree = "<group>"; };
@@ -1391,7 +1389,6 @@
 				C0883CAFDE697DC5DE1E0A91 /* Core */,
 				838E07EF0C126A3F956A9AF7 /* Extensions */,
 				F14CB99F646401E83BBAD7A1 /* Infrastructure */,
-				1946B05F96F17EAF65905AFA /* Mocks */,
 				F9E92A00D886754F461BBBE6 /* Models */,
 				713E6B3100E566A6E272FD1B /* Navigation */,
 				EE474731D678A9518AA558EB /* Observability */,
@@ -1439,13 +1436,6 @@
 				2957C1DC8542051C6BF75E63 /* TurnStartPluginTests.swift */,
 			);
 			path = Plugins;
-			sourceTree = "<group>";
-		};
-		1946B05F96F17EAF65905AFA /* Mocks */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Mocks;
 			sourceTree = "<group>";
 		};
 		1E03404AF5055605B852F8E2 /* Parsing */ = {
@@ -1881,7 +1871,6 @@
 				6C6841F90EE852E5911F5AED /* SessionRefreshServiceTests.swift */,
 				93B246F168C6810A4234865D /* SettingsClientTests.swift */,
 				D5339E77178DDD0EE4D2A6AF /* WebSocketAuthTests.swift */,
-				D19A778941AE083382CB245D /* Audio */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -2116,7 +2105,6 @@
 			isa = PBXGroup;
 			children = (
 				84E5AE7C913863A2C97EEB32 /* AnyCodableExtensionsTests.swift */,
-				E8E9DFC08932E47A40AF6EC5 /* CapabilityDTOTests.swift */,
 				5B607421A7705DFFA7CB3533 /* CapabilitySchemaFormTests.swift */,
 				74239985866693A2818864B1 /* EngineProtocolTypesAuthTests.swift */,
 				F39463E182167FE9CCE126F5 /* EngineProtocolTypesModelTests.swift */,
@@ -2554,13 +2542,6 @@
 				780E0D57C56571700CDE1447 /* DependencyProviding.swift */,
 			);
 			path = DI;
-			sourceTree = "<group>";
-		};
-		D19A778941AE083382CB245D /* Audio */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Audio;
 			sourceTree = "<group>";
 		};
 		D24F740FADE5892AC59EFE0A /* Theme */ = {
@@ -3428,7 +3409,6 @@
 				B44EEAA44E8B73C8CD869910 /* BlobClientTests.swift in Sources */,
 				AB02084A1FDE696F8C867F08 /* CapabilityArgumentExtractorTests.swift in Sources */,
 				E9DAF5D4C59C2CEE77849300 /* CapabilityArgumentParserTests.swift in Sources */,
-				D648AB0CA994754B4B95CAB2 /* CapabilityDTOTests.swift in Sources */,
 				DF35C64DDF98FD476C0976F4 /* CapabilityErrorRenderingTests.swift in Sources */,
 				FF23E2D3982C419C712A5F7E /* CapabilityInvocationCompletedPluginTests.swift in Sources */,
 				CF56B8BFB6DF77BE2D6523D6 /* CapabilityInvocationCoordinatorTests.swift in Sources */,

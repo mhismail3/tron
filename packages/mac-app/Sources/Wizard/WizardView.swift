@@ -404,10 +404,9 @@ struct WizardShell<Content: View>: View {
         }
     }
 
-    /// Gate for the Permissions step's Continue button. All three
-    /// categories (FDA, Screen Recording, Accessibility) must be
-    /// granted, so we'd rather hold the wizard here than let the user
-    /// land on a half-working install.
+    /// Gate for the Permissions step's Continue button. Full Disk Access
+    /// must be granted before pairing so primitive file-backed execution
+    /// does not start from a half-working install.
     private var permissionsCanContinue: Bool {
         Permission.allCases.allSatisfy { permission in
             state.permissionStatuses[permission] == .granted
