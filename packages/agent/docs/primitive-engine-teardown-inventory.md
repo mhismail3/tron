@@ -296,9 +296,10 @@ server settings shape and iOS controls together.
 
 - PET-11 must audit retained iOS `Attachments`, `Capabilities`, `Process`,
   `SessionTree`, and `UserInteraction` source from first principles.
-- PET-11 must decide whether `session_drafts.skills_json`,
-  `EngineProtocolTypes+Repo.swift`, and `EngineProtocolTypes+Task.swift` are
-  true shell/session infrastructure or stale product DTO residue.
+- PET-11 decided that `session_drafts.skills_json` was stale product DTO
+  residue and deleted it from fresh iOS draft storage. PET-11 must still decide
+  whether `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift`
+  are true shell/session infrastructure or stale product DTO residue.
 - PET-11 must re-audit retained `capability_support`, `update.rs`, Mac update
   docs, local diagnostics/logging surfaces, and dynamic-surface rendering for
   hidden product policy.

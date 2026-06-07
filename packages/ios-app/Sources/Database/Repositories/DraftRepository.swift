@@ -29,8 +29,8 @@ final class DraftRepository: @unchecked Sendable {
         try await transport.withDB { db in
             let sql = """
                 INSERT OR REPLACE INTO session_drafts
-                (session_id, text, skills_json, attachment_metadata_json, updated_at)
-                VALUES (?, ?, ?, ?, ?)
+                (session_id, text, attachment_metadata_json, updated_at)
+                VALUES (?, ?, ?, ?)
             """
 
             var stmt: OpaquePointer?
@@ -41,9 +41,8 @@ final class DraftRepository: @unchecked Sendable {
 
             sqlite3_bind_text(stmt, 1, sessionId, -1, SQLITE_TRANSIENT_DESTRUCTOR)
             sqlite3_bind_text(stmt, 2, text, -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            sqlite3_bind_text(stmt, 3, "[]", -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            sqlite3_bind_text(stmt, 4, String(data: attachmentJson, encoding: .utf8), -1, SQLITE_TRANSIENT_DESTRUCTOR)
-            sqlite3_bind_text(stmt, 5, updatedAt, -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_text(stmt, 3, String(data: attachmentJson, encoding: .utf8), -1, SQLITE_TRANSIENT_DESTRUCTOR)
+            sqlite3_bind_text(stmt, 4, updatedAt, -1, SQLITE_TRANSIENT_DESTRUCTOR)
 
             guard sqlite3_step(stmt) == SQLITE_DONE else {
                 throw EventDatabaseError.insertFailed(sqliteErrorMessage(db))

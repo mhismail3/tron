@@ -602,6 +602,43 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Draft persistence has no skills residue")
+    func testDraftPersistenceHasNoSkillsResidue() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let checkedPaths = [
+            "Sources/Database",
+            "Sources/Services/DraftStore.swift",
+            "Tests/Infrastructure",
+            "Tests/Services/DraftStoreTests.swift",
+        ]
+        let forbidden = [
+            "skills" + "_json",
+            "spells" + "_json",
+            "selected" + "Skills",
+            "Selected" + "Skill",
+        ]
+
+        for relativePath in checkedPaths {
+            let url = iosRoot.appendingPathComponent(relativePath)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            let files: [URL]
+            if (try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                files = try swiftFiles(in: url)
+            } else {
+                files = [url]
+            }
+            for file in files where file.lastPathComponent != "SourceGuardTests.swift" {
+                let source = try String(contentsOf: file, encoding: .utf8)
+                for token in forbidden {
+                    #expect(!source.contains(token), "\(token) must stay deleted from draft persistence path: \(file.path)")
+                }
+            }
+        }
+    }
+
     @Test("iOS runtime contract is iOS 26 only")
     func testIOSRuntimeContractIsIOS26Only() throws {
         let fileURL = URL(fileURLWithPath: #filePath)

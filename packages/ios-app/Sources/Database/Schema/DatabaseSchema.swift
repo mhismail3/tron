@@ -26,7 +26,6 @@ enum DatabaseSchema {
         try runSessionsMigrations(db: db)
         try createSyncStateTable(db: db)
         try createDraftsTable(db: db)
-        try runDraftsMigrations(db: db)
 
         try setUserVersion(db: db, version)
     }
@@ -227,18 +226,10 @@ enum DatabaseSchema {
             CREATE TABLE IF NOT EXISTS session_drafts (
                 session_id TEXT PRIMARY KEY,
                 text TEXT NOT NULL DEFAULT '',
-                skills_json TEXT NOT NULL DEFAULT '[]',
                 attachment_metadata_json TEXT NOT NULL DEFAULT '[]',
                 updated_at TEXT NOT NULL
             )
         """)
-    }
-
-    private static func runDraftsMigrations(db: OpaquePointer?) throws {
-        // Migration: Remove spells_json (spells feature removed in schema v10)
-        if try columnExists(table: "session_drafts", column: "spells_json", db: db) {
-            try execute(db: db, "ALTER TABLE session_drafts DROP COLUMN spells_json")
-        }
     }
 
     // MARK: - Helpers

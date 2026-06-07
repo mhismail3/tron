@@ -209,8 +209,8 @@ final class DraftRepositoryTests: XCTestCase {
     func testLoadDraft_corruptAttachmentMetadataJson_returnsNil() async throws {
         // Manually insert a row with corrupt JSON
         let sql = """
-            INSERT INTO session_drafts (session_id, text, skills_json, attachment_metadata_json, updated_at)
-            VALUES ('corrupt', 'text', '[]', '{NOT VALID JSON}', '2026-04-03T00:00:00Z')
+            INSERT INTO session_drafts (session_id, text, attachment_metadata_json, updated_at)
+            VALUES ('corrupt', 'text', '{NOT VALID JSON}', '2026-04-03T00:00:00Z')
         """
         try await database.withDB { db in
             guard sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK else {
@@ -224,20 +224,56 @@ final class DraftRepositoryTests: XCTestCase {
 
     // MARK: - Schema migration regression guards
 
-    func testFreshDatabase_noSpellsJsonColumn() async throws {
-        let exists = try await database.withDB { db in
-            try DatabaseSchema.columnExists(table: "session_drafts", column: "spells_json", db: db)
+    func testFreshDatabase_hasNoDraftSkillColumns() async throws {
+        let columns = try await withFreshDatabase { freshDatabase in
+            try await draftColumns(in: freshDatabase)
         }
-        XCTAssertFalse(exists)
+        XCTAssertFalse(columns.contains("skills" + "_json"))
+        XCTAssertFalse(columns.contains("spells" + "_json"))
     }
 
     func testMigration_idempotent_runsTwiceWithoutError() async throws {
+        let columns = try await withFreshDatabase { freshDatabase in
+            try await freshDatabase.withDB { db in
+                try DatabaseSchema.createTables(db: db)
+            }
+            return try await draftColumns(in: freshDatabase)
+        }
+        XCTAssertEqual(columns, ["session_id", "text", "attachment_metadata_json", "updated_at"])
+    }
+
+    private func withFreshDatabase<T>(_ body: (EventDatabase) async throws -> T) async throws -> T {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let freshDatabase = EventDatabase(temporaryCachePath: directory.appendingPathComponent("drafts.db").path)
+        try await freshDatabase.initialize()
+
+        do {
+            let result = try await body(freshDatabase)
+            await freshDatabase.close()
+            try? FileManager.default.removeItem(at: directory)
+            return result
+        } catch {
+            await freshDatabase.close()
+            try? FileManager.default.removeItem(at: directory)
+            throw error
+        }
+    }
+
+    private func draftColumns(in database: EventDatabase) async throws -> [String] {
         try await database.withDB { db in
-            try DatabaseSchema.createTables(db: db)
+            var stmt: OpaquePointer?
+            defer { sqlite3_finalize(stmt) }
+
+            guard sqlite3_prepare_v2(db, "PRAGMA table_info(session_drafts)", -1, &stmt, nil) == SQLITE_OK else {
+                throw EventDatabaseError.prepareFailed(sqliteErrorMessage(db))
+            }
+
+            var columns: [String] = []
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                columns.append(String(cString: sqlite3_column_text(stmt, 1)))
+            }
+            return columns
         }
-        let exists = try await database.withDB { db in
-            try DatabaseSchema.columnExists(table: "session_drafts", column: "spells_json", db: db)
-        }
-        XCTAssertFalse(exists)
     }
 }
