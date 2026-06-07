@@ -26,7 +26,6 @@
 //!   isRunning: bool,
 //!   runId: string?,          // active run id, null when idle
 //!   metadata: {...},
-//!   pendingQueue: [...],     // queued messages not yet sent (pills on iOS)
 //!   approvalItems: [...],    // durable engine approvals scoped to session
 //! }
 //! ```
@@ -34,7 +33,6 @@
 use serde_json::{Value, json};
 use tracing::{debug, instrument};
 
-use crate::domains::agent::prompt_queue::PromptQueueService;
 use crate::domains::session::Deps;
 use crate::domains::session::event_store::sqlite::row_types::EventRow;
 use crate::shared::server::context::run_blocking_task;
@@ -108,8 +106,8 @@ impl SessionReconstructService {
         let sid = session_id.clone();
         let cursor_event_id = before_event_id.clone();
 
-        // 1. Load events and pending queue from DB (blocking — SQLite)
-        let (events, has_more, session_metadata, pending_queue) =
+        // 1. Load events from DB (blocking — SQLite)
+        let (events, has_more, session_metadata) =
             run_blocking_task("session.reconstruct.load", move || {
                 // Verify session exists
                 let session = session_manager
@@ -198,11 +196,7 @@ impl SessionReconstructService {
                     "totalCost": session.total_cost,
                 });
 
-                // Load pending queue state (derived from message.queued/dequeued events)
-                let pending_queue =
-                    PromptQueueService::get_pending_queue(&event_store, &sid).unwrap_or_default();
-
-                Ok((events, has_more, metadata, pending_queue))
+                Ok((events, has_more, metadata))
             })
             .await?;
 
@@ -301,7 +295,6 @@ impl SessionReconstructService {
             // tracked by the orchestrator, so reconnection during that brief window shows "idle".
             "agentPhase": if is_running { "processing" } else { "idle" },
             "metadata": session_metadata,
-            "pendingQueue": pending_queue,
             "approvalItems": approval_items,
         }))
     }

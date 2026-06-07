@@ -27,8 +27,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         sequence_counter,
         server_origin,
         run_id,
-        source,
-        profile,
         model,
         working_dir,
         request,
@@ -37,29 +35,26 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
 
     let session_plan =
         match profile_runtime.plan_session(crate::domains::agent::runner::SessionPlanRequest {
-            requested_profile: Some(profile.clone()),
+            requested_profile: None,
             model: model.clone(),
-            source: source.clone(),
+            source: None,
             entrypoint: None,
         }) {
             Ok(plan) => plan,
             Err(error) => {
                 warn!(
                     session_id = %request.session_id,
-                    profile = %profile,
                     error = %error,
-                    "failed to resolve session profile"
+                    "failed to resolve active runtime profile"
                 );
                 let _ = broadcast.emit(crate::shared::events::TronEvent::Error {
                     base: crate::shared::events::BaseEvent::now(&request.session_id),
-                    error: format!("Session profile `{profile}` is invalid: {error}"),
+                    error: format!("Active runtime profile is invalid: {error}"),
                     context: None,
                     code: Some("PROFILE_INVALID".into()),
                     provider: None,
                     category: Some("profile".into()),
-                    suggestion: Some(
-                        "Repair the profile or create a new session with a valid profile.".into(),
-                    ),
+                    suggestion: Some("Repair the active profile configuration.".into()),
                     retryable: Some(false),
                     status_code: None,
                     error_type: Some("profile".into()),
@@ -204,7 +199,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             crate::domains::agent::runner::types::ReasoningLevel::from_str_loose(&level)
         }),
         agent_state_context,
-        profile_name: Some(profile.clone()),
+        profile_name: Some(session_plan.profile_name.clone()),
         resolved_profile: Some(resolved_profile.clone()),
         user_content_override,
         run_id: Some(run_id.clone()),

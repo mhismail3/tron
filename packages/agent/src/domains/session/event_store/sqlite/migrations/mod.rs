@@ -1,9 +1,7 @@
 //! Schema migration runner for the event store database.
 //!
-//! Tron ships a consolidated `v001_schema.sql` for fresh databases, plus
-//! small additive follow-up migrations for installs that already recorded v001.
-//! There are no table-rebuild migrations or historical-shape branches; each
-//! appended migration is idempotent and moves version N-1 to N.
+//! Tron ships a single `v001_schema.sql` for the primitive branch.
+//! There are no old-shape migrations on this clean-break branch.
 //!
 //! The `schema_version` table tracks which migrations have been applied.
 //! Running the migrator is idempotent: already-applied versions are skipped.
@@ -15,11 +13,7 @@
 //! migration before they reach production.
 //!
 //! # INVARIANT
-//! Every migration SQL file stands alone: it must bring the schema from the
-//! state at version N-1 to version N. For the consolidated v001, that means
-//! "empty DB → full schema." Editing v001 after a DB has already recorded it
-//! as applied will produce inconsistent databases in the wild — add a new
-//! migration instead.
+//! The only supported path is empty DB to the primitive schema.
 
 use rusqlite::Connection;
 use tracing::{debug, info};
@@ -36,28 +30,11 @@ struct Migration {
 /// All migrations in version order.
 ///
 /// Migrations in application order.
-const MIGRATIONS: &[Migration] = &[
-    Migration {
-        version: 1,
-        description: "Consolidated schema — all core tables, indexes, and CHECK constraints",
-        sql: include_str!("v001_schema.sql"),
-    },
-    Migration {
-        version: 2,
-        description: "Constitution audit tables for migrated v001 databases",
-        sql: include_str!("v002_constitution_audit.sql"),
-    },
-    Migration {
-        version: 4,
-        description: "Session execution profile",
-        sql: include_str!("v004_session_profile.sql"),
-    },
-    Migration {
-        version: 5,
-        description: "Drop retired profile migration ledger",
-        sql: include_str!("v005_drop_profile_migrations.sql"),
-    },
-];
+const MIGRATIONS: &[Migration] = &[Migration {
+    version: 1,
+    description: "Consolidated schema — all core tables, indexes, and CHECK constraints",
+    sql: include_str!("v001_schema.sql"),
+}];
 
 /// Result of running migrations.
 #[derive(Debug)]
@@ -193,11 +170,8 @@ fn apply_migration(conn: &Connection, migration: &Migration) -> Result<()> {
             ),
         })?;
 
-    // FK sanity check: zero rows ⇒ every FK is satisfied. Any row signals a
-    // dangling reference the migration left behind. This is redundant for
-    // the consolidated v001 (fresh schema has no rows to point at anything)
-    // but is the first line of defense if a future migration rebuilds a
-    // table.
+    // FK sanity check: zero rows means every FK is satisfied. Any row signals a
+    // dangling reference the migration left behind.
     let violations = check_foreign_keys(&tx, migration.version)?;
     if !violations.is_empty() {
         return Err(EventStoreError::Migration {

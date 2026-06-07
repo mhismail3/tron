@@ -38,21 +38,6 @@ pub struct CreateSessionOptions<'a> {
     pub parent_session_id: Option<&'a str>,
     /// Fork point event.
     pub fork_from_event_id: Option<&'a str>,
-    /// Spawning session (for subagents).
-    pub spawning_session_id: Option<&'a str>,
-    /// Spawn type.
-    pub spawn_type: Option<&'a str>,
-    /// Spawn task description.
-    pub spawn_task: Option<&'a str>,
-    /// Server origin (e.g. "localhost:9847").
-    pub origin: Option<&'a str>,
-    /// Session source (e.g. "cron"). NULL for user-created sessions.
-    pub source: Option<&'a str>,
-    /// Execution profile selected for this session.
-    pub profile: Option<&'a str>,
-    /// Per-session worktree override. NULL = defer to global isolation mode;
-    /// Some(true) = force-isolate; Some(false) = force-passthrough.
-    pub use_worktree: Option<bool>,
 }
 
 /// Options for listing sessions.
@@ -64,19 +49,11 @@ pub struct ListSessionsOptions<'a> {
     pub working_directory: Option<&'a str>,
     /// Filter by ended state.
     pub ended: Option<bool>,
-    /// Exclude subagent sessions.
-    pub exclude_subagents: Option<bool>,
     /// Maximum results.
     pub limit: Option<i64>,
     /// Skip results.
     pub offset: Option<i64>,
-    /// Filter by server origin.
-    pub origin: Option<&'a str>,
-    /// Show only user-visible sessions.
-    ///
-    /// This excludes background sources and abandoned chat drafts that contain
-    /// only the root `session.start` event. The rows remain reconstructable by
-    /// ID, but they do not clutter dashboard-style session lists.
+    /// Show only non-empty sessions.
     pub user_only: Option<bool>,
 }
 
@@ -116,15 +93,10 @@ impl SessionRepo {
             |t| serde_json::to_string(t).unwrap_or_else(|_| "[]".to_string()),
         );
 
-        let profile = opts
-            .profile
-            .unwrap_or(crate::shared::profile::NORMAL_PROFILE);
-
         let _ = conn.execute(
             "INSERT INTO sessions (id, workspace_id, title, latest_model, working_directory,
-             parent_session_id, fork_from_event_id, created_at, last_activity_at, tags,
-             spawning_session_id, spawn_type, spawn_task, origin, source, profile, use_worktree)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
+             parent_session_id, fork_from_event_id, created_at, last_activity_at, tags)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 id,
                 opts.workspace_id,
@@ -136,13 +108,6 @@ impl SessionRepo {
                 now,
                 now,
                 tags_json,
-                opts.spawning_session_id,
-                opts.spawn_type,
-                opts.spawn_task,
-                opts.origin,
-                opts.source,
-                profile,
-                opts.use_worktree,
             ],
         )?;
 
@@ -169,13 +134,6 @@ impl SessionRepo {
             total_cache_read_tokens: 0,
             total_cache_creation_tokens: 0,
             tags: tags_json,
-            spawning_session_id: opts.spawning_session_id.map(String::from),
-            spawn_type: opts.spawn_type.map(String::from),
-            spawn_task: opts.spawn_task.map(String::from),
-            origin: opts.origin.map(String::from),
-            source: opts.source.map(String::from),
-            profile: profile.to_string(),
-            use_worktree: opts.use_worktree,
         })
     }
 
@@ -212,25 +170,15 @@ impl SessionRepo {
                 sql.push_str(" AND ended_at IS NULL");
             }
         }
-        if opts.exclude_subagents == Some(true) {
-            sql.push_str(" AND spawning_session_id IS NULL");
-        }
-        if let Some(origin) = opts.origin {
-            let _ = write!(sql, " AND origin = ?{}", param_values.len() + 1);
-            param_values.push(Box::new(origin.to_string()));
-        }
         if opts.user_only == Some(true) {
             sql.push_str(
-                " AND (source IS NULL OR source = 'import' OR (
-                    source = 'chat'
-                    AND NOT (
-                        message_count = 0
-                        AND turn_count = 0
-                        AND total_input_tokens = 0
-                        AND total_output_tokens = 0
-                        AND event_count <= 1
-                    )
-                ))",
+                " AND NOT (
+                    message_count = 0
+                    AND turn_count = 0
+                    AND total_input_tokens = 0
+                    AND total_output_tokens = 0
+                    AND event_count <= 1
+                )",
             );
         }
         sql.push_str(" ORDER BY last_activity_at DESC");
@@ -306,30 +254,6 @@ impl SessionRepo {
         let changed = conn.execute(
             "UPDATE sessions SET title = ?1 WHERE id = ?2",
             params![title, session_id],
-        )?;
-        Ok(changed > 0)
-    }
-
-    /// Update session source (e.g. `"cron"` or `"chat"`).
-    pub fn update_source(conn: &Connection, session_id: &str, source: &str) -> Result<bool> {
-        let changed = conn.execute(
-            "UPDATE sessions SET source = ?1 WHERE id = ?2",
-            params![source, session_id],
-        )?;
-        Ok(changed > 0)
-    }
-
-    /// Update subagent spawn metadata for an existing session.
-    pub fn update_spawn_info(
-        conn: &Connection,
-        session_id: &str,
-        spawning_session_id: &str,
-        spawn_type: &str,
-        spawn_task: &str,
-    ) -> Result<bool> {
-        let changed = conn.execute(
-            "UPDATE sessions SET spawning_session_id = ?1, spawn_type = ?2, spawn_task = ?3 WHERE id = ?4",
-            params![spawning_session_id, spawn_type, spawn_task, session_id],
         )?;
         Ok(changed > 0)
     }
@@ -436,17 +360,6 @@ impl SessionRepo {
         Ok(result)
     }
 
-    /// List subagent sessions for a parent.
-    pub fn list_subagents(conn: &Connection, spawning_session_id: &str) -> Result<Vec<SessionRow>> {
-        let mut stmt = conn.prepare(
-            "SELECT * FROM sessions WHERE spawning_session_id = ?1 ORDER BY created_at DESC",
-        )?;
-        let rows = stmt
-            .query_map(params![spawning_session_id], Self::map_row)?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(rows)
-    }
-
     fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<SessionRow> {
         Ok(SessionRow {
             id: row.get("id")?,
@@ -471,13 +384,6 @@ impl SessionRepo {
             total_cache_read_tokens: row.get("total_cache_read_tokens")?,
             total_cache_creation_tokens: row.get("total_cache_creation_tokens")?,
             tags: row.get("tags")?,
-            spawning_session_id: row.get("spawning_session_id")?,
-            spawn_type: row.get("spawn_type")?,
-            spawn_task: row.get("spawn_task")?,
-            origin: row.get("origin")?,
-            source: row.get("source")?,
-            profile: row.get("profile")?,
-            use_worktree: row.get("use_worktree")?,
         })
     }
 }

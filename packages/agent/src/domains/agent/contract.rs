@@ -67,17 +67,6 @@ fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             ))
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
-        CapabilityContract::new("agent::prompt_queue_drain", "agent", EffectClass::ExternalSideEffect, RiskLevel::High, Some("agent.write"))
-            .visibility(VisibilityScope::Internal)
-            .request_schema(agent_prompt_queue_drain_request_schema())
-            .response_schema(agent_prompt_queue_drain_response_schema())
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .compensation(CompensationContract::new(
-                CompensationKind::ExternalIrreversible,
-                "hidden prompt queue drain starts queued runtime work after a prior run completes; replay is ledger/idempotency controlled",
-            ))
-            .stream_topics(STREAM_TOPICS.to_vec())
-            .build()?,
     ])
 }
 
@@ -111,33 +100,6 @@ fn agent_prompt_response_schema() -> serde_json::Value {
     })
 }
 
-fn agent_prompt_queue_drain_request_schema() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "required": ["sessionId", "completedRunId"],
-        "additionalProperties": false,
-        "properties": {
-            "sessionId": {"type": "string"},
-            "completedRunId": {"type": "string"},
-            "workspaceId": {"type": "string"}
-        }
-    })
-}
-
-fn agent_prompt_queue_drain_response_schema() -> serde_json::Value {
-    json!({
-        "type": "object",
-        "required": ["drained", "count"],
-        "additionalProperties": false,
-        "properties": {
-            "drained": {"type": "boolean"},
-            "count": {"type": "integer"},
-            "runId": {"type": ["string", "null"]},
-            "reason": {"type": ["string", "null"]}
-        }
-    })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,7 +120,6 @@ mod tests {
                 "agent::status",
                 "agent::prompt_apply",
                 "agent::run_turn",
-                "agent::prompt_queue_drain",
             ]
         );
     }

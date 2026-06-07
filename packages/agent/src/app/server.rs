@@ -547,7 +547,7 @@ mod tests {
         // Create a session so orchestrator reports 1
         assert!(
             ctx.session_manager
-                .create_session("claude-opus-4-6", "/tmp", None, None)
+                .create_session("claude-opus-4-6", "/tmp", None)
                 .is_ok()
         );
         let server = TronServer::new(ServerConfig::default(), ctx, make_metrics_handle());

@@ -26,7 +26,7 @@ impl<'a> LogStore<'a> {
         let mut sql = String::from(
             "SELECT id, timestamp, level, level_num, component, message, \
              session_id, workspace_id, event_id, turn, trace_id, \
-             parent_trace_id, depth, data, error_message, error_stack, origin \
+             parent_trace_id, depth, data, error_message, error_stack \
              FROM logs WHERE 1=1",
         );
         let mut params: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
@@ -46,10 +46,6 @@ impl<'a> LogStore<'a> {
         if let Some(ref tid) = opts.trace_id {
             sql.push_str(" AND trace_id = ?");
             params.push(Box::new(tid.clone()));
-        }
-        if let Some(ref origin) = opts.origin {
-            sql.push_str(" AND origin = ?");
-            params.push(Box::new(origin.clone()));
         }
         if let Some(ref components) = opts.components
             && !components.is_empty()
@@ -111,7 +107,7 @@ impl<'a> LogStore<'a> {
     pub fn get_trace_tree(&self, trace_id: &str) -> Vec<LogEntry> {
         let sql = "SELECT id, timestamp, level, level_num, component, message, \
                    session_id, workspace_id, event_id, turn, trace_id, \
-                   parent_trace_id, depth, data, error_message, error_stack, origin \
+                   parent_trace_id, depth, data, error_message, error_stack \
                    FROM logs WHERE trace_id = ?1 OR parent_trace_id = ?1 \
                    ORDER BY timestamp ASC";
 
@@ -174,7 +170,6 @@ fn row_to_entry(row: &rusqlite::Row<'_>) -> LogEntry {
         }),
         error_message: row.get(14).unwrap_or(None),
         error_stack: row.get(15).unwrap_or(None),
-        origin: row.get(16).unwrap_or(None),
     }
 }
 
@@ -205,8 +200,7 @@ mod tests {
                 depth INTEGER,
                 data TEXT,
                 error_message TEXT,
-                error_stack TEXT,
-                origin TEXT
+                error_stack TEXT
             );",
         )
         .unwrap();

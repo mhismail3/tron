@@ -23,16 +23,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .response_schema(json!({"additionalProperties":false,"properties":{"newModel":{"type":"string"},"previousModel":{"type":"string"}},"required":["previousModel","newModel"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .resource_lease(ResourceLeaseRequirement::exclusive_template("session", "session:{sessionId}:model", 60000))
-            .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "previousModel is returned and persisted in config.model_switch for manual reversal"))
-            .stream_topics(STREAM_TOPICS.to_vec())
-            .build()?,
-        CapabilityContract::new("config::set_reasoning_level", "config", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("config.write"))
-            .domain_module("model")
-            .request_schema(json!({"additionalProperties":false,"properties":{"level":{"type":"string"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId","level"],"type":"object"}))
-            .response_schema(json!({"additionalProperties":false,"properties":{"changed":{"type":"boolean"},"newLevel":{"type":"string"},"previousLevel":{"type":["string","null"]}},"required":["previousLevel","newLevel","changed"],"type":"object"}))
-            .idempotency(IdempotencyContract::caller_session_engine_ledger())
-            .resource_lease(ResourceLeaseRequirement::exclusive_template("session", "session:{sessionId}:reasoning", 60000))
-            .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "previousLevel is returned and persisted in config.reasoning_level for manual reversal"))
+            .compensation(CompensationContract::new(CompensationKind::ManualOnly, "latest_model is updated in the primitive session row; reversal is an explicit model switch"))
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?
     ])

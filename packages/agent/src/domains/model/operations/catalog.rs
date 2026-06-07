@@ -1,7 +1,7 @@
 //! Model operation implementations.
 //!
-//! Model catalog reads, model switching, and reasoning-level mutation live here
-//! behind canonical `model::*` and `config::*` functions.
+//! Model catalog reads and model switching live here behind canonical
+//! `model::*` functions.
 
 use crate::domains::model::Deps;
 use crate::domains::model::catalog as model_catalog;
@@ -33,11 +33,4 @@ pub(crate) async fn list_models(
 
 pub(crate) async fn switch_model(payload: &Value, deps: &Deps) -> Result<Value, CapabilityError> {
     model_catalog::switch_model(Some(payload), deps).await
-}
-
-pub(crate) async fn set_reasoning_level(
-    payload: &Value,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    model_catalog::set_reasoning_level(Some(payload), deps).await
 }

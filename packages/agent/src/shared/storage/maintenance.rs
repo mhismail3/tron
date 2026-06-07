@@ -118,7 +118,7 @@ pub fn retention_run(
         let count = conn
             .query_row(
                 "SELECT COUNT(*) FROM logs
-                 WHERE origin = 'ios-client'
+                 WHERE component LIKE 'ios.%'
                    AND lower(level) IN ('trace', 'debug')
                    AND timestamp < ?1",
                 params![cutoff],
@@ -128,7 +128,7 @@ pub fn retention_run(
         if !dry_run && count > 0 {
             let _ = conn.execute(
                 "DELETE FROM logs
-                 WHERE origin = 'ios-client'
+                 WHERE component LIKE 'ios.%'
                    AND lower(level) IN ('trace', 'debug')
                    AND timestamp < ?1",
                 params![cutoff],

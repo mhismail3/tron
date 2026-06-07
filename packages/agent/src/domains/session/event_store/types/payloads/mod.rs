@@ -6,27 +6,14 @@
 
 pub mod capability_invocation;
 pub mod compact;
-pub mod config;
 pub mod context;
-pub mod device;
 pub mod error;
-pub mod file;
-pub mod hook;
-pub mod memory;
 pub mod message;
 pub mod message_ops;
 pub mod metadata;
-pub mod notification;
-pub mod repo;
-pub mod rules;
-pub mod server;
 pub mod session;
-pub mod skill;
 pub mod streaming;
-pub mod subagent;
-pub mod todo;
 pub mod token_usage;
 pub mod turn;
-pub mod worktree;
 
 pub use token_usage::{TokenRecord, TokenTotals, TokenUsage};

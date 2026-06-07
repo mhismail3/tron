@@ -1,27 +1,18 @@
 //! # server/platform — OS / vendor integrations
 //!
-//! Platform-specific services that live on the server side but depend
-//! on an external SDK or cloud surface. Each integration is feature-gated
-//! so a build without the feature flag compiles without the dependency.
+//! Platform-specific services that live on the server side and are required
+//! by the primitive loop shell.
 //!
 //! ## Submodules
 //!
-//! | Module   | Feature flag | Content |
-//! |----------|--------------|---------|
-//! | [`apns`] | `apns`       | Apple Push Notification service — JWT auth, HTTP/2 send, 410 Gone handling |
-//! | [`device_broker`] | always | Engine-stream request/response broker for paired devices |
+//! | Module | Content |
+//! |--------|---------|
+//! | [`device_broker`] | Engine-stream request/response broker for paired devices |
 //!
 //! ## Invariants
 //!
-//! - When a feature flag is off, iOS-originating requests that would
-//!   trigger a push still return success at the engine transport — the stub
-//!   `StubNotifyDelegate` ([`crate::domains::capability_support::implementations::backends::stubs`]) surfaces
-//!   a warning so the agent can mention it instead of failing.
-//! - APNS 410 Gone responses remove the offending device token from
-//!   the local store (see H22); subsequent pushes to the same token
-//!   are suppressed without a round-trip.
+//! - The retained platform layer may broker local paired-device responses, but
+//!   it does not own push notification state or product delivery policy.
 
-#[cfg(feature = "apns")]
-pub mod apns;
 pub mod device_broker;
 pub mod updater;

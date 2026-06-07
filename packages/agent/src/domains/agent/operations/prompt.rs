@@ -1,7 +1,6 @@
 //! Agent workflow operations.
 use super::{
-    AgentCommandService, ENGINE_INTERNAL_INVOKE_SCOPE, PromptEngineCausality, PromptRequest,
-    drain_prompt_queue, errors,
+    AgentCommandService, ENGINE_INTERNAL_INVOKE_SCOPE, PromptEngineCausality, PromptRequest, errors,
 };
 use crate::domains::agent::Deps;
 use crate::domains::agent::runtime::service::spawn_prompt_run;
@@ -132,50 +131,6 @@ pub(crate) async fn run_turn_value(
         "acknowledged": true,
         "runId": run_id,
     }))
-}
-
-pub(crate) async fn prompt_queue_drain_value(
-    params: Option<&Value>,
-    invocation: &Invocation,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let session_id = require_string_param(params, "sessionId")?;
-    let session = AgentCommandService::load_prompt_session(deps, &session_id).await?;
-    let agent_deps = deps
-        .agent_deps
-        .as_ref()
-        .ok_or_else(|| CapabilityError::NotAvailable {
-            message: "Agent execution dependencies are not configured".into(),
-        })?;
-    let outcome = drain_prompt_queue(
-        &deps.event_store,
-        &deps.orchestrator,
-        &deps.session_manager,
-        &session_id,
-        &session.latest_model,
-        &session.working_directory,
-        deps.orchestrator.broadcast().clone(),
-        agent_deps.provider_factory.clone(),
-        deps.health_tracker.clone(),
-        deps.profile_runtime.clone(),
-        deps.shutdown_coordinator
-            .as_ref()
-            .map(|coord| coord.token()),
-        deps.origin.clone(),
-        deps.engine_host.clone(),
-        Some(PromptEngineCausality::from_invocation(invocation)),
-    )?;
-    publish_prompt_stream(
-        invocation,
-        deps,
-        &session_id,
-        "queue_drained",
-        serde_json::to_value(&outcome).unwrap_or_else(|_| json!({})),
-    )
-    .await;
-    serde_json::to_value(outcome).map_err(|e| CapabilityError::Internal {
-        message: format!("Failed to serialize prompt queue drain outcome: {e}"),
-    })
 }
 
 pub(crate) async fn validate_prompt_submission(

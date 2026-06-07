@@ -4,7 +4,7 @@
 //!
 //! This is the largest subsystem, responsible for:
 //!
-//! - **Event types**: 80-variant [`EventType`] enum matching the TypeScript wire format exactly
+//! - **Event types**: branch-local [`EventType`] enum for retained loop events
 //! - **Session events**: [`SessionEvent`] flat struct with typed payload access
 //! - **Event store**: High-level API for session creation, event append, ancestor walk, fork
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
@@ -41,7 +41,6 @@ pub use factory::{EventChainBuilder, EventFactory};
 pub use reconstruct::{
     COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX, ReconstructionResult, reconstruct_from_events,
 };
-pub use sqlite::repositories::device_token::RegisterTokenResult;
 pub use sqlite::repositories::session::{ActivitySummaryLine, MessagePreview};
 pub use sqlite::{
     ConnectionConfig, ConnectionPool, DatabaseLock, LockError, MigrationResult, PooledConnection,

@@ -1,8 +1,4 @@
-//! Database row types for mapping between `SQLite` rows and Rust structs.
-//!
-//! These represent the raw database row shape — not the public API types.
-//! Conversion to public types (e.g., [`Workspace`], [`SessionSummary`])
-//! happens in the repository layer.
+//! SQLite row types for the primitive session store.
 
 use serde::{Deserialize, Serialize};
 
@@ -23,15 +19,15 @@ pub struct SessionRow {
     pub latest_model: String,
     /// Working directory.
     pub working_directory: String,
-    /// Parent session ID (for forks).
+    /// Parent session ID for forks.
     pub parent_session_id: Option<String>,
-    /// Fork point event ID.
+    /// Event ID used as the fork point.
     pub fork_from_event_id: Option<String>,
     /// Creation timestamp.
     pub created_at: String,
     /// Last activity timestamp.
     pub last_activity_at: String,
-    /// End timestamp (null if active).
+    /// End timestamp, when archived or completed.
     pub ended_at: Option<String>,
     /// Event count.
     pub event_count: i64,
@@ -45,29 +41,14 @@ pub struct SessionRow {
     pub total_output_tokens: i64,
     /// Last turn input tokens.
     pub last_turn_input_tokens: i64,
-    /// Total cost in USD.
+    /// Total model cost.
     pub total_cost: f64,
     /// Total cache read tokens.
     pub total_cache_read_tokens: i64,
     /// Total cache creation tokens.
     pub total_cache_creation_tokens: i64,
-    /// Tags as JSON array string.
+    /// Tags as a JSON array string.
     pub tags: String,
-    /// Spawning session ID (for subagents).
-    pub spawning_session_id: Option<String>,
-    /// Spawn type.
-    pub spawn_type: Option<String>,
-    /// Spawn task description.
-    pub spawn_task: Option<String>,
-    /// Server origin (e.g. "localhost:9847").
-    pub origin: Option<String>,
-    /// Session source (e.g. "cron"). NULL for user-created sessions.
-    pub source: Option<String>,
-    /// Execution profile selected for this session (e.g. "normal", "chat", "local").
-    pub profile: String,
-    /// Per-session worktree override. NULL = defer to global isolation mode;
-    /// Some(true) = force-isolate; Some(false) = force-passthrough.
-    pub use_worktree: Option<bool>,
 }
 
 /// Raw event row from the `events` table.
@@ -96,9 +77,9 @@ pub struct EventRow {
     pub workspace_id: String,
     /// Denormalized role.
     pub role: Option<String>,
-    /// Denormalized capability id.
+    /// Denormalized model primitive name.
     pub model_primitive_name: Option<String>,
-    /// Denormalized capability invocation ID.
+    /// Denormalized invocation ID.
     pub invocation_id: Option<String>,
     /// Denormalized turn number.
     pub turn: Option<i64>,
@@ -110,19 +91,19 @@ pub struct EventRow {
     pub cache_read_tokens: Option<i64>,
     /// Denormalized cache creation tokens.
     pub cache_creation_tokens: Option<i64>,
-    /// Checksum.
+    /// Payload checksum.
     pub checksum: Option<String>,
-    /// LLM model ID (e.g. "claude-opus-4-6").
+    /// Model ID.
     pub model: Option<String>,
     /// Turn duration in milliseconds.
     pub latency_ms: Option<i64>,
-    /// LLM stop reason (e.g. `end_turn`, `capability_invocation`).
+    /// Model stop reason.
     pub stop_reason: Option<String>,
-    /// Whether the response contained thinking blocks (0 or 1).
+    /// Whether the response contained thinking blocks.
     pub has_thinking: Option<i64>,
-    /// Provider type (e.g. "anthropic", "openai", "google").
+    /// Provider type.
     pub provider_type: Option<String>,
-    /// Estimated cost in USD.
+    /// Estimated cost.
     pub cost: Option<f64>,
 }
 
@@ -172,63 +153,8 @@ pub struct WorkspaceRow {
     pub created_at: String,
     /// Last activity timestamp.
     pub last_activity_at: String,
-    /// Session count (computed via subquery).
+    /// Session count from listing queries.
     pub session_count: Option<i64>,
-}
-
-/// Raw branch row from the `branches` table.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct BranchRow {
-    /// Branch ID.
-    pub id: String,
-    /// Session ID.
-    pub session_id: String,
-    /// Branch name.
-    pub name: String,
-    /// Description.
-    pub description: Option<String>,
-    /// Root event ID.
-    pub root_event_id: String,
-    /// Head event ID.
-    pub head_event_id: String,
-    /// Whether this is the default branch.
-    pub is_default: bool,
-    /// Creation timestamp.
-    pub created_at: String,
-    /// Last activity timestamp.
-    pub last_activity_at: String,
-}
-
-/// Raw device token row from the `device_tokens` table.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DeviceTokenRow {
-    /// Device token registration ID.
-    pub id: String,
-    /// APNS device token as an even-length hex string. Apple treats token
-    /// bytes as variable-length opaque data, so callers must not hard-code
-    /// a 32-byte/64-char token size.
-    pub device_token: String,
-    /// Associated session ID.
-    pub session_id: Option<String>,
-    /// Associated workspace ID.
-    pub workspace_id: Option<String>,
-    /// Platform. Device tokens are APNS-specific, so this is always the
-    /// literal `"ios"`. Kept as a column (not an enum) so that adding a
-    /// second platform — e.g. FCM for Android — does not require a
-    /// schema migration, only a new `APNS`-equivalent service module.
-    pub platform: String,
-    /// APNS environment ("sandbox" or "production").
-    pub environment: String,
-    /// APNs bundle ID the token was registered against. NOT NULL — every
-    /// client sends its bundle identifier at registration time so the send
-    /// path can set the correct `apns-topic` per row from persisted data.
-    pub bundle_id: String,
-    /// Creation timestamp.
-    pub created_at: String,
-    /// Last used timestamp.
-    pub last_used_at: String,
-    /// Whether the token is active.
-    pub is_active: bool,
 }
 
 /// Raw blob row from the `blobs` table.
@@ -236,14 +162,14 @@ pub struct DeviceTokenRow {
 pub struct BlobRow {
     /// Blob ID.
     pub id: String,
-    /// Content hash (SHA-256).
+    /// Content hash.
     pub hash: String,
     /// Blob content.
     pub content: Vec<u8>,
     /// MIME type.
     pub mime_type: String,
-    /// Original content size.
-    pub size_original: i64,
+    /// Uncompressed content size.
+    pub uncompressed_size: i64,
     /// Compressed content size.
     pub size_compressed: i64,
     /// Compression algorithm.

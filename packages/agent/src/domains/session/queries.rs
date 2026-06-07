@@ -40,7 +40,6 @@ impl SessionQueryService {
         let filter = crate::domains::agent::runner::SessionFilter {
             workspace_path: working_directory,
             include_archived,
-            exclude_subagents: true,
             user_only: true,
             limit,
             offset,
@@ -83,8 +82,6 @@ impl SessionQueryService {
                         "isActive": is_active,
                         "isRunning": is_running,
                         "isArchived": session.ended_at.is_some(),
-                        "source": session.source,
-                        "profile": session.profile,
                         "eventCount": session.event_count,
                         "turnCount": session.turn_count,
                         "messageCount": session.message_count,
@@ -95,7 +92,6 @@ impl SessionQueryService {
                         "cacheCreationTokens": session.total_cache_creation_tokens,
                         "cost": session.total_cost,
                         "parentSessionId": session.parent_session_id,
-                        "useWorktree": session.use_worktree,
                         "lastUserPrompt": preview.and_then(|p| p.last_user_prompt.as_deref()),
                         "lastAssistantResponse": preview.and_then(|p| p.last_assistant_response.as_deref()),
                         "activityLines": activity_summaries.get(&session.id).cloned().unwrap_or_default(),
@@ -446,11 +442,7 @@ mod tests {
         });
     }
 
-    /// Export of a subagent session succeeds — unlike `archive_older_than`,
-    /// export does not filter by `source` or `spawning_session_id`. The
-    /// caller (iOS) is trusted to pass a real session ID. This test guards
-    /// against a future "helpful" filter hiding a child session's data
-    /// from the user.
+    /// Export accepts any real session ID without dashboard filtering.
     #[tokio::test]
     async fn export_of_subagent_session_succeeds() {
         let ctx = make_test_context();

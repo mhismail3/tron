@@ -34,7 +34,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
-        "Current score: **55/100**",
+        "Current score: **63/100**",
         "Status: **active execution artifact**",
         "Branch: `codex/primitive-engine-teardown`",
         "There are no users and no compatibility obligations.",
@@ -48,7 +48,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-2 | Server domain registration teardown | 12 | passed_after_fix |",
         "| PET-3 | Single execute primitive | 12 | passed_after_fix |",
         "| PET-4 | Soul and agent-owned state workspace | 10 | passed_after_fix |",
-        "| PET-5 | Session, event, ledger, and resource collapse | 8 | pending |",
+        "| PET-5 | Session, event, ledger, and resource collapse | 8 | passed_after_fix |",
         "| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | passed_after_fix |",
         "| PET-7 | Self-authored worker/capability substrate | 8 | pending |",
         "| PET-8 | iOS primitive shell | 10 | pending |",
@@ -72,7 +72,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Evidence Manifest",
-        "Current score: **55/100**",
+        "Current score: **63/100**",
         "Status: **active execution artifact**",
         "New teardown branch: `codex/primitive-engine-teardown`",
         "Compatibility assumption: none.",
@@ -81,6 +81,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-2 | passed_after_fix |",
         "| PET-3 | passed_after_fix |",
         "| PET-4 | passed_after_fix |",
+        "| PET-5 | passed_after_fix |",
         "| PET-6 | passed_after_fix |",
         "| PET-11 | pending |",
         "provider model-facing tool export proof",
@@ -615,5 +616,149 @@ fn engine_registration_policy_has_no_approval_metadata_exceptions() {
             "requires explicit approval metadata",
         ],
         "engine effect helpers",
+    );
+}
+
+#[test]
+fn fresh_session_store_has_no_product_tables_or_old_shape_migrations() {
+    let migration = read_repo_file(
+        "packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql",
+    );
+    let migration_runner =
+        read_repo_file("packages/agent/src/domains/session/event_store/sqlite/migrations/mod.rs");
+    let repositories =
+        read_repo_file("packages/agent/src/domains/session/event_store/sqlite/repositories/mod.rs");
+    let row_types =
+        read_repo_file("packages/agent/src/domains/session/event_store/sqlite/row_types.rs");
+    let session_repo = read_repo_file(
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/session.rs",
+    );
+
+    assert_absent(
+        &migration,
+        &[
+            "branches",
+            "device_tokens",
+            "cron_jobs",
+            "cron_runs",
+            "constitution_",
+            "profile_migrations",
+            "spawning_session_id",
+            "spawn_type",
+            "spawn_task",
+            "origin",
+            "source",
+            "profile",
+            "use_worktree",
+        ],
+        "fresh session schema",
+    );
+    assert_absent(
+        &migration_runner,
+        &[
+            "v002_",
+            "v004_",
+            "v005_",
+            "migrated v001",
+            "historical-shape",
+            "already recorded v001",
+        ],
+        "migration runner",
+    );
+    assert_absent(
+        &repositories,
+        &["branch", "constitution", "device_token"],
+        "session store repositories",
+    );
+    assert_absent(
+        &row_types,
+        &[
+            "BranchRow",
+            "DeviceTokenRow",
+            "spawning_session_id",
+            "spawn_type",
+            "spawn_task",
+            "origin",
+            "source",
+            "profile",
+            "use_worktree",
+        ],
+        "session store row types",
+    );
+    assert_absent(
+        &session_repo,
+        &[
+            "exclude_subagents",
+            "list_subagents",
+            "update_spawn_info",
+            "update_source",
+            "NORMAL_PROFILE",
+            "use_worktree",
+            "source = '",
+        ],
+        "session repository",
+    );
+}
+
+#[test]
+fn retained_event_payload_surface_is_loop_owned() {
+    let payloads =
+        read_repo_file("packages/agent/src/domains/session/event_store/types/payloads/mod.rs");
+    let generated =
+        read_repo_file("packages/agent/src/domains/session/event_store/types/generated.rs");
+
+    assert_absent(
+        &payloads,
+        &[
+            "pub mod device;",
+            "pub mod file;",
+            "pub mod hook;",
+            "pub mod memory;",
+            "pub mod notification;",
+            "pub mod repo;",
+            "pub mod rules;",
+            "pub mod skill;",
+            "pub mod subagent;",
+            "pub mod todo;",
+            "pub mod worktree;",
+        ],
+        "typed payload module surface",
+    );
+    assert_absent(
+        &generated,
+        &[
+            "MessageQueued",
+            "MessageDequeued",
+            "CapabilityPauseRequested",
+            "CapabilityPauseResolved",
+            "CapabilityRunStatus",
+            "ConfigModelSwitch",
+            "ConfigPromptUpdate",
+            "ConfigReasoningLevel",
+            "Notification",
+            "Skill",
+            "Rules",
+            "File",
+            "Worktree",
+            "Subagent",
+            "ProcessResults",
+            "UserJob",
+            "Todo",
+            "Hook",
+            "Memory",
+            "Repo",
+            "DeviceToken",
+            "ServerUpdateAvailable",
+            "is_worktree_type",
+            "is_repo_type",
+            "is_subagent_type",
+            "is_hook_type",
+            "is_skill_type",
+            "is_rules_type",
+            "is_queue_type",
+            "is_file_type",
+            "is_server_type",
+        ],
+        "generated event type surface",
     );
 }

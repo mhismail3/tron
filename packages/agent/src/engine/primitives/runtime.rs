@@ -505,7 +505,6 @@ fn log_query(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
     let text = optional_string(invocation.payload.get("text"))?;
     let session_id = optional_string(invocation.payload.get("sessionId"))?;
     let workspace_id = optional_string(invocation.payload.get("workspaceId"))?;
-    let origin = optional_string(invocation.payload.get("origin"))?;
     let component = optional_string(invocation.payload.get("component"))?;
     let min_level = optional_string(invocation.payload.get("minLevel"))?
         .map(|level| LogLevel::from_str_lossy(&level).as_num());
@@ -525,7 +524,6 @@ fn log_query(host: &dyn PrimitiveRuntimeHost, invocation: &Invocation) -> Result
             limit: Some(limit.min(500)),
             offset: None,
             order: Some(SortOrder::Asc),
-            origin,
         },
         include_full_payloads,
     )?);

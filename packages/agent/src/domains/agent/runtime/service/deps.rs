@@ -1,6 +1,5 @@
 use super::{CausalContext, FunctionId, FunctionRevision, InvocationId};
 use crate::engine::Invocation;
-use serde::Serialize;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -36,35 +35,6 @@ impl PromptEngineCausality {
             function_id: invocation.function_id.clone(),
             expected_function_revision: invocation.expected_function_revision,
             idempotency_key: invocation.causal_context.idempotency_key.clone(),
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PromptDrainOutcome {
-    pub drained: bool,
-    pub count: usize,
-    pub run_id: Option<String>,
-    pub reason: Option<String>,
-}
-
-impl PromptDrainOutcome {
-    pub(super) fn drained(run_id: String, count: usize) -> Self {
-        Self {
-            drained: true,
-            count,
-            run_id: Some(run_id),
-            reason: None,
-        }
-    }
-
-    pub(super) fn not_drained(reason: impl Into<String>) -> Self {
-        Self {
-            drained: false,
-            count: 0,
-            run_id: None,
-            reason: Some(reason.into()),
         }
     }
 }

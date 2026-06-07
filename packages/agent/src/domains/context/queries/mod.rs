@@ -37,15 +37,12 @@ impl ContextQueryService {
         let session_id_for_query = session_id.clone();
         run_blocking_task("context.get_snapshot", move || {
             retry_context_read("context.get_snapshot", || {
-                let mut prepared = build_context_manager_for_session(
+                let prepared = build_context_manager_for_session(
                     &session_id_for_query,
                     session_manager.as_ref(),
                     profile_runtime.as_ref(),
                     capabilities_for_model.clone(),
                 )?;
-                prepared
-                    .context_manager
-                    .set_server_origin(prepared.session.origin.clone());
                 let snapshot = prepared.context_manager.get_snapshot();
                 Ok(snapshot_response(&snapshot))
             })

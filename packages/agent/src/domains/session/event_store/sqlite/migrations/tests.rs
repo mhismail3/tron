@@ -30,11 +30,5 @@ fn seed_workspace_and_session(conn: &Connection, ws: &str, sess: &str) {
     .unwrap();
 }
 
-#[path = "tests/devices_retired.rs"]
-mod devices_retired;
-#[path = "tests/mechanics.rs"]
-mod mechanics;
-#[path = "tests/schema_events.rs"]
-mod schema_events;
-#[path = "tests/sessions_logs.rs"]
-mod sessions_logs;
+#[path = "tests/primitive.rs"]
+mod primitive;

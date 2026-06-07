@@ -39,7 +39,7 @@ impl ClientLogsService {
     /// Insert client log entries into the `logs` table with deduplication.
     ///
     /// Uses the partial unique index on `(timestamp, component, message)` for
-    /// `origin = 'ios-client'`, so out-of-order delivery remains correct and
+    /// `ios.*` components, so out-of-order delivery remains correct and
     /// duplicate replays are ignored at insert time.
     pub(crate) fn ingest(
         conn: &mut PooledConnection,
@@ -102,8 +102,8 @@ fn insert_client_logs(
     let inserted = {
         let mut stmt = tx
             .prepare_cached(
-                "INSERT OR IGNORE INTO logs (timestamp, level, level_num, component, message, origin) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, 'ios-client')",
+                "INSERT OR IGNORE INTO logs (timestamp, level, level_num, component, message) \
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
             )
             .map_err(|e| CapabilityError::Internal {
                 message: format!("Failed to prepare statement: {e}"),
@@ -204,7 +204,7 @@ mod tests {
 
         let level_num: i32 = conn
             .query_row(
-                "SELECT level_num FROM logs WHERE origin = 'ios-client'",
+                "SELECT level_num FROM logs WHERE component = 'ios.Engine'",
                 [],
                 |row| row.get(0),
             )
@@ -273,7 +273,7 @@ mod tests {
 
         let stored: String = conn
             .query_row(
-                "SELECT message FROM logs WHERE origin = 'ios-client'",
+                "SELECT message FROM logs WHERE component = 'ios.Engine'",
                 [],
                 |row| row.get(0),
             )

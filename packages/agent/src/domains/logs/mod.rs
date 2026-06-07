@@ -63,7 +63,6 @@ struct RecentLogEntry {
     level: String,
     component: String,
     message: String,
-    origin: Option<String>,
     session_id: Option<String>,
     error_message: Option<String>,
 }
@@ -119,7 +118,7 @@ async fn recent_logs_value(params: Option<Value>, deps: &Deps) -> Result<Value, 
         })?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, timestamp, level, component, message, origin, session_id, error_message \
+                "SELECT id, timestamp, level, component, message, session_id, error_message \
                  FROM logs ORDER BY id DESC LIMIT ?1",
             )
             .map_err(|error| CapabilityError::Internal {
@@ -133,20 +132,19 @@ async fn recent_logs_value(params: Option<Value>, deps: &Deps) -> Result<Value, 
                     level: row.get(2)?,
                     component: row.get(3)?,
                     message: row.get(4)?,
-                    origin: row.get(5)?,
-                    session_id: row.get(6)?,
-                    error_message: row.get(7)?,
+                    session_id: row.get(5)?,
+                    error_message: row.get(6)?,
                 })
             })
             .map_err(|error| CapabilityError::Internal {
                 message: format!("Failed to read logs: {error}"),
             })?;
 
-        let mut entries = rows
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|error| CapabilityError::Internal {
-                message: format!("Failed to decode logs: {error}"),
-            })?;
+        let mut entries =
+            rows.collect::<Result<Vec<_>, _>>()
+                .map_err(|error| CapabilityError::Internal {
+                    message: format!("Failed to decode logs: {error}"),
+                })?;
         entries.reverse();
         Ok(RecentLogsResult {
             count: entries.len(),

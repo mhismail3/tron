@@ -56,7 +56,7 @@ pub fn ensure_storage_schema(conn: &Connection) -> Result<()> {
            hash            TEXT    NOT NULL UNIQUE,
            content         BLOB    NOT NULL,
            mime_type       TEXT    NOT NULL DEFAULT 'text/plain',
-           size_original   INTEGER NOT NULL,
+           uncompressed_size INTEGER NOT NULL,
            size_compressed INTEGER NOT NULL,
            compression     TEXT    NOT NULL DEFAULT 'none',
            created_at      TEXT    NOT NULL,

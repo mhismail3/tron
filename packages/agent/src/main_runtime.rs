@@ -189,7 +189,6 @@ fn init_logging(
     db_path: &std::path::Path,
     settings: &tron::domains::settings::TronSettings,
     log_level_override: Option<&str>,
-    origin: &str,
     stderr_enabled: bool,
 ) -> Result<(
     tron::shared::logging::TransportHandle,
@@ -213,7 +212,6 @@ fn init_logging(
         effective_log_level,
         &module_overrides,
         log_conn,
-        Some(origin.to_owned()),
         stderr_enabled,
     );
     let flush_task = tron::shared::logging::spawn_flush_task(log_handle.clone());
@@ -234,10 +232,8 @@ async fn init_services(
     event_store: Arc<EventStore>,
     settings: &tron::domains::settings::TronSettings,
     engine_host: tron::engine::EngineHostHandle,
-    origin: &str,
 ) -> anyhow::Result<ServiceState> {
-    let session_manager =
-        Arc::new(SessionManager::new(event_store.clone()).with_origin(origin.to_owned()));
+    let session_manager = Arc::new(SessionManager::new(event_store.clone()));
     let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
 
     // Crash recovery: recover partial LLM output from orphaned streaming journals
@@ -387,13 +383,8 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     let settings = profile_runtime.current().settings.clone();
     tron::domains::settings::init_settings(settings.clone());
     let origin = format!("localhost:{}", args.port);
-    let (log_handle, flush_task) = init_logging(
-        &db_path,
-        &settings,
-        args.log_level.as_deref(),
-        &origin,
-        !args.quiet,
-    )?;
+    let (log_handle, flush_task) =
+        init_logging(&db_path, &settings, args.log_level.as_deref(), !args.quiet)?;
     if settings.storage.retention_enabled {
         match tron::shared::storage::StorageRuntime::new(db_path.clone())
             .retention_run(false, settings.observability.verbose_retention_days)
@@ -440,7 +431,7 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     let engine_host = init_engine_host(&db_path)?;
 
     // Phase 3: Core services (orchestrator, providers, primitive agent deps)
-    let services = init_services(event_store, &settings, engine_host.clone(), &origin).await?;
+    let services = init_services(event_store, &settings, engine_host.clone()).await?;
 
     // Phase 4: Runtime context
     let session_manager_for_startup = services.session_manager.clone();

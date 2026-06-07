@@ -380,8 +380,8 @@ pub struct EncodedBlobContent {
     pub content: Vec<u8>,
     /// Compression algorithm name.
     pub compression: &'static str,
-    /// Original size.
-    pub size_original: i64,
+    /// Uncompressed size.
+    pub uncompressed_size: i64,
     /// Stored size.
     pub size_compressed: i64,
 }

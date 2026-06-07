@@ -121,7 +121,6 @@ pub(crate) fn drain_prompt_queue(
     let max_seq = event_store.get_max_sequence(session_id).unwrap_or(0);
     let sequence_counter = Some(orchestrator.ensure_sequence_counter_at_least(session_id, max_seq));
 
-    let session_row = session_manager.get_session(session_id).ok().flatten();
     let plan = PromptRunPlan {
         started_run,
         orchestrator: orchestrator.clone(),
@@ -135,11 +134,6 @@ pub(crate) fn drain_prompt_queue(
         engine_host,
         engine_causality: engine_causality.clone(),
         sequence_counter,
-        source: session_row.as_ref().and_then(|s| s.source.clone()),
-        profile: session_row
-            .as_ref()
-            .map(|s| s.profile.clone())
-            .unwrap_or_else(|| crate::shared::profile::NORMAL_PROFILE.to_string()),
         server_origin,
         run_id: run_id.clone(),
         model: model.to_string(),

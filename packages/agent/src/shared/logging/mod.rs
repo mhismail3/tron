@@ -62,14 +62,12 @@ pub fn init_subscriber(level: &str) {
 /// * `level` - Minimum log level to display/persist.
 /// * `module_overrides` - Per-module level overrides (e.g. `{"ort": "warn"}`).
 /// * `conn` - A [`rusqlite::Connection`] with the `logs` table already created.
-/// * `origin` - Server origin (e.g. `"localhost:9847"`) stamped on every log entry.
 /// * `enable_fmt` - When `true`, also writes human-readable logs to stderr.
 ///   Pass `false` for background/daemon mode where only DB persistence is needed.
 pub fn init_subscriber_with_sqlite(
     level: &str,
     module_overrides: &[(String, &str)],
     conn: rusqlite::Connection,
-    origin: Option<String>,
     enable_fmt: bool,
 ) -> TransportHandle {
     use tracing_subscriber::EnvFilter;
@@ -97,7 +95,6 @@ pub fn init_subscriber_with_sqlite(
 
     let config = TransportConfig {
         min_level: LogLevel::from_str_lossy(level).as_num(),
-        origin,
         ..Default::default()
     };
     let transport = SqliteTransport::new(conn, config);

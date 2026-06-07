@@ -1,11 +1,11 @@
-//! Prompt-run completion, recovery, and follow-up queue handoff.
+//! Prompt-run completion and recovery.
 
 use std::sync::Arc;
 
 use tracing::{debug, warn};
 
 use super::{
-    PromptEngineCausality, PromptRunCleanup, enqueue_prompt_queue_drain, load_session_update_data,
+    PromptEngineCausality, PromptRunCleanup, load_session_update_data,
     publish_prompt_runtime_stream, retain_eligible,
 };
 use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
@@ -96,17 +96,6 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         }),
     )
     .await;
-
-    // Auto-drain is hidden engine queue work. Completion only enqueues the
-    // drain capability, so queue handoff, trace propagation, and idempotency
-    // remain visible through the engine ledger and stream records.
-    enqueue_prompt_queue_drain(
-        &engine_host,
-        &session_id,
-        &run_id,
-        engine_causality.as_ref(),
-    )
-    .await;
 }
 
 async fn create_agent_result_resource(
@@ -186,10 +175,14 @@ async fn persist_interrupted_if_needed(
     if let Err(error) = persister
         .append(
             session_id,
-            crate::domains::session::event_store::EventType::NotificationInterrupted,
+            crate::domains::session::event_store::EventType::TurnFailed,
             serde_json::json!({
-                "timestamp": chrono::Utc::now().to_rfc3339(),
                 "turn": result.turns_executed,
+                "error": "Interrupted by user",
+                "code": "INTERRUPTED",
+                "category": "interruption",
+                "recoverable": true,
+                "partialContent": null,
             }),
         )
         .await
@@ -197,7 +190,7 @@ async fn persist_interrupted_if_needed(
         tracing::error!(
             session_id = %session_id,
             error = %error,
-            "failed to persist notification.interrupted"
+            "failed to persist interrupted turn failure"
         );
     }
     let _ = persister.flush().await;

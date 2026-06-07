@@ -25,18 +25,12 @@ pub(crate) async fn session_create_value(
     let model =
         opt_string(params, "model").unwrap_or_else(|| "claude-sonnet-4-20250514".to_owned());
     let title = opt_string(params, "title");
-    let source = opt_string(params, "source");
-    let profile = opt_string(params, "profile");
-    let use_worktree = opt_bool(params, "useWorktree");
     crate::domains::session::commands::SessionCommandService::create(
         deps,
         crate::domains::session::commands::CreateSessionRequest {
             working_directory,
             model,
             title,
-            source,
-            profile,
-            use_worktree,
         },
     )
     .await

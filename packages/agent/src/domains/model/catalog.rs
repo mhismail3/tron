@@ -1,18 +1,14 @@
 //! Model provider catalog and session model-configuration helpers.
 //!
-//! `model.list`, `model.switch`, and `config.setReasoningLevel` are served by
-//! canonical engine functions. The provider catalog helpers in this file remain
+//! `model.list` and `model.switch` are served by canonical engine functions.
+//! The provider catalog helpers in this file remain
 //! the source of truth for model support/deprecation/default reasoning checks,
-//! and the mutating helpers are plain domain functions rather than transport
-//! dispatch branches.
+//! and the model switch helper is a plain domain function rather than a
+//! transport dispatch branch.
 //!
 //! Model data is derived from the provider registries (single source of truth).
 //! See `anthropic/types.rs`, `openai/types.rs`, `google/types.rs`, `minimax/types.rs`.
 //!
-//! NOTE: Event appends in this module use `let _ =` because they are supplementary
-//! audit-trail emissions. The capability response has already been determined; a failed
-//! append should not change the capability result.
-
 use serde_json::Value;
 
 use super::Deps;
@@ -139,19 +135,6 @@ pub(crate) async fn switch_model(
             message: e.to_string(),
         })?;
 
-    let _ = deps
-        .event_store
-        .append(&crate::domains::session::event_store::AppendOptions {
-            session_id: &session_id,
-            event_type: crate::domains::session::event_store::EventType::ConfigModelSwitch,
-            payload: serde_json::json!({
-                "previousModel": previous_model,
-                "newModel": model,
-            }),
-            parent_id: None,
-            sequence: None,
-        });
-
     deps.session_manager.invalidate_session(&session_id);
 
     let is_active = deps.session_manager.is_active(&session_id);
@@ -198,69 +181,4 @@ pub(crate) fn default_reasoning_level(
         return Some(profile.default_reasoning_level.to_string());
     }
     None
-}
-
-/// Set the reasoning level for a session.
-///
-/// Persists a `config.reasoning_level` event and invalidates the session cache.
-/// The server is the source of truth: it resolves `previousLevel` from event
-/// history, falling back to the model's `defaultReasoningLevel` for the first
-/// change in a session. The client only sends `sessionId` and `level`.
-pub(crate) async fn set_reasoning_level(
-    params: Option<&Value>,
-    deps: &Deps,
-) -> Result<Value, CapabilityError> {
-    let session_id = require_string_param(params, "sessionId")?;
-    let new_level = require_string_param(params, "level")?;
-
-    let _ = deps
-        .event_store
-        .get_session(&session_id)
-        .map_err(|e| CapabilityError::Internal {
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| CapabilityError::NotFound {
-            code: errors::SESSION_NOT_FOUND.into(),
-            message: format!("Session '{session_id}' not found"),
-        })?;
-
-    let state = deps
-        .event_store
-        .get_state_at_head(&session_id)
-        .map_err(|e| CapabilityError::Internal {
-            message: format!("failed to resolve session state: {e}"),
-        })?;
-    let previous_level = state
-        .reasoning_level
-        .clone()
-        .or_else(|| default_reasoning_level(&state.model, active_openai_auth_path(deps)));
-
-    if previous_level.as_deref().map(str::to_lowercase) == Some(new_level.to_lowercase()) {
-        return Ok(serde_json::json!({
-            "previousLevel": previous_level,
-            "newLevel": new_level,
-            "changed": false,
-        }));
-    }
-
-    let _ = deps
-        .event_store
-        .append(&crate::domains::session::event_store::AppendOptions {
-            session_id: &session_id,
-            event_type: crate::domains::session::event_store::EventType::ConfigReasoningLevel,
-            payload: serde_json::json!({
-                "previousLevel": previous_level,
-                "newLevel": new_level,
-            }),
-            parent_id: None,
-            sequence: None,
-        });
-
-    deps.session_manager.invalidate_session(&session_id);
-
-    Ok(serde_json::json!({
-        "previousLevel": previous_level,
-        "newLevel": new_level,
-        "changed": true,
-    }))
 }

@@ -33,14 +33,14 @@ pub fn store_content_blob(conn: &Connection, content: &[u8], mime_type: &str) ->
     let encoded = encode_blob_content(content);
     conn.execute(
         "INSERT INTO blobs
-         (id, hash, content, mime_type, size_original, size_compressed, compression, created_at)
+         (id, hash, content, mime_type, uncompressed_size, size_compressed, compression, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             id,
             hash,
             encoded.content,
             mime_type,
-            encoded.size_original,
+            encoded.uncompressed_size,
             encoded.size_compressed,
             encoded.compression,
             Utc::now().to_rfc3339()
@@ -58,14 +58,14 @@ pub fn encode_blob_content(content: &[u8]) -> EncodedBlobContent {
         && compressed.len() < content.len()
     {
         return EncodedBlobContent {
-            size_original: i64::try_from(content.len()).unwrap_or(i64::MAX),
+            uncompressed_size: i64::try_from(content.len()).unwrap_or(i64::MAX),
             size_compressed: i64::try_from(compressed.len()).unwrap_or(i64::MAX),
             content: compressed,
             compression: "zstd",
         };
     }
     EncodedBlobContent {
-        size_original: i64::try_from(content.len()).unwrap_or(i64::MAX),
+        uncompressed_size: i64::try_from(content.len()).unwrap_or(i64::MAX),
         size_compressed: i64::try_from(content.len()).unwrap_or(i64::MAX),
         content: content.to_vec(),
         compression: "none",
@@ -249,9 +249,9 @@ pub fn register_existing_blob_owner(
     retention_class: &str,
 ) -> Result<()> {
     ensure_storage_schema(conn)?;
-    let (hash, size_original, mime_type): (String, i64, String) = conn
+    let (hash, uncompressed_size, mime_type): (String, i64, String) = conn
         .query_row(
-            "SELECT hash, size_original, mime_type FROM blobs WHERE id = ?1",
+            "SELECT hash, uncompressed_size, mime_type FROM blobs WHERE id = ?1",
             params![blob_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
@@ -270,7 +270,7 @@ pub fn register_existing_blob_owner(
             field_name,
             hash,
             blob_id,
-            size_original,
+            uncompressed_size,
             mime_type,
             retention_class,
             Utc::now().to_rfc3339(),
@@ -296,7 +296,7 @@ fn resolve_payload_ref_envelope(conn: &Connection, stored_json: &str) -> Result<
     };
     let (content, compression, original_size): (Vec<u8>, String, i64) = conn
         .query_row(
-            "SELECT content, compression, size_original FROM blobs WHERE id = ?1",
+            "SELECT content, compression, uncompressed_size FROM blobs WHERE id = ?1",
             params![blob_id],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )

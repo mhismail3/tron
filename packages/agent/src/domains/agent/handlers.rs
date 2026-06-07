@@ -17,9 +17,6 @@ operation_bindings! {
         "run_turn" => |invocation, deps| {
             run_turn_value(Some(&invocation.payload), invocation, deps).await
         },
-        "prompt_queue_drain" => |invocation, deps| {
-            prompt_queue_drain_value(Some(&invocation.payload), invocation, deps).await
-        },
         "status" => |invocation, deps| {
             status_value(Some(&invocation.payload), deps).await
         },

@@ -67,8 +67,6 @@ pub struct SessionFilter {
     pub workspace_path: Option<String>,
     /// Include archived sessions.
     pub include_archived: bool,
-    /// Exclude subagent sessions (`spawning_session_id` IS NULL).
-    pub exclude_subagents: bool,
     /// Show only user-created sessions (exclude cron, etc.).
     pub user_only: bool,
     /// Maximum number of results.
@@ -82,7 +80,6 @@ pub struct SessionManager {
     event_store: Arc<EventStore>,
     active_sessions: DashMap<String, CachedSession>,
     plan_mode: DashMap<String, bool>,
-    origin: Option<String>,
 }
 
 impl SessionManager {
@@ -92,15 +89,7 @@ impl SessionManager {
             event_store,
             active_sessions: DashMap::new(),
             plan_mode: DashMap::new(),
-            origin: None,
         }
-    }
-
-    /// Set the server origin (e.g. "localhost:9847") for all sessions created by this manager.
-    #[must_use]
-    pub fn with_origin(mut self, origin: String) -> Self {
-        self.origin = Some(origin);
-        self
     }
 
     /// Create a new session.
@@ -110,65 +99,10 @@ impl SessionManager {
         model: &str,
         workspace_path: &str,
         title: Option<&str>,
-        source: Option<&str>,
-    ) -> Result<String, RuntimeError> {
-        self.create_session_with_profile_and_worktree_override(
-            model,
-            workspace_path,
-            title,
-            source,
-            None,
-            None,
-        )
-    }
-
-    /// Like [`create_session`] but accepts a per-session worktree override:
-    ///   * `None` defers to the global isolation mode setting (current default).
-    ///   * `Some(true)` forces an isolated worktree on first prompt (when in a git repo).
-    ///   * `Some(false)` forces passthrough (no worktree) regardless of global mode.
-    #[instrument(skip(self), fields(model, working_dir = workspace_path))]
-    pub fn create_session_with_worktree_override(
-        &self,
-        model: &str,
-        workspace_path: &str,
-        title: Option<&str>,
-        source: Option<&str>,
-        use_worktree: Option<bool>,
-    ) -> Result<String, RuntimeError> {
-        self.create_session_with_profile_and_worktree_override(
-            model,
-            workspace_path,
-            title,
-            source,
-            None,
-            use_worktree,
-        )
-    }
-
-    /// Like [`create_session_with_worktree_override`] but records the selected
-    /// execution profile for prompt/context/capability policy resolution.
-    #[instrument(skip(self), fields(model, working_dir = workspace_path))]
-    pub fn create_session_with_profile_and_worktree_override(
-        &self,
-        model: &str,
-        workspace_path: &str,
-        title: Option<&str>,
-        source: Option<&str>,
-        profile: Option<&str>,
-        use_worktree: Option<bool>,
     ) -> Result<String, RuntimeError> {
         let result = self
             .event_store
-            .create_session_with_worktree_override(
-                model,
-                workspace_path,
-                title,
-                None,
-                self.origin.as_deref(),
-                source,
-                profile,
-                use_worktree,
-            )
+            .create_session(model, workspace_path, title, None)
             .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
 
         let session_id = result.session.id.clone();
@@ -339,56 +273,15 @@ impl SessionManager {
             } else {
                 Some(false)
             },
-            exclude_subagents: if filter.exclude_subagents {
-                Some(true)
-            } else {
-                None
-            },
             #[allow(clippy::cast_possible_wrap)]
             limit: filter.limit.map(|l| l as i64),
             #[allow(clippy::cast_possible_wrap)]
             offset: filter.offset.map(|o| o as i64),
-            origin: self.origin.as_deref(),
             user_only: if filter.user_only { Some(true) } else { None },
         };
         self.event_store
             .list_sessions(&opts)
             .map_err(|e| RuntimeError::Persistence(e.to_string()))
-    }
-
-    /// Create a session for a subagent (linked to parent via `spawning_session_id`).
-    #[instrument(skip(self), fields(model, working_dir = workspace_path, parent = spawning_session_id))]
-    pub fn create_session_for_subagent(
-        &self,
-        model: &str,
-        workspace_path: &str,
-        title: Option<&str>,
-        spawning_session_id: &str,
-        spawn_type: &str,
-        spawn_task: &str,
-    ) -> Result<String, RuntimeError> {
-        let parent_profile = self
-            .event_store
-            .get_session(spawning_session_id)
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))?
-            .map(|session| session.profile);
-
-        let session_id = self.create_session_with_profile_and_worktree_override(
-            model,
-            workspace_path,
-            title,
-            None,
-            parent_profile.as_deref(),
-            None,
-        )?;
-
-        let _ = self
-            .event_store
-            .update_spawn_info(&session_id, spawning_session_id, spawn_type, spawn_task)
-            .map_err(|e| RuntimeError::Persistence(e.to_string()))?;
-
-        debug!(session_id, spawning_session_id, "subagent session created");
-        Ok(session_id)
     }
 
     /// Check if a session is active.

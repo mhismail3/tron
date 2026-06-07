@@ -30,8 +30,8 @@
 //! - `handlers` / `operations`: worker entrypoints and capability
 //!   implementations.
 //! - `runner`: turn execution, primitive tool invocation, and context assembly.
-//! - `runtime`, `stream`, and `prompt_queue`: run lifecycle coordination,
-//!   queued prompt serialization, and client stream projection.
+//! - `runtime` and `stream`: run lifecycle coordination and client stream
+//!   projection.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
@@ -43,7 +43,6 @@ pub(crate) use deps::Deps;
 pub(crate) use worker::worker_module;
 
 pub(crate) mod commands;
-pub(crate) mod prompt_queue;
 pub(crate) mod runtime;
 pub(crate) mod stream;
 pub(crate) mod worker;

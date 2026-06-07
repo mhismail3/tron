@@ -37,8 +37,6 @@ pub fn spawn_prompt_run(
         },
         server_origin: runtime_deps.origin.clone(),
         run_id,
-        source: session.source.clone(),
-        profile: session.profile.clone(),
         model: session.latest_model.clone(),
         working_dir: session.working_directory.clone(),
         request,

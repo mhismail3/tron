@@ -147,7 +147,7 @@ fn retention_prunes_verbose_ios_logs_and_unowned_blobs_but_keeps_owned_blobs() {
            id INTEGER PRIMARY KEY AUTOINCREMENT,
            timestamp TEXT NOT NULL,
            level TEXT NOT NULL,
-           origin TEXT
+           component TEXT NOT NULL
          );",
     )
     .unwrap();
@@ -166,7 +166,7 @@ fn retention_prunes_verbose_ios_logs_and_unowned_blobs_but_keeps_owned_blobs() {
     .unwrap();
     assert!(owned.contains(PAYLOAD_REF_ENVELOPE_KEY));
     conn.execute(
-        "INSERT INTO logs (timestamp, level, origin) VALUES (?1, 'debug', 'ios-client')",
+        "INSERT INTO logs (timestamp, level, component) VALUES (?1, 'debug', 'ios.Engine')",
         params![(Utc::now() - chrono::Duration::days(10)).to_rfc3339()],
     )
     .unwrap();
@@ -195,7 +195,7 @@ fn size_budget_runs_safe_retention_and_checkpoint_without_dropping_audit_refs() 
            id INTEGER PRIMARY KEY AUTOINCREMENT,
            timestamp TEXT NOT NULL,
            level TEXT NOT NULL,
-           origin TEXT
+           component TEXT NOT NULL
          );
          CREATE TABLE filler (payload BLOB NOT NULL);",
     )
@@ -206,7 +206,7 @@ fn size_budget_runs_safe_retention_and_checkpoint_without_dropping_audit_refs() 
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO logs (timestamp, level, origin) VALUES (?1, 'debug', 'ios-client')",
+        "INSERT INTO logs (timestamp, level, component) VALUES (?1, 'debug', 'ios.Engine')",
         params![(Utc::now() - chrono::Duration::days(10)).to_rfc3339()],
     )
     .unwrap();

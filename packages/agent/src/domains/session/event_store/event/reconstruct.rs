@@ -3,13 +3,13 @@
 //! [`reconstruct_from_events`] implements a two-pass algorithm that rebuilds
 //! the message list from an ordered sequence of [`SessionEvent`]s:
 //!
-//! 1. **First pass**: collect deleted event IDs, capability invocation argument maps,
-//!    reasoning level, and system prompt.
+//! 1. **First pass**: collect deleted event IDs, capability invocation argument
+//!    maps, and system prompt.
 //! 2. **Second pass**: build messages while handling deletions, compaction,
 //!    context clears, capability result injection, and consecutive-role merging.
 //!
 //! The output is a [`ReconstructionResult`] containing messages with event IDs,
-//! aggregate token usage, turn count, and config state.
+//! aggregate token usage and turn count.
 //!
 //! ## Size note
 //!
@@ -39,9 +39,9 @@ pub struct ReconstructionResult {
     pub token_usage: TokenTotals,
     /// Highest turn number seen.
     pub turn_count: i64,
-    /// Last-seen reasoning level from `config.reasoning_level` events.
+    /// Reasoning level is no longer a session event surface.
     pub reasoning_level: Option<String>,
-    /// System prompt from `session.start` or `config.prompt_update`.
+    /// System prompt from `session.start`.
     pub system_prompt: Option<String>,
 }
 
@@ -72,15 +72,13 @@ pub fn reconstruct_from_events(ancestors: &[SessionEvent]) -> ReconstructionResu
 struct Metadata {
     deleted_event_ids: std::collections::HashSet<String>,
     capability_invocation_args_map: std::collections::HashMap<String, Value>,
-    reasoning_level: Option<String>,
     system_prompt: Option<String>,
 }
 
-/// Pass 1: Collect deleted event IDs, capability invocation arguments, and config state.
+/// Pass 1: Collect deleted event IDs and capability invocation arguments.
 fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
     let mut deleted_event_ids = std::collections::HashSet::new();
     let mut capability_invocation_args_map = std::collections::HashMap::new();
-    let mut reasoning_level: Option<String> = None;
     let mut system_prompt: Option<String> = None;
 
     for event in ancestors {
@@ -97,23 +95,9 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
                     let _ = capability_invocation_args_map.insert(id.to_string(), a.clone());
                 }
             }
-            EventType::ConfigReasoningLevel => {
-                reasoning_level = event
-                    .payload
-                    .get("newLevel")
-                    .and_then(Value::as_str)
-                    .map(String::from);
-            }
             EventType::SessionStart => {
                 if let Some(sp) = event.payload.get("systemPrompt").and_then(Value::as_str) {
                     system_prompt = Some(sp.to_string());
-                }
-            }
-            EventType::ConfigPromptUpdate => {
-                if event.payload.get("contentBlobId").is_some()
-                    && let Some(hash) = event.payload.get("newHash").and_then(Value::as_str)
-                {
-                    system_prompt = Some(format!("[Updated prompt - hash: {hash}]"));
                 }
             }
             _ => {}
@@ -123,7 +107,6 @@ fn collect_metadata(ancestors: &[SessionEvent]) -> Metadata {
     Metadata {
         deleted_event_ids,
         capability_invocation_args_map,
-        reasoning_level,
         system_prompt,
     }
 }
@@ -182,7 +165,7 @@ fn build_messages(ancestors: &[SessionEvent], metadata: &Metadata) -> Reconstruc
         messages_with_event_ids: st.combined,
         token_usage: st.tokens,
         turn_count: st.turn_count,
-        reasoning_level: metadata.reasoning_level.clone(),
+        reasoning_level: None,
         system_prompt: metadata.system_prompt.clone(),
     }
 }

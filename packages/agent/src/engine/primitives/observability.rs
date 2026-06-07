@@ -145,7 +145,6 @@ fn log_query_schema() -> Value {
             "sessionId": {"type": "string"},
             "workspaceId": {"type": "string"},
             "component": {"type": "string"},
-            "origin": {"type": "string"},
             "minLevel": {"type": "string", "enum": ["trace", "debug", "info", "warn", "warning", "error", "fatal"]},
             "limit": {"type": "integer"},
             "text": {"type": "string"},

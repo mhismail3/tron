@@ -28,6 +28,7 @@ pub use cache::ContextArtifactsService;
 pub(crate) use cache::load_session_context_artifacts_with_home;
 #[cfg(test)]
 pub(crate) use dynamic::collect_dynamic_rule_paths;
+#[cfg(test)]
 pub(crate) use types::RuleFileLevel;
 
 #[cfg(test)]

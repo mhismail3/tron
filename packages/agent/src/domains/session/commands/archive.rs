@@ -93,7 +93,6 @@ impl SessionCommandService {
             run_blocking_task("session.archiveOlderThan.list", move || {
                 let filter = crate::domains::agent::runner::SessionFilter {
                     include_archived: false,
-                    exclude_subagents: true,
                     user_only: true,
                     ..Default::default()
                 };

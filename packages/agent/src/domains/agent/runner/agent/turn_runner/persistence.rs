@@ -2,9 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::domains::session::event_store::EventType;
-use crate::shared::events::{
-    ActivatedRuleInfo, AssistantMessage, BaseEvent, CapabilityInvocationSummary, TronEvent,
-};
+use crate::shared::events::{AssistantMessage, BaseEvent, CapabilityInvocationSummary, TronEvent};
 use crate::shared::messages::{Provider, TokenUsage};
 use serde_json::{Value, json};
 use tracing::{error, warn};
@@ -348,48 +346,6 @@ pub(super) async fn persist_completed_assistant_message(
                 session_id,
                 error = %error,
                 "failed to persist message.assistant"
-            );
-        })
-}
-
-/// Persist a `rules.activated` event synchronously and return the outcome.
-///
-/// INVARIANT: synchronous append so the caller can gate the matching
-/// `RulesActivated` broadcast on success. A fire-and-forget append would
-/// let a broadcast-only consumer (iOS) render activated-rules that were
-/// silently missing from session history on reconnect.
-pub(super) async fn persist_rules_activated(
-    persister: Option<&EventPersister>,
-    session_id: &str,
-    turn: u32,
-    activated_rules: &[ActivatedRuleInfo],
-    total_activated: u32,
-    sequence_counter: Option<&AtomicI64>,
-) -> Result<(), crate::domains::agent::runner::errors::RuntimeError> {
-    let Some(persister) = persister else {
-        return Ok(());
-    };
-    persister
-        .append_with_runtime_sequence(
-            session_id,
-            EventType::RulesActivated,
-            json!({
-                "rules": activated_rules.iter().map(|a| json!({
-                    "relativePath": a.relative_path,
-                    "scopeDir": a.scope_dir,
-                })).collect::<Vec<_>>(),
-                "totalActivated": total_activated,
-            }),
-            sequence_counter,
-        )
-        .await
-        .map(|_| ())
-        .inspect_err(|error| {
-            warn!(
-                session_id,
-                turn,
-                error = %error,
-                "failed to persist rules-activated event"
             );
         })
 }
@@ -840,64 +796,5 @@ mod tests {
             persist_completed_assistant_message(None, &h.session_id, payload, Some(&h.counter))
                 .await;
         assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn persist_rules_activated_returns_ok_on_success() {
-        let h = harness().await;
-        let result = persist_rules_activated(
-            Some(&h.persister),
-            &h.session_id,
-            1,
-            &[],
-            0,
-            Some(&h.counter),
-        )
-        .await;
-        assert!(result.is_ok());
-    }
-
-    #[tokio::test]
-    async fn persist_rules_activated_returns_err_on_worker_death() {
-        let h = harness().await;
-        h.persister.worker_handle.abort();
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-
-        let result = persist_rules_activated(
-            Some(&h.persister),
-            &h.session_id,
-            1,
-            &[],
-            0,
-            Some(&h.counter),
-        )
-        .await;
-        assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn persist_rules_activated_writes_to_db_when_successful() {
-        // Regression guard: after switching from background to sync, the
-        // rules.activated row must still land in the event log under the
-        // expected event_type.
-        let h = harness().await;
-        persist_rules_activated(
-            Some(&h.persister),
-            &h.session_id,
-            1,
-            &[],
-            3,
-            Some(&h.counter),
-        )
-        .await
-        .unwrap();
-
-        h.persister.flush().await.unwrap();
-        let persisted = persisted_events(&h.store, &h.session_id, "rules.activated");
-        assert_eq!(
-            persisted.len(),
-            1,
-            "expected exactly one rules.activated row"
-        );
     }
 }

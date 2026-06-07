@@ -8,8 +8,7 @@ license = "MIT"
 repository = "https://github.com/mhismail3/tron"
 
 [features]
-default = ["apns"]
-apns = []
+default = []
 
 
 [lib]

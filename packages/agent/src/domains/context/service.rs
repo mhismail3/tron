@@ -40,17 +40,17 @@ pub(crate) fn build_context_manager_for_session(
         },
     };
 
-    let profile_name = session.profile.as_str();
     let session_plan = profile_runtime
         .plan_session(crate::domains::agent::runner::SessionPlanRequest {
-            requested_profile: Some(profile_name.to_string()),
+            requested_profile: None,
             model: state.model.clone(),
-            source: session.source.clone(),
+            source: None,
             entrypoint: None,
         })
         .map_err(|error| CapabilityError::Internal {
-            message: format!("invalid session profile `{profile_name}`: {error}"),
+            message: format!("invalid active runtime profile: {error}"),
         })?;
+    let profile_name = session_plan.profile_name.as_str();
     let settings = session_plan.settings.clone();
     let context_limit = crate::domains::model::providers::model_context_window(&state.model);
     let compactor_settings = &settings.context.compactor;

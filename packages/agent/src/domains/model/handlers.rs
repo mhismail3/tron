@@ -24,18 +24,3 @@ pub(crate) mod model {
         ];
     }
 }
-
-pub(crate) mod config {
-    use super::{Deps, operation_bindings};
-    use crate::domains::model::operations;
-
-    operation_bindings! {
-        deps = Deps;
-        hidden = [];
-        bindings = [
-            "set_reasoning_level" => |invocation, deps| {
-                operations::set_reasoning_level(&invocation.payload, deps).await
-            },
-        ];
-    }
-}

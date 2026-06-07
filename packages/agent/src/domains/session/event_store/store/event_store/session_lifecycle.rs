@@ -4,7 +4,6 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
-use crate::domains::session::event_store::sqlite::repositories::branch::BranchRepo;
 use crate::domains::session::event_store::sqlite::repositories::event::{
     EventRepo, ListEventsOptions,
 };
@@ -26,18 +25,14 @@ pub(super) struct CreateSessionInTxOptions<'a> {
     pub workspace_path: &'a str,
     pub title: Option<&'a str>,
     pub provider: Option<&'a str>,
-    pub origin: Option<&'a str>,
-    pub source: Option<&'a str>,
-    pub profile: Option<&'a str>,
-    pub use_worktree: Option<bool>,
 }
 
 /// Core session-creation primitive: workspace get-or-create, sessions row
 /// insert, root `session.start` event, root/head pointer updates, and counter
 /// increments — all inside the caller's transaction. The caller commits.
 ///
-/// Shared by [`EventStore::create_session_with_worktree_override`] (one tx
-/// per session) and [`EventStore::import_atomic`] (many appends under one tx).
+/// Shared by [`EventStore::create_session`] (one tx per session) and
+/// [`EventStore::import_atomic`] (many appends under one tx).
 pub(super) fn create_session_in_tx(
     tx: &rusqlite::Transaction<'_>,
     opts: &CreateSessionInTxOptions<'_>,
@@ -53,13 +48,6 @@ pub(super) fn create_session_in_tx(
             tags: None,
             parent_session_id: None,
             fork_from_event_id: None,
-            spawning_session_id: None,
-            spawn_type: None,
-            spawn_task: None,
-            origin: opts.origin,
-            source: opts.source,
-            profile: opts.profile,
-            use_worktree: opts.use_worktree,
         },
     )?;
 
@@ -90,7 +78,6 @@ pub(super) fn create_session_in_tx(
         "workingDirectory": opts.workspace_path,
         "model": opts.model,
         "provider": provider,
-        "profile": session.profile.clone(),
     });
     let event = SessionEvent {
         id: event_id,
@@ -143,10 +130,6 @@ pub struct ImportAtomicOptions<'a> {
     pub workspace_path: &'a str,
     /// Optional initial title (extracted from the source, e.g. a custom title line).
     pub title: Option<&'a str>,
-    /// Optional `origin` tag (e.g. "ios").
-    pub origin: Option<&'a str>,
-    /// Optional `source` tag identifying the importer (e.g. "import").
-    pub source: Option<&'a str>,
     /// Pre-transformed events to append after the root `session.start` event,
     /// in order. Each receives a monotonically increasing sequence starting at 1.
     pub events: &'a [ImportEventSpec<'a>],
@@ -211,19 +194,25 @@ impl EventStore {
         workspace_path: &str,
         title: Option<&str>,
         provider: Option<&str>,
-        origin: Option<&str>,
-        source: Option<&str>,
     ) -> Result<CreateSessionResult> {
-        self.create_session_with_worktree_override(
-            model,
-            workspace_path,
-            title,
-            provider,
-            origin,
-            source,
-            None,
-            None,
-        )
+        self.with_global_write_lock(|| {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+            let result = create_session_in_tx(
+                &tx,
+                &CreateSessionInTxOptions {
+                    model,
+                    workspace_path,
+                    title,
+                    provider,
+                },
+            )?;
+
+            tx.commit()?;
+            tracing::debug!(session_id = %result.session.id, "session created");
+            Ok(result)
+        })
     }
 
     /// Return the ID of any session holding the given metadata tag
@@ -270,10 +259,6 @@ impl EventStore {
                     workspace_path: opts.workspace_path,
                     title: opts.title,
                     provider: None,
-                    origin: opts.origin,
-                    source: opts.source,
-                    profile: None,
-                    use_worktree: None,
                 },
             )?;
 
@@ -350,43 +335,6 @@ impl EventStore {
         })
     }
 
-    /// Like [`create_session`] but accepts a per-session worktree override
-    /// (`None` = defer to global isolation mode).
-    pub fn create_session_with_worktree_override(
-        &self,
-        model: &str,
-        workspace_path: &str,
-        title: Option<&str>,
-        provider: Option<&str>,
-        origin: Option<&str>,
-        source: Option<&str>,
-        profile: Option<&str>,
-        use_worktree: Option<bool>,
-    ) -> Result<CreateSessionResult> {
-        self.with_global_write_lock(|| {
-            let mut conn = self.conn()?;
-            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-
-            let result = create_session_in_tx(
-                &tx,
-                &CreateSessionInTxOptions {
-                    model,
-                    workspace_path,
-                    title,
-                    provider,
-                    origin,
-                    source,
-                    profile,
-                    use_worktree,
-                },
-            )?;
-
-            tx.commit()?;
-            tracing::debug!(session_id = %result.session.id, "session created");
-            Ok(result)
-        })
-    }
-
     /// Fork a session from a specific event.
     ///
     /// Creates a new session whose root `session.fork` event has its `parent_id`
@@ -414,13 +362,6 @@ impl EventStore {
                     tags: None,
                     parent_session_id: Some(&source_session.id),
                     fork_from_event_id: Some(from_event_id),
-                    spawning_session_id: None,
-                    spawn_type: None,
-                    spawn_task: None,
-                    origin: source_session.origin.as_deref(),
-                    source: None,
-                    profile: Some(source_session.profile.as_str()),
-                    use_worktree: None,
                 },
             )?;
 
@@ -527,7 +468,6 @@ impl EventStore {
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
             let _ = EventRepo::delete_by_session(&tx, session_id)?;
-            let _ = BranchRepo::delete_by_session(&tx, session_id)?;
             let deleted = SessionRepo::delete(&tx, session_id)?;
 
             tx.commit()?;
@@ -538,12 +478,6 @@ impl EventStore {
             self.remove_session_write_lock(session_id)?;
         }
         Ok(deleted)
-    }
-
-    /// List subagent sessions for a parent.
-    pub fn list_subagents(&self, spawning_session_id: &str) -> Result<Vec<SessionRow>> {
-        let conn = self.conn()?;
-        SessionRepo::list_subagents(&conn, spawning_session_id)
     }
 
     /// Batch-fetch sessions by IDs.
@@ -588,33 +522,5 @@ impl EventStore {
             );
         }
         Ok(result)
-    }
-
-    /// Update session source (e.g. `"cron"` for scheduled sessions).
-    pub fn update_source(&self, session_id: &str, source: &str) -> Result<bool> {
-        self.with_session_write_lock(session_id, || {
-            let conn = self.conn()?;
-            SessionRepo::update_source(&conn, session_id, source)
-        })
-    }
-
-    /// Update session spawn info (links child to parent session).
-    pub fn update_spawn_info(
-        &self,
-        session_id: &str,
-        spawning_session_id: &str,
-        spawn_type: &str,
-        spawn_task: &str,
-    ) -> Result<bool> {
-        self.with_session_write_lock(session_id, || {
-            let conn = self.conn()?;
-            SessionRepo::update_spawn_info(
-                &conn,
-                session_id,
-                spawning_session_id,
-                spawn_type,
-                spawn_task,
-            )
-        })
     }
 }

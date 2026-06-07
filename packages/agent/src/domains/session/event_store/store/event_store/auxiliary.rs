@@ -1,12 +1,7 @@
 use crate::domains::session::event_store::errors::Result;
 use crate::domains::session::event_store::sqlite::repositories::blob::BlobRepo;
-use crate::domains::session::event_store::sqlite::repositories::device_token::{
-    DeviceTokenRepo, RegisterTokenResult,
-};
 use crate::domains::session::event_store::sqlite::repositories::workspace::WorkspaceRepo;
-use crate::domains::session::event_store::sqlite::row_types::{
-    BlobRow, DeviceTokenRow, WorkspaceRow,
-};
+use crate::domains::session::event_store::sqlite::row_types::{BlobRow, WorkspaceRow};
 
 use super::EventStore;
 
@@ -55,48 +50,6 @@ impl EventStore {
     pub fn get_blob(&self, blob_id: &str) -> Result<Option<BlobRow>> {
         let conn = self.conn()?;
         BlobRepo::get_by_id(&conn, blob_id)
-    }
-
-    /// Register or update a device token. Returns `{id, created}`.
-    ///
-    /// `bundle_id` is the APNs topic the token was issued against and is
-    /// used as the `apns-topic` header at send time. Every client sends
-    /// its bundle identifier on registration — the `device_tokens`
-    /// column is NOT NULL since the v001 consolidated schema, so send
-    /// time always uses the stored topic.
-    pub fn register_device_token(
-        &self,
-        device_token: &str,
-        session_id: Option<&str>,
-        workspace_id: Option<&str>,
-        environment: &str,
-        bundle_id: &str,
-    ) -> Result<RegisterTokenResult> {
-        self.with_global_write_lock(|| {
-            let conn = self.conn()?;
-            DeviceTokenRepo::register(
-                &conn,
-                device_token,
-                session_id,
-                workspace_id,
-                environment,
-                bundle_id,
-            )
-        })
-    }
-
-    /// Unregister (deactivate) a device token.
-    pub fn unregister_device_token(&self, device_token: &str) -> Result<bool> {
-        self.with_global_write_lock(|| {
-            let conn = self.conn()?;
-            DeviceTokenRepo::unregister(&conn, device_token)
-        })
-    }
-
-    /// Get all active device tokens.
-    pub fn get_all_active_device_tokens(&self) -> Result<Vec<DeviceTokenRow>> {
-        let conn = self.conn()?;
-        DeviceTokenRepo::get_all_active(&conn)
     }
 }
 

@@ -19,8 +19,6 @@ pub(crate) struct PromptRunPlan {
     pub(super) sequence_counter: Option<Arc<AtomicI64>>,
     pub(super) server_origin: String,
     pub(super) run_id: String,
-    pub(super) source: Option<String>,
-    pub(super) profile: String,
     pub(super) model: String,
     pub(super) working_dir: String,
     pub(super) request: PromptRequest,

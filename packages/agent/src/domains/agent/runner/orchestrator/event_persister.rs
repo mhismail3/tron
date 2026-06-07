@@ -231,26 +231,6 @@ impl EventPersister {
         }
     }
 
-    /// Record Constitution context-resolution audit metadata.
-    pub fn record_constitution_context_resolution(
-        &self,
-        input: &crate::domains::session::event_store::sqlite::repositories::constitution::ContextResolutionAudit<'_>,
-    ) -> Result<String, RuntimeError> {
-        self.event_store
-            .record_constitution_context_resolution(input)
-            .map_err(|error| RuntimeError::Persistence(error.to_string()))
-    }
-
-    /// Record Constitution provider-payload audit metadata.
-    pub fn record_constitution_provider_payload(
-        &self,
-        input: &crate::domains::session::event_store::sqlite::repositories::constitution::ProviderPayloadAudit<'_>,
-    ) -> Result<String, RuntimeError> {
-        self.event_store
-            .record_constitution_provider_payload(input)
-            .map_err(|error| RuntimeError::Persistence(error.to_string()))
-    }
-
     #[cfg(test)]
     fn new_with_capacity_for_tests(
         event_store: Arc<EventStore>,

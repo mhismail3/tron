@@ -27,12 +27,11 @@ pub(super) fn build_detailed_snapshot_response(
 ) -> Result<Value, CapabilityError> {
     let PreparedSessionContext {
         session,
-        mut context_manager,
+        context_manager,
     } = prepared;
-    context_manager.set_server_origin(session.origin.clone());
 
     let detailed = context_manager.get_detailed_snapshot();
-    let composed_system_prompt = build_composed_system_prompt(&context_manager, &session);
+    let composed_system_prompt = build_composed_system_prompt(&context_manager);
 
     Ok(json!({
         "currentTokens": detailed.snapshot.current_tokens,
@@ -53,7 +52,6 @@ pub(super) fn build_detailed_snapshot_response(
         "composedSystemPrompt": composed_system_prompt,
         "environment": {
             "workingDirectory": session.working_directory,
-            "serverOrigin": session.origin,
         },
     }))
 }
@@ -100,10 +98,9 @@ fn build_detailed_messages(
 
 fn build_composed_system_prompt(
     context_manager: &crate::domains::agent::runner::context::context_manager::ContextManager,
-    session: &crate::domains::session::event_store::sqlite::row_types::SessionRow,
 ) -> String {
     let mut composed_context = context_manager.build_base_context();
-    composed_context.server_origin.clone_from(&session.origin);
+    composed_context.server_origin = None;
 
     crate::domains::model::providers::compose_context_parts(&composed_context).join("\n\n")
 }

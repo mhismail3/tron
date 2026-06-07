@@ -1,12 +1,12 @@
 //! Event type definitions for the Tron event sourcing system.
 //!
-//! - [`EventType`]: 80-variant enum of all session event type discriminators
-//!   (count regression-guarded by the `ALL_EVENT_TYPES.len() == 80` assertion
+//! - [`EventType`]: 23-variant enum of primitive loop event discriminators
+//!   (count regression-guarded by the `ALL_EVENT_TYPES.len() == 23` assertion
 //!   in `generated.rs` tests — keep this line in sync when that number changes).
 //! - [`SessionEvent`]: Flat struct with base fields + opaque `payload` JSON.
 //! - [`SessionEventPayload`]: Typed payload access via [`SessionEvent::typed_payload()`].
 //! - [`payloads`]: Typed payload structs for each event type domain.
-//! - [`state`]: Session state, workspace, branch, search result types.
+//! - [`state`]: Session state, workspace, and search result types.
 
 // `macros` must come first so the `define_events!` macro is available to
 // subsequent modules.

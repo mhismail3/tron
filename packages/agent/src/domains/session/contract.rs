@@ -15,7 +15,7 @@ pub(crate) const STREAM_TOPICS: &[&str] = &["session.events", "session.lifecycle
 pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
         CapabilityContract::new("session::create", "session", EffectClass::IdempotentWrite, RiskLevel::Medium, Some("session.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"__capabilityContext":{"additionalProperties":false,"properties":{"transportId":{"type":"string"}},"type":"object"},"model":{"type":"string"},"profile":{"type":"string"},"sessionId":{"type":"string"},"source":{"type":"string"},"title":{"type":"string"},"useWorktree":{"type":"boolean"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"required":["workingDirectory"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"__capabilityContext":{"additionalProperties":false,"properties":{"transportId":{"type":"string"}},"type":"object"},"model":{"type":"string"},"sessionId":{"type":"string"},"title":{"type":"string"},"workingDirectory":{"type":"string"},"workspaceId":{"type":"string"}},"required":["workingDirectory"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))

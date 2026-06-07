@@ -60,7 +60,7 @@ impl BlobRepo {
     pub fn get_content(conn: &Connection, blob_id: &str) -> Result<Option<Vec<u8>>> {
         let content: Option<(Vec<u8>, String, i64)> = conn
             .query_row(
-                "SELECT content, compression, size_original FROM blobs WHERE id = ?1",
+                "SELECT content, compression, uncompressed_size FROM blobs WHERE id = ?1",
                 params![blob_id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
@@ -74,7 +74,7 @@ impl BlobRepo {
     pub fn get_by_id(conn: &Connection, blob_id: &str) -> Result<Option<BlobRow>> {
         let row = conn
             .query_row(
-                "SELECT id, hash, content, mime_type, size_original, size_compressed, compression, created_at, ref_count
+                "SELECT id, hash, content, mime_type, uncompressed_size, size_compressed, compression, created_at, ref_count
                  FROM blobs WHERE id = ?1",
                 params![blob_id],
                 Self::map_row,
@@ -87,7 +87,7 @@ impl BlobRepo {
     pub fn get_by_hash(conn: &Connection, hash: &str) -> Result<Option<BlobRow>> {
         let row = conn
             .query_row(
-                "SELECT id, hash, content, mime_type, size_original, size_compressed, compression, created_at, ref_count
+                "SELECT id, hash, content, mime_type, uncompressed_size, size_compressed, compression, created_at, ref_count
                  FROM blobs WHERE hash = ?1",
                 params![hash],
                 Self::map_row,
@@ -159,7 +159,7 @@ impl BlobRepo {
     /// Get total storage usage.
     pub fn get_total_size(conn: &Connection) -> Result<BlobSizeInfo> {
         let (original, compressed) = conn.query_row(
-            "SELECT COALESCE(SUM(size_original), 0), COALESCE(SUM(size_compressed), 0) FROM blobs",
+            "SELECT COALESCE(SUM(uncompressed_size), 0), COALESCE(SUM(size_compressed), 0) FROM blobs",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
@@ -175,7 +175,7 @@ impl BlobRepo {
             hash: row.get(1)?,
             content: decode_content_for_row(row.get(2)?, &row.get::<_, String>(6)?, row.get(4)?)?,
             mime_type: row.get(3)?,
-            size_original: row.get(4)?,
+            uncompressed_size: row.get(4)?,
             size_compressed: row.get(5)?,
             compression: row.get(6)?,
             created_at: row.get(7)?,
@@ -276,7 +276,7 @@ mod tests {
         let blob = BlobRepo::get_by_id(&conn, &id).unwrap().unwrap();
         assert_eq!(blob.content, content);
         assert_eq!(blob.compression, "zstd");
-        assert!(blob.size_compressed < blob.size_original);
+        assert!(blob.size_compressed < blob.uncompressed_size);
     }
 
     #[test]
@@ -296,7 +296,7 @@ mod tests {
         assert_eq!(blob.id, id);
         assert_eq!(blob.content, b"test data");
         assert_eq!(blob.mime_type, "text/plain");
-        assert_eq!(blob.size_original, 9);
+        assert_eq!(blob.uncompressed_size, 9);
         assert_eq!(blob.compression, "none");
         assert_eq!(blob.ref_count, 1);
     }

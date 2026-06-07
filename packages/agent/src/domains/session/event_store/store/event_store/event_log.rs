@@ -5,7 +5,6 @@ use serde_json::Value;
 use uuid::Uuid;
 
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
-use crate::domains::session::event_store::sqlite::repositories::branch::BranchRepo;
 use crate::domains::session::event_store::sqlite::repositories::event::{
     EventRepo, ListEventsOptions,
 };
@@ -461,15 +460,6 @@ impl EventStore {
             (Some(_), None) => Ok(true),
             (Some(assistant), Some(turn_end)) => Ok(assistant.sequence > turn_end.sequence),
         }
-    }
-
-    /// Get branches for a session.
-    pub fn get_branches(
-        &self,
-        session_id: &str,
-    ) -> Result<Vec<crate::domains::session::event_store::sqlite::row_types::BranchRow>> {
-        let conn = self.conn()?;
-        BranchRepo::get_by_session(&conn, session_id)
     }
 
     /// Get the active worktree for a session, if any.
