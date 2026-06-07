@@ -12,7 +12,10 @@ use crate::domains::agent::runner::types::CapabilityInvocationExecutionResult;
 use crate::domains::capability_support::implementations::primitive_surface::{
     EngineCapabilityTarget, ResolvedCapabilitySurface,
 };
-use crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY;
+use crate::engine::invocation::{
+    RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+    RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY,
+};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
     InvocationId, TraceId,
@@ -340,11 +343,22 @@ async fn execute_capability_primitive_via_engine(
         CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id),
         working_directory,
     )
-    .with_scope("capability.search")
-    .with_scope("capability.inspect")
     .with_scope("capability.execute")
+    .with_runtime_metadata(
+        RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+        invocation_id.to_owned(),
+    )
+    .with_runtime_metadata(
+        RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
+        model_primitive_name.to_owned(),
+    )
+    .with_runtime_metadata(RUNTIME_METADATA_TURN, turn.to_string())
     .with_session_id(session_id.to_owned())
     .with_idempotency_key(idempotency_key);
+    if let Some(run_id) = run_id {
+        causal_context =
+            causal_context.with_runtime_metadata(RUNTIME_METADATA_RUN_ID, run_id.to_owned());
+    }
     if let Some(workspace_id) = workspace_id {
         causal_context = causal_context.with_workspace_id(workspace_id.to_owned());
     }

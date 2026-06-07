@@ -121,3 +121,28 @@ CREATE TABLE IF NOT EXISTS logs (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_logs_client_dedup
   ON logs(timestamp, component, message)
   WHERE component LIKE 'ios.%';
+
+CREATE TABLE IF NOT EXISTS trace_records (
+  id                         TEXT    PRIMARY KEY,
+  trace_id                   TEXT    NOT NULL,
+  invocation_id              TEXT    NOT NULL,
+  parent_invocation_id       TEXT,
+  provider_invocation_id     TEXT,
+  session_id                 TEXT,
+  workspace_id               TEXT,
+  turn                       INTEGER,
+  model_primitive_name       TEXT    NOT NULL,
+  operation                  TEXT    NOT NULL,
+  status                     TEXT    NOT NULL,
+  timestamp                  TEXT    NOT NULL,
+  completed_at               TEXT,
+  duration_ms                INTEGER,
+  record_json                TEXT    NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_trace_records_trace
+  ON trace_records(trace_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_trace_records_session
+  ON trace_records(session_id, timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_trace_records_invocation
+  ON trace_records(invocation_id);

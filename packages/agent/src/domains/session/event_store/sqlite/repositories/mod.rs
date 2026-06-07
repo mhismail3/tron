@@ -7,4 +7,5 @@
 pub mod blob;
 pub mod event;
 pub mod session;
+pub mod trace;
 pub mod workspace;

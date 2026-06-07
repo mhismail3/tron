@@ -360,8 +360,8 @@ surface is intentionally collapsed to one provider-visible function:
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
 primitive fields such as `input`, `scope`, `namespace`, `key`, `value`, `path`,
-`content`, `command`, `timeoutMs`, `maxOutputBytes`, `idempotencyKey`, and
-`reason`.
+`content`, `command`, `traceId`, `traceRecordId`, `limit`, `timeoutMs`,
+`maxOutputBytes`, `idempotencyKey`, and `reason`.
 
 Current primitive operations:
 
@@ -374,6 +374,8 @@ Current primitive operations:
 | `file_read` | Read a UTF-8 file under the current working directory. |
 | `file_write` | Write UTF-8 content under the current working directory. |
 | `process_run` | Run a bounded local shell command with timeout and output limits. |
+| `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
+| `trace_get` | Read one durable trace record by id within the current session. |
 
 Startup registration currently keeps only loop infrastructure domains: `system`,
 `capability`, `blob`, `message`, `settings`, `auth`, `agent`, `logs`, `session`,
@@ -392,11 +394,10 @@ Deleted product routes such as `agent::run_goal`, `agent::work_snapshot`,
 `agent::ask_user`, `agent::spawn_subagent`, subagent status/result/cancel, and
 public queue management are not registered.
 
-The teardown is not complete yet. Unregistered product source modules and some
-old tests/docs remain compiled while PET-7 through PET-10 remove product
-storage, generated-helper lifecycle code, fixed iOS modes, and dead source
-files. Those leftovers are residual teardown work, not supported branch
-behavior.
+The teardown is not complete yet. Some unregistered product source modules and
+old tests/docs remain compiled while PET-10/PET-11 finish dead-source cleanup
+and the final adversarial audit. Those leftovers are residual teardown work, not
+supported branch behavior.
 
 ## Engine Protocol API
 
@@ -456,8 +457,8 @@ promotion failures return typed public error codes with structured details.
 versioned hello with `WorkerIdentity`, auth policy, registration mode, visibility
 scope, heartbeat interval, and supported capability labels; then it registers
 canonical function and trigger definitions with the same schema, authority,
-effect/risk, idempotency, approval, lease, compensation, visibility, and
-provenance metadata as in-process domain workers. Volatile worker entries are
+effect/risk, idempotency, lease, compensation, visibility, and provenance
+metadata as in-process domain workers. Volatile worker entries are
 removed on disconnect or missed heartbeat. Durable local worker entries stay in
 the catalog but are marked unhealthy when the worker disconnects, so invocation
 fails closed until the worker reconnects and re-registers. On SQLite-backed
@@ -466,8 +467,8 @@ stopped/unhealthy with no handler, so an unclean socket loss cannot become an
 optimistic callable function. Workers publish events by asking the engine to
 invoke `stream::publish`; there is no direct socket event bypass. Worker
 connect/register/disconnect/heartbeat-timeout events are stored on
-`worker.lifecycle` through the stream primitive and are visible in
-`observability::trace_get`.
+`worker.lifecycle` through the stream primitive and are visible through retained
+ledger/log records while PET-10 finishes primitive substrate cleanup.
 
 Agents do not receive a server-authored helper-launch loop. The retained
 `/engine/workers` protocol is host infrastructure for already-running external
@@ -477,36 +478,16 @@ agent-owned state, workspace files, or generic resources. If a future helper
 needs to become a live worker, it must be introduced through explicit host
 infrastructure rather than a checked-in product lifecycle.
 
-Engine primitives are first-class worker surfaces. `stream::*`, `state::*`,
-`queue::*`, `trigger::*`, `resource::*`, `grant::*`, and `approval::*` preserve
-the runtime semantics for delivery, projection state, queued handoff, trigger
-dispatch, typed durable objects, engine-owned authority, and human approval.
-Trigger dispatch records trigger id, trace, parent, session/workspace,
-idempotency, and runtime metadata across Sync, Void, and Enqueue delivery; Void
-is restricted to the private trigger runtime path for explicitly loss-tolerant
-low-risk targets, and trigger cascades carry depth/path budgets that fail closed
-before unbounded recursion.
-Queue receipts remain inspectable after retry, cancellation, completion, and
-dead-letter states: `queue::get`/`queue::list` expose current lease state,
-failed-attempt count, retry timing, durable attempt records, delivery/result
-invocation ids, replay refs, errors, resource lease ids, and compensation refs.
-`artifact::*`, `goal::*`,
-`claim::*`, `evidence::*`, and `decision::*` are wrapper capabilities that
-compose the generic resource kernel; they do not create separate stores.
-`catalog::*`, `worker::*`, `control::*`, and `observability::*` expose live
-catalog snapshots, worker health/lifecycle, substrate projections, trace
-summaries, spans, structured log projections, and metrics through the same
-canonical invocation path.
-`storage::*` owns stats, retention, checkpoints, and portable snapshot export
-for the unified engine database. A practical debugging trace includes
-invocation records, catalog changes, queue receipts, resource
-versions/links/events, stream publications, approvals, resource leases, and
-compensation records, all tied together by `traceId` plus
-`parentInvocationId`. Query
-response shaping for these privileged primitive workers lives under
-`packages/agent/src/engine/primitives/runtime.rs`; `EngineHost` coordinates
-catalog, ledger, stream, queue, resource, lease, approval, and compensation access
-without owning primitive response contracts.
+Engine substrate primitives still provide host infrastructure behind the loop:
+state, streams, queues, triggers, grants, generic resources, storage operations,
+and bounded internal projections. They are not exported as model tools. The
+agent-visible trace path is `execute` with `trace_list` and `trace_get`; those
+operations read durable `trace_records` emitted around every `execute` call.
+Each trace record carries the causal trace id, invocation id, provider tool-call
+id, session/workspace, turn, model id/provider, authority envelope, VCS revision
+when available, result/error hashes, and file attribution with content hashes.
+PET-10 owns deleting or collapsing any remaining substrate workers that are not
+required once this trace path and the primitive loop are sufficient.
 
 Subagent routes are not registered on the primitive teardown branch. Any future
 parallel helper behavior must be created by the agent through `execute` and
@@ -814,7 +795,15 @@ Default production server storage lives in `~/.tron/internal/database/tron.sqlit
 
 The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`. The migration runner registers only that schema; old product follow-up migrations are not active on this clean-break branch. Every retained session-store constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships.
 
-Engine ledger rows, grants, streams, state, queues, typed resources, approvals, resource leases, compensation records, bounded server/iOS logs, and compressed content-addressed blobs share that same SQLite file. Large correctness and audit payloads flow through `StoredPayloadRef`: primary rows keep compact inline JSON only below the configured threshold, otherwise they store an internal payload-ref envelope while the full bytes live once in `blobs` and are owned by `storage_payload_refs`. Retention operates from `storage_payload_refs`, so blobs are deleted only when no live owner remains. Startup enforces `storage.max_database_mb` as a soft budget: when the active DB plus WAL/SHM sidecars exceed it, the server records a warning, runs only safe verbose-log/blob retention, and checkpoints the WAL; audit-critical rows and owner refs are not automatically deleted. Observability primitives read the same local truth for `observability::trace_get`, `observability::trace_list`, `observability::span_list`, `observability::log_query`, and `observability::metrics_snapshot`. Trace and log queries return previews/refs by default; callers must explicitly request full payload expansion through blob refs.
+Retained session rows, event rows, Agent Trace-style records, bounded
+server/iOS logs, and compressed content-addressed blobs share that same SQLite
+file. Large correctness and audit payloads flow through blob refs where the
+owning row needs them; compact rows keep human/agent-readable JSON inline. The
+model-visible trace read path is `capability::execute` with `trace_list` and
+`trace_get`, backed by `trace_records`. Every `execute` call inserts a running
+record before the effect runs and updates that same record with status,
+duration, result/error hashes, authority, provider/model metadata, VCS revision
+when available, and file attribution/content hashes after completion.
 
 ### Tables
 
@@ -826,6 +815,7 @@ Engine ledger rows, grants, streams, state, queues, typed resources, approvals, 
 | `events` | Immutable append-only event log. Denormalized columns (`role`, `model_primitive_name`, `invocation_id`, `turn`, token counts, `model`, `latency_ms`, `stop_reason`, `provider_type`, `cost`, ...) extracted from payloads for indexed queries |
 | `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, uncompressed/compressed size metadata) |
 | `logs` | Application logs (level, component, message, error fields, trace IDs) |
+| `trace_records` | Agent Trace-style durable records for primitive `execute` calls, including trace/session/invocation/provider ids, model primitive name, operation, status, timestamps, duration, and full JSON `record_json` |
 | `engine_invocations` | Engine invocation ledger: function, worker, trace, parent, idempotency, status, result/error summaries |
 | `engine_grants`, `engine_grant_events` | Engine-owned authority model: parent/child grants, subject binding, allowed capabilities/namespaces/resource selectors/file roots/network/risk/budget/expiry/delegation, plus lifecycle events |
 | `engine_stream_events` | Engine stream publication history with cursor, topic, visibility, trace, and compact payload |

@@ -46,7 +46,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                 "name": "execute",
                 "description": concat!(
                     "Primitive host operation for the bare Tron loop. ",
-                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, and run a bounded local command. ",
+                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, and inspect agent trace records. ",
                     "Choose one operation per call. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()
@@ -68,7 +68,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "properties": {
             "operation": {
                 "type": "string",
-                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, or process_run."
+                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, or trace_get."
             },
             "input": {"type": "string", "description": "Text to record for observe."},
             "scope": {"type": "string", "description": "State scope: session, workspace, or system."},
@@ -78,6 +78,9 @@ fn execute_model_request_schema() -> serde_json::Value {
             "path": {"type": "string", "description": "Relative file path under the current working directory."},
             "content": {"type": "string", "description": "UTF-8 file content for file_write."},
             "command": {"type": "string", "description": "Shell command for process_run."},
+            "traceId": {"type": "string", "description": "Optional trace id filter for trace_list."},
+            "traceRecordId": {"type": "string", "description": "Trace record id for trace_get."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 500},
             "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 120000},
             "maxOutputBytes": {"type": "integer", "minimum": 1, "maximum": 200000},
             "idempotencyKey": {"type": "string", "description": "Stable caller key for writes or command side effects."},

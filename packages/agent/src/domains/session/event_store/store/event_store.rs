@@ -18,6 +18,7 @@ mod event_log;
 mod locking;
 mod session_lifecycle;
 mod state;
+mod trace_log;
 
 pub use self::session_lifecycle::{ImportAtomicOptions, ImportAtomicResult, ImportEventSpec};
 pub use self::state::event_rows_to_session_events;

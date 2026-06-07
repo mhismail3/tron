@@ -47,12 +47,15 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
-        "Current score: **63/100**",
+        "Current score: **81/100**",
         "Status: **active execution artifact**",
         "Branch: `codex/primitive-engine-teardown`",
         "There are no users and no compatibility obligations.",
         "No backward compatibility",
         "the model receives one initial tool, `execute`",
+        "No runtime approval prompt plane",
+        "No invisible agent authorship",
+        "First-Class Traceability Primitive",
         "The soul is not a toolbox, recipe pack, policy profile, or product guide.",
         "Target Bare Loop",
         "Agent Soul Seed",
@@ -63,10 +66,10 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-4 | Soul and agent-owned state workspace | 10 | passed_after_fix |",
         "| PET-5 | Session, event, ledger, and resource collapse | 8 | passed_after_fix |",
         "| PET-6 | Rules, skills, hooks, guardrails, approvals, and policy deletion | 8 | passed_after_fix |",
-        "| PET-7 | Self-authored worker/capability substrate | 8 | pending |",
-        "| PET-8 | iOS primitive shell | 10 | pending |",
+        "| PET-7 | Self-authored worker/capability substrate | 8 | passed_after_fix |",
+        "| PET-8 | iOS primitive shell | 10 | passed_after_fix |",
         "| PET-9 | Documentation and managed asset rewrite | 5 | pending |",
-        "| PET-10 | Absence gates and dead-code cleanup | 6 | pending |",
+        "| PET-10 | Absence gates, traceability gates, and dead-code cleanup | 6 | running |",
         "| PET-11 | End-to-end closeout and \"cannot remove more\" audit | 8 | pending |",
         "Total weight: **100**",
         "`provider_surface_exports_only_execute`",
@@ -74,6 +77,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "`context_has_soul_not_rules_or_skills`",
         "`ios_primary_shell_has_no_fixed_product_modes`",
         "`no_legacy_fallback_compatibility_paths`",
+        "`agent_trace_records_are_first_class`",
         "`primitive_loop_end_to_end`",
         "After PET-11 passes, create a separate self-adapting-agent scorecard",
     ] {
@@ -85,7 +89,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Evidence Manifest",
-        "Current score: **63/100**",
+        "Current score: **81/100**",
         "Status: **active execution artifact**",
         "New teardown branch: `codex/primitive-engine-teardown`",
         "Compatibility assumption: none.",
@@ -96,8 +100,11 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-4 | passed_after_fix |",
         "| PET-5 | passed_after_fix |",
         "| PET-6 | passed_after_fix |",
+        "| PET-7 | passed_after_fix |",
+        "| PET-8 | passed_after_fix |",
         "| PET-11 | pending |",
         "provider model-facing tool export proof",
+        "trace record proof linking provider/model turn, invocation, VCS/resource",
         "iOS simulator target name, UDID, bundle id, launch return code",
     ] {
         assert!(
@@ -793,6 +800,196 @@ fn capability_registry_recipe_and_conformance_scaffolding_is_deleted() {
             "policy-profile",
         ],
         "README capability substrate references",
+    );
+}
+
+#[test]
+fn agent_trace_records_are_first_class_and_agent_visible() {
+    let migration = read_repo_file(
+        "packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql",
+    );
+    for required in [
+        "CREATE TABLE IF NOT EXISTS trace_records",
+        "trace_id",
+        "invocation_id",
+        "parent_invocation_id",
+        "provider_invocation_id",
+        "session_id",
+        "workspace_id",
+        "turn",
+        "model_primitive_name",
+        "operation",
+        "status",
+        "record_json",
+        "idx_trace_records_trace",
+        "idx_trace_records_session",
+        "idx_trace_records_invocation",
+    ] {
+        assert!(
+            migration.contains(required),
+            "fresh schema must persist first-class trace record field/index: {required}"
+        );
+    }
+
+    let trace_types = read_repo_file("packages/agent/src/domains/session/event_store/trace.rs");
+    for required in [
+        "AGENT_TRACE_VERSION",
+        "TRON_TRACE_METADATA_KEY",
+        "AgentTraceRecord",
+        "provider_invocation_id",
+        "model_primitive_name",
+        "record_json: Value",
+        "AgentTraceListOptions",
+    ] {
+        assert!(
+            trace_types.contains(required),
+            "trace type module missing required primitive trace type text: {required}"
+        );
+    }
+
+    let trace_repo = read_repo_file(
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/trace.rs",
+    );
+    for required in [
+        "INSERT INTO trace_records",
+        "UPDATE trace_records",
+        "FROM trace_records",
+        "WHERE session_id = ?1 AND trace_id = ?2",
+        "ORDER BY timestamp DESC",
+        "serde_json::from_str",
+    ] {
+        assert!(
+            trace_repo.contains(required),
+            "trace repository missing durable query/storage behavior: {required}"
+        );
+    }
+
+    let trace_log = read_repo_file(
+        "packages/agent/src/domains/session/event_store/store/event_store/trace_log.rs",
+    );
+    for required in [
+        "append_trace_record",
+        "update_trace_record",
+        "get_trace_record",
+        "list_trace_records",
+    ] {
+        assert!(
+            trace_log.contains(required),
+            "event store trace log missing required method: {required}"
+        );
+    }
+
+    let contract = read_repo_file("packages/agent/src/domains/capability/contract.rs");
+    for required in [
+        "trace_list",
+        "trace_get",
+        "inspect agent trace records",
+        "\"traceRecordId\"",
+        "\"traceId\"",
+    ] {
+        assert!(
+            contract.contains(required),
+            "execute contract must expose agent-visible trace query operation: {required}"
+        );
+    }
+
+    let operations = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    for required in [
+        "append_trace_record(&trace_record)",
+        "update_trace_record(&trace_record)",
+        "execute_operation(&operation",
+        "\"trace_list\" => trace_list",
+        "\"trace_get\" => trace_get",
+        "AgentTraceListOptions",
+        "AGENT_TRACE_VERSION",
+        "TRON_TRACE_METADATA_KEY",
+        "\"providerInvocationId\"",
+        "\"modelId\"",
+        "\"authority\"",
+        "\"requestHash\"",
+        "\"resultHash\"",
+        "\"content_hash\"",
+        "\"model_id\"",
+        "git_vcs",
+    ] {
+        assert!(
+            operations.contains(required),
+            "execute operation trace wrapper missing primitive trace behavior: {required}"
+        );
+    }
+    assert_absent(
+        &operations,
+        &[
+            "observability::trace_get",
+            "observability::trace_list",
+            "capability::search",
+            "capability::inspect",
+        ],
+        "primitive execute trace path",
+    );
+
+    let primitive_surface = read_repo_file(
+        "packages/agent/src/domains/capability_support/implementations/primitive_surface.rs",
+    );
+    assert!(
+        primitive_surface.contains("\"capability.execute\""),
+        "primitive surface resolver must authorize the one execute primitive"
+    );
+    assert_absent(
+        &primitive_surface,
+        &["capability.search", "capability.inspect"],
+        "primitive surface resolver",
+    );
+
+    let executor = read_repo_file(
+        "packages/agent/src/domains/agent/runner/agent/capability_invocation_executor.rs",
+    );
+    for required in [
+        "RUNTIME_METADATA_PROVIDER_INVOCATION_ID",
+        "RUNTIME_METADATA_MODEL_PRIMITIVE_NAME",
+        "RUNTIME_METADATA_TURN",
+        "RUNTIME_METADATA_RUN_ID",
+        ".with_scope(\"capability.execute\")",
+    ] {
+        assert!(
+            executor.contains(required),
+            "capability executor must attach trusted trace runtime metadata: {required}"
+        );
+    }
+    assert_absent(
+        &executor,
+        &["capability.search", "capability.inspect"],
+        "capability executor authority envelope",
+    );
+
+    let integration_test = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
+    for required in [
+        "execute_file_write_records_agent_trace_and_trace_list_exposes_it",
+        "\"operation\": \"trace_list\"",
+        "\"operation\": \"trace_get\"",
+        "\"provider-call-write-1\"",
+        "\"provider-call-get-1\"",
+        "\"openai/gpt-4o\"",
+        "\"model_id\"",
+        "\"content_hash\"",
+    ] {
+        assert!(
+            integration_test.contains(required),
+            "trace integration proof missing required evidence assertion: {required}"
+        );
+    }
+
+    let readme = read_repo_file("README.md");
+    for required in ["trace_list", "trace_get", "trace_records"] {
+        assert!(
+            readme.contains(required),
+            "README must document primitive traceability surface: {required}"
+        );
+    }
+    assert_absent(
+        &readme,
+        &["observability::trace_get", "observability::trace_list"],
+        "README model-visible trace documentation",
     );
 }
 

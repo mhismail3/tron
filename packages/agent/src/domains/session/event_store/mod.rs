@@ -31,6 +31,7 @@ pub mod reconstruct;
 pub mod redaction;
 pub mod sqlite;
 pub mod store;
+pub mod trace;
 pub mod types;
 
 pub use envelope::{
@@ -50,6 +51,7 @@ pub use store::{
     AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult, ImportAtomicOptions,
     ImportAtomicResult, ImportEventSpec, event_rows_to_session_events,
 };
+pub use trace::{AGENT_TRACE_VERSION, AgentTraceListOptions, AgentTraceRecord};
 pub use types::{
     ALL_EVENT_TYPES, Branch, EventType, Message, MessageWithEventId, SessionEvent,
     SessionEventPayload, SessionState, SessionSummary, TokenTotals, TokenUsage, Workspace,

@@ -172,8 +172,6 @@ fn primitive_surface_actor(
         ActorKind::Agent,
         AuthorityGrantId::new(PRIMITIVE_SURFACE_GRANT).map_err(|error| error.to_string())?,
     )
-    .with_scope("capability.search")
-    .with_scope("capability.inspect")
     .with_scope("capability.execute")
     .with_session_id(session_id.to_owned());
     if let Some(workspace_id) = workspace_id {
@@ -183,12 +181,11 @@ fn primitive_surface_actor(
 }
 
 fn authority_is_available(function: &FunctionDefinition) -> bool {
-    function.required_authority.scopes.iter().all(|scope| {
-        matches!(
-            scope.as_str(),
-            "capability.search" | "capability.inspect" | "capability.execute"
-        )
-    })
+    function
+        .required_authority
+        .scopes
+        .iter()
+        .all(|scope| matches!(scope.as_str(), "capability.execute"))
 }
 
 fn is_capability_primitive(function: &FunctionDefinition) -> bool {
