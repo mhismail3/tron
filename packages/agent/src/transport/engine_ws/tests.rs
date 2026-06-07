@@ -46,7 +46,7 @@ fn invoke_message_maps_to_engine_invoke_payload() {
             "sessionId": "s1",
             "traceId": "trace-1",
             "authorityScopes": ["system.read"],
-            "runtimeMetadata": {"capability.searchPolicyId": "operatorConsoleHybridLexical"}
+            "runtimeMetadata": {"agent.runId": "run-1"}
         }
     });
     let message: InvokeMessage = serde_json::from_value(value).unwrap();
@@ -54,8 +54,8 @@ fn invoke_message_maps_to_engine_invoke_payload() {
     let context = message.context.unwrap();
     assert_eq!(context.authority_scopes, vec!["system.read".to_owned()]);
     assert_eq!(
-        context.runtime_metadata.get("capability.searchPolicyId"),
-        Some(&"operatorConsoleHybridLexical".to_owned())
+        context.runtime_metadata.get("agent.runId"),
+        Some(&"run-1".to_owned())
     );
 }
 

@@ -61,7 +61,7 @@ pub struct OpenAIModelInfo {
     pub tier: &'static str,
     /// Model description for the client UI.
     pub description: &'static str,
-    /// Hidden aliases and snapshots accepted by the registry.
+    /// Provider aliases and snapshots accepted by the registry.
     pub aliases: &'static [&'static str],
     /// Per-auth-path profiles.
     pub profiles: Vec<OpenAIModelProfile>,
@@ -71,14 +71,13 @@ pub struct OpenAIModelInfo {
     pub recommended: bool,
     /// Whether this is a retired/older generation model.
     pub is_retired_generation: bool,
-    /// Whether this model has been retired by the provider. Retired models
-    /// remain in the registry so existing sessions can still be rendered and
-    /// their costs/capabilities resolved, but they are surfaced as unavailable
-    /// in the iOS picker via `isDeprecated`.
+    /// Whether this model has been retired by the provider. Retired models are
+    /// provider metadata for routing, audit, and cost reporting; new selection
+    /// surfaces mark them unavailable.
     pub is_retired: bool,
     /// Retirement date (ISO-8601), if retired.
     pub deprecation_date: Option<&'static str>,
-    /// Replacement model for retired aliases.
+    /// Suggested replacement model from the provider catalog.
     pub replacement_model: Option<&'static str>,
     /// Whether this model should be hidden from `model.list`.
     pub is_hidden: bool,
@@ -394,9 +393,9 @@ pub fn canonical_openai_model_id(model_id: &str) -> Option<&'static str> {
 
 /// Resolve the request model ID sent to OpenAI.
 ///
-/// Snapshot aliases are preserved so callers can intentionally pin behavior.
-/// Live retired model IDs are also preserved: entitlement, availability, and
-/// retirement state are reported explicitly instead of silently downgrading.
+/// Explicit model IDs are sent as configured. Entitlement, availability, and
+/// provider retirement state are reported explicitly instead of silently
+/// downgrading to another model.
 #[must_use]
 pub fn openai_request_model_id(model_id: &str) -> String {
     strip_openai_provider_prefix(model_id).to_string()

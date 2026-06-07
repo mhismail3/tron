@@ -37,7 +37,7 @@ pub struct ErrorCapabilityPayload {
 /// `category` is required — every emitter must classify the failure. Use
 /// `"unknown"` as the literal classification when the originating layer
 /// couldn't narrow it further (import transformer, historical rows). Missing
-/// `category` is a bug, not back-compat: reject it at decode time so iOS
+/// `category` is a bug: reject it at decode time so iOS
 /// never has to guess what to render.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -68,7 +68,7 @@ mod tests {
 
     #[test]
     fn error_provider_requires_category() {
-        // Missing `category` — must fail (scorched-earth: no back-compat defaulting).
+        // Missing `category` must fail; there is no defaulting path.
         let raw = json!({
             "provider": "anthropic",
             "error": "rate limited",

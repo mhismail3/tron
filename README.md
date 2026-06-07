@@ -92,13 +92,13 @@ Current living entry points:
 - `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
 - `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`
   primitive and provider export.
-- `packages/agent/docs/primitive-engine-teardown-scorecard.md`: active
+- `packages/agent/docs/primitive-engine-teardown-scorecard.md`: completed
   clean-break primitive engine teardown scorecard for stripping hard-coded
   capabilities, policies, skills, rules, helper launch products, and fixed iOS product
   surfaces down to the smallest provider loop, single `execute` primitive,
   agent-owned state workspace, event/ledger truth, and dynamic client shell.
 - `packages/agent/docs/primitive-engine-teardown-evidence-manifest.md`:
-  companion evidence manifest for the active primitive engine teardown
+  companion evidence manifest for the completed primitive engine teardown
   scorecard.
 - `packages/agent/docs/primitive-engine-teardown-inventory.md`: PET-1
   source-audited deletion map for every current Rust domain, engine primitive
@@ -110,7 +110,7 @@ Current living entry points:
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
-Retired product campaign scorecards and guides are deleted on this branch.
+Deleted product campaign scorecards and guides are absent on this branch.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -386,10 +386,9 @@ Deleted product routes such as `agent::run_goal`, `agent::work_snapshot`,
 `agent::ask_user`, `agent::spawn_subagent`, subagent status/result/cancel, and
 public queue management are not registered.
 
-The teardown is not complete yet. Some unregistered product source modules and
-old tests/docs remain compiled while PET-10/PET-11 finish dead-source cleanup
-and the final adversarial audit. Those leftovers are residual teardown work, not
-supported branch behavior.
+The teardown scorecard is complete. Retained source is limited to the primitive
+loop, generic shell, and evidence paths described here; deleted product routes
+are not supported branch behavior.
 
 ## Engine Protocol API
 
@@ -423,7 +422,7 @@ idempotency key. Message ids are correlation ids only.
 When test clients invoke `capability::execute` directly, the transport dispatches
 it as the agent actor and passes only the envelope's session, workspace, trace,
 authority scopes, and explicit runtime metadata through to the engine. The
-transport does not derive profile policy scopes or capability runtime metadata;
+transport does not derive profile scopes or capability runtime metadata;
 `execute` is the primitive operation boundary.
 
 Hidden functions remain in the engine catalog for queue/runtime side effects
@@ -516,7 +515,7 @@ sessions.
 Active runtime/UI identity is primitive-execution native: payloads carry the
 model-visible primitive name, invocation id, trace id, turn, operation
 arguments, result content, error state, and duration. iOS renders active work
-from those primitive fields and does not map retired built-in names to
+from those primitive fields and does not map deleted built-in names to
 capability identity.
 
 ### Event Streaming
@@ -742,9 +741,9 @@ Agent soul / system prompt
 
 ## Database Schema
 
-Default production server storage lives in `~/.tron/internal/database/tron.sqlite`; explicit developer/test homes such as the Mac isolated install use the same `internal/database/tron.sqlite` path under their resolved Tron home. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v4"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/modular-engine-v4-*` and starts fresh. Old product/session data is archived, not migrated or read by the new runtime. Retired pre-unified database artifacts are archived the same way and are never read as active storage.
+Default production server storage lives in `~/.tron/internal/database/tron.sqlite`; explicit developer/test homes such as the Mac isolated install use the same `internal/database/tron.sqlite` path under their resolved Tron home. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v4"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/modular-engine-v4-*` and starts fresh. Non-current product/session data is archived, not migrated or read by the new runtime. Pre-unified database artifacts are archived the same way and are never read as active storage.
 
-The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`. The migration runner registers only that schema; old product follow-up migrations are not active on this clean-break branch. Every retained session-store constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships.
+The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`. The migration runner registers only that schema; deleted product follow-up migrations are not active on this clean-break branch. Every retained session-store constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships.
 
 Retained session rows, event rows, Agent Trace-style records, bounded
 server/iOS logs, and compressed content-addressed blobs share that same SQLite
@@ -778,7 +777,7 @@ attribution/content hashes after completion.
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 
-The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)`; most other access patterns are intentionally allowed to scan/filter at our volumes. Session views are reconstructed from the canonical event log. Fresh storage contains no branches, push-token tables, cron tables, constitution audit tables, session profiles, worktree overrides, prompt queue events, config mutation events, rules/skills/hooks events, or retired product catalog tables.
+The events table enforces correctness with `UNIQUE(session_id, sequence)` and a single ordering index on `(session_id, sequence)`; most other access patterns are intentionally allowed to scan/filter at our volumes. Session views are reconstructed from the canonical event log. Fresh storage contains no branches, push-token tables, cron tables, constitution audit tables, session profiles, worktree overrides, prompt queue events, config mutation events, rules/skills/hooks events, or deleted product catalog tables.
 
 ---
 
@@ -1005,17 +1004,17 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- plans/                     Plan files and TODOs
 |   +-- reports/                   Analysis and investigation reports
 |   +-- renders/                   Rendered pages displayed in chat
-|   +-- screenshots/               Saved screenshots from the computer-use capability
+|   +-- screenshots/               Saved screenshots from runtime execution
 |   +-- scratch/                   Downloads, temp files, experiments
 |   +-- labs/                      Manifested experimental spaces
-|   +-- archive/                   Retired workspace material
+|   +-- archive/                   Archived workspace material
 |   +-- knowledge/                 Curated wiki/research experiment
 |   +-- vault/                     Local fast secret storage for agent-owned workspace state
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
     |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, leases, compensation, workers
     |   +-- tron.sqlite.lock       OS-level flock sidecar; one Tron process owns it while running
-    |   +-- archive/               One-way archive of retired or incompatible storage generations
+    |   +-- archive/               One-way archive of non-current storage generations
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output
     +-- run/                       Mutable runtime state and local contributor artifacts
     |   +-- auth.lock              Auth-file refresh lock
@@ -1120,9 +1119,9 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 
 4. **Session-serialized writes**: All event appends are serialized per-session via in-process mutex locks. SQLite `UNIQUE(session_id, sequence)` enforces ordering at the DB level.
 
-5. **Event ordering (iOS send button)**: `agent.ready` is emitted AFTER `agent.complete`. iOS `handleComplete()` sets `isPostProcessing=true`, `handleAgentReady()` clears it. Three independent send-button concerns: `isPostProcessing`, `isCompacting`, and ledger (fully async).
+5. **Event ordering (iOS send button)**: `agent.ready` is emitted AFTER `agent.complete`. Clients see active work as `processing` and every terminal or between-turn window as `idle`; compaction and ledger state stay independent.
 
-6. **Primitive context boundary**: model context contains soul, agent-owned state, environment, session history, and pending `execute` results. Built-in rules, skills, hooks, worker guides, and profile policy primers are not prompt planes.
+6. **Primitive context boundary**: model context contains soul, agent-owned state, environment, session history, and pending `execute` results. Built-in rules, skills, hooks, worker guides, and profile primers are not prompt planes.
 
 7. **Compaction before provider calls**: threshold-triggered compaction runs before the next provider call and only persists a boundary when it reduces durable context.
 

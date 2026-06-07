@@ -126,7 +126,7 @@ pub(crate) fn init_database(
         tracing::info!(
             archive_dir = ?archive_report.archive_dir,
             files = archive_report.files.len(),
-            "archived retired or incompatible database files before unified storage startup"
+            "archived non-current database files before unified storage startup"
         );
     }
 

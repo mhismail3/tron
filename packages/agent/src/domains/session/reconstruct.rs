@@ -264,8 +264,8 @@ impl SessionReconstructService {
             "lastSequence": last_sequence,
             "isRunning": is_running,
             "runId": run_id,
-            // Note: "postProcessing" phase (between agent.complete and agent.ready) is not
-            // tracked by the orchestrator, so reconnection during that brief window shows "idle".
+            // Reconnect state is intentionally two-valued: active turn work is
+            // "processing"; every terminal or between-turn window is "idle".
             "agentPhase": if is_running { "processing" } else { "idle" },
             "metadata": session_metadata,
         }))

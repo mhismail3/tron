@@ -136,7 +136,7 @@ fn merge_consecutive_roles(messages: Vec<AnthropicMessageParam>) -> Vec<Anthropi
 
 /// Deduplicate tool blocks within messages.
 ///
-/// Handles existing sessions with duplicate tool events stored in the DB:
+/// Normalizes duplicate tool blocks before sending the provider request:
 /// - In assistant messages: duplicate `tool_use` blocks with same `id` → keep last
 /// - In user messages: duplicate `tool_result` blocks with same `tool_use_id` → keep last
 fn dedup_tool_blocks(messages: Vec<AnthropicMessageParam>) -> Vec<AnthropicMessageParam> {

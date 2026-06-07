@@ -30,8 +30,8 @@
 //!   from the active auth-path profile. The shared model-only registry is only
 //!   a conservative default for call sites without credential context.
 //! - `model.list` surfaces streaming-capable models for the active auth path.
-//!   Retired OpenAI models stay visible with replacement metadata, but
-//!   `model.switch` rejects them so users cannot newly select retired IDs.
+//!   Provider-retired OpenAI models stay visible with replacement metadata, but
+//!   `model.switch` rejects them so new runs do not select unavailable IDs.
 //!   Non-streaming Pro/preview records stay hidden and are rejected before a
 //!   request is sent.
 //! - Capability invocations arrive as streaming deltas over multiple SSE events.

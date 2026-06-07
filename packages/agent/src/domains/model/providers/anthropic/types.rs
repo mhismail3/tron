@@ -543,7 +543,7 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
         },
     );
 
-    // Claude 3.7 (retired — removed from model picker, kept for existing sessions)
+    // Claude 3.7 (provider-retired; unavailable for new model selection)
     let _ = m.insert(
         "claude-3-7-sonnet-20250219",
         ClaudeModelInfo {

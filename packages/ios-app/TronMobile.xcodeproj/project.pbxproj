@@ -2133,7 +2133,6 @@
 				C7297D9A306D121FEC63F0C2 /* ParsedEventV2.swift */,
 				809CE31F342D26DE4F92516F /* CapabilityInvocation */,
 				AE57A76FF9539761C0E81D08 /* Display */,
-				AA51B98B2A19E9867E4DF327 /* Hook */,
 				8484A19D413A097A935F3D62 /* Lifecycle */,
 				97E6E4DEFF0E6E534AE34B2C /* Queue */,
 				5541AA1F28867E9BF05FF9AC /* Server */,
@@ -2205,13 +2204,6 @@
 				85384FFF041BD584D47D7D5A /* Thinking */,
 			);
 			path = Capabilities;
-			sourceTree = "<group>";
-		};
-		AA51B98B2A19E9867E4DF327 /* Hook */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = Hook;
 			sourceTree = "<group>";
 		};
 		AC6166611A5239356657919C /* Handlers */ = {

@@ -61,7 +61,7 @@ pub struct CausalContext {
     /// Idempotency key.
     pub idempotency_key: Option<String>,
     /// Engine-internal runtime metadata. This is not model-supplied payload and
-    /// is used to carry profile/policy context into primitive workers.
+    /// is used to carry trusted run context into primitive workers.
     #[serde(default)]
     pub runtime_metadata: BTreeMap<String, String>,
 }

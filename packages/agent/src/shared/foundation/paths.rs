@@ -59,7 +59,7 @@ pub mod dirs {
     pub const ARCHIVE: &str = "archive";
     /// Workspace-local curated wiki/research experiment.
     pub const KNOWLEDGE: &str = "knowledge";
-    /// Workspace-local skill-owned credential vault.
+    /// Workspace-local credential vault.
     pub const VAULT: &str = "vault";
 }
 

@@ -4,7 +4,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
     match event {
         TronEvent::AgentStart { .. } => Some(session_scoped(event, "agent.start", Some(json!({})))),
         TronEvent::AgentEnd { error, .. } => {
-            let mut data = json!({ "agentPhase": "postProcessing" });
+            let mut data = json!({ "agentPhase": "idle" });
             if let Some(message) = error {
                 data["error"] = json!(message);
             }

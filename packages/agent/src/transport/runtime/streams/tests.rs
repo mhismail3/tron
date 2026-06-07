@@ -35,6 +35,19 @@ fn tron_event_projection_preserves_engine_trace_context() {
 }
 
 #[test]
+fn agent_complete_projects_to_idle_lifecycle_phase() {
+    let event = TronEvent::AgentEnd {
+        base: BaseEvent::now("s1"),
+        error: None,
+    };
+
+    let projected = tron_event_to_projected(&event);
+
+    assert_eq!(projected.server_event.event_type, "agent.complete");
+    assert_eq!(projected.server_event.data.unwrap()["agentPhase"], "idle");
+}
+
+#[test]
 fn all_session_events_project_to_system_visible_stream_scope() {
     let event = TronEvent::SessionCreated {
         base: BaseEvent::now("session-a"),

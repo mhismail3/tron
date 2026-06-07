@@ -4,10 +4,10 @@
 //! `~/.tron/internal/database/tron.sqlite`. Runtime connections use WAL for
 //! safe concurrent reads/writes; checkpoints and exports create compact
 //! single-file artifacts when the operator needs one. The `modular-engine-v4`
-//! generation is a clean break for the collapsed substrate: startup archives
-//! older active DB, WAL, and SHM files before creating the grant, resource,
-//! ledger, stream, state, queue, grant, lease, compensation, storage, and
-//! session-harness tables from the current schema only.
+//! generation is a clean break for the collapsed substrate: startup moves
+//! non-current active DB, WAL, and SHM files aside before creating the grant,
+//! resource, ledger, stream, state, queue, grant, lease, compensation, storage,
+//! and session-harness tables from the current schema only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -33,7 +33,8 @@ mod stats;
 mod tests;
 
 pub use archive::{
-    archive_incompatible_active_database, archive_retired_database_files, prepare_active_database,
+    archive_non_current_active_database, archive_non_current_database_files,
+    prepare_active_database,
 };
 pub use maintenance::{checkpoint_database, enforce_size_budget, export_snapshot, retention_run};
 pub use payloads::{
@@ -57,8 +58,8 @@ pub const CURRENT_STORAGE_GENERATION: &str = "modular-engine-v4";
 /// Metadata key storing the active storage generation.
 pub const STORAGE_GENERATION_KEY: &str = "storage_generation";
 
-/// Retired active database artifacts archived on first unified startup.
-pub const RETIRED_DATABASE_FILES: &[&str] = &[
+/// Non-current active database artifacts moved aside on first unified startup.
+pub const NON_CURRENT_DATABASE_FILES: &[&str] = &[
     "log.db",
     "log.db-wal",
     "log.db-shm",
@@ -86,11 +87,11 @@ pub const ARCHIVE_DIR: &str = "archive";
 /// Internal storage envelope key for payload-ref-backed JSON columns.
 pub const PAYLOAD_REF_ENVELOPE_KEY: &str = "__tronPayloadRef";
 
-/// Summary of one retired file archive operation.
+/// Summary of one archived database file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ArchivedDatabaseFile {
-    /// Retired filename.
+    /// Archived filename.
     pub filename: String,
     /// Final archived path.
     pub archived_path: PathBuf,
@@ -104,12 +105,12 @@ pub struct ArchivedDatabaseFile {
 pub struct ArchiveReport {
     /// Archive directory used for this startup, if any files moved.
     pub archive_dir: Option<PathBuf>,
-    /// Retired files moved out of active storage.
+    /// Non-current files moved out of active storage.
     pub files: Vec<ArchivedDatabaseFile>,
 }
 
 impl ArchiveReport {
-    /// Whether startup moved any retired database artifacts.
+    /// Whether startup moved any non-current database artifacts.
     #[must_use]
     pub fn moved_any(&self) -> bool {
         !self.files.is_empty()
@@ -414,7 +415,7 @@ impl StorageRuntime {
         Ok(conn)
     }
 
-    /// Archive/reset any incompatible active DB and retired artifacts.
+    /// Move any non-current active DB artifacts aside before startup.
     pub fn prepare_for_startup(&self) -> Result<ArchiveReport> {
         prepare_active_database(&self.path)
     }

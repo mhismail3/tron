@@ -96,7 +96,7 @@ tron_events! {
         error: Option<String>,
     } => "agent_end",
 
-    /// Agent ready (post-processing complete, safe to send next message).
+    /// Agent ready after the terminal event has been published.
     AgentReady {} => "agent_ready",
 
     /// Session processing state changed (global broadcast for dashboard).

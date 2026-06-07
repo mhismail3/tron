@@ -95,8 +95,8 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Scorecard",
-        "Current score: **92/100**",
-        "Status: **active execution artifact**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "Branch: `codex/primitive-engine-teardown`",
         "There are no users and no compatibility obligations.",
         "No backward compatibility",
@@ -118,7 +118,7 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-8 | iOS primitive shell | 10 | passed_after_fix |",
         "| PET-9 | Documentation and managed asset rewrite | 5 | passed_after_fix |",
         "| PET-10 | Absence gates, traceability gates, and dead-code cleanup | 6 | passed_after_fix |",
-        "| PET-11 | End-to-end closeout and \"cannot remove more\" audit | 8 | running |",
+        "| PET-11 | End-to-end closeout and \"cannot remove more\" audit | 8 | passed_after_fix |",
         "Total weight: **100**",
         "`provider_surface_exports_only_execute`",
         "`deleted_first_party_capabilities_are_absent`",
@@ -138,8 +138,8 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     for required in [
         "# Primitive Engine Teardown Evidence Manifest",
-        "Current score: **92/100**",
-        "Status: **active execution artifact**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "New teardown branch: `codex/primitive-engine-teardown`",
         "Compatibility assumption: none.",
         "| PET-0 | passed_after_fix |",
@@ -153,10 +153,12 @@ fn primitive_engine_teardown_plan_stays_formalized() {
         "| PET-8 | passed_after_fix |",
         "| PET-9 | passed_after_fix |",
         "| PET-10 | passed_after_fix |",
-        "| PET-11 | running |",
-        "provider model-facing tool export proof",
-        "trace record proof linking provider/model turn, invocation, VCS/resource",
-        "iOS simulator target name, UDID, bundle id, launch return code",
+        "| PET-11 | passed_after_fix |",
+        "PET-11 Final Primitive Loop Closeout Addendum",
+        "Provider and primitive-loop fixture proof",
+        "Database and trace proof from the same fresh run",
+        "iOS closeout screenshots",
+        "Final retained-surface scans",
     ] {
         assert!(
             manifest.contains(required),
@@ -166,11 +168,11 @@ fn primitive_engine_teardown_plan_stays_formalized() {
 
     assert!(
         readme.contains("packages/agent/docs/primitive-engine-teardown-scorecard.md")
-            && readme.contains("active")
+            && readme.contains("completed")
             && readme.contains("clean-break primitive engine teardown scorecard")
             && readme
                 .contains("packages/agent/docs/primitive-engine-teardown-evidence-manifest.md"),
-        "README living-doc map must link the active primitive teardown scorecard and evidence manifest"
+        "README living-doc map must link the completed primitive teardown scorecard and evidence manifest"
     );
 }
 
@@ -2169,6 +2171,33 @@ fn public_catalog_readout_state_is_not_client_envelope_state() {
         ],
         "public catalog/meta/worker readout catalog revision surface",
     );
+}
+
+#[test]
+fn prompt_suggestion_lifecycle_state_is_deleted_from_retained_sources() {
+    let retained_sources = read_repo_source_trees(&[
+        "packages/agent/src",
+        "packages/ios-app/Sources",
+        "packages/ios-app/Tests",
+        "packages/ios-app/project.yml",
+    ]);
+    let forbidden = [
+        ["post", "Processing"].concat(),
+        ["is", "Post", "Processing"].concat(),
+        ["post", "-", "processing"].concat(),
+        ["post", " processing"].concat(),
+        ["awaiting", "Suggestions"].concat(),
+        ["suggest", "-", "prompts"].concat(),
+        ["Pull", "Up", "Panel"].concat(),
+        ["Llm", "Hook", "Result"].concat(),
+        ["hook", ".", "llm", "_", "result"].concat(),
+    ];
+    for token in forbidden {
+        assert!(
+            !retained_sources.contains(&token),
+            "retained primitive sources must not contain deleted prompt-suggestion lifecycle token `{token}`"
+        );
+    }
 }
 
 #[test]

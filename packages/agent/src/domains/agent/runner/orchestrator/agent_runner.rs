@@ -89,11 +89,9 @@ pub async fn run_agent(
 
     debug!(session_id, stop_reason = ?result.stop_reason, turns = result.turns_executed, "agent run completed");
 
-    // INVARIANT: agent.ready MUST be emitted AFTER agent.complete — iOS
-    // handleComplete() sets isPostProcessing=true, handleAgentReady() clears it.
-    // Wrong ordering = stuck send button. Three independent send-button concerns:
-    // isPostProcessing (cleared by agent.ready), isCompacting (cleared by
-    // agent.compaction), ledger (fully async, no blocking).
+    // INVARIANT: agent.ready MUST be emitted AFTER agent.complete so clients see
+    // a terminal run before returning to idle. The send button now depends only
+    // on active processing/compaction plus the async ledger.
     let _ = broadcast.emit(TronEvent::AgentReady {
         base: BaseEvent::now(&session_id),
     });
