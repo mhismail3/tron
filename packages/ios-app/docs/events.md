@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-07 (PET-10 client primitive cleanup).
+> Last verified: 2026-06-07 (PET-11 primitive capability identity cleanup).
 
 The iOS app handles engine events through two paths:
 
@@ -65,7 +65,10 @@ dashboard APIs.
 `UnifiedEventTransformer` reconstructs messages from `SessionEvent` rows. The
 retained reconstruction state tracks message content, capability invocation
 lifecycles, streaming state, turn grouping, generated runtime data, and compact
-session metadata needed for chat.
+session metadata needed for chat. Capability identity fields stay primitive:
+model primitive, operation, trace/root invocation ids, theme color, and
+presentation hints. Reconstruction must not recover retired contract,
+implementation, worker, risk, or binding metadata from old payloads.
 
 Unsupported event payloads should remain visible as diagnostics or no-op
 transport facts. They should not be converted into Work, Source Control,

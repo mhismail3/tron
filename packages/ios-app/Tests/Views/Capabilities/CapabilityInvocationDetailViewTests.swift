@@ -81,24 +81,6 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
             result: #"{"exitCode":0,"stdout":"clean\n","stderr":"","timedOut":false,"outputTruncated":false}"#,
             details: [
                 "status": "ok",
-                "bindingDecision": [
-                    "selectionPolicy": "runtime_ready",
-                    "selectedImplementation": "runtime.process.v1.run"
-                ],
-                "orchestration": [
-                    "phaseDetails": [
-                        "resolveMode": "explicit_target",
-                        "preparedRequest": [
-                            "hasPayload": true,
-                            "hasInspectionHandle": false
-                        ],
-                        "selectedTarget": [
-                            "contractId": "process::run",
-                            "implementationId": "runtime.process.v1.run",
-                            "schemaDigest": "sha256:process"
-                        ]
-                    ]
-                ],
                 "output": [
                     "exitCode": 0,
                     "stdout": "clean\n",
@@ -110,17 +92,8 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
             durationMs: 86,
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
-                contractId: "process::run",
-                implementationId: "runtime.process.v1.run",
-                functionId: "process::run",
-                pluginId: "runtime.process",
-                workerId: "process-worker",
-                schemaDigest: "sha256:process",
-                trustTier: "runtime",
-                riskLevel: "low",
-                effectClass: "read",
-                traceId: "trace-process",
-                bindingDecisionId: "binding-process"
+                operationName: "process_run",
+                traceId: "trace-process"
             )
         )
     }

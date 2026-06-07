@@ -10,19 +10,11 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
     let isError: Bool?
     let turns: Int?
     let modelPrimitiveName: String?
-    let contractId: String?
-    let implementationId: String?
-    let functionId: String?
-    let pluginId: String?
-    let workerId: String?
-    let schemaDigest: String?
-    let catalogRevision: UInt64?
-    let trustTier: String?
-    let riskLevel: String?
-    let effectClass: String?
+    let operationName: String?
+    let operation: String?
     let traceId: String?
     let rootInvocationId: String?
-    let bindingDecisionId: String?
+    let themeColor: String?
     let presentationHints: [String: AnyCodable]?
     let summary: String?
 
@@ -62,19 +54,10 @@ struct ServerActivityLine: Decodable, Hashable, Sendable {
     private var capabilityIdentity: CapabilityIdentity {
         CapabilityIdentity(
             modelPrimitiveName: modelPrimitiveName,
-            contractId: contractId,
-            implementationId: implementationId,
-            functionId: functionId,
-            pluginId: pluginId,
-            workerId: workerId,
-            schemaDigest: schemaDigest,
-            catalogRevision: catalogRevision,
-            trustTier: trustTier,
-            riskLevel: riskLevel,
-            effectClass: effectClass,
+            operationName: operationName ?? operation,
             traceId: traceId,
             rootInvocationId: rootInvocationId,
-            bindingDecisionId: bindingDecisionId,
+            themeColor: themeColor,
             presentationHints: presentationHints
         )
     }

@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-07 (PET-10 client primitive cleanup).
+> Last verified: 2026-06-07 (PET-11 primitive capability identity cleanup).
 
 ## Overview
 
@@ -73,7 +73,9 @@ Sources/
 
 The retained `Views/Capabilities` components render capability lifecycle data
 as generic chat evidence. They are not a capability catalog, admin console, or
-operator policy surface.
+operator policy surface. Capability identity is limited to the model-visible
+primitive name, optional operation name, trace/root invocation ids, theme
+color, and runtime-supplied presentation hints.
 
 ## Data Flow
 

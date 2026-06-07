@@ -28,9 +28,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
 
             enum CodingKeys: String, CodingKey {
                 case invocationId, modelPrimitiveName, content, isError, duration, details
-                case contractId, implementationId, functionId, pluginId, workerId
-                case schemaDigest, catalogRevision, trustTier, riskLevel, effectClass, traceId
-                case rootInvocationId, bindingDecisionId, themeColor, presentationHints
+                case operationName, operation, traceId, rootInvocationId, themeColor, presentationHints
             }
 
             init(from decoder: Decoder) throws {
@@ -44,19 +42,10 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
                 rawDetails = try container.decodeIfPresent([String: AnyCodable].self, forKey: .details)
                 identity = CapabilityIdentity(
                     modelPrimitiveName: try container.decodeIfPresent(String.self, forKey: .modelPrimitiveName),
-                    contractId: try container.decodeIfPresent(String.self, forKey: .contractId),
-                    implementationId: try container.decodeIfPresent(String.self, forKey: .implementationId),
-                    functionId: try container.decodeIfPresent(String.self, forKey: .functionId),
-                    pluginId: try container.decodeIfPresent(String.self, forKey: .pluginId),
-                    workerId: try container.decodeIfPresent(String.self, forKey: .workerId),
-                    schemaDigest: try container.decodeIfPresent(String.self, forKey: .schemaDigest),
-                    catalogRevision: try container.decodeIfPresent(UInt64.self, forKey: .catalogRevision),
-                    trustTier: try container.decodeIfPresent(String.self, forKey: .trustTier),
-                    riskLevel: try container.decodeIfPresent(String.self, forKey: .riskLevel),
-                    effectClass: try container.decodeIfPresent(String.self, forKey: .effectClass),
+                    operationName: try container.decodeIfPresent(String.self, forKey: .operationName)
+                        ?? container.decodeIfPresent(String.self, forKey: .operation),
                     traceId: try container.decodeIfPresent(String.self, forKey: .traceId),
                     rootInvocationId: try container.decodeIfPresent(String.self, forKey: .rootInvocationId),
-                    bindingDecisionId: try container.decodeIfPresent(String.self, forKey: .bindingDecisionId),
                     themeColor: try container.decodeIfPresent(String.self, forKey: .themeColor),
                     presentationHints: try container.decodeIfPresent([String: AnyCodable].self, forKey: .presentationHints)
                 )

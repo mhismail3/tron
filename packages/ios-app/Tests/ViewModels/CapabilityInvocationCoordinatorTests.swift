@@ -26,7 +26,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         let result = CapabilityInvocationGeneratingPlugin.Result(
             modelPrimitiveName: "execute",
             invocationId: "gen_123",
-            identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "filesystem::write_file")
+            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "file_write")
         )
 
         // When: Handling capability generating
@@ -37,7 +37,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.messages[0].role, .assistant)
         if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
             XCTAssertEqual(invocation.identity.modelPrimitiveName, "execute")
-            XCTAssertEqual(invocation.identity.contractId, "filesystem::write_file")
+            XCTAssertEqual(invocation.identity.operationName, "file_write")
             XCTAssertEqual(invocation.id, "gen_123")
             XCTAssertEqual(invocation.status, .generating)
             XCTAssertEqual(invocation.arguments, "")
@@ -244,7 +244,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
             CapabilityInvocationGeneratingPlugin.Result(
                 modelPrimitiveName: "execute",
                 invocationId: "tc1",
-                identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "filesystem::write_file")
+                identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "file_write")
             ),
             context: mockContext
         )
@@ -252,7 +252,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
             CapabilityInvocationGeneratingPlugin.Result(
                 modelPrimitiveName: "execute",
                 invocationId: "tc2",
-                identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "process::run")
+                identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "process_run")
             ),
             context: mockContext
         )
@@ -263,12 +263,12 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         if case .capabilityInvocation(let invocation1) = mockContext.messages[0].content {
             XCTAssertEqual(invocation1.status, .generating)
             XCTAssertEqual(invocation1.identity.modelPrimitiveName, "execute")
-            XCTAssertEqual(invocation1.identity.contractId, "filesystem::write_file")
+            XCTAssertEqual(invocation1.identity.operationName, "file_write")
         } else { XCTFail("Expected capability invocation content") }
         if case .capabilityInvocation(let invocation2) = mockContext.messages[1].content {
             XCTAssertEqual(invocation2.status, .generating)
             XCTAssertEqual(invocation2.identity.modelPrimitiveName, "execute")
-            XCTAssertEqual(invocation2.identity.contractId, "process::run")
+            XCTAssertEqual(invocation2.identity.operationName, "process_run")
         } else { XCTFail("Expected capability invocation content") }
         // Then: Two enqueued capability starts
         XCTAssertEqual(mockContext.enqueuedCapabilityStarts.count, 2)
@@ -285,7 +285,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
             invocationId: "inv_123",
             arguments: nil,
             formattedArguments: "{\"command\": \"ls -la\"}",
-            identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "process::run")
+            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "process_run")
         )
 
         // When: Handling capability start
@@ -296,7 +296,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.messages[0].role, .assistant)
         if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
             XCTAssertEqual(invocation.identity.modelPrimitiveName, "execute")
-            XCTAssertEqual(invocation.identity.contractId, "process::run")
+            XCTAssertEqual(invocation.identity.operationName, "process_run")
             XCTAssertEqual(invocation.id, "inv_123")
             XCTAssertEqual(invocation.status, .running)
         } else {
@@ -309,9 +309,9 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
             modelPrimitiveName: "execute",
             invocationId: "work_stream_123",
             arguments: [
-                "target": AnyCodable("process::run"),
+                "operation": AnyCodable("process_run"),
                 "intent": AnyCodable("Check repository state."),
-                "arguments": AnyCodable([
+                "payload": AnyCodable([
                     "command": "git status --short",
                     "executionMode": "read_only"
                 ]),
@@ -320,12 +320,8 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
             formattedArguments: "{}",
             identity: CapabilityIdentity(
                 modelPrimitiveName: "execute",
-                contractId: "process::run",
-                implementationId: "runtime.process.v1.run",
-                functionId: "process::run",
-                pluginId: "runtime.process",
-                workerId: "process-worker",
-                trustTier: "runtime"
+                operationName: "process_run",
+                traceId: "trace-process"
             )
         )
 
@@ -334,8 +330,8 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.messages.count, 1)
         if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
             XCTAssertEqual(invocation.display.primitiveTitle, "Action")
-            XCTAssertEqual(invocation.display.chipTitle, "Run")
-            XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Executor", value: "Process Worker")))
+            XCTAssertEqual(invocation.display.chipTitle, "Process Run")
+            XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Trace", value: "trace-proces")))
             XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Why", value: "User asked for current repository state.")))
             let visibleProjection = [
                 invocation.display.primitiveTitle,
@@ -389,8 +385,8 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
             modelPrimitiveName: "execute",
             invocationId: "inv_789",
             arguments: nil,
-            formattedArguments: "{\"contractId\":\"filesystem::search_text\",\"payload\":{\"pattern\":\"TODO\"}}",
-            identity: CapabilityIdentity(modelPrimitiveName: "execute", contractId: "filesystem::search_text")
+            formattedArguments: "{\"operation\":\"text_search\",\"payload\":{\"pattern\":\"TODO\"}}",
+            identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "text_search")
         )
 
         // When: Handling capability start
@@ -400,7 +396,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.currentTurnCapabilityInvocations.count, 1)
         XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].invocationId, "inv_789")
         XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].modelPrimitiveName, "execute")
-        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].identity.contractId, "filesystem::search_text")
+        XCTAssertEqual(mockContext.currentTurnCapabilityInvocations[0].identity.operationName, "text_search")
     }
 
     func testCapabilityInvocationStartMakesCapabilityVisible() async throws {
@@ -498,7 +494,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
         // Then: Should render a capability error instead of inferring an old-name identity
         XCTAssertEqual(mockContext.messages.count, 1)
         if case .capabilityInvocation(let invocation) = mockContext.messages[0].content {
-            XCTAssertEqual(invocation.identity.contractId, "agent::ask_user")
+            XCTAssertEqual(invocation.identity.operationName, "ask_user")
             XCTAssertEqual(invocation.status, .error)
             XCTAssertEqual(invocation.result, "Unable to parse interaction payload.")
         } else {

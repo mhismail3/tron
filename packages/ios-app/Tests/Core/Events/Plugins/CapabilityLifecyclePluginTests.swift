@@ -18,10 +18,8 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
                     "questions": [{ "id": "q1", "question": "Proceed?", "options": [] }]
                 },
                 "answerAuthority": "user_client",
-                "contractId": "agent::ask_user",
-                "implementationId": "runtime.agent.v1.ask_user",
-                "functionId": "agent::ask_user",
                 "modelPrimitiveName": "execute",
+                "operationName": "ask_user",
                 "presentationHints": {
                     "displayName": "Ask User",
                     "chipTitle": "Ask",
@@ -37,7 +35,7 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
 
         XCTAssertEqual(result?.pauseId, "pause-1")
         XCTAssertEqual(result?.kind, "user_input")
-        XCTAssertEqual(result?.identity.contractId, "agent::ask_user")
+        XCTAssertEqual(result?.identity.operationName, "ask_user")
         XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "Ask User")
         XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "Ask")
         XCTAssertNotNil(result?.promptPayload?["questions"])
@@ -56,10 +54,8 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
                 "streamTopic": "agent.runtime",
                 "childInvocations": ["child-1"],
                 "details": { "task": "inspect" },
-                "contractId": "filesystem::list_dir",
-                "implementationId": "runtime.filesystem.v1.list_dir",
-                "functionId": "filesystem::list_dir",
                 "modelPrimitiveName": "execute",
+                "operationName": "state_list",
                 "presentationHints": {
                     "displayName": "List Directory",
                     "chipTitle": "List",
@@ -76,7 +72,7 @@ final class CapabilityLifecyclePluginTests: XCTestCase {
         XCTAssertEqual(result?.runId, "run-1")
         XCTAssertEqual(result?.status, "running")
         XCTAssertEqual(result?.childInvocations, ["child-1"])
-        XCTAssertEqual(result?.identity.contractId, "filesystem::list_dir")
+        XCTAssertEqual(result?.identity.operationName, "state_list")
         XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "List Directory")
         XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "List")
     }

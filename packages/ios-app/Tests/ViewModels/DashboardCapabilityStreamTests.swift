@@ -8,15 +8,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         {
             "kind": "capability",
             "modelPrimitiveName": "execute",
-            "contractId": "runtime::make_surface",
-            "implementationId": "runtime.surface.v1.make",
-            "functionId": "runtime::make_surface",
-            "pluginId": "runtime.surface",
-            "workerId": "runtime",
-            "catalogRevision": 42,
-            "trustTier": "runtime",
-            "riskLevel": "High",
-            "effectClass": "ExternalSideEffect",
+            "operationName": "make_surface",
             "presentationHints": {
                 "displayName": "Runtime surface",
                 "summary": "Generated panel",
@@ -37,7 +29,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         XCTAssertEqual(line.icon, "puzzlepiece.extension")
         XCTAssertEqual(line.duration, "150ms")
         XCTAssertFalse(line.summary?.contains("{") ?? false)
-        XCTAssertEqual(line.capabilityIdentity?.contractId, "runtime::make_surface")
+        XCTAssertEqual(line.capabilityIdentity?.operationName, "make_surface")
     }
 
     func testRuntimePathServerActivityLineUsesCompactPathSummary() throws {
@@ -45,15 +37,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         {
             "kind": "capability",
             "modelPrimitiveName": "execute",
-            "contractId": "runtime::state_write",
-            "implementationId": "runtime.state.v1.write",
-            "functionId": "runtime::state_write",
-            "pluginId": "runtime.state",
-            "workerId": "runtime",
-            "catalogRevision": 42,
-            "trustTier": "runtime",
-            "riskLevel": "Medium",
-            "effectClass": "DelegatedInvocation",
+            "operationName": "state_write",
             "capabilityArgs": {
                 "path": "/Users/moose/Downloads/projects/tron"
             },
@@ -74,15 +58,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         {
             "kind": "capability",
             "modelPrimitiveName": "execute",
-            "contractId": "runtime::list_state",
-            "implementationId": "runtime.state.v1.list",
-            "functionId": "runtime::list_state",
-            "pluginId": "runtime.state",
-            "workerId": "runtime",
-            "catalogRevision": 42,
-            "trustTier": "runtime",
-            "riskLevel": "Low",
-            "effectClass": "PureRead",
+            "operationName": "state_list",
             "durationMs": 147,
             "isError": false
         }
@@ -90,7 +66,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
 
         let line = try JSONDecoder().decode(ServerActivityLine.self, from: data).toActivityLine()
 
-        XCTAssertEqual(line.displayName, "List State")
+        XCTAssertEqual(line.displayName, "State List")
         XCTAssertFalse(line.displayName?.contains("Worker") ?? false)
     }
 
@@ -98,9 +74,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         var buffer = SessionStreamBuffer()
         let identity = testCapabilityIdentity(
             modelPrimitiveName: "execute",
-            contractId: "runtime::read_state",
-            implementationId: "runtime.state.v1.read",
-            functionId: "runtime::read_state"
+            operationName: "state_read"
         )
 
         buffer.addCapabilityStart(
@@ -110,8 +84,8 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         )
 
         XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].modelPrimitiveName, "runtime::read_state")
-        XCTAssertEqual(buffer.lines[0].displayName, "Read State")
+        XCTAssertEqual(buffer.lines[0].modelPrimitiveName, "state_read")
+        XCTAssertEqual(buffer.lines[0].displayName, "State Read")
         XCTAssertEqual(buffer.lines[0].icon, "play.circle")
         XCTAssertEqual(buffer.lines[0].capabilityIdentity, identity)
     }
@@ -120,9 +94,7 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         var buffer = SessionStreamBuffer()
         let identity = testCapabilityIdentity(
             modelPrimitiveName: "execute",
-            contractId: "runtime::run",
-            implementationId: "runtime.action.v1.run",
-            functionId: "runtime::run"
+            operationName: "process_run"
         )
 
         buffer.addCapabilityStart(
@@ -135,24 +107,22 @@ final class DashboardCapabilityStreamTests: XCTestCase {
         )
 
         XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].displayName, "Run")
+        XCTAssertEqual(buffer.lines[0].displayName, "Process Run")
         XCTAssertEqual(buffer.lines[0].summary, "git status --short --branch")
         XCTAssertFalse(buffer.lines[0].summary?.contains("{") ?? false)
     }
 
-    func testSessionStreamBufferAddsCapabilityEndWithRiskAwarePresentation() {
+    func testSessionStreamBufferAddsCapabilityEndWithNeutralPresentation() {
         var buffer = SessionStreamBuffer()
         let identity = testCapabilityIdentity(
             modelPrimitiveName: "execute",
-            contractId: "runtime::run",
-            implementationId: "runtime.action.v1.run",
-            functionId: "runtime::run"
+            operationName: "process_run"
         )
 
         buffer.addCapabilityEnd(identity: identity, success: false, durationMs: 250)
 
         XCTAssertEqual(buffer.lines.count, 1)
-        XCTAssertEqual(buffer.lines[0].displayName, "Run")
+        XCTAssertEqual(buffer.lines[0].displayName, "Process Run")
         XCTAssertEqual(buffer.lines[0].icon, "play.circle")
         XCTAssertEqual(buffer.lines[0].iconColor, .tronInfo)
         XCTAssertEqual(buffer.lines[0].duration, "250ms")

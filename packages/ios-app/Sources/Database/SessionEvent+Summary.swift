@@ -67,14 +67,13 @@ extension SessionEvent {
             return parts.joined(separator: " • ")
 
         case .capabilityInvocationStarted:
-            let name = payload.string("contractId") ??
-                payload.string("functionId") ??
-                payload.string("implementationId") ??
+            let name = payload.string("operationName") ??
+                payload.string("operation") ??
                 payload.string("modelPrimitiveName") ??
-                "unknown"
+                "execute"
             let displayName = formatCapabilityName(name)
             let args = payload.dict("arguments") ?? [:]
-            let keyArg = extractKeyArgument(modelPrimitiveName: name, from: args)
+            let keyArg = extractKeyArgument(from: args)
             if !keyArg.isEmpty {
                 return "\(displayName): \(keyArg)"
             }
@@ -205,23 +204,21 @@ extension SessionEvent {
         }
     }
 
-    /// Helper to extract key argument for capability display
-    func extractKeyArgument(modelPrimitiveName: String, from args: [String: Any]) -> String {
-        if modelPrimitiveName.hasPrefix("filesystem::") {
-            if let path = args["file_path"] as? String ?? args["path"] as? String {
-                return URL(fileURLWithPath: path).lastPathComponent
-            }
-        } else if modelPrimitiveName.hasPrefix("process::") {
-            if let cmd = args["command"] as? String {
-                return String(cmd.prefix(25))
-            }
-        } else if modelPrimitiveName.contains("search") {
-            if let pattern = args["pattern"] as? String {
-                return "\"\(String(pattern.prefix(20)))\""
-            }
-        } else if modelPrimitiveName.contains("glob") {
-            if let pattern = args["pattern"] as? String {
-                return pattern
+    /// Helper to extract a compact argument preview for primitive execution display.
+    func extractKeyArgument(from args: [String: Any]) -> String {
+        if let command = args["command"] as? String ?? args["cmd"] as? String {
+            return String(command.prefix(25))
+        }
+        if let query = args["query"] as? String ?? args["pattern"] as? String {
+            return "\"\(String(query.prefix(20)))\""
+        }
+        if let path = args["file_path"] as? String ?? args["path"] as? String ?? args["cwd"] as? String {
+            return URL(fileURLWithPath: path).lastPathComponent
+        }
+        if let payload = args["payload"] as? [String: Any] {
+            let nested = extractKeyArgument(from: payload)
+            if !nested.isEmpty {
+                return nested
             }
         }
         return ""

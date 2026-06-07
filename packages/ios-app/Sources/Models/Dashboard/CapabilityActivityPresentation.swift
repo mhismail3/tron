@@ -50,7 +50,6 @@ enum CapabilityActivityPresentation {
         }
 
         let rawObject = object(from: arguments)
-        let target = targetId(from: rawObject) ?? identity.contractId ?? identity.functionId
         let object = targetArguments(from: rawObject) ?? rawObject
         guard let object else { return nil }
         if let summary = simpleSummary(from: object) {
@@ -82,12 +81,12 @@ enum CapabilityActivityPresentation {
         }
         if let target = object["target"] as? [String: Any] {
             return firstString(
-                ["capabilityId", "contractId", "implementationId", "functionId", "capability", "contract", "function"],
+                ["operationName", "operation", "action", "name"],
                 in: target
             )
         }
         return firstString(
-            ["capabilityId", "contractId", "implementationId", "functionId", "capability", "contract", "function"],
+            ["operationName", "operation", "action", "target", "name"],
             in: object
         )
     }

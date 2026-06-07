@@ -66,15 +66,8 @@ enum CapabilityColor: String, Codable, Equatable, CaseIterable, Sendable {
         self = CapabilityColor(rawValue: name) ?? .tronTextMuted
     }
 
-    static func fromCapability(_ identity: CapabilityIdentity) -> CapabilityColor {
-        switch identity.riskLevel?.lowercased() {
-        case "critical", "high":
-            return .tronError
-        case "medium":
-            return .tronAmber
-        default:
-            return .tronInfo
-        }
+    static func fromCapability(_: CapabilityIdentity) -> CapabilityColor {
+        .tronInfo
     }
 }
 

@@ -160,8 +160,8 @@ final class SessionTypesTests: XCTestCase {
                     "id": "toolu_123",
                     "identity": {
                         "modelPrimitiveName": "execute",
-                        "contractId": "filesystem::read_file",
-                        "functionId": "filesystem::read_file"
+                        "operationName": "file_read",
+                        "traceId": "trace-file"
                     },
                     "input": {"file_path": "/test.txt"},
                     "result": "file contents",
@@ -177,7 +177,8 @@ final class SessionTypesTests: XCTestCase {
         XCTAssertEqual(message.role, "assistant")
         XCTAssertEqual(message.capabilityInvocations?.count, 1)
         XCTAssertEqual(message.capabilityInvocations?[0].id, "toolu_123")
-        XCTAssertEqual(message.capabilityInvocations?[0].identity?.contractId, "filesystem::read_file")
+        XCTAssertEqual(message.capabilityInvocations?[0].identity?.operationName, "file_read")
+        XCTAssertEqual(message.capabilityInvocations?[0].identity?.traceId, "trace-file")
     }
 }
 

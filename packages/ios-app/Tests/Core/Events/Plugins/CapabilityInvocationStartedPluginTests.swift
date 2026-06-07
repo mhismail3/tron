@@ -11,9 +11,9 @@ final class CapabilityInvocationStartedPluginTests: XCTestCase {
             "timestamp": "2026-05-21T10:00:00Z",
             "data": {
                 "modelPrimitiveName": "execute",
+                "operationName": "process_run",
                 "invocationId": "inv-1",
                 "arguments": { "command": "pwd" },
-                "contractId": "process::run",
                 "presentationHints": {
                     "displayName": "Shell Command",
                     "chipTitle": "Shell",
@@ -28,7 +28,7 @@ final class CapabilityInvocationStartedPluginTests: XCTestCase {
         let result = CapabilityInvocationStartedPlugin.transform(event) as? CapabilityInvocationStartedPlugin.Result
 
         XCTAssertEqual(result?.invocationId, "inv-1")
-        XCTAssertEqual(result?.identity.contractId, "process::run")
+        XCTAssertEqual(result?.identity.operationName, "process_run")
         XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "Shell Command")
         XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "Shell")
         XCTAssertEqual(result?.identity.presentationHints?["icon"]?.stringValue, "terminal")

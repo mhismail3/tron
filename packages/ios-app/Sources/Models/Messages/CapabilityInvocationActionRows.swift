@@ -20,7 +20,7 @@ extension CapabilityInvocationDisplayModel {
             : capabilityName
         append("What happened", actionTitle)
         append("Why", actionWhyText(from: arguments, identity: data.identity))
-        append("Executor", CapabilityPresentation.workerLabel(for: data.identity, targetId: target) ?? "Runtime")
+        append("Trace", data.identity.traceId.map { String($0.prefix(12)) })
         append("Status", statusText)
         append("Result", actionResultText(data: data, resultPreview: resultPreview))
         return rows

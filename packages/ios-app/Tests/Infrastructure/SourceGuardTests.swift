@@ -537,6 +537,71 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("Capability identity stays primitive-only")
+    func testCapabilityIdentityStaysPrimitiveOnly() throws {
+        let iosRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let checkedPaths = [
+            "Sources/Core/Events/Payloads/CapabilityInvocationPayloads.swift",
+            "Sources/Core/Events/Plugins/CapabilityInvocation",
+            "Sources/Database/SessionEvent+Summary.swift",
+            "Sources/Models/Dashboard/ActivityLine.swift",
+            "Sources/Models/Dashboard/CapabilityActivityPresentation.swift",
+            "Sources/Models/Dashboard/ServerActivityLine.swift",
+            "Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift",
+            "Sources/Models/EngineProtocol/EngineProtocolTypes+Capability.swift",
+            "Sources/Models/Messages",
+            "Sources/ViewModels/Chat/ChatViewModel+Reconstruction.swift",
+            "Sources/ViewModels/Handlers/CapabilityInvocationCoordinator.swift",
+            "Sources/ViewModels/Managers/DashboardStreamManager.swift",
+            "Sources/Views/Capabilities",
+            "Tests/Core/Events/Plugins",
+            "Tests/Core/Events/UnifiedEventTransformerActionProjectionTests.swift",
+            "Tests/Models/CapabilityInvocationDisplayModelTests.swift",
+            "Tests/Support/CapabilityTestFixtures.swift",
+            "Tests/ViewModels/CapabilityInvocationCoordinatorTests.swift",
+            "Tests/ViewModels/DashboardCapabilityStreamTests.swift",
+            "Tests/Views/Capabilities",
+        ]
+        let forbidden = [
+            "contract" + "Id",
+            "implementation" + "Id",
+            "function" + "Id",
+            "plugin" + "Id",
+            "worker" + "Id",
+            "schema" + "Digest",
+            "catalog" + "Revision",
+            "trust" + "Tier",
+            "risk" + "Level",
+            "effect" + "Class",
+            "binding" + "Decision" + "Id",
+            "capability" + "::" + "search",
+            "capability" + "::" + "inspect",
+            "source" + "Label",
+            "plugin" + "Label",
+            "worker" + "Label",
+        ]
+
+        for relativePath in checkedPaths {
+            let url = iosRoot.appendingPathComponent(relativePath)
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            let files: [URL]
+            if (try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true {
+                files = try swiftFiles(in: url)
+            } else {
+                files = [url]
+            }
+            for file in files where file.lastPathComponent != "SourceGuardTests.swift" {
+                let source = try String(contentsOf: file, encoding: .utf8)
+                for token in forbidden {
+                    #expect(!source.contains(token), "\(token) must stay deleted from capability primitive identity path: \(file.path)")
+                }
+            }
+        }
+    }
+
     @Test("iOS runtime contract is iOS 26 only")
     func testIOSRuntimeContractIsIOS26Only() throws {
         let fileURL = URL(fileURLWithPath: #filePath)

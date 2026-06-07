@@ -117,19 +117,12 @@ struct CurrentTurnCapabilityInvocation: Decodable {
     /// Progressive output accumulated during execution
     let streamingOutput: String?
     let modelPrimitiveName: String?
-    let contractId: String?
-    let implementationId: String?
-    let functionId: String?
-    let pluginId: String?
-    let workerId: String?
-    let schemaDigest: String?
-    let catalogRevision: UInt64?
-    let trustTier: String?
-    let riskLevel: String?
-    let effectClass: String?
+    let operationName: String?
+    let operation: String?
     let traceId: String?
     let rootInvocationId: String?
-    let bindingDecisionId: String?
+    let themeColor: String?
+    let presentationHints: [String: AnyCodable]?
 }
 
 /// Structured content sequence item (interleaved text/thinking/capability_ref)

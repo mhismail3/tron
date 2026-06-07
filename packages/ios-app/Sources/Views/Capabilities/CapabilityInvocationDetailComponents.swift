@@ -45,8 +45,8 @@ struct CapabilityDetailHeader: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let worker = CapabilityPresentation.workerLabel(for: data.identity, targetId: display.targetId) {
-                CapabilityHeaderMetric(label: "Executor", value: worker, tint: tint)
+            if let traceId = data.identity.traceId?.nilIfEmpty {
+                CapabilityHeaderMetric(label: "Trace", value: String(traceId.prefix(12)), tint: tint)
             }
         }
         .padding(16)

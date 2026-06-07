@@ -218,19 +218,9 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
             "data": {
                 "invocationId": "019e25cb-1234-7000-a000-000000000001",
                 "modelPrimitiveName": "execute",
-                "contractId": "filesystem::list_dir",
-                "implementationId": "runtime.filesystem.v1.list_dir",
-                "functionId": "filesystem::list_dir",
-                "pluginId": "runtime.filesystem",
-                "workerId": "filesystem",
-                "schemaDigest": "a8fe337ce28191708a15186227c6614c65da77c8771a9c6a8666bd097e462139",
-                "catalogRevision": 303,
-                "trustTier": "runtime",
-                "riskLevel": "low",
-                "effectClass": "pure_read",
+                "operationName": "file_list",
                 "traceId": "019e25cb-0ebe-79d1-b20c-3070e3256a15",
                 "rootInvocationId": "019e25cb-6ab0-7782-8110-684e36bc6218",
-                "bindingDecisionId": "binding_decision_019e25cb",
                 "themeColor": "#10B981",
                 "presentationHints": {
                     "displayName": "List Directory",
@@ -259,7 +249,7 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
         XCTAssertEqual(result?.success, true)
         XCTAssertEqual(result?.displayResult, "Listed runtime directory.")
         XCTAssertEqual(result?.duration, 69)
-        XCTAssertEqual(result?.identity.contractId, "filesystem::list_dir")
+        XCTAssertEqual(result?.identity.operationName, "file_list")
         XCTAssertEqual(result?.identity.themeColor, "#10B981")
         XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "List Directory")
         XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "List")

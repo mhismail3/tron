@@ -86,7 +86,7 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
             "data": {
                 "modelPrimitiveName": "execute",
                 "invocationId": "tc4",
-                "contractId": "process::run",
+                "operationName": "process_run",
                 "presentationHints": {
                     "displayName": "Shell Command",
                     "chipTitle": "Shell",
@@ -100,7 +100,7 @@ final class CapabilityInvocationGeneratingPluginTests: XCTestCase {
         let event = try CapabilityInvocationGeneratingPlugin.parse(from: json)
         let result = CapabilityInvocationGeneratingPlugin.transform(event) as? CapabilityInvocationGeneratingPlugin.Result
 
-        XCTAssertEqual(result?.identity.contractId, "process::run")
+        XCTAssertEqual(result?.identity.operationName, "process_run")
         XCTAssertEqual(result?.identity.presentationHints?["displayName"]?.stringValue, "Shell Command")
         XCTAssertEqual(result?.identity.presentationHints?["chipTitle"]?.stringValue, "Shell")
         XCTAssertEqual(result?.identity.presentationHints?["icon"]?.stringValue, "terminal")

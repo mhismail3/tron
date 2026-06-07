@@ -174,65 +174,28 @@ extension CapabilityIdentity {
     init(payload: [String: Any]) {
         self.init(
             modelPrimitiveName: payload["modelPrimitiveName"] as? String,
-            contractId: payload["contractId"] as? String,
-            implementationId: payload["implementationId"] as? String,
-            functionId: payload["functionId"] as? String,
-            pluginId: payload["pluginId"] as? String,
-            workerId: payload["workerId"] as? String,
-            schemaDigest: payload["schemaDigest"] as? String,
-            catalogRevision: CapabilityIdentity.uint64Value(payload["catalogRevision"]),
-            trustTier: payload["trustTier"] as? String,
-            riskLevel: payload["riskLevel"] as? String,
-            effectClass: payload["effectClass"] as? String,
+            operationName: payload["operationName"] as? String ?? payload["operation"] as? String,
             traceId: payload["traceId"] as? String,
             rootInvocationId: payload["rootInvocationId"] as? String,
-            bindingDecisionId: payload["bindingDecisionId"] as? String,
             themeColor: payload["themeColor"] as? String,
             presentationHints: (payload["presentationHints"] as? [String: Any])?.mapValues { AnyCodable($0) }
         )
     }
 
     var isUserInteractionCapability: Bool {
-        contractId == "agent::ask_user" || functionId == "agent::ask_user"
+        operationName == "ask_user" || modelPrimitiveName == "ask_user"
     }
 
     var stableCapabilityId: String {
-        implementationId ?? contractId ?? functionId ?? modelPrimitiveName ?? "capability"
+        operationName ?? modelPrimitiveName ?? "execute"
     }
 
     var isEmpty: Bool {
         modelPrimitiveName == nil &&
-        contractId == nil &&
-        implementationId == nil &&
-        functionId == nil &&
-        pluginId == nil &&
-        workerId == nil &&
-        schemaDigest == nil &&
-        catalogRevision == nil &&
-        trustTier == nil &&
-        riskLevel == nil &&
-            effectClass == nil &&
+            operationName == nil &&
             traceId == nil &&
             rootInvocationId == nil &&
-            bindingDecisionId == nil &&
             themeColor == nil &&
             presentationHints == nil
-    }
-
-    private static func uint64Value(_ value: Any?) -> UInt64? {
-        switch value {
-        case let value as UInt64:
-            return value
-        case let value as UInt:
-            return UInt64(value)
-        case let value as Int where value >= 0:
-            return UInt64(value)
-        case let value as NSNumber:
-            return value.uint64Value
-        case let value as String:
-            return UInt64(value)
-        default:
-            return nil
-        }
     }
 }

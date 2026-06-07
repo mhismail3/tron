@@ -17,38 +17,19 @@ enum CapabilityInvocationStartedPlugin: DispatchableEventPlugin {
             let modelPrimitiveName: String
             let invocationId: String
             let arguments: [String: AnyCodable]?
-            let contractId: String?
-            let implementationId: String?
-            let functionId: String?
-            let pluginId: String?
-            let workerId: String?
-            let schemaDigest: String?
-            let catalogRevision: UInt64?
-            let trustTier: String?
-            let riskLevel: String?
-            let effectClass: String?
+            let operationName: String?
+            let operation: String?
             let traceId: String?
             let rootInvocationId: String?
-            let bindingDecisionId: String?
             let themeColor: String?
             let presentationHints: [String: AnyCodable]?
 
             var identity: CapabilityIdentity {
                 CapabilityIdentity(
                     modelPrimitiveName: modelPrimitiveName,
-                    contractId: contractId,
-                    implementationId: implementationId,
-                    functionId: functionId,
-                    pluginId: pluginId,
-                    workerId: workerId,
-                    schemaDigest: schemaDigest,
-                    catalogRevision: catalogRevision,
-                    trustTier: trustTier,
-                    riskLevel: riskLevel,
-                    effectClass: effectClass,
+                    operationName: operationName ?? operation,
                     traceId: traceId,
                     rootInvocationId: rootInvocationId,
-                    bindingDecisionId: bindingDecisionId,
                     themeColor: themeColor,
                     presentationHints: presentationHints
                 )

@@ -267,8 +267,7 @@ final class CapabilityInvocationCoordinator {
             case .userInteraction:
                 return CapabilityIdentity(
                     modelPrimitiveName: modelPrimitiveName,
-                    contractId: "capability::execute",
-                    functionId: "capability::execute"
+                    operationName: "ask_user"
                 )
             default:
                 return CapabilityIdentity(modelPrimitiveName: modelPrimitiveName)

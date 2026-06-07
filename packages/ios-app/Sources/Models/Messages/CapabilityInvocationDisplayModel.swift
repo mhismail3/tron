@@ -131,11 +131,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
     }
 
     private static func primitiveTitle(_ primitive: String) -> String {
-        switch primitive {
-        case "search": return "Search"
-        case "inspect": return "Inspect"
-        default: return "Action"
-        }
+        primitive == "execute" ? "Action" : CapabilityPresentation.humanizeCapabilityId(primitive)
     }
 
     private static func chipTitle(
@@ -146,12 +142,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         if let chipTitle = CapabilityPresentation.presentationString("chipTitle", for: identity) {
             return chipTitle
         }
-        switch primitive {
-        case "inspect":
-            return "Inspect"
-        default:
-            return capabilityName
-        }
+        return capabilityName.nilIfEmpty ?? primitiveTitle(primitive)
     }
 
     private static func sheetTitle(
@@ -160,10 +151,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         capabilityName: String,
         target: String?
     ) -> String {
-        guard primitive == "execute", target != nil else {
-            return primitiveTitle(primitive)
-        }
-        return chipTitle.nilIfEmpty ?? capabilityName.nilIfEmpty ?? "Action"
+        chipTitle.nilIfEmpty ?? capabilityName.nilIfEmpty ?? primitiveTitle(primitive)
     }
 
     private static func statusText(
@@ -211,30 +199,19 @@ struct CapabilityInvocationDisplayModel: Equatable {
         if let summary = presentationString(["summary", "subtitle", "commandText"], for: identity) {
             return summary.truncated(to: 140)
         }
-        switch primitive {
-        case "search":
-            if let query = query?.nilIfEmpty {
-                return "“\(query.truncated(to: 96))”"
-            }
-            return "Capability catalog"
-        case "inspect":
-            return (target.map(CapabilityPresentation.humanizeCapabilityId)
-                ?? identity.contractId.map(CapabilityPresentation.humanizeCapabilityId)
-                ?? identity.functionId.map(CapabilityPresentation.humanizeCapabilityId)
-                ?? "Capability metadata")
-                .truncated(to: 120)
-        default:
-            if primitive == "execute", target == nil {
-                return "Preparing action"
-            }
-            if let payloadSummary {
-                return payloadSummary.truncated(to: 140)
-            }
-            if let target, target != capabilityName {
-                return CapabilityPresentation.humanizeCapabilityId(target).truncated(to: 120)
-            }
-            return "Invocation"
+        if let payloadSummary {
+            return payloadSummary.truncated(to: 140)
         }
+        if let query = query?.nilIfEmpty {
+            return query.truncated(to: 96)
+        }
+        if let target, target != capabilityName {
+            return CapabilityPresentation.humanizeCapabilityId(target).truncated(to: 120)
+        }
+        if let operation = identity.operationName?.nilIfEmpty {
+            return CapabilityPresentation.humanizeCapabilityId(operation).truncated(to: 120)
+        }
+        return "Invocation"
     }
 
     private static func summaryText(
@@ -248,15 +225,11 @@ struct CapabilityInvocationDisplayModel: Equatable {
             return summary.truncated(to: 160)
         }
 
-        if primitive == "execute", target != nil {
-            return (payloadSummary ?? capabilityName).truncated(to: 160)
-        }
-
-        var parts = [primitiveTitle(primitive)]
+        var parts = [payloadSummary ?? capabilityName]
         if let target = target?.nilIfEmpty {
-            parts.append(target)
+            parts.append(CapabilityPresentation.humanizeCapabilityId(target))
         }
-        return parts.joined(separator: " via ")
+        return parts.joined(separator: " · ").truncated(to: 160)
     }
 
     static func presentationString(_ keys: [String], for identity: CapabilityIdentity) -> String? {
@@ -277,42 +250,20 @@ struct CapabilityInvocationDisplayModel: Equatable {
             return target
         }
 
-        let argumentTarget = firstString(
-            ["capabilityId", "contractId", "implementationId", "functionId", "capability", "contract", "function"],
-            in: arguments
-        )
+        let argumentTarget = firstString(["operationName", "operation", "action", "target", "name"], in: arguments)
         if let argumentTarget = argumentTarget?.nilIfEmpty {
             return argumentTarget
         }
 
-        switch primitive {
-        case "search":
-            return nil
-        case "inspect":
-            return identity.contractId ?? identity.functionId ?? identity.implementationId
-        default:
-            if let contractId = identity.contractId, !contractId.hasPrefix("capability::") {
-                return contractId
-            }
-            if let functionId = identity.functionId, !functionId.hasPrefix("capability::") {
-                return functionId
-            }
-            if primitive == "execute" {
-                return nil
-            }
-            return identity.implementationId
-        }
+        return identity.operationName?.nilIfEmpty
     }
 
     private static func targetHint(from object: [String: Any]) -> String? {
-        if let target = object["target"] as? String {
-            return target
+        if let target = object["target"] as? String, let value = target.nilIfEmpty {
+            return value
         }
         if let target = object["target"] as? [String: Any] {
-            return firstString(
-                ["capabilityId", "contractId", "implementationId", "functionId", "capability", "contract", "function"],
-                in: target
-            )
+            return firstString(["operationName", "operation", "action", "name"], in: target)
         }
         return nil
     }
@@ -328,12 +279,6 @@ struct CapabilityInvocationDisplayModel: Equatable {
     }
 
     private static func payloadSummary(target: String?, from object: [String: Any]) -> String? {
-        if target == "capability::inspect" {
-            return "Capability details"
-        }
-        if target == "capability::search" {
-            return "Capability catalog"
-        }
         if let command = firstString(["command", "cmd", "shellCommand"], in: object)?.nilIfEmpty {
             return command.truncated(to: 96)
         }
@@ -356,7 +301,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
 
         let simplePairs = object
             .filter { key, value in
-                !["payload", "allowedContracts", "allowedImplementations"].contains(key)
+                !["payload"].contains(key)
                     && !technicalSummaryKeys.contains(key)
                     && Self.simpleDisplayValue(value) != nil
             }
@@ -371,21 +316,15 @@ struct CapabilityInvocationDisplayModel: Equatable {
 
     private static let technicalSummaryKeys: Set<String> = [
         "afterRevision",
-        "bindingDecisionId",
         "classes",
-        "contractId",
-        "functionId",
         "grantId",
         "idempotencyKey",
-        "implementationId",
         "includeDocs",
         "includeExamples",
         "kind",
         "kinds",
         "limit",
-        "pluginId",
         "resourceRefs",
-        "schemaDigest",
         "sessionId",
         "subjectPrefix",
         "traceId",
@@ -407,28 +346,17 @@ struct CapabilityInvocationDisplayModel: Equatable {
             rows.append(CapabilityDisplayRow(label: label, value: value))
         }
 
-        switch primitive {
-        case "search":
-            append("Query", query)
-            append("Kind", firstString(["kind"], in: arguments))
-            append("Namespace", firstString(["namespace"], in: arguments))
-            append("Contract", firstString(["contractId"], in: arguments))
-            append("Plugin", firstString(["pluginId"], in: arguments))
-            append("Risk ceiling", firstString(["riskMax"], in: arguments))
-            append("Trust floor", firstString(["trustTierMin"], in: arguments))
-        case "inspect":
-            append("Target", target)
-            append("Contract", firstString(["contractId"], in: arguments))
-            append("Implementation", firstString(["implementationId"], in: arguments))
-            append("Function", firstString(["functionId"], in: arguments))
-        default:
-            if let targetArguments = targetArguments(from: arguments) {
-                appendPayloadRows(targetArguments, into: &rows)
-            } else {
-                append("Payload", payloadSummary)
-            }
-            append("Intent", firstString(["intent"], in: arguments))
-            append("Reason", firstString(["reason"], in: arguments))
+        if let targetArguments = targetArguments(from: arguments) {
+            appendPayloadRows(targetArguments, into: &rows)
+        } else {
+            append("Payload", payloadSummary ?? query)
+        }
+        append("Operation", target)
+        append("Intent", firstString(["intent"], in: arguments))
+        append("Reason", firstString(["reason"], in: arguments))
+        if let targetArguments = targetArguments(from: arguments) {
+            append("Intent", firstString(["intent"], in: targetArguments))
+            append("Reason", firstString(["reason"], in: targetArguments))
         }
 
         if rows.isEmpty, let payloadSummary {
@@ -479,81 +407,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         arguments: [String: Any],
         output: [String: Any]
     ) -> [CapabilityDisplayGroup] {
-        guard primitive == "execute" else { return [] }
-
-        let orchestration = dictionary(details["orchestration"])
-        let phaseDetails = dictionary(orchestration?["phaseDetails"])
-        let selectedTarget = dictionary(phaseDetails?["selectedTarget"])
-        let preparedRequest = dictionary(phaseDetails?["preparedRequest"])
-        let binding = dictionary(details["bindingDecision"])
-        let correctedRequest = dictionary(details["correctedRequest"]) ?? dictionary(orchestration?["correctedRequest"])
-        let childInvocations = stringArray(details["childInvocations"])
-            ?? stringArray(orchestration?["childInvocationIds"])
-            ?? []
-        let corrections = array(details["correctionsApplied"])
-            ?? array(orchestration?["correctionsApplied"])
-            ?? []
-
-        var groups: [CapabilityDisplayGroup] = []
-
-        var resolution: [CapabilityDisplayRow] = []
-        appendRow("Mode", humanizeToken(string(phaseDetails?["resolveMode"])), to: &resolution)
-        appendRow("Target", string(selectedTarget?["contractId"]) ?? string(selectedTarget?["functionId"]) ?? targetHint(from: arguments), to: &resolution, technical: true)
-        appendRow("Implementation", string(selectedTarget?["implementationId"]) ?? string(binding?["selectedImplementation"]), to: &resolution, technical: true)
-        appendRow("Selection", humanizeToken(string(binding?["selectionPolicy"])), to: &resolution)
-        appendRow("Revision", string(selectedTarget?["catalogRevision"]) ?? string(details["catalogRevision"]), to: &resolution, technical: true)
-        if let rejected = array(phaseDetails?["rejectedCandidates"]), !rejected.isEmpty {
-            appendRow("Rejected candidates", String(rejected.count), to: &resolution)
-        }
-        if !resolution.isEmpty {
-            groups.append(CapabilityDisplayGroup(title: "Resolution", rows: resolution))
-        }
-
-        var preparation: [CapabilityDisplayRow] = []
-        appendRow("Capability risk", humanizeToken(string(selectedTarget?["riskLevel"]) ?? data.identity.riskLevel), to: &preparation)
-        appendRow("Effect class", humanizeToken(string(selectedTarget?["effectClass"]) ?? data.identity.effectClass), to: &preparation)
-        appendRow("Schema", string(selectedTarget?["schemaDigest"]) ?? data.identity.schemaDigest, to: &preparation, technical: true)
-        appendRow("Payload", bool(preparedRequest?["hasPayload"]).map { $0 ? "Validated" : "Not provided" }, to: &preparation)
-        appendRow("Fresh handle", bool(preparedRequest?["hasInspectionHandle"]).map { $0 ? "Prepared" : "Not required" }, to: &preparation)
-        appendRow("Corrections", correctionSummary(corrections), to: &preparation)
-        if !preparation.isEmpty {
-            groups.append(CapabilityDisplayGroup(title: "Preparation", rows: preparation))
-        }
-
-        var run: [CapabilityDisplayRow] = []
-        appendRow("Child invocation", childInvocations.first.map(compactIdentifier), to: &run, technical: true)
-        if childInvocations.count > 1 {
-            appendRow("Child count", String(childInvocations.count), to: &run)
-        }
-        appendRow("Function", string(selectedTarget?["functionId"]) ?? data.identity.functionId, to: &run, technical: true)
-        appendRow("Executor", data.identity.workerId, to: &run, technical: true)
-        appendRow("Status", statusText(data.status, identity: data.identity), to: &run)
-        appendRow("Duration", data.formattedDuration, to: &run)
-        if !run.isEmpty {
-            groups.append(CapabilityDisplayGroup(title: "Run", rows: run))
-        }
-
-        var discoveryRows: [CapabilityDisplayRow] = []
-        if let searchStatus = dictionary(phaseDetails?["searchStatus"]) {
-            appendRow("Search", humanizeToken(string(searchStatus["state"])), to: &discoveryRows)
-            appendRow("Vector index", bool(searchStatus["localVector"]).map { $0 ? "Ready" : "Unavailable" }, to: &discoveryRows)
-            appendRow("Lexical", bool(searchStatus["lexical"]).map { $0 ? "Enabled" : "Disabled" }, to: &discoveryRows)
-            appendRow("Degraded reason", string(searchStatus["degradedReason"]), to: &discoveryRows)
-        }
-        if !discoveryRows.isEmpty {
-            groups.append(CapabilityDisplayGroup(title: "Discovery", rows: discoveryRows))
-        }
-
-        if correctedRequest != nil, !corrections.isEmpty {
-            var corrected: [CapabilityDisplayRow] = []
-            appendRow("Confidence", string(details["correctionConfidence"]) ?? string(orchestration?["correctionConfidence"]), to: &corrected)
-            appendRow("Applied", correctionSummary(corrections), to: &corrected)
-            if !corrected.isEmpty {
-                groups.append(CapabilityDisplayGroup(title: "Corrections", rows: corrected))
-            }
-        }
-
-        return groups
+        []
     }
 
     private static func resultRows(
@@ -628,19 +482,9 @@ struct CapabilityInvocationDisplayModel: Equatable {
         }
         append("Invocation", data.id)
         append("Primitive", identity.modelPrimitiveName)
-        append("Contract", identity.contractId)
-        append("Implementation", identity.implementationId)
-        append("Function", identity.functionId)
-        append("Plugin", identity.pluginId)
-        append("Executor", identity.workerId)
-        append("Revision", identity.catalogRevision.map(String.init))
-        append("Schema", identity.schemaDigest)
-        append("Trust", identity.trustTier)
-        append("Risk", identity.riskLevel)
-        append("Effect", identity.effectClass)
+        append("Operation", identity.operationName)
         append("Trace", identity.traceId)
         append("Root invocation", identity.rootInvocationId)
-        append("Binding", identity.bindingDecisionId)
         append("Theme color", identity.themeColor)
         append("Server duration", data.serverFormattedDuration)
         append("Observed duration", data.observedDurationMs.map(CapabilityInvocationData.formatDuration))

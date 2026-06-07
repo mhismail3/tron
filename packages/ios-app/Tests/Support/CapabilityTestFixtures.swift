@@ -3,45 +3,28 @@ import Foundation
 
 func testCapabilityIdentity(
     modelPrimitiveName: String = "execute",
-    contractId: String? = "filesystem::read_file",
-    implementationId: String? = "runtime.filesystem.v1.read_file",
-    functionId: String? = "filesystem::read_file",
-    bindingDecisionId: String? = "binding_decision_test"
+    operationName: String? = "file_read",
+    traceId: String? = "trace-test",
+    rootInvocationId: String? = "invocation-test",
+    themeColor: String? = nil,
+    presentationHints: [String: AnyCodable]? = nil
 ) -> CapabilityIdentity {
     CapabilityIdentity(
         modelPrimitiveName: modelPrimitiveName,
-        contractId: contractId,
-        implementationId: implementationId,
-        functionId: functionId,
-        pluginId: "runtime.filesystem",
-        workerId: "filesystem-worker",
-        schemaDigest: "sha256:test",
-        catalogRevision: 7,
-        trustTier: "runtime",
-        riskLevel: "low",
-        effectClass: "read",
-        traceId: "trace-test",
-        rootInvocationId: "invocation-test",
-        bindingDecisionId: bindingDecisionId
+        operationName: operationName,
+        traceId: traceId,
+        rootInvocationId: rootInvocationId,
+        themeColor: themeColor,
+        presentationHints: presentationHints
     )
 }
 
 func testUserInteractionCapabilityIdentity(modelPrimitiveName: String = "execute") -> CapabilityIdentity {
     CapabilityIdentity(
         modelPrimitiveName: modelPrimitiveName,
-        contractId: "agent::ask_user",
-        implementationId: "runtime.agent.v1.ask_user",
-        functionId: "agent::ask_user",
-        pluginId: "runtime.agent",
-        workerId: "agent-worker",
-        schemaDigest: "sha256:ask-user-test",
-        catalogRevision: 7,
-        trustTier: "runtime",
-        riskLevel: "medium",
-        effectClass: "interaction",
+        operationName: "ask_user",
         traceId: "trace-ask-user-test",
-        rootInvocationId: "invocation-ask-user-test",
-        bindingDecisionId: "binding_decision_ask_user_test"
+        rootInvocationId: "invocation-ask-user-test"
     )
 }
 

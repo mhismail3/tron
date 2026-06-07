@@ -1287,8 +1287,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let events = [
             sessionEvent(type: "capability.invocation.started", payload: [
                 "modelPrimitiveName": AnyCodable("execute"),
-                "contractId": AnyCodable("agent::ask_user"),
-                "functionId": AnyCodable("agent::ask_user"),
+                "operationName": AnyCodable("ask_user"),
                 "invocationId": AnyCodable(invocationId),
                 "arguments": AnyCodable(questionsJson),
                 "turn": AnyCodable(1),
@@ -1329,8 +1328,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let events = [
             rawEvent(type: "capability.invocation.started", payload: [
                 "modelPrimitiveName": AnyCodable("execute"),
-                "contractId": AnyCodable("agent::ask_user"),
-                "functionId": AnyCodable("agent::ask_user"),
+                "operationName": AnyCodable("ask_user"),
                 "invocationId": AnyCodable(invocationId),
                 "arguments": AnyCodable(questionsJson),
                 "turn": AnyCodable(1),
@@ -1377,8 +1375,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let events = [
             rawEvent(type: "capability.invocation.started", payload: [
                 "modelPrimitiveName": AnyCodable("execute"),
-                "contractId": AnyCodable("agent::ask_user"),
-                "functionId": AnyCodable("agent::ask_user"),
+                "operationName": AnyCodable("ask_user"),
                 "invocationId": AnyCodable(invocationId),
                 "arguments": AnyCodable(questionsJson),
                 "turn": AnyCodable(1),
@@ -1419,8 +1416,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
         let events = [
             sessionEvent(type: "capability.invocation.started", payload: [
                 "modelPrimitiveName": AnyCodable("execute"),
-                "contractId": AnyCodable("agent::ask_user"),
-                "functionId": AnyCodable("agent::ask_user"),
+                "operationName": AnyCodable("ask_user"),
                 "invocationId": AnyCodable(invocationId),
                 "arguments": AnyCodable(questionsJson),
                 "turn": AnyCodable(1)
@@ -1737,7 +1733,7 @@ final class UnifiedEventTransformerTests: XCTestCase {
 
         let events = [
             sessionEvent(type: "capability.invocation.started", payload: [
-                "modelPrimitiveName": AnyCodable("execute"), "contractId": AnyCodable("web::search"),
+                "modelPrimitiveName": AnyCodable("execute"), "operationName": AnyCodable("web_search"),
                 "invocationId": AnyCodable("tc_1"),
                 "arguments": AnyCodable(["query": "test"]),
                 "turn": AnyCodable(1)

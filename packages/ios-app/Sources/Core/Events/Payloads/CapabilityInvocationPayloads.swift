@@ -33,19 +33,9 @@ struct CapabilityInvocationStartedPayload {
         self.rawPayload = payload
         self.identity = CapabilityIdentity(
             modelPrimitiveName: modelPrimitiveName,
-            contractId: payload.string("contractId"),
-            implementationId: payload.string("implementationId"),
-            functionId: payload.string("functionId"),
-            pluginId: payload.string("pluginId"),
-            workerId: payload.string("workerId"),
-            schemaDigest: payload.string("schemaDigest"),
-            catalogRevision: payload.uint64("catalogRevision"),
-            trustTier: payload.string("trustTier"),
-            riskLevel: payload.string("riskLevel"),
-            effectClass: payload.string("effectClass"),
+            operationName: payload.string("operationName") ?? payload.string("operation"),
             traceId: payload.string("traceId"),
             rootInvocationId: payload.string("rootInvocationId"),
-            bindingDecisionId: payload.string("bindingDecisionId"),
             themeColor: payload.string("themeColor"),
             presentationHints: payload.dict("presentationHints")?.mapValues { AnyCodable($0) }
         )
@@ -111,19 +101,9 @@ struct CapabilityInvocationCompletedPayload {
         self.blobId = payload.string("blobId")
         self.identity = CapabilityIdentity(
             modelPrimitiveName: modelPrimitiveName,
-            contractId: payload.string("contractId"),
-            implementationId: payload.string("implementationId"),
-            functionId: payload.string("functionId"),
-            pluginId: payload.string("pluginId"),
-            workerId: payload.string("workerId"),
-            schemaDigest: payload.string("schemaDigest"),
-            catalogRevision: payload.uint64("catalogRevision"),
-            trustTier: payload.string("trustTier"),
-            riskLevel: payload.string("riskLevel"),
-            effectClass: payload.string("effectClass"),
+            operationName: payload.string("operationName") ?? payload.string("operation"),
             traceId: payload.string("traceId"),
             rootInvocationId: payload.string("rootInvocationId"),
-            bindingDecisionId: payload.string("bindingDecisionId"),
             themeColor: payload.string("themeColor"),
             presentationHints: payload.dict("presentationHints")?.mapValues { AnyCodable($0) }
         )

@@ -53,7 +53,7 @@ struct SessionStreamBuffer {
         guard isActive else { return }
         currentTextLineIndex = nil
 
-        let name = identity.contractId ?? identity.functionId ?? identity.implementationId ?? identity.modelPrimitiveName ?? "capability"
+        let name = identity.stableCapabilityId
 
         let line = ActivityLine(
             kind: .capabilityInvocationStarted,
@@ -88,7 +88,7 @@ struct SessionStreamBuffer {
             return
         }
 
-        let name = identity.contractId ?? identity.functionId ?? identity.implementationId ?? identity.modelPrimitiveName ?? "capability"
+        let name = identity.stableCapabilityId
         if let idx = lines.lastIndex(where: { $0.kind == .capabilityInvocationStarted && $0.modelPrimitiveName == name && $0.status == .running }) {
             lines[idx].status = success ? .success : .error
             lines[idx].duration = formattedDuration

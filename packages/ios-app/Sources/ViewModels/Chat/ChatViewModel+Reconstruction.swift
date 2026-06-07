@@ -289,19 +289,11 @@ extension ChatViewModel {
 
         let identity = CapabilityIdentity(
             modelPrimitiveName: modelPrimitiveName,
-            contractId: capabilityInvocation.contractId,
-            implementationId: capabilityInvocation.implementationId,
-            functionId: capabilityInvocation.functionId,
-            pluginId: capabilityInvocation.pluginId,
-            workerId: capabilityInvocation.workerId,
-            schemaDigest: capabilityInvocation.schemaDigest,
-            catalogRevision: capabilityInvocation.catalogRevision,
-            trustTier: capabilityInvocation.trustTier,
-            riskLevel: capabilityInvocation.riskLevel,
-            effectClass: capabilityInvocation.effectClass,
+            operationName: capabilityInvocation.operationName ?? capabilityInvocation.operation,
             traceId: capabilityInvocation.traceId,
             rootInvocationId: capabilityInvocation.rootInvocationId,
-            bindingDecisionId: capabilityInvocation.bindingDecisionId
+            themeColor: capabilityInvocation.themeColor,
+            presentationHints: capabilityInvocation.presentationHints
         )
 
         // UserInteraction: create interactive form instead of generic capability chip

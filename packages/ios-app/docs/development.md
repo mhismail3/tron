@@ -416,12 +416,12 @@ version normally skip that review wait and move straight to group assignment.
 3. Add navigation in parent view or sheet coordinator
 4. Add deep link route if applicable
 
-### Adding Capability Presentation
+### Adding Runtime Presentation
 
-1. Add schema or result presentation hints to the capability metadata.
-2. Reuse the generated capability chip, detail sheet, and result renderer.
-3. Add a reusable renderer under `Views/Capabilities/` only when metadata-driven rendering is not expressive enough.
-4. Add focused tests for the schema/result shape and the sheet route.
+1. Emit operation, trace ids, and runtime-owned presentation hints from the server or generated runtime data.
+2. Reuse the generic capability chip, detail sheet, result renderer, and `GeneratedRuntimeSurfaceView`.
+3. Add a reusable renderer under `Views/Capabilities/` only when primitive trace/result rendering is not expressive enough.
+4. Add focused tests for the primitive payload/result shape and the generic sheet route.
 
 ### Updating Event Handling
 

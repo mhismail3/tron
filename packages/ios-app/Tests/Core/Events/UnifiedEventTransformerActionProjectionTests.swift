@@ -10,18 +10,12 @@ final class UnifiedEventTransformerActionProjectionTests: XCTestCase {
             sessionEvent(type: "capability.invocation.started", payload: [
                 "modelPrimitiveName": AnyCodable("execute"),
                 "invocationId": AnyCodable("action-reconstruct-1"),
-                "contractId": AnyCodable("process::run"),
-                "implementationId": AnyCodable("runtime.process.v1.run"),
-                "functionId": AnyCodable("process::run"),
-                "pluginId": AnyCodable("runtime.process"),
-                "workerId": AnyCodable("process-worker"),
-                "schemaDigest": AnyCodable("sha256:process"),
+                "operationName": AnyCodable("process_run"),
                 "traceId": AnyCodable("trace-process"),
-                "bindingDecisionId": AnyCodable("binding-process"),
                 "arguments": AnyCodable([
-                    "target": "process::run",
+                    "operation": "process_run",
                     "intent": "Check repository state.",
-                    "arguments": [
+                    "payload": [
                         "command": "git status --short",
                         "executionMode": "read_only"
                     ],
@@ -32,14 +26,8 @@ final class UnifiedEventTransformerActionProjectionTests: XCTestCase {
             sessionEvent(type: "capability.invocation.completed", payload: [
                 "invocationId": AnyCodable("action-reconstruct-1"),
                 "modelPrimitiveName": AnyCodable("execute"),
-                "contractId": AnyCodable("process::run"),
-                "implementationId": AnyCodable("runtime.process.v1.run"),
-                "functionId": AnyCodable("process::run"),
-                "pluginId": AnyCodable("runtime.process"),
-                "workerId": AnyCodable("process-worker"),
-                "schemaDigest": AnyCodable("sha256:process"),
+                "operationName": AnyCodable("process_run"),
                 "traceId": AnyCodable("trace-process"),
-                "bindingDecisionId": AnyCodable("binding-process"),
                 "content": AnyCodable("clean"),
                 "isError": AnyCodable(false),
                 "duration": AnyCodable(86),
@@ -70,9 +58,9 @@ final class UnifiedEventTransformerActionProjectionTests: XCTestCase {
             return XCTFail("Expected capability invocation content")
         }
         XCTAssertEqual(invocation.display.primitiveTitle, "Action")
-        XCTAssertEqual(invocation.display.chipTitle, "Run")
+        XCTAssertEqual(invocation.display.chipTitle, "Process Run")
         XCTAssertEqual(invocation.display.commandText, "git status --short")
-        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Executor", value: "Process Worker")))
+        XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Trace", value: "trace-proces")))
         XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Why", value: "User asked for current repository state.")))
         XCTAssertTrue(invocation.display.actionRows.contains(CapabilityDisplayRow(label: "Result", value: "clean")))
 
@@ -84,7 +72,7 @@ final class UnifiedEventTransformerActionProjectionTests: XCTestCase {
         ].joined(separator: " ")
         XCTAssertFalse(visibleProjection.contains("execute"))
         XCTAssertFalse(visibleProjection.contains("first_party"))
-        XCTAssertTrue(invocation.display.technicalRows.contains(CapabilityDisplayRow(label: "Schema", value: "sha256:process", isTechnical: true)))
+        XCTAssertTrue(invocation.display.technicalRows.contains(CapabilityDisplayRow(label: "Operation", value: "process_run", isTechnical: true)))
         XCTAssertTrue(invocation.display.technicalRows.contains(CapabilityDisplayRow(label: "Trace", value: "trace-process", isTechnical: true)))
     }
 

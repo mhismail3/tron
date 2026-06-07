@@ -7,11 +7,11 @@ final class MessageFinderTests: XCTestCase {
 
     // MARK: - Helpers
 
-    private func makeCapabilityInvocationMessage(invocationId: String, contractId: String = "filesystem::read_file") -> ChatMessage {
+    private func makeCapabilityInvocationMessage(invocationId: String, operationName: String = "file_read") -> ChatMessage {
         ChatMessage(role: .assistant, content: .capabilityInvocation(testCapabilityInvocation(
             id: invocationId,
             status: .success,
-            identity: testCapabilityIdentity(contractId: contractId, functionId: contractId)
+            identity: testCapabilityIdentity(operationName: operationName)
         )))
     }
 

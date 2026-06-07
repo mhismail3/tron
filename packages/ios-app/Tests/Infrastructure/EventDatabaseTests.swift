@@ -619,11 +619,10 @@ final class EventDatabaseTests: XCTestCase {
         // Test capability-backed capability.invocation.started transport summary
         let capabilityEvent = SessionEvent(id: "e3", parentId: nil, sessionId: "s1", workspaceId: "/test", type: "capability.invocation.started", timestamp: "2024-01-01T00:00:00Z", sequence: 3, payload: [
             "modelPrimitiveName": AnyCodable("execute"),
-            "contractId": AnyCodable("filesystem::read_file"),
-            "functionId": AnyCodable("filesystem::read_file"),
+            "operationName": AnyCodable("file_read"),
             "arguments": AnyCodable(["file_path": "/src/main.ts"])
         ])
-        XCTAssertTrue(capabilityEvent.summary.contains("Read File"))
+        XCTAssertTrue(capabilityEvent.summary.contains("File Read"))
         XCTAssertTrue(capabilityEvent.summary.contains("main.ts"))
 
         // Test session.start summary (shortModelName returns "Opus 4" for "claude-opus-4")
