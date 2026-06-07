@@ -2055,6 +2055,37 @@ fn engine_invocation_and_transport_do_not_require_expected_revision_tokens() {
 }
 
 #[test]
+fn control_projection_primitive_is_deleted() {
+    let retained_control_surface = [
+        read_repo_file("packages/agent/src/engine/primitives/mod.rs"),
+        read_repo_file("packages/agent/src/engine/primitives/runtime.rs"),
+        read_repo_file("packages/ios-app/project.yml"),
+    ]
+    .join("\n");
+    assert_absent(
+        &retained_control_surface,
+        &[
+            "CONTROL_WORKER_ID",
+            "control::",
+            "mod control",
+            "ControlSnapshotDTO",
+        ],
+        "retained control projection registration surface",
+    );
+    assert!(
+        !repo_path("packages/agent/src/engine/primitives/control.rs").exists(),
+        "control primitive source should be deleted"
+    );
+    assert!(
+        !repo_path(
+            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Control.swift"
+        )
+        .exists(),
+        "iOS control DTO should be deleted"
+    );
+}
+
+#[test]
 fn user_interaction_pause_plane_is_deleted_from_retained_sources() {
     let retained_sources = read_repo_source_trees(&[
         "packages/agent/src",

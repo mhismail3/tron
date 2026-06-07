@@ -42,9 +42,9 @@ use super::queue::{
     SqliteEngineQueueStore,
 };
 use super::resources::{
-    CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
-    EngineResourceTypeDefinition, EngineResourceVersion, InMemoryEngineResourceStore,
-    LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
+    CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
+    EngineResourceVersion, InMemoryEngineResourceStore, LinkResources, ListResources,
+    RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
     builtin_resource_type_definitions,
 };
 use super::state::{
@@ -60,7 +60,6 @@ use super::types::{
 };
 
 pub(crate) mod catalog;
-pub(crate) mod control;
 pub(crate) mod grant;
 pub(crate) mod queue;
 pub(crate) mod resource;
@@ -79,7 +78,6 @@ pub(crate) const RESOURCE_WORKER_ID: &str = "resource";
 pub(crate) const TRIGGER_WORKER_ID: &str = "trigger";
 pub(crate) const GRANT_WORKER_ID: &str = "grant";
 pub(crate) const CATALOG_WORKER_ID: &str = "catalog";
-pub(crate) const CONTROL_WORKER_ID: &str = "control";
 pub(crate) const WORKER_WORKER_ID: &str = "worker";
 pub(crate) const STORAGE_WORKER_ID: &str = "storage";
 pub(crate) const UI_WORKER_ID: &str = "ui";
@@ -171,17 +169,6 @@ impl StreamStoreBackend {
         match self {
             Self::InMemory(store) => store.poll(subscription_id, after, limit, actor),
             Self::Sqlite(store) => store.poll(subscription_id, after, limit, actor),
-        }
-    }
-
-    pub(in crate::engine) fn list_by_trace(
-        &self,
-        trace_id: &str,
-        limit: usize,
-    ) -> Result<Vec<super::streams::EngineStreamEvent>> {
-        match self {
-            Self::InMemory(store) => store.list_by_trace(trace_id, limit),
-            Self::Sqlite(store) => store.list_by_trace(trace_id, limit),
         }
     }
 }
@@ -372,17 +359,6 @@ impl QueueStoreBackend {
             Self::Sqlite(store) => store.list(queue, limit),
         }
     }
-
-    pub(in crate::engine) fn list_by_trace(
-        &self,
-        trace_id: &str,
-        limit: usize,
-    ) -> Result<Vec<EngineQueueItem>> {
-        match self {
-            Self::InMemory(store) => store.list_by_trace(trace_id, limit),
-            Self::Sqlite(store) => store.list_by_trace(trace_id, limit),
-        }
-    }
 }
 
 pub(in crate::engine) enum ResourceLeaseStoreBackend {
@@ -415,17 +391,6 @@ impl ResourceLeaseStoreBackend {
         match self {
             Self::InMemory(store) => store.get(lease_id),
             Self::Sqlite(store) => store.get(lease_id),
-        }
-    }
-
-    pub(in crate::engine) fn list_by_trace(
-        &self,
-        trace_id: &str,
-        limit: usize,
-    ) -> Result<Vec<EngineResourceLease>> {
-        match self {
-            Self::InMemory(store) => store.list_by_trace(trace_id, limit),
-            Self::Sqlite(store) => store.list_by_trace(trace_id, limit),
         }
     }
 }
@@ -480,13 +445,6 @@ impl ResourceStoreBackend {
         }
     }
 
-    pub(in crate::engine) fn list_types(&self) -> Result<Vec<EngineResourceTypeDefinition>> {
-        match self {
-            Self::InMemory(store) => store.list_types(),
-            Self::Sqlite(store) => store.list_types(),
-        }
-    }
-
     pub(in crate::engine) fn create(&mut self, request: CreateResource) -> Result<EngineResource> {
         match self {
             Self::InMemory(store) => store.create(request),
@@ -521,17 +479,6 @@ impl ResourceStoreBackend {
         match self {
             Self::InMemory(store) => store.inspect(resource_id),
             Self::Sqlite(store) => store.inspect(resource_id),
-        }
-    }
-
-    pub(in crate::engine) fn events_by_trace(
-        &self,
-        trace_id: &str,
-        limit: usize,
-    ) -> Result<Vec<EngineResourceEvent>> {
-        match self {
-            Self::InMemory(store) => store.events_by_trace(trace_id, limit),
-            Self::Sqlite(store) => store.events_by_trace(trace_id, limit),
         }
     }
 
@@ -670,7 +617,6 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         primitive_worker(TRIGGER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(GRANT_WORKER_ID, WorkerKind::System)?,
         primitive_worker(CATALOG_WORKER_ID, WorkerKind::System)?,
-        primitive_worker(CONTROL_WORKER_ID, WorkerKind::System)?,
         primitive_worker(UI_WORKER_ID, WorkerKind::System)?,
         primitive_worker(WORKER_WORKER_ID, WorkerKind::System)?,
         primitive_worker(STORAGE_WORKER_ID, WorkerKind::System)?,
@@ -688,7 +634,6 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(trigger::registrations(stores)?);
     registrations.extend(grant::registrations(stores)?);
     registrations.extend(catalog::registrations()?);
-    registrations.extend(control::registrations()?);
     registrations.extend(ui::registrations()?);
     registrations.extend(worker::registrations()?);
     registrations.extend(storage::registrations()?);

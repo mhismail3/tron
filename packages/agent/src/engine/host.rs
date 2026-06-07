@@ -38,8 +38,7 @@ use super::registry::{
     PreparedSyncInvocationDecision,
 };
 use super::streams::{
-    EngineStreamEvent, EngineStreamPage, EngineStreamSubscription, PublishStreamEvent,
-    StreamActorScope, StreamCursor,
+    EngineStreamPage, EngineStreamSubscription, PublishStreamEvent, StreamActorScope, StreamCursor,
 };
 use super::types::{
     AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,

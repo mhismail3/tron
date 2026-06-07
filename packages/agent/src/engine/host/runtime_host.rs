@@ -48,93 +48,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
         self.catalog.unregister_worker(id, owner_actor)
     }
 
-    fn invocations(&self) -> Vec<super::super::invocation::InvocationRecord> {
-        self.catalog.invocations().to_vec()
-    }
-
-    fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
-        self.catalog.ledger_catalog_changes()
-    }
-
-    fn stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineStreamEvent>> {
-        self.primitives
-            .streams
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
-            .list_by_trace(trace_id, 500)
-    }
-
-    fn queue_items_for_trace(&self, trace_id: &str) -> Result<Vec<EngineQueueItem>> {
-        self.primitives
-            .queue
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .list_by_trace(trace_id, 500)
-    }
-
-    fn resource_events_for_trace(
-        &self,
-        trace_id: &str,
-    ) -> Result<Vec<super::super::resources::EngineResourceEvent>> {
-        self.primitives
-            .resources
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
-            .events_by_trace(trace_id, 500)
-    }
-
-    fn resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>> {
-        self.primitives
-            .leases
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
-            .list_by_trace(trace_id, 500)
-    }
-
-    fn resource_lease(&self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
-        self.primitives
-            .leases
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("lease store lock poisoned".to_owned()))?
-            .get(lease_id)
-    }
-
-    fn compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>> {
-        self.primitives
-            .compensation
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("compensation store lock poisoned".to_owned()))?
-            .list()
-            .map(|records| {
-                records
-                    .into_iter()
-                    .filter(|record| record.trace_id.as_str() == trace_id)
-                    .map(|record| json!(record))
-                    .collect()
-            })
-    }
-
-    fn resource_type_definitions(
-        &self,
-    ) -> Result<Vec<super::super::resources::EngineResourceTypeDefinition>> {
-        self.primitives
-            .resources
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
-            .list_types()
-    }
-
-    fn list_resources(
-        &self,
-        filter: super::super::resources::ListResources,
-    ) -> Result<Vec<super::super::resources::EngineResource>> {
-        self.primitives
-            .resources
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
-            .list(filter)
-    }
-
     fn inspect_resource(
         &self,
         resource_id: &str,
@@ -166,36 +79,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
             .update(request)
-    }
-
-    fn list_grants(
-        &self,
-        filter: super::super::grants::ListGrants,
-    ) -> Result<Vec<super::super::grants::EngineGrant>> {
-        self.primitives
-            .grants
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-            .list(filter)
-    }
-
-    fn inspect_grant(
-        &self,
-        grant_id: &AuthorityGrantId,
-    ) -> Result<Option<super::super::grants::EngineGrant>> {
-        self.primitives
-            .grants
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-            .inspect(grant_id)
-    }
-
-    fn queue_items(&self, queue: &str, limit: usize) -> Result<Vec<EngineQueueItem>> {
-        self.primitives
-            .queue
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
-            .list(queue, limit)
     }
 
     fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport> {

@@ -1,44 +1,23 @@
 //! Privileged primitive query runtime.
 //!
-//! Catalog, worker, storage, control, and generated-UI primitives need access
+//! Catalog, worker, storage, and generated-UI primitives need access
 //! to host-owned catalog and ledger state. The response contracts live here so
 //! `EngineHost` stays a coordinator rather than a primitive response bucket.
 
-use std::collections::BTreeSet;
-
 use serde_json::{Value, json};
 
-use super::{catalog, control, storage, ui, worker};
+use super::{catalog, storage, ui, worker};
 use crate::engine::discovery::{ActorContext, FunctionQuery};
 use crate::engine::errors::{EngineError, Result};
-use crate::engine::grants::{EngineGrant, ListGrants};
-use crate::engine::ids::{InvocationId, TriggerId, WorkerId};
-use crate::engine::invocation::{CausalContext, Invocation, InvocationRecord};
-use crate::engine::leases::EngineResourceLease;
-use crate::engine::queue::EngineQueueItem;
+use crate::engine::ids::WorkerId;
+use crate::engine::invocation::{CausalContext, Invocation};
 use crate::engine::resources::{
-    CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
-    EngineResourceTypeDefinition, EngineResourceVersion, ListResources, UpdateResource,
+    CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion, UpdateResource,
 };
-use crate::engine::streams::EngineStreamEvent;
 use crate::engine::types::{
-    CatalogChange, CatalogRevision, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition,
-    VisibilityScope, WorkerDefinition,
+    CatalogRevision, FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope,
+    WorkerDefinition,
 };
-
-mod trace_projection;
-use trace_projection::catalog_change_belongs_to_trace;
-pub(in crate::engine::primitives) use trace_projection::trace_summary;
-
-pub(in crate::engine::primitives) struct TraceComponents {
-    pub invocations: Vec<InvocationRecord>,
-    pub catalog_changes: Vec<CatalogChange>,
-    pub streams: Vec<EngineStreamEvent>,
-    pub queue_items: Vec<EngineQueueItem>,
-    pub resource_events: Vec<EngineResourceEvent>,
-    pub leases: Vec<EngineResourceLease>,
-    pub compensation: Vec<Value>,
-}
 
 /// Narrow host interface required by host-dispatched primitive workers.
 pub(in crate::engine) trait PrimitiveRuntimeHost {
@@ -52,25 +31,9 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn inspect_worker(&self, id: &WorkerId) -> Result<WorkerDefinition>;
     fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool>;
     fn unregister_worker(&mut self, id: &WorkerId, owner_actor: &str) -> Result<()>;
-    fn invocations(&self) -> Vec<InvocationRecord>;
-    fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>>;
-    fn stream_records_for_trace(&self, trace_id: &str) -> Result<Vec<EngineStreamEvent>>;
-    fn queue_items_for_trace(&self, trace_id: &str) -> Result<Vec<EngineQueueItem>>;
-    fn resource_events_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceEvent>>;
-    fn resource_leases_for_trace(&self, trace_id: &str) -> Result<Vec<EngineResourceLease>>;
-    fn resource_lease(&self, lease_id: &str) -> Result<Option<EngineResourceLease>>;
-    fn compensation_records_for_trace(&self, trace_id: &str) -> Result<Vec<Value>>;
-    fn resource_type_definitions(&self) -> Result<Vec<EngineResourceTypeDefinition>>;
-    fn list_resources(&self, filter: ListResources) -> Result<Vec<EngineResource>>;
     fn inspect_resource(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>>;
     fn create_resource(&mut self, request: CreateResource) -> Result<EngineResource>;
     fn update_resource(&mut self, request: UpdateResource) -> Result<EngineResourceVersion>;
-    fn list_grants(&self, filter: ListGrants) -> Result<Vec<EngineGrant>>;
-    fn inspect_grant(
-        &self,
-        grant_id: &crate::engine::ids::AuthorityGrantId,
-    ) -> Result<Option<EngineGrant>>;
-    fn queue_items(&self, queue: &str, limit: usize) -> Result<Vec<EngineQueueItem>>;
     fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport>;
     fn storage_checkpoint(&self) -> Result<crate::shared::storage::StorageCheckpointReport>;
     fn storage_export_snapshot(
@@ -96,9 +59,6 @@ pub(in crate::engine) fn dispatch(
         worker::GET_FUNCTION => worker_get(host, invocation),
         worker::HEALTH_FUNCTION => worker_health(host, invocation),
         worker::DISCONNECT_FUNCTION => worker_disconnect(host, invocation),
-        control::SNAPSHOT_FUNCTION | control::INSPECT_FUNCTION => {
-            control::dispatch(host, invocation)
-        }
         ui::CREATE_SURFACE_FUNCTION
         | ui::UPDATE_SURFACE_FUNCTION
         | ui::INSPECT_SURFACE_FUNCTION
@@ -283,40 +243,6 @@ fn storage_retention_run(
     }))
 }
 
-pub(in crate::engine::primitives) fn trace_components(
-    host: &dyn PrimitiveRuntimeHost,
-    trace_id: &str,
-) -> Result<TraceComponents> {
-    let invocations = host
-        .invocations()
-        .into_iter()
-        .filter(|record| record.trace_id.as_str() == trace_id)
-        .collect::<Vec<_>>();
-    let function_ids = invocations
-        .iter()
-        .map(|record| record.function_id.as_str().to_owned())
-        .collect::<BTreeSet<_>>();
-    let worker_ids = invocations
-        .iter()
-        .map(|record| record.worker_id.as_str().to_owned())
-        .collect::<BTreeSet<_>>();
-    Ok(TraceComponents {
-        invocations,
-        catalog_changes: host
-            .ledger_catalog_changes()?
-            .into_iter()
-            .filter(|change| {
-                catalog_change_belongs_to_trace(change, trace_id, &function_ids, &worker_ids)
-            })
-            .collect(),
-        streams: host.stream_records_for_trace(trace_id)?,
-        queue_items: host.queue_items_for_trace(trace_id)?,
-        resource_events: host.resource_events_for_trace(trace_id)?,
-        leases: host.resource_leases_for_trace(trace_id)?,
-        compensation: host.compensation_records_for_trace(trace_id)?,
-    })
-}
-
 pub(in crate::engine::primitives) fn actor_context(context: &CausalContext) -> ActorContext {
     ActorContext {
         actor_id: context.actor_id.clone(),
@@ -363,64 +289,6 @@ fn is_visibility_visible(
         }
         VisibilityScope::Admin => actor.actor_kind.is_admin_like(),
     }
-}
-
-pub(in crate::engine::primitives) fn invocation_record_value(
-    record: &InvocationRecord,
-    include_full_payloads: bool,
-) -> Value {
-    let mut value = json!({
-        "invocationId": record.invocation_id.as_str(),
-        "functionId": record.function_id.as_str(),
-        "workerId": record.worker_id.as_str(),
-        "functionRevision": record.function_revision.0,
-        "catalogRevision": record.catalog_revision.0,
-        "actorId": record.actor_id.as_str(),
-        "actorKind": &record.actor_kind,
-        "authorityGrantId": record.authority_grant_id.as_str(),
-        "authorityScopes": &record.authority_scopes,
-        "traceId": record.trace_id.as_str(),
-        "parentInvocationId": record.parent_invocation_id.as_ref().map(InvocationId::as_str),
-        "triggerId": record.trigger_id.as_ref().map(TriggerId::as_str),
-        "sessionId": record.session_id.as_deref(),
-        "workspaceId": record.workspace_id.as_deref(),
-        "deliveryMode": record.delivery_mode.as_str(),
-        "idempotencyKey": record.idempotency_key.as_deref(),
-        "idempotencyScope": record.idempotency_scope.as_ref().map(|scope| {
-            json!({"kind": scope.kind.as_str(), "value": scope.value.as_str()})
-        }),
-        "resourceLeaseIds": &record.resource_lease_ids,
-        "compensationStatus": record.compensation_status.as_deref(),
-        "producedResourceRefs": &record.produced_resource_refs,
-        "replayedFrom": record.replayed_from.as_ref().map(InvocationId::as_str),
-        "succeeded": record.succeeded,
-        "error": record.error.as_ref().map(error_value),
-        "timestamp": record.timestamp.to_rfc3339(),
-    });
-    if include_full_payloads {
-        value["result"] = record.result_value.as_ref().cloned().unwrap_or(Value::Null);
-    } else if let Some(result) = &record.result_value {
-        let serialized = serde_json::to_string(result).unwrap_or_default();
-        value["resultPreview"] = Value::String(compact_preview(&serialized, 512));
-        value["resultSizeBytes"] = Value::Number(serde_json::Number::from(serialized.len() as u64));
-        value["resultOmitted"] = Value::Bool(true);
-    }
-    value
-}
-
-fn error_value(error: &EngineError) -> Value {
-    json!({
-        "message": error.to_string(),
-        "kind": format!("{error:?}"),
-    })
-}
-
-fn compact_preview(value: &str, max_chars: usize) -> String {
-    let mut preview = value.chars().take(max_chars).collect::<String>();
-    if value.chars().count() > max_chars {
-        preview.push_str("...");
-    }
-    preview
 }
 
 pub(in crate::engine::primitives) fn required_str<'a>(
