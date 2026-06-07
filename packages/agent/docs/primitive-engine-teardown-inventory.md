@@ -298,9 +298,9 @@ server settings shape and iOS controls together.
   and `SessionTree` source from first principles. The hard-coded
   `UserInteraction` prompt/answer plane was deleted during PET-11.
 - PET-11 decided that `session_drafts.skills_json` was stale product DTO
-  residue and deleted it from fresh iOS draft storage. PET-11 must still decide
-  whether `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift`
-  are true shell/session infrastructure or stale product DTO residue.
+  residue and deleted it from fresh iOS draft storage. PET-11 also deleted
+  `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift` after
+  proving they were unreferenced product DTO residue.
 - PET-11 must re-audit retained `capability_support`, `update.rs`, Mac update
   docs, local diagnostics/logging surfaces, and dynamic-surface rendering for
   hidden product policy.

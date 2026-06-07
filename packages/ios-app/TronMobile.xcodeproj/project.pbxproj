@@ -99,7 +99,6 @@
 		25CCF33285BCC90282BAFAEF /* DiffFormattingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE3864611A466B1F3A505772 /* DiffFormattingTests.swift */; };
 		2627191A9EA2CCFCBCDB5A7F /* ModelProviderSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29A1A128621BEC68283D71CF /* ModelProviderSection.swift */; };
 		262F728F81322E55356E8958 /* ChatViewModel+Messaging.swift in Sources */ = {isa = PBXBuildFile; fileRef = F92F6CAE7238A608B2D19BE1 /* ChatViewModel+Messaging.swift */; };
-		26423FB769A749ED997A0F59 /* EngineProtocolTypes+Task.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F3531283D03DA952F2D642A /* EngineProtocolTypes+Task.swift */; };
 		27066E4630C2AFFE4AA8E178 /* SettingsCaption.swift in Sources */ = {isa = PBXBuildFile; fileRef = 648A52A5CF33601A2C591624 /* SettingsCaption.swift */; };
 		278A764C36B437DE9033D952 /* SessionTitleIcons.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2EC68B4E1C2443506AE905F7 /* SessionTitleIcons.swift */; };
 		27CCE36A61745E25F78D9145 /* StreamingPayloads.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE92A6AE9E91E88CEF9CE5E2 /* StreamingPayloads.swift */; };
@@ -435,7 +434,6 @@
 		B40951C5FD63406124CC3E2A /* QRCodeScannerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 49396BE5380F94BD892A9E53 /* QRCodeScannerSheet.swift */; };
 		B4442D14DEA3295B00CB88B5 /* ModelFilteringServiceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 586CC1009C7B6D0D091CA9FD /* ModelFilteringServiceTests.swift */; };
 		B44EEAA44E8B73C8CD869910 /* BlobClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88756EFFE19EE26ED65B3283 /* BlobClientTests.swift */; };
-		B4BEC384A2D5A98DD94CB661 /* EngineProtocolTypes+Repo.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF5A0B2E286503912D496725 /* EngineProtocolTypes+Repo.swift */; };
 		B4CE6599B439130867C25BE8 /* EngineProtocolTypes+Control.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91D5AE1ABD647D8B61B8048B /* EngineProtocolTypes+Control.swift */; };
 		B523893BDC7E79D4FBF86800 /* TronLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF550C99638AAC41D6ACAD87 /* TronLogger.swift */; };
 		B5AF6F91EF3F82293BDB2171 /* DiffFormatting.swift in Sources */ = {isa = PBXBuildFile; fileRef = CCF54E8A43E2BFDA34764DEF /* DiffFormatting.swift */; };
@@ -723,7 +721,6 @@
 		1E1E2A2B22732B153F35C836 /* ConnectionCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionCoordinator.swift; sourceTree = "<group>"; };
 		1E658EA6BA001A95E6077D7D /* SettingsInfoCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsInfoCard.swift; sourceTree = "<group>"; };
 		1EB42A678D783DF00F87C9A2 /* MarkdownBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockView.swift; sourceTree = "<group>"; };
-		1F3531283D03DA952F2D642A /* EngineProtocolTypes+Task.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineProtocolTypes+Task.swift"; sourceTree = "<group>"; };
 		1F6DA1DEEECF5EA80D87A190 /* ThinkingRepositoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThinkingRepositoryTests.swift; sourceTree = "<group>"; };
 		1F88902FF851CB3600BB8054 /* CompactionDetailSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactionDetailSheet.swift; sourceTree = "<group>"; };
 		1FDA303C74F309FCC7BD1AC3 /* InteractionPolicyEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionPolicyEnvironment.swift; sourceTree = "<group>"; };
@@ -1154,7 +1151,6 @@
 		CE4D0BAAA4B0DEA4962596E2 /* CapabilityInvocationHandlers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CapabilityInvocationHandlers.swift; sourceTree = "<group>"; };
 		CE676271AC2AAC201328BBF1 /* VersionDisplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VersionDisplay.swift; sourceTree = "<group>"; };
 		CE92A6AE9E91E88CEF9CE5E2 /* StreamingPayloads.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StreamingPayloads.swift; sourceTree = "<group>"; };
-		CF5A0B2E286503912D496725 /* EngineProtocolTypes+Repo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineProtocolTypes+Repo.swift"; sourceTree = "<group>"; };
 		CF69380B2E839981F4B4E30E /* IBMPlexMono-Light.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Light.ttf"; sourceTree = "<group>"; };
 		D03A2E1D488FAFF8C0088D61 /* ModelNameFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelNameFormatter.swift; sourceTree = "<group>"; };
 		D05A145BE8014E1D17C36824 /* IBMPlexMono-Regular.ttf */ = {isa = PBXFileReference; lastKnownFileType = file; path = "IBMPlexMono-Regular.ttf"; sourceTree = "<group>"; };
@@ -2703,11 +2699,9 @@
 				CA871A4BC451F7D785E989EF /* EngineProtocolTypes+Interaction.swift */,
 				C0962028D903987679C0F3CD /* EngineProtocolTypes+Model.swift */,
 				E9A5CB888BDEE9CA027F9C39 /* EngineProtocolTypes+Reconstruct.swift */,
-				CF5A0B2E286503912D496725 /* EngineProtocolTypes+Repo.swift */,
 				6E133BFF1031DBC6F936C753 /* EngineProtocolTypes+Session.swift */,
 				76A9D3B44125D34A1C717F36 /* EngineProtocolTypes+Settings.swift */,
 				FCA7E17623278E64D32DCC4B /* EngineProtocolTypes+System.swift */,
-				1F3531283D03DA952F2D642A /* EngineProtocolTypes+Task.swift */,
 			);
 			path = EngineProtocol;
 			sourceTree = "<group>";
@@ -3118,11 +3112,9 @@
 				956B0BEA895DDFB6CA07BBEB /* EngineProtocolTypes+Interaction.swift in Sources */,
 				1D76D4DCB4C0F2D090CEB227 /* EngineProtocolTypes+Model.swift in Sources */,
 				F145FDA10D0B96BB63742AB4 /* EngineProtocolTypes+Reconstruct.swift in Sources */,
-				B4BEC384A2D5A98DD94CB661 /* EngineProtocolTypes+Repo.swift in Sources */,
 				654272B720786FBFA12EC575 /* EngineProtocolTypes+Session.swift in Sources */,
 				D34FC8500E2EDA84DC3FE10E /* EngineProtocolTypes+Settings.swift in Sources */,
 				4E73B77DFADEC56A0B2873EE /* EngineProtocolTypes+System.swift in Sources */,
-				26423FB769A749ED997A0F59 /* EngineProtocolTypes+Task.swift in Sources */,
 				606C9D41B0E512DAEBF75BE8 /* EngineProtocolTypes.swift in Sources */,
 				7D61965D46E5756E2688AFCF /* EngineRetryPolicy.swift in Sources */,
 				E0E9527DA2F86C57C1AE941D /* EngineStreamCursorStore.swift in Sources */,
