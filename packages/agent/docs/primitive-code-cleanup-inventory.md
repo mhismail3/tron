@@ -6,7 +6,7 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-08 during `PCC-3` Rust consolidation.
+Last updated: 2026-06-08 during `PCC-4` engine substrate cleanup.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
@@ -36,12 +36,12 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 686 | Current package/config/test/doc boundaries |
-| `collapse` | 539 | Cleanup rows PCC-4 through PCC-9 |
+| `retain` | 689 | Current package/config/test/doc boundaries |
+| `collapse` | 531 | Cleanup rows PCC-5 through PCC-9 |
 | `asset` | 74 | iOS/Mac resources and benchmark baselines |
-| `delete` | 11 | PCC-4/PCC-9 delete candidates |
+| `delete` | 11 | PCC-9 delete candidates |
 | `generated` | 7 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1317** | Whole repo |
+| **Total** | **1312** | Whole repo |
 
 ## Current Tracked Package Counts
 
@@ -51,7 +51,7 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `.codex` | 2 |
 | `.github` | 8 |
 | root files | 5 |
-| `packages/agent` | 513 |
+| `packages/agent` | 508 |
 | `packages/ios-app` | 644 |
 | `packages/mac-app` | 115 |
 | `scripts` | 24 |
@@ -124,19 +124,18 @@ The inventory classifies these tracked files as `delete` for later proof rows:
 
 | Path family | Files | Owning row | Reason |
 |-------------|-------|------------|--------|
-| `packages/agent/examples/local-packs/` | 11 | PCC-4/PCC-9 | Old local-pack examples are not primitive runtime source unless host infrastructure docs/tests prove otherwise. |
+| `packages/agent/examples/local-packs/` | 11 | PCC-9 | Old local-pack examples are not primitive runtime source unless host infrastructure docs/tests prove otherwise. |
 
 No files were deleted in PCC-1. During PCC-3, the retired capability-search
 asset bundle was deleted after source and lockfile audits proved no retained
-primitive used it. PCC-4/PCC-9 must either delete the remaining local-pack
-family or revise its classification with direct evidence.
+primitive used it. PCC-9 must either delete the remaining local-pack family or
+revise its classification with direct evidence.
 
 ## Collapse-Audit Hotspots
 
 | Area | Inventory owner | Later row |
 |------|-----------------|-----------|
-| Rust capability domain glue | `domains/capability` plus shared domain helpers | PCC-4 |
-| Rust engine substrate shards | `engine/*` | PCC-4 |
+| Rust engine substrate shards | `engine/*` | PCC-5/PCC-10 follow-up only if persistence or final scans find unowned leaves |
 | Session repository/store helper layers | session event store and SQLite repositories | PCC-5 |
 | iOS source roots | `Core`, `Database`, `Models`, `Services`, `ViewModels`, `Views`, `Theme`, `Utilities`, `Extensions`, `Protocols` | PCC-6 |
 | Mac source roots | root Swift files, `Services`, `Theme` | PCC-7 |
@@ -145,7 +144,7 @@ family or revise its classification with direct evidence.
 
 ## Open Loops
 
-- 539 files are still `collapse` until their owning cleanup rows run.
+- 531 files are still `collapse` until their owning cleanup rows run.
 - 11 files are `delete` candidates and intentionally remain in place until
   their owning rows prove deletion.
 - The target tree is canonical for future moves, but Xcode project files must

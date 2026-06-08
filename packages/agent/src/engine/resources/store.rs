@@ -6,6 +6,7 @@ use std::path::Path;
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
+use uuid::Uuid;
 
 use super::definitions::type_definition_from_request;
 use super::types::*;
@@ -18,18 +19,37 @@ use super::versions::payload_hash;
 use crate::engine::errors::{EngineError, Result};
 use crate::engine::ids::{InvocationId, TraceId};
 
-mod events;
 mod sqlite_codec;
 #[cfg(test)]
 mod tests;
-mod trace_events;
 
-use events::{generated_id, resource_event};
 use sqlite_codec::{
     RESOURCE_SQLITE_SCHEMA, collect_rows, json_string, resource_scope_workspace, row_to_resource,
     row_to_resource_event, row_to_resource_link, row_to_resource_version, row_to_type_definition,
     sqlite_err,
 };
+
+fn resource_event(
+    resource_id: &str,
+    event_type: &str,
+    payload: Value,
+    invocation_id: Option<InvocationId>,
+    trace_id: TraceId,
+) -> EngineResourceEvent {
+    EngineResourceEvent {
+        event_id: generated_id("revt"),
+        resource_id: resource_id.to_owned(),
+        event_type: event_type.to_owned(),
+        payload,
+        invocation_id,
+        trace_id,
+        occurred_at: Utc::now(),
+    }
+}
+
+fn generated_id(prefix: &str) -> String {
+    format!("{prefix}_{}", Uuid::now_v7())
+}
 
 /// In-memory resource store.
 #[derive(Default)]

@@ -4,7 +4,7 @@ Created: 2026-06-08
 
 Initial score: **0/100**
 
-Current score: **40/100**
+Current score: **50/100**
 
 Status: **active**
 
@@ -117,6 +117,7 @@ Current over-budget exceptions:
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1571 | session persistence tests | Dense event-store behavior suite. | PCC-5 |
 | `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | 1383 | auth storage tests | Credential persistence behavior suite. | PCC-3 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1196 | engine resource tests | Resource substrate behavior suite. | PCC-4 |
+| `packages/agent/src/engine/types.rs` | 1008 | engine metadata contracts | Public worker/function/trigger/catalog metadata contracts now include the collapsed catalog-change types and restored Rustdoc. | PCC-4 |
 | `packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs` | 1182 | agent stream tests | Provider stream reconstruction behavior. | PCC-3 |
 | `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | 1038 | context tests | Compaction behavior and edge-case coverage. | PCC-3 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2140 | iOS reconstruction tests | Large stored-event reconstruction suite. | PCC-6 |
@@ -137,6 +138,9 @@ planning gates:
   table;
 - tracked generated/cache junk such as Python bytecode caches, dependency
   folders, Rust build outputs, and Xcode result bundles is absent.
+- Rust engine cleanup shape stays flat where proven: the catalog type shard is
+  folded into `engine/types.rs`, dead resource event shards stay deleted, and
+  `engine/tests/mod.rs` remains declaration-only.
 
 ## Operating Loop
 
@@ -156,7 +160,7 @@ planning gates:
 | PCC-1 | Inventory and folder justification | 12 | passed_after_fix | architecture | Added [`primitive-code-cleanup-inventory.md`](primitive-code-cleanup-inventory.md) and [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv). The inventory classifies all 1339 tracked/current cleanup artifact paths: 686 `retain`, 551 `collapse`, 74 `asset`, 21 `delete`, and 7 `generated`; records the canonical target tree; and names every delete/collapse owner row. Static gates now prove every tracked file has an inventory row and the README links both inventory artifacts. | Collapse/delete work remains owned by PCC-3 through PCC-9; no folder is unowned because every unresolved area has a cleanup row. | PCC-1 inventory checkpoint |
 | PCC-2 | Root and generated artifact hygiene | 5 | passed_after_fix | repo_hygiene | Tracked generated/cache scan found no tracked `__pycache__`, `.pyc`, `.xcresult`, `target`, `node_modules`, or `DerivedData` paths. Root `.gitignore` now covers project-local Rust, Xcode, Node, Python, benchmark, temp, log, debug, and worktree artifacts, including `DerivedData/`, `*.dSYM/`, `*.pyc`, and `.pytest_cache/`. Static gates assert both absence and ignore coverage. No untracked build outputs were deleted. | Local untracked ignored outputs may exist and are intentionally left alone. | PCC-2 hygiene checkpoint |
 | PCC-3 | Rust agent consolidation | 18 | passed_after_fix | rust_agent | Removed unused `fastembed`, `sqlite-vec`, `rquickjs`, `rquickjs-serde`, `image`, and `resvg` dependencies, refreshed `Cargo.lock`, deleted the retired `packages/agent/assets/capability-search/` bundle, collapsed `blob`, `logs`, `message`, and `system` contract/deps/handler shards into their owning `mod.rs` files, retargeted the aggregate domain catalog, regenerated the file inventory, and added static gates for dead dependencies and small-domain shape. | Engine substrate flattening remains PCC-4; session persistence flattening remains PCC-5; client/script/docs consolidation remain later rows. | PCC-3 Rust consolidation checkpoint |
-| PCC-4 | Engine and primitive surface cleanup | 10 | pending | engine_architecture | Engine shards flattened where unowned; runtime need for resources/state/queues/traces/catalog/grants/workers proven; primitive loop tests pass. | Some substrate may remain until final adversarial proof. | pending |
+| PCC-4 | Engine and primitive surface cleanup | 10 | passed_after_fix | engine_architecture | Collapsed the unowned `engine/types/catalog.rs` shard into `engine/types.rs`, folded the resource-store event/id helper into `resources/store.rs`, deleted the uncalled `resources/store/trace_events.rs` query extension, collapsed `capability::execute` deps/handler boilerplate into its worker module, removed empty local source directories left by earlier cleanup, regenerated the file inventory, and added a static gate for the retained engine/capability shape. Engine concern tests prove the retained catalog, grant, resource, state, queue, stream, trigger, ledger, host, worker, and `capability::execute` substrates still run. | Session/event persistence cleanup remains PCC-5; final adversarial scans remain PCC-10. | PCC-4 engine substrate checkpoint |
 | PCC-5 | Session, trace, and persistence cleanup | 8 | pending | storage | Persistence helpers collapsed where possible, schema/query owners retained only where needed, trace/session/event truth remains agent-queryable, and old product schema/event absence gates pass. | Existing large tests may need decomposition. | pending |
 | PCC-6 | iOS app consolidation | 12 | pending | ios | `Sources` moves toward `App`, `Engine`, `Session`, `UI`, `Support`, `Resources`, assets, and extension boundaries; project regenerated; source guards and targeted UI tests pass. | Simulator/device proof may require environment availability. | pending |
 | PCC-7 | Mac app consolidation | 8 | pending | mac | `Sources` moves toward `App`, `Server`, `Wizard`, `MenuBar`, `Support`, and resources; project regenerated; targeted Mac tests pass. | macOS UI test breadth may stay source-level if no harness exists. | pending |
@@ -168,9 +172,9 @@ Total weight: **100**
 
 ## Next Test
 
-PCC-4 starts engine and primitive surface cleanup. Begin with retained engine
-substrate ownership and one-file shard audit:
+PCC-5 starts session, trace, and persistence cleanup. Begin with retained
+session event-store ownership and helper-layer audit:
 
 ```bash
-find packages/agent/src/engine -maxdepth 2 -type f -print | sort
+find packages/agent/src/domains/session -maxdepth 4 -type f -print | sort
 ```

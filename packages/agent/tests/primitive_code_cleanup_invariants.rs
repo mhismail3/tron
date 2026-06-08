@@ -65,7 +65,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **40/100**",
+        "Current score: **50/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
@@ -78,7 +78,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-1 | Inventory and folder justification | 12 | passed_after_fix |",
         "| PCC-2 | Root and generated artifact hygiene | 5 | passed_after_fix |",
         "| PCC-3 | Rust agent consolidation | 18 | passed_after_fix |",
-        "PCC-4 starts engine and primitive surface cleanup.",
+        "| PCC-4 | Engine and primitive surface cleanup | 10 | passed_after_fix |",
+        "PCC-5 starts session, trace, and persistence cleanup.",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -90,12 +91,13 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **40/100**",
+        "Current score: **50/100**",
         "Status: **active**",
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
         "| PCC-2 | passed_after_fix |",
         "| PCC-3 | passed_after_fix |",
+        "| PCC-4 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -432,4 +434,103 @@ fn small_rust_domains_stay_collapsed_to_single_worker_modules() {
             "domain catalog must use collapsed small-domain owner `{required}`"
         );
     }
+}
+
+#[test]
+fn engine_primitive_surface_stays_flattened_to_owned_boundaries() {
+    for path in [
+        "packages/agent/src/engine/types/catalog.rs",
+        "packages/agent/src/engine/resources/store/events.rs",
+        "packages/agent/src/engine/resources/store/trace_events.rs",
+        "packages/agent/src/domains/capability/deps.rs",
+        "packages/agent/src/domains/capability/handlers.rs",
+    ] {
+        assert!(
+            !repo_path(path).exists(),
+            "unowned engine substrate shard must stay collapsed or deleted: {path}"
+        );
+    }
+
+    let engine_types = read_repo_file("packages/agent/src/engine/types.rs");
+    for required in [
+        "pub enum CatalogSubjectKind",
+        "pub enum CatalogChangeClass",
+        "pub struct CatalogChange",
+        "pub enum CatalogChangeKind",
+    ] {
+        assert!(
+            engine_types.contains(required),
+            "engine types owner missing collapsed catalog type `{required}`"
+        );
+    }
+    for banned in ["mod catalog;", "pub use catalog::*"] {
+        assert!(
+            !engine_types.contains(banned),
+            "engine types owner must not recreate catalog submodule glue `{banned}`"
+        );
+    }
+
+    let resource_store = read_repo_file("packages/agent/src/engine/resources/store.rs");
+    for required in ["fn resource_event(", "fn generated_id("] {
+        assert!(
+            resource_store.contains(required),
+            "resource store missing collapsed event helper `{required}`"
+        );
+    }
+    for banned in ["mod events;", "mod trace_events;", "events_by_trace("] {
+        assert!(
+            !resource_store.contains(banned),
+            "resource store must not retain unproven event shard/API `{banned}`"
+        );
+    }
+
+    let engine_tests = read_repo_file("packages/agent/src/engine/tests/mod.rs");
+    for banned in ["fn ", "#[test]", "async fn "] {
+        assert!(
+            !engine_tests.contains(banned),
+            "engine/tests/mod.rs must stay declaration-only and fixture-only"
+        );
+    }
+    assert!(
+        engine_tests.contains("mod support;")
+            && engine_tests.contains("pub(in crate::engine::tests) use support::*;")
+            && engine_tests.contains("mod resource_kernel;")
+            && engine_tests.contains("mod state_queue;")
+            && engine_tests.contains("mod streams;")
+            && engine_tests.contains("mod triggers;"),
+        "engine tests must stay organized by substrate concern"
+    );
+
+    let capability_mod = read_repo_file("packages/agent/src/domains/capability/mod.rs");
+    for required in [
+        "pub(crate) struct Deps",
+        "function_registrations(contract::capabilities()?, domain_deps)?",
+        "struct ExecuteHandler",
+        "execute_value(&invocation, &self.deps)",
+    ] {
+        assert!(
+            capability_mod.contains(required),
+            "capability execute worker missing collapsed local owner `{required}`"
+        );
+    }
+    for banned in [
+        "mod deps;",
+        "mod handlers;",
+        "pub(crate) use deps::Deps;",
+        "handlers::function_registrations",
+        "operation_bindings!",
+    ] {
+        assert!(
+            !capability_mod.contains(banned),
+            "capability execute worker must not recreate boilerplate shard `{banned}`"
+        );
+    }
+
+    let capability_contract = read_repo_file("packages/agent/src/domains/capability/contract.rs");
+    assert!(
+        capability_contract
+            .contains("pub(crate) const EXECUTE_FUNCTION_ID: &str = \"capability::execute\";")
+            && capability_contract.contains("fn only_execute_is_registered_and_model_facing()"),
+        "capability contract must retain the single execute primitive proof"
+    );
 }

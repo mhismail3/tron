@@ -31,10 +31,10 @@ packages/agent/defaults/profiles/default/profile.toml	retain	profile defaults	PC
 packages/agent/defaults/profiles/local/profile.toml	retain	profile defaults	PCC-3/PCC-7	Bundled settings/profile defaults used by server and Mac wrapper
 packages/agent/defaults/profiles/normal/profile.toml	retain	profile defaults	PCC-3/PCC-7	Bundled settings/profile defaults used by server and Mac wrapper
 packages/agent/defaults/profiles/user/profile.toml	retain	profile defaults	PCC-3/PCC-7	Bundled settings/profile defaults used by server and Mac wrapper
-packages/agent/docs/primitive-code-cleanup-evidence-manifest.md	retain	cleanup scorecard	PCC-0/PCC-1/PCC-3	Active cleanup scorecard and evidence
-packages/agent/docs/primitive-code-cleanup-file-inventory.tsv	retain	cleanup inventory	PCC-1/PCC-3	Inventory artifact required before structural cleanup
-packages/agent/docs/primitive-code-cleanup-inventory.md	retain	cleanup inventory	PCC-1/PCC-3	Inventory artifact required before structural cleanup
-packages/agent/docs/primitive-code-cleanup-scorecard.md	retain	cleanup scorecard	PCC-0/PCC-1/PCC-3	Active cleanup scorecard and evidence
+packages/agent/docs/primitive-code-cleanup-evidence-manifest.md	retain	cleanup scorecard	PCC-1/PCC-3/PCC-4	Inventory, scorecard, and evidence artifacts
+packages/agent/docs/primitive-code-cleanup-file-inventory.tsv	retain	cleanup inventory	PCC-1/PCC-3/PCC-4	Inventory, scorecard, and evidence artifacts
+packages/agent/docs/primitive-code-cleanup-inventory.md	retain	cleanup inventory	PCC-1/PCC-3/PCC-4	Inventory, scorecard, and evidence artifacts
+packages/agent/docs/primitive-code-cleanup-scorecard.md	retain	cleanup scorecard	PCC-1/PCC-3/PCC-4	Inventory, scorecard, and evidence artifacts
 packages/agent/docs/primitive-engine-teardown-evidence-manifest.md	retain	teardown evidence	PCC-9	Historical primitive teardown proof retained as evidence
 packages/agent/docs/primitive-engine-teardown-inventory.md	retain	teardown evidence	PCC-9	Historical primitive teardown proof retained as evidence
 packages/agent/docs/primitive-engine-teardown-scorecard.md	retain	teardown evidence	PCC-9	Historical primitive teardown proof retained as evidence
@@ -164,17 +164,15 @@ packages/agent/src/domains/auth/provider_credentials/storage/tests.rs	retain	rus
 packages/agent/src/domains/auth/provider_credentials/types.rs	retain	rust auth domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/auth/stream.rs	retain	rust auth domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/bindings.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
-packages/agent/src/domains/blob/mod.rs	collapse	rust blob domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/capability/contract.rs	collapse	rust capability domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/capability/deps.rs	collapse	rust capability domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/capability/handlers.rs	collapse	rust capability domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/capability/mod.rs	collapse	rust capability domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/capability/operations/mod.rs	collapse	rust capability domain	PCC-3	Small retained domain should collapse if behavior remains small
+packages/agent/src/domains/blob/mod.rs	collapse	rust blob domain	PCC-3/PCC-4	Small retained domain or primitive capability boundary
+packages/agent/src/domains/capability/contract.rs	retain	rust capability domain	PCC-4	Retained model-facing execute contract and provider schema boundary
+packages/agent/src/domains/capability/mod.rs	retain	rust capability domain	PCC-4	Retained execute worker module and local operation owner
+packages/agent/src/domains/capability/operations/mod.rs	retain	rust capability domain	PCC-4	Retained direct primitive operation implementation boundary
 packages/agent/src/domains/catalog.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
 packages/agent/src/domains/contract.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
-packages/agent/src/domains/logs/client_logs.rs	collapse	rust logs domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/logs/mod.rs	collapse	rust logs domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/message/mod.rs	collapse	rust message domain	PCC-3	Small retained domain should collapse if behavior remains small
+packages/agent/src/domains/logs/client_logs.rs	collapse	rust logs domain	PCC-3/PCC-4	Small retained domain or primitive capability boundary
+packages/agent/src/domains/logs/mod.rs	collapse	rust logs domain	PCC-3/PCC-4	Small retained domain or primitive capability boundary
+packages/agent/src/domains/message/mod.rs	collapse	rust message domain	PCC-3/PCC-4	Small retained domain or primitive capability boundary
 packages/agent/src/domains/mod.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
 packages/agent/src/domains/model/catalog.rs	retain	rust model domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/model/contract.rs	retain	rust model domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
@@ -356,7 +354,7 @@ packages/agent/src/domains/settings/implementation/types/mod.rs	retain	rust sett
 packages/agent/src/domains/settings/implementation/types/server.rs	retain	rust settings domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/settings/implementation/types/ui.rs	retain	rust settings domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/settings/mod.rs	retain	rust settings domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
-packages/agent/src/domains/system/mod.rs	collapse	rust system domain	PCC-3	Small retained domain should collapse if behavior remains small
+packages/agent/src/domains/system/mod.rs	collapse	rust system domain	PCC-3/PCC-4	Small retained domain or primitive capability boundary
 packages/agent/src/domains/worker.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
 packages/agent/src/engine/capabilities.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/compensation.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
@@ -413,10 +411,8 @@ packages/agent/src/engine/registry/output_contract.rs	collapse	rust engine subst
 packages/agent/src/engine/resources/definitions.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/resources/mod.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/resources/store.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
-packages/agent/src/engine/resources/store/events.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/resources/store/sqlite_codec.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/resources/store/tests.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
-packages/agent/src/engine/resources/store/trace_events.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/resources/types.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/resources/ui_surface.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/resources/validation.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
@@ -442,7 +438,6 @@ packages/agent/src/engine/tests/support.rs	collapse	rust engine substrate	PCC-4	
 packages/agent/src/engine/tests/triggers.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/triggers.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/engine/types.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
-packages/agent/src/engine/types/catalog.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries
 packages/agent/src/lib.rs	collapse	rust source	PCC-3	Rust source must map to an approved top-level root
 packages/agent/src/main.rs	retain	rust entrypoint	PCC-3	Binary and runtime entrypoint
 packages/agent/src/main_cli.rs	retain	rust entrypoint	PCC-3	Binary and runtime entrypoint

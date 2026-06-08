@@ -9,8 +9,6 @@
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `contract` | Single `capability::execute` contract and provider schema |
-//! | `deps` | Narrow dependency bundle containing the engine host handle |
-//! | `handlers` | Operation wiring for `execute` |
 //! | `operations` | Direct primitive operation implementations |
 //!
 //! # INVARIANT: the model-facing surface is tiny
@@ -23,22 +21,40 @@
 //! model-id string parsing or shell aliases.
 
 pub(crate) mod contract;
-pub(crate) mod deps;
-pub(crate) mod handlers;
 mod operations;
-pub(crate) use deps::Deps;
 pub(crate) use operations::execute_value;
 
+use std::sync::Arc;
+
+use crate::domains::catalog::{CapabilitySpec, function_definition_for_capability};
+use crate::domains::session::event_store::EventStore;
+use crate::domains::worker::{
+    DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
+};
+use crate::engine::{EngineError, InProcessFunctionHandler, Invocation};
+use crate::shared::server::error_mapping::capability_error_to_engine;
 use serde_json::Value;
 
-use crate::domains::worker::{DomainRegistrationContext, DomainWorkerModule};
+#[derive(Clone)]
+pub(crate) struct Deps {
+    pub(crate) engine_host: crate::engine::EngineHostHandle,
+    pub(crate) event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
+        Self {
+            engine_host: deps.engine_host.clone(),
+            event_store: Arc::clone(&deps.event_store),
+        }
+    }
+}
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
 ) -> crate::engine::Result<DomainWorkerModule> {
     let domain_deps = Deps::from_engine(deps);
-    let mut registrations =
-        handlers::function_registrations(contract::capabilities()?, domain_deps)?;
+    let mut registrations = function_registrations(contract::capabilities()?, domain_deps)?;
     for registration in &mut registrations {
         merge_metadata(
             &mut registration.definition.metadata,
@@ -65,5 +81,38 @@ fn merge_metadata(target: &mut Value, extra: Value) {
         (target, extra) => {
             *target = extra;
         }
+    }
+}
+
+fn function_registrations(
+    specs: Vec<CapabilitySpec>,
+    deps: Deps,
+) -> crate::engine::Result<Vec<DomainFunctionRegistration>> {
+    let mut registrations = Vec::with_capacity(specs.len());
+    for spec in specs {
+        if spec.operation_key != "execute" {
+            return Err(EngineError::PolicyViolation(format!(
+                "unexpected capability operation '{}'",
+                spec.operation_key
+            )));
+        }
+        registrations.push(DomainFunctionRegistration {
+            definition: function_definition_for_capability(&spec),
+            handler: Arc::new(ExecuteHandler { deps: deps.clone() }),
+        });
+    }
+    Ok(registrations)
+}
+
+struct ExecuteHandler {
+    deps: Deps,
+}
+
+#[async_trait::async_trait]
+impl InProcessFunctionHandler for ExecuteHandler {
+    async fn invoke(&self, invocation: Invocation) -> Result<Value, EngineError> {
+        execute_value(&invocation, &self.deps)
+            .await
+            .map_err(capability_error_to_engine)
     }
 }
