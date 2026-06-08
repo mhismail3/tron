@@ -164,7 +164,7 @@ fn external_cli_variance_has_no_compatibility_or_fallback_wording() {
 }
 
 #[test]
-fn xcodegen_workflows_fail_on_tracked_project_drift() {
+fn xcodegen_workflows_match_ios_tracked_and_mac_untracked_policy() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     let release_ios = read_repo_file(".github/workflows/release-ios.yml");
     let release_mac = read_repo_file(".github/workflows/release-mac.yml");
@@ -180,17 +180,25 @@ fn xcodegen_workflows_fail_on_tracked_project_drift() {
             release_ios.as_str(),
             "packages/ios-app/TronMobile.xcodeproj",
         ),
-        (
-            "release-mac.yml",
-            release_mac.as_str(),
-            "packages/mac-app/TronMac.xcodeproj",
-        ),
     ] {
         assert!(
             text.contains("xcodegen generate")
                 && text.contains("git diff --exit-code")
                 && text.contains(project),
             "{name} must fail when xcodegen changes tracked project `{project}`"
+        );
+    }
+
+    for (name, text) in [
+        ("ci.yml", ci.as_str()),
+        ("release-mac.yml", release_mac.as_str()),
+    ] {
+        assert!(
+            text.contains("xcodegen generate")
+                && text.contains("packages/mac-app/TronMac.xcodeproj")
+                && text.contains("git check-ignore -q packages/mac-app/TronMac.xcodeproj")
+                && !text.contains("git diff --exit-code packages/mac-app/TronMac.xcodeproj"),
+            "{name} must keep the generated Mac project ignored instead of checking tracked drift"
         );
     }
 }

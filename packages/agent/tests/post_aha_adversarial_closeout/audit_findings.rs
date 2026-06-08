@@ -17,9 +17,25 @@ fn mac_generated_project_policy_is_truthful() {
     );
 
     let mut hits = Vec::new();
-    for workflow in [
-        ".github/workflows/ci.yml",
-        ".github/workflows/release-mac.yml",
+    for (workflow, required_commands) in [
+        (
+            ".github/workflows/ci.yml",
+            [
+                "xcodegen generate",
+                "-project TronMac.xcodeproj",
+                "xcodebuild test",
+            ]
+            .as_slice(),
+        ),
+        (
+            ".github/workflows/release-mac.yml",
+            [
+                "xcodegen generate",
+                "-project TronMac.xcodeproj",
+                "xcodebuild archive",
+            ]
+            .as_slice(),
+        ),
     ] {
         let text = read_repo_file(workflow);
         if text.contains("git diff --exit-code packages/mac-app/TronMac.xcodeproj") {
@@ -27,11 +43,12 @@ fn mac_generated_project_policy_is_truthful() {
                 "{workflow}: hollow Mac generated-project drift check"
             ));
         }
-        for required in [
-            "xcodegen generate",
-            "-project TronMac.xcodeproj",
-            "xcodebuild test",
-        ] {
+        if !text.contains("git check-ignore -q packages/mac-app/TronMac.xcodeproj") {
+            hits.push(format!(
+                "{workflow}: missing ignored Mac project policy proof"
+            ));
+        }
+        for required in required_commands {
             if !text.contains(required) {
                 hits.push(format!(
                     "{workflow}: missing Mac generated-project build/test proof `{required}`"

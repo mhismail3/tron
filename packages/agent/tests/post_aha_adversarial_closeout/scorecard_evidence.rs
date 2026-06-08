@@ -8,11 +8,11 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
 
     for required in [
         "# Post-AHA Adversarial Closeout Scorecard",
-        "Current score: **6/100**",
+        "Current score: **16/100**",
         "Status: **active**",
         "Total weight: **100**",
         "PAC-0 | Scorecard, evidence, README, and red-gate setup | 6 | passed_after_fix",
-        "PAC-1 | Mac generated-project CI policy | 10 | pending",
+        "PAC-1 | Mac generated-project CI policy | 10 | passed_after_fix",
         "PAC-2 | README/AGENTS source-truth path repair | 12 | pending",
         "PAC-3 | Runtime/docs parity and database inventory | 10 | pending",
         "PAC-4 | Mac launch-agent/process ownership | 12 | pending",
@@ -56,10 +56,10 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
 
     for required in [
         "# Post-AHA Adversarial Closeout Evidence Manifest",
-        "Current score: **6/100**",
+        "Current score: **16/100**",
         "Status: **active**",
         "| PAC-0 | passed_after_fix |",
-        "| PAC-1 | pending |",
+        "| PAC-1 | passed_after_fix |",
         "| PAC-10 | pending |",
         "## PAC-0 Red Proof",
         "## Residual Risk Log",

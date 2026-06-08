@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Evidence Manifest
 
-Current score: **6/100**
+Current score: **16/100**
 
 Status: **active**
 
@@ -17,7 +17,7 @@ work is driven by executable evidence instead of the external Downloads plan.
 | ID | Status | Change summary | Verification | Residuals | Commit |
 |----|--------|----------------|--------------|-----------|--------|
 | PAC-0 | passed_after_fix | Created the scorecard, evidence manifest, README links, and intentionally red static gate target for the PAC findings. | Red proof captured by `cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants -- --nocapture`; see PAC-0 red proof below. | Closed; PAC-1 through PAC-10 own the remaining red gates. | `1d1aa2f34` |
-| PAC-1 | pending | Pending. | Pending. | Mac generated-project policy still needs repair. | pending |
+| PAC-1 | passed_after_fix | Removed Mac `git diff --exit-code packages/mac-app/TronMac.xcodeproj` checks from CI/release, added ignored-project existence checks after XcodeGen, kept iOS tracked-project drift checks, and revised the older AHA Xcode policy gate/docs to the split iOS-tracked/Mac-untracked rule. | PAC Mac policy gate, revised AHA Xcode policy gate, and AHA scorecard formalization passed. | Closed; PAC-4/PAC-5 still own Mac source organization and guard breadth. | pending |
 | PAC-2 | pending | Pending. | Pending. | README/AGENTS source-truth paths still need repair. | pending |
 | PAC-3 | pending | Pending. | Pending. | Runtime docs and database inventory still need parity proof. | pending |
 | PAC-4 | pending | Pending. | Pending. | Mac launch-agent and subprocess ownership still need physical moves. | pending |
@@ -68,5 +68,41 @@ Expected red findings:
 
 ## Residual Risk Log
 
-- PAC-1 through PAC-10 remain open by design after PAC-0. No row will be marked
-  complete until its guard, docs, targeted verification, and evidence are green.
+- PAC-2 through PAC-10 remain open. No row will be marked complete until its
+  guard, docs, targeted verification, and evidence are green.
+
+## PAC-1 Verification
+
+Completed Mac generated-project policy repair:
+
+- `.github/workflows/ci.yml` and `.github/workflows/release-mac.yml` no longer
+  diff `packages/mac-app/TronMac.xcodeproj`.
+- Both Mac workflows run `xcodegen generate`, verify
+  `packages/mac-app/TronMac.xcodeproj` exists, and verify it is ignored with
+  `git check-ignore`.
+- CI still builds/tests from `TronMac.xcodeproj`; release-mac archives from the
+  generated project.
+- iOS workflows still run `git diff --exit-code
+  packages/ios-app/TronMobile.xcodeproj`.
+- AHA's older Xcode policy gate/docs now enforce the split policy rather than
+  preserving the obsolete tracked-Mac project rule.
+
+Focused proof:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants mac_generated_project_policy_is_truthful -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants xcodegen_workflows_match_ios_tracked_and_mac_untracked_policy -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants post_hra_adversarial_hardening_scorecard_stays_formalized -- --nocapture
+```
+
+Result: exit 0, 1 passed.

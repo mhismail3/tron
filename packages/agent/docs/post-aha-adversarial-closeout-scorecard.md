@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Scorecard
 
-Current score: **6/100**
+Current score: **16/100**
 
 Status: **active**
 
@@ -40,7 +40,7 @@ Total weight: **100**
 | ID | Area | Weight | Status | Owner | Evidence | Open loops |
 |----|------|--------|--------|-------|----------|------------|
 | PAC-0 | Scorecard, evidence, README, and red-gate setup | 6 | passed_after_fix | docs/static gates | Added this scorecard, the evidence manifest, README living-doc links, and the intentionally red `post_aha_adversarial_closeout_invariants` target. | Later rows turn the red gates green. |
-| PAC-1 | Mac generated-project CI policy | 10 | pending | CI/project generation | Pending. | Remove Mac `TronMac.xcodeproj` diff checks and verify generation plus build/test from `project.yml`. |
+| PAC-1 | Mac generated-project CI policy | 10 | passed_after_fix | CI/project generation | Mac workflows now generate `TronMac.xcodeproj`, verify it is ignored, and build/test/archive from that generated project; iOS workflows keep tracked `TronMobile.xcodeproj` drift checks. The older AHA policy gate was revised to enforce this split policy instead of the superseded tracked-Mac rule. | Closed; focused Mac guard/source organization remains PAC-4/PAC-5. |
 | PAC-2 | README/AGENTS source-truth path repair | 12 | pending | docs/source truth | Pending. | Repair stale canonical paths and guard documented paths. |
 | PAC-3 | Runtime/docs parity and database inventory | 10 | pending | runtime/docs parity | Pending. | Remove stale `context` startup-domain claim and align database table inventory with booted runtime storage. |
 | PAC-4 | Mac launch-agent/process ownership | 12 | pending | Mac architecture | Pending. | Move `LiveLaunchAgentManager`, `Subprocess`, and live-manager tests to physical owners. |

@@ -200,8 +200,10 @@ jobs:
         working-directory: packages/mac-app
         run: xcodegen generate
 
-      - name: Verify generated Xcode project is committed
-        run: git diff --exit-code packages/mac-app/TronMac.xcodeproj
+      - name: Verify generated Xcode project stays ignored
+        run: |
+          test -d packages/mac-app/TronMac.xcodeproj
+          git check-ignore -q packages/mac-app/TronMac.xcodeproj
 
       # ── Code signing setup ─────────────────────────────────────────
       #

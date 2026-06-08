@@ -20,7 +20,7 @@ known audit findings are covered by executable proof.
 | AHA-1 | passed_after_fix | Redacted historical `/Users/<USER>` equivalents in evidence, moved ordinary iOS fixtures to neutral `/tmp/tron-fixtures/...` paths, removed tracked personal feedback email/domain/handle literals, replaced repo/release fallbacks with generic placeholders, made iOS feedback recipient blank by default with local/CI override, and expanded `scripts/personal-info-guard.sh` to catch personal handle/domain split constructions. | `scripts/personal-info-guard.sh`, the AHA full-repo personal-info gate, the Cargo repository regression, release-notes self-test, XcodeGen drift check, and focused iOS `AppConstantsTests`/`SourceGuardTests` all passed. Direct grep for raw home paths, personal handle/domain literals, and split handle constructions outside allowlisted guard tests returned no hits. | Closed. | `fb655244c` |
 | AHA-2 | passed_after_fix | Rewrote PR template and CONTRIBUTING references to `AGENTS.md`, removed stale skill-copy wording from AGENTS, marked PCC/HRA README scorecard links completed instead of active, replaced a deleted-doc absence claim with current evidence/source-of-truth wording, and redacted historical helper-tree strings from PCC/AHA docs. | `cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants live_docs_templates_and_scorecards_have_no_deleted_doc_residue -- --nocapture` -> exit 0. Direct scan for the deleted-doc/template residue needles returned no hits. | Closed. | `ff5ed492d` |
 | AHA-3 | passed_after_fix | Added a separate Ubuntu `rust-static-gates` CI job for docs/templates/iOS/Mac/script/CI path changes, wired it to PET/PCC/HRA/AHA invariant targets, changed GitHub Rust CI to run `scripts/tron ci test`, and aligned Clippy help/docs with the Cargo lint-policy contract. | AHA workflow path/static gate, Rust harness-shape gate, and Clippy contract gate all passed after the workflow/docs update. | Closed; later phases may extend the AHA target with additional static gates. | `30862f603` |
-| AHA-4 | passed_after_fix | Added post-XcodeGen `git diff --exit-code` checks for tracked iOS/Mac projects in CI and release workflows, kept Mac `build-for-testing`, and added focused CI execution for `TronPathsTests`, `ServerStatusPollerTests`, and `TailscaleProbeTests`. | AHA Xcode drift and Mac wrapper CI gates both passed after the workflow update. | Closed; final closeout still reruns local XcodeGen drift checks and focused Mac tests. | `30862f603` |
+| AHA-4 | passed_after_fix | Added post-XcodeGen `git diff --exit-code` checks for tracked iOS projects in CI and release workflows, verified Mac generated projects stay ignored before build/test/archive, kept Mac `build-for-testing`, and added focused CI execution for `TronPathsTests`, `ServerStatusPollerTests`, and `TailscaleProbeTests`. | AHA Xcode policy and Mac wrapper CI gates both pass under the post-AHA policy. | Closed; final closeout still reruns iOS XcodeGen drift checks, Mac generation/build checks, and focused Mac tests. | `30862f603` |
 | AHA-5 | passed_after_fix | Removed production `#[path]` aliases and module-inception residue by moving provider shared helpers under `providers::shared`, moving settings loader ownership under `profile::storage::loader`, converting OpenAI provider tests to a normal `provider/tests.rs` module, removing the foundation error-test path alias, and renaming the nested orchestrator coordinator module to `core`. | `cargo check --manifest-path packages/agent/Cargo.toml --all-targets`, the AHA production path/module-inception gate, and the provider/settings physical-owner gate passed. | Closed; no compatibility reexports or old internal import paths remain for the moved ownership surfaces. | `ebd37a6b7` |
 | AHA-6 | passed_after_fix | Added progressive docs for the AHA-5 ownership roots, added explicit 850 LOC watch rows for all current Rust files at or above the warning band, replaced stale HRA temporary-budget wording with the current hard-limit/watch-band contract, and refreshed HRA/PCC machine-readable inventories for the moved Rust ownership paths. | The AHA near-budget row gate, progressive-doc ownership-root gate, HRA inventory coverage gate, and PCC inventory coverage gate passed. | Closed; the 900 LOC HRA hard limit remains enforced separately. | `ebd37a6b7` |
 | AHA-7 | passed_after_fix | Deleted `MiscClient`, added concrete `SystemClient`, `MessageClient`, and `LogsClient`, changed `EngineClientProtocol` and call sites from `misc` to `system`/`message`/`logs`, removed stale Git workflow error/comment residue, and renamed the chat `Sub-Managers` marker to coordinator terminology. | AHA misc-facade and iOS transport residue gates passed after the client split. Focused iOS client tests cover system ping, message delete context, and log recent/ingest behavior. | Closed; no compatibility `misc` facade remains. | `b3c0e96bb` |
@@ -55,8 +55,8 @@ Red findings covered by executable gates:
   iOS, and Mac path changes before AHA-3.
 - `github_rust_ci_matches_tron_ci_test_harness_shape`: GitHub Rust CI does not
   yet match the `scripts/tron ci test` harness shape before AHA-3.
-- `xcodegen_workflows_fail_on_tracked_project_drift`: workflows do not yet fail
-  on tracked Xcode project drift after XcodeGen before AHA-4.
+- `xcodegen_workflows_match_ios_tracked_and_mac_untracked_policy`: workflows do
+  not yet enforce tracked iOS drift plus ignored Mac generation before AHA-4.
 - `mac_ci_runs_focused_wrapper_tests`: GitHub CI does not yet run the focused
   Mac wrapper path/status/Tailscale suites before AHA-4.
 - `rust_production_modules_have_no_path_aliases_or_module_inception`: production
@@ -217,7 +217,7 @@ Xcode project drift and Mac wrapper CI cleanup:
 Proof:
 
 ```bash
-cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants xcodegen_workflows_fail_on_tracked_project_drift -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants xcodegen_workflows_match_ios_tracked_and_mac_untracked_policy -- --nocapture
 ```
 
 Result: exit 0, 1 passed.
@@ -424,7 +424,8 @@ Final adversarial closeout:
 - Full personal-info guard passed after source-identity cleanup removed plain
   developer-username residue from product source and expanded the guard to ban
   the plain username outside regression-guard files.
-- iOS and Mac XcodeGen runs produced no tracked project drift.
+- iOS XcodeGen produced no tracked project drift; Mac XcodeGen produced an
+  ignored generated project and build/test proof.
 - Focused iOS SourceGuard/client/diagnostics/protocol tests passed 58 Swift
   Testing tests; focused Mac path/status/Tailscale tests passed.
 - A fresh adversarial subagent audit reported closeout blockers. This checkpoint
@@ -472,7 +473,8 @@ Result: exit 0.
 
 ```bash
 cd packages/mac-app && xcodegen generate
-git diff --exit-code packages/mac-app/TronMac.xcodeproj
+test -d packages/mac-app/TronMac.xcodeproj
+git check-ignore -q packages/mac-app/TronMac.xcodeproj
 ```
 
 Result: exit 0.

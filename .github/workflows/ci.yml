@@ -297,9 +297,11 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
-      - name: Verify generated Xcode project is committed
+      - name: Verify generated Xcode project stays ignored
         working-directory: ${{ github.workspace }}
-        run: git diff --exit-code packages/mac-app/TronMac.xcodeproj
+        run: |
+          test -d packages/mac-app/TronMac.xcodeproj
+          git check-ignore -q packages/mac-app/TronMac.xcodeproj
 
       # Build the TronMac scheme in Debug and compile its unit-test bundle;
       # ad-hoc signing (CODE_SIGN_IDENTITY="-") keeps this portable to any
