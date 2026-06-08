@@ -974,7 +974,7 @@ packages/mac-app/Sources/
 +-- Support/
 |   +-- Diagnostics/           Redaction for diagnostics and logs
 |   +-- Feedback/              GitHub issue composer
-|   +-- Foundation/            Shared display helpers
+|   +-- Foundation/            Shared foundation helpers, subprocess, and display formatting
 |   +-- Onboarding/            Wizard models, probes, install planning
 |   +-- Pairing/               Pairing URL, QR, local computer-name helpers
 |   +-- Theme/                 Colors, font loading, typography

@@ -49,6 +49,7 @@ packages/mac-app/
 │   │   ├── Feedback/
 │   │   │   └── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
 │   │   ├── Foundation/
+│   │   │   ├── Subprocess.swift
 │   │   │   └── VersionDisplay.swift
 │   │   ├── Onboarding/
 │   │   │   ├── ExistingInstallDetector.swift
@@ -113,7 +114,7 @@ second production policy owner.
 
 ### Protocol-bounded subprocess surface
 
-`LaunchAgentManaging` is the only launch-control interface — register/unregister/restart/isLoaded. `LiveLaunchAgentManager` uses `SMAppService` for registration and unregistration, and uses `launchctl print/kickstart` only for diagnostics/restart. Everything else (permission probes, Tailscale checks, logs) is internal to the wrapper or server engine protocol.
+`LaunchAgentManaging` is the only launch-control interface — register/unregister/restart/isLoaded. `LiveLaunchAgentManager` lives under `Server/LaunchAgent`, uses `SMAppService` for registration and unregistration, and uses `launchctl print/kickstart` only for diagnostics/restart. The shared async `Subprocess` runner lives under `Support/Foundation` so health probing, launch-agent diagnostics, and process-control callers do not make `Server/Health` a second ownership bucket. Everything else (permission probes, Tailscale checks, logs) is internal to the wrapper or server engine protocol.
 
 ### Wizard visual system
 
