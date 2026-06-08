@@ -13,9 +13,9 @@ cd packages/agent && cargo check && cargo test -- --quiet          # baseline
 ```
 
 Open a PR against `main`. CI always runs the personal-info/version guards, runs
-Rust-owned static gates for docs/template/iOS/Mac surfaces, and runs the full
-Rust, iOS, or Mac jobs when their source paths or labels apply. Fill out the PR
-template — the checklist exists because `README.md` and the in-tree
+the Rust closeout target set for docs/template/iOS/Mac surfaces, and runs the
+full Rust, iOS, or Mac jobs when their source paths or labels apply. Fill out
+the PR template — the checklist exists because `README.md` and the in-tree
 progressive-disclosure docs drift fast.
 
 ## Project layout
@@ -115,10 +115,11 @@ work test-first whenever practical — write the failing test, then make it pass
 | All-in-one (workspace only) | `scripts/tron ci` |
 
 CI runs the same Rust test harness through `scripts/tron ci test` when the Rust
-job is selected. A separate Ubuntu static-gates job runs the PET/PCC/HRA/AHA
-invariant targets for docs/template/iOS/Mac changes. iOS and Mac jobs only run
-for their package paths, relevant labels, or pushes to `main` (macOS minutes
-are ~10× the cost of Linux minutes).
+job is selected. A separate Ubuntu static-gates job runs the same named
+closeout targets, including PET/PCC/HRA/AHA/PAC invariants, primitive trace,
+database-path, and serial integration targets, for docs/template/iOS/Mac
+changes. iOS and Mac jobs only run for their package paths, relevant labels, or
+pushes to `main` (macOS minutes are ~10× the cost of Linux minutes).
 
 ## Commits
 

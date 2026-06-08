@@ -1,19 +1,46 @@
 #!/bin/bash
 # quality.sh - sourced by tron; do not execute directly.
 
+run_named_test_target() {
+    local target="$1"
+
+    case "$target" in
+        integration)
+            cargo test --test integration -- --test-threads=1 --quiet 2>&1
+            ;;
+        *)
+            cargo test --test "$target" -- --quiet 2>&1
+            ;;
+    esac
+}
+
+run_named_test_targets() {
+    local target
+
+    for target in "$@"; do
+        run_named_test_target "$target" || return 1
+    done
+}
+
 run_tests() {
     print_status "Running tests..."
-    # The WebSocket integration target shares process-global test server
-    # plumbing and must run serially. Keep unit/binary tests parallel for
-    # speed, then run each integration target with the harness shape it needs.
+    # Keep unit/binary tests parallel for speed, then run every closeout
+    # target explicitly. The WebSocket integration target shares
+    # process-global test server plumbing and must run serially.
+    local closeout_test_targets=(
+        db_path_guard
+        primitive_engine_teardown_plan_invariants
+        primitive_code_cleanup_invariants
+        hierarchical_rearchitecture_invariants
+        post_hra_adversarial_hardening_invariants
+        post_aha_adversarial_closeout_invariants
+        primitive_trace_execution
+        integration
+    )
+
     if (cd "$RUST_WORKSPACE" \
         && cargo test --workspace --lib --bins -- --quiet 2>&1 \
-        && cargo test --test db_path_guard -- --quiet 2>&1 \
-        && cargo test --test primitive_engine_teardown_plan_invariants -- --quiet 2>&1 \
-        && cargo test --test primitive_code_cleanup_invariants -- --quiet 2>&1 \
-        && cargo test --test hierarchical_rearchitecture_invariants -- --quiet 2>&1 \
-        && cargo test --test primitive_trace_execution -- --quiet 2>&1 \
-        && cargo test --test integration -- --test-threads=1 --quiet 2>&1); then
+        && run_named_test_targets "${closeout_test_targets[@]}"); then
         print_success "Tests passed"
         return 0
     else

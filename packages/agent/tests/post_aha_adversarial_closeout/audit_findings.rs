@@ -376,11 +376,19 @@ fn local_and_github_ci_run_the_same_static_closeout_targets() {
     ];
     let mut hits = Vec::new();
     for target in required_targets {
-        if !quality.contains(target) {
-            hits.push(format!("scripts/tron ci test missing `{target}`"));
+        if !quality.contains(&format!("\n        {target}\n")) {
+            hits.push(format!(
+                "scripts/tron ci test target array missing `{target}`"
+            ));
         }
-        if !ci.contains(target) {
-            hits.push(format!("GitHub CI missing `{target}`"));
+        let ci_command = match target {
+            "integration" => {
+                "cargo test --test integration -- --test-threads=1 --quiet".to_string()
+            }
+            _ => format!("cargo test --test {target} -- --quiet"),
+        };
+        if !ci.contains(&ci_command) {
+            hits.push(format!("GitHub CI missing command `{ci_command}`"));
         }
     }
     assert_no_hits(

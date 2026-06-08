@@ -377,7 +377,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | Command | Description |
 |---------|-------------|
 | `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`, defaults dev logging to `RUST_LOG=info,ort=error` unless the caller already set `RUST_LOG`, waits up to 30 seconds for `/health` in background mode by default, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
-| `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc` |
+| `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step runs lib/bin tests, closeout invariant targets, primitive trace, database-path, and serial integration targets |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
 | `tron setup` | First-time project setup |
@@ -1189,6 +1189,11 @@ tron ci                      # Run every check (fmt, check, clippy, test, bench,
 tron ci fmt check            # Subset: formatting + compilation
 tron ci clippy test          # Subset: linting + tests
 ```
+
+`tron ci test` runs Rust lib/bin tests first, then the named closeout targets
+(`db_path_guard`, PET/PCC/HRA/AHA/PAC invariants, `primitive_trace_execution`,
+and serial `integration`). GitHub's Rust static-gates job runs the same named
+target set for docs, template, iOS, Mac, script, and CI changes.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

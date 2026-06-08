@@ -3,8 +3,8 @@
 # Six workloads, two cost tiers:
 #   - personal-info-guard: ubuntu, ~30s, runs every PR + push (always).
 #   - version-drift:       ubuntu, ~10s, validates VERSION.env mirrors.
-#   - rust-static-gates:   ubuntu (1x), runs Rust-owned documentation and
-#                          architecture invariant targets for docs/templates,
+#   - rust-static-gates:   ubuntu (1x), runs the same named closeout target
+#                          set as `scripts/tron ci test` for docs/templates,
 #                          iOS, Mac, agent, script, and CI changes.
 #   - rust:                ubuntu (1x), runs when packages/agent/** changes,
 #                          on every push to main, or when labeled `rust`.
@@ -131,12 +131,16 @@ jobs:
         with:
           cache-workspaces: packages/agent
 
-      - name: Run Rust-owned documentation and architecture gates
+      - name: Run Rust-owned closeout target set
         run: |
+          cargo test --test db_path_guard -- --quiet
           cargo test --test primitive_engine_teardown_plan_invariants -- --quiet
           cargo test --test primitive_code_cleanup_invariants -- --quiet
           cargo test --test hierarchical_rearchitecture_invariants -- --quiet
           cargo test --test post_hra_adversarial_hardening_invariants -- --quiet
+          cargo test --test post_aha_adversarial_closeout_invariants -- --quiet
+          cargo test --test primitive_trace_execution -- --quiet
+          cargo test --test integration -- --test-threads=1 --quiet
 
   rust:
     name: Rust (fmt + clippy + test)
@@ -187,8 +191,7 @@ jobs:
         run: cargo check
 
       # Match the local `scripts/tron ci test` harness exactly, including
-      # serial integration execution for `--test integration` and the
-      # `--test primitive_trace_execution` target.
+      # serial integration execution for `--test integration`.
       - name: scripts/tron ci test
         working-directory: ${{ github.workspace }}
         run: scripts/tron ci test

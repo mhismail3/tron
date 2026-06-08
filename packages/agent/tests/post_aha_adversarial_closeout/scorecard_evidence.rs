@@ -8,7 +8,7 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
 
     for required in [
         "# Post-AHA Adversarial Closeout Scorecard",
-        "Current score: **79/100**",
+        "Current score: **87/100**",
         "Status: **active**",
         "Total weight: **100**",
         "PAC-0 | Scorecard, evidence, README, and red-gate setup | 6 | passed_after_fix",
@@ -19,7 +19,7 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
         "PAC-5 | Mac guard parity | 10 | passed_after_fix",
         "PAC-6 | iOS hierarchy and mirrored tests | 9 | passed_after_fix",
         "PAC-7 | Rust docs and LOC split budgets | 10 | passed_after_fix",
-        "PAC-8 | Local/GitHub CI parity | 8 | pending",
+        "PAC-8 | Local/GitHub CI parity | 8 | passed_after_fix",
         "PAC-9 | Provenance, privacy, and residue policy | 7 | pending",
         "PAC-10 | Final closeout verification | 6 | pending",
         "mac_generated_project_policy_is_truthful",
@@ -56,7 +56,7 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
 
     for required in [
         "# Post-AHA Adversarial Closeout Evidence Manifest",
-        "Current score: **79/100**",
+        "Current score: **87/100**",
         "Status: **active**",
         "| PAC-0 | passed_after_fix |",
         "| PAC-1 | passed_after_fix |",
@@ -66,8 +66,10 @@ fn post_aha_adversarial_closeout_scorecard_stays_formalized() {
         "| PAC-5 | passed_after_fix |",
         "| PAC-6 | passed_after_fix |",
         "| PAC-7 | passed_after_fix |",
+        "| PAC-8 | passed_after_fix |",
         "| PAC-10 | pending |",
         "## PAC-0 Red Proof",
+        "## PAC-8 Verification",
         "## Residual Risk Log",
     ] {
         assert!(
