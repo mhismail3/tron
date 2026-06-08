@@ -33,7 +33,7 @@ All commands were run from `/Users/<USER>/Downloads/projects/tron` on
 | iOS top-level roots | `find packages/ios-app/Sources -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
 | iOS primitive owner roots | `find packages/ios-app/Sources/{Engine,Session,Support,UI} -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
 | Settings type roots | `find packages/agent/src/domains/settings/profile/types -type f -name '*.rs' -maxdepth 1 -print \| sort` | 0 |
-| Settings UI parity | `rg -n "SettingsPage\|SettingsState\|ServerSettings" packages/ios-app/Sources/UI/Views/Settings packages/ios-app/Sources/Session/ViewModels/State/SettingsState.swift packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift` | 0 |
+| Settings UI parity | `rg -n "SettingsPage\|SettingsState\|ServerSettings" packages/ios-app/Sources/UI/Views/Settings packages/ios-app/Sources/Session/Chat/State/SettingsState.swift packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift` | 0 |
 
 The covering gate was added first and failed red before this file existed:
 `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture`

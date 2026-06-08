@@ -559,15 +559,15 @@ struct SourceGuardTests {
             "Sources/Engine/Events/Payloads/CapabilityInvocationPayloads.swift",
             "Sources/Engine/Events/Plugins/CapabilityInvocation",
             "Sources/Engine/Persistence/SQLite/SessionEvent+Summary.swift",
-            "Sources/Session/Activity/ActivityLine.swift",
-            "Sources/Session/Activity/CapabilityActivityPresentation.swift",
-            "Sources/Session/Activity/ServerActivityLine.swift",
+            "Sources/Session/Timeline/Activity/ActivityLine.swift",
+            "Sources/Session/Timeline/Activity/CapabilityActivityPresentation.swift",
+            "Sources/Session/Timeline/Activity/ServerActivityLine.swift",
             "Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
             "Sources/Engine/Protocol/Capability/EngineProtocolTypes+Capability.swift",
-            "Sources/Session/Messages",
-            "Sources/Session/ViewModels/Chat/ChatViewModel+Reconstruction.swift",
-            "Sources/Session/ViewModels/Handlers/CapabilityInvocationCoordinator.swift",
-            "Sources/Session/ViewModels/Managers/SessionActivityStreamManager.swift",
+            "Sources/Session/Timeline/Messages",
+            "Sources/Session/Chat/ViewModel/ChatViewModel+Reconstruction.swift",
+            "Sources/Session/Chat/Coordinators/CapabilityInvocationCoordinator.swift",
+            "Sources/Session/Timeline/Activity/SessionActivityStreamManager.swift",
             "Sources/UI/Views/Capabilities",
             "Tests/Core/Events/Plugins",
             "Tests/Core/Events/UnifiedEventTransformerActionProjectionTests.swift",
@@ -1469,6 +1469,55 @@ struct SourceGuardTests {
         )
     }
 
+    @Test("iOS Session uses HRA target hierarchy")
+    func testIOSSessionUsesHRATargetHierarchy() throws {
+        let iosRoot = iosAppRoot()
+        let requiredRoots = [
+            "Sources/Session/Attachments",
+            "Sources/Session/Chat/ViewModel",
+            "Sources/Session/Chat/Coordinators",
+            "Sources/Session/Chat/Messaging",
+            "Sources/Session/Chat/Navigation",
+            "Sources/Session/Chat/State",
+            "Sources/Session/Parsing",
+            "Sources/Session/Timeline/Activity",
+            "Sources/Session/Timeline/Messages",
+            "Sources/Session/Timeline/Reconstruction",
+            "Sources/Session/Timeline/Tokens",
+        ]
+        let bannedRoots = [
+            "Sources/Session/Activity",
+            "Sources/Session/Features",
+            "Sources/Session/Messages",
+            "Sources/Session/Reconstruction",
+            "Sources/Session/Tokens",
+            "Sources/Session/ViewModels",
+        ]
+        let splitDisplayModelFiles = [
+            "Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel.swift",
+            "Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel+PresentationHelpers.swift",
+        ]
+
+        let missingRequired = requiredRoots
+            .filter { !directoryExists(iosRoot.appendingPathComponent($0)) }
+        let presentBanned = bannedRoots
+            .filter { directoryExists(iosRoot.appendingPathComponent($0)) }
+        let missingSplitFiles = splitDisplayModelFiles
+            .filter { !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
+        let oversizedSplitFiles = try splitDisplayModelFiles.compactMap { relativePath -> String? in
+            let lineCount = try sourceLineCount(iosRoot.appendingPathComponent(relativePath))
+            return lineCount > 700 ? "\(relativePath) has \(lineCount) LOC" : nil
+        }
+
+        #expect(
+            missingRequired.isEmpty
+                && presentBanned.isEmpty
+                && missingSplitFiles.isEmpty
+                && oversizedSplitFiles.isEmpty,
+            "HRA-10 Session hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingSplitFiles); oversized split files: \(oversizedSplitFiles)"
+        )
+    }
+
     @Test("iOS tests mirror HRA source boundaries")
     func testIOSTestsMirrorHRASourceBoundaries() throws {
         let iosRoot = iosAppRoot()
@@ -1534,7 +1583,7 @@ struct SourceGuardTests {
             "Sources/Engine/Transport/Clients/AgentClientProtocol.swift",
             "Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
             "Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift",
-            "Sources/Session/ViewModels/Chat/ChatViewModel+Messaging.swift",
+            "Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift",
             "Tests/Services/AgentClientTests.swift",
             "Tests/Repositories/DefaultAgentRepositoryTests.swift",
             "Tests/Models/EngineProtocolTypesTests.swift",
@@ -1665,6 +1714,12 @@ struct SourceGuardTests {
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
             && isDirectory.boolValue
+    }
+
+    private func sourceLineCount(_ url: URL) throws -> Int {
+        try String(contentsOf: url, encoding: .utf8)
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .count
     }
 
     private func swiftFiles(in root: URL) throws -> [URL] {

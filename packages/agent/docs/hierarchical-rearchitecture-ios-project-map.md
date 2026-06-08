@@ -9,8 +9,9 @@ Plan source: `/Users/<USER>/Downloads/TRON_REARCHITECTURE_PLAN.md`.
 ## Scope
 
 HRA-8 was the red-gate and map checkpoint for the iOS hierarchy campaign. HRA-9
-has since consumed the Engine rows. This artifact records the target path for
-every live Swift file under `packages/ios-app/Sources` and
+has since consumed the Engine rows, and HRA-10 has consumed the Session rows.
+This artifact records the target path for every live Swift file under
+`packages/ios-app/Sources` and
 `packages/ios-app/Tests`, the SourceGuard tests that fail until the remaining
 source/test buckets move, and the XcodeGen target-membership model that later
 move phases must preserve.
@@ -19,11 +20,11 @@ Machine-readable map:
 
 - `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`
 
-Coverage after HRA-9:
+Coverage after HRA-10:
 
-- `packages/ios-app/Sources`: 358 Swift files
+- `packages/ios-app/Sources`: 359 Swift files
 - `packages/ios-app/Tests`: 192 Swift files
-- Total mapped Swift source/test files: 550
+- Total mapped Swift source/test files: 551
 
 ## Target Phase Ownership
 
@@ -38,7 +39,7 @@ Coverage after HRA-9:
 ## SourceGuard Red Gates
 
 `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` now contains HRA
-hierarchy checks that intentionally fail until HRA-9 through HRA-13 complete:
+hierarchy checks that intentionally fail until HRA-11 through HRA-13 complete:
 
 - `testIOSSourcesUseHRAFeatureOwnedHierarchy`
 - `testIOSTestsMirrorHRASourceBoundaries`
@@ -63,7 +64,8 @@ extension target still compiles.
 
 - HRA-9 consumed the map rows whose target phase is `HRA-9`; those rows now
   live under the target Engine owners and are marked `passed_after_fix`.
-- HRA-10 must consume the map rows whose target phase is `HRA-10`.
+- HRA-10 consumed the map rows whose target phase is `HRA-10`; those rows now
+  live under the target Session owners and are marked `passed_after_fix`.
 - HRA-11 must consume the map rows whose target phase is `HRA-11`.
 - HRA-12 must consume the map rows whose target phase is `HRA-12`.
 - HRA-13 must consume the map rows whose target phase is `HRA-13`, decompose

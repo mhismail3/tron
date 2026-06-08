@@ -779,71 +779,72 @@ packages/ios-app/Sources/Resources/IconLayers/background-white.png	asset	ios app
 packages/ios-app/Sources/Resources/IconLayers/foreground-amber.png	asset	ios app	PCC-6/PCC-7/PCC-9	Tracked asset/generated boundary retained after HRA-2 path update
 packages/ios-app/Sources/Resources/IconLayers/foreground-emerald.png	asset	ios app	PCC-6/PCC-7/PCC-9	Tracked asset/generated boundary retained after HRA-2 path update
 packages/ios-app/Sources/Resources/IconLayers/foreground-gray.png	asset	ios app	PCC-6/PCC-7/PCC-9	Tracked asset/generated boundary retained after HRA-2 path update
-packages/ios-app/Sources/Session/Activity/ActivityLine.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Activity/CapabilityActivityPresentation.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Activity/ServerActivityLine.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Activity/SessionActivityEvent.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Features/Attachment.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Features/AttachmentCapability.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Features/DraftMetadata.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Features/ThinkingBlock.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/CapabilityInvocationActionRows.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/CapabilityInvocationDisplayModel.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/CapabilityInvocationProgressModel.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/CapabilityInvocationTypes.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/CapabilityPresentation.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/ChatMessage.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/ImageContent.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/MessageBubbleTapAction.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/MessageContent.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/MessageExtensions.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/MessageRole.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Messages/SystemEvent.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Parsing/CapabilityArgumentParser.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Reconstruction/UnifiedEventTransformer.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Tokens/TokenRecord.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/Tokens/TokenStateManager.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+CapabilityInvocationContext.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+Connection.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+DeepLinks.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+DisplayStream.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+EventDispatchContext.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+Events.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+Messaging.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+Pagination.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+Reconstruction.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+TurnLifecycleContext.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/CapabilityInvocationContext.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/CapabilityInvocationCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/CompactionCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/ConnectionCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/ContentViewCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/EventDispatchContext.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/EventDispatchCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/MessagingCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/SheetCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/TurnLifecycleContext.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Handlers/TurnLifecycleCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Managers/AnimationCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Managers/ScrollStateCoordinator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Managers/SessionActivityStreamManager.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Managers/StreamingManager.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Managers/UIUpdateQueue.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/ChatSheet.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/ContextTrackingState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/DisplayStreamState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/InputBarState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/ModelPickerState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/OnboardingSetupSnapshot.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/OnboardingState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/SettingsState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/SheetReadOnlyPolicy.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/StreamingRecoverySnapshot.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/ThinkingDetailState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/State/ThinkingState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Utilities/MessageFinder.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Session/ViewModels/Utilities/MessageIndex.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
+packages/ios-app/Sources/Session/Attachments/Attachment.swift	retain	iOS session attachments	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Attachments/AttachmentCapability.swift	retain	iOS session attachments	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/CapabilityInvocationContext.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/CapabilityInvocationCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/CompactionCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/ConnectionCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/ContentViewCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/EventDispatchContext.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/EventDispatchCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/MessagingCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/SheetCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/TurnLifecycleContext.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/TurnLifecycleCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Coordinators/UIUpdateQueue.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Messaging/DraftMetadata.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Messaging/StreamingManager.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Navigation/AnimationCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Navigation/MessageFinder.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Navigation/MessageIndex.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/Navigation/ScrollStateCoordinator.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/ChatSheet.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/ContextTrackingState.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/DisplayStreamState.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/InputBarState.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/ModelPickerState.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/OnboardingSetupSnapshot.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/OnboardingState.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/SettingsState.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/SheetReadOnlyPolicy.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/StreamingRecoverySnapshot.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/ThinkingDetailState.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/State/ThinkingState.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+CapabilityInvocationContext.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Connection.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+DeepLinks.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+DisplayStream.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+EventDispatchContext.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Events.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Pagination.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Reconstruction.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+TurnLifecycleContext.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel.swift	retain	iOS session chat	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Parsing/CapabilityArgumentParser.swift	retain	iOS session parsing	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Activity/ActivityLine.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Activity/CapabilityActivityPresentation.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Activity/ServerActivityLine.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Activity/SessionActivityEvent.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Activity/SessionActivityStreamManager.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Activity/ThinkingBlock.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationActionRows.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel+PresentationHelpers.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked file retained after HRA-10 display model split
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationProgressModel.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationTypes.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityPresentation.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/ChatMessage.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/ImageContent.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/MessageBubbleTapAction.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/MessageContent.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/MessageExtensions.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/MessageRole.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Messages/SystemEvent.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Reconstruction/UnifiedEventTransformer.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Tokens/TokenRecord.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
+packages/ios-app/Sources/Session/Timeline/Tokens/TokenStateManager.swift	retain	iOS session timeline	PCC-6/HRA-10	Current tracked Session file retained after HRA-10 path update
 packages/ios-app/Sources/Support/AppConstants.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
 packages/ios-app/Sources/Support/Concurrency/AsyncSemaphore.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
 packages/ios-app/Sources/Support/DependencyInjection/AppInitializer.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update

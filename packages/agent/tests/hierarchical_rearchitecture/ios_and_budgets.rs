@@ -145,10 +145,10 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
             allowed_classifications.contains(*classification),
             "{IOS_MOVE_MAP_PATH} row has invalid classification `{classification}`: {line}"
         );
-        if *phase == "HRA-9" {
+        if *phase == "HRA-9" || *phase == "HRA-10" {
             assert_eq!(
                 *status, "passed_after_fix",
-                "{IOS_MOVE_MAP_PATH} HRA-9 rows should be complete after the Engine hierarchy move: {line}"
+                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10 rows should be complete after the Engine and Session hierarchy moves: {line}"
             );
         } else {
             assert_eq!(
@@ -270,6 +270,67 @@ fn ios_engine_hra9_sources_use_target_boundaries() {
             && missing_connection_files.is_empty()
             && oversized_connection_files.is_empty(),
         "HRA-9 Engine hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_connection_files:#?}; oversized split files: {oversized_connection_files:#?}"
+    );
+}
+
+#[test]
+fn ios_session_hra10_sources_use_target_boundaries() {
+    let required_roots = [
+        "packages/ios-app/Sources/Session/Attachments",
+        "packages/ios-app/Sources/Session/Chat/ViewModel",
+        "packages/ios-app/Sources/Session/Chat/Coordinators",
+        "packages/ios-app/Sources/Session/Chat/Messaging",
+        "packages/ios-app/Sources/Session/Chat/Navigation",
+        "packages/ios-app/Sources/Session/Chat/State",
+        "packages/ios-app/Sources/Session/Parsing",
+        "packages/ios-app/Sources/Session/Timeline/Activity",
+        "packages/ios-app/Sources/Session/Timeline/Messages",
+        "packages/ios-app/Sources/Session/Timeline/Reconstruction",
+        "packages/ios-app/Sources/Session/Timeline/Tokens",
+    ];
+    let banned_roots = [
+        "packages/ios-app/Sources/Session/Activity",
+        "packages/ios-app/Sources/Session/Features",
+        "packages/ios-app/Sources/Session/Messages",
+        "packages/ios-app/Sources/Session/Reconstruction",
+        "packages/ios-app/Sources/Session/Tokens",
+        "packages/ios-app/Sources/Session/ViewModels",
+    ];
+    let split_display_model_files = [
+        "packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel.swift",
+        "packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel+PresentationHelpers.swift",
+    ];
+
+    let missing_required: Vec<_> = required_roots
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_dir())
+        .collect();
+    let present_banned: Vec<_> = banned_roots
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+    let missing_split_files: Vec<_> = split_display_model_files
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_file())
+        .collect();
+    let oversized_split_files: Vec<_> = split_display_model_files
+        .iter()
+        .copied()
+        .filter_map(|path| {
+            let lines = source_line_count(&repo_path(path));
+            (lines > 700).then(|| format!("{path} has {lines} LOC"))
+        })
+        .collect();
+
+    assert!(
+        missing_required.is_empty()
+            && present_banned.is_empty()
+            && missing_split_files.is_empty()
+            && oversized_split_files.is_empty(),
+        "HRA-10 Session hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_split_files:#?}; oversized split files: {oversized_split_files:#?}"
     );
 }
 

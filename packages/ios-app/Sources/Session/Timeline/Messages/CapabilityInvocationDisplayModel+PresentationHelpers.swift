@@ -1,320 +1,7 @@
 import Foundation
 
-struct CapabilityDisplayRow: Equatable, Identifiable {
-    let label: String
-    let value: String
-    var isTechnical: Bool = false
-
-    var id: String { "\(label)|\(value)" }
-}
-
-struct CapabilityDisplayGroup: Equatable, Identifiable {
-    let title: String
-    let rows: [CapabilityDisplayRow]
-
-    var id: String { title }
-}
-
-struct CapabilityInvocationDisplayModel: Equatable {
-    let primitiveTitle: String
-    let sheetTitle: String
-    let chipTitle: String
-    let capabilityName: String
-    let commandText: String
-    let summaryText: String
-    let statusText: String
-    let statusWithDuration: String
-    let targetId: String?
-    let payloadSummary: String?
-    let actionRows: [CapabilityDisplayRow]
-    let progressSteps: [CapabilityProgressStep]
-    let requestRows: [CapabilityDisplayRow]
-    let executionGroups: [CapabilityDisplayGroup]
-    let resultRows: [CapabilityDisplayRow]
-    let resultPreview: String?
-    let technicalRows: [CapabilityDisplayRow]
-    let prettyArguments: String?
-    let prettyResult: String?
-
-    init(data: CapabilityInvocationData) {
-        let argumentObject = Self.argumentObject(from: data)
-        let primitive = CapabilityPresentation.primitiveName(for: data.identity)
-        let target = Self.targetId(for: primitive, identity: data.identity, arguments: argumentObject)
-        let targetArguments = Self.targetArguments(from: argumentObject)
-        let payloadSummary = Self.payloadSummary(target: target, from: targetArguments ?? argumentObject)
-        let capabilityName = CapabilityPresentation.title(for: data.identity, targetId: target)
-        let query = Self.firstString(["query", "q", "searchQuery"], in: argumentObject)
-            ?? Self.firstString(["query"], in: data.details?.rawValues ?? [:])
-        let details = data.details?.rawValues ?? [:]
-        let outputObject = Self.outputObject(from: data)
-
-        self.primitiveTitle = Self.primitiveTitle(primitive)
-        self.chipTitle = Self.chipTitle(
-            primitive: primitive,
-            capabilityName: capabilityName,
-            identity: data.identity
-        )
-        self.sheetTitle = Self.sheetTitle(
-            primitive: primitive,
-            chipTitle: self.chipTitle,
-            capabilityName: capabilityName,
-            target: target
-        )
-        self.capabilityName = capabilityName
-        self.targetId = target
-        self.payloadSummary = payloadSummary
-        self.statusText = Self.statusText(data.status, identity: data.identity)
-        self.statusWithDuration = [self.statusText, data.formattedDuration]
-            .compactMap { $0?.nilIfEmpty }
-            .joined(separator: " · ")
-        self.commandText = Self.commandText(
-            primitive: primitive,
-            query: query,
-            target: target,
-            payloadSummary: payloadSummary,
-            capabilityName: capabilityName,
-            identity: data.identity
-        )
-        self.summaryText = Self.summaryText(
-            primitive: primitive,
-            target: target,
-            identity: data.identity,
-            capabilityName: capabilityName,
-            payloadSummary: payloadSummary
-        )
-        self.progressSteps = Self.progressSteps(
-            primitive: primitive,
-            data: data,
-            target: target,
-            capabilityName: capabilityName,
-            payloadSummary: payloadSummary,
-            details: details
-        )
-        self.requestRows = Self.requestRows(
-            primitive: primitive,
-            query: query,
-            target: target,
-            capabilityName: capabilityName,
-            payloadSummary: payloadSummary,
-            arguments: argumentObject
-        )
-        self.executionGroups = Self.executionGroups(
-            primitive: primitive,
-            data: data,
-            details: details,
-            arguments: argumentObject,
-            output: outputObject
-        )
-        let resultRows = Self.resultRows(
-            data: data,
-            details: details,
-            output: outputObject
-        )
-        let resultPreview = Self.resultPreview(
-            primitive: primitive,
-            result: data.result,
-            output: outputObject
-        )
-        self.actionRows = Self.actionRows(
-            data: data,
-            arguments: argumentObject,
-            target: target,
-            capabilityName: capabilityName,
-            statusText: self.statusWithDuration,
-            resultPreview: resultPreview
-        )
-        self.resultRows = resultRows
-        self.resultPreview = resultPreview
-        self.technicalRows = Self.technicalRows(data: data)
-        self.prettyArguments = Self.prettyJSONString(data.arguments) ?? data.arguments.nilIfEmpty
-        self.prettyResult = data.result.flatMap(Self.prettyJSONString) ?? data.result?.nilIfEmpty
-    }
-
-    private static func primitiveTitle(_ primitive: String) -> String {
-        primitive == "execute" ? "Action" : CapabilityPresentation.humanizeCapabilityId(primitive)
-    }
-
-    private static func chipTitle(
-        primitive: String,
-        capabilityName: String,
-        identity: CapabilityIdentity
-    ) -> String {
-        if let chipTitle = CapabilityPresentation.presentationString("chipTitle", for: identity) {
-            return chipTitle
-        }
-        return capabilityName.nilIfEmpty ?? primitiveTitle(primitive)
-    }
-
-    private static func sheetTitle(
-        primitive: String,
-        chipTitle: String,
-        capabilityName: String,
-        target: String?
-    ) -> String {
-        chipTitle.nilIfEmpty ?? capabilityName.nilIfEmpty ?? primitiveTitle(primitive)
-    }
-
-    private static func statusText(
-        _ status: CapabilityInvocationStatus,
-        identity: CapabilityIdentity
-    ) -> String {
-        if let label = presentationString(statusHintKeys(for: status), for: identity) {
-            return label
-        }
-        switch status {
-        case .generating: return "Preparing"
-        case .running: return "Running"
-        case .paused: return "Paused"
-        case .success: return "Completed"
-        case .error: return "Failed"
-        case .unavailable: return "Unavailable"
-        }
-    }
-
-    private static func statusHintKeys(for status: CapabilityInvocationStatus) -> [String] {
-        switch status {
-        case .generating:
-            return ["generatingLabel", "progressLabel", "statusLabel"]
-        case .running:
-            return ["runningLabel", "progressLabel", "statusLabel"]
-        case .paused:
-            return ["pausedLabel", "statusLabel"]
-        case .success:
-            return ["successLabel", "statusLabel"]
-        case .error:
-            return ["failureLabel", "errorLabel", "statusLabel"]
-        case .unavailable:
-            return ["unavailableLabel", "statusLabel"]
-        }
-    }
-
-    private static func commandText(
-        primitive: String,
-        query: String?,
-        target: String?,
-        payloadSummary: String?,
-        capabilityName: String,
-        identity: CapabilityIdentity
-    ) -> String {
-        if let summary = presentationString(["summary", "subtitle", "commandText"], for: identity) {
-            return summary.truncated(to: 140)
-        }
-        if let payloadSummary {
-            return payloadSummary.truncated(to: 140)
-        }
-        if let query = query?.nilIfEmpty {
-            return query.truncated(to: 96)
-        }
-        if let target, target != capabilityName {
-            return CapabilityPresentation.humanizeCapabilityId(target).truncated(to: 120)
-        }
-        if let operation = identity.operationName?.nilIfEmpty {
-            return CapabilityPresentation.humanizeCapabilityId(operation).truncated(to: 120)
-        }
-        return "Invocation"
-    }
-
-    private static func summaryText(
-        primitive: String,
-        target: String?,
-        identity: CapabilityIdentity,
-        capabilityName: String,
-        payloadSummary: String?
-    ) -> String {
-        if let summary = presentationString(["summary", "subtitle"], for: identity) {
-            return summary.truncated(to: 160)
-        }
-
-        var parts = [payloadSummary ?? capabilityName]
-        if let target = target?.nilIfEmpty {
-            parts.append(CapabilityPresentation.humanizeCapabilityId(target))
-        }
-        return parts.joined(separator: " · ").truncated(to: 160)
-    }
-
-    static func presentationString(_ keys: [String], for identity: CapabilityIdentity) -> String? {
-        for key in keys {
-            if let value = CapabilityPresentation.presentationString(key, for: identity) {
-                return value
-            }
-        }
-        return nil
-    }
-
-    private static func targetId(
-        for primitive: String,
-        identity: CapabilityIdentity,
-        arguments: [String: Any]
-    ) -> String? {
-        if let target = targetHint(from: arguments)?.nilIfEmpty {
-            return target
-        }
-
-        let argumentTarget = firstString(["operationName", "operation", "action", "target", "name"], in: arguments)
-        if let argumentTarget = argumentTarget?.nilIfEmpty {
-            return argumentTarget
-        }
-
-        return identity.operationName?.nilIfEmpty
-    }
-
-    private static func targetHint(from object: [String: Any]) -> String? {
-        if let target = object["target"] as? String, let value = target.nilIfEmpty {
-            return value
-        }
-        if let target = object["target"] as? [String: Any] {
-            return firstString(["operationName", "operation", "action", "name"], in: target)
-        }
-        return nil
-    }
-
-    static func targetArguments(from object: [String: Any]) -> [String: Any]? {
-        if let arguments = object["arguments"] as? [String: Any] {
-            return arguments
-        }
-        if let payload = object["payload"] as? [String: Any] {
-            return payload
-        }
-        return nil
-    }
-
-    private static func payloadSummary(target: String?, from object: [String: Any]) -> String? {
-        if let command = firstString(["command", "cmd", "shellCommand"], in: object)?.nilIfEmpty {
-            return command.truncated(to: 96)
-        }
-        if let query = firstString(["query", "q", "searchQuery"], in: object)?.nilIfEmpty {
-            return query.truncated(to: 80)
-        }
-        if let pattern = firstString(["pattern", "glob", "name"], in: object)?.nilIfEmpty {
-            return pattern.truncated(to: 80)
-        }
-        if let url = firstString(["url", "apiUrl", "endpoint"], in: object)?.nilIfEmpty {
-            return url.truncated(to: 96)
-        }
-        if let path = firstString(["workspacePath", "path", "filePath", "cwd"], in: object)?.nilIfEmpty {
-            return compactPathLabel(path).truncated(to: 80)
-        }
-        if let code = firstString(["code"], in: object)?.nilIfEmpty {
-            let firstLine = code.lines.first?.trimmed.nilIfEmpty ?? "program"
-            return firstLine.truncated(to: 96)
-        }
-
-        let simplePairs = object
-            .filter { key, value in
-                !["payload"].contains(key)
-                    && !technicalSummaryKeys.contains(key)
-                    && Self.simpleDisplayValue(value) != nil
-            }
-            .sorted { $0.key < $1.key }
-            .prefix(2)
-            .compactMap { key, value in
-                simpleDisplayValue(value).map { "\(key)=\($0)" }
-            }
-        guard !simplePairs.isEmpty else { return nil }
-        return simplePairs.joined(separator: ", ").truncated(to: 96)
-    }
-
-    private static let technicalSummaryKeys: Set<String> = [
+extension CapabilityInvocationDisplayModel {
+    static let technicalSummaryKeys: Set<String> = [
         "afterRevision",
         "classes",
         "grantId",
@@ -332,7 +19,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         "workspaceId"
     ]
 
-    private static func requestRows(
+    static func requestRows(
         primitive: String,
         query: String?,
         target: String?,
@@ -365,7 +52,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return rows
     }
 
-    private static func appendPayloadRows(_ payload: [String: Any], into rows: inout [CapabilityDisplayRow]) {
+    static func appendPayloadRows(_ payload: [String: Any], into rows: inout [CapabilityDisplayRow]) {
         func append(_ label: String, _ value: String?) {
             guard let value = value?.nilIfEmpty else { return }
             rows.append(CapabilityDisplayRow(label: label, value: value))
@@ -400,7 +87,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         rows.append(contentsOf: extraRows)
     }
 
-    private static func executionGroups(
+    static func executionGroups(
         primitive: String,
         data: CapabilityInvocationData,
         details: [String: Any],
@@ -410,7 +97,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         []
     }
 
-    private static func resultRows(
+    static func resultRows(
         data: CapabilityInvocationData,
         details _: [String: Any],
         output: [String: Any]
@@ -429,7 +116,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return rows
     }
 
-    private static func resultPreview(
+    static func resultPreview(
         primitive: String,
         result: String?,
         output: [String: Any]
@@ -471,7 +158,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return pretty.count <= 1_200 ? pretty : nil
     }
 
-    private static func technicalRows(data: CapabilityInvocationData) -> [CapabilityDisplayRow] {
+    static func technicalRows(data: CapabilityInvocationData) -> [CapabilityDisplayRow] {
         let identity = data.identity
         let details = data.details?.rawValues ?? [:]
         let output = outputObject(from: data)
@@ -507,7 +194,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return rows
     }
 
-    private static func appendRow(
+    static func appendRow(
         _ label: String,
         _ value: String?,
         to rows: inout [CapabilityDisplayRow],
@@ -517,14 +204,14 @@ struct CapabilityInvocationDisplayModel: Equatable {
         rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: technical))
     }
 
-    private static func argumentObject(from data: CapabilityInvocationData) -> [String: Any] {
+    static func argumentObject(from data: CapabilityInvocationData) -> [String: Any] {
         if let payloadJSON = data.payloadJSON {
             return payloadJSON.rawValues
         }
         return objectFromJSONString(data.arguments) ?? [:]
     }
 
-    private static func outputObject(from data: CapabilityInvocationData) -> [String: Any] {
+    static func outputObject(from data: CapabilityInvocationData) -> [String: Any] {
         if let output = data.details?.anyCodableDict("output")?.rawValues {
             return output
         }
@@ -534,7 +221,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return [:]
     }
 
-    private static func objectFromJSONString(_ text: String) -> [String: Any]? {
+    static func objectFromJSONString(_ text: String) -> [String: Any]? {
         guard let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data),
               let dictionary = object as? [String: Any] else {
@@ -543,7 +230,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return dictionary
     }
 
-    private static func prettyJSONString(_ text: String) -> String? {
+    static func prettyJSONString(_ text: String) -> String? {
         guard let data = text.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data),
               JSONSerialization.isValidJSONObject(object),
@@ -552,7 +239,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return String(data: pretty, encoding: .utf8)
     }
 
-    private static func prettyJSON(_ value: [String: AnyCodable]) -> String? {
+    static func prettyJSON(_ value: [String: AnyCodable]) -> String? {
         let raw = value.mapValues(\.value)
         guard JSONSerialization.isValidJSONObject(raw),
               let data = try? JSONSerialization.data(withJSONObject: raw, options: [.prettyPrinted, .sortedKeys]),
@@ -583,7 +270,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return nil
     }
 
-    private static func array(_ value: Any?) -> [Any]? {
+    static func array(_ value: Any?) -> [Any]? {
         if let array = value as? [Any] {
             return array
         }
@@ -609,7 +296,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return nil
     }
 
-    private static func bool(_ value: Any?) -> Bool? {
+    static func bool(_ value: Any?) -> Bool? {
         if let bool = value as? Bool {
             return bool
         }
@@ -622,7 +309,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return nil
     }
 
-    private static func simpleDisplayValue(_ value: Any) -> String? {
+    static func simpleDisplayValue(_ value: Any) -> String? {
         switch value {
         case let string as String:
             return string
@@ -658,7 +345,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
             .joined(separator: " ")
     }
 
-    private static func readableBool(_ keys: [String], in object: [String: Any]) -> String? {
+    static func readableBool(_ keys: [String], in object: [String: Any]) -> String? {
         for key in keys {
             if let bool = object[key] as? Bool {
                 return bool ? "Yes" : "No"
@@ -680,7 +367,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return nil
     }
 
-    private static func correctionSummary(_ corrections: [Any]) -> String {
+    static func correctionSummary(_ corrections: [Any]) -> String {
         guard !corrections.isEmpty else { return "None" }
         let labels = corrections.prefix(3).compactMap { item -> String? in
             if let item = item as? [String: Any] {
@@ -698,14 +385,14 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return labels.joined(separator: "; ") + more
     }
 
-    private static func compactIdentifier(_ id: String) -> String {
+    static func compactIdentifier(_ id: String) -> String {
         guard id.count > 28 else { return id }
         let prefix = id.prefix(12)
         let suffix = id.suffix(10)
         return "\(prefix)…\(suffix)"
     }
 
-    private static func simplePayloadExtraValue(_ value: Any) -> String? {
+    static func simplePayloadExtraValue(_ value: Any) -> String? {
         if let bool = value as? Bool {
             return bool ? "true" : nil
         }
@@ -715,7 +402,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return simpleDisplayValue(value)
     }
 
-    private static func compactPathLabel(_ path: String) -> String {
+    static func compactPathLabel(_ path: String) -> String {
         let abbreviated = path.abbreviatingHomeDirectory
         let last = (abbreviated as NSString).lastPathComponent
         if !last.isEmpty, last != "/" {
@@ -724,7 +411,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
         return abbreviated
     }
 
-    private static func humanizeKey(_ key: String) -> String {
+    static func humanizeKey(_ key: String) -> String {
         key
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
@@ -737,7 +424,7 @@ struct CapabilityInvocationDisplayModel: Equatable {
     }
 }
 
-private extension Dictionary where Key == String, Value == AnyCodable {
+extension Dictionary where Key == String, Value == AnyCodable {
     var rawValues: [String: Any] {
         mapValues(\.value)
     }

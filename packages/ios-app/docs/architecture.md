@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-08 (HRA-9 Engine hierarchy).
+> Last verified: 2026-06-08 (HRA-10 Session hierarchy).
 
 ## Overview
 
@@ -46,8 +46,8 @@ Sources/
 +-- App/                  App entry point, app delegate, scene phases
 +-- Engine/               Engine transport, protocol DTOs, live/stored
 |                         events, persistence, repositories
-+-- Session/              Chat/session view models, messages, parsing,
-|                         activity summaries, token accounting
++-- Session/              Chat workflow, attachments, parsing, timeline
+|                         messages, reconstruction, activity, and tokens
 +-- Support/              Dependency injection, diagnostics, pairing,
 |                         settings, storage, feedback, utilities
 +-- UI/                   Theme and SwiftUI views for chat, settings,
@@ -72,7 +72,7 @@ icon catalog, or fork-row state model.
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentClient -> agent::prompt
 Live:    WebSocket -> EngineClient -> EventRegistry -> Plugin -> ChatViewModel
-Stored:  EventDatabase -> UnifiedEventTransformer -> ChatMessage -> ChatView
+Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 ```
 
@@ -104,10 +104,12 @@ diagnostics only; it does not use them as an alternate truth store.
 ## Event Handling
 
 Live events use self-dispatching plugins registered in
-`Engine/Events/Plugins/EventRegistry.swift`. Stored events use the
-`Engine/Events/Reconstruction` helpers and `UnifiedEventTransformer` for
-reconstruction into session UI state. Unsupported or malformed events are
-diagnostics; they are not normalized through retired product names.
+`Engine/Events/Plugins/EventRegistry.swift`. Stored events use
+`Engine/Events/Reconstruction` for stored-event helper types and
+`Session/Timeline/Reconstruction/UnifiedEventTransformer.swift` for the
+session-owned projection into `ChatMessage` timeline state. Unsupported or
+malformed events are diagnostics; they are not normalized through retired
+product names.
 
 See `events.md` for the current plugin categories and reconstruction boundary.
 

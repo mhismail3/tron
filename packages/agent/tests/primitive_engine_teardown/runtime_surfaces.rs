@@ -102,7 +102,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         read_repo_file(
             "packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift",
         ),
-        read_repo_file("packages/ios-app/Sources/Session/ViewModels/State/SettingsState.swift"),
+        read_repo_file("packages/ios-app/Sources/Session/Chat/State/SettingsState.swift"),
         read_repo_file(
             "packages/ios-app/Sources/UI/Views/Settings/Pages/ConnectionSettingsPage.swift",
         ),

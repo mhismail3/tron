@@ -1,12 +1,12 @@
 # Event Handling
 
-> Last verified: 2026-06-08 (PCC-6 iOS source consolidation).
+> Last verified: 2026-06-08 (HRA-10 Session hierarchy).
 
 The iOS app handles engine events through two paths:
 
 ```
 Live:   WebSocket -> EngineClient -> EventRegistry -> Plugin -> ChatViewModel
-Stored: EventDatabase -> UnifiedEventTransformer -> ChatMessage array
+Stored: EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage array
 ```
 
 The live path updates the mounted session UI. The stored path reconstructs
@@ -61,13 +61,16 @@ session-list APIs.
 
 ## Stored Reconstruction
 
-`UnifiedEventTransformer` reconstructs messages from `SessionEvent` rows. The
-retained reconstruction state tracks message content, capability invocation
-lifecycles, streaming state, turn grouping, generated runtime data, and compact
-session metadata needed for chat. Capability identity fields stay primitive:
-model primitive, operation, trace/root invocation ids, theme color, and
-presentation hints. Reconstruction must not recover retired contract,
-implementation, worker, risk, or binding metadata from old payloads.
+`Session/Timeline/Reconstruction/UnifiedEventTransformer.swift` reconstructs
+messages from `SessionEvent` rows. Engine reconstruction helpers own persisted
+event decoding support; the transformer is Session-owned because it projects
+durable events into chat timeline state. The retained reconstruction state
+tracks message content, capability invocation lifecycles, streaming state, turn
+grouping, generated runtime data, and compact session metadata needed for chat.
+Capability identity fields stay primitive: model primitive, operation,
+trace/root invocation ids, theme color, and presentation hints. Reconstruction
+must not recover retired contract, implementation, worker, risk, or binding
+metadata from old payloads.
 
 Unsupported event payloads should remain visible as diagnostics or no-op
 transport facts. They should not be converted into fixed panels,

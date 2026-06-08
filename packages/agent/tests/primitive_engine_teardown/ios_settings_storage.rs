@@ -35,7 +35,7 @@ fn prompt_media_uses_unified_attachment_primitive() {
         "packages/ios-app/Sources/Engine/Transport/Clients/AgentClientProtocol.swift",
         "packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
         "packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift",
-        "packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+Messaging.swift",
+        "packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift",
         "packages/ios-app/Tests/Services/AgentClientTests.swift",
         "packages/ios-app/Tests/Repositories/DefaultAgentRepositoryTests.swift",
         "packages/ios-app/Tests/Models/EngineProtocolTypesTests.swift",

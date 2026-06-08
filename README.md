@@ -863,8 +863,8 @@ packages/ios-app/Sources/
 +-- App/                  App entry point, delegates, scene phases
 +-- Engine/               Engine transport, protocol DTOs, event handling,
                          local persistence, repositories
-+-- Session/              Chat/session view models, messages, parsing,
-                         activity summaries, token accounting
++-- Session/              Chat workflow, attachments, parsing, timeline
+                         messages, reconstruction, activity, and tokens
 +-- Support/              Dependency injection, diagnostics, pairing,
                          settings, storage, feedback, utilities
 +-- UI/                   SwiftUI shell, theme, chat, input bar, settings,
@@ -881,7 +881,7 @@ packages/ios-app/Sources/
 - **MVVM + Extensions**: Large view models split across extension files (`ChatViewModel+Connection.swift`, etc.)
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
-- **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
+- **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   session navigation, prompt input, message rendering, local reconstruction,
   diagnostics, and generic runtime surfaces. Fixed product panels,
@@ -901,7 +901,7 @@ packages/ios-app/Sources/
 
 ```
 Live:    WebSocket -> EngineClient -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
-Stored:  EventDatabase -> UnifiedEventTransformer -> [ChatMessage] -> ChatViewModel -> ChatView
+Stored:  EventDatabase -> Session/Timeline/Reconstruction -> [ChatMessage] -> ChatViewModel -> ChatView
 Prompt:  InputBar -> ChatViewModel -> AgentClient -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
 ```

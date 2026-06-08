@@ -387,8 +387,8 @@ Sources/Support/Settings/PairedServerStore.swift
 Sources/Support/Storage/Services/PairedServerTokenStore.swift
 Sources/Support/Storage/Services/KeychainItem.swift
 Sources/Support/Extensions/Swift/Binding+PasteAware.swift
-Sources/Session/ViewModels/State/OnboardingSetupSnapshot.swift
-Sources/Session/ViewModels/State/OnboardingState.swift
+Sources/Session/Chat/State/OnboardingSetupSnapshot.swift
+Sources/Session/Chat/State/OnboardingState.swift
 
 Tests/Onboarding/
   ├── OnboardingStateTests.swift
