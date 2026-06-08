@@ -103,9 +103,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
             "packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift",
         ),
         read_repo_file("packages/ios-app/Sources/Session/Chat/State/SettingsState.swift"),
-        read_repo_file(
-            "packages/ios-app/Sources/UI/Views/Settings/Pages/ConnectionSettingsPage.swift",
-        ),
+        read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
         read_repo_file("README.md"),
     ]
     .join("\n");
@@ -141,10 +139,8 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         read_repo_file(
             "packages/ios-app/Sources/Engine/Protocol/System/EngineProtocolTypes+System.swift",
         ),
-        read_repo_file("packages/ios-app/Sources/UI/Views/Settings/SettingsSupport.swift"),
-        read_repo_file(
-            "packages/ios-app/Sources/UI/Views/Settings/Pages/ConnectionSettingsPage.swift",
-        ),
+        read_repo_file("packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift"),
+        read_repo_file("packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
     ]
     .join("\n");
     assert_absent(
@@ -218,7 +214,7 @@ fn dynamic_runtime_surfaces_are_schema_rendering_not_target_authoring() {
             "packages/ios-app/Sources/Engine/Protocol/GeneratedUI/EngineProtocolTypes+GeneratedUI.swift",
         ),
         read_repo_file(
-            "packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift",
+            "packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
         ),
         read_repo_file("packages/ios-app/Tests/Models/EngineProtocol/GeneratedUIDTOTests.swift"),
         read_repo_file("packages/ios-app/Tests/Views/GeneratedUIRendererTests.swift"),

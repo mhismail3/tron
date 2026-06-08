@@ -9,7 +9,7 @@ import SwiftUI
 final class AgentSettingsPageLayoutTests: XCTestCase {
 
     func testSettingsAdaptiveLayoutDetectsIPadLandscape() throws {
-        let content = try source(pathComponents: ["Sources", "UI", "Views", "Settings", "SettingsSupport.swift"])
+        let content = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsSupport.swift"])
 
         XCTAssertTrue(
             content.contains("enum SettingsAdaptiveLayout"),
@@ -185,7 +185,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
     }
 
     private func settingsPageSource(named fileName: String) throws -> String {
-        try source(pathComponents: ["Sources", "UI", "Views", "Settings", "Pages", fileName])
+        try source(pathComponents: ["Sources", "UI", "Settings", "Pages", fileName])
     }
 
     private func source(pathComponents: [String]) throws -> String {

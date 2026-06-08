@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-08 (HRA-10 Session hierarchy).
+> Last verified: 2026-06-08 (HRA-11 UI hierarchy).
 
 ## Overview
 
@@ -50,13 +50,13 @@ Sources/
 |                         messages, reconstruction, activity, and tokens
 +-- Support/              Dependency injection, diagnostics, pairing,
 |                         settings, storage, feedback, utilities
-+-- UI/                   Theme and SwiftUI views for chat, settings,
-|                         onboarding, dynamic surfaces, diagnostics
++-- UI/                   Theme, chat, settings, onboarding, runtime
+|                         surfaces, capabilities, components, system sheets
 +-- Assets.xcassets/      App icons and image assets
 +-- Resources/            Fonts, localized strings, generated icon layers
 ```
 
-The retained `UI/Views/Capabilities` components render capability lifecycle
+The retained `UI/Capabilities` components render capability lifecycle
 data as generic chat evidence. They are not a capability catalog, admin
 console, or operator policy surface. Capability identity is limited to the
 model-visible primitive name, optional operation name, trace/root invocation
@@ -115,7 +115,7 @@ See `events.md` for the current plugin categories and reconstruction boundary.
 
 ## Dynamic Runtime Surfaces
 
-`UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` is the retained
+`UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift` is the retained
 generic renderer for server/agent-authored runtime data. It uses native SwiftUI
 layout primitives and submits only generic action coordinates or encoded action
 payloads supplied by the runtime surface. It must not map fixed feature names

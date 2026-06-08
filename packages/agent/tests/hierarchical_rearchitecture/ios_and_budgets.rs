@@ -145,10 +145,10 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
             allowed_classifications.contains(*classification),
             "{IOS_MOVE_MAP_PATH} row has invalid classification `{classification}`: {line}"
         );
-        if *phase == "HRA-9" || *phase == "HRA-10" {
+        if *phase == "HRA-9" || *phase == "HRA-10" || *phase == "HRA-11" {
             assert_eq!(
                 *status, "passed_after_fix",
-                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10 rows should be complete after the Engine and Session hierarchy moves: {line}"
+                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10/HRA-11 rows should be complete after the Engine, Session, and UI hierarchy moves: {line}"
             );
         } else {
             assert_eq!(
@@ -331,6 +331,72 @@ fn ios_session_hra10_sources_use_target_boundaries() {
             && missing_split_files.is_empty()
             && oversized_split_files.is_empty(),
         "HRA-10 Session hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_split_files:#?}; oversized split files: {oversized_split_files:#?}"
+    );
+}
+
+#[test]
+fn ios_ui_hra11_sources_use_target_boundaries() {
+    let required_roots = [
+        "packages/ios-app/Sources/UI/Capabilities",
+        "packages/ios-app/Sources/UI/Capabilities/Shared",
+        "packages/ios-app/Sources/UI/Capabilities/Thinking",
+        "packages/ios-app/Sources/UI/Chat/Composer",
+        "packages/ios-app/Sources/UI/Chat/Messages",
+        "packages/ios-app/Sources/UI/Chat/Messages/Indicators",
+        "packages/ios-app/Sources/UI/Chat/Sheets",
+        "packages/ios-app/Sources/UI/Chat/Shell",
+        "packages/ios-app/Sources/UI/Components",
+        "packages/ios-app/Sources/UI/Onboarding/Flow",
+        "packages/ios-app/Sources/UI/Onboarding/Pairing",
+        "packages/ios-app/Sources/UI/Onboarding/Steps",
+        "packages/ios-app/Sources/UI/RuntimeSurfaces",
+        "packages/ios-app/Sources/UI/RuntimeSurfaces/Display",
+        "packages/ios-app/Sources/UI/Settings/ModelPicker",
+        "packages/ios-app/Sources/UI/Settings/Pages",
+        "packages/ios-app/Sources/UI/Settings/Pages/ModelProviders",
+        "packages/ios-app/Sources/UI/Settings/Providers/OAuth",
+        "packages/ios-app/Sources/UI/Settings/Shell",
+        "packages/ios-app/Sources/UI/System",
+        "packages/ios-app/Sources/UI/Theme",
+    ];
+    let banned_roots = ["packages/ios-app/Sources/UI/Views"];
+    let split_ui_files = [
+        "packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
+        "packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.swift",
+        "packages/ios-app/Sources/UI/Settings/Shell/SettingsView.swift",
+        "packages/ios-app/Sources/UI/Settings/Shell/SettingsView+FooterSupport.swift",
+    ];
+
+    let missing_required: Vec<_> = required_roots
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_dir())
+        .collect();
+    let present_banned: Vec<_> = banned_roots
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+    let missing_split_files: Vec<_> = split_ui_files
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_file())
+        .collect();
+    let oversized_split_files: Vec<_> = split_ui_files
+        .iter()
+        .copied()
+        .filter_map(|path| {
+            let lines = source_line_count(&repo_path(path));
+            (lines > 700).then(|| format!("{path} has {lines} LOC"))
+        })
+        .collect();
+
+    assert!(
+        missing_required.is_empty()
+            && present_banned.is_empty()
+            && missing_split_files.is_empty()
+            && oversized_split_files.is_empty(),
+        "HRA-11 UI hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_split_files:#?}; oversized split files: {oversized_split_files:#?}"
     );
 }
 

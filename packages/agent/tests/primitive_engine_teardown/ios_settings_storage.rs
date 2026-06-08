@@ -64,7 +64,7 @@ fn prompt_media_uses_unified_attachment_primitive() {
 fn ios_shell_has_no_fixed_session_tree_projection() {
     for (path, label) in [
         (
-            "packages/ios-app/Sources/UI/Views/SessionTree",
+            "packages/ios-app/Sources/UI/SessionTree",
             "fixed iOS session-tree view root",
         ),
         (

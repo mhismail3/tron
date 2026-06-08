@@ -884,131 +884,133 @@ packages/ios-app/Sources/Support/Utilities/Core/ModelNameFormatter.swift	retain	
 packages/ios-app/Sources/Support/Utilities/Core/TaskFormatting.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
 packages/ios-app/Sources/Support/Utilities/Core/TokenFormatter.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
 packages/ios-app/Sources/Support/Utilities/Core/VersionDisplay.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Theme/AppearanceSettings.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Theme/FontFamily.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Theme/FontSettings.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Theme/ThinkingIndicatorStyle.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Theme/TronColors.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Theme/TronFontLoader.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Theme/TronIcons.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Theme/TronSpacing.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Theme/TronTypography.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Attachments/AttachmentBubble.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Attachments/CameraCaptureSheet.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Attachments/DocumentPicker.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/CapabilityInvocationDetailComponents.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/CapabilityInvocationViews.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/CapabilityResultRenderers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Display/GenerativeWebView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Display/StreamSheetView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityClassifiedErrorSection.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityCodeBlock.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityCopyButton.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityDetailSection.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityDetailSheetContainer.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityDurationBadge.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityEmptyState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityErrorView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityFileInfoSection.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityInfoPill.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityResultNote.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityRunningSpinner.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityStatusBadge.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/CapabilityStatusRow.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/DiffFormatting.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/ErrorClassification.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/FileDisplayHelpers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/FileInfoProperties.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Shared/FileOperationError.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Capabilities/Thinking/ThinkingDetailSheet.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/ChatSheetContent.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/ChatSheetModifier.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/ChatView+Helpers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/ChatView+Toolbar.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/ChatView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/ContentView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/Indicators/NeuralSparkIndicator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/Indicators/OrbitingParticleIndicator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/Indicators/PhaseWaveIndicator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/InteractivePopGestureEnabler.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/SessionSidebar.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/ShellToolbarActions.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/ShellToolbarContent.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Chat/ThinkingIndicator.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/CachedSession+Display.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/CardEntranceModifier.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/ConnectionStatusPill.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/FlowLayout.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/LineNumberedContentView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/SessionTitleIcons.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/SheetComponents.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/ToastBanner.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/TronSearchBar.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/TronSegmentedControl.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/TypewriterAnimationState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Components/TypewriterText.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/InputBar/ActionButtons.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/InputBar/ContentAreaView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/InputBar/ContextStatusPill.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/InputBar/InputBar.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/InputBar/InputTextField.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/InputBar/WrappingHStackLayout.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/DecodedImageView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/ImagesContentView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/MarkdownBlockParser.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/MarkdownBlockView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/MessageBubble.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/MessageMetadataBadge.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/NotificationViews.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/StreamingContentView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/SystemEventView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/TextContentView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/MessageBubble/ThinkingContentView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Onboarding/OnboardingFlowView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Onboarding/OnboardingShell.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Onboarding/QRCodeScannerSheet.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Onboarding/Steps/PairingStep.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Onboarding/Steps/SetupSteps.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Session/NewSessionFlow.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Session/NewSessionFlowComponents.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Session/NewSessionFlowTypes.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Session/TurnGrouping.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Session/WorkspaceSelector.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/FeedbackMailView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/ModelPickerSheet.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/OAuth/OAuthLoginSheet.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/OAuth/OAuthLoopbackServer.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/OAuth/OAuthWebView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/AgentSettingsPage.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/AppearanceSettingsPage.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ConnectionSettingsPage.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ContextSettingsPage.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ModelProviders/GoogleCloudRows.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ModelProviders/ModelProviderSection.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ModelProviders/ProviderApiKeyAlert.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ModelProviders/ProviderAuthActionResult.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ModelProviders/ProviderCredentialRow.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ModelProviders/ProviderCredentialRowItem.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ModelProviders/ProviderInfo.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ModelProviders/ProviderServiceCard.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ModelProviders/ProviderStatusHelpers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Pages/ProvidersSettingsPage.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/SettingsSupport.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/SettingsView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Shared/SettingsCaption.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Shared/SettingsCard.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Shared/SettingsCycleToggle.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Shared/SettingsInfoCard.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Shared/SettingsPageContainer.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Shared/SettingsRow.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Shared/SettingsRowDivider.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/Shared/SettingsSectionHeader.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/Settings/TronStepper.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/System/CompactionDetailSheet.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/System/InitializationErrorView.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/System/LogViewer.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/UI/Views/System/ProviderErrorDetailSheet.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
+packages/ios-app/Sources/UI/Capabilities/CapabilityInvocationDetailComponents.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/CapabilityInvocationViews.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/CapabilityResultRenderers.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityClassifiedErrorSection.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityCodeBlock.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityCopyButton.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityDetailSection.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityDetailSheetContainer.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityDurationBadge.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityEmptyState.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityErrorView.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityFileInfoSection.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityInfoPill.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityResultNote.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityRunningSpinner.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityStatusBadge.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityStatusRow.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/DiffFormatting.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/ErrorClassification.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/FileDisplayHelpers.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/FileInfoProperties.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Shared/FileOperationError.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Capabilities/Thinking/ThinkingDetailSheet.swift	retain	iOS capability UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Composer/ActionButtons.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Composer/AttachmentBubble.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Composer/CameraCaptureSheet.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Composer/ContentAreaView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Composer/ContextStatusPill.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Composer/DocumentPicker.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Composer/InputBar.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Composer/InputTextField.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Composer/WrappingHStackLayout.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/DecodedImageView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/ImagesContentView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/Indicators/NeuralSparkIndicator.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/Indicators/OrbitingParticleIndicator.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/Indicators/PhaseWaveIndicator.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/MarkdownBlockParser.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/MarkdownBlockView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/MessageBubble.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/MessageMetadataBadge.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/NotificationViews.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/StreamingContentView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/SystemEventView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/TextContentView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Messages/ThinkingContentView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Sheets/NewSessionFlow.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Sheets/NewSessionFlowComponents.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Sheets/NewSessionFlowTypes.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Sheets/TurnGrouping.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Sheets/WorkspaceSelector.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/ChatSheetContent.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/ChatSheetModifier.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/ChatView+Helpers.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/ChatView+Toolbar.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/ContentView.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/InteractivePopGestureEnabler.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/SessionSidebar.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/ShellToolbarActions.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/ShellToolbarContent.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Chat/Shell/ThinkingIndicator.swift	retain	iOS chat UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/CachedSession+Display.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/CardEntranceModifier.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/ConnectionStatusPill.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/FlowLayout.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/LineNumberedContentView.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/SessionTitleIcons.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/SheetComponents.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/ToastBanner.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/TronSearchBar.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/TronSegmentedControl.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/TypewriterAnimationState.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Components/TypewriterText.swift	retain	iOS UI components	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingFlowView.swift	retain	iOS onboarding UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingShell.swift	retain	iOS onboarding UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Onboarding/Pairing/QRCodeScannerSheet.swift	retain	iOS onboarding UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Onboarding/Steps/PairingStep.swift	retain	iOS onboarding UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Onboarding/Steps/SetupSteps.swift	retain	iOS onboarding UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/RuntimeSurfaces/Display/GenerativeWebView.swift	retain	iOS runtime surfaces	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/RuntimeSurfaces/Display/StreamSheetView.swift	retain	iOS runtime surfaces	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.swift	retain	iOS runtime surfaces	PCC-6/HRA-11	Current tracked file retained after HRA-11 UI split
+packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift	retain	iOS runtime surfaces	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/AgentSettingsPage.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/AppearanceSettingsPage.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ContextSettingsPage.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/GoogleCloudRows.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ModelProviderSection.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderApiKeyAlert.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderAuthActionResult.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderCredentialRow.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderCredentialRowItem.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderInfo.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderServiceCard.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderStatusHelpers.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Pages/ProvidersSettingsPage.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthLoginSheet.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthLoopbackServer.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/FeedbackMailView.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsCaption.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsCard.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsCycleToggle.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsInfoCard.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsPageContainer.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsRow.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsRowDivider.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsSectionHeader.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/SettingsView+FooterSupport.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked file retained after HRA-11 UI split
+packages/ios-app/Sources/UI/Settings/Shell/SettingsView.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Settings/Shell/TronStepper.swift	retain	iOS settings UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/System/CompactionDetailSheet.swift	retain	iOS system UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/System/InitializationErrorView.swift	retain	iOS system UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/System/LogViewer.swift	retain	iOS system UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/System/ProviderErrorDetailSheet.swift	retain	iOS system UI	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Theme/AppearanceSettings.swift	retain	iOS theme	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Theme/FontFamily.swift	retain	iOS theme	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Theme/FontSettings.swift	retain	iOS theme	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Theme/ThinkingIndicatorStyle.swift	retain	iOS theme	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Theme/TronColors.swift	retain	iOS theme	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Theme/TronFontLoader.swift	retain	iOS theme	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Theme/TronIcons.swift	retain	iOS theme	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Theme/TronSpacing.swift	retain	iOS theme	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
+packages/ios-app/Sources/UI/Theme/TronTypography.swift	retain	iOS theme	PCC-6/HRA-11	Current tracked UI file retained after HRA-11 path update
 packages/ios-app/Tests/Core/AppConstantsTests.swift	retain	ios test	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
 packages/ios-app/Tests/Core/Concurrency/AsyncSemaphoreTests.swift	retain	ios test	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
 packages/ios-app/Tests/Core/Events/AsyncEventStreamTests.swift	retain	ios test	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update

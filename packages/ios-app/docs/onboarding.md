@@ -369,7 +369,7 @@ unlocked at least once.
 Sources/App/TronMobileApp.swift
   └── owns the shell + onboarding sheet presentation
 
-Sources/UI/Views/Onboarding/
+Sources/UI/Onboarding/
   ├── OnboardingFlowView.swift
   ├── OnboardingShell.swift
   ├── QRCodeScannerSheet.swift

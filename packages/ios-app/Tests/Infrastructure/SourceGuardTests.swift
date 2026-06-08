@@ -17,7 +17,7 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let toolbar = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Views/Chat/ShellToolbarContent.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ShellToolbarContent.swift"),
             encoding: .utf8
         )
 
@@ -36,7 +36,7 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let badge = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Views/MessageBubble/MessageMetadataBadge.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Messages/MessageMetadataBadge.swift"),
             encoding: .utf8
         )
 
@@ -478,11 +478,11 @@ struct SourceGuardTests {
             "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Filesystem.swift",
             "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Repo.swift",
             "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Task.swift",
-            "Sources/Session/Messages/NotificationDeliveryTypes.swift",
+            "Sources/Session/Timeline/Messages/NotificationDeliveryTypes.swift",
             "Sources/Support/Storage/NotificationStore.swift",
-            "Sources/Session/ViewModels/State/ContextRefreshGate.swift",
-            "Sources/UI/Views/Capabilities/NotificationDelivery",
-            "Sources/UI/Views/Notifications",
+            "Sources/Session/Chat/State/ContextRefreshGate.swift",
+            "Sources/UI/Capabilities/NotificationDelivery",
+            "Sources/UI/Notifications",
             "Tests/Models/EngineProtocol/EngineProtocolTypesCronTests.swift",
             "Tests/Services/ContextClientTests.swift",
             "Tests/Services/CronClientTests.swift",
@@ -568,7 +568,7 @@ struct SourceGuardTests {
             "Sources/Session/Chat/ViewModel/ChatViewModel+Reconstruction.swift",
             "Sources/Session/Chat/Coordinators/CapabilityInvocationCoordinator.swift",
             "Sources/Session/Timeline/Activity/SessionActivityStreamManager.swift",
-            "Sources/UI/Views/Capabilities",
+            "Sources/UI/Capabilities",
             "Tests/Core/Events/Plugins",
             "Tests/Core/Events/UnifiedEventTransformerActionProjectionTests.swift",
             "Tests/Models/CapabilityInvocationDisplayModelTests.swift",
@@ -712,10 +712,10 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
         let deletedPaths = [
             "Sources/Engine/Events/Core/Plugins/Process",
-            "Sources/Session/ViewModels/Chat/ChatViewModel+ProcessEvents.swift",
-            "Sources/Session/ViewModels/State/ProcessState.swift",
-            "Sources/UI/Views/Capabilities/Process",
-            "Sources/UI/Views/Process",
+            "Sources/Session/Chat/ViewModel/ChatViewModel+ProcessEvents.swift",
+            "Sources/Session/Chat/State/ProcessState.swift",
+            "Sources/UI/Capabilities/Process",
+            "Sources/UI/Process",
             "Tests/ViewModels/State/ProcessStateTests.swift",
         ]
         for relativePath in deletedPaths {
@@ -778,10 +778,10 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
         let deletedPaths = [
             "Sources/Engine/Events/Core/Plugins/Hook",
-            "Sources/Session/ViewModels/Chat/ChatViewModel+" + "Hook" + "Events.swift",
-            "Sources/Session/ViewModels/State/Pull" + "Up" + "Panel" + "State.swift",
-            "Sources/UI/Views/InputBar/Input" + "Area" + "Drag" + "Modifier.swift",
-            "Sources/UI/Views/InputBar/Pull" + "Up" + "Panel" + "View.swift",
+            "Sources/Session/Chat/ViewModel/ChatViewModel+" + "Hook" + "Events.swift",
+            "Sources/Session/Chat/State/Pull" + "Up" + "Panel" + "State.swift",
+            "Sources/UI/Chat/Composer/Input" + "Area" + "Drag" + "Modifier.swift",
+            "Sources/UI/Chat/Composer/Pull" + "Up" + "Panel" + "View.swift",
         ]
         for relativePath in deletedPaths {
             #expect(
@@ -868,11 +868,11 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let promptRoot = iosRoot.appendingPathComponent("Sources/UI/Views/Prompt" + "Library")
+        let promptRoot = iosRoot.appendingPathComponent("Sources/UI/Prompt" + "Library")
 
         #expect(!FileManager.default.fileExists(atPath: promptRoot.path))
         #expect(!FileManager.default.fileExists(
-            atPath: iosRoot.appendingPathComponent("Sources/Session/ViewModels/State/Prompt" + "LibraryState.swift").path
+            atPath: iosRoot.appendingPathComponent("Sources/Session/Chat/State/Prompt" + "LibraryState.swift").path
         ))
         #expect(!FileManager.default.fileExists(
             atPath: iosRoot.appendingPathComponent("Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Prompt" + "Library.swift").path
@@ -891,10 +891,10 @@ struct SourceGuardTests {
         let deletedPaths = [
             "Sources/Engine/Events/Core/Plugins/Approval",
             "Sources/Engine/Network/Clients/ApprovalClient.swift",
-            "Sources/Session/ViewModels/Handlers/EngineApprovalCoordinator.swift",
-            "Sources/Session/ViewModels/State/EngineApprovalState.swift",
-            "Sources/UI/Views/EngineApproval",
-            "Sources/Session/Messages/EngineApprovalTypes.swift",
+            "Sources/Session/Chat/Coordinators/EngineApprovalCoordinator.swift",
+            "Sources/Session/Chat/State/EngineApprovalState.swift",
+            "Sources/UI/EngineApproval",
+            "Sources/Session/Timeline/Messages/EngineApprovalTypes.swift",
             "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Approval.swift",
         ]
         for relativePath in deletedPaths {
@@ -947,10 +947,10 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let deletedPaths = [
-            "Sources/UI/Views/AuditDetails",
-            "Sources/Session/ViewModels/State/AuditDetailsState.swift",
-            "Sources/Session/ViewModels/State/AuditDetailsWorkerPackProjection.swift",
-            "Sources/Session/ViewModels/State/AuditDetailsWorkerArtifactProjection.swift",
+            "Sources/UI/AuditDetails",
+            "Sources/Session/Chat/State/AuditDetailsState.swift",
+            "Sources/Session/Chat/State/AuditDetailsWorkerPackProjection.swift",
+            "Sources/Session/Chat/State/AuditDetailsWorkerArtifactProjection.swift",
             "Sources/Engine/Network/Clients/CapabilityClient.swift",
         ]
         for relativePath in deletedPaths {
@@ -1031,11 +1031,11 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
 
         let settingsView = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Views/Settings/SettingsView.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Shell/SettingsView.swift"),
             encoding: .utf8
         )
         let logViewer = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Views/System/LogViewer.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/System/LogViewer.swift"),
             encoding: .utf8
         )
         let ingestionService = try String(
@@ -1300,7 +1300,7 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let sourcesRoot = iosRoot.appendingPathComponent("Sources")
-        let viewsRoot = sourcesRoot.appendingPathComponent("UI/Views")
+        let uiRoot = sourcesRoot.appendingPathComponent("UI")
 
         let removedViewRoots = [
             "Agent" + "Control",
@@ -1314,17 +1314,17 @@ struct SourceGuardTests {
         ]
         for rootName in removedViewRoots {
             #expect(
-                !FileManager.default.fileExists(atPath: viewsRoot.appendingPathComponent(rootName).path),
+                !FileManager.default.fileExists(atPath: uiRoot.appendingPathComponent(rootName).path),
                 "\(rootName) is a fixed product UI root; primitive iOS must render only the chat shell and generic runtime surfaces"
             )
         }
 
         let requiredShellFiles = [
-            "UI/Views/Chat/ContentView.swift",
-            "UI/Views/Chat/ChatView.swift",
-            "UI/Views/InputBar/InputBar.swift",
-            "UI/Views/Settings/SettingsView.swift",
-            "UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift",
+            "UI/Chat/Shell/ContentView.swift",
+            "UI/Chat/Shell/ChatView.swift",
+            "UI/Chat/Composer/InputBar.swift",
+            "UI/Settings/Shell/SettingsView.swift",
+            "UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
         ]
         for relativePath in requiredShellFiles {
             #expect(
@@ -1518,6 +1518,62 @@ struct SourceGuardTests {
         )
     }
 
+    @Test("iOS UI uses HRA target hierarchy")
+    func testIOSUIUsesHRATargetHierarchy() throws {
+        let iosRoot = iosAppRoot()
+        let requiredRoots = [
+            "Sources/UI/Capabilities",
+            "Sources/UI/Capabilities/Shared",
+            "Sources/UI/Capabilities/Thinking",
+            "Sources/UI/Chat/Composer",
+            "Sources/UI/Chat/Messages",
+            "Sources/UI/Chat/Messages/Indicators",
+            "Sources/UI/Chat/Sheets",
+            "Sources/UI/Chat/Shell",
+            "Sources/UI/Components",
+            "Sources/UI/Onboarding/Flow",
+            "Sources/UI/Onboarding/Pairing",
+            "Sources/UI/Onboarding/Steps",
+            "Sources/UI/RuntimeSurfaces",
+            "Sources/UI/RuntimeSurfaces/Display",
+            "Sources/UI/Settings/ModelPicker",
+            "Sources/UI/Settings/Pages",
+            "Sources/UI/Settings/Pages/ModelProviders",
+            "Sources/UI/Settings/Providers/OAuth",
+            "Sources/UI/Settings/Shell",
+            "Sources/UI/System",
+            "Sources/UI/Theme",
+        ]
+        let bannedRoots = [
+            "Sources/UI/Views",
+        ]
+        let splitUIFiles = [
+            "Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
+            "Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.swift",
+            "Sources/UI/Settings/Shell/SettingsView.swift",
+            "Sources/UI/Settings/Shell/SettingsView+FooterSupport.swift",
+        ]
+
+        let missingRequired = requiredRoots
+            .filter { !directoryExists(iosRoot.appendingPathComponent($0)) }
+        let presentBanned = bannedRoots
+            .filter { directoryExists(iosRoot.appendingPathComponent($0)) }
+        let missingSplitFiles = splitUIFiles
+            .filter { !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
+        let oversizedSplitFiles = try splitUIFiles.compactMap { relativePath -> String? in
+            let lineCount = try sourceLineCount(iosRoot.appendingPathComponent(relativePath))
+            return lineCount > 700 ? "\(relativePath) has \(lineCount) LOC" : nil
+        }
+
+        #expect(
+            missingRequired.isEmpty
+                && presentBanned.isEmpty
+                && missingSplitFiles.isEmpty
+                && oversizedSplitFiles.isEmpty,
+            "HRA-11 UI hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingSplitFiles); oversized split files: \(oversizedSplitFiles)"
+        )
+    }
+
     @Test("iOS tests mirror HRA source boundaries")
     func testIOSTestsMirrorHRASourceBoundaries() throws {
         let iosRoot = iosAppRoot()
@@ -1620,7 +1676,7 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let deletedPaths = [
-            "Sources/UI/Views/SessionTree",
+            "Sources/UI/SessionTree",
             "Sources/Engine/Database/Repositories/TreeRepository.swift",
             "Sources/Engine/EventStore/EventTreeBuilder.swift",
             "Tests/Infrastructure/TreeRepositoryTests.swift",

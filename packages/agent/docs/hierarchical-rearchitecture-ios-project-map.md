@@ -9,7 +9,8 @@ Plan source: `/Users/<USER>/Downloads/TRON_REARCHITECTURE_PLAN.md`.
 ## Scope
 
 HRA-8 was the red-gate and map checkpoint for the iOS hierarchy campaign. HRA-9
-has since consumed the Engine rows, and HRA-10 has consumed the Session rows.
+has since consumed the Engine rows, HRA-10 has consumed the Session rows, and
+HRA-11 has consumed the UI rows.
 This artifact records the target path for every live Swift file under
 `packages/ios-app/Sources` and
 `packages/ios-app/Tests`, the SourceGuard tests that fail until the remaining
@@ -20,11 +21,11 @@ Machine-readable map:
 
 - `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`
 
-Coverage after HRA-10:
+Coverage after HRA-11:
 
-- `packages/ios-app/Sources`: 359 Swift files
+- `packages/ios-app/Sources`: 361 Swift files
 - `packages/ios-app/Tests`: 192 Swift files
-- Total mapped Swift source/test files: 551
+- Total mapped Swift source/test files: 553
 
 ## Target Phase Ownership
 
@@ -39,7 +40,7 @@ Coverage after HRA-10:
 ## SourceGuard Red Gates
 
 `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` now contains HRA
-hierarchy checks that intentionally fail until HRA-11 through HRA-13 complete:
+hierarchy checks that intentionally fail until HRA-12 and HRA-13 complete:
 
 - `testIOSSourcesUseHRAFeatureOwnedHierarchy`
 - `testIOSTestsMirrorHRASourceBoundaries`
@@ -66,7 +67,8 @@ extension target still compiles.
   live under the target Engine owners and are marked `passed_after_fix`.
 - HRA-10 consumed the map rows whose target phase is `HRA-10`; those rows now
   live under the target Session owners and are marked `passed_after_fix`.
-- HRA-11 must consume the map rows whose target phase is `HRA-11`.
+- HRA-11 consumed the map rows whose target phase is `HRA-11`; those rows now
+  live under feature-owned UI roots and are marked `passed_after_fix`.
 - HRA-12 must consume the map rows whose target phase is `HRA-12`.
 - HRA-13 must consume the map rows whose target phase is `HRA-13`, decompose
   SourceGuard if it remains over budget, regenerate XcodeGen, and pass the

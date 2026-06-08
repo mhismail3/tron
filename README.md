@@ -867,8 +867,8 @@ packages/ios-app/Sources/
                          messages, reconstruction, activity, and tokens
 +-- Support/              Dependency injection, diagnostics, pairing,
                          settings, storage, feedback, utilities
-+-- UI/                   SwiftUI shell, theme, chat, input bar, settings,
-                         onboarding, dynamic surfaces
++-- UI/                   Theme, chat, settings, onboarding, runtime
+                         surfaces, capabilities, components, system sheets
 +-- Resources/            Localized strings, fixtures
 +-- Assets.xcassets/      Icons and images
 +-- Resources/IconLayers/ Source layers for the app icon

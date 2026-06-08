@@ -108,8 +108,7 @@ Current over-budget exceptions:
 | Path | Current LOC | Owner | Reason | Cleanup row |
 |------|-------------|-------|--------|-------------|
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2140 | iOS reconstruction tests | Large stored-event reconstruction suite. | PCC-6 |
-| `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | 1688 | iOS static guards | Primitive shell absence, source guards, and HRA hierarchy gates. | PCC-6/HRA-8/HRA-9 |
-| `packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | 817 | iOS dynamic runtime UI | Generic runtime renderer. | PCC-6 |
+| `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | 1799 | iOS static guards | Primitive shell absence, source guards, and HRA hierarchy gates. | PCC-6/HRA-8/HRA-11 |
 
 ## Static Gates
 

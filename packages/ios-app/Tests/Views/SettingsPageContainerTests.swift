@@ -31,9 +31,9 @@ final class SettingsPageContainerTests: XCTestCase {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         url.appendPathComponent("Sources")
-        url.appendPathComponent("Views")
+        url.appendPathComponent("UI")
         url.appendPathComponent("Settings")
-        url.appendPathComponent("Shared")
+        url.appendPathComponent("Shell")
         url.appendPathComponent(fileName)
         return try String(contentsOf: url, encoding: .utf8)
     }
