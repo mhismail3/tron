@@ -313,7 +313,7 @@ files are still preserved.
 - **App bundles are immutable at runtime.** Mutable files live under `~/.tron`; ephemeral locks live under `~/.tron/internal/run`; `Tron.app` is only replaced by a new notarized DMG.
 - **Wrapper and server share no in-memory state.** Every interaction is either a filesystem read (`auth.json`, `profile.toml`, `run/.onboarded`) or a engine protocol call. Crashing the wrapper does not kill the server (LaunchAgent keeps it alive).
 - **Production uses one port (`9847`) and one LaunchAgent label (`com.tron.server`).** The DMG-installed `Tron.app` (`com.tron.mac`), local Release copies, the default Xcode Debug companion (`com.tron.mac.dev`), and the `tron dev` agent bundle at `~/.tron/internal/run/Tron-Dev.app` (`com.tron.agent`) all target the production `~/.tron` data tree. Debug companion observes production but does not manage its Login Item; `tron dev` is the explicit server takeover path and stops the production LaunchAgent before binding 9847. The isolated install scheme is the exception by design: it uses `com.tron.server.dev`, `Tron Server Dev.app`, port `9848`, and `~/.tron-dev`.
-- **TronPaths is the single source of truth.** If any path is referenced elsewhere, that's a bug. See `packages/agent/src/core/foundation/paths.rs` for the Rust-side mirror.
+- **TronPaths is the single source of truth.** If any path is referenced elsewhere, that's a bug. See `packages/agent/src/shared/foundation/paths/mod.rs` for the Rust-side mirror.
 
 ## Workflows & Variants
 

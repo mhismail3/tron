@@ -1,3 +1,4 @@
+mod docs_path_closeout;
 mod ios_and_budgets;
 mod mac_wrapper;
 mod rust_domains;

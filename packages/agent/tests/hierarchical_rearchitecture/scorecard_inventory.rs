@@ -9,7 +9,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Scorecard",
-        "Current score: **96/100**",
+        "Current score: **98/100**",
         "Status: **running**",
         "Total weight: **100**",
         "## Folder Justification Table",
@@ -30,6 +30,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "HRA-12 | iOS Support foundation hierarchy | 4 | passed_after_fix",
         "HRA-13 | iOS tests and generated project closeout | 4 | passed_after_fix",
         "HRA-14 | Mac wrapper hierarchy audit | 2 | passed_after_fix",
+        "HRA-15 | Scripts, README, and docs path closeout | 2 | passed_after_fix",
         "HRA-16 | Final adversarial review and closeout | 2 | pending",
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
@@ -60,7 +61,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Evidence Manifest",
-        "Current score: **96/100**",
+        "Current score: **98/100**",
         "Status: **running**",
         "| HRA-0 | passed_after_fix |",
         "| HRA-5 | passed_after_fix |",
@@ -73,6 +74,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "| HRA-12 | passed_after_fix |",
         "| HRA-13 | passed_after_fix |",
         "| HRA-14 | passed_after_fix |",
+        "| HRA-15 | passed_after_fix |",
         "## HRA-0 Red Static Gate",
     ] {
         assert!(
@@ -87,7 +89,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "Machine-Readable Artifacts",
         "Allowed classifications",
         "Allowed statuses",
-        "HRA-1 Baseline Counts Updated After HRA-14",
+        "HRA-1 Baseline Counts Updated After HRA-15",
         IOS_MOVE_MAP_PATH,
         IOS_PROJECT_MAP_PATH,
     ] {

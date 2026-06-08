@@ -43,7 +43,7 @@ PATTERNS=(
 ALLOWLIST_PATHS=(
     'packages/agent/src/shared/foundation/paths.rs'
     'packages/agent/src/domains/auth/**'
-    'packages/ios-app/Sources/Views/Chat/ContentView.swift'
+    'packages/ios-app/Sources/UI/Chat/Shell/ContentView.swift'
     'scripts/personal-info-guard.sh'
     '.git/*'
     'target/*'

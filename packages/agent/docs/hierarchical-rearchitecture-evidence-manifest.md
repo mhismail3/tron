@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Evidence Manifest
 
-Current score: **96/100**
+Current score: **98/100**
 
 Status: **running**
 
@@ -26,8 +26,8 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 | HRA-11 | passed_after_fix | Replaced `UI/Views` with feature-owned UI roots for chat, settings, onboarding, runtime surfaces, capabilities, components, system sheets, and theme. Split `GeneratedRuntimeSurfaceView` support types and `SettingsView` footer support so no iOS production UI file remains over the HRA line budget. | XcodeGen passed; SourceGuard expected-red run passed the new HRA-11 UI hierarchy guard and failed only Support/test hierarchy future gates; focused UI batch passed after updating source-reading tests to the new Settings paths; Rust teardown/cleanup invariants passed and HRA static target is expected partial red only on HRA-12/HRA-13 gates. | Closed; iOS test hierarchy is complete in HRA-13. | `b8c1c7c02` |
 | HRA-12 | passed_after_fix | Moved App entry points under `App/Lifecycle`; moved dependency assembly to `Support/Composition`; collapsed diagnostics/storage service buckets; moved utilities, extensions, infrastructure, observability, and settings support files into diagnostics, feedback, foundation, pairing, share, and storage owners without compatibility shims. | XcodeGen passed; SourceGuard expected-red run passed the new HRA-12 Support hierarchy guard and failed only the HRA-13 test mirror gate; focused Support/App batch passed after fixing a stale cleanup terminology comment and retired Mac-path assertion. | Closed; iOS test hierarchy and SourceGuard decomposition are complete in HRA-13. | `d76384d2d` |
 | HRA-13 | passed_after_fix | Moved 192 pre-existing iOS tests from old technical buckets into mirrored `Engine`, `Session`, `UI`, `Support`, and `Infrastructure` owners; split SourceGuard into same-suite guard extensions; split the large unified event transformer test into focused reconstruction suites; regenerated XcodeGen. | SourceGuard red proof failed on split self-scan and stale old test paths, then passed 34 tests after fixes. The moved-test batch red proof failed only stale capability UI source paths, then the rerun exited 0 with `** TEST SUCCEEDED **` and 124 Swift Testing cases in 9 suites passed. Rust formatting, primitive teardown, cleanup, and HRA static gates pass. | HRA-14 closed; HRA-15/HRA-16 remain. | `69f73bfa8` |
-| HRA-14 | passed_after_fix | Added Mac hierarchy red gates, moved Mac production sources into target App/Server/MenuBar/Wizard/Support owners, mirrored tests by feature owner, split `WizardStepTests`, split mixed pairing/settings/onboarding helpers, regenerated XcodeGen, and updated Mac docs/README/inventories. | Red HRA proof failed only the three new Mac gates. First Mac test rerun failed 21 split-test path assumptions, then the rerun exited 0 with `** TEST SUCCEEDED **` and 271 Swift Testing cases in 42 suites passed. Final HRA static gates pass after inventory/docs regeneration; primitive cleanup and focused iOS SourceGuard also pass after removing stale retired-product labels exposed by the cleanup guard. | HRA-15/HRA-16 remain. | `e1ec5ec5d` |
-| HRA-15 | pending | Not started. | pending | Close docs/scripts/README old path references. | pending |
+| HRA-14 | passed_after_fix | Added Mac hierarchy red gates, moved Mac production sources into target App/Server/MenuBar/Wizard/Support owners, mirrored tests by feature owner, split `WizardStepTests`, split mixed pairing/settings/onboarding helpers, regenerated XcodeGen, and updated Mac docs/README/inventories. | Red HRA proof failed only the three new Mac gates. First Mac test rerun failed 21 split-test path assumptions, then the rerun exited 0 with `** TEST SUCCEEDED **` and 271 Swift Testing cases in 42 suites passed. Final HRA static gates pass after inventory/docs regeneration; primitive cleanup and focused iOS SourceGuard also pass after removing stale retired-product labels exposed by the cleanup guard. | HRA-15 closed; HRA-16 remains. | `e1ec5ec5d` |
+| HRA-15 | passed_after_fix | Added a live docs/scripts/workflows stale-path static gate, then updated README onboarding links, iOS test-organization docs, Mac Rust path mirror docs, and the personal-info guard allowlist to current paths. Regenerated HRA and cleanup inventories for the new gate. | HRA-15 red proof failed on seven stale live references, then the focused HRA-15 gate passed after fixes. Final HRA static target passes with the new gate. | HRA-16 remains. | pending |
 | HRA-16 | pending | Not started. | pending | Final verification, adversarial review, ledger, and closeout. | pending |
 
 ## HRA-0 Red Static Gate
@@ -889,3 +889,44 @@ Open loops after HRA-14:
 - HRA-16 still owns final adversarial review and closeout.
 
 Checkpoint commit: `e1ec5ec5d`.
+
+## HRA-15 Scripts, README, And Docs Path Closeout Verification
+
+Commands:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants live_docs_scripts_and_workflows_do_not_claim_old_paths -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture
+```
+
+Results:
+
+- Added `live_docs_scripts_and_workflows_do_not_claim_old_paths`, which scans
+  live README/docs/scripts/workflows while leaving historical scorecards,
+  evidence, and negative static absence tests free to preserve old-path
+  evidence.
+- First focused HRA-15 run: exit 101, expected red proof. It failed on:
+  - README link to `packages/agent/src/app/onboarding/mod.rs`
+  - iOS development docs old `Tests/{ViewModels,Services,Core,Views,Navigation}`
+    tree
+  - Mac architecture docs link to `packages/agent/src/core/foundation/paths.rs`
+  - `scripts/personal-info-guard.sh` allowlist path
+    `packages/ios-app/Sources/Views/Chat/ContentView.swift`
+- Fixed those references to the current source/test owners:
+  `app/lifecycle/onboarding`, `shared/foundation/paths/mod.rs`,
+  `Sources/UI/Chat/Shell/ContentView.swift`, and the mirrored iOS test roots
+  `Engine`, `Session`, `UI`, `Support`, and `Infrastructure`.
+- Regenerated HRA and primitive cleanup file inventories so the new HRA-15
+  static gate is covered before staging.
+- Focused HRA-15 rerun: 1 passed, 0 failed.
+- Final HRA static target: 33 passed, 0 failed.
+- primitive code cleanup invariants: 16 passed.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`:
+  passed after sorting the new HRA module declaration.
+- `git diff --check`: passed.
+
+Open loops after HRA-15:
+
+- HRA-16 still owns final adversarial review and closeout.
+
+Checkpoint commit: pending.

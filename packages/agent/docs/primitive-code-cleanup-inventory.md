@@ -36,10 +36,10 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 1314 | Current package/config/test/doc boundaries |
+| `retain` | 1315 | Current package/config/test/doc boundaries |
 | `asset` | 53 | iOS/Mac resources and benchmark baselines |
 | `generated` | 7 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1374** | Whole repo |
+| **Total** | **1375** | Whole repo |
 
 ## Current Tracked Package Counts
 
@@ -48,7 +48,7 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `.codex` | 2 |
 | `.github` | 8 |
 | root files | 5 |
-| `packages/agent` | 575 |
+| `packages/agent` | 576 |
 | `packages/ios-app` | 643 |
 | `packages/mac-app` | 119 |
 | `scripts` | 22 |

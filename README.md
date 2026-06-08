@@ -755,7 +755,7 @@ Rotation is serialized through a process-wide mutex and the on-disk write is ato
 
 The first-run sentinel `~/.tron/internal/run/.onboarded` is created by the Mac wizard at the end of its install flow OR on the first successful WS auth, and is reported via the `paired` field of the canonical `system::get_info` capability (so an iOS device pointed at a fresh server can distinguish "never been onboarded" from "ready to pair").
 
-See [`packages/agent/src/app/onboarding/mod.rs`](packages/agent/src/app/onboarding/mod.rs) for the full token + sentinel lifecycle.
+See [`packages/agent/src/app/lifecycle/onboarding/mod.rs`](packages/agent/src/app/lifecycle/onboarding/mod.rs) for the full token + sentinel lifecycle.
 
 ---
 

@@ -2,7 +2,7 @@
 
 Status: `running`
 
-Generated from the live checkout after HRA-14. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, and HRA-14 consumed the Mac wrapper rows.
+Generated from the live checkout after HRA-15. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, and HRA-15 closed live docs/scripts/workflow old-path claims.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -31,13 +31,13 @@ The HRA iOS move map uses this HRA-8-specific header:
 current_path	target_path	owner	phase	classification	status	reason
 ```
 
-## HRA-1 Baseline Counts Updated After HRA-14
+## HRA-1 Baseline Counts Updated After HRA-15
 
 | Metric | Count |
 | --- | --- |
-| Tracked files after HRA-14 staged additions | 1374 |
+| Tracked files after HRA-15 staged additions | 1375 |
 | Files under `packages/agent/src` | 522 |
-| Files under `packages/agent/tests` | 27 |
+| Files under `packages/agent/tests` | 28 |
 | Files under `packages/ios-app/Sources` | 414 |
 | Files under `packages/ios-app/Tests` | 205 |
 | Files under `packages/mac-app/Sources` | 74 |
@@ -48,7 +48,7 @@ current_path	target_path	owner	phase	classification	status	reason
 | Extension | Count |
 | --- | --- |
 | .swift | 654 |
-| .rs | 548 |
+| .rs | 549 |
 | .md | 22 |
 | .json | 20 |
 | .png | 20 |
@@ -78,7 +78,7 @@ current_path	target_path	owner	phase	classification	status	reason
 | Package | Count |
 | --- | --- |
 | ios-app | 643 |
-| agent | 575 |
+| agent | 576 |
 | mac-app | 119 |
 | scripts | 22 |
 | github | 8 |
@@ -100,6 +100,7 @@ current_path	target_path	owner	phase	classification	status	reason
 | iOS Support | App entry points live under `App/Lifecycle`; dependency assembly lives under `Support/Composition`; diagnostics, feedback, foundation, pairing, share, and storage are concrete owners with no broad utilities/extensions/services buckets. | HRA-12 |
 | iOS tests | Old technical buckets moved to `Infrastructure`, `Engine`, `Session`, `UI`, and `Support` mirrors; oversized guard/reconstruction tests are decomposed. | HRA-13 |
 | Mac wrapper | App, Server, MenuBar, Wizard, Support, and tests now use target owner subfolders; old Services, Mocks, Observability, and loose root files are gone. | HRA-14 |
+| Live docs/scripts/workflows | README, iOS docs, Mac docs, scripts, and workflows are guarded against known old path claims outside historical evidence and static absence tests. | HRA-15 |
 
 ## Completed Rust Root Findings
 
@@ -219,8 +220,8 @@ HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 
 
 ## Docs And Scripts With Old Path Claims
 
-Old-path claims are intentionally still visible in historical HRA/PCC evidence artifacts. HRA-15 owns remaining user-facing README/docs/scripts closeout after the code hierarchy is fully moved.
+Old-path claims are intentionally still visible in historical HRA/PCC evidence artifacts and negative static absence tests. HRA-15 added `live_docs_scripts_and_workflows_do_not_claim_old_paths` to guard live README/docs/scripts/workflows and fixed the stale live references it exposed.
 
 ## Open Loops
 
-- HRA-15 still owns stale path claims in docs/scripts/README outside evidence history.
+- HRA-16 still owns final adversarial review and closeout.

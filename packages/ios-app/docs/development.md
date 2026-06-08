@@ -218,14 +218,11 @@ the next turn.
 
 ```
 Tests/
-├── ViewModels/        # ViewModel tests
-├── Services/          # Service tests
-├── Core/              # Event plugin tests
-├── Infrastructure/    # Source, cleanup, database, and project-structure guards
-├── Theme/             # Font, color, and visual token tests
-├── Views/             # Sheet, card, and presentation behavior tests
-├── Mocks/             # Test doubles
-└── Navigation/        # Deep link tests
+├── Engine/            # Transport, protocol, event, persistence, and model tests
+├── Session/           # Chat, timeline, attachment, and parsing tests
+├── UI/                # Chat, settings, onboarding, runtime surface, and component tests
+├── Support/           # Composition, diagnostics, foundation, pairing, and storage tests
+└── Infrastructure/    # Fakes, fixtures, SourceGuard, cleanup, and project-structure guards
 ```
 
 ## Debugging

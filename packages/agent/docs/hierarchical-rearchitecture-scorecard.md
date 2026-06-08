@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Scorecard
 
-Current score: **96/100**
+Current score: **98/100**
 
 Status: **running**
 
@@ -56,8 +56,8 @@ Total weight: **100**
 | HRA-11 | iOS UI hierarchy | 6 | passed_after_fix | iOS UI owner | Replaced `UI/Views` with `UI/Chat`, `UI/Settings`, `UI/Onboarding`, `UI/RuntimeSurfaces`, `UI/Capabilities`, `UI/Components`, `UI/System`, and `UI/Theme`; split runtime surface and settings support files. | Closed; later iOS test mirroring is complete in HRA-13. |
 | HRA-12 | iOS Support foundation hierarchy | 4 | passed_after_fix | iOS support owner | Moved app entry points under `App/Lifecycle`; moved dependency assembly to `Support/Composition`; split support helpers into diagnostics, feedback, foundation, pairing, share, and storage owners; removed broad utility, extension, infrastructure, observability, settings, and service buckets. | Closed; later iOS test mirroring and SourceGuard decomposition are complete in HRA-13. |
 | HRA-13 | iOS tests and generated project closeout | 4 | passed_after_fix | iOS test owner | Moved all iOS tests into `Engine`, `Session`, `UI`, `Support`, and `Infrastructure` mirrors; decomposed `SourceGuardTests` and `UnifiedEventTransformerTests`; regenerated XcodeGen; SourceGuard and moved-test batches pass. | HRA-14 closed; HRA-15/HRA-16 remain. |
-| HRA-14 | Mac wrapper hierarchy audit | 2 | passed_after_fix | Mac wrapper owner | Moved App, Server, MenuBar, Wizard, and Support sources into target owner folders; mirrored Mac tests to App, Server, MenuBar, Support, Wizard, and Infrastructure; split `WizardStepTests`; XcodeGen and Mac tests pass. | HRA-15/HRA-16 remain. |
-| HRA-15 | Scripts, README, and docs path closeout | 2 | pending | docs/scripts owner | Not started. | Remove old-path claims and update README/docs/scripts/workflows. |
+| HRA-14 | Mac wrapper hierarchy audit | 2 | passed_after_fix | Mac wrapper owner | Moved App, Server, MenuBar, Wizard, and Support sources into target owner folders; mirrored Mac tests to App, Server, MenuBar, Support, Wizard, and Infrastructure; split `WizardStepTests`; XcodeGen and Mac tests pass. | HRA-15 closed; HRA-16 remains. |
+| HRA-15 | Scripts, README, and docs path closeout | 2 | passed_after_fix | docs/scripts owner | Added a live docs/scripts/workflows old-path static gate; fixed stale README, iOS development docs, Mac architecture docs, and personal-info guard paths; regenerated inventories. | HRA-16 remains. |
 | HRA-16 | Final adversarial review and closeout | 2 | pending | architecture campaign | Not started. | Run full verification, adversarial review, ledger append, and final commit. |
 
 ## Folder Justification Table
@@ -125,11 +125,11 @@ checks:
 - `mac_sources_use_hra14_target_boundaries`
 - `mac_tests_mirror_source_boundaries`
 - `mac_tests_have_no_remaining_overbudget_swift_files`
+- `live_docs_scripts_and_workflows_do_not_claim_old_paths`
 
 ## Open Loops
 
-- HRA-15 still owns stale path claims in docs/scripts/README outside evidence
-  history.
+- HRA-16 still owns final adversarial review and closeout.
 - The project `@self-inspect` skill referenced by `AGENTS.md` is not installed
   in this Codex environment; direct repository and database inspection will be
   used until an equivalent skill becomes available.
