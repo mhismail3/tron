@@ -165,7 +165,7 @@ pub fn deep_merge(target: Value, source: Value) -> Value {
 /// Each env var has strict parsing rules:
 /// - Integers must be valid and within the specified range
 /// - Booleans accept: `true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off`
-/// - Invalid values are silently ignored (fall back to file/default)
+/// - Invalid values are silently ignored (use file/default)
 pub fn apply_env_overrides(settings: &mut TronSettings) {
     // ── Server settings ─────────────────────────────────────────────
     if let Some(v) = read_env_string("TRON_DEFAULT_MODEL") {

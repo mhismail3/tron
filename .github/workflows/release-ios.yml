@@ -25,9 +25,9 @@
 #
 # Real releases archive the Prod app, export with Apple's app-store-connect
 # method, then upload with `asc builds upload`. Exports use explicit manual
-# signing when the optional iOS signing secrets are configured; otherwise they
-# fall back to Xcode cloud signing through the ASC API key. The app declares
-# `ITSAppUsesNonExemptEncryption=false`; CI also patches reused builds that were
+# signing when the optional iOS signing secrets are configured; without those
+# optional secrets they use Xcode cloud signing through the ASC API key. The app
+# declares `ITSAppUsesNonExemptEncryption=false`; CI also patches reused builds that were
 # uploaded before that key existed so idempotent reruns can still distribute.
 # Dry-runs still create an unsigned IPA from the archive to validate package
 # layout without requiring Apple signing credentials.
@@ -1017,7 +1017,8 @@ jobs:
           groups_json="$RUNNER_TEMP/testflight-groups.json"
           groups_error="$RUNNER_TEMP/testflight-groups-error.log"
           # ASC CLI releases have exposed both command shapes; keep the
-          # compatibility path explicit while still failing if neither works.
+          # third-party command-shape variance explicit while still failing if
+          # neither works.
           if asc testflight beta-groups list \
               --app "$ASC_APP_ID" \
               --output json > "$groups_json" 2> "$groups_error"; then

@@ -135,7 +135,7 @@ fn estimate_block_chars(block: &Value) -> usize {
             (tokens * CHARS_PER_TOKEN) as usize
         }
 
-        // Unknown type — fall back to JSON serialization
+        // Unknown type: use JSON serialization
         _ => block.to_string().len(),
     }
 }

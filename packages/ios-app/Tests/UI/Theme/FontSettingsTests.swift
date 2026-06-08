@@ -296,7 +296,7 @@ struct FontSettingsTests {
     @Test func monoFamilyDefaultsToRecursiveForNonMonoFont() {
         let defaults = UserDefaults(suiteName: "FontSettingsTests.monoNonMono")!
         defaults.removePersistentDomain(forName: "FontSettingsTests.monoNonMono")
-        // Try to set a serif font as mono — should fall back to recursive
+        // Try to set a serif font as mono; should use recursive
         defaults.set(FontFamily.lora.rawValue, forKey: "monoFontFamily")
         let settings = FontSettings(defaults: defaults)
         #expect(settings.selectedMonoFamily == .recursive)

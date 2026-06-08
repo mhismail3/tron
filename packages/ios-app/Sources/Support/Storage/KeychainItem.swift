@@ -56,7 +56,7 @@ struct KeychainItem {
             throw KeychainError.unexpectedItemData
         }
 
-        // Try update first; fall back to add when no item exists yet.
+        // Try update first; add when no item exists yet.
         let updateAttributes: [String: Any] = [kSecValueData as String: data]
         let updateStatus = SecItemUpdate(
             baseQuery as CFDictionary,

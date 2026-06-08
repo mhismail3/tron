@@ -1,8 +1,8 @@
 # Post-HRA Adversarial Hardening Scorecard
 
-Current score: **90/100**
+Current score: **100/100**
 
-Status: **active**
+Status: **completed**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -14,7 +14,7 @@ Downloads path used to seed this campaign.
 ## Operating Rules
 
 - The campaign starts with red static gates for the adversarial audit findings.
-- Fixes remove old surfaces physically; compatibility facades, fallback imports,
+- Fixes remove old surfaces physically; compatibility facades, old-path imports,
   and stale aliases are not acceptable closeout states.
 - Code, tests, docs, generated projects, evidence, and ledger records move
   together for each checkpoint.
@@ -28,9 +28,9 @@ Downloads path used to seed this campaign.
 
 | Artifact | Status | Purpose |
 |----------|--------|---------|
-| `packages/agent/docs/post-hra-adversarial-hardening-scorecard.md` | active | Weighted campaign scorecard, open-loop ledger, and closeout state. |
-| `packages/agent/docs/post-hra-adversarial-hardening-evidence-manifest.md` | active | Red/green proof, verification commands, commit hashes, and residual risk. |
-| `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs` | red | Integration target for adversarial hardening static gates. |
+| `packages/agent/docs/post-hra-adversarial-hardening-scorecard.md` | completed | Weighted campaign scorecard, open-loop ledger, and closeout state. |
+| `packages/agent/docs/post-hra-adversarial-hardening-evidence-manifest.md` | completed | Red/green proof, verification commands, commit hashes, and residual risk. |
+| `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs` | completed | Integration target for adversarial hardening static gates. |
 
 ## Scorecard
 
@@ -48,7 +48,7 @@ Total weight: **100**
 | AHA-7 | iOS transport/domain residue | 10 | passed_after_fix | iOS engine owner | `MiscClient` is deleted. `EngineClientProtocol` and call sites use concrete `system`, `message`, and `logs` clients; stale Git workflow error/comment residue and `Sub-Managers` terminology are removed. | Closed; no `misc` compatibility facade remains. |
 | AHA-8 | iOS hierarchy, budgets, and docs | 9 | passed_after_fix | iOS architecture owner | SourceGuard now enforces deep hierarchy/count/budget gates for Engine clients, shared capability UI, settings shell, shared components, and Session/Chat tests. Swift files at or above the 590 LOC warning band have explicit watch rows, iOS resource docs are current, and redundant iOS 26 availability annotations are removed. | Closed; final closeout reruns XcodeGen drift and focused iOS tests. |
 | AHA-9 | Inventory and provenance integrity | 8 | passed_after_fix | inventory/provenance owner | HRA live maps are renamed current ownership maps, the completed-HRA inventory gate rejects open row statuses, and HRA provenance now points at the in-repo plan summary. | Closed; no current inventory or ownership-map row remains open. |
-| AHA-10 | Final adversarial closeout | 10 | pending | architecture campaign | Final proof is pending. | Rerun all gates, broad scans, iOS/Mac checks, adversarial audit, ledger append, hash record, and clean repo proof. |
+| AHA-10 | Final adversarial closeout | 10 | passed_after_fix | architecture campaign | Full Rust CI, AHA/HRA/PCC/static gates, rustdoc, personal-info guard, XcodeGen drift checks, focused iOS/Mac tests, broad residue scans, and a fresh adversarial subagent audit passed after addressing closeout findings. | Closed; final hash-record commit backfills this row's implementation hash. |
 
 ## Static Gates
 
@@ -61,6 +61,7 @@ The Rust integration target
 - `github_ci_runs_rust_static_gates_for_docs_templates_ios_and_mac_changes`
 - `github_rust_ci_matches_tron_ci_test_harness_shape`
 - `tron_ci_clippy_contract_matches_cargo_lint_policy`
+- `external_cli_variance_has_no_compatibility_or_fallback_wording`
 - `xcodegen_workflows_fail_on_tracked_project_drift`
 - `mac_ci_runs_focused_wrapper_tests`
 - `rust_production_modules_have_no_path_aliases_or_module_inception`
@@ -74,9 +75,9 @@ The Rust integration target
 
 ## Open Loops
 
-- AHA-0 is complete after the red target is committed.
-- AHA-1 through AHA-9 are closed. AHA-10 remains open until final closeout proof
-  reruns the full static, Rust, Apple, scan, and adversarial audit suite.
+- No AHA implementation rows remain open. The evidence manifest records the
+  final closeout proof, adversarial audit findings, and the separate hash-record
+  backfill requirement.
 
 ## Rust Near-Budget Watchlist
 

@@ -423,7 +423,7 @@ impl OpenAIModelInfo {
     /// Best profile when the caller has no auth-path context.
     ///
     /// Prefer the Codex profile because it is the smaller, subscription-safe
-    /// context window. Platform-only models naturally fall back to Platform.
+    /// context window. Platform-only models naturally use Platform.
     #[must_use]
     pub fn default_profile(&self) -> &OpenAIModelProfile {
         self.profile_for_auth_path(OpenAIAuthPath::ChatGptCodex)

@@ -20,7 +20,7 @@ struct ServerPingDecodeTests {
         #expect(info.paired == true)
     }
 
-    @Test("missing optional fields fall back to defaults")
+    @Test("missing optional fields use defaults")
     func missingOptionalFields() throws {
         let body = """
         {"type":"response","id":"mac-system-ping","ok":true,"result":{"child":{"value":{}}}}

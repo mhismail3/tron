@@ -144,7 +144,7 @@ struct BindingPasteAwareTests {
     func partialOrMalformedPairURLFallsThrough() {
         // The fast-path string check matches `"tron://pair"`, so the
         // parser runs — but the parser rejects this (port is invalid).
-        // That MUST fall back to writing the literal so the user can keep
+        // That MUST write the literal so the user can keep
         // editing. (In practice the user would never type this exactly,
         // but the safety property matters: a bad parse must not silently
         // drop the keystroke.)

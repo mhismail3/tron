@@ -1,8 +1,8 @@
 # Post-HRA Adversarial Hardening Evidence Manifest
 
-Current score: **90/100**
+Current score: **100/100**
 
-Status: **active**
+Status: **completed**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -25,8 +25,8 @@ known audit findings are covered by executable proof.
 | AHA-6 | passed_after_fix | Added progressive docs for the AHA-5 ownership roots, added explicit 850 LOC watch rows for all current Rust files at or above the warning band, replaced stale HRA temporary-budget wording with the current hard-limit/watch-band contract, and refreshed HRA/PCC machine-readable inventories for the moved Rust ownership paths. | The AHA near-budget row gate, progressive-doc ownership-root gate, HRA inventory coverage gate, and PCC inventory coverage gate passed. | Closed; the 900 LOC HRA hard limit remains enforced separately. | `ebd37a6b7` |
 | AHA-7 | passed_after_fix | Deleted `MiscClient`, added concrete `SystemClient`, `MessageClient`, and `LogsClient`, changed `EngineClientProtocol` and call sites from `misc` to `system`/`message`/`logs`, removed stale Git workflow error/comment residue, and renamed the chat `Sub-Managers` marker to coordinator terminology. | AHA misc-facade and iOS transport residue gates passed after the client split. Focused iOS client tests cover system ping, message delete context, and log recent/ingest behavior. | Closed; no compatibility `misc` facade remains. | `b3c0e96bb` |
 | AHA-8 | passed_after_fix | Added SourceGuard deep hierarchy/count/budget gates for `Engine/Transport/Clients`, `UI/Capabilities/Shared`, `UI/Settings/Shell`, `UI/Components`, and `Tests/Session/Chat`; added Swift 590 LOC watch rows; refreshed root/iOS docs for actual resources and concrete engine clients; removed redundant iOS 26 availability annotations. | SourceGuard budget/availability tests and the AHA SourceGuard gate passed. XcodeGen regenerated the project and tracked project drift was checked. | Closed; final closeout still reruns focused iOS/Mac and full static proof. | `b3c0e96bb` |
-| AHA-9 | passed_after_fix | Renamed live HRA identity maps to current ownership maps, added an in-repo HRA plan summary, redirected HRA provenance to that summary, refreshed HRA/PCC inventories, and tightened completed-score inventory gates for the global and iOS TSV status columns. | HRA inventory coverage, completed-status, iOS ownership-map, AHA provenance, PCC inventory, personal-info, and residue scans pass after this checkpoint. | Closed; the AHA-9 implementation checkpoint hash is recorded in the ledger and will be backfilled in the final hash-record update. | pending |
-| AHA-10 | pending | Not started. | Pending. | Final closeout proof remains pending. | pending |
+| AHA-9 | passed_after_fix | Renamed live HRA identity maps to current ownership maps, added an in-repo HRA plan summary, redirected HRA provenance to that summary, refreshed HRA/PCC inventories, and tightened completed-score inventory gates for the global and iOS TSV status columns. | HRA inventory coverage, completed-status, iOS ownership-map, AHA provenance, PCC inventory, personal-info, and residue scans pass after this checkpoint. | Closed. | `0cde80d2c` |
+| AHA-10 | passed_after_fix | Ran final full closeout proof, addressed adversarial audit blockers, removed ASC command-shape wording flagged by the audit, tightened source-identity guarding for the plain developer username, updated scorecard/evidence/README to completed, and recorded the remaining hash-record backfill step. | Full Rust CI, AHA/HRA/PCC gates, rustdoc, personal-info guard, XcodeGen drift checks, focused iOS/Mac tests, generated-junk scan, broad residue scans, and fresh adversarial subagent audit proof are recorded below. | Closed; this implementation checkpoint cannot contain its own hash, so a separate hash-record commit backfills this row. | pending |
 
 ## AHA-0 Red Proof
 
@@ -75,8 +75,9 @@ Red findings covered by executable gates:
 
 ## Residual Risk Log
 
-- The target is intentionally red after AHA-0. Each later phase must update this
-  manifest with the green proof that closes its own red findings.
+- No AHA implementation rows remain open. The AHA-10 implementation commit
+  cannot contain its own hash; the required hash-record backfill commit records
+  the AHA-10 implementation hash after this checkpoint exists.
 
 ## AHA-1 Verification
 
@@ -300,6 +301,58 @@ cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial
 
 Result: exit 0, 1 passed.
 
+## AHA-7 Verification
+
+iOS transport/domain residue cleanup:
+
+- Deleted `MiscClient` and moved the remaining methods to concrete
+  `SystemClient`, `MessageClient`, and `LogsClient` owners.
+- Updated `EngineClientProtocol` and call sites to use `system`, `message`, and
+  `logs` instead of `misc`.
+- Removed stale Git workflow error-code cases, stale sheet comment wording, and
+  `Sub-Managers` terminology from live iOS source.
+
+Proof:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants ios_engine_clients_have_no_misc_facade -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants ios_transport_domain_residue_is_removed -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+Focused iOS client tests for system ping/info, message deletion, log recent,
+log ingestion, diagnostics, and protocol decoding passed in the AHA-7/AHA-8
+checkpoint and again in the AHA-10 focused iOS closeout batch.
+
+## AHA-8 Verification
+
+iOS hierarchy, budgets, and docs cleanup:
+
+- Added SourceGuard deep hierarchy/count/budget gates for Engine transport
+  clients, shared capability UI, settings shell, shared components, and
+  Session/Chat tests.
+- Added Swift 590 LOC near-budget rows to the AHA scorecard.
+- Refreshed iOS/root docs for actual resources and concrete engine clients.
+- Removed redundant `@available(iOS 26.0, *)` annotations covered by the
+  deployment target.
+
+Proof:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants ios_sourceguard_has_deep_hierarchy_and_budget_gates -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+The AHA-10 focused iOS closeout batch reran `SourceGuardTests` with the client,
+diagnostics, and protocol suites and passed 58 Swift Testing tests.
+
 ## AHA-9 Verification
 
 Inventory and provenance integrity cleanup:
@@ -356,3 +409,91 @@ Result: exit 0.
 Direct scans for the old HRA external-plan filename, old move-map artifact
 filenames, the old iOS move-map guard name, and open TSV statuses returned no
 hits in live HRA docs, README links, and HRA tests.
+
+## AHA-10 Verification
+
+Final adversarial closeout:
+
+- Full Rust CI passed with formatting, check, Clippy under the Cargo lint
+  policy, 2920 library tests, 13 `db_path_guard` tests, 27 PET tests, 16 PCC
+  tests, 35 HRA tests, 3 primitive trace tests, and 2 serial integration tests.
+- The AHA invariant target passed 17 tests after adding the ASC command-shape wording
+  guard and updating the formalized scorecard/evidence state to `100/100`
+  completed.
+- Rustdoc passed with `RUSTDOCFLAGS='-D warnings'`.
+- Full personal-info guard passed after source-identity cleanup removed plain
+  developer-username residue from product source and expanded the guard to ban
+  the plain username outside regression-guard files.
+- iOS and Mac XcodeGen runs produced no tracked project drift.
+- Focused iOS SourceGuard/client/diagnostics/protocol tests passed 58 Swift
+  Testing tests; focused Mac path/status/Tailscale tests passed.
+- A fresh adversarial subagent audit reported closeout blockers. This checkpoint
+  fixed them by closing AHA-10 artifacts/tests, backfilling AHA-9's hash,
+  adding AHA-7/AHA-8 detail sections, removing ASC command-shape wording flagged
+  by the audit, and removing plain developer-username product-source residue.
+- Broad scans for old HRA move-map/external-plan names, iOS misc facade residue,
+  stale Git workflow residue, redundant iOS 26 availability annotations, plain
+  developer username residue, tracked generated junk, and open HRA TSV statuses
+  returned no live-source blockers after the fixes. Remaining retired-term hits
+  are historical evidence rows or static absence-test needles.
+
+Proof:
+
+```bash
+scripts/tron ci fmt check clippy test
+```
+
+Result: exit 0.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants -- --nocapture
+```
+
+Result: exit 0, 17 passed.
+
+```bash
+RUSTDOCFLAGS='-D warnings' cargo doc --manifest-path packages/agent/Cargo.toml --workspace --no-deps
+```
+
+Result: exit 0.
+
+```bash
+scripts/personal-info-guard.sh
+```
+
+Result: exit 0.
+
+```bash
+cd packages/ios-app && xcodegen generate
+git diff --exit-code packages/ios-app/TronMobile.xcodeproj
+```
+
+Result: exit 0.
+
+```bash
+cd packages/mac-app && xcodegen generate
+git diff --exit-code packages/mac-app/TronMac.xcodeproj
+```
+
+Result: exit 0.
+
+```bash
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/SystemClientTests -only-testing:TronMobileTests/MessageClientTests -only-testing:TronMobileTests/LogsClientTests -only-testing:TronMobileTests/ClientLogIngestionServiceTests -only-testing:TronMobileTests/DiagnosticsBundleBuilderTests -only-testing:TronMobileTests/EngineProtocolTypesTests
+```
+
+Result: exit 0, 58 Swift Testing tests passed. xcresult:
+`/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.08_11-38-45--0700.xcresult`.
+
+```bash
+TRON_MAC_TEST_HOST=1 xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS,arch=$(uname -m)' -configuration Debug -only-testing:TronMacTests/TronPathsTests -only-testing:TronMacTests/ServerStatusPollerTests -only-testing:TronMacTests/TailscaleProbeTests CODE_SIGN_IDENTITY='-' CODE_SIGN_STYLE=Manual -quiet
+```
+
+Result: exit 0.
+
+```bash
+git diff --check
+git ls-files | rg -n '(^|/)(\\.DS_Store|Thumbs\\.db|__pycache__|\\.pytest_cache|DerivedData|xcuserdata|\\.swp$|\\.tmp$)'
+```
+
+Result: `git diff --check` exited 0; tracked generated-junk scan exited 1 with
+no matches.

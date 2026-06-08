@@ -9,7 +9,8 @@ fn home_dir_returns_env_var() {
 #[test]
 fn paths_source_has_no_hardcoded_user_directory() {
     let src = include_str!("../mod.rs");
-    let needle = format!("/Users/{}", "moose");
+    let developer_username = ["m", "oo", "se"].concat();
+    let needle = format!("/Users/{developer_username}");
     assert!(
         !src.contains(&needle),
         "hardcoded user path leaked back into paths.rs"
@@ -20,7 +21,7 @@ fn paths_source_has_no_hardcoded_user_directory() {
 fn cargo_pkg_repository_has_no_personal_handle() {
     let repo = env!("CARGO_PKG_REPOSITORY");
     let needles = [
-        format!("/{}/", "moose"),
+        format!("/{}/", ["m", "oo", "se"].concat()),
         format!("{}{}{}", "mh", "is", "mail"),
     ];
     for needle in needles {

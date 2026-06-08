@@ -258,7 +258,7 @@ struct PairingValidationTests {
         // Defensive: an unclassified error still reads as a connect failure
         // to the user. This keeps the inline error never blank.
         if case .unreachable = classified { /* ok */ } else {
-            Issue.record("unknown error should fall back to unreachable: got \(classified)")
+            Issue.record("unknown error should classify as unreachable: got \(classified)")
         }
     }
 }

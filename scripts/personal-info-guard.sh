@@ -4,21 +4,15 @@
 # Scans the source tree for high-impact patterns that would break or embarrass
 # when shipped to a different user:
 #
-#   /Users/moose           — raw filesystem path that won't exist for other users
-#   -Users-moose-          — Claude-Code-encoded form of the same path
-#   github.com/moose       — personal GitHub handle
+#   /Users/<developer>     — raw filesystem path that won't exist for other users
+#   -Users-<developer>-    — Claude-Code-encoded form of the same path
+#   github.com/<developer> — personal GitHub handle
 #   mhismail3              — personal GitHub handle, including split-string forms
 #   mhismail.com           — personal feedback domain
-#   e.g. moose@            — placeholder / example text leaking the username
+#   bare developer username in product source, docs, or examples
 #
-# These differ from intentional uses of "moose":
-#   - paths.rs constructs needles from string parts as part of the regression
-#     guard (`format!("/Users/{}", "moose")`) — that's the test, not a leak.
-#   - auth_tests.rs uses literals like "moose@macbook" as test fixtures.
-#   - ContentView.swift comments mention "Circuit moose logo" (internal name).
-#   - paths tests construct split personal-info needles as regression guards.
-#
-# Allowlist below covers those intentional cases. Everything else is a fail.
+# The guard constructs the developer-username needle from fragments so the guard
+# itself does not normalize the source-identity string it bans.
 #
 # Exit codes: 0 = clean, 1 = offenders found, 2 = setup error.
 #
@@ -31,28 +25,27 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+DEV_USER='m''oose'
+DEV_USER_ENCODED='-Users-'"$DEV_USER"'-'
+
 # Patterns to ban. Each line: <regex>|<short description>
 PATTERNS=(
-    '/Users/moose|raw home path; should be /Users/<USER> or use paths.rs helpers'
-    '\-Users\-moose\-|Claude-Code encoded developer path'
-    'github\.com/moose|personal GitHub handle'
+    "/Users/${DEV_USER}|raw home path; should be /Users/<USER> or use paths.rs helpers"
+    "${DEV_USER_ENCODED}|Claude-Code encoded developer path"
+    "github\\.com/${DEV_USER}|personal GitHub handle"
+    "\\b${DEV_USER}\\b|plain developer username; use generic product/source wording"
     'mhismail3|personal GitHub handle; use a generic placeholder or configured repository URL'
     'mhismail\.com|personal domain; use configured feedback recipient'
-    'e\.g\. moose@|placeholder text leaking developer username'
-    '"moose@iphone"|hardcoded example matching developer device'
     '"mh"[[:space:]]*\+[[:space:]]*"is"[[:space:]]*\+[[:space:]]*"mail"|split personal handle construction'
     '"mh"[[:space:]]*,[[:space:]]*"is"[[:space:]]*,[[:space:]]*"mail"|split personal handle regression needle outside allowlisted tests'
     '"tron@"[[:space:]]*\+[[:space:]]*"mh"|split personal feedback email construction'
 )
 
-# Files / directories that may legitimately contain "moose" (test fixtures,
-# regression-guard needle construction, internal nicknames). Each entry is
-# matched as a glob against the file path relative to repo root.
+# Regression-guard files construct personal-info needles from fragments. Each
+# entry is matched as a glob against the file path relative to repo root.
 ALLOWLIST_PATHS=(
     'packages/agent/src/shared/foundation/paths/mod.rs'
     'packages/agent/src/shared/foundation/paths/tests.rs'
-    'packages/agent/src/domains/auth/**'
-    'packages/ios-app/Sources/UI/Chat/Shell/ContentView.swift'
     'scripts/personal-info-guard.sh'
     '.git/*'
     'target/*'

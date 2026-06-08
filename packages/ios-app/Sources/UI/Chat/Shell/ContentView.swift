@@ -262,7 +262,7 @@ struct ContentView: View {
             ZStack(alignment: .bottomTrailing) {
                 // Centered content - positioned higher to match WelcomePage
                 VStack(spacing: 16) {
-                    // Circuit moose logo
+                    // Circuit logo
                     Image("TronLogo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)
@@ -431,7 +431,7 @@ struct WelcomePage: View {
             ZStack(alignment: .bottomTrailing) {
                 // Centered content - positioned higher
                 VStack(spacing: 16) {
-                    // Circuit moose logo
+                    // Circuit logo
                     Image("TronLogo")
                         .resizable()
                         .aspectRatio(contentMode: .fit)

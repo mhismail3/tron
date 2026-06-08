@@ -8,8 +8,8 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
 
     for required in [
         "# Post-HRA Adversarial Hardening Scorecard",
-        "Current score: **90/100**",
-        "Status: **active**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "Total weight: **100**",
         "AHA-0 | Scorecard, evidence, and red-gate setup | 5 | passed_after_fix",
         "AHA-1 | Personal-info and source identity cleanup | 12 | passed_after_fix",
@@ -21,7 +21,8 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
         "AHA-7 | iOS transport/domain residue | 10 | passed_after_fix",
         "AHA-8 | iOS hierarchy, budgets, and docs | 9 | passed_after_fix",
         "AHA-9 | Inventory and provenance integrity | 8 | passed_after_fix",
-        "AHA-10 | Final adversarial closeout | 10 | pending",
+        "AHA-10 | Final adversarial closeout | 10 | passed_after_fix",
+        "external_cli_variance_has_no_compatibility_or_fallback_wording",
         "## Static Gates",
     ] {
         assert!(
@@ -48,8 +49,8 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
 
     for required in [
         "# Post-HRA Adversarial Hardening Evidence Manifest",
-        "Current score: **90/100**",
-        "Status: **active**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "| AHA-0 | passed_after_fix |",
         "| AHA-1 | passed_after_fix |",
         "| AHA-2 | passed_after_fix |",
@@ -60,7 +61,8 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
         "| AHA-7 | passed_after_fix |",
         "| AHA-8 | passed_after_fix |",
         "| AHA-9 | passed_after_fix |",
-        "| AHA-10 | pending |",
+        "| AHA-10 | passed_after_fix |",
+        "## AHA-10 Verification",
         "## AHA-0 Red Proof",
         "## Residual Risk Log",
     ] {

@@ -120,7 +120,7 @@ Current living entry points:
 - `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md`:
   companion evidence manifest for the completed hierarchical rearchitecture
   scorecard.
-- `packages/agent/docs/post-hra-adversarial-hardening-scorecard.md`: active
+- `packages/agent/docs/post-hra-adversarial-hardening-scorecard.md`: completed
   closeout campaign for adversarial audit findings after hierarchical
   rearchitecture completion.
 - `packages/agent/docs/post-hra-adversarial-hardening-evidence-manifest.md`:
@@ -148,7 +148,7 @@ Current living entry points:
 - `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: completed
   hierarchy scorecard, inventory, path-shape, broad-bucket, mirrored-test, and
   large-file-budget gates.
-- `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs`: active
+- `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs`: completed
   post-HRA adversarial hardening gates for source identity, deleted-doc
   residue, CI parity, Rust ownership, iOS transport, inventory, and provenance.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
@@ -156,7 +156,7 @@ Current living entry points:
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-active AHA scorecard.
+completed AHA scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1138,7 +1138,7 @@ End-users install `Tron.app` via a notarized DMG published to GitHub Releases. R
 4. Install XcodeGen + `create-dmg`.
 5. `packages/mac-app/scripts/bundle-agent.sh --skip-build` stages `packages/agent/target/release/tron` into both bundled helpers (`Tron Server.app` and `Tron Server Dev.app`) and writes both LaunchAgent plists.
 6. `xcodegen generate` inside `packages/mac-app/`.
-7. Create an isolated release keychain from the signing/notarization secrets, or fall back to dry-run ad-hoc signing when secrets are absent.
+7. Create an isolated release keychain from the signing/notarization secrets, or use dry-run ad-hoc signing when secrets are absent.
 8. `xcodebuild archive` with `-scheme TronMac -configuration Release`.
 9. Verify the bundled helper app, both helper executables, LaunchAgent plist, and profile defaults are present in the archive.
 10. Sign the helper apps first, then sign `Tron.app` with hardened runtime + `TronMac.entitlements`; verify inside-out signatures before DMG packaging.

@@ -33,11 +33,11 @@ function recolorSvg(fromColor, toColor) {
 }
 
 async function generateAppIcon(svgString, bgColor, outputPath, size = 1024) {
-  const mooseSize = Math.round(size * 0.75);
-  const offset = Math.round((size - mooseSize) / 2);
+  const logoSize = Math.round(size * 0.75);
+  const offset = Math.round((size - logoSize) / 2);
 
-  const moose = await sharp(Buffer.from(svgString))
-    .resize(mooseSize, mooseSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+  const logo = await sharp(Buffer.from(svgString))
+    .resize(logoSize, logoSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .png()
     .toBuffer();
 
@@ -48,7 +48,7 @@ async function generateAppIcon(svgString, bgColor, outputPath, size = 1024) {
   await sharp({
     create: { width: size, height: size, channels: 4, background: { r, g, b, alpha: 1 } },
   })
-    .composite([{ input: moose, top: offset, left: offset }])
+    .composite([{ input: logo, top: offset, left: offset }])
     .png()
     .toFile(outputPath);
 }
@@ -70,15 +70,15 @@ function generateTemplateSvg(outputPath) {
 }
 
 async function generateDepthLayer(svgString, size, outputPath) {
-  const mooseSize = Math.round(size * 0.7);
+  const logoSize = Math.round(size * 0.7);
 
   await sharp(Buffer.from(svgString))
-    .resize(mooseSize, mooseSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
+    .resize(logoSize, logoSize, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .extend({
-      top: Math.round((size - mooseSize) / 2),
-      bottom: size - mooseSize - Math.round((size - mooseSize) / 2),
-      left: Math.round((size - mooseSize) / 2),
-      right: size - mooseSize - Math.round((size - mooseSize) / 2),
+      top: Math.round((size - logoSize) / 2),
+      bottom: size - logoSize - Math.round((size - logoSize) / 2),
+      left: Math.round((size - logoSize) / 2),
+      right: size - logoSize - Math.round((size - logoSize) / 2),
       background: { r: 0, g: 0, b: 0, alpha: 0 },
     })
     .png()
@@ -122,11 +122,11 @@ async function main() {
 
   console.log("Generating app icons...");
 
-  // Production icon: emerald moose on cream (iOS auto-generates dark variant)
+  // Production icon: emerald logo on cream (iOS auto-generates dark variant)
   const deepEmeraldSvg = recolorSvg(ORIGINAL_FILL, "#059669");
   await generateAppIcon(deepEmeraldSvg, BG.cream, join(ASSETS, "AppIcon.appiconset", "icon-1024.png"));
 
-  // Beta icon: white moose on amber bg (iOS auto-generates dark/tinted)
+  // Beta icon: white logo on amber bg (iOS auto-generates dark/tinted)
   await generateAppIcon(whiteSvg, COLORS.amber, join(ASSETS, "AppIconBeta.appiconset", "icon-1024-beta.png"));
 
   console.log("Generating in-app raster logos...");

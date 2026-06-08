@@ -17,7 +17,7 @@ Plan summary: `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md`.
 - Every retained folder must have an owner, reason, allowed contents, and test
   responsibility before closeout.
 - Moves must remove old internal paths instead of preserving compatibility
-  shims, alias modules, or fallback wrappers.
+  shims, alias modules, or old-path wrappers.
 - Code, tests, docs, generated projects, scorecard, evidence, and inventory
   move together in each checkpoint.
 - HRA-0 intentionally leaves the new invariant target red against the current

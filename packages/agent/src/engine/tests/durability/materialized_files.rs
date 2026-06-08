@@ -55,7 +55,7 @@ async fn materialized_file_update_resolves_relative_paths_with_runtime_working_d
     );
     assert!(
         !std::path::Path::new(&relative).exists(),
-        "relative materialized paths must not fall back to the server cwd when runtime working directory is present"
+        "relative materialized paths must not use the server cwd when runtime working directory is present"
     );
 }
 

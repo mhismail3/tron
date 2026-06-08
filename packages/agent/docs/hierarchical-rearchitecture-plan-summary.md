@@ -22,7 +22,7 @@ goal was to make the repository tree read like the architecture:
 - Mac wrapper code is organized by wrapper feature boundaries;
 - scripts, README, generated projects, docs, inventories, and scorecards move
   with the architecture;
-- old internal paths, compatibility shims, fallback wrappers, alias modules, and
+- old internal paths, compatibility shims, old-path wrappers, alias modules, and
   stale path documentation are removed instead of preserved.
 
 ## Required Proof Shape

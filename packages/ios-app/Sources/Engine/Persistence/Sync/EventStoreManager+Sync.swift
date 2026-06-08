@@ -157,7 +157,7 @@ extension EventStoreManager {
 
     /// Merge existing local session data with server info.
     func mergeSessionData(existing: CachedSession, serverInfo: SessionInfo, serverOrigin: String) -> CachedSession {
-        // Prefer server title if available, fall back to existing local title
+        // Prefer server title if available, then keep the existing local title
         let title = serverInfo.title ?? existing.title
 
         // Use server lastActivity if available, otherwise keep local

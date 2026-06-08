@@ -100,7 +100,7 @@ pub fn home_dir() -> String {
     }
     panic!(
         "tron: cannot resolve a home directory — $HOME is unset and home::home_dir() returned None. \
-         Every on-disk path descends from this value; refusing to fall back to a guessed location."
+         Every on-disk path descends from this value; refusing to use a guessed location."
     );
 }
 

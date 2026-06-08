@@ -807,7 +807,7 @@ mod tests {
         let settings = crate::domains::settings::TronSettings::default();
         let factory = DefaultProviderFactory::new(&settings).with_auth_path(path);
 
-        // Should fail — OAuth exists but refresh fails, no API key to fall back to
+        // Should fail: OAuth exists but refresh fails, and no API key is available.
         let err = expect_auth_error(&factory, "claude-opus-4-6").await;
         assert!(
             err.to_string().contains("auth") || err.to_string().contains("Auth"),

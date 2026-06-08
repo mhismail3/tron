@@ -404,7 +404,7 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
 
     assert!(
         body.contains("attempting public-link auto-discovery"),
-        "stale public TestFlight group config should fall back to ASC public-link discovery"
+        "stale public TestFlight group config should use ASC public-link discovery"
     );
     assert!(
         body.contains("no public TestFlight group id resolved; skipping API group assignment"),

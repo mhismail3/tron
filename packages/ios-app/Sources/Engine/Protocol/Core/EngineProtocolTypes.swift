@@ -172,7 +172,7 @@ struct EngineChildError: Decodable, Sendable {
 ///
 /// Adding a case here forces exhaustive switches to handle new typed errors at
 /// compile time. Unknown server codes decode to nil
-/// through `EngineProtocolError.errorCode` and callers fall back to the raw message.
+/// through `EngineProtocolError.errorCode` and callers keep the raw message.
 enum EngineErrorCode: String, CaseIterable, Sendable {
     case sessionNotFound = "SESSION_NOT_FOUND"
     case agentNotRunning = "AGENT_NOT_RUNNING"

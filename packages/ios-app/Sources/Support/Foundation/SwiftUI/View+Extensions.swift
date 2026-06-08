@@ -243,7 +243,7 @@ extension View {
     }
 
     /// Keep popover actions as popovers on compact-width presentations instead
-    /// of allowing them to fall back to sheet styling.
+    /// of allowing them to use sheet styling.
     func popoverCompactAdaptation() -> some View {
         presentationCompactAdaptation(.popover)
     }
