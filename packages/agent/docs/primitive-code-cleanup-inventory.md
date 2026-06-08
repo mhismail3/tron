@@ -6,6 +6,8 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
+Last updated: 2026-06-08 during `PCC-3` dependency cleanup.
+
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
 
@@ -37,9 +39,9 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `retain` | 686 | Current package/config/test/doc boundaries |
 | `collapse` | 551 | Cleanup rows PCC-3 through PCC-9 |
 | `asset` | 74 | iOS/Mac resources and benchmark baselines |
-| `delete` | 21 | PCC-3/PCC-4/PCC-9 delete candidates |
+| `delete` | 11 | PCC-4/PCC-9 delete candidates |
 | `generated` | 7 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1339** | Whole repo |
+| **Total** | **1329** | Whole repo |
 
 ## Current Tracked Package Counts
 
@@ -122,11 +124,12 @@ The inventory classifies these tracked files as `delete` for later proof rows:
 
 | Path family | Files | Owning row | Reason |
 |-------------|-------|------------|--------|
-| `packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/` | 10 | PCC-3/PCC-4 | Retired capability-search asset bundle unless the dependency audit proves a retained primitive still uses it. |
 | `packages/agent/examples/local-packs/` | 11 | PCC-4/PCC-9 | Old local-pack examples are not primitive runtime source unless host infrastructure docs/tests prove otherwise. |
 
-No files were deleted in PCC-1. PCC-3/PCC-4/PCC-9 must either delete these
-families or revise their classification with direct evidence.
+No files were deleted in PCC-1. During PCC-3, the retired capability-search
+asset bundle was deleted after source and lockfile audits proved no retained
+primitive used it. PCC-4/PCC-9 must either delete the remaining local-pack
+family or revise its classification with direct evidence.
 
 ## Collapse-Audit Hotspots
 
@@ -143,7 +146,7 @@ families or revise their classification with direct evidence.
 ## Open Loops
 
 - 551 files are still `collapse` until their owning cleanup rows run.
-- 21 files are `delete` candidates and intentionally remain in place until
+- 11 files are `delete` candidates and intentionally remain in place until
   their owning rows prove deletion.
 - The target tree is canonical for future moves, but Xcode project files must
   be regenerated from `project.yml` after iOS or Mac source moves.

@@ -23,16 +23,6 @@ VERSION.env	retain	repo configuration	PCC-2/PCC-8	Root configuration or release 
 packages/agent/.gitignore	retain	rust package config	PCC-3	Rust package configuration and lock boundary
 packages/agent/Cargo.lock	generated	rust package config	PCC-3	Rust package configuration and lock boundary
 packages/agent/Cargo.toml	retain	rust package config	PCC-3	Rust package configuration and lock boundary
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/LICENSE-APACHE-2.0.txt	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/README.md	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/SOURCE.md	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/config.json	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/model.onnx	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/model.sha256	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/special_tokens_map.json	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/tokenizer.json	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/tokenizer_config.json	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
-packages/agent/assets/capability-search/embeddings/all-MiniLM-L6-v2/vocab.txt	delete	retired capability-search asset	PCC-3/PCC-4	Delete unless dependency audit proves retained primitive use
 packages/agent/defaults/profiles/active.toml	retain	profile defaults	PCC-3/PCC-7	Bundled settings/profile defaults used by server and Mac wrapper
 packages/agent/defaults/profiles/auth.json	retain	profile defaults	PCC-3/PCC-7	Bundled settings/profile defaults used by server and Mac wrapper
 packages/agent/defaults/profiles/auth.toml	retain	profile defaults	PCC-3/PCC-7	Bundled settings/profile defaults used by server and Mac wrapper
@@ -41,10 +31,10 @@ packages/agent/defaults/profiles/default/profile.toml	retain	profile defaults	PC
 packages/agent/defaults/profiles/local/profile.toml	retain	profile defaults	PCC-3/PCC-7	Bundled settings/profile defaults used by server and Mac wrapper
 packages/agent/defaults/profiles/normal/profile.toml	retain	profile defaults	PCC-3/PCC-7	Bundled settings/profile defaults used by server and Mac wrapper
 packages/agent/defaults/profiles/user/profile.toml	retain	profile defaults	PCC-3/PCC-7	Bundled settings/profile defaults used by server and Mac wrapper
-packages/agent/docs/primitive-code-cleanup-evidence-manifest.md	retain	cleanup scorecard	PCC-0/PCC-1	Active cleanup scorecard and evidence
-packages/agent/docs/primitive-code-cleanup-file-inventory.tsv	retain	cleanup inventory	PCC-1	Inventory artifact required before structural cleanup
-packages/agent/docs/primitive-code-cleanup-inventory.md	retain	cleanup inventory	PCC-1	Inventory artifact required before structural cleanup
-packages/agent/docs/primitive-code-cleanup-scorecard.md	retain	cleanup scorecard	PCC-0/PCC-1	Active cleanup scorecard and evidence
+packages/agent/docs/primitive-code-cleanup-evidence-manifest.md	retain	cleanup scorecard	PCC-0/PCC-1/PCC-3	Active cleanup scorecard and evidence
+packages/agent/docs/primitive-code-cleanup-file-inventory.tsv	retain	cleanup inventory	PCC-1/PCC-3	Inventory artifact required before structural cleanup
+packages/agent/docs/primitive-code-cleanup-inventory.md	retain	cleanup inventory	PCC-1/PCC-3	Inventory artifact required before structural cleanup
+packages/agent/docs/primitive-code-cleanup-scorecard.md	retain	cleanup scorecard	PCC-0/PCC-1/PCC-3	Active cleanup scorecard and evidence
 packages/agent/docs/primitive-engine-teardown-evidence-manifest.md	retain	teardown evidence	PCC-9	Historical primitive teardown proof retained as evidence
 packages/agent/docs/primitive-engine-teardown-inventory.md	retain	teardown evidence	PCC-9	Historical primitive teardown proof retained as evidence
 packages/agent/docs/primitive-engine-teardown-scorecard.md	retain	teardown evidence	PCC-9	Historical primitive teardown proof retained as evidence

@@ -77,7 +77,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "Total weight: **100**",
         "| PCC-1 | Inventory and folder justification | 12 | passed_after_fix |",
         "| PCC-2 | Root and generated artifact hygiene | 5 | passed_after_fix |",
-        "PCC-3 starts Rust agent consolidation.",
+        "| PCC-3 | Rust agent consolidation | 18 | running |",
+        "Continue PCC-3 with the small-domain collapse audit:",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -94,6 +95,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
         "| PCC-2 | passed_after_fix |",
+        "| PCC-3 | running |",
     ] {
         assert!(
             manifest.contains(required),
@@ -340,4 +342,38 @@ fn project_gitignore_covers_recurring_local_artifacts() {
             "root .gitignore must cover recurring local artifact pattern `{pattern}`"
         );
     }
+}
+
+#[test]
+fn rust_dead_dependency_artifacts_stay_removed() {
+    let cargo_toml = read_repo_file("packages/agent/Cargo.toml");
+    let cargo_lock = read_repo_file("packages/agent/Cargo.lock");
+
+    for banned in [
+        "fastembed",
+        "sqlite-vec",
+        "rquickjs",
+        "rquickjs-serde",
+        "resvg",
+    ] {
+        assert!(
+            !cargo_toml.contains(banned),
+            "Cargo.toml must not reintroduce dead dependency `{banned}`"
+        );
+        assert!(
+            !cargo_lock.contains(banned),
+            "Cargo.lock must not retain dead dependency `{banned}`"
+        );
+    }
+
+    assert!(
+        !cargo_toml.contains("\nimage = ") && !cargo_lock.contains("name = \"image\""),
+        "standalone image conversion dependency must stay removed"
+    );
+
+    let retired_asset = repo_path("packages/agent/assets/capability-search");
+    assert!(
+        !retired_asset.exists(),
+        "retired capability-search asset bundle must stay deleted"
+    );
 }
