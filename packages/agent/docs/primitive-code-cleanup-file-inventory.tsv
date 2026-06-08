@@ -164,9 +164,6 @@ packages/agent/src/domains/auth/provider_credentials/storage/tests.rs	retain	rus
 packages/agent/src/domains/auth/provider_credentials/types.rs	retain	rust auth domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/auth/stream.rs	retain	rust auth domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/bindings.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
-packages/agent/src/domains/blob/contract.rs	collapse	rust blob domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/blob/deps.rs	collapse	rust blob domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/blob/handlers.rs	collapse	rust blob domain	PCC-3	Small retained domain should collapse if behavior remains small
 packages/agent/src/domains/blob/mod.rs	collapse	rust blob domain	PCC-3	Small retained domain should collapse if behavior remains small
 packages/agent/src/domains/capability/contract.rs	collapse	rust capability domain	PCC-3	Small retained domain should collapse if behavior remains small
 packages/agent/src/domains/capability/deps.rs	collapse	rust capability domain	PCC-3	Small retained domain should collapse if behavior remains small
@@ -176,13 +173,7 @@ packages/agent/src/domains/capability/operations/mod.rs	collapse	rust capability
 packages/agent/src/domains/catalog.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
 packages/agent/src/domains/contract.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
 packages/agent/src/domains/logs/client_logs.rs	collapse	rust logs domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/logs/contract.rs	collapse	rust logs domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/logs/deps.rs	collapse	rust logs domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/logs/handlers.rs	collapse	rust logs domain	PCC-3	Small retained domain should collapse if behavior remains small
 packages/agent/src/domains/logs/mod.rs	collapse	rust logs domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/message/contract.rs	collapse	rust message domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/message/deps.rs	collapse	rust message domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/message/handlers.rs	collapse	rust message domain	PCC-3	Small retained domain should collapse if behavior remains small
 packages/agent/src/domains/message/mod.rs	collapse	rust message domain	PCC-3	Small retained domain should collapse if behavior remains small
 packages/agent/src/domains/mod.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
 packages/agent/src/domains/model/catalog.rs	retain	rust model domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
@@ -365,9 +356,6 @@ packages/agent/src/domains/settings/implementation/types/mod.rs	retain	rust sett
 packages/agent/src/domains/settings/implementation/types/server.rs	retain	rust settings domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/settings/implementation/types/ui.rs	retain	rust settings domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/settings/mod.rs	retain	rust settings domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
-packages/agent/src/domains/system/contract.rs	collapse	rust system domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/system/deps.rs	collapse	rust system domain	PCC-3	Small retained domain should collapse if behavior remains small
-packages/agent/src/domains/system/handlers.rs	collapse	rust system domain	PCC-3	Small retained domain should collapse if behavior remains small
 packages/agent/src/domains/system/mod.rs	collapse	rust system domain	PCC-3	Small retained domain should collapse if behavior remains small
 packages/agent/src/domains/worker.rs	collapse	rust domain shared glue	PCC-3	Domain glue must prove ownership or fold into parent
 packages/agent/src/engine/capabilities.rs	collapse	rust engine substrate	PCC-4	Retain only proven primitive substrate boundaries

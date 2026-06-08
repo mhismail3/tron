@@ -715,8 +715,8 @@ fn retained_registered_contracts_do_not_encode_approval_or_policy_planes() {
             "packages/agent/src/domains/auth/contract.rs",
         ),
         (
-            "message contract",
-            "packages/agent/src/domains/message/contract.rs",
+            "message domain",
+            "packages/agent/src/domains/message/mod.rs",
         ),
         (
             "model contract",
@@ -730,10 +730,7 @@ fn retained_registered_contracts_do_not_encode_approval_or_policy_planes() {
             "settings contract",
             "packages/agent/src/domains/settings/contract.rs",
         ),
-        (
-            "system contract",
-            "packages/agent/src/domains/system/contract.rs",
-        ),
+        ("system domain", "packages/agent/src/domains/system/mod.rs"),
     ] {
         let source = read_repo_file(path);
         assert_absent(
@@ -1848,12 +1845,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         );
     }
 
-    let system_surface = [
-        read_repo_file("packages/agent/src/domains/system/mod.rs"),
-        read_repo_file("packages/agent/src/domains/system/contract.rs"),
-        read_repo_file("packages/agent/src/domains/system/handlers.rs"),
-    ]
-    .join("\n");
+    let system_surface = read_repo_file("packages/agent/src/domains/system/mod.rs");
     assert_absent(
         &system_surface,
         &[

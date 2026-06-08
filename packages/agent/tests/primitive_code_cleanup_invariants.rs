@@ -65,7 +65,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **22/100**",
+        "Current score: **40/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
@@ -77,8 +77,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "Total weight: **100**",
         "| PCC-1 | Inventory and folder justification | 12 | passed_after_fix |",
         "| PCC-2 | Root and generated artifact hygiene | 5 | passed_after_fix |",
-        "| PCC-3 | Rust agent consolidation | 18 | running |",
-        "Continue PCC-3 with the small-domain collapse audit:",
+        "| PCC-3 | Rust agent consolidation | 18 | passed_after_fix |",
+        "PCC-4 starts engine and primitive surface cleanup.",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -90,12 +90,12 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **22/100**",
+        "Current score: **40/100**",
         "Status: **active**",
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
         "| PCC-2 | passed_after_fix |",
-        "| PCC-3 | running |",
+        "| PCC-3 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -376,4 +376,60 @@ fn rust_dead_dependency_artifacts_stay_removed() {
         !retired_asset.exists(),
         "retired capability-search asset bundle must stay deleted"
     );
+}
+
+#[test]
+fn small_rust_domains_stay_collapsed_to_single_worker_modules() {
+    for path in [
+        "packages/agent/src/domains/blob/contract.rs",
+        "packages/agent/src/domains/blob/deps.rs",
+        "packages/agent/src/domains/blob/handlers.rs",
+        "packages/agent/src/domains/logs/contract.rs",
+        "packages/agent/src/domains/logs/deps.rs",
+        "packages/agent/src/domains/logs/handlers.rs",
+        "packages/agent/src/domains/message/contract.rs",
+        "packages/agent/src/domains/message/deps.rs",
+        "packages/agent/src/domains/message/handlers.rs",
+        "packages/agent/src/domains/system/contract.rs",
+        "packages/agent/src/domains/system/deps.rs",
+        "packages/agent/src/domains/system/handlers.rs",
+    ] {
+        assert!(
+            !repo_path(path).exists(),
+            "small Rust domain boilerplate shard must stay collapsed: {path}"
+        );
+    }
+
+    for path in [
+        "packages/agent/src/domains/blob/mod.rs",
+        "packages/agent/src/domains/logs/mod.rs",
+        "packages/agent/src/domains/message/mod.rs",
+        "packages/agent/src/domains/system/mod.rs",
+    ] {
+        let source = read_repo_file(path);
+        for required in [
+            "pub(crate) fn capabilities()",
+            "pub(crate) struct Deps",
+            "operation_bindings!",
+            "function_registrations(capabilities()?, domain_deps)?",
+        ] {
+            assert!(
+                source.contains(required),
+                "collapsed small domain {path} missing `{required}`"
+            );
+        }
+    }
+
+    let domain_catalog = read_repo_file("packages/agent/src/domains/catalog.rs");
+    for required in [
+        "super::blob::capabilities()?",
+        "super::logs::capabilities()?",
+        "super::message::capabilities()?",
+        "super::system::capabilities()?",
+    ] {
+        assert!(
+            domain_catalog.contains(required),
+            "domain catalog must use collapsed small-domain owner `{required}`"
+        );
+    }
 }

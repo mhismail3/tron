@@ -1,21 +1,51 @@
 //! system domain worker.
 //!
-//! This module owns canonical function execution for the system namespace and keeps
-//! domain contracts, services, and tests beside the worker that uses them.
+//! This module owns the small system namespace end-to-end: contract metadata,
+//! registration dependencies, handler binding, and operation execution.
 
-pub(crate) mod contract;
-pub(crate) mod deps;
-pub(crate) mod handlers;
-pub(crate) use deps::Deps;
-
+use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::runner::profile_runtime::ProfileRuntime;
+use crate::domains::bindings::operation_bindings;
+use crate::domains::catalog::CapabilitySpec;
+use crate::domains::contract::CapabilityContract;
 use crate::domains::worker::DomainRegistrationContext;
 use crate::domains::worker::DomainWorkerModule;
+use crate::engine::{
+    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
+    ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
+};
 use crate::shared::server::errors::CLIENT_VERSION_UNSUPPORTED;
 use crate::shared::server::errors::CapabilityError;
 use serde_json::Value;
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicU16;
 use std::sync::atomic::Ordering;
+use std::time::Instant;
+
+const STREAM_TOPICS: &[&str] = &["system.status"];
+
+#[derive(Clone)]
+pub(crate) struct Deps {
+    onboarded_marker_path: PathBuf,
+    orchestrator: Arc<Orchestrator>,
+    profile_runtime: Arc<ProfileRuntime>,
+    server_start_time: Instant,
+    ws_port: Arc<AtomicU16>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
+        Self {
+            onboarded_marker_path: deps.onboarded_marker_path.clone(),
+            orchestrator: deps.orchestrator.clone(),
+            profile_runtime: deps.profile_runtime.clone(),
+            server_start_time: deps.server_start_time,
+            ws_port: deps.ws_port.clone(),
+        }
+    }
+}
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
@@ -24,13 +54,75 @@ pub(crate) fn worker_module(
         let domain_deps = Deps::from_engine(deps);
         crate::domains::worker::domain_worker_module(
             "system",
-            contract::STREAM_TOPICS,
-            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+            STREAM_TOPICS,
+            function_registrations(capabilities()?, domain_deps)?,
         )
     }
 }
 
 use crate::shared::server::protocol as engine_transport_protocol;
+
+pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+    Ok(vec![
+        CapabilityContract::new(
+            "system::ping",
+            "system",
+            EffectClass::PureRead,
+            RiskLevel::Low,
+            Some("system.read"),
+        )
+        .request_schema(json!({"additionalProperties":false,"properties":{"clientVersion":{"type":"string"},"protocolVersion":{"type":"integer"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["protocolVersion"],"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"compatible":{"type":"boolean"},"minClientProtocolVersion":{"type":"integer"},"pong":{"type":"boolean"},"serverProtocolVersion":{"type":"integer"},"serverVersion":{"type":"string"},"timestamp":{"type":"string"}},"required":["pong","timestamp","serverVersion","serverProtocolVersion","minClientProtocolVersion","compatible"],"type":"object"}))
+        .build()?,
+        CapabilityContract::new(
+            "system::get_info",
+            "system",
+            EffectClass::PureRead,
+            RiskLevel::Low,
+            Some("system.read"),
+        )
+        .request_schema(json!({"additionalProperties":false,"properties":{"__capabilityContext":{"additionalProperties":false,"properties":{"onboardedMarkerPath":{"type":"string"}},"type":"object"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"activeSessions":{"type":"integer"},"arch":{"type":"string"},"paired":{"type":"boolean"},"platform":{"type":"string"},"port":{"type":"integer"},"runtime":{"type":"string"},"tailscaleIp":{"type":["string","null"]},"uptime":{"type":"integer"},"version":{"type":"string"}},"required":["version","uptime","activeSessions","platform","arch","runtime","port","tailscaleIp","paired"],"type":"object"}))
+        .build()?,
+        CapabilityContract::new(
+            "system::shutdown",
+            "system",
+            EffectClass::IrreversibleSideEffect,
+            RiskLevel::Critical,
+            Some("system.write"),
+        )
+        .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"acknowledged":{"type":"boolean"}},"required":["acknowledged"],"type":"object"}))
+        .idempotency(IdempotencyContract::caller_session_engine_ledger())
+        .resource_lease(ResourceLeaseRequirement::exclusive_template("system", "system:shutdown", 60000))
+        .compensation(CompensationContract::new(
+            CompensationKind::ExternalIrreversible,
+            "shutdown is irreversible for the current process; restart Tron manually",
+        ))
+        .stream_topics(STREAM_TOPICS.to_vec())
+        .build()?,
+    ])
+}
+
+operation_bindings! {
+    deps = Deps;
+    hidden = [];
+    bindings = [
+        "ping" => |invocation, _deps| {
+            ping_value(Some(&invocation.payload))
+        },
+        "get_info" => |invocation, deps| {
+            let allow_server_context = matches!(
+                invocation.causal_context.actor_kind,
+                crate::engine::ActorKind::Client
+            );
+            Ok(system_info_value(&invocation.payload, deps, allow_server_context))
+        },
+        "shutdown" => |_invocation, deps| {
+            system_shutdown_value(deps).await
+        },
+    ];
+}
 
 async fn system_shutdown_value(deps: &Deps) -> Result<Value, CapabilityError> {
     deps.orchestrator

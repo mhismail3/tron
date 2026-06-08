@@ -123,14 +123,14 @@ pub struct DomainWorkerModule {
 fn canonical_capability_contracts() -> EngineResult<Vec<CapabilitySpec>> {
     let mut specs = super::agent::contract::capabilities()?;
     specs.extend(super::auth::contract::capabilities()?);
-    specs.extend(super::blob::contract::capabilities()?);
+    specs.extend(super::blob::capabilities()?);
     specs.extend(super::capability::contract::capabilities()?);
-    specs.extend(super::logs::contract::capabilities()?);
-    specs.extend(super::message::contract::capabilities()?);
+    specs.extend(super::logs::capabilities()?);
+    specs.extend(super::message::capabilities()?);
     specs.extend(super::model::contract::capabilities()?);
     specs.extend(super::session::contract::capabilities()?);
     specs.extend(super::settings::contract::capabilities()?);
-    specs.extend(super::system::contract::capabilities()?);
+    specs.extend(super::system::capabilities()?);
     Ok(specs)
 }
 

@@ -1,23 +1,29 @@
 //! logs domain worker.
 //!
-//! This module owns canonical function execution for the logs namespace and keeps
-//! domain contracts, services, and tests beside the worker that uses them.
+//! This module owns the small logs namespace contract/deps/handler binding.
+//! Client log ingestion stays in `client_logs` because it is a real service
+//! boundary with parsing, dedupe, and storage behavior.
 
-pub(crate) mod contract;
-pub(crate) mod deps;
-pub(crate) mod handlers;
-pub(crate) use deps::Deps;
-
+use crate::domains::bindings::operation_bindings;
+use crate::domains::catalog::CapabilitySpec;
+use crate::domains::contract::CapabilityContract;
 use crate::domains::logs::client_logs::ClientLogEntry;
 use crate::domains::logs::client_logs::ClientLogsService;
+use crate::domains::session::event_store::EventStore;
 use crate::domains::worker::DomainRegistrationContext;
 use crate::domains::worker::DomainWorkerModule;
+use crate::engine::{
+    CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
+    Result as EngineResult, RiskLevel,
+};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::errors::to_json_value;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
+use serde_json::json;
+use std::sync::Arc;
 
 pub(crate) fn worker_module(
     deps: &DomainRegistrationContext,
@@ -26,16 +32,73 @@ pub(crate) fn worker_module(
         let domain_deps = Deps::from_engine(deps);
         crate::domains::worker::domain_worker_module(
             "logs",
-            contract::STREAM_TOPICS,
-            handlers::function_registrations(contract::capabilities()?, domain_deps)?,
+            STREAM_TOPICS,
+            function_registrations(capabilities()?, domain_deps)?,
         )
     }
 }
 
 pub(crate) mod client_logs;
 
+const STREAM_TOPICS: &[&str] = &["logs.ingest"];
 const DEFAULT_RECENT_LIMIT: u32 = 200;
 const MAX_RECENT_LIMIT: u32 = 1_000;
+
+#[derive(Clone)]
+pub(crate) struct Deps {
+    event_store: Arc<EventStore>,
+}
+
+impl Deps {
+    pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
+        Self {
+            event_store: deps.event_store.clone(),
+        }
+    }
+}
+
+pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
+    Ok(vec![
+        CapabilityContract::new(
+            "logs::ingest",
+            "logs",
+            EffectClass::AppendOnlyEvent,
+            RiskLevel::Medium,
+            Some("logs.write"),
+        )
+        .request_schema(json!({"additionalProperties":false,"properties":{"entries":{"items":{"additionalProperties":false,"properties":{"category":{"type":"string"},"level":{"type":"string"},"message":{"type":"string"},"timestamp":{"type":"string"}},"required":["timestamp","level","category","message"],"type":"object"},"maxItems":10000,"type":"array"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["entries"],"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"inserted":{"type":"integer"},"success":{"type":"boolean"}},"required":["success","inserted"],"type":"object"}))
+        .idempotency(IdempotencyContract::caller_system_engine_ledger())
+        .compensation(CompensationContract::new(
+            CompensationKind::EventSourced,
+            "domain-specific tests preserve current rollback, no-op, or replay behavior",
+        ))
+        .build()?,
+        CapabilityContract::new(
+            "logs::recent",
+            "logs",
+            EffectClass::PureRead,
+            RiskLevel::Low,
+            Some("logs.read"),
+        )
+        .request_schema(json!({"additionalProperties":false,"properties":{"limit":{"type":"integer"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"count":{"type":"integer"},"entries":{"items":{"additionalProperties":true,"type":"object"},"type":"array"}},"required":["entries","count"],"type":"object"}))
+        .build()?,
+    ])
+}
+
+operation_bindings! {
+    deps = Deps;
+    hidden = [];
+    bindings = [
+        "ingest" => |invocation, deps| {
+            ingest_logs_value(Some(&invocation.payload), deps).await
+        },
+        "recent" => |invocation, deps| {
+            recent_logs_value(Some(invocation.payload.clone()), deps).await
+        },
+    ];
+}
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
