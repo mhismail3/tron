@@ -93,6 +93,10 @@ miscellaneous facade. They must not encode product policy. Any fixed
 workflow-specific client removed in PET-8 must stay removed unless a later
 scorecard row proves it is boot infrastructure.
 
+Transport tests mirror the production owners: retry policy tests live under
+`Tests/Engine/Transport/Retry`, and WebSocket/request-response tests live under
+`Tests/Engine/Transport/WebSocket`.
+
 `Engine/Protocol` groups DTOs by server domain instead of one broad DTO bucket.
 `Engine/Persistence` owns the local SQLite cache, repositories, and sync cursor
 coordination. `Engine/Events` owns live event dispatch, payload decoding,
@@ -143,6 +147,8 @@ For shell-affecting changes:
   deleted, or renamed.
 - Run `SourceGuardTests`, which compiles the full app/test target and enforces
   deleted product roots.
+- Keep chat tests under the same owner names as production chat code:
+  `Coordinators`, `Messaging`, `Navigation`, `State`, and `ViewModel`.
 - Capture iPhone and iPad simulator screenshots when UI behavior changes.
 - Include simulator name, UDID, bundle id, launch/openurl return codes, and
   screenshot paths in the relevant scorecard evidence.

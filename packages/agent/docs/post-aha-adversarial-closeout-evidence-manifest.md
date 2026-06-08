@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Evidence Manifest
 
-Current score: **60/100**
+Current score: **69/100**
 
 Status: **active**
 
@@ -22,7 +22,7 @@ work is driven by executable evidence instead of the external Downloads plan.
 | PAC-3 | passed_after_fix | Removed the stale README `context` startup-domain claim and added the missing `engine_catalog_workers`/`engine_catalog_functions` rows to the database table inventory. | PAC runtime/docs parity guard and the primitive SQLite migration table test passed. | Closed. | `62d089682` |
 | PAC-4 | passed_after_fix | Split Mac runtime ownership so `LiveLaunchAgentManager` lives under `Server/LaunchAgent`, `Subprocess` lives under `Support/Foundation`, live-manager tests live under `Tests/Server/LaunchAgent`, and `ServerPing.swift` contains only ping/status capture behavior. README and Mac architecture docs now name those owners. | PAC Mac ownership guard passed; Mac XcodeGen regenerated the ignored project; focused Mac ping, launch-agent, install-runner, and fake-manager tests passed. | Closed; PAC-5 still owns guard breadth for roots, helper resources, staged binaries, clean mode, and LOC warnings. | `57fbcf537` |
 | PAC-5 | passed_after_fix | Added Mac SourceGuard-style tests for required roots, banned roots, helper-resource layout, staged-binary policy, `bundle-agent --clean`, and 590 LOC warning rows. Narrowed `bundle-agent.sh --clean` so it removes only ignored staged helper binaries, not tracked helper skeletons or LaunchAgent plists. Mac development docs now spell out the clean-mode boundary. | PAC Mac guard static gate passed; `bash -n packages/mac-app/scripts/bundle-agent.sh` passed; XcodeGen regenerated the ignored project; focused `MacSourceGuardTests` passed. | Closed. | `1455a59a9` |
-| PAC-6 | pending | Pending. | Pending. | iOS hierarchy and mirrored tests still need expansion. | pending |
+| PAC-6 | passed_after_fix | Moved iOS Retry, WebSocket, and Chat tests into directories that mirror their production owners; expanded `SourceGuardTests+Budgets` to watch `Sources/Engine/Transport/Retry`, `Tests/Engine/Transport/Retry`, `Tests/Engine/Transport/WebSocket`, and the Chat `Coordinators`/`Messaging`/`ViewModel` test roots; updated iOS docs, HRA near-budget rows, and HRA/PCC inventory rows; regenerated the tracked iOS Xcode project. | PAC iOS mirror static gate passed; HRA scorecard formalization passed; HRA/PCC inventory guards passed; iOS XcodeGen passed; focused `SourceGuardTests` and the moved test suites passed on `iPhone 17 Pro`. | Closed. | pending |
 | PAC-7 | pending | Pending. | Pending. | Rust docs and 890+ LOC split-plan rows still need proof. | pending |
 | PAC-8 | pending | Pending. | Pending. | Local/GitHub CI parity still needs PAC target wiring. | pending |
 | PAC-9 | pending | Pending. | Pending. | AHA provenance, privacy scope, and residue wording policy still need durable proof. | pending |
@@ -68,8 +68,39 @@ Expected red findings:
 
 ## Residual Risk Log
 
-- PAC-6 through PAC-10 remain open. No row will be marked complete until its
+- PAC-7 through PAC-10 remain open. No row will be marked complete until its
   guard, docs, targeted verification, and evidence are green.
+
+## PAC-6 Verification
+
+Completed iOS hierarchy cleanup:
+
+- Moved Retry tests from `Tests/Engine/Transport/Clients` to
+  `Tests/Engine/Transport/Retry`.
+- Moved WebSocket client/auth tests from `Tests/Engine/Transport/Clients` to
+  `Tests/Engine/Transport/WebSocket`.
+- Moved Chat tests to the production-owner roots:
+  `Coordinators`, `Messaging`, and `ViewModel`.
+- Expanded `SourceGuardTests+Budgets` to guard the production Retry source
+  root and the mirrored Retry/WebSocket/Chat test roots.
+- Updated iOS architecture/development docs, the HRA Swift near-budget watch
+  rows, and HRA/PCC inventory rows for the moved/new tracked paths.
+
+Focused proof:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants ios_transport_and_chat_tests_mirror_production_owners -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants post_hra_adversarial_hardening_scorecard_stays_formalized -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants tracked_files_have_rearchitecture_inventory_rows -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants ios_hra8_ownership_map_covers_every_source_and_test_swift_file -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants primitive_code_cleanup_inventory_covers_tracked_files -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants inventory_and_provenance_have_no_open_or_external_closeout_state -- --nocapture
+cd packages/ios-app && xcodegen generate
+xcodebuild test -project TronMobile.xcodeproj -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -quiet
+xcodebuild test -project TronMobile.xcodeproj -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ConnectionErrorClassifierTests -only-testing:TronMobileTests/ConnectionManagerTests -only-testing:TronMobileTests/ConnectionToastPolicyTests -only-testing:TronMobileTests/NetworkDiagnosticsFormatterTests -only-testing:TronMobileTests/ReconnectProbePolicyTests -only-testing:TronMobileTests/EngineClientErrorTests -only-testing:TronMobileTests/ConnectionStateTests -only-testing:TronMobileTests/EngineStreamScopeTests -only-testing:TronMobileTests/ModelInfoTests -only-testing:TronMobileTests/WebSocketAuthTests -only-testing:TronMobileTests/MessagingCoordinatorTests -only-testing:TronMobileTests/StreamingManagerTests -only-testing:TronMobileTests/ChatViewModelEventRoutingTests -quiet
+```
+
+Result: exit 0 for all focused commands on 2026-06-08.
 
 ## PAC-5 Verification
 

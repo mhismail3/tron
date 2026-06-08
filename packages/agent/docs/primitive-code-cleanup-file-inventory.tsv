@@ -1069,11 +1069,11 @@ packages/ios-app/Tests/Engine/Protocol/ProtocolConstantsTests.swift	retain	ios t
 packages/ios-app/Tests/Engine/Transport/Clients/AgentClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/AuthClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/BlobClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Engine/Transport/Clients/ConnectionErrorClassifierTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Engine/Transport/Clients/ConnectionManagerTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Engine/Transport/Clients/ConnectionToastPolicyTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Engine/Transport/Retry/ConnectionErrorClassifierTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
+packages/ios-app/Tests/Engine/Transport/Retry/ConnectionManagerTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
+packages/ios-app/Tests/Engine/Transport/Retry/ConnectionToastPolicyTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
 packages/ios-app/Tests/Engine/Transport/Clients/EngineClientObservationTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Engine/Transport/Clients/EngineClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Engine/Transport/WebSocket/EngineClientTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
 packages/ios-app/Tests/Engine/Transport/Clients/EngineTransportConnectionGuardTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/EngineTransportHelpersTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/EventSyncClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1081,15 +1081,15 @@ packages/ios-app/Tests/Engine/Transport/Clients/InteractionPolicyTests.swift	ret
 packages/ios-app/Tests/Engine/Transport/Clients/LogsClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/MessageClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/ModelClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Engine/Transport/Clients/NetworkDiagnosticsFormatterTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Engine/Transport/Clients/ReconnectProbePolicyTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Engine/Transport/Retry/NetworkDiagnosticsFormatterTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
+packages/ios-app/Tests/Engine/Transport/Retry/ReconnectProbePolicyTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
 packages/ios-app/Tests/Engine/Transport/Clients/Repositories/DefaultAgentRepositoryTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/Repositories/DefaultModelRepositoryTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/Repositories/DefaultSessionRepositoryTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/SessionClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/SettingsClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/Clients/SystemClientTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Engine/Transport/Clients/WebSocketAuthTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Engine/Transport/WebSocket/WebSocketAuthTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
 packages/ios-app/Tests/Engine/Transport/DeepLinks/DeepLinkRouterTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Engine/Transport/WebSocket/EngineConnectionReconnectTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Infrastructure/Fakes/MockAsyncClock.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1116,7 +1116,7 @@ packages/ios-app/Tests/Session/Chat/AnimationCoordinatorTests.swift	retain	ios t
 packages/ios-app/Tests/Session/Chat/CapabilityInvocationCoordinatorTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/CatchUpEventBufferTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/ChatSheetTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Session/Chat/ChatViewModelEventRoutingTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Session/Chat/ViewModel/ChatViewModelEventRoutingTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
 packages/ios-app/Tests/Session/Chat/ChatViewModelFindMessageTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/ChatViewModelLifecycleTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/ChatViewModelSequenceDedupTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1128,7 +1128,7 @@ packages/ios-app/Tests/Session/Chat/DisplayStreamStateTests.swift	retain	ios tes
 packages/ios-app/Tests/Session/Chat/EventDispatchCoordinatorTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/InputBarStateTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/LiveSessionPruningTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Session/Chat/MessagingCoordinatorTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Session/Chat/Coordinators/MessagingCoordinatorTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
 packages/ios-app/Tests/Session/Chat/Navigation/ForkNavigationTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/Navigation/MessageFinderTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/Navigation/MessageIndexTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1142,7 +1142,7 @@ packages/ios-app/Tests/Session/Chat/SheetReadOnlyTests.swift	retain	ios test	PCC
 packages/ios-app/Tests/Session/Chat/State/ModelPickerStateTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/State/SettingsParityTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/State/SettingsStateTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/Session/Chat/StreamingManagerTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/Session/Chat/Messaging/StreamingManagerTests.swift	retain	ios test	PCC-10/AHA-9/PAC-6	Current tracked file retained after PAC-6 mirrored test-owner move.
 packages/ios-app/Tests/Session/Chat/StreamingRecoveryTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/TextStreamConvergenceTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/Session/Chat/TurnLifecycleCoordinatorTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1389,3 +1389,14 @@ scripts/tron.d/deploy.sh	retain	script	PCC-10/AHA-9	Current tracked file retaine
 scripts/tron.d/dev.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron.d/quality.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron.d/workspace.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md	retain	closeout docs	PAC-0/PAC-6	Current closeout evidence artifact retained and inventoried during PAC-6 coverage cleanup.
+packages/agent/docs/post-aha-adversarial-closeout-scorecard.md	retain	closeout docs	PAC-0/PAC-6	Current closeout scorecard artifact retained and inventoried during PAC-6 coverage cleanup.
+packages/agent/tests/post_aha_adversarial_closeout/audit_findings.rs	retain	closeout tests	PAC-0/PAC-6	Current closeout invariant module retained and inventoried during PAC-6 coverage cleanup.
+packages/agent/tests/post_aha_adversarial_closeout/mod.rs	retain	closeout tests	PAC-0/PAC-6	Current closeout invariant module retained and inventoried during PAC-6 coverage cleanup.
+packages/agent/tests/post_aha_adversarial_closeout/scorecard_evidence.rs	retain	closeout tests	PAC-0/PAC-6	Current closeout scorecard guard retained and inventoried during PAC-6 coverage cleanup.
+packages/agent/tests/post_aha_adversarial_closeout/support.rs	retain	closeout tests	PAC-0/PAC-6	Current closeout test support retained and inventoried during PAC-6 coverage cleanup.
+packages/agent/tests/post_aha_adversarial_closeout_invariants.rs	retain	closeout tests	PAC-0/PAC-6	Current closeout invariant target retained and inventoried during PAC-6 coverage cleanup.
+packages/mac-app/Sources/Server/LaunchAgent/LiveLaunchAgentManager.swift	retain	mac app	PAC-4/PAC-6	Current Mac launch-agent owner retained and inventoried during PAC-6 coverage cleanup.
+packages/mac-app/Sources/Support/Foundation/Subprocess.swift	retain	mac app	PAC-4/PAC-6	Current Mac subprocess helper retained and inventoried during PAC-6 coverage cleanup.
+packages/mac-app/Tests/Infrastructure/Guards/MacSourceGuardTests.swift	retain	mac tests	PAC-5/PAC-6	Current Mac source guard retained and inventoried during PAC-6 coverage cleanup.
+packages/mac-app/Tests/Server/LaunchAgent/LiveLaunchAgentManagerTests.swift	retain	mac tests	PAC-4/PAC-6	Current Mac launch-agent tests retained and inventoried during PAC-6 coverage cleanup.

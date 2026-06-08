@@ -22,6 +22,46 @@ extension SourceGuardTests {
                 ]
             ),
             HierarchyBudget(
+                relativePath: "Sources/Engine/Transport/Retry",
+                minimumFileCount: 8,
+                maximumFileCount: 8,
+                maximumLineCount: hardLineLimit,
+                allowedImmediateSubdirectories: [],
+                requiredFiles: [
+                    "Sources/Engine/Transport/Retry/ConnectionManager.swift",
+                    "Sources/Engine/Transport/Retry/ConnectionErrorClassifier.swift",
+                    "Sources/Engine/Transport/Retry/ConnectionToastPolicy.swift",
+                    "Sources/Engine/Transport/Retry/NetworkDiagnosticsFormatter.swift",
+                    "Sources/Engine/Transport/Retry/ReconnectProbePolicy.swift",
+                ]
+            ),
+            HierarchyBudget(
+                relativePath: "Tests/Engine/Transport/Retry",
+                minimumFileCount: 5,
+                maximumFileCount: 5,
+                maximumLineCount: hardLineLimit,
+                allowedImmediateSubdirectories: [],
+                requiredFiles: [
+                    "Tests/Engine/Transport/Retry/ConnectionManagerTests.swift",
+                    "Tests/Engine/Transport/Retry/ConnectionErrorClassifierTests.swift",
+                    "Tests/Engine/Transport/Retry/ConnectionToastPolicyTests.swift",
+                    "Tests/Engine/Transport/Retry/NetworkDiagnosticsFormatterTests.swift",
+                    "Tests/Engine/Transport/Retry/ReconnectProbePolicyTests.swift",
+                ]
+            ),
+            HierarchyBudget(
+                relativePath: "Tests/Engine/Transport/WebSocket",
+                minimumFileCount: 3,
+                maximumFileCount: 3,
+                maximumLineCount: hardLineLimit,
+                allowedImmediateSubdirectories: [],
+                requiredFiles: [
+                    "Tests/Engine/Transport/WebSocket/EngineClientTests.swift",
+                    "Tests/Engine/Transport/WebSocket/WebSocketAuthTests.swift",
+                    "Tests/Engine/Transport/WebSocket/EngineConnectionReconnectTests.swift",
+                ]
+            ),
+            HierarchyBudget(
                 relativePath: "Sources/UI/Capabilities/Shared",
                 minimumFileCount: 19,
                 maximumFileCount: 22,
@@ -47,7 +87,43 @@ extension SourceGuardTests {
                 minimumFileCount: 36,
                 maximumFileCount: 42,
                 maximumLineCount: hardLineLimit,
-                allowedImmediateSubdirectories: ["Navigation", "State"]
+                allowedImmediateSubdirectories: [
+                    "Coordinators",
+                    "Messaging",
+                    "Navigation",
+                    "State",
+                    "ViewModel",
+                ]
+            ),
+            HierarchyBudget(
+                relativePath: "Tests/Session/Chat/Coordinators",
+                minimumFileCount: 1,
+                maximumFileCount: 1,
+                maximumLineCount: hardLineLimit,
+                allowedImmediateSubdirectories: [],
+                requiredFiles: [
+                    "Tests/Session/Chat/Coordinators/MessagingCoordinatorTests.swift",
+                ]
+            ),
+            HierarchyBudget(
+                relativePath: "Tests/Session/Chat/Messaging",
+                minimumFileCount: 1,
+                maximumFileCount: 1,
+                maximumLineCount: hardLineLimit,
+                allowedImmediateSubdirectories: [],
+                requiredFiles: [
+                    "Tests/Session/Chat/Messaging/StreamingManagerTests.swift",
+                ]
+            ),
+            HierarchyBudget(
+                relativePath: "Tests/Session/Chat/ViewModel",
+                minimumFileCount: 1,
+                maximumFileCount: 1,
+                maximumLineCount: hardLineLimit,
+                allowedImmediateSubdirectories: [],
+                requiredFiles: [
+                    "Tests/Session/Chat/ViewModel/ChatViewModelEventRoutingTests.swift",
+                ]
             ),
         ]
 

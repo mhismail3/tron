@@ -219,7 +219,9 @@ the next turn.
 ```
 Tests/
 ├── Engine/            # Transport, protocol, event, persistence, and model tests
+│   └── Transport/     # Clients, Retry, WebSocket, and DeepLinks tests mirror Sources
 ├── Session/           # Chat, timeline, attachment, and parsing tests
+│   └── Chat/          # Coordinators, Messaging, Navigation, State, ViewModel owner roots
 ├── UI/                # Chat, settings, onboarding, runtime surface, and component tests
 ├── Support/           # Composition, diagnostics, foundation, pairing, and storage tests
 └── Infrastructure/    # Fakes, fixtures, SourceGuard, cleanup, and project-structure guards

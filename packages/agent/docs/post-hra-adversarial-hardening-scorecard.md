@@ -104,9 +104,9 @@ quietly become oversized modules.
 |------|-------------|-------|---------------------|--------|
 | `packages/ios-app/Sources/UI/Settings/Shell/SettingsView.swift` | 699 | settings shell owner | At the hard-limit edge; new settings navigation, toolbar, or modal behavior must move into shell support or page-owned files first. | watch |
 | `packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel.swift` | 658 | chat view-model owner | Keep orchestration only; move new behavior into coordinators, state slices, or focused extensions before adding branches. | watch |
-| `packages/ios-app/Tests/Session/Chat/StreamingManagerTests.swift` | 653 | chat streaming test owner | Split new streaming scenarios by behavior before adding another broad fixture block. | watch |
+| `packages/ios-app/Tests/Session/Chat/Messaging/StreamingManagerTests.swift` | 653 | chat streaming test owner | Split new streaming scenarios by behavior before adding another broad fixture block. | watch |
 | `packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift` | 653 | chat shell owner | Move new toolbar/sheet/rendering support into shell extensions or feature components before expanding the root view. | watch |
-| `packages/ios-app/Tests/Session/Chat/ChatViewModelEventRoutingTests.swift` | 652 | chat event-routing test owner | Split new event-routing coverage into coordinator- or event-family tests before expanding this file. | watch |
+| `packages/ios-app/Tests/Session/Chat/ViewModel/ChatViewModelEventRoutingTests.swift` | 652 | chat event-routing test owner | Split new event-routing coverage into coordinator- or event-family tests before expanding this file. | watch |
 | `packages/ios-app/Tests/Engine/Persistence/EventDatabaseTests.swift` | 650 | event database test owner | Add new persistence cases under behavior-specific test files before growing the broad database suite. | watch |
 | `packages/ios-app/Sources/UI/Onboarding/Steps/SetupSteps.swift` | 625 | onboarding setup owner | Move new setup card, step, or validation UI into focused step components before expanding this file. | watch |
 | `packages/ios-app/Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift` | 616 | diagnostics owner | Move new bundle sections or transforms into focused diagnostics helpers before adding more builder branches. | watch |
