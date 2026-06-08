@@ -1,8 +1,8 @@
 # Post-AHA Adversarial Closeout Evidence Manifest
 
-Current score: **94/100**
+Current score: **100/100**
 
-Status: **active**
+Status: **completed**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -26,7 +26,7 @@ work is driven by executable evidence instead of the external Downloads plan.
 | PAC-7 | passed_after_fix | Added progressive disclosure sections to top-level Rust `mod.rs` roots for `app`, `domains`, `engine`, `shared`, and `transport`; added the current 895 LOC concrete split-plan watch row for `packages/agent/src/engine/catalog/registry/mod.rs`. | PAC Rust docs/LOC static gate passed; Rust formatting check passed; rustdoc with denied warnings passed; whitespace check passed. | Closed. | `8e2221f74` |
 | PAC-8 | passed_after_fix | Aligned the local and GitHub CI closeout test sets. `scripts/tron ci test` now runs an explicit target list for `db_path_guard`, PET/PCC/HRA/AHA/PAC invariants, `primitive_trace_execution`, and serial `integration`; the GitHub Rust static-gates job runs the same named targets in the same order. README and CONTRIBUTING now document that parity. | PAC local/GitHub parity static gate passed; PAC scorecard formalization passed; `bash -n scripts/tron.d/quality.sh` passed; post-HRA closeout target passed. | Closed. | `f0e28f907` |
 | PAC-9 | passed_after_fix | Added `packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md` as the redacted in-repo digest for the operator AHA plan; redirected the AHA scorecard and README to that durable artifact; made the personal-info guard's full-scan roots explicit for root docs, packages, and scripts; and retained the PAC fallback/compatibility wording policy. Updated HRA/PCC inventories for the new tracked summary. | PAC provenance/privacy/residue static gate passed; the full PAC target passed; AHA scorecard formalization and provenance/inventory gates passed; HRA/PCC inventory coverage passed; full personal-info guard passed; script syntax, Rust formatting, and whitespace checks passed. | Closed. | `8d001e7d3` |
-| PAC-10 | pending | Pending. | Pending. | Final closeout verification has not run. | pending |
+| PAC-10 | passed_after_fix | Ran final closeout verification across Rust CI, rustdoc, full personal-info guard, PAC/PET/PCC/HRA/AHA static targets through the local harness, focused iOS hierarchy tests, focused and full Mac wrapper tests, generated-project drift checks, ignored-artifact audit, and residue scans. Reviewed broad wording-scan hits and found only live stale-state handling, provider model IDs, and negative guard/policy text rather than actionable legacy paths. | All listed final checks passed; generated iOS project had no tracked diff; generated Mac project remained ignored; ignored artifacts were local build/cache/helper-output paths only. | Closed. | pending |
 
 ## PAC-0 Red Proof
 
@@ -68,8 +68,49 @@ Expected red findings:
 
 ## Residual Risk Log
 
-- PAC-10 remains open. No row will be marked complete until its
-  guard, docs, targeted verification, and evidence are green.
+- No PAC implementation rows remain open. Final verification passed on
+  2026-06-08. Ignored artifacts remain limited to expected local build/cache
+  output, generated Mac project output, Xcode result/build folders, local
+  helper binary staging directories, and `.DS_Store` files.
+
+## PAC-10 Verification
+
+Final closeout proof:
+
+```bash
+scripts/tron ci fmt check clippy test
+RUSTDOCFLAGS='-D warnings' cargo doc --manifest-path packages/agent/Cargo.toml --no-deps
+scripts/personal-info-guard.sh
+cd packages/ios-app && xcodegen generate
+xcodebuild test -project TronMobile.xcodeproj -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -quiet
+xcodebuild test -project TronMobile.xcodeproj -scheme 'Tron Beta' -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ConnectionErrorClassifierTests -only-testing:TronMobileTests/ConnectionManagerTests -only-testing:TronMobileTests/ConnectionToastPolicyTests -only-testing:TronMobileTests/NetworkDiagnosticsFormatterTests -only-testing:TronMobileTests/ReconnectProbePolicyTests -only-testing:TronMobileTests/EngineClientErrorTests -only-testing:TronMobileTests/ConnectionStateTests -only-testing:TronMobileTests/EngineStreamScopeTests -only-testing:TronMobileTests/ModelInfoTests -only-testing:TronMobileTests/WebSocketAuthTests -only-testing:TronMobileTests/MessagingCoordinatorTests -only-testing:TronMobileTests/StreamingManagerTests -only-testing:TronMobileTests/ChatViewModelEventRoutingTests -quiet
+cd packages/mac-app && xcodegen generate
+TRON_MAC_TEST_HOST=1 xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Debug -only-testing:TronMacTests/MacSourceGuardTests -only-testing:TronMacTests/LiveLaunchAgentManagerTests -only-testing:TronMacTests/InstallLaunchAgentRunnerTests -only-testing:TronMacTests/ServerPingDecodeTests -only-testing:TronMacTests/ServerPingResultTests -only-testing:TronMacTests/ServerPingLiveTests -only-testing:TronMacTests/MockLaunchAgentManagerTests -only-testing:TronMacTests/TronPathsTests -only-testing:TronMacTests/ServerStatusPollerTests -only-testing:TronMacTests/TailscaleProbeTests CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual -quiet
+TRON_MAC_TEST_HOST=1 xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS' -configuration Debug CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual -quiet
+git diff --check
+git status --short
+git status --ignored --short
+```
+
+Result: exit 0 for all executable checks on 2026-06-08. `git status --short`
+was clean before the PAC-10 documentation update. `git status --ignored
+--short` showed only expected local ignored output: Rust `target/`, Swift
+`.build`/`build` folders, generated ignored Mac project, Xcode result/userdata
+folders, local helper binary staging directories, `node_modules`,
+`__pycache__`, and `.DS_Store` files.
+
+Residue audit:
+
+- Broad `legacy|fallback|compatibility|stale|deprecated|TODO|FIXME` wording
+  scan was reviewed. Hits were live stale-state handling, provider model IDs,
+  third-party command-shape policy text, negative guard needles, and existing
+  docs warning against stale state; no actionable legacy implementation or
+  compatibility facade was found.
+- Concrete retired-surface scan for deleted helper trees, local packs,
+  `MiscClient`, old Git DTOs, module-inception/path aliases, deleted docs,
+  auto-deploy, and context primitives found only protective rules, absence
+  tests, provider model IDs, and current docs that explicitly forbid those
+  paths.
 
 ## PAC-9 Verification
 

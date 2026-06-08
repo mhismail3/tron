@@ -1,8 +1,8 @@
 # Post-AHA Adversarial Closeout Scorecard
 
-Current score: **94/100**
+Current score: **100/100**
 
-Status: **active**
+Status: **completed**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -29,9 +29,9 @@ Downloads path used to seed this campaign.
 
 | Artifact | Status | Purpose |
 |----------|--------|---------|
-| `packages/agent/docs/post-aha-adversarial-closeout-scorecard.md` | active | Weighted PAC scorecard, open-loop ledger, and closeout state. |
-| `packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md` | active | Red/green proof, verification commands, commit hashes, and residual risk. |
-| `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs` | active | Integration target for post-AHA closeout static gates. |
+| `packages/agent/docs/post-aha-adversarial-closeout-scorecard.md` | completed | Weighted PAC scorecard, open-loop ledger, and closeout state. |
+| `packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md` | completed | Red/green proof, verification commands, commit hashes, and residual risk. |
+| `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs` | completed | Integration target for post-AHA closeout static gates. |
 
 ## Scorecard
 
@@ -49,7 +49,7 @@ Total weight: **100**
 | PAC-7 | Rust docs and LOC split budgets | 10 | passed_after_fix | Rust docs/budgets | Top-level Rust roots `app`, `domains`, `engine`, `shared`, and `transport` now carry `## Submodules`, `## Entry Points`, `## Invariants`, and `## Test Ownership` sections. The PAC split-plan watchlist now has the current 895 LOC row for `engine/catalog/registry/mod.rs` with a concrete split plan. | Closed. |
 | PAC-8 | Local/GitHub CI parity | 8 | passed_after_fix | local/CI parity | `scripts/tron ci test` now runs the full explicit closeout target set: `db_path_guard`, PET/PCC/HRA/AHA/PAC invariants, `primitive_trace_execution`, and serial `integration`. GitHub's Rust static-gates job runs the same named target set in the same order, and README/CONTRIBUTING document that parity. | Closed. |
 | PAC-9 | Provenance, privacy, and residue policy | 7 | passed_after_fix | provenance/privacy/residue | Added the redacted in-repo AHA plan digest, redirected the AHA scorecard and README to it, made the personal-info full-scan roots explicit for `packages/agent`, `packages/ios-app`, `packages/mac-app`, `AGENTS.md`, and `README.md`, and kept the allowed fallback/compatibility wording policy durable in this scorecard. | Closed. |
-| PAC-10 | Final closeout verification | 6 | pending | final closeout | Pending. | Run full Rust CI, focused iOS/Mac checks, privacy guard, ignored-artifact audit, residue scans, and final adversarial audit. |
+| PAC-10 | Final closeout verification | 6 | passed_after_fix | final closeout | Full Rust CI (`scripts/tron ci fmt check clippy test`), rustdoc, full personal-info guard, full PAC target, focused iOS hierarchy tests, focused and full Mac wrapper tests, generated-project drift checks, ignored-artifact audit, and residue scans completed. The broad wording scan hits were reviewed as live stale-state handling, provider model IDs, and negative guard/policy text rather than actionable legacy paths. | Closed. |
 
 ## Static Gates
 
@@ -81,8 +81,8 @@ old paths and dual behavior. The allowed contexts are:
 
 ## Open Loops
 
-- PAC-10 remains open. The current red target is the executable
-  punch list for those rows.
+- No PAC implementation rows remain open. The evidence manifest records final
+  verification commands, reviewed ignored artifacts, and checkpoint hashes.
 
 ## Rust/Swift Split-Plan Watchlist
 
