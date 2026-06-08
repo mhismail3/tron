@@ -9,8 +9,15 @@ fn ios_sources_do_not_use_broad_views_network_database_buckets() {
         "packages/ios-app/Sources/Engine/EventStore",
         "packages/ios-app/Sources/Session/ViewModels/Managers",
         "packages/ios-app/Sources/Session/ViewModels/Utilities",
+        "packages/ios-app/Sources/Support/Concurrency",
+        "packages/ios-app/Sources/Support/DependencyInjection",
+        "packages/ios-app/Sources/Support/Diagnostics/Services",
         "packages/ios-app/Sources/Support/Utilities",
         "packages/ios-app/Sources/Support/Extensions",
+        "packages/ios-app/Sources/Support/Infrastructure",
+        "packages/ios-app/Sources/Support/Observability",
+        "packages/ios-app/Sources/Support/Settings",
+        "packages/ios-app/Sources/Support/Storage/Services",
     ];
 
     let present: Vec<_> = banned
@@ -85,8 +92,15 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
         "packages/ios-app/Sources/Engine/EventStore",
         "packages/ios-app/Sources/Session/ViewModels/Managers",
         "packages/ios-app/Sources/Session/ViewModels/Utilities",
+        "packages/ios-app/Sources/Support/Concurrency",
+        "packages/ios-app/Sources/Support/DependencyInjection",
+        "packages/ios-app/Sources/Support/Diagnostics/Services",
         "packages/ios-app/Sources/Support/Utilities",
         "packages/ios-app/Sources/Support/Extensions",
+        "packages/ios-app/Sources/Support/Infrastructure",
+        "packages/ios-app/Sources/Support/Observability",
+        "packages/ios-app/Sources/Support/Settings",
+        "packages/ios-app/Sources/Support/Storage/Services",
         "packages/ios-app/Tests/Core",
         "packages/ios-app/Tests/Extensions",
         "packages/ios-app/Tests/Models",
@@ -145,10 +159,10 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
             allowed_classifications.contains(*classification),
             "{IOS_MOVE_MAP_PATH} row has invalid classification `{classification}`: {line}"
         );
-        if *phase == "HRA-9" || *phase == "HRA-10" || *phase == "HRA-11" {
+        if *phase == "HRA-9" || *phase == "HRA-10" || *phase == "HRA-11" || *phase == "HRA-12" {
             assert_eq!(
                 *status, "passed_after_fix",
-                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10/HRA-11 rows should be complete after the Engine, Session, and UI hierarchy moves: {line}"
+                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10/HRA-11/HRA-12 rows should be complete after the Engine, Session, UI, and Support hierarchy moves: {line}"
             );
         } else {
             assert_eq!(
@@ -397,6 +411,110 @@ fn ios_ui_hra11_sources_use_target_boundaries() {
             && missing_split_files.is_empty()
             && oversized_split_files.is_empty(),
         "HRA-11 UI hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_split_files:#?}; oversized split files: {oversized_split_files:#?}"
+    );
+}
+
+#[test]
+fn ios_support_hra12_sources_use_target_boundaries() {
+    let required_roots = [
+        "packages/ios-app/Sources/App/Lifecycle",
+        "packages/ios-app/Sources/Support/Composition",
+        "packages/ios-app/Sources/Support/Diagnostics",
+        "packages/ios-app/Sources/Support/Feedback",
+        "packages/ios-app/Sources/Support/Foundation",
+        "packages/ios-app/Sources/Support/Foundation/Concurrency",
+        "packages/ios-app/Sources/Support/Foundation/Formatting",
+        "packages/ios-app/Sources/Support/Foundation/Media",
+        "packages/ios-app/Sources/Support/Foundation/Parsing",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI",
+        "packages/ios-app/Sources/Support/Foundation/Validation",
+        "packages/ios-app/Sources/Support/Pairing",
+        "packages/ios-app/Sources/Support/Pairing/Onboarding",
+        "packages/ios-app/Sources/Support/Share",
+        "packages/ios-app/Sources/Support/Storage",
+    ];
+    let banned_roots = [
+        "packages/ios-app/Sources/Support/Concurrency",
+        "packages/ios-app/Sources/Support/DependencyInjection",
+        "packages/ios-app/Sources/Support/Diagnostics/Services",
+        "packages/ios-app/Sources/Support/Extensions",
+        "packages/ios-app/Sources/Support/Infrastructure",
+        "packages/ios-app/Sources/Support/Observability",
+        "packages/ios-app/Sources/Support/Settings",
+        "packages/ios-app/Sources/Support/Storage/Services",
+        "packages/ios-app/Sources/Support/Utilities",
+    ];
+    let required_files = [
+        "packages/ios-app/Sources/App/Lifecycle/AppDelegate.swift",
+        "packages/ios-app/Sources/App/Lifecycle/TronMobileApp.swift",
+        "packages/ios-app/Sources/Support/Composition/AppInitializer.swift",
+        "packages/ios-app/Sources/Support/Composition/DependencyContainer.swift",
+        "packages/ios-app/Sources/Support/Composition/DependencyEnvironment.swift",
+        "packages/ios-app/Sources/Support/Composition/DependencyProviding.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/ClientLogIngestionService.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/DiagnosticsRedactor.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/ErrorHandler.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/MetricKitDiagnosticsStore.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/TronLogger.swift",
+        "packages/ios-app/Sources/Support/Foundation/AppConstants.swift",
+        "packages/ios-app/Sources/Support/Foundation/Concurrency/AsyncSemaphore.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/Date+Extensions.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/DurationFormatter.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/ModelNameFormatter.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/String+Extensions.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/TaskFormatting.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/TokenFormatter.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/VersionDisplay.swift",
+        "packages/ios-app/Sources/Support/Foundation/Media/ImageProcessor.swift",
+        "packages/ios-app/Sources/Support/Foundation/Parsing/ContentLineParser.swift",
+        "packages/ios-app/Sources/Support/Foundation/Parsing/DateParser.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/Binding+PasteAware.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/KeyboardObserver.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/ToastCenter.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/View+Accessibility.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/View+Extensions.swift",
+        "packages/ios-app/Sources/Support/Foundation/Validation/FolderNameValidator.swift",
+        "packages/ios-app/Sources/Support/Pairing/PairedServerStore.swift",
+        "packages/ios-app/Sources/Support/Share/SharedContent.swift",
+        "packages/ios-app/Sources/Support/Storage/DraftStore.swift",
+        "packages/ios-app/Sources/Support/Storage/InputHistoryStore.swift",
+        "packages/ios-app/Sources/Support/Storage/KeychainItem.swift",
+        "packages/ios-app/Sources/Support/Storage/PairedServerTokenStore.swift",
+    ];
+    let banned_files = [
+        "packages/ios-app/Sources/App/AppDelegate.swift",
+        "packages/ios-app/Sources/App/TronMobileApp.swift",
+        "packages/ios-app/Sources/Support/AppConstants.swift",
+    ];
+
+    let missing_required: Vec<_> = required_roots
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_dir())
+        .collect();
+    let present_banned: Vec<_> = banned_roots
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+    let missing_files: Vec<_> = required_files
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_file())
+        .collect();
+    let present_banned_files: Vec<_> = banned_files
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing_required.is_empty()
+            && present_banned.is_empty()
+            && missing_files.is_empty()
+            && present_banned_files.is_empty(),
+        "HRA-12 Support hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing files: {missing_files:#?}; old files present: {present_banned_files:#?}"
     );
 }
 

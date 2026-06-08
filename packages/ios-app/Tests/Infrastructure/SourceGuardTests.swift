@@ -201,8 +201,8 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
         let checkedFiles = [
             iosRoot.appendingPathComponent("Sources/Engine/Persistence/SQLite/EventDatabase.swift"),
-            iosRoot.appendingPathComponent("Sources/Support/DependencyInjection/DependencyContainer.swift"),
-            iosRoot.appendingPathComponent("Sources/Support/Diagnostics/Services/DiagnosticsBundleBuilder.swift"),
+            iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
+            iosRoot.appendingPathComponent("Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift"),
         ]
 
         for url in checkedFiles {
@@ -837,7 +837,7 @@ struct SourceGuardTests {
             encoding: .utf8
         )
         let appEntry = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/App/TronMobileApp.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/TronMobileApp.swift"),
             encoding: .utf8
         )
         let architectureDoc = try String(
@@ -1039,7 +1039,7 @@ struct SourceGuardTests {
             encoding: .utf8
         )
         let ingestionService = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Diagnostics/Services/ClientLogIngestionService.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Diagnostics/ClientLogIngestionService.swift"),
             encoding: .utf8
         )
         let miscClient = try String(
@@ -1047,11 +1047,11 @@ struct SourceGuardTests {
             encoding: .utf8
         )
         let dependencyContainer = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Support/DependencyInjection/DependencyContainer.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
             encoding: .utf8
         )
         let app = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/App/TronMobileApp.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/TronMobileApp.swift"),
             encoding: .utf8
         )
         let architectureDoc = try String(
@@ -1387,11 +1387,18 @@ struct SourceGuardTests {
             "Sources/Engine/EventStore": "HRA-9 reconciles event-store sync under Engine/Persistence/Sync and Repositories.",
             "Sources/Session/ViewModels/Managers": "HRA-10 moves manager files to chat coordinators, messaging, navigation, activity, or state owners.",
             "Sources/Session/ViewModels/Utilities": "HRA-10 moves message lookup helpers to Session/Chat/Navigation.",
+            "Sources/Support/Concurrency": "HRA-12 moves concurrency primitives under Support/Foundation/Concurrency.",
+            "Sources/Support/DependencyInjection": "HRA-12 moves dependency assembly under Support/Composition.",
+            "Sources/Support/Diagnostics/Services": "HRA-12 flattens diagnostics services under Support/Diagnostics.",
             "Sources/Support/Utilities": "HRA-12 splits utilities into scoped Support/Foundation concerns.",
             "Sources/Support/Extensions": "HRA-12 splits extensions into scoped Support/Foundation/SwiftUI or parsing/formatting concerns.",
+            "Sources/Support/Infrastructure": "HRA-12 moves infrastructure services to diagnostics or foundation owners.",
+            "Sources/Support/Observability": "HRA-12 merges observability helpers under Support/Diagnostics.",
+            "Sources/Support/Settings": "HRA-12 moves paired-server settings storage under Support/Pairing.",
+            "Sources/Support/Storage/Services": "HRA-12 flattens storage service files under Support/Storage.",
         ]
         let requiredRoots = [
-            "Sources/App",
+            "Sources/App/Lifecycle",
             "Sources/Engine/Transport",
             "Sources/Engine/Protocol",
             "Sources/Engine/Events",
@@ -1404,6 +1411,11 @@ struct SourceGuardTests {
             "Sources/UI/RuntimeSurfaces",
             "Sources/Support/Composition",
             "Sources/Support/Foundation",
+            "Sources/Support/Diagnostics",
+            "Sources/Support/Pairing",
+            "Sources/Support/Storage",
+            "Sources/Support/Feedback",
+            "Sources/Support/Share",
         ]
 
         let presentBanned = bannedBuckets.keys
@@ -1571,6 +1583,99 @@ struct SourceGuardTests {
                 && missingSplitFiles.isEmpty
                 && oversizedSplitFiles.isEmpty,
             "HRA-11 UI hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingSplitFiles); oversized split files: \(oversizedSplitFiles)"
+        )
+    }
+
+    @Test("iOS Support uses HRA target hierarchy")
+    func testIOSSupportUsesHRATargetHierarchy() throws {
+        let iosRoot = iosAppRoot()
+        let requiredRoots = [
+            "Sources/App/Lifecycle",
+            "Sources/Support/Composition",
+            "Sources/Support/Diagnostics",
+            "Sources/Support/Feedback",
+            "Sources/Support/Foundation",
+            "Sources/Support/Foundation/Concurrency",
+            "Sources/Support/Foundation/Formatting",
+            "Sources/Support/Foundation/Media",
+            "Sources/Support/Foundation/Parsing",
+            "Sources/Support/Foundation/SwiftUI",
+            "Sources/Support/Foundation/Validation",
+            "Sources/Support/Pairing",
+            "Sources/Support/Pairing/Onboarding",
+            "Sources/Support/Share",
+            "Sources/Support/Storage",
+        ]
+        let bannedRoots = [
+            "Sources/Support/Concurrency",
+            "Sources/Support/DependencyInjection",
+            "Sources/Support/Diagnostics/Services",
+            "Sources/Support/Extensions",
+            "Sources/Support/Infrastructure",
+            "Sources/Support/Observability",
+            "Sources/Support/Settings",
+            "Sources/Support/Storage/Services",
+            "Sources/Support/Utilities",
+        ]
+        let requiredFiles = [
+            "Sources/App/Lifecycle/AppDelegate.swift",
+            "Sources/App/Lifecycle/TronMobileApp.swift",
+            "Sources/Support/Composition/AppInitializer.swift",
+            "Sources/Support/Composition/DependencyContainer.swift",
+            "Sources/Support/Composition/DependencyEnvironment.swift",
+            "Sources/Support/Composition/DependencyProviding.swift",
+            "Sources/Support/Diagnostics/ClientLogIngestionService.swift",
+            "Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift",
+            "Sources/Support/Diagnostics/DiagnosticsRedactor.swift",
+            "Sources/Support/Diagnostics/ErrorHandler.swift",
+            "Sources/Support/Diagnostics/MetricKitDiagnosticsStore.swift",
+            "Sources/Support/Diagnostics/TronLogger.swift",
+            "Sources/Support/Foundation/AppConstants.swift",
+            "Sources/Support/Foundation/Concurrency/AsyncSemaphore.swift",
+            "Sources/Support/Foundation/Formatting/Date+Extensions.swift",
+            "Sources/Support/Foundation/Formatting/DurationFormatter.swift",
+            "Sources/Support/Foundation/Formatting/ModelNameFormatter.swift",
+            "Sources/Support/Foundation/Formatting/String+Extensions.swift",
+            "Sources/Support/Foundation/Formatting/TaskFormatting.swift",
+            "Sources/Support/Foundation/Formatting/TokenFormatter.swift",
+            "Sources/Support/Foundation/Formatting/VersionDisplay.swift",
+            "Sources/Support/Foundation/Media/ImageProcessor.swift",
+            "Sources/Support/Foundation/Parsing/ContentLineParser.swift",
+            "Sources/Support/Foundation/Parsing/DateParser.swift",
+            "Sources/Support/Foundation/SwiftUI/Binding+PasteAware.swift",
+            "Sources/Support/Foundation/SwiftUI/KeyboardObserver.swift",
+            "Sources/Support/Foundation/SwiftUI/ToastCenter.swift",
+            "Sources/Support/Foundation/SwiftUI/View+Accessibility.swift",
+            "Sources/Support/Foundation/SwiftUI/View+Extensions.swift",
+            "Sources/Support/Foundation/Validation/FolderNameValidator.swift",
+            "Sources/Support/Pairing/PairedServerStore.swift",
+            "Sources/Support/Share/SharedContent.swift",
+            "Sources/Support/Storage/DraftStore.swift",
+            "Sources/Support/Storage/InputHistoryStore.swift",
+            "Sources/Support/Storage/KeychainItem.swift",
+            "Sources/Support/Storage/PairedServerTokenStore.swift",
+        ]
+        let bannedFiles = [
+            "Sources/App/AppDelegate.swift",
+            "Sources/App/TronMobileApp.swift",
+            "Sources/Support/AppConstants.swift",
+        ]
+
+        let missingRequired = requiredRoots
+            .filter { !directoryExists(iosRoot.appendingPathComponent($0)) }
+        let presentBanned = bannedRoots
+            .filter { directoryExists(iosRoot.appendingPathComponent($0)) }
+        let missingFiles = requiredFiles
+            .filter { !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
+        let presentBannedFiles = bannedFiles
+            .filter { FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
+
+        #expect(
+            missingRequired.isEmpty
+                && presentBanned.isEmpty
+                && missingFiles.isEmpty
+                && presentBannedFiles.isEmpty,
+            "HRA-12 Support hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing files: \(missingFiles); old files present: \(presentBannedFiles)"
         )
     }
 

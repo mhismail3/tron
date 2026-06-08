@@ -860,13 +860,13 @@ The app uses MVVM with coordinators, event plugins, and SwiftUI's `@Observable` 
 
 ```
 packages/ios-app/Sources/
-+-- App/                  App entry point, delegates, scene phases
++-- App/                  Lifecycle entry point, delegates, scene phases
 +-- Engine/               Engine transport, protocol DTOs, event handling,
                          local persistence, repositories
 +-- Session/              Chat workflow, attachments, parsing, timeline
                          messages, reconstruction, activity, and tokens
-+-- Support/              Dependency injection, diagnostics, pairing,
-                         settings, storage, feedback, utilities
++-- Support/              Composition, diagnostics, feedback, foundation,
+                         pairing, share, storage
 +-- UI/                   Theme, chat, settings, onboarding, runtime
                          surfaces, capabilities, components, system sheets
 +-- Resources/            Localized strings, fixtures

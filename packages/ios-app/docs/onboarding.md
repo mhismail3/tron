@@ -366,7 +366,7 @@ unlocked at least once.
 ## File Map
 
 ```
-Sources/App/TronMobileApp.swift
+Sources/App/Lifecycle/TronMobileApp.swift
   └── owns the shell + onboarding sheet presentation
 
 Sources/UI/Onboarding/
@@ -383,10 +383,10 @@ Sources/Support/Pairing/Onboarding/
   └── PairingPersistor.swift
 
 Sources/Support/Pairing/PairingURLParser.swift
-Sources/Support/Settings/PairedServerStore.swift
-Sources/Support/Storage/Services/PairedServerTokenStore.swift
-Sources/Support/Storage/Services/KeychainItem.swift
-Sources/Support/Extensions/Swift/Binding+PasteAware.swift
+Sources/Support/Pairing/PairedServerStore.swift
+Sources/Support/Storage/PairedServerTokenStore.swift
+Sources/Support/Storage/KeychainItem.swift
+Sources/Support/Foundation/SwiftUI/Binding+PasteAware.swift
 Sources/Session/Chat/State/OnboardingSetupSnapshot.swift
 Sources/Session/Chat/State/OnboardingState.swift
 

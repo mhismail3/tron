@@ -35,8 +35,8 @@ struct CleanupGuardTests {
 
     @Test("Display helpers use active defaults and deterministic heuristics")
     func displayHelpersAvoidLegacyFallbackTerminology() throws {
-        let modelFormatter = try read("packages/ios-app/Sources/Support/Utilities/Core/ModelNameFormatter.swift")
-        let localComputerName = try read("packages/mac-app/Sources/Services/Pairing/LocalComputerName.swift")
+        let modelFormatter = try read("packages/ios-app/Sources/Support/Foundation/Formatting/ModelNameFormatter.swift")
+        let localComputerName = try read("packages/mac-app/Sources/Support/Pairing/LocalComputerName.swift")
 
         let retiredTerm = "fall" + "back"
         #expect(!modelFormatter.localizedCaseInsensitiveContains(retiredTerm))

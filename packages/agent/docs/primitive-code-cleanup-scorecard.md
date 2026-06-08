@@ -84,7 +84,7 @@ maintainability owner.
 | `packages/ios-app/Sources/Engine` | retain | iOS engine protocol/cache | Engine DTOs, protocol transport, event decoding, local event cache, repositories. | Keep as the only server/engine integration root. |
 | `packages/ios-app/Sources/Resources` | asset | iOS resources | Fonts, localized strings, and generated icon layer assets. | Keep resource boundary. |
 | `packages/ios-app/Sources/Session` | retain | iOS session state | Chat/session view models, messages, activity summaries, parsing, token accounting. | Keep as the only session-state root. |
-| `packages/ios-app/Sources/Support` | retain | iOS support services | Dependency injection, diagnostics, pairing, storage, settings, concurrency, feedback, extensions, utilities. | Keep as non-UI support root. |
+| `packages/ios-app/Sources/Support` | retain | iOS support services | Composition, diagnostics, feedback, foundation, pairing, share, and storage owners. | Keep as non-UI support root with no broad utility/service buckets. |
 | `packages/ios-app/Sources/UI` | retain | iOS UI shell | Theme and SwiftUI views for chat, settings, onboarding, generic runtime surfaces. | Keep as the only UI source root. |
 | `packages/mac-app/Sources/App` | retain | Mac app lifecycle | App entry, environment setup, command-mode startup, and runtime variant selection. | Keep. |
 | `packages/mac-app/Sources/Assets.xcassets` | asset | Mac assets | Xcode asset catalog boundary. | Keep. |

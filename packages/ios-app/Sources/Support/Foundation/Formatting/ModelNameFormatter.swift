@@ -509,7 +509,7 @@ extension String {
 // MARK: - Quick Lookup Helper
 
 /// Formats a model ID into a friendly display name.
-/// Uses server cache when available, falls back to heuristic parsing.
+/// Uses server cache when available, otherwise deterministic ID heuristics.
 func formatModelDisplayName(_ modelId: String) -> String {
     ModelNameFormatter.format(modelId, style: .short)
 }

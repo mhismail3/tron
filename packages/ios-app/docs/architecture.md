@@ -43,13 +43,13 @@ scorecards, evidence manifests, inventory docs, and static absence tests.
 
 ```
 Sources/
-+-- App/                  App entry point, app delegate, scene phases
++-- App/                  Lifecycle entry point, app delegate, scene phases
 +-- Engine/               Engine transport, protocol DTOs, live/stored
 |                         events, persistence, repositories
 +-- Session/              Chat workflow, attachments, parsing, timeline
 |                         messages, reconstruction, activity, and tokens
-+-- Support/              Dependency injection, diagnostics, pairing,
-|                         settings, storage, feedback, utilities
++-- Support/              Composition, diagnostics, feedback, foundation,
+|                         pairing, share, storage
 +-- UI/                   Theme, chat, settings, onboarding, runtime
 |                         surfaces, capabilities, components, system sheets
 +-- Assets.xcassets/      App icons and image assets

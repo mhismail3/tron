@@ -10,7 +10,7 @@ Plan source: `/Users/<USER>/Downloads/TRON_REARCHITECTURE_PLAN.md`.
 
 HRA-8 was the red-gate and map checkpoint for the iOS hierarchy campaign. HRA-9
 has since consumed the Engine rows, HRA-10 has consumed the Session rows, and
-HRA-11 has consumed the UI rows.
+HRA-11 has consumed the UI rows, and HRA-12 has consumed the App/Support rows.
 This artifact records the target path for every live Swift file under
 `packages/ios-app/Sources` and
 `packages/ios-app/Tests`, the SourceGuard tests that fail until the remaining
@@ -21,7 +21,7 @@ Machine-readable map:
 
 - `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`
 
-Coverage after HRA-11:
+Coverage after HRA-12:
 
 - `packages/ios-app/Sources`: 361 Swift files
 - `packages/ios-app/Tests`: 192 Swift files
@@ -40,9 +40,8 @@ Coverage after HRA-11:
 ## SourceGuard Red Gates
 
 `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` now contains HRA
-hierarchy checks that intentionally fail until HRA-12 and HRA-13 complete:
+hierarchy checks that intentionally fail until HRA-13 completes:
 
-- `testIOSSourcesUseHRAFeatureOwnedHierarchy`
 - `testIOSTestsMirrorHRASourceBoundaries`
 
 The same file also confirms XcodeGen constraints with
@@ -57,9 +56,9 @@ true`; the test target includes `Tests` recursively with
 XcodeGen regeneration, not hand-edited `.xcodeproj` membership.
 
 The ShareExtension target has its own source root and explicitly includes
-`Sources/Support/Share/SharedContent.swift`. HRA-12 may move that shared file
-only if it updates `project.yml`, regenerates the project, and proves the share
-extension target still compiles.
+`Sources/Support/Share/SharedContent.swift`. HRA-12 retained that file in
+`Support/Share`, so the share-extension include remains valid after XcodeGen
+regeneration.
 
 ## Open Loops
 
@@ -69,7 +68,9 @@ extension target still compiles.
   live under the target Session owners and are marked `passed_after_fix`.
 - HRA-11 consumed the map rows whose target phase is `HRA-11`; those rows now
   live under feature-owned UI roots and are marked `passed_after_fix`.
-- HRA-12 must consume the map rows whose target phase is `HRA-12`.
+- HRA-12 consumed the map rows whose target phase is `HRA-12`; those rows now
+  live under app lifecycle, composition, diagnostics, foundation, pairing,
+  share, feedback, and storage owners and are marked `passed_after_fix`.
 - HRA-13 must consume the map rows whose target phase is `HRA-13`, decompose
   SourceGuard if it remains over budget, regenerate XcodeGen, and pass the
   SourceGuard target.
