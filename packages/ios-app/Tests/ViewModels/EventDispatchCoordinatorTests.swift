@@ -453,11 +453,6 @@ final class MockEventDispatchContext: EventDispatchTarget {
     // Display streaming
     func handleDisplayFrame(_ result: DisplayFramePlugin.Result) {}
 
-    // Queue events
-    func handleMessageQueued(_ result: MessageQueuedPlugin.Result) {}
-    func handleMessageDequeued(_ result: MessageDequeuedPlugin.Result) {}
-    func handleQueuedMessageSent(_ result: QueuedMessageSentPlugin.Result) {}
-
     func logWarning(_ message: String) {
         logWarningCalled = true
     }

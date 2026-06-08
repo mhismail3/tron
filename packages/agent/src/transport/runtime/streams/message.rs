@@ -26,38 +26,6 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
                 "reason": reason,
             })),
         )),
-        TronEvent::MessageQueued {
-            queue_id,
-            text,
-            position,
-            ..
-        } => Some(session_scoped(
-            event,
-            "agent.message_queued",
-            Some(json!({
-                "queueId": queue_id,
-                "text": text,
-                "position": position,
-            })),
-        )),
-        TronEvent::MessageDequeued {
-            queue_id, reason, ..
-        } => Some(session_scoped(
-            event,
-            "agent.message_dequeued",
-            Some(json!({
-                "queueId": queue_id,
-                "reason": reason,
-            })),
-        )),
-        TronEvent::QueuedMessageSent { text, queue_id, .. } => Some(session_scoped(
-            event,
-            "agent.queued_message_sent",
-            Some(json!({
-                "text": text,
-                "queueId": queue_id,
-            })),
-        )),
         _ => None,
     }
 }

@@ -65,7 +65,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **58/100**",
+        "Current score: **70/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
@@ -80,7 +80,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-3 | Rust agent consolidation | 18 | passed_after_fix |",
         "| PCC-4 | Engine and primitive surface cleanup | 10 | passed_after_fix |",
         "| PCC-5 | Session, trace, and persistence cleanup | 8 | passed_after_fix |",
-        "PCC-6 starts iOS app consolidation.",
+        "| PCC-6 | iOS app consolidation | 12 | passed_after_fix |",
+        "PCC-7 starts Mac app consolidation.",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -92,7 +93,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **58/100**",
+        "Current score: **70/100**",
         "Status: **active**",
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
@@ -100,6 +101,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-3 | passed_after_fix |",
         "| PCC-4 | passed_after_fix |",
         "| PCC-5 | passed_after_fix |",
+        "| PCC-6 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -216,19 +218,12 @@ fn retained_top_level_source_directories_are_justified() {
         "packages/agent/src/shared",
         "packages/agent/src/platform",
         "packages/ios-app/Sources/App",
-        "packages/ios-app/Sources/Core",
-        "packages/ios-app/Sources/Database",
-        "packages/ios-app/Sources/Extensions",
-        "packages/ios-app/Sources/IconLayers",
-        "packages/ios-app/Sources/Models",
-        "packages/ios-app/Sources/Protocols",
-        "packages/ios-app/Sources/Resources",
-        "packages/ios-app/Sources/Services",
-        "packages/ios-app/Sources/Theme",
-        "packages/ios-app/Sources/Utilities",
-        "packages/ios-app/Sources/ViewModels",
-        "packages/ios-app/Sources/Views",
         "packages/ios-app/Sources/Assets.xcassets",
+        "packages/ios-app/Sources/Engine",
+        "packages/ios-app/Sources/Resources",
+        "packages/ios-app/Sources/Session",
+        "packages/ios-app/Sources/Support",
+        "packages/ios-app/Sources/UI",
         "packages/mac-app/Sources/Assets.xcassets",
         "packages/mac-app/Sources/MenuBar",
         "packages/mac-app/Sources/Resources",
@@ -574,7 +569,7 @@ fn session_persistence_surface_stays_current_and_collapsed() {
         "pub(crate) use deps::Deps;",
         "handlers::function_registrations",
         "operations/",
-        "dashboard query",
+        concat!("dash", "board query"),
     ] {
         assert!(
             !session_mod.contains(banned),
@@ -601,10 +596,10 @@ fn session_persistence_surface_stays_current_and_collapsed() {
         "packages/agent/src/domains/session/event_store/types/payloads/message_ops.rs",
     );
     for banned in [
-        "MessageQueuedPayload",
-        "MessageDequeuedPayload",
-        "message.queued",
-        "message.dequeued",
+        concat!("Message", "Queued", "Payload"),
+        concat!("Message", "Dequeued", "Payload"),
+        concat!("message", ".", "queued"),
+        concat!("message", ".", "dequeued"),
     ] {
         assert!(
             !message_ops.contains(banned),
@@ -634,5 +629,56 @@ fn session_persistence_surface_stays_current_and_collapsed() {
             !schema.contains(banned),
             "fresh primitive schema must not recreate old product table/column text `{banned}`"
         );
+    }
+}
+
+#[test]
+fn prompt_queue_and_shell_list_residue_stays_out_of_retained_runtime_source() {
+    let banned_terms = [
+        concat!("apply", "_", "enqueued"),
+        concat!("send", "-", "to", "-", "queue"),
+        concat!("queue", " drain mode"),
+        concat!("queued", " follow-up"),
+        concat!("hidden prompt apply starts ", "queued"),
+        concat!("queued", " runtime work"),
+        concat!("Dash", "board"),
+        concat!("dash", "board"),
+        concat!("Message", "Queue"),
+        concat!("Queued", "Message"),
+        concat!("queue", "Prompt"),
+        concat!("clear", "Queue"),
+        concat!("dequeue", "Prompt"),
+        concat!("queue", "Drain", "Mode"),
+        concat!("message", "Queue"),
+        concat!("Queued", "Message", "Chips"),
+        concat!("Message", "Queued"),
+        concat!("Message", "Dequeued"),
+        concat!("queued", "_", "message"),
+        concat!("message", ".", "queued"),
+        concat!("message", ".", "dequeued"),
+    ];
+
+    for path in git_ls_files() {
+        if !(path.starts_with("packages/agent/src/")
+            || path.starts_with("packages/ios-app/Sources/")
+            || path.starts_with("packages/ios-app/Tests/"))
+        {
+            continue;
+        }
+        if !matches!(
+            Path::new(&path)
+                .extension()
+                .and_then(|extension| extension.to_str()),
+            Some("md" | "rs" | "swift")
+        ) {
+            continue;
+        }
+        let text = read_repo_file(&path);
+        for term in banned_terms {
+            assert!(
+                !text.contains(term),
+                "retired prompt queue/session-list term `{term}` must stay out of retained source {path}"
+            );
+        }
     }
 }

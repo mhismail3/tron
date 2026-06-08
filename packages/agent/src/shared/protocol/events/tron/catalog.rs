@@ -99,7 +99,7 @@ tron_events! {
     /// Agent ready after the terminal event has been published.
     AgentReady {} => "agent_ready",
 
-    /// Session processing state changed (global broadcast for dashboard).
+    /// Session processing state changed (global broadcast for session activity).
     SessionProcessingChanged {
         #[serde(rename = "isProcessing")]
         is_processing: bool,
@@ -466,28 +466,6 @@ tron_events! {
         reason: Option<String>,
     } => "message_deleted",
 
-    /// Message queued for later delivery (user sent while agent busy).
-    MessageQueued {
-        #[serde(rename = "queueId")]
-        queue_id: String,
-        text: String,
-        position: u32,
-    } => "message_queued",
-
-    /// Queued message consumed or cancelled.
-    MessageDequeued {
-        #[serde(rename = "queueId")]
-        queue_id: String,
-        reason: String,
-    } => "message_dequeued",
-
-    /// Queued message sent as a user prompt (auto-drain).
-    /// Broadcast so iOS can render the user message bubble in real-time.
-    QueuedMessageSent {
-        text: String,
-        #[serde(rename = "queueId")]
-        queue_id: String,
-    } => "queued_message_sent",
 }
 
 impl TronEvent {

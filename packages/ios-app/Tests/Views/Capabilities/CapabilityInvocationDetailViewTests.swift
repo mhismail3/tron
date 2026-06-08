@@ -6,7 +6,7 @@ import XCTest
 @MainActor
 final class CapabilityInvocationDetailViewTests: XCTestCase {
     func testCapabilityInvocationDetailSourceKeepsRawProtocolDataAuditOnly() throws {
-        let source = try source(pathComponents: ["Sources", "Views", "Capabilities", "CapabilityInvocationViews.swift"])
+        let source = try source(pathComponents: ["Sources", "UI", "Views", "Capabilities", "CapabilityInvocationViews.swift"])
 
         XCTAssertTrue(source.contains(#"CapabilityDetailSection(title: "Action""#))
         XCTAssertTrue(source.contains(#"CapabilityDetailSection(title: "Runtime Details""#))
@@ -18,7 +18,7 @@ final class CapabilityInvocationDetailViewTests: XCTestCase {
     }
 
     func testCapabilityDetailSectionUsesSolidSurfaceForPayloadReadability() throws {
-        let source = try source(pathComponents: ["Sources", "Views", "Capabilities", "Shared", "CapabilityDetailSection.swift"])
+        let source = try source(pathComponents: ["Sources", "UI", "Views", "Capabilities", "Shared", "CapabilityDetailSection.swift"])
 
         XCTAssertTrue(source.contains("Color.tronSurface.opacity"))
         XCTAssertTrue(source.contains(".stroke(accent.opacity"))

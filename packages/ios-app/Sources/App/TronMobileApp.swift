@@ -16,7 +16,7 @@ struct TronMobileApp: App {
     // Onboarding state — owned per-launch; survives across the sheet
     // because @State preserves its initial value for the lifetime of
     // the App. Once `onboardingComplete` flips to true the sheet is
-    // dismissed and the dashboard remains mounted.
+    // dismissed and the session list remains mounted.
     @State private var onboardingState = OnboardingState()
     @State private var isOnboardingSheetPresented = false
     @State private var onboardingDetent: PresentationDetent = .medium
@@ -25,7 +25,7 @@ struct TronMobileApp: App {
 
     /// First-run pairing flag. Driven by `OnboardingState.completionStorageKey`
     /// (the literal key `"onboardingComplete"`). When false, the app still
-    /// mounts the dashboard and presents `OnboardingFlowView` as a medium
+    /// mounts the session list and presents `OnboardingFlowView` as a medium
     /// sheet.
     @AppStorage("onboardingComplete") private var onboardingComplete: Bool = false
 
@@ -130,7 +130,7 @@ struct TronMobileApp: App {
 
     @ViewBuilder
     private func readyContent() -> some View {
-        dashboardContent
+        sessionListContent
             .sheet(isPresented: $isOnboardingSheetPresented) {
                 OnboardingFlowView(
                     state: onboardingState,
@@ -158,7 +158,7 @@ struct TronMobileApp: App {
             }
     }
 
-    private var dashboardContent: some View {
+    private var sessionListContent: some View {
         ContentView(
             deepLinkSessionId: $deepLinkSessionId,
             deepLinkScrollTarget: $deepLinkScrollTarget

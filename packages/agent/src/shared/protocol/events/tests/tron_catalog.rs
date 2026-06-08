@@ -219,22 +219,6 @@ fn tron_event_all_event_types() {
             target_turn: None,
             reason: None,
         },
-        TronEvent::MessageQueued {
-            base: base.clone(),
-            queue_id: "q1".into(),
-            text: "hello".into(),
-            position: 0,
-        },
-        TronEvent::MessageDequeued {
-            base: base.clone(),
-            queue_id: "q1".into(),
-            reason: "processed".into(),
-        },
-        TronEvent::QueuedMessageSent {
-            base: base.clone(),
-            text: "hello".into(),
-            queue_id: "q1".into(),
-        },
     ];
 
     assert_eq!(events.len(), VARIANT_COUNT);

@@ -116,15 +116,6 @@ struct AgentClientTests {
             case "agent::prompt":
                 #expect((payload as? AgentPromptParams)?.sessionId == sessionId)
                 return AgentPromptResult(acknowledged: true)
-            case "agent::queue_prompt":
-                #expect((payload as? QueuePromptParams)?.sessionId == sessionId)
-                return PendingQueueItem(queueId: "queue-1", text: "queued", position: 1, timestamp: "2026-05-10T00:00:00Z")
-            case "agent::dequeue_prompt":
-                #expect((payload as? DequeuePromptParams)?.sessionId == sessionId)
-                return DequeueResult(ok: true)
-            case "agent::clear_queue":
-                #expect((payload as? ClearQueueParams)?.sessionId == sessionId)
-                return ClearQueueResult(cleared: 1)
             case "agent::abort":
                 #expect((payload as? AgentAbortParams)?.sessionId == sessionId)
                 return EmptyParams()
@@ -136,9 +127,6 @@ struct AgentClientTests {
             }
         }
         try await client.sendPrompt("Hello", idempotencyKey: .userAction("agent.prompt.test"))
-        _ = try await client.queuePrompt("queued", idempotencyKey: .userAction("agent.queuePrompt.test"))
-        try await client.dequeuePrompt("queue-1", idempotencyKey: .userAction("agent.dequeuePrompt.test"))
-        try await client.clearQueue(idempotencyKey: .userAction("agent.clearQueue.test"))
         try await client.abort(idempotencyKey: .userAction("agent.abort.test"))
         _ = try await client.abortCapabilityInvocation(invocationId: "capability-1", idempotencyKey: .userAction("agent.abortCapabilityInvocation.test"))
         #expect(transport.ensureSessionEventSubscriptionCallCount >= 1)
@@ -148,9 +136,6 @@ struct AgentClientTests {
         ])
         #expect(seenFunctions == [
             "agent::prompt",
-            "agent::queue_prompt",
-            "agent::dequeue_prompt",
-            "agent::clear_queue",
             "agent::abort",
             "agent::abort_invocation"
         ])

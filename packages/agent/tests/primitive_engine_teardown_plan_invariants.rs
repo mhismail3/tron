@@ -1221,7 +1221,6 @@ fn prompt_media_uses_unified_attachment_primitive() {
         "packages/agent/src/domains/agent/operations/prompt.rs",
         "packages/agent/src/domains/agent/runtime/service/request.rs",
         "packages/agent/src/domains/agent/runtime/service/execute.rs",
-        "packages/agent/src/domains/agent/runtime/service/queue.rs",
         "packages/agent/src/domains/agent/runtime/runtime/user_event.rs",
     ];
     for path in rust_files {
@@ -1245,12 +1244,12 @@ fn prompt_media_uses_unified_attachment_primitive() {
     }
 
     let ios_files = [
-        "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift",
-        "packages/ios-app/Sources/Services/Network/Clients/AgentClient.swift",
-        "packages/ios-app/Sources/Services/Network/Clients/AgentClientProtocol.swift",
-        "packages/ios-app/Sources/Core/Repositories/Protocols/AgentRepository.swift",
-        "packages/ios-app/Sources/Core/Repositories/DefaultAgentRepository.swift",
-        "packages/ios-app/Sources/ViewModels/Chat/ChatViewModel+Messaging.swift",
+        "packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Agent.swift",
+        "packages/ios-app/Sources/Engine/Network/Clients/AgentClient.swift",
+        "packages/ios-app/Sources/Engine/Network/Clients/AgentClientProtocol.swift",
+        "packages/ios-app/Sources/Engine/Repositories/Defaults/Protocols/AgentRepository.swift",
+        "packages/ios-app/Sources/Engine/Repositories/Defaults/DefaultAgentRepository.swift",
+        "packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+Messaging.swift",
         "packages/ios-app/Tests/Services/AgentClientTests.swift",
         "packages/ios-app/Tests/Repositories/DefaultAgentRepositoryTests.swift",
         "packages/ios-app/Tests/Models/EngineProtocolTypesTests.swift",
@@ -1279,15 +1278,15 @@ fn prompt_media_uses_unified_attachment_primitive() {
 fn ios_shell_has_no_fixed_session_tree_projection() {
     for (path, label) in [
         (
-            "packages/ios-app/Sources/Views/SessionTree",
+            "packages/ios-app/Sources/UI/Views/SessionTree",
             "fixed iOS session-tree view root",
         ),
         (
-            "packages/ios-app/Sources/Database/Repositories/TreeRepository.swift",
+            "packages/ios-app/Sources/Engine/Database/Repositories/TreeRepository.swift",
             "fixed local event-tree repository",
         ),
         (
-            "packages/ios-app/Sources/Services/Events/EventTreeBuilder.swift",
+            "packages/ios-app/Sources/Engine/EventStore/EventTreeBuilder.swift",
             "fixed local event-tree projection builder",
         ),
         (
@@ -1789,8 +1788,8 @@ fn retained_event_payload_surface_is_loop_owned() {
     assert_absent(
         &generated,
         &[
-            "MessageQueued",
-            "MessageDequeued",
+            concat!("Message", "Queued"),
+            concat!("Message", "Dequeued"),
             pause_requested.as_str(),
             pause_resolved.as_str(),
             "CapabilityRunStatus",
@@ -1860,11 +1859,11 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         read_repo_file("packages/agent/src/domains/settings/implementation/types/server.rs"),
         read_repo_file("packages/agent/defaults/profiles/default/profile.toml"),
         read_repo_file(
-            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Settings.swift",
+            "packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Settings.swift",
         ),
-        read_repo_file("packages/ios-app/Sources/ViewModels/State/SettingsState.swift"),
+        read_repo_file("packages/ios-app/Sources/Session/ViewModels/State/SettingsState.swift"),
         read_repo_file(
-            "packages/ios-app/Sources/Views/Settings/Pages/ConnectionSettingsPage.swift",
+            "packages/ios-app/Sources/UI/Views/Settings/Pages/ConnectionSettingsPage.swift",
         ),
         read_repo_file("README.md"),
     ]
@@ -1897,13 +1896,13 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
     }
 
     let ios_surface = [
-        read_repo_file("packages/ios-app/Sources/Services/Network/Clients/MiscClient.swift"),
+        read_repo_file("packages/ios-app/Sources/Engine/Network/Clients/MiscClient.swift"),
         read_repo_file(
-            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+System.swift",
+            "packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+System.swift",
         ),
-        read_repo_file("packages/ios-app/Sources/Views/Settings/SettingsSupport.swift"),
+        read_repo_file("packages/ios-app/Sources/UI/Views/Settings/SettingsSupport.swift"),
         read_repo_file(
-            "packages/ios-app/Sources/Views/Settings/Pages/ConnectionSettingsPage.swift",
+            "packages/ios-app/Sources/UI/Views/Settings/Pages/ConnectionSettingsPage.swift",
         ),
     ]
     .join("\n");
@@ -1975,10 +1974,10 @@ fn dynamic_runtime_surfaces_are_schema_rendering_not_target_authoring() {
 
     let ios_surface = [
         read_repo_file(
-            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+GeneratedUI.swift",
+            "packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+GeneratedUI.swift",
         ),
         read_repo_file(
-            "packages/ios-app/Sources/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift",
+            "packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift",
         ),
         read_repo_file("packages/ios-app/Tests/Models/EngineProtocol/GeneratedUIDTOTests.swift"),
         read_repo_file("packages/ios-app/Tests/Views/GeneratedUIRendererTests.swift"),
@@ -2030,7 +2029,6 @@ fn queue_trigger_and_prompt_envelopes_do_not_pin_preexecution_catalog_state() {
         read_repo_file("packages/agent/src/domains/agent/runtime/service/deps.rs"),
         read_repo_file("packages/agent/src/domains/agent/runtime/service/events.rs"),
         read_repo_file("packages/agent/src/domains/agent/runtime/service/execute.rs"),
-        read_repo_file("packages/agent/src/domains/agent/runtime/service/queue.rs"),
         read_repo_file("packages/agent/src/domains/agent/stream.rs"),
     ]
     .join("\n");
@@ -2066,10 +2064,10 @@ fn engine_invocation_and_transport_do_not_require_expected_revision_tokens() {
         read_repo_file("packages/agent/src/engine/tests/host_invocation.rs"),
         read_repo_file("packages/agent/src/engine/tests/meta_primitives.rs"),
         read_repo_file("packages/agent/src/engine/tests/external_worker.rs"),
-        read_repo_file("packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes.swift"),
-        read_repo_file("packages/ios-app/Sources/Services/Network/EngineConnection.swift"),
+        read_repo_file("packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes.swift"),
+        read_repo_file("packages/ios-app/Sources/Engine/Network/EngineConnection.swift"),
         read_repo_file(
-            "packages/ios-app/Sources/Services/Network/EngineConnectionProtocolFrames.swift",
+            "packages/ios-app/Sources/Engine/Network/EngineConnectionProtocolFrames.swift",
         ),
     ]
     .join("\n");
@@ -2112,7 +2110,7 @@ fn control_projection_primitive_is_deleted() {
     );
     assert!(
         !repo_path(
-            "packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Control.swift"
+            "packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Control.swift"
         )
         .exists(),
         "iOS control DTO should be deleted"
@@ -2125,7 +2123,7 @@ fn public_catalog_readout_state_is_not_client_envelope_state() {
         read_repo_file("packages/agent/src/transport/contracts.rs"),
         read_repo_file("packages/agent/src/transport/engine_ws.rs"),
         read_repo_file(
-            "packages/ios-app/Sources/Services/Network/EngineConnectionProtocolFrames.swift",
+            "packages/ios-app/Sources/Engine/Network/EngineConnectionProtocolFrames.swift",
         ),
     ]
     .join("\n");
@@ -2140,7 +2138,7 @@ fn public_catalog_readout_state_is_not_client_envelope_state() {
         "public engine transport envelope catalog readout surface",
     );
     let swift_protocol =
-        read_repo_file("packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes.swift");
+        read_repo_file("packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes.swift");
     let response_frame = swift_protocol
         .split("struct EngineProtocolResponseFrame")
         .nth(1)

@@ -207,8 +207,16 @@ mod tests {
 
     #[test]
     fn from_str_rejects_retired_message_queue_types() {
-        assert!("message.queued".parse::<EventType>().is_err());
-        assert!("message.dequeued".parse::<EventType>().is_err());
+        assert!(
+            concat!("message", ".", "queued")
+                .parse::<EventType>()
+                .is_err()
+        );
+        assert!(
+            concat!("message", ".", "dequeued")
+                .parse::<EventType>()
+                .is_err()
+        );
     }
 
     #[test]

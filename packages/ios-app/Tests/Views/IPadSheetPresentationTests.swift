@@ -8,7 +8,7 @@ import XCTest
 final class IPadSheetPresentationTests: XCTestCase {
 
     func testAdaptivePresentationHelperCentralizesIPadSizingAndPhonePreservation() throws {
-        let content = try source(pathComponents: ["Sources", "Extensions", "View+Extensions.swift"])
+        let content = try source(pathComponents: ["Sources", "Support", "Extensions", "Swift", "View+Extensions.swift"])
 
         XCTAssertTrue(
             content.contains("func targetSize(referenceWidth: CGFloat, referenceHeight: CGFloat, intrinsicSize: CGSize? = nil) -> CGSize"),
@@ -67,23 +67,23 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ".adaptivePresentationDetents([.medium, .large], selection: $onboardingDetent, ipadSizing: .largeForm, phoneBackground: .clear)"
             ),
             (
-                ["Sources", "Views", "Attachments", "CameraCaptureSheet.swift"],
+                ["Sources", "UI", "Views", "Attachments", "CameraCaptureSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
-                ["Sources", "Views", "Onboarding", "QRCodeScannerSheet.swift"],
+                ["Sources", "UI", "Views", "Onboarding", "QRCodeScannerSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
-                ["Sources", "Views", "Capabilities", "Display", "StreamSheetView.swift"],
+                ["Sources", "UI", "Views", "Capabilities", "Display", "StreamSheetView.swift"],
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
-                ["Sources", "Views", "System", "CompactionDetailSheet.swift"],
+                ["Sources", "UI", "Views", "System", "CompactionDetailSheet.swift"],
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             ),
             (
-                ["Sources", "Views", "System", "ProviderErrorDetailSheet.swift"],
+                ["Sources", "UI", "Views", "System", "ProviderErrorDetailSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
             )
         ]
@@ -100,7 +100,7 @@ final class IPadSheetPresentationTests: XCTestCase {
     func testReusableSheetViewsOwnCanonicalIPadSizing() throws {
         let expected: [(path: [String], anchor: String, fragment: String)] = [
             (
-                ["Sources", "Views", "System", "LogViewer.swift"],
+                ["Sources", "UI", "Views", "System", "LogViewer.swift"],
                 "struct LogViewer: View",
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             )
@@ -121,7 +121,7 @@ final class IPadSheetPresentationTests: XCTestCase {
     }
 
     func testSettingsDoesNotWrapLogViewerWithDuplicateSizing() throws {
-        let content = try source(pathComponents: ["Sources", "Views", "Settings", "SettingsView.swift"])
+        let content = try source(pathComponents: ["Sources", "UI", "Views", "Settings", "SettingsView.swift"])
         let sheetRange = try XCTUnwrap(
             content.range(of: ".sheet(isPresented: $showLogViewer)"),
             "SettingsView should still present LogViewer through its logs sheet"

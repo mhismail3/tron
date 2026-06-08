@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-08 (primitive cleanup setup).
+> Last verified: 2026-06-08 (PCC-6 iOS source consolidation).
 
 The iOS app handles engine events through two paths:
 
@@ -11,8 +11,9 @@ Stored: EventDatabase -> UnifiedEventTransformer -> ChatMessage array
 
 The live path updates the mounted session UI. The stored path reconstructs
 history from durable event rows. Neither path owns repository workflow state,
-assistant-management state, curated prompt state, skill state, or fixed audit
-dashboard state on the primitive teardown branch.
+assistant-management state, curated prompt state, skill state, prompt-queue
+state, hook suggestion state, or fixed audit panels on the primitive teardown
+branch.
 
 ## Plugin Boundary
 
@@ -25,17 +26,16 @@ Current retained plugin groups:
 
 | Group | Directory | Purpose |
 |-------|-----------|---------|
-| Streaming | `Plugins/Streaming/` | Text, thinking, and turn lifecycle deltas. |
-| Capability invocation | `Plugins/CapabilityInvocation/` | Generic `capability.invocation.*` lifecycle evidence for chat. |
-| Lifecycle | `Plugins/Lifecycle/` | Agent readiness, completion, compaction, context clearing, message deletion, and turn failure labels that still reach the shell. |
-| Session | `Plugins/Session/` | Connection and session list/update/archive/delete state. |
-| Queue | `Plugins/Queue/` | Prompt queue/dequeue/send status. |
-| Display | `Plugins/Display/` | Generic display frames for runtime surfaces. |
-| Server | `Plugins/Server/` | Server/auth/restart status messages. |
-| Hook | `Plugins/Hook/` | Generic LLM hook result display while cleanup audits remaining hook labels. |
+| Streaming | `Sources/Engine/Events/Core/Plugins/Streaming/` | Text, thinking, and turn lifecycle deltas. |
+| Capability invocation | `Sources/Engine/Events/Core/Plugins/CapabilityInvocation/` | Generic `capability.invocation.*` lifecycle evidence for chat. |
+| Lifecycle | `Sources/Engine/Events/Core/Plugins/Lifecycle/` | Agent readiness, completion, compaction, context clearing, message deletion, and turn failure labels that still reach the shell. |
+| Session | `Sources/Engine/Events/Core/Plugins/Session/` | Connection and session list/update/archive/delete state. |
+| Display | `Sources/Engine/Events/Core/Plugins/Display/` | Generic display frames for runtime surfaces. |
+| Server | `Sources/Engine/Events/Core/Plugins/Server/` | Server/auth/restart status messages. |
 
-Deleted workflow-specific plugin roots must stay absent. Static tests keep
-their exact retired names out of ordinary source and docs.
+Deleted workflow-specific plugin roots, including prompt queue and hook
+suggestion plugins, must stay absent. Static tests keep their retired names out
+of ordinary source and docs.
 
 ## Registration
 
@@ -57,7 +57,7 @@ func dispatch(type: String, transform: () -> (any EventResult)?, context: EventD
 
 `ChatViewModel` conforms to the composed dispatch target through small handler
 extensions. The target exposes chat/session primitives, not fixed product
-dashboard APIs.
+session-list APIs.
 
 ## Stored Reconstruction
 
@@ -70,7 +70,7 @@ presentation hints. Reconstruction must not recover retired contract,
 implementation, worker, risk, or binding metadata from old payloads.
 
 Unsupported event payloads should remain visible as diagnostics or no-op
-transport facts. They should not be converted into fixed dashboard,
+transport facts. They should not be converted into fixed panels,
 repository, assistant-management, skill, curated prompt, or media workflow
 models.
 
@@ -79,7 +79,7 @@ models.
 `session.updated` updates only fields the server sends. iOS persists the
 resulting `CachedSession` and uses it for the session list and active-session
 metadata. The client does not synthesize missing counts from unrelated local
-state and does not reconstruct product dashboards from session metadata.
+state and does not reconstruct product panels from session metadata.
 
 ## Guardrails
 

@@ -10,13 +10,7 @@ use std::sync::Arc;
 /// session resume can reconstruct client UI and the LLM can see previously-sent
 /// images and documents in reconstructed history.
 ///
-/// The optional `extra_metadata` object is merged into the payload for
-/// event-source metadata that must travel with a queued prompt.
-pub fn build_user_event_payload(
-    prompt: &str,
-    attachments: Option<&[Value]>,
-    extra_metadata: Option<&Value>,
-) -> Value {
+pub fn build_user_event_payload(prompt: &str, attachments: Option<&[Value]>) -> Value {
     let has_attachments = attachments.is_some_and(|v| !v.is_empty());
 
     let (content, image_count) = if !has_attachments {
@@ -63,13 +57,6 @@ pub fn build_user_event_payload(
     let mut payload = serde_json::json!({ "content": content });
     if let Some(c) = image_count {
         payload["imageCount"] = Value::Number(c.into());
-    }
-    if let Some(Value::Object(extra)) = extra_metadata {
-        if let Value::Object(ref mut obj) = payload {
-            for (k, v) in extra {
-                let _ = obj.insert(k.clone(), v.clone());
-            }
-        }
     }
     payload
 }
@@ -163,7 +150,7 @@ mod tests {
             }),
         ];
 
-        let payload = build_user_event_payload("hello", Some(&attachments), None);
+        let payload = build_user_event_payload("hello", Some(&attachments));
 
         assert_eq!(payload["imageCount"], 1);
         let blocks = payload["content"].as_array().expect("content blocks");

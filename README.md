@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. On the primitive teardown branch, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The native iOS app is being reduced to a thin chat and generic runtime shell; fixed product dashboards are teardown targets, not supported branch behavior.
+Tron is a local-first AI coding agent that runs as a persistent background service. On the primitive teardown branch, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The native iOS app is being reduced to a thin chat and generic runtime shell; fixed product panels are teardown targets, not supported branch behavior.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -442,9 +442,9 @@ authority scopes, and explicit runtime metadata through to the engine. The
 transport does not derive profile scopes or capability runtime metadata;
 `execute` is the primitive operation boundary.
 
-Hidden functions remain in the engine catalog for queue/runtime side effects
-such as agent apply/run-turn and prompt-history capture. Normal discovery
-excludes them and the public transport cannot invoke them directly.
+Hidden functions remain in the engine catalog for internal runtime effects such
+as agent apply/run-turn and prompt-history capture. Normal discovery excludes
+them and the public transport cannot invoke them directly.
 
 The core request set is `hello`, `discover`, `inspect`, `watch`, `invoke`,
 `promote`, `subscribe`, `poll`, `ack`, `heartbeat`, and `goodbye`. Every request
@@ -640,9 +640,7 @@ The schema is defined in `packages/agent/src/domains/settings/implementation/typ
 
   "retry":  { "maxRetries": 1 },
 
-  "session": {
-    "queueDrainMode": "sequential"              // "sequential" | "drop" for queued prompts
-  }
+  "session": {}
 }
 ```
 
@@ -810,23 +808,17 @@ The app uses MVVM with coordinators, event plugins, and SwiftUI's `@Observable` 
 ```
 packages/ios-app/Sources/
 +-- App/                  App entry point, delegates, scene phases
-+-- Core/                 DI, EventDispatchCoordinator, plugins, payloads
-+-- Database/             SQLite event database, queries
-+-- Models/               Data models, engine protocol codables, event types
-+-- Services/             Engine transport/domain clients, paired servers,
-+                         local diagnostics, feedback,
-+                         Keychain tokens
-+-- ViewModels/           Chat view models, handlers, managers,
-+                         settings/onboarding state
-+-- Views/                SwiftUI shell: chat, input bar, message bubbles,
-+                         session navigation, settings, onboarding,
-+                         dynamic surfaces
-+-- Theme/                Colors, typography, design tokens
-+-- Utilities/            Shared helpers
-+-- Extensions/           Type extensions
++-- Engine/               Engine protocol DTOs, transport, event plugins,
+                         local event cache, repositories
++-- Session/              Chat/session view models, messages, parsing,
+                         activity summaries, token accounting
++-- Support/              Dependency injection, diagnostics, pairing,
+                         settings, storage, feedback, utilities
++-- UI/                   SwiftUI shell, theme, chat, input bar, settings,
+                         onboarding, dynamic surfaces
 +-- Resources/            Localized strings, fixtures
 +-- Assets.xcassets/      Icons and images
-+-- IconLayers/           Source layers for the app icon
++-- Resources/IconLayers/ Source layers for the app icon
 +-- Info.plist            App metadata
 +-- PrivacyInfo.xcprivacy Apple privacy manifest
 ```
@@ -839,7 +831,7 @@ packages/ios-app/Sources/
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   session navigation, prompt input, message rendering, local reconstruction,
-  diagnostics, and generic runtime surfaces. Fixed product dashboards,
+  diagnostics, and generic runtime surfaces. Fixed product panels,
   repository-specific panels, media workflow surfaces, assistant-management
   panels, extension-source surfaces, audio transcription, memory-retain, rules,
   and parallel tree-only projections are removed from the primary source tree.

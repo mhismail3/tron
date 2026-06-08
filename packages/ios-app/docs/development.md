@@ -120,7 +120,8 @@ Use the simulator deep-link path only when a scenario is explicitly testing
 navigation/deep-link handling, or when visible iOS evidence for an exact
 server-created session is intentionally called out. Backend evidence harnesses
 should default to isolated temporary server homes and must not populate the
-user's normal dashboard or jump the visible Simulator without an explicit flag.
+user's normal session shell or jump the visible Simulator without an explicit
+flag.
 The completed post-100 UI/UX scorecard lives at
 `packages/agent/docs/post-100-operating-conditions-scorecard.md`; use that
 scenario ledger as the archived iPhone/mac evidence model for owner

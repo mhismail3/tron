@@ -52,7 +52,7 @@ fn hidden_capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             .idempotency(IdempotencyContract::caller_session_engine_ledger())
             .compensation(CompensationContract::new(
                 CompensationKind::ExternalIrreversible,
-                "hidden prompt apply starts queued runtime work; event-store history remains authoritative and replay is ledger/idempotency controlled",
+                "hidden prompt apply starts live runtime work; event-store history remains authoritative and replay is ledger/idempotency controlled",
             ))
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,

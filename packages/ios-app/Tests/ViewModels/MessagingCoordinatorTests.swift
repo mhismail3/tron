@@ -174,7 +174,7 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.appendedMessages.first?.role, .user)
     }
 
-    // MARK: - Dashboard Update Tests
+    // MARK: - Session Activity Update Tests
 
     func testSendMessageUpdatesSessionProcessingState() async {
         // Given: Valid input
@@ -183,21 +183,21 @@ final class MessagingCoordinatorTests: XCTestCase {
         // When: Sending message
         await coordinator.sendMessage(context: mockContext)
 
-        // Then: Dashboard should be updated
+        // Then: session processing should be updated
         XCTAssertTrue(mockContext.setSessionProcessingCalled)
         XCTAssertTrue(mockContext.lastSessionProcessingValue ?? false)
     }
 
-    func testSendMessageUpdatesDashboardInfo() async {
+    func testSendMessageUpdatesSessionActivitySummary() async {
         // Given: Valid input
         mockContext.inputText = "Test prompt"
 
         // When: Sending message
         await coordinator.sendMessage(context: mockContext)
 
-        // Then: Dashboard info should be updated with prompt
-        XCTAssertTrue(mockContext.updateSessionDashboardInfoCalled)
-        XCTAssertEqual(mockContext.lastDashboardPrompt, "Test prompt")
+        // Then: session activity summary should be updated with prompt
+        XCTAssertTrue(mockContext.updateSessionActivitySummaryCalled)
+        XCTAssertEqual(mockContext.lastSessionActivityPrompt, "Test prompt")
     }
 
     // MARK: - Reasoning Tests
@@ -326,14 +326,14 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertTrue(mockContext.appendedInterruptedMessage)
     }
 
-    func testAbortAgentUpdatesDashboardState() async {
+    func testAbortAgentUpdatesSessionActivityState() async {
         // When: Aborting agent
         await coordinator.abortAgent(context: mockContext)
 
-        // Then: Dashboard should show interrupted
+        // Then: session activity summary should show interrupted
         XCTAssertTrue(mockContext.setSessionProcessingCalled)
         XCTAssertFalse(mockContext.lastSessionProcessingValue ?? true)
-        XCTAssertEqual(mockContext.lastDashboardResponse, "Interrupted")
+        XCTAssertEqual(mockContext.lastSessionActivityResponse, "Interrupted")
     }
 
     func testAbortAgentHandlesServerError() async {
@@ -423,9 +423,9 @@ final class MockMessagingContext: MessagingContext {
     var streamingManagerResetCalled = false
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
-    var updateSessionDashboardInfoCalled = false
-    var lastDashboardPrompt: String?
-    var lastDashboardResponse: String?
+    var updateSessionActivitySummaryCalled = false
+    var lastSessionActivityPrompt: String?
+    var lastSessionActivityResponse: String?
     var handleAgentErrorCalled = false
     var abortAgentCalled = false
     var finalizeStreamingMessageCalled = false
@@ -510,10 +510,10 @@ final class MockMessagingContext: MessagingContext {
         lastSessionProcessingValue = isProcessing
     }
 
-    func updateSessionDashboardInfo(lastUserPrompt: String?, lastAssistantResponse: String?) {
-        updateSessionDashboardInfoCalled = true
-        lastDashboardPrompt = lastUserPrompt
-        lastDashboardResponse = lastAssistantResponse
+    func updateSessionActivitySummary(lastUserPrompt: String?, lastAssistantResponse: String?) {
+        updateSessionActivitySummaryCalled = true
+        lastSessionActivityPrompt = lastUserPrompt
+        lastSessionActivityResponse = lastAssistantResponse
     }
 
     func handleAgentError(_ message: String) {

@@ -10,14 +10,14 @@ import Foundation
 /// contain them.
 @Suite("Source Guards")
 struct SourceGuardTests {
-    @Test("Dashboard toolbar keeps explicit iPhone icons")
-    func testDashboardToolbarKeepsExplicitIPhoneIcons() throws {
+    @Test("Shell toolbar keeps explicit iPhone icons")
+    func testShellToolbarKeepsExplicitIPhoneIcons() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let toolbar = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/Chat/DashboardToolbarContent.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Views/Chat/ShellToolbarContent.swift"),
             encoding: .utf8
         )
 
@@ -36,7 +36,7 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let badge = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/MessageBubble/MessageMetadataBadge.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Views/MessageBubble/MessageMetadataBadge.swift"),
             encoding: .utf8
         )
 
@@ -106,7 +106,7 @@ struct SourceGuardTests {
             "open" + "Feedback" + "Issue",
             "Create" + " Issue",
             "Sandbox" + "Client",
-            "Sand" + "boxes" + "Dashboard" + "View",
+            "Sand" + "boxes" + "Dash" + "board" + "View",
             "Container" + "DTO",
             "Container" + "Action" + "Params",
             "Container" + "Action" + "Result",
@@ -115,7 +115,7 @@ struct SourceGuardTests {
             "sandbox" + "::" + "stop_" + "container",
             "sandbox" + "::" + "kill_" + "container",
             "sandbox" + "::" + "remove_" + "container",
-            "Automations" + "Dashboard" + "View",
+            "Automations" + "Dash" + "board" + "View",
             "Automation" + "Detail" + "Sheet",
             "Automation" + "Form" + "Sheet",
             "Automation" + "Run" + "Detail" + "Sheet",
@@ -200,9 +200,9 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checkedFiles = [
-            iosRoot.appendingPathComponent("Sources/Database/EventDatabase.swift"),
-            iosRoot.appendingPathComponent("Sources/Core/DI/DependencyContainer.swift"),
-            iosRoot.appendingPathComponent("Sources/Services/Diagnostics/DiagnosticsBundleBuilder.swift"),
+            iosRoot.appendingPathComponent("Sources/Engine/Database/EventDatabase.swift"),
+            iosRoot.appendingPathComponent("Sources/Support/DependencyInjection/DependencyContainer.swift"),
+            iosRoot.appendingPathComponent("Sources/Support/Diagnostics/Services/DiagnosticsBundleBuilder.swift"),
         ]
 
         for url in checkedFiles {
@@ -305,8 +305,8 @@ struct SourceGuardTests {
             ("tool" + "_" + "result", "provider protocol payload shape outside protocol boundary"),
             ("Tool" + "Call", "retired invocation identifier/model spelling"),
             ("tool " + "call", "retired invocation wording"),
-            ("tool" + "Start", "retired dashboard activity kind"),
-            ("tool" + "End", "retired dashboard activity kind"),
+            ("tool" + "Start", "retired session list activity kind"),
+            ("tool" + "End", "retired session list activity kind"),
             ("tool" + "Agent", "retired worker spawn-type wire value"),
             ("Tool" + "Agent", "retired worker spawn-type symbol"),
             ("tool" + "Count", "retired analytics capability-count field"),
@@ -316,7 +316,7 @@ struct SourceGuardTests {
             ("tool" + "Schema", "retired capability metadata schema key"),
             ("local" + "Tool" + "Schema", "retired local capability schema key"),
             ("Tool" + "Operation", "retired process kind"),
-            ("Tool" + "Color", "retired dashboard color model"),
+            ("Tool" + "Color", "retired session list color model"),
             ("with" + "Fallback" + "Model" + "Tool" + "Name", "old-name tool identity substitution"),
             ("modelPrimitiveName ?? " + "tool" + "Name", "old-name model primitive substitution"),
             (#"payload["modelPrimitiveName"] as? String ?? payload["# + "tool" + #"Name"]"#, "old-name payload identity substitution"),
@@ -411,8 +411,8 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let deletedPaths = [
-            "Sources/Services/Notifications/PushNotificationService.swift",
-            "Sources/Services/Infrastructure/APNsEnvironment.swift",
+            "Sources/Support/Notifications/PushNotificationService.swift",
+            "Sources/Support/Infrastructure/APNsEnvironment.swift",
             "Tests/Services/PushNotificationServiceTests.swift",
             "Tests/Services/APNsEnvironmentTests.swift",
         ]
@@ -467,22 +467,22 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let deletedPaths = [
-            "Sources/Services/Network/Clients/ContextClient.swift",
-            "Sources/Services/Network/Clients/CronClient.swift",
-            "Sources/Services/Network/Clients/DisplayClient.swift",
-            "Sources/Services/Network/Clients/FilesystemClient.swift",
-            "Sources/Services/Network/Clients/JobClient.swift",
-            "Sources/Services/Network/Clients/NotificationClient.swift",
-            "Sources/Services/Network/Clients/RepoClient.swift",
-            "Sources/Models/EngineProtocol/EngineProtocolTypes+Cron.swift",
-            "Sources/Models/EngineProtocol/EngineProtocolTypes+Filesystem.swift",
-            "Sources/Models/EngineProtocol/EngineProtocolTypes+Repo.swift",
-            "Sources/Models/EngineProtocol/EngineProtocolTypes+Task.swift",
-            "Sources/Models/Messages/NotificationDeliveryTypes.swift",
-            "Sources/Services/NotificationStore.swift",
-            "Sources/ViewModels/State/ContextRefreshGate.swift",
-            "Sources/Views/Capabilities/NotificationDelivery",
-            "Sources/Views/Notifications",
+            "Sources/Engine/Network/Clients/ContextClient.swift",
+            "Sources/Engine/Network/Clients/CronClient.swift",
+            "Sources/Engine/Network/Clients/DisplayClient.swift",
+            "Sources/Engine/Network/Clients/FilesystemClient.swift",
+            "Sources/Engine/Network/Clients/JobClient.swift",
+            "Sources/Engine/Network/Clients/NotificationClient.swift",
+            "Sources/Engine/Network/Clients/RepoClient.swift",
+            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Cron.swift",
+            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Filesystem.swift",
+            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Repo.swift",
+            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Task.swift",
+            "Sources/Session/Messages/NotificationDeliveryTypes.swift",
+            "Sources/Support/Storage/NotificationStore.swift",
+            "Sources/Session/ViewModels/State/ContextRefreshGate.swift",
+            "Sources/UI/Views/Capabilities/NotificationDelivery",
+            "Sources/UI/Views/Notifications",
             "Tests/Models/EngineProtocol/EngineProtocolTypesCronTests.swift",
             "Tests/Services/ContextClientTests.swift",
             "Tests/Services/CronClientTests.swift",
@@ -556,25 +556,25 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checkedPaths = [
-            "Sources/Core/Events/Payloads/CapabilityInvocationPayloads.swift",
-            "Sources/Core/Events/Plugins/CapabilityInvocation",
-            "Sources/Database/SessionEvent+Summary.swift",
-            "Sources/Models/Dashboard/ActivityLine.swift",
-            "Sources/Models/Dashboard/CapabilityActivityPresentation.swift",
-            "Sources/Models/Dashboard/ServerActivityLine.swift",
-            "Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift",
-            "Sources/Models/EngineProtocol/EngineProtocolTypes+Capability.swift",
-            "Sources/Models/Messages",
-            "Sources/ViewModels/Chat/ChatViewModel+Reconstruction.swift",
-            "Sources/ViewModels/Handlers/CapabilityInvocationCoordinator.swift",
-            "Sources/ViewModels/Managers/DashboardStreamManager.swift",
-            "Sources/Views/Capabilities",
+            "Sources/Engine/Events/Core/Payloads/CapabilityInvocationPayloads.swift",
+            "Sources/Engine/Events/Core/Plugins/CapabilityInvocation",
+            "Sources/Engine/Database/SessionEvent+Summary.swift",
+            "Sources/Session/Activity/ActivityLine.swift",
+            "Sources/Session/Activity/CapabilityActivityPresentation.swift",
+            "Sources/Session/Activity/ServerActivityLine.swift",
+            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Agent.swift",
+            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Capability.swift",
+            "Sources/Session/Messages",
+            "Sources/Session/ViewModels/Chat/ChatViewModel+Reconstruction.swift",
+            "Sources/Session/ViewModels/Handlers/CapabilityInvocationCoordinator.swift",
+            "Sources/Session/ViewModels/Managers/SessionActivityStreamManager.swift",
+            "Sources/UI/Views/Capabilities",
             "Tests/Core/Events/Plugins",
             "Tests/Core/Events/UnifiedEventTransformerActionProjectionTests.swift",
             "Tests/Models/CapabilityInvocationDisplayModelTests.swift",
             "Tests/Support/CapabilityTestFixtures.swift",
             "Tests/ViewModels/CapabilityInvocationCoordinatorTests.swift",
-            "Tests/ViewModels/DashboardCapabilityStreamTests.swift",
+            "Tests/ViewModels/SessionActivityStreamTests.swift",
             "Tests/Views/Capabilities",
         ]
         let forbidden = [
@@ -621,8 +621,8 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checkedPaths = [
-            "Sources/Database",
-            "Sources/Services/DraftStore.swift",
+            "Sources/Engine/Database",
+            "Sources/Support/Storage/DraftStore.swift",
             "Tests/Infrastructure",
             "Tests/Services/DraftStoreTests.swift",
         ]
@@ -704,24 +704,24 @@ struct SourceGuardTests {
         }
     }
 
-    @Test("Primitive shell has no fixed process dashboard plane")
-    func testPrimitiveShellHasNoFixedProcessDashboardPlane() throws {
+    @Test("Primitive shell has no fixed process session list plane")
+    func testPrimitiveShellHasNoFixedProcessSessionActivityPlane() throws {
         let iosRoot = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let deletedPaths = [
-            "Sources/Core/Events/Plugins/Process",
-            "Sources/ViewModels/Chat/ChatViewModel+ProcessEvents.swift",
-            "Sources/ViewModels/State/ProcessState.swift",
-            "Sources/Views/Capabilities/Process",
-            "Sources/Views/Process",
+            "Sources/Engine/Events/Core/Plugins/Process",
+            "Sources/Session/ViewModels/Chat/ChatViewModel+ProcessEvents.swift",
+            "Sources/Session/ViewModels/State/ProcessState.swift",
+            "Sources/UI/Views/Capabilities/Process",
+            "Sources/UI/Views/Process",
             "Tests/ViewModels/State/ProcessStateTests.swift",
         ]
         for relativePath in deletedPaths {
             #expect(
                 !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
-                "\(relativePath) belongs to the deleted fixed process dashboard plane"
+                "\(relativePath) belongs to the deleted fixed process session list plane"
             )
         }
 
@@ -777,11 +777,11 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let deletedPaths = [
-            "Sources/Core/Events/Plugins/Hook",
-            "Sources/ViewModels/Chat/ChatViewModel+" + "Hook" + "Events.swift",
-            "Sources/ViewModels/State/Pull" + "Up" + "Panel" + "State.swift",
-            "Sources/Views/InputBar/Input" + "Area" + "Drag" + "Modifier.swift",
-            "Sources/Views/InputBar/Pull" + "Up" + "Panel" + "View.swift",
+            "Sources/Engine/Events/Core/Plugins/Hook",
+            "Sources/Session/ViewModels/Chat/ChatViewModel+" + "Hook" + "Events.swift",
+            "Sources/Session/ViewModels/State/Pull" + "Up" + "Panel" + "State.swift",
+            "Sources/UI/Views/InputBar/Input" + "Area" + "Drag" + "Modifier.swift",
+            "Sources/UI/Views/InputBar/Pull" + "Up" + "Panel" + "View.swift",
         ]
         for relativePath in deletedPaths {
             #expect(
@@ -868,17 +868,17 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-        let promptRoot = iosRoot.appendingPathComponent("Sources/Views/Prompt" + "Library")
+        let promptRoot = iosRoot.appendingPathComponent("Sources/UI/Views/Prompt" + "Library")
 
         #expect(!FileManager.default.fileExists(atPath: promptRoot.path))
         #expect(!FileManager.default.fileExists(
-            atPath: iosRoot.appendingPathComponent("Sources/ViewModels/State/Prompt" + "LibraryState.swift").path
+            atPath: iosRoot.appendingPathComponent("Sources/Session/ViewModels/State/Prompt" + "LibraryState.swift").path
         ))
         #expect(!FileManager.default.fileExists(
-            atPath: iosRoot.appendingPathComponent("Sources/Models/EngineProtocol/EngineProtocolTypes+Prompt" + "Library.swift").path
+            atPath: iosRoot.appendingPathComponent("Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Prompt" + "Library.swift").path
         ))
         #expect(!FileManager.default.fileExists(
-            atPath: iosRoot.appendingPathComponent("Sources/Services/Network/Clients/Prompt" + "LibraryClient.swift").path
+            atPath: iosRoot.appendingPathComponent("Sources/Engine/Network/Clients/Prompt" + "LibraryClient.swift").path
         ))
     }
 
@@ -889,13 +889,13 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let deletedPaths = [
-            "Sources/Core/Events/Plugins/Approval",
-            "Sources/Services/Network/Clients/ApprovalClient.swift",
-            "Sources/ViewModels/Handlers/EngineApprovalCoordinator.swift",
-            "Sources/ViewModels/State/EngineApprovalState.swift",
-            "Sources/Views/EngineApproval",
-            "Sources/Models/Messages/EngineApprovalTypes.swift",
-            "Sources/Models/EngineProtocol/EngineProtocolTypes+Approval.swift",
+            "Sources/Engine/Events/Core/Plugins/Approval",
+            "Sources/Engine/Network/Clients/ApprovalClient.swift",
+            "Sources/Session/ViewModels/Handlers/EngineApprovalCoordinator.swift",
+            "Sources/Session/ViewModels/State/EngineApprovalState.swift",
+            "Sources/UI/Views/EngineApproval",
+            "Sources/Session/Messages/EngineApprovalTypes.swift",
+            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Approval.swift",
         ]
         for relativePath in deletedPaths {
             #expect(
@@ -947,11 +947,11 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let deletedPaths = [
-            "Sources/Views/AuditDetails",
-            "Sources/ViewModels/State/AuditDetailsState.swift",
-            "Sources/ViewModels/State/AuditDetailsWorkerPackProjection.swift",
-            "Sources/ViewModels/State/AuditDetailsWorkerArtifactProjection.swift",
-            "Sources/Services/Network/Clients/CapabilityClient.swift",
+            "Sources/UI/Views/AuditDetails",
+            "Sources/Session/ViewModels/State/AuditDetailsState.swift",
+            "Sources/Session/ViewModels/State/AuditDetailsWorkerPackProjection.swift",
+            "Sources/Session/ViewModels/State/AuditDetailsWorkerArtifactProjection.swift",
+            "Sources/Engine/Network/Clients/CapabilityClient.swift",
         ]
         for relativePath in deletedPaths {
             #expect(
@@ -1031,23 +1031,23 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
 
         let settingsView = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/Settings/SettingsView.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Views/Settings/SettingsView.swift"),
             encoding: .utf8
         )
         let logViewer = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Views/System/LogViewer.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Views/System/LogViewer.swift"),
             encoding: .utf8
         )
         let ingestionService = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Services/Diagnostics/ClientLogIngestionService.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Diagnostics/Services/ClientLogIngestionService.swift"),
             encoding: .utf8
         )
         let miscClient = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Services/Network/Clients/MiscClient.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/Engine/Network/Clients/MiscClient.swift"),
             encoding: .utf8
         )
         let dependencyContainer = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Core/DI/DependencyContainer.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/DependencyInjection/DependencyContainer.swift"),
             encoding: .utf8
         )
         let app = try String(
@@ -1300,7 +1300,7 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let sourcesRoot = iosRoot.appendingPathComponent("Sources")
-        let viewsRoot = sourcesRoot.appendingPathComponent("Views")
+        let viewsRoot = sourcesRoot.appendingPathComponent("UI/Views")
 
         let removedViewRoots = [
             "Agent" + "Control",
@@ -1320,11 +1320,11 @@ struct SourceGuardTests {
         }
 
         let requiredShellFiles = [
-            "Views/Chat/ContentView.swift",
-            "Views/Chat/ChatView.swift",
-            "Views/InputBar/InputBar.swift",
-            "Views/Settings/SettingsView.swift",
-            "Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift",
+            "UI/Views/Chat/ContentView.swift",
+            "UI/Views/Chat/ChatView.swift",
+            "UI/Views/InputBar/InputBar.swift",
+            "UI/Views/Settings/SettingsView.swift",
+            "UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift",
         ]
         for relativePath in requiredShellFiles {
             #expect(
@@ -1340,7 +1340,7 @@ struct SourceGuardTests {
             ("case " + "work:", "fixed Work navigation enum case"),
             ("show" + "Agent" + "Control", "Agent Control sheet presenter"),
             ("Agent" + "Control" + "View", "Agent Control product sheet"),
-            ("Work" + "Dashboard" + "View", "fixed Work dashboard"),
+            ("Work" + "Dash" + "board" + "View", "fixed Work session list"),
             ("Audit" + "Details" + "View", "fixed Audit Details console"),
             ("Source" + "Control" + "Sheet", "fixed Source Control sheet"),
             ("Prompt" + "Library" + "Sheet", "fixed prompt picker"),
@@ -1385,12 +1385,12 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checkedFiles = [
-            "Sources/Models/EngineProtocol/EngineProtocolTypes+Agent.swift",
-            "Sources/Services/Network/Clients/AgentClient.swift",
-            "Sources/Services/Network/Clients/AgentClientProtocol.swift",
-            "Sources/Core/Repositories/Protocols/AgentRepository.swift",
-            "Sources/Core/Repositories/DefaultAgentRepository.swift",
-            "Sources/ViewModels/Chat/ChatViewModel+Messaging.swift",
+            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Agent.swift",
+            "Sources/Engine/Network/Clients/AgentClient.swift",
+            "Sources/Engine/Network/Clients/AgentClientProtocol.swift",
+            "Sources/Engine/Repositories/Defaults/Protocols/AgentRepository.swift",
+            "Sources/Engine/Repositories/Defaults/DefaultAgentRepository.swift",
+            "Sources/Session/ViewModels/Chat/ChatViewModel+Messaging.swift",
             "Tests/Services/AgentClientTests.swift",
             "Tests/Repositories/DefaultAgentRepositoryTests.swift",
             "Tests/Models/EngineProtocolTypesTests.swift",
@@ -1427,9 +1427,9 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let deletedPaths = [
-            "Sources/Views/SessionTree",
-            "Sources/Database/Repositories/TreeRepository.swift",
-            "Sources/Services/Events/EventTreeBuilder.swift",
+            "Sources/UI/Views/SessionTree",
+            "Sources/Engine/Database/Repositories/TreeRepository.swift",
+            "Sources/Engine/EventStore/EventTreeBuilder.swift",
             "Tests/Infrastructure/TreeRepositoryTests.swift",
             "Tests/Views/ForkButtonTests.swift",
             "Tests/Views/EventIconProviderTests.swift",

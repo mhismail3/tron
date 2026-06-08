@@ -20,7 +20,7 @@ struct InputBarKeyboardTraversalTests {
             .deletingLastPathComponent() // Views/
             .deletingLastPathComponent() // Tests/
             .deletingLastPathComponent() // ios-app/
-        let sourceURL = iosRoot.appendingPathComponent("Sources/Views/InputBar/InputBar.swift")
+        let sourceURL = iosRoot.appendingPathComponent("Sources/UI/Views/InputBar/InputBar.swift")
         return try String(contentsOf: sourceURL, encoding: .utf8)
     }
 }

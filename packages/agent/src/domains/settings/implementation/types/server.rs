@@ -187,28 +187,12 @@ impl Default for TmuxSettings {
 /// Session behavior settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct SessionSettings {
-    /// How queued messages are drained when the agent finishes.
-    pub queue_drain_mode: QueueDrainMode,
-}
+pub struct SessionSettings {}
 
 impl Default for SessionSettings {
     fn default() -> Self {
-        Self {
-            queue_drain_mode: QueueDrainMode::default(),
-        }
+        Self {}
     }
-}
-
-/// How queued messages are drained after the agent finishes a turn.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum QueueDrainMode {
-    /// Each queued message is sent as its own turn (agent responds to each individually).
-    #[default]
-    Sequential,
-    /// All pending queued messages are combined into a single prompt for one turn.
-    Batched,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -346,22 +330,13 @@ mod tests {
     #[test]
     fn session_defaults() {
         let s = SessionSettings::default();
-        assert_eq!(s.queue_drain_mode, QueueDrainMode::Sequential);
-    }
-
-    #[test]
-    fn session_with_queue_override() {
-        let json = serde_json::json!({
-            "queueDrainMode": "batched"
-        });
-        let s: SessionSettings = serde_json::from_value(json).unwrap();
-        assert_eq!(s.queue_drain_mode, QueueDrainMode::Batched);
+        assert_eq!(serde_json::to_value(s).unwrap(), serde_json::json!({}));
     }
 
     #[test]
     fn empty_session_json_uses_defaults() {
         let s: SessionSettings = serde_json::from_str("{}").unwrap();
-        assert_eq!(s.queue_drain_mode, QueueDrainMode::Sequential);
+        assert_eq!(serde_json::to_value(s).unwrap(), serde_json::json!({}));
     }
 
     #[test]

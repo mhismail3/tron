@@ -9,7 +9,7 @@ import SwiftUI
 final class AgentSettingsPageLayoutTests: XCTestCase {
 
     func testSettingsAdaptiveLayoutDetectsIPadLandscape() throws {
-        let content = try source(pathComponents: ["Sources", "Views", "Settings", "SettingsSupport.swift"])
+        let content = try source(pathComponents: ["Sources", "UI", "Views", "Settings", "SettingsSupport.swift"])
 
         XCTAssertTrue(
             content.contains("enum SettingsAdaptiveLayout"),
@@ -41,13 +41,8 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             content.range(of: "private var landscapeContent: some View")?.lowerBound
         )
         let landscapeContent = content[landscapeStart..<content.endIndex]
-        let quickSessionIndex = try XCTUnwrap(landscapeContent.range(of: "quickSessionCard")?.lowerBound)
-        let messageQueueIndex = try XCTUnwrap(landscapeContent.range(of: "messageQueueCard")?.lowerBound)
-        XCTAssertLessThan(
-            quickSessionIndex,
-            messageQueueIndex,
-            "Quick-session defaults should stay before queue controls in the landscape projection"
-        )
+        XCTAssertNotNil(landscapeContent.range(of: "quickSessionCard"))
+        XCTAssertFalse(landscapeContent.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(
             landscapeContent.contains("protected" + "Branches" + "Section"),
             "Protected branch policy is not a primitive settings card"
@@ -58,7 +53,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         let content = try settingsPageSource(named: "AgentSettingsPage.swift")
 
         XCTAssertTrue(content.contains("quickSessionCard"))
-        XCTAssertTrue(content.contains("messageQueueCard"))
+        XCTAssertFalse(content.contains("message" + "Queue" + "Card"))
         XCTAssertFalse(content.contains("autonomy" + "Section"))
         XCTAssertFalse(content.contains("guard" + "rails" + "Section"))
         XCTAssertFalse(content.contains("hooks" + "Section"))
@@ -74,7 +69,6 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
             .appendingPathComponent("tron-visual-qa")
             .path
         settingsState.defaultModel = "gpt-5.5"
-        settingsState.queueDrainMode = "batched"
         let content = AgentSettingsPage(
             settingsState: settingsState,
             selectedModelDisplayName: "GPT-5.5",
@@ -191,7 +185,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
     }
 
     private func settingsPageSource(named fileName: String) throws -> String {
-        try source(pathComponents: ["Sources", "Views", "Settings", "Pages", fileName])
+        try source(pathComponents: ["Sources", "UI", "Views", "Settings", "Pages", fileName])
     }
 
     private func source(pathComponents: [String]) throws -> String {

@@ -30,8 +30,6 @@ final class SettingsParityTests: XCTestCase {
         // Context compaction
         "preserveRecentCount",
         "triggerTokenThreshold",
-        // Message queue
-        "queueDrainMode",
         // Engine diagnostics
         "observabilityLogLevel",
         "observabilityVerboseRetentionDays",

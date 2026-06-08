@@ -18,7 +18,7 @@ struct AgentContextSettingsPageTests {
         #expect(ServerSettingsCategory.server.subtitle == "Paired servers and evidence")
         #expect(ServerSettingsCategory.providers.icon == "circle.hexagongrid")
         #expect(ServerSettingsCategory.agent.title == "Agent")
-        #expect(ServerSettingsCategory.agent.subtitle == "Prompt defaults and queueing")
+        #expect(ServerSettingsCategory.agent.subtitle == "Prompt defaults")
         #expect(ServerSettingsCategory.context.title == "Context")
         #expect(ServerSettingsCategory.context.subtitle == "Compaction for the prompt loop")
 
@@ -37,7 +37,7 @@ struct AgentContextSettingsPageTests {
             .context,
         ])
         #expect(MainSettingsGridDestination.behaviorRow.map(\.description) == [
-            "Prompt defaults, queueing",
+            "Prompt defaults",
             "Prompt compaction",
         ])
         #expect(MainSettingsGridDestination.visibleDestinations(serverSettingsUnavailable: false) == [
@@ -57,11 +57,10 @@ struct AgentContextSettingsPageTests {
         })
     }
 
-    @Test("agent sheet keeps only quick session and queue settings")
+    @Test("agent sheet keeps only quick session settings")
     func agentSheetKeepsOnlyPrimitiveSections() {
         #expect(AgentSettingsSection.allCases == [
             .quickSession,
-            .messageQueue,
         ])
     }
 
@@ -103,18 +102,16 @@ struct AgentContextSettingsPageTests {
     @Test("agent summary describes prompt defaults")
     func agentSummaryDescribesPromptDefaults() {
         let unloaded = AgentSettingsSummary.Context(
-            isLoaded: false,
-            queueDrainMode: "sequential"
+            isLoaded: false
         )
         #expect(AgentSettingsSummary.title(for: unloaded) == "Load agent settings")
         #expect(AgentSettingsSummary.description(for: unloaded) == "Loading prompt defaults from the active server.")
 
         let loaded = AgentSettingsSummary.Context(
-            isLoaded: true,
-            queueDrainMode: "batched"
+            isLoaded: true
         )
         #expect(AgentSettingsSummary.title(for: loaded) == "Agent behavior")
-        #expect(AgentSettingsSummary.description(for: loaded) == "Queued messages are batched into one prompt.")
+        #expect(AgentSettingsSummary.description(for: loaded) == "Prompt defaults are loaded from the active server.")
     }
 
     @Test("context summary describes compaction only")

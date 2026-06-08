@@ -17,9 +17,6 @@ struct ServerSettingsTests {
             "context": {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
             },
-            "session": {
-                "queueDrainMode": "batched"
-            },
             "observability": {
                 "logLevel": "debug",
                 "verboseRetentionDays": 3
@@ -37,7 +34,6 @@ struct ServerSettingsTests {
         #expect(settings.tailscaleIp == "100.64.0.7")
         #expect(settings.compaction.preserveRecentCount == 3)
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
-        #expect(settings.queueDrainMode == "batched")
         #expect(settings.observabilityLogLevel == "debug")
         #expect(settings.observabilityVerboseRetentionDays == 3)
         #expect(settings.storageRetentionEnabled == false)
@@ -52,7 +48,6 @@ struct ServerSettingsTests {
         #expect(settings.tailscaleIp == nil)
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
-        #expect(settings.queueDrainMode == "sequential")
         #expect(settings.observabilityLogLevel == "info")
         #expect(settings.observabilityVerboseRetentionDays == 7)
         #expect(settings.storageRetentionEnabled == true)
@@ -64,7 +59,6 @@ struct ServerSettingsTests {
         let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.defaultModel == "claude-opus-4-6")
-        #expect(settings.queueDrainMode == "sequential")
     }
 
     @Test("missing retired policy blocks are accepted")
@@ -72,13 +66,6 @@ struct ServerSettingsTests {
         let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
         let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
         #expect(settings.defaultModel == "claude-opus-4-6")
-    }
-
-    @Test("session key present with queue mode")
-    func sessionQueueModeDecode() throws {
-        let json = #"{"session":{"queueDrainMode":"batched"}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
-        #expect(settings.queueDrainMode == "batched")
     }
 
     @Test("CompactionSettings decoder with empty JSON uses defaults")
@@ -93,7 +80,6 @@ struct ServerSettingsTests {
     func settingsUpdateEncode() throws {
         var update = ServerSettingsUpdate()
         update.server = .init(defaultModel: "claude-opus-4-6")
-        update.session = .init(queueDrainMode: .batched)
         update.observability = .init(logLevel: "debug")
         update.storage = .init(retentionEnabled: false)
 
@@ -103,22 +89,13 @@ struct ServerSettingsTests {
         let server = json["server"] as? [String: Any]
         #expect(server?["defaultModel"] as? String == "claude-opus-4-6")
 
-        let session = json["session"] as? [String: Any]
-        #expect(session?["queueDrainMode"] as? String == "batched")
+        #expect(json["session"] == nil)
 
         let observability = json["observability"] as? [String: Any]
         #expect(observability?["logLevel"] as? String == "debug")
 
         let storage = json["storage"] as? [String: Any]
         #expect(storage?["retentionEnabled"] as? Bool == false)
-    }
-
-    @Test("QueueDrainMode recognizes known String values")
-    func queueDrainModeFromString() {
-        #expect(QueueDrainMode.from("sequential") == .sequential)
-        #expect(QueueDrainMode.from("batched") == .batched)
-        #expect(QueueDrainMode.from("parallel") == nil)
-        #expect(QueueDrainMode.from(nil) == nil)
     }
 
 }

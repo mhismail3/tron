@@ -69,7 +69,7 @@ targets:
     platform: iOS
     sources:
       - path: ShareExtension
-      - path: Sources/Models/Share
+      - path: Sources/Support/Share/SharedContent.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tron.mobile.ShareExtension

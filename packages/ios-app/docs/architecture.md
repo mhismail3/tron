@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-08 (primitive cleanup setup).
+> Last verified: 2026-06-08 (PCC-6 iOS source consolidation).
 
 ## Overview
 
@@ -10,14 +10,14 @@ The iOS app is a SwiftUI `/engine` client. On the primitive teardown branch it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,
 renders session messages, persists a local event cache for reconstruction, and
 renders generic runtime surfaces emitted by the engine. It does not own fixed
-product dashboards, repository-specific panels, media workflow surfaces,
+product panels, repository-specific panels, media workflow surfaces,
 assistant-management panels, extension-source surfaces, audio transcription,
 memory-retain, or rules.
 
 The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
 may cache and render server facts, but it must not invent capability policy,
-source-control state, worker state, or product dashboards locally.
+source-control state, worker state, or product panels locally.
 
 ## Retained Surface
 
@@ -33,7 +33,7 @@ source-control state, worker state, or product dashboards locally.
 
 ## Deleted Fixed Product Modes
 
-The primary source tree must not contain fixed dashboard roots, repository
+The primary source tree must not contain fixed product roots, repository
 workflow panels, assistant-management panels, extension-source panels, or their
 matching state/client objects. Static source guards and the cleanup invariant
 test are the regression gates for this boundary; product names live only in
@@ -44,24 +44,23 @@ scorecards, evidence manifests, inventory docs, and static absence tests.
 ```
 Sources/
 +-- App/                  App entry point, app delegate, scene phases
-+-- Core/                 Dependency injection, event plugins, transformers
-+-- Database/             Local event database and cache queries
-+-- Models/               Messages, event types, engine protocol DTOs
-+-- Services/             Engine transport, domain clients, pairing,
-|                         diagnostics, notifications, storage
-+-- ViewModels/           Chat state, event handlers, settings/onboarding state
-+-- Views/                Chat, input bar, message bubbles, session navigation,
-|                         settings, onboarding, dynamic surfaces, diagnostics
-+-- Theme/                Colors, typography, design tokens
-+-- Utilities/            Shared helpers
++-- Engine/               Engine protocol DTOs, transport, event plugins,
+|                         local event cache, repositories
++-- Session/              Chat/session view models, messages, parsing,
+|                         activity summaries, token accounting
++-- Support/              Dependency injection, diagnostics, pairing,
+|                         settings, storage, feedback, utilities
++-- UI/                   Theme and SwiftUI views for chat, settings,
+|                         onboarding, dynamic surfaces, diagnostics
 +-- Assets.xcassets/      App icons and image assets
++-- Resources/            Fonts, localized strings, generated icon layers
 ```
 
-The retained `Views/Capabilities` components render capability lifecycle data
-as generic chat evidence. They are not a capability catalog, admin console, or
-operator policy surface. Capability identity is limited to the model-visible
-primitive name, optional operation name, trace/root invocation ids, theme
-color, and runtime-supplied presentation hints.
+The retained `UI/Views/Capabilities` components render capability lifecycle
+data as generic chat evidence. They are not a capability catalog, admin
+console, or operator policy surface. Capability identity is limited to the
+model-visible primitive name, optional operation name, trace/root invocation
+ids, theme color, and runtime-supplied presentation hints.
 
 The deleted parallel session-tree projection is not a shell primitive. Fork
 lineage remains in session metadata and stored events; iOS reconstructs history
@@ -104,7 +103,7 @@ See `events.md` for the current plugin categories and reconstruction boundary.
 
 ## Dynamic Runtime Surfaces
 
-`Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` is the retained
+`UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` is the retained
 generic renderer for server/agent-authored runtime data. It uses native SwiftUI
 layout primitives and submits only generic action coordinates or encoded action
 payloads supplied by the runtime surface. It must not map fixed feature names

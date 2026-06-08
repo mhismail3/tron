@@ -1,10 +1,10 @@
 # Onboarding (iOS sheet)
 
-> Last verified: 2026-06-07 (PET-10 client primitive cleanup).
+> Last verified: 2026-06-08 (PCC-6 iOS source consolidation).
 
-The iOS app always opens to the normal dashboard after initialization.
+The iOS app always opens to the normal session shell after initialization.
 Fresh installs present a medium-detent onboarding sheet above the
-dashboard when `@AppStorage("onboardingComplete")` is false. The sheet is a
+shell when `@AppStorage("onboardingComplete")` is false. The sheet is a
 paged flow: welcome, install Tailscale on iPhone, install Tron Server on Mac,
 connect, then a short settings setup flow for workspace, credentials, services,
 and default model. Setup pages are locked until the Mac connection succeeds.
@@ -213,7 +213,7 @@ App and Server row, hides Providers, Agent, and Context, and shows the
 server-unavailable card immediately below that row before the destructive
 actions.
 Device-only preferences such as onboarding completion,
-paired servers, active server id, appearance, dashboard presentation, and bearer
+paired servers, active server id, appearance, shell presentation, and bearer
 tokens live in iOS `UserDefaults`/Keychain. When the user switches Macs, the app
 clears server-backed controls immediately and reloads them from the newly active
 Mac.
@@ -231,7 +231,7 @@ controls including the `Server Controls` header until the Mac reconnects and
 and Forget. The main Settings sheet also disables destructive server-coupled
 actions while in this unavailable state: Archive All Sessions is unavailable,
 while Reset All Settings remains available for local app preferences.
-The dashboard also surfaces a deduplicated banner for the active paired server
+The shell also surfaces a deduplicated banner for the active paired server
 when connection state moves to disconnected, reconnecting, failed, or
 unauthorized. Disconnected and reconnecting banners are warning-yellow,
 failed banners are error-red, and all retryable connection banners auto-dismiss
@@ -243,12 +243,12 @@ fixed maximum width, and clears automatically on reconnect. Settings keeps its
 own persistent warning cards so users still see the unavailable state even after
 dismissing the banner. Normal reconnect keeps issuing short foreground probes
 at a bounded cadence until the server returns, the app backgrounds, or
-authentication fails, so dashboard and chat controls recover after a dev-server
+authentication fails, so shell and chat controls recover after a dev-server
 rebuild without requiring every screen to own retry logic.
 The Agent and Context settings sheets follow the same top summary-card pattern
 and divide server settings by ownership. Agent owns the retained execution and
 lifecycle controls that still exist in the current settings schema:
-quick-session defaults and queued-message delivery. Each setting keeps its own
+quick-session defaults. Each setting keeps its own
 glass container and description unless controls are intentionally coupled.
 Context owns retained context-management behavior: compaction only. Deleted
 plugin-source, hook, rules, memory-retain, prompt-history, and prompt-library
@@ -367,9 +367,9 @@ unlocked at least once.
 
 ```
 Sources/App/TronMobileApp.swift
-  └── owns the dashboard + onboarding sheet presentation
+  └── owns the shell + onboarding sheet presentation
 
-Sources/Views/Onboarding/
+Sources/UI/Views/Onboarding/
   ├── OnboardingFlowView.swift
   ├── OnboardingShell.swift
   ├── QRCodeScannerSheet.swift
@@ -377,18 +377,18 @@ Sources/Views/Onboarding/
       ├── SetupSteps.swift
       └── PairingStep.swift
 
-Sources/Services/Onboarding/
+Sources/Support/Pairing/Onboarding/
   ├── PairingStepValidator.swift
   ├── PairingProbe.swift
   └── PairingPersistor.swift
 
-Sources/Services/PairingURLParser.swift
-Sources/Services/Settings/PairedServerStore.swift
-Sources/Services/Storage/PairedServerTokenStore.swift
-Sources/Services/Storage/KeychainItem.swift
-Sources/Extensions/Binding+PasteAware.swift
-Sources/ViewModels/State/OnboardingSetupSnapshot.swift
-Sources/ViewModels/State/OnboardingState.swift
+Sources/Support/Pairing/PairingURLParser.swift
+Sources/Support/Settings/PairedServerStore.swift
+Sources/Support/Storage/Services/PairedServerTokenStore.swift
+Sources/Support/Storage/Services/KeychainItem.swift
+Sources/Support/Extensions/Swift/Binding+PasteAware.swift
+Sources/Session/ViewModels/State/OnboardingSetupSnapshot.swift
+Sources/Session/ViewModels/State/OnboardingState.swift
 
 Tests/Onboarding/
   ├── OnboardingStateTests.swift

@@ -22,7 +22,7 @@ struct CleanupGuardTests {
 
     @Test("Font settings no longer carries retired casual-axis storage")
     func fontSettingsDoesNotRetainRetiredCasualAxisMigration() throws {
-        let source = try read("packages/ios-app/Sources/Theme/FontSettings.swift")
+        let source = try read("packages/ios-app/Sources/UI/Theme/FontSettings.swift")
 
         for retired in [
             "casual" + "Axis",
@@ -35,7 +35,7 @@ struct CleanupGuardTests {
 
     @Test("Display helpers use active defaults and deterministic heuristics")
     func displayHelpersAvoidLegacyFallbackTerminology() throws {
-        let modelFormatter = try read("packages/ios-app/Sources/Utilities/ModelNameFormatter.swift")
+        let modelFormatter = try read("packages/ios-app/Sources/Support/Utilities/Core/ModelNameFormatter.swift")
         let localComputerName = try read("packages/mac-app/Sources/Services/Pairing/LocalComputerName.swift")
 
         let retiredTerm = "fall" + "back"

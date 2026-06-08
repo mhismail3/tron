@@ -137,7 +137,7 @@ final class DatabaseSchemaTests: XCTestCase {
         await actor.close()
     }
 
-    /// Existing install: schema v12 predates dashboard processing persistence.
+    /// Existing install: schema v12 predates session list processing persistence.
     func testExistingInstallAddsProcessingColumnOnVersionBump() async throws {
         var db: OpaquePointer?
         guard sqlite3_open(dbPath, &db) == SQLITE_OK else {
@@ -233,7 +233,7 @@ final class DatabaseSchemaTests: XCTestCase {
     }
 
     /// Legacy provider/status schemas are rebuilt before current-column
-    /// migrations, so the rebuild cannot drop dashboard metadata columns.
+    /// migrations, so the rebuild cannot drop session list metadata columns.
     func testLegacyProviderMigrationKeepsCurrentSessionColumns() async throws {
         var db: OpaquePointer?
         guard sqlite3_open(dbPath, &db) == SQLITE_OK else {

@@ -83,8 +83,6 @@ final class SendBlockReasonTests: XCTestCase {
     /// orthogonal reason (compaction triggered during a turn). The
     /// blockReason is independent of agentPhase.
     func testSendBlockReasonIsIndependentOfAgentPhase() {
-        // Processing + compaction: compaction blocks even though
-        // queueing would otherwise be allowed.
         let c = config(agentPhase: .processing, isCompacting: true)
         XCTAssertEqual(c.sendBlockReason, .compacting)
     }
@@ -92,6 +90,6 @@ final class SendBlockReasonTests: XCTestCase {
     func testSendBlockReasonNilDuringProcessingWithoutOtherBlockers() {
         let c = config(agentPhase: .processing)
         XCTAssertNil(c.sendBlockReason,
-                     "processing alone doesn't block send — user can queue")
+                     "processing alone does not produce an async block reason; the active input bar shows Stop instead of Send")
     }
 }

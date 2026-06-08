@@ -36,7 +36,6 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         prompt,
         reasoning_level,
         attachments,
-        message_metadata,
         engine_causality: _,
     } = request;
 
@@ -117,8 +116,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     agent.set_persister(Some(persister.clone()));
     agent.set_invocation_abort_registry(orchestrator.invocation_abort_registry().clone());
     orchestrator.register_compaction_handler(&session_id, agent.compaction_handler().clone());
-    let mut user_event_payload =
-        build_user_event_payload(&prompt, attachments.as_deref(), message_metadata.as_ref());
+    let mut user_event_payload = build_user_event_payload(&prompt, attachments.as_deref());
     if let Some(object) = user_event_payload.as_object_mut() {
         object.insert("runId".to_owned(), serde_json::json!(run_id.clone()));
         if let Some(causality) = engine_causality.as_ref() {

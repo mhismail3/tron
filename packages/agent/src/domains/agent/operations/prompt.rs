@@ -118,7 +118,6 @@ pub(crate) async fn run_turn_value(
             prompt: submission.prompt,
             reasoning_level: submission.reasoning_level,
             attachments: submission.attachments,
-            message_metadata: None,
             engine_causality: Some(PromptEngineCausality::from_invocation(invocation)),
         },
     );
@@ -219,7 +218,7 @@ pub(crate) async fn invoke_agent_function_sync(
             .session_id
             .as_deref()
             .unwrap_or_default(),
-        "apply_enqueued",
+        "apply_invoked",
         json!({"function": idempotency_prefix}),
     )
     .await;

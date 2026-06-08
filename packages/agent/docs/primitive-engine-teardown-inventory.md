@@ -30,10 +30,10 @@ All commands were run from `/Users/moose/Downloads/projects/tron` on
 | Runner context planes | `sed -n '1,140p' packages/agent/src/domains/agent/runner/context/mod.rs` | 0 |
 | Managed skills absence | `test ! -d packages/agent/skills` | 0 |
 | Agent docs | `find packages/agent/docs -maxdepth 1 -type f \| sort` | 0 |
-| iOS top-level views | `find packages/ios-app/Sources/Views -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
-| iOS service/model roots | `find packages/ios-app/Sources/{Services,Models} -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
+| iOS top-level roots | `find packages/ios-app/Sources -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
+| iOS primitive owner roots | `find packages/ios-app/Sources/{Engine,Session,Support,UI} -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
 | Settings type roots | `find packages/agent/src/domains/settings/implementation/types -type f -name '*.rs' -maxdepth 1 -print \| sort` | 0 |
-| Settings UI parity | `rg -n "SettingsPage\|SettingsState\|ServerSettings" packages/ios-app/Sources/Views/Settings packages/ios-app/Sources/ViewModels/State/SettingsState.swift packages/ios-app/Sources/Models/EngineProtocol/EngineProtocolTypes+Settings.swift` | 0 |
+| Settings UI parity | `rg -n "SettingsPage\|SettingsState\|ServerSettings" packages/ios-app/Sources/UI/Views/Settings packages/ios-app/Sources/Session/ViewModels/State/SettingsState.swift packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Settings.swift` | 0 |
 
 The covering gate was added first and failed red before this file existed:
 `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture`
@@ -71,7 +71,7 @@ before closeout.
 
 | Domain | Class | Teardown decision |
 |--------|-------|-------------------|
-| `agent` | retain | Keep the minimal turn runner, prompt entry, queue handoff, and crash recovery needed for the provider loop. Delete Work dashboard, run-goal product flows, subagent product policy, worker guide projections, and fixed autonomy DTOs. |
+| `agent` | retain | Keep the minimal turn runner, prompt entry, and crash recovery needed for the provider loop. Delete Work product flows, run-goal product flows, subagent product policy, worker guide projections, and fixed autonomy DTOs. |
 | `auth` | retain | Keep provider credential/profile loading, masked auth reads, and local secret handling required before the first model call. Delete product OAuth/update surfaces that are not needed for bootstrap. |
 | `blob` | retain | Keep payload/blob resolution for event, resource, and invocation evidence. |
 | `browser` | delete | First-party browser/computer-use product capability. Any future browser helper must be agent-authored runtime state. |
@@ -124,7 +124,7 @@ PET-3/PET-5/PET-7 must collapse them to loop infrastructure.
 | `grant` | retain | Keep minimal host integrity and scoped authority records. Delete product trust-tier and worker-pack policy assumptions. |
 | `approval` | delete | Approval prompts and policy workflow are product-coded. Keep no approval prompt plane unless reduced to a hard infrastructure block for irreversible host risk. |
 | `catalog` | retain | Keep internal registry mechanics only if needed by host dispatch; do not expose model-facing catalog discovery. PET-11 removed caller-held expected function revision tokens and ordinary public catalog readout fields; remaining catalog revisions are catalog-watch cursor truth or invocation/trace evidence. |
-| `control` | delete | Product operator dashboard/control snapshot. PET-11 deletes the primitive worker, `control::*` functions, trace graph projection helpers, and stale iOS control DTO. |
+| `control` | delete | Product operator control snapshot. PET-11 deletes the primitive worker, `control::*` functions, trace graph projection helpers, and stale iOS control DTO. |
 | `worker` | successor | Retain only if PET-7 reduces it to generic helper connection/disconnection substrate. PET-11 removed redundant `worker::list` catalog revision readouts. |
 | `observability` | retain | Invocation records, Agent Trace-style records, retained logs, and failure evidence for proof and debugging. |
 | `storage` | retain | SQLite stats/checkpoint/snapshot infrastructure. Delete product storage controls. |
@@ -224,25 +224,18 @@ are deleted rather than kept as historical source files on this branch.
 
 ## iOS Top-Level Source Inventory
 
-PET-8 must turn iOS into a prompt/session/connection shell plus generic dynamic
-runtime output. These package roots are the top-level source cleanup map.
+PCC-6 turned iOS into a prompt/session/connection shell plus generic dynamic
+runtime output. These package roots are the retained top-level source map.
 
 | Source root | Class | Teardown decision |
 |-------------|-------|-------------------|
 | `App` | retain | Keep app lifecycle, dependency boot, and connection shell. |
 | `Assets.xcassets` | retain | Keep minimal app icons/logo/accent assets; delete provider/product icons no longer visible. |
-| `Core` | retain | Keep concurrency, DI, event plumbing used by the shell. |
-| `Database` | retain | Keep local cache for sessions/messages/settings needed by offline shell. Delete product projection tables. |
-| `Extensions` | retain | Keep generic SwiftUI/util extensions used by shell. |
-| `IconLayers` | delete | Product visual asset generator unless app icon requires it. |
-| `Models` | retain | Keep EngineProtocol, Messages, Tokens. Delete Dashboard, Features, product DTOs. |
-| `Protocols` | retain | Keep only shell/service protocols. |
-| `Resources` | retain | Keep required fonts/resources only. |
-| `Services` | retain | Keep Network, Storage, Settings, Events, Observability, Onboarding, and paired-server bootstrap. Audio/transcription, plugin-source, APNs, notification-store, push-relay clients, and fixed diagnostics RPCs are deleted. |
-| `Theme` | retain | Keep minimal accessible styling. |
-| `Utilities` | retain | Keep only generic shell utilities. |
-| `ViewModels` | retain | Keep chat/session/settings state. Delete fixed product handlers and projections. |
-| `Views` | retain | Keep chat/session/settings/onboarding/generic dynamic renderer. Delete fixed product directories listed below. |
+| `Engine` | retain | Keep engine protocol DTOs, transport, event plugins/transformers, local event cache, and repositories. Product DTO/client roots are deleted. |
+| `Resources` | retain | Keep required fonts/resources and generated icon layers only. |
+| `Session` | retain | Keep chat/session/settings/onboarding state, messages, parsing, tokens, and generic activity summaries. Delete fixed product handlers and projections. |
+| `Support` | retain | Keep dependency injection, diagnostics, pairing, storage, settings, feedback, extensions, and generic utilities. Audio/transcription, plugin-source, APNs, notification-store, push-relay clients, and fixed diagnostics RPCs are deleted. |
+| `UI` | retain | Keep theme, chat/session/settings/onboarding/generic dynamic renderer. Delete fixed product directories listed below. |
 
 ## iOS Primary View Inventory
 
@@ -260,18 +253,18 @@ runtime output. These package roots are the top-level source cleanup map.
 | `MessageBubble` | retain | Keep message rendering and generic runtime output. Delete capability/product-specific cards. |
 | `Notifications` | delete | Product notification surface. |
 | `Onboarding` | retain | Keep server pairing/provider setup needed to reach the loop. |
-| `Process` | delete | PET-11 deleted the fixed iOS process dashboard, live `process.*` plugins, `ProcessState`, process sheet, and process-specific result viewer. The retained `process_run` primitive renders through generic capability evidence and trace records. |
+| `Process` | delete | PET-11 deleted the fixed iOS process plane, live `process.*` plugins, `ProcessState`, process sheet, and process-specific result viewer. The retained `process_run` primitive renders through generic capability evidence and trace records. |
 | `PromptLibrary` | delete | Product prompt library UI. |
 | `Session` | retain | Keep session list/create/resume/delete. Delete clone/worktree/session analytics/product cards. |
 | `SessionTree` | delete | PET-11 deleted the fixed iOS session-tree view root, local `TreeRepository`, `EventTreeBuilder`, fork-row visualization, icon catalog, and tests. Session navigation and fork lineage remain only as session/event truth reconstructed through generic session repositories and event queries. |
-| `Settings` | retain | Keep connection/provider/server settings plus quick-session, prompt queue, and compaction controls. Agent autonomy, guardrails, hooks, skills, plugin sources, memory/rules, prompt-library, protected branch, and capability settings are deleted. |
+| `Settings` | retain | Keep connection/provider/server settings plus quick-session and compaction controls. Agent autonomy, guardrails, hooks, skills, plugin sources, memory/rules, prompt-library, protected branch, prompt queue, and capability settings are deleted. |
 | `Skills` | delete | Skill management UI. |
 | `SourceChanges` | delete | Source-control product UI. |
 | `Subagents` | delete | Product subagent UI. |
 | `System` | retain | Keep minimal connection/error sheets. Fixed diagnostics DTOs and RPCs are deleted; runtime evidence comes from trace records, retained logs, and generic capability evidence. |
 | `UserInteraction` | delete | PET-11 deleted the bespoke prompt/answer sheet, transformer, coordinator, state, viewer, submit-answer client method, pause plugins, and tests. Future interaction must be agent-authored generated UI/action state, not a hard-coded mid-turn prompt plane. |
 | `VoiceNotes` | delete | Product voice note UI. |
-| `Work` | delete | Worker-first dashboard. |
+| `Work` | delete | Worker-first product panel. |
 
 ## Settings Surface Inventory
 
@@ -289,12 +282,12 @@ server settings shape and iOS controls together.
 | `prompt_library.rs` | delete | Prompt-history/snippet settings. |
 | `server.rs` | retain | Provider/default model/default workspace/Tailscale/bootstrap and retained-log policy only. Transcription, product update bootstrap, payload capture level, and inline payload byte settings are deleted. |
 | `skills.rs` | delete | Skill discovery/injection settings. |
-| `ui.rs` | retain | Keep appearance/accessibility basics only. Delete product dashboard settings. |
+| `ui.rs` | retain | Keep appearance/accessibility basics only. Delete product panel settings. |
 | `update.rs` | delete | PET-11 deleted the user-mode updater settings enums/schema. Product update checks are not needed before the first model call and are not primitive loop infrastructure. |
 | `SettingsState.swift` | retain | Keep only fields matching retained server settings. |
 | `EngineProtocolTypes+Settings.swift` | retain | Decode/update only retained server settings. |
 | `ConnectionSettingsPage.swift` | retain | Keep server pairing/provider/bootstrap controls. |
-| `AgentSettingsPage.swift` | retain | Retain only quick-session defaults and server-owned queued-message controls. Autonomy, guardrails, hooks, prompt library, protected branches, and plugin-source policy are deleted. |
+| `AgentSettingsPage.swift` | retain | Retain only quick-session defaults. Autonomy, guardrails, hooks, prompt library, protected branches, queued-message controls, and plugin-source policy are deleted. |
 | `SettingsView` and shared setting components | retain | Keep shell navigation/components after product pages are removed. |
 
 ## Deletion Checkpoint Order
@@ -313,7 +306,7 @@ server settings shape and iOS controls together.
   the fixed iOS `SessionTree` projection; session fork lineage remains only as
   generic session/event truth. PET-11 must still audit retained iOS
   `Capabilities` source from first principles. The hard-coded
-  `UserInteraction` prompt/answer plane and fixed process dashboard were
+  `UserInteraction` prompt/answer plane and fixed process plane were
   deleted during PET-11.
 - PET-11 decided that `session_drafts.skills_json` was stale product DTO
   residue and deleted it from fresh iOS draft storage. PET-11 also deleted

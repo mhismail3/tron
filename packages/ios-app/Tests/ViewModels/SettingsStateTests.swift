@@ -12,7 +12,6 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
         XCTAssertEqual(state.preserveRecentCount, 5)
         XCTAssertEqual(state.triggerTokenThreshold, 0.70, accuracy: 0.001)
-        XCTAssertEqual(state.queueDrainMode, "sequential")
         XCTAssertFalse(state.isLoaded)
         XCTAssertTrue(state.availableModels.isEmpty)
         XCTAssertFalse(state.isLoadingModels)

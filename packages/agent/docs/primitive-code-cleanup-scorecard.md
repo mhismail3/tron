@@ -4,7 +4,7 @@ Created: 2026-06-08
 
 Initial score: **0/100**
 
-Current score: **58/100**
+Current score: **70/100**
 
 Status: **active**
 
@@ -71,7 +71,7 @@ only until the owning scorecard row proves whether they remain a boundary.
 | `packages` | retain | package boundary | Contains the Rust agent, iOS app, and Mac wrapper package roots. | Retain. |
 | `scripts` | retain | CLI boundary | Workspace and installed helper scripts. | Consolidate helpers during PCC-8. |
 | `packages/agent` | retain | Rust server package | Single Rust crate plus server docs/assets/tests. | Retain; remove stale examples/assets if unowned. |
-| `packages/ios-app` | retain | iOS package | SwiftUI mobile shell and generated Xcode project boundary. | Consolidate `Sources` during PCC-6. |
+| `packages/ios-app` | retain | iOS package | SwiftUI mobile shell and generated Xcode project boundary. | Retain consolidated primitive shell source roots. |
 | `packages/mac-app` | retain | Mac package | SwiftUI menu-bar wrapper and generated Xcode project boundary. | Consolidate `Sources` during PCC-7. |
 | `packages/agent/src/app` | retain | Rust bootstrap | Server bootstrap, health, metrics, onboarding, shutdown. | Keep as top-level Rust root. |
 | `packages/agent/src/transport` | retain | Rust transport | `/engine` client protocol, worker socket, auth gate. | Keep as top-level Rust root. |
@@ -80,19 +80,12 @@ only until the owning scorecard row proves whether they remain a boundary.
 | `packages/agent/src/shared` | retain | Rust foundation/protocol | IDs, errors, paths, DTOs, storage helpers, logging. | Keep if helpers remain shared by at least two owners. |
 | `packages/agent/src/platform` | retain | platform integration | OS/vendor platform boundary. | Keep only platform-specific code. |
 | `packages/ios-app/Sources/App` | retain | iOS app lifecycle | App entry, scene, delegates, lifecycle. | Keep. |
-| `packages/ios-app/Sources/Core` | collapse audit | iOS event/DI core | DI, event dispatch, plugins, transformers. | Fold into `Engine` or `Session` target shape during PCC-6. |
-| `packages/ios-app/Sources/Database` | collapse audit | iOS local cache | SQLite event cache and repositories. | Fold into `Engine` unless DB boundary remains large. |
-| `packages/ios-app/Sources/Extensions` | collapse audit | iOS utilities | Type/view extensions. | Fold into `Support` unless broad sharing justifies root. |
-| `packages/ios-app/Sources/IconLayers` | asset | iOS app icon source | Source layers for generated app icon assets. | Keep as asset/generation boundary if tracked intentionally. |
-| `packages/ios-app/Sources/Models` | collapse audit | iOS DTOs | Engine protocol, session, settings, event models. | Fold into `Engine`, `Session`, or `UI` during PCC-6. |
-| `packages/ios-app/Sources/Protocols` | collapse audit | iOS abstraction leftovers | Small protocol files and test seams. | Delete or fold during PCC-6. |
-| `packages/ios-app/Sources/Resources` | asset | iOS resources | Localized strings and fixtures. | Keep resource boundary. |
-| `packages/ios-app/Sources/Services` | collapse audit | iOS transport/support services | Engine network, pairing, diagnostics, storage. | Split into target `Engine` and `Support` roots during PCC-6. |
-| `packages/ios-app/Sources/Theme` | collapse audit | iOS UI styling | Colors, typography, design tokens. | Fold into `UI` unless reusable theme boundary remains. |
-| `packages/ios-app/Sources/Utilities` | collapse audit | iOS helpers | Shared utility functions. | Fold into `Support`. |
-| `packages/ios-app/Sources/ViewModels` | collapse audit | iOS session/UI state | Chat, settings, onboarding state. | Fold into `Session` or `UI`. |
-| `packages/ios-app/Sources/Views` | collapse audit | iOS UI shell | Chat, settings, onboarding, generic runtime surfaces. | Move toward `UI` target shape. |
 | `packages/ios-app/Sources/Assets.xcassets` | asset | iOS assets | Xcode asset catalog boundary. | Keep. |
+| `packages/ios-app/Sources/Engine` | retain | iOS engine protocol/cache | Engine DTOs, protocol transport, event decoding, local event cache, repositories. | Keep as the only server/engine integration root. |
+| `packages/ios-app/Sources/Resources` | asset | iOS resources | Fonts, localized strings, and generated icon layer assets. | Keep resource boundary. |
+| `packages/ios-app/Sources/Session` | retain | iOS session state | Chat/session view models, messages, activity summaries, parsing, token accounting. | Keep as the only session-state root. |
+| `packages/ios-app/Sources/Support` | retain | iOS support services | Dependency injection, diagnostics, pairing, storage, settings, concurrency, feedback, extensions, utilities. | Keep as non-UI support root. |
+| `packages/ios-app/Sources/UI` | retain | iOS UI shell | Theme and SwiftUI views for chat, settings, onboarding, generic runtime surfaces. | Keep as the only UI source root. |
 | `packages/mac-app/Sources/Assets.xcassets` | asset | Mac assets | Xcode asset catalog boundary. | Keep. |
 | `packages/mac-app/Sources/MenuBar` | retain | Mac menu-bar shell | Menu model, controller, actions. | Keep as target root. |
 | `packages/mac-app/Sources/Resources` | asset | Mac resources | Bundled resources and helper metadata. | Keep. |
@@ -122,8 +115,8 @@ Current over-budget exceptions:
 | `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | 1038 | context tests | Compaction behavior and edge-case coverage. | PCC-3 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2140 | iOS reconstruction tests | Large stored-event reconstruction suite. | PCC-6 |
 | `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | 1531 | iOS static guards | Primitive shell absence and source guards. | PCC-6 |
-| `packages/ios-app/Sources/Services/Network/EngineConnection.swift` | 958 | iOS transport | WebSocket transport and request/response lifecycle. | PCC-6 |
-| `packages/ios-app/Sources/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | 817 | iOS dynamic runtime UI | Generic runtime renderer. | PCC-6 |
+| `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | 958 | iOS transport | WebSocket transport and request/response lifecycle. | PCC-6 |
+| `packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | 817 | iOS dynamic runtime UI | Generic runtime renderer. | PCC-6 |
 
 ## Static Gates
 
@@ -166,7 +159,7 @@ planning gates:
 | PCC-3 | Rust agent consolidation | 18 | passed_after_fix | rust_agent | Removed unused `fastembed`, `sqlite-vec`, `rquickjs`, `rquickjs-serde`, `image`, and `resvg` dependencies, refreshed `Cargo.lock`, deleted the retired `packages/agent/assets/capability-search/` bundle, collapsed `blob`, `logs`, `message`, and `system` contract/deps/handler shards into their owning `mod.rs` files, retargeted the aggregate domain catalog, regenerated the file inventory, and added static gates for dead dependencies and small-domain shape. | Engine substrate flattening remains PCC-4; session persistence flattening remains PCC-5; client/script/docs consolidation remain later rows. | PCC-3 Rust consolidation checkpoint |
 | PCC-4 | Engine and primitive surface cleanup | 10 | passed_after_fix | engine_architecture | Collapsed the unowned `engine/types/catalog.rs` shard into `engine/types.rs`, folded the resource-store event/id helper into `resources/store.rs`, deleted the uncalled `resources/store/trace_events.rs` query extension, collapsed `capability::execute` deps/handler boilerplate into its worker module, removed empty local source directories left by earlier cleanup, regenerated the file inventory, and added a static gate for the retained engine/capability shape. Engine concern tests prove the retained catalog, grant, resource, state, queue, stream, trigger, ledger, host, worker, and `capability::execute` substrates still run. | Session/event persistence cleanup remains PCC-5; final adversarial scans remain PCC-10. | PCC-4 engine substrate checkpoint |
 | PCC-5 | Session, trace, and persistence cleanup | 8 | passed_after_fix | storage | Collapsed session worker `deps`/`handlers` into `session/mod.rs`, collapsed the one-file `operations/` folder into `session/operations.rs`, rewrote stale SQLite/event-store docs that still described retired migration planes, deleted retired `message.queued`/`message.dequeued` payload DTOs, added parser rejection proof for those event strings, regenerated the file inventory, and added a cleanup invariant for the retained session persistence shape and old product schema absence. | Existing dense event repository tests remain intentionally over budget and listed; iOS queue/event client surfaces remain PCC-6. | PCC-5 session persistence checkpoint |
-| PCC-6 | iOS app consolidation | 12 | pending | ios | `Sources` moves toward `App`, `Engine`, `Session`, `UI`, `Support`, `Resources`, assets, and extension boundaries; project regenerated; source guards and targeted UI tests pass. | Simulator/device proof may require environment availability. | pending |
+| PCC-6 | iOS app consolidation | 12 | passed_after_fix | ios | Deleted the prompt-queue UI/event/settings/client plane, removed Rust prompt queue message metadata shims, consolidated iOS `Sources` to `App`, `Engine`, `Session`, `Support`, `UI`, `Resources`, and assets, moved shared App Group transfer types into `Support/Share`, regenerated XcodeGen, updated README/iOS docs/path guards, renamed stale synchronous prompt stream wording to `apply_invoked`, regenerated the file inventory, and proved the shell with focused source guards/settings/share/session tests plus a retained-source residue scan. | Full app-wide iOS suite remains a final PCC-10 candidate; no open PCC-6 cleanup loops. | PCC-6 iOS consolidation checkpoint |
 | PCC-7 | Mac app consolidation | 8 | pending | mac | `Sources` moves toward `App`, `Server`, `Wizard`, `MenuBar`, `Support`, and resources; project regenerated; targeted Mac tests pass. | macOS UI test breadth may stay source-level if no harness exists. | pending |
 | PCC-8 | Scripts cleanup | 6 | pending | scripts | Dispatcher/helper/module split matches README, stale helpers/caches deleted, syntax checks and relevant status/dev health-gated checks pass. | Live service checks depend on local environment. | pending |
 | PCC-9 | Docs and test cleanup | 8 | pending | docs_or_test_harness | Stale docs deleted or rewritten, redundant tests consolidated, static gates cover deleted product surfaces and folder drift, progressive disclosure docs updated. | Historical scorecards may retain deleted terms as evidence. | pending |
@@ -176,9 +169,9 @@ Total weight: **100**
 
 ## Next Test
 
-PCC-6 starts iOS app consolidation. Begin with source-root ownership and
+PCC-7 starts Mac app consolidation. Begin with source-root ownership and
 generated project audit:
 
 ```bash
-find packages/ios-app/Sources -maxdepth 3 -type f -print | sort
+find packages/mac-app/Sources -maxdepth 3 -type f -print | sort
 ```
