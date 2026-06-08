@@ -28,6 +28,8 @@ packages/agent/defaults/profiles/user/profile.toml	retain	repo	PCC-3/PCC-9	Curre
 packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md	retain	agent docs	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv	retain	agent docs	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/docs/hierarchical-rearchitecture-inventory.md	retain	agent docs	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
+packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv	retain	agent docs	PCC-3/PCC-9	Current HRA-8 iOS move-map artifact retained beside HRA docs
+packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md	retain	agent docs	PCC-3/PCC-9	Current HRA-8 iOS project-map artifact retained beside HRA docs
 packages/agent/docs/hierarchical-rearchitecture-move-map.tsv	retain	agent docs	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/docs/hierarchical-rearchitecture-scorecard.md	retain	agent docs	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/docs/primitive-code-cleanup-evidence-manifest.md	retain	agent docs	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update

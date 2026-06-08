@@ -9,7 +9,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Scorecard",
-        "Current score: **59/100**",
+        "Current score: **65/100**",
         "Status: **running**",
         "Total weight: **100**",
         "## Folder Justification Table",
@@ -23,9 +23,12 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "HRA-5 | Rust domain vertical slices | 10 | passed_after_fix",
         "HRA-6 | Rust session and event-store hierarchy | 7 | passed_after_fix",
         "HRA-7 | Rust tests and progressive docs | 5 | passed_after_fix",
+        "HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | passed_after_fix",
         "HRA-16 | Final adversarial review and closeout | 2 | pending",
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
+        IOS_MOVE_MAP_PATH,
+        IOS_PROJECT_MAP_PATH,
     ] {
         assert!(
             scorecard.contains(required),
@@ -51,12 +54,13 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Evidence Manifest",
-        "Current score: **59/100**",
+        "Current score: **65/100**",
         "Status: **running**",
         "| HRA-0 | passed_after_fix |",
         "| HRA-5 | passed_after_fix |",
         "| HRA-6 | passed_after_fix |",
         "| HRA-7 | passed_after_fix |",
+        "| HRA-8 | passed_after_fix |",
         "## HRA-0 Red Static Gate",
     ] {
         assert!(
@@ -67,11 +71,13 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Inventory",
-        "Status: `passed_after_fix`",
+        "Status: `running`",
         "Machine-Readable Artifacts",
         "Allowed classifications",
         "Allowed statuses",
-        "HRA-1 Baseline Counts",
+        "HRA-1 Baseline Counts Updated After HRA-8",
+        IOS_MOVE_MAP_PATH,
+        IOS_PROJECT_MAP_PATH,
     ] {
         assert!(
             inventory.contains(required),
@@ -85,6 +91,8 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         INVENTORY_PATH,
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
+        IOS_MOVE_MAP_PATH,
+        IOS_PROJECT_MAP_PATH,
         INVARIANT_TEST_PATH,
     ] {
         assert!(
@@ -105,6 +113,8 @@ fn tracked_files_have_rearchitecture_inventory_rows() {
         INVENTORY_PATH,
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
+        IOS_MOVE_MAP_PATH,
+        IOS_PROJECT_MAP_PATH,
         INVARIANT_TEST_PATH,
     ];
 

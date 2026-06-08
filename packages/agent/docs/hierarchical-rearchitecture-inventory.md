@@ -1,8 +1,8 @@
 # Hierarchical Rearchitecture Inventory
 
-Status: `passed_after_fix`
+Status: `running`
 
-Generated from the live tracked checkout after HRA-6. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-6 have updated the Rust source, engine, non-session domain, and session/event-store hierarchy without compatibility shim modules.
+Generated from the live checkout after HRA-8. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map without moving Swift production files.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -12,8 +12,10 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 
 - `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv`
 - `packages/agent/docs/hierarchical-rearchitecture-move-map.tsv`
+- `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`
+- `packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md`
 
-Both TSV files use this stable header:
+The global HRA inventory and move-map TSV files use this stable header:
 
 ```text
 current_path	target_path	package	area	owner	classification	reason	phase	status	notes
@@ -23,13 +25,19 @@ Allowed classifications: `retain_in_place`, `move`, `split`, `merge`, `delete`, 
 
 Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_unfixed`, `blocked`, `deferred_to_successor`.
 
-## HRA-1 Baseline Counts Updated After HRA-6
+The HRA iOS move map uses this HRA-8-specific header:
+
+```text
+current_path	target_path	owner	phase	classification	status	reason
+```
+
+## HRA-1 Baseline Counts Updated After HRA-8
 
 | Metric | Count |
 | ------ | ----- |
-| Tracked files from `git ls-files` after HRA-6 | 1308 |
-| Files under `packages/agent/src` | 503 |
-| Files under `packages/agent/tests` | 6 |
+| Tracked files plus HRA-8 staged additions | 1349 |
+| Files under `packages/agent/src` | 522 |
+| Files under `packages/agent/tests` | 26 |
 | Files under `packages/ios-app/Sources` | 408 |
 | Files under `packages/ios-app/Tests` | 192 |
 | Files under `packages/mac-app/Sources` | 72 |
@@ -40,8 +48,8 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 | Extension | Count |
 | --------- | ----- |
 | .swift | 630 |
-| .rs | 508 |
-| .md | 21 |
+| .rs | 547 |
+| .md | 22 |
 | .json | 20 |
 | .png | 20 |
 | .ttf | 20 |
@@ -54,7 +62,7 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 | .plist | 7 |
 | .entitlements | 6 |
 | .icns | 4 |
-| .tsv | 3 |
+| .tsv | 4 |
 | .xcscheme | 3 |
 | .lock | 2 |
 | .env | 1 |
@@ -70,7 +78,7 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 | Package | Count |
 | ------- | ----- |
 | ios-app | 624 |
-| agent | 533 |
+| agent | 574 |
 | mac-app | 114 |
 | scripts | 22 |
 | github | 8 |
@@ -96,6 +104,8 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 ## Completed Rust Root Findings
 
 The current Rust source root has only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`. Domain startup helpers live under `packages/agent/src/domains/registration`; non-session domains and the session event-store no longer have avoidable same-name file/folder module pairs. HRA-7 mirrors engine tests under `engine/tests/{authority,catalog,durability,invocation,kernel,runtime}` and splits root static integration targets into folder-backed modules while preserving their integration target names.
+
+HRA-8 adds a 547-row iOS source/test Swift move map. The map has no fallback rows, points old broad-bucket paths to target feature owners, and is guarded by `ios_hra8_move_map_covers_every_source_and_test_swift_file`. The iOS production tree remains intentionally unmoved until HRA-9 through HRA-12; the iOS test tree remains unmoved until HRA-13.
 
 ## Directories Over 12 Source Files
 
@@ -145,14 +155,14 @@ The current Rust source root has only `packages/agent/src/lib.rs` and `packages/
 | `packages/ios-app/Sources/Engine/Protocol` | `ProtocolConstants.swift` | ios engine owner | HRA-9 |
 | `packages/ios-app/Sources/Session/Parsing` | `CapabilityArgumentParser.swift` | ios session owner | HRA-10 |
 | `packages/ios-app/Sources/Session/Reconstruction` | `UnifiedEventTransformer.swift` | ios session owner | HRA-10 |
-| `packages/ios-app/Sources/Support` | `AppConstants.swift` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Concurrency` | `AsyncSemaphore.swift` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Feedback` | `FeedbackComposer.swift` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Observability` | `DiagnosticsRedactor.swift` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Pairing` | `PairingURLParser.swift` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Settings` | `PairedServerStore.swift` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Share` | `SharedContent.swift` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Storage` | `DraftStore.swift` | repo owner | HRA-15 |
+| `packages/ios-app/Sources/Support` | `AppConstants.swift` | ios support owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Concurrency` | `AsyncSemaphore.swift` | ios support owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Feedback` | `FeedbackComposer.swift` | ios support owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Observability` | `DiagnosticsRedactor.swift` | ios support owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Pairing` | `PairingURLParser.swift` | ios support owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Settings` | `PairedServerStore.swift` | ios support owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Share` | `SharedContent.swift` | ios share extension boundary owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Storage` | `DraftStore.swift` | ios support owner | HRA-12 |
 | `packages/ios-app/Sources/UI/Views/Capabilities/Thinking` | `ThinkingDetailSheet.swift` | ios UI owner | HRA-11 |
 | `packages/ios-app/Sources/UI/Views/DynamicSurfaces` | `GeneratedRuntimeSurfaceView.swift` | ios UI owner | HRA-11 |
 | `packages/ios-app/Tests/Core` | `AppConstantsTests.swift` | ios test owner | HRA-13 |
@@ -175,10 +185,10 @@ The current Rust source root has only `packages/agent/src/lib.rs` and `packages/
 | `packages/ios-app/Sources/Session/ViewModels/Handlers` | ios session owner | HRA-10 |
 | `packages/ios-app/Sources/Session/ViewModels/Managers` | ios session owner | HRA-10 |
 | `packages/ios-app/Sources/Session/ViewModels/Utilities` | ios session owner | HRA-10 |
-| `packages/ios-app/Sources/Support/Diagnostics/Services` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Infrastructure/Services` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Storage/Services` | repo owner | HRA-15 |
-| `packages/ios-app/Sources/Support/Utilities/Core` | repo owner | HRA-15 |
+| `packages/ios-app/Sources/Support/Diagnostics/Services` | ios support owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Infrastructure/Services` | ios support owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Storage/Services` | ios support owner | HRA-12 |
+| `packages/ios-app/Sources/Support/Utilities/Core` | ios support owner | HRA-12 |
 | `packages/ios-app/Tests/Core` | ios test owner | HRA-13 |
 | `packages/ios-app/Tests/Services` | ios test owner | HRA-13 |
 | `packages/ios-app/Tests/Utilities` | ios test owner | HRA-13 |
@@ -201,7 +211,7 @@ The current Rust source root has only `packages/agent/src/lib.rs` and `packages/
 | `packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | 817 | 700 | ios UI owner | HRA-11 |
 | `packages/ios-app/Sources/UI/Views/Settings/SettingsView.swift` | 735 | 700 | ios UI owner | HRA-11 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2140 | 700 | ios test owner | HRA-13 |
-| `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | 1531 | 700 | ios test owner | HRA-13 |
+| `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | 1637 | 700 | ios test owner | HRA-13 |
 | `packages/mac-app/Tests/Wizard/WizardStepTests.swift` | 717 | 700 | mac wrapper owner | HRA-14 |
 
 ## Docs And Scripts With Old Path Claims
@@ -210,6 +220,6 @@ Old-path claims are intentionally still visible in historical HRA/PCC evidence a
 
 ## Open Loops
 
-- HRA-9 through HRA-13 still own iOS source and test hierarchy gates.
+- HRA-9 through HRA-13 still own iOS source/test hierarchy moves and SourceGuard red closure.
 - HRA-14 still owns the Mac wrapper audit.
 - HRA-15 still owns stale path claims in docs/scripts/README outside evidence history.

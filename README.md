@@ -128,6 +128,10 @@ Current living entry points:
 - `packages/agent/docs/hierarchical-rearchitecture-move-map.tsv`:
   machine-readable old-to-new path map for the hierarchical rearchitecture
   campaign.
+- `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`:
+  HRA-8 source/test Swift move map for the iOS hierarchy phases.
+- `packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md`:
+  HRA-8 XcodeGen, ShareExtension, SourceGuard, and iOS phase-ownership map.
 - `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
   absence, traceability, schema, registration, and documentation gates for the
   primitive branch.

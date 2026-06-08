@@ -1377,6 +1377,99 @@ struct SourceGuardTests {
         }
     }
 
+    @Test("iOS sources use HRA feature-owned hierarchy")
+    func testIOSSourcesUseHRAFeatureOwnedHierarchy() throws {
+        let iosRoot = iosAppRoot()
+        let bannedBuckets = [
+            "Sources/UI/Views": "HRA-11 replaces the broad view bucket with UI/Chat, UI/Settings, UI/Onboarding, UI/RuntimeSurfaces, UI/Capabilities, UI/Components, UI/System, and UI/Theme owners.",
+            "Sources/Engine/Network": "HRA-9 replaces the network bucket with Engine/Transport/WebSocket, Clients, Retry, and DeepLinks owners.",
+            "Sources/Engine/Database": "HRA-9 reconciles database code under Engine/Persistence/SQLite and Repositories.",
+            "Sources/Engine/EventStore": "HRA-9 reconciles event-store sync under Engine/Persistence/Sync and Repositories.",
+            "Sources/Session/ViewModels/Managers": "HRA-10 moves manager files to chat coordinators, messaging, navigation, activity, or state owners.",
+            "Sources/Session/ViewModels/Utilities": "HRA-10 moves message lookup helpers to Session/Chat/Navigation.",
+            "Sources/Support/Utilities": "HRA-12 splits utilities into scoped Support/Foundation concerns.",
+            "Sources/Support/Extensions": "HRA-12 splits extensions into scoped Support/Foundation/SwiftUI or parsing/formatting concerns.",
+        ]
+        let requiredRoots = [
+            "Sources/App",
+            "Sources/Engine/Transport",
+            "Sources/Engine/Protocol",
+            "Sources/Engine/Events",
+            "Sources/Engine/Persistence",
+            "Sources/Session/Chat",
+            "Sources/Session/Timeline",
+            "Sources/UI/Chat",
+            "Sources/UI/Settings",
+            "Sources/UI/Onboarding",
+            "Sources/UI/RuntimeSurfaces",
+            "Sources/Support/Composition",
+            "Sources/Support/Foundation",
+        ]
+
+        let presentBanned = bannedBuckets.keys
+            .sorted()
+            .filter { directoryExists(iosRoot.appendingPathComponent($0)) }
+        let missingRequired = requiredRoots
+            .filter { !directoryExists(iosRoot.appendingPathComponent($0)) }
+
+        #expect(
+            presentBanned.isEmpty && missingRequired.isEmpty,
+            "HRA iOS source hierarchy is still loose. Present banned buckets: \(presentBanned.map { "\($0): \(bannedBuckets[$0] ?? "")" }); missing target roots: \(missingRequired)"
+        )
+    }
+
+    @Test("iOS tests mirror HRA source boundaries")
+    func testIOSTestsMirrorHRASourceBoundaries() throws {
+        let iosRoot = iosAppRoot()
+        let requiredRoots = [
+            "Tests/Infrastructure",
+            "Tests/Engine",
+            "Tests/Session",
+            "Tests/UI",
+            "Tests/Support",
+        ]
+        let bannedRoots = [
+            "Tests/Core",
+            "Tests/Extensions",
+            "Tests/Models",
+            "Tests/Navigation",
+            "Tests/Observability",
+            "Tests/Onboarding",
+            "Tests/Repositories",
+            "Tests/Services",
+            "Tests/Theme",
+            "Tests/Utilities",
+            "Tests/ViewModels",
+            "Tests/Views",
+        ]
+
+        let missingRequired = requiredRoots
+            .filter { !directoryExists(iosRoot.appendingPathComponent($0)) }
+        let presentBanned = bannedRoots
+            .filter { directoryExists(iosRoot.appendingPathComponent($0)) }
+
+        #expect(
+            missingRequired.isEmpty && presentBanned.isEmpty,
+            "HRA iOS tests must mirror production owners. Missing target roots: \(missingRequired); old technical buckets still present: \(presentBanned)"
+        )
+    }
+
+    @Test("XcodeGen keeps recursive iOS target membership")
+    func testXcodeGenKeepsRecursiveIOSTargetMembership() throws {
+        let iosRoot = iosAppRoot()
+        let project = try String(
+            contentsOf: iosRoot.appendingPathComponent("project.yml"),
+            encoding: .utf8
+        )
+
+        #expect(project.contains("- path: Sources\n        createIntermediateGroups: true"))
+        #expect(project.contains("- path: Tests\n        createIntermediateGroups: true"))
+        #expect(project.contains("- path: ShareExtension"))
+        #expect(project.contains("- path: Sources/Support/Share/SharedContent.swift"))
+        #expect(project.contains("generateEmptyDirectories: true"))
+        #expect(project.contains("createIntermediateGroups: true"))
+    }
+
     @Test("Prompt transport has one attachment plane")
     func testPromptTransportHasOneAttachmentPlane() throws {
         let fileURL = URL(fileURLWithPath: #filePath)
@@ -1508,6 +1601,19 @@ struct SourceGuardTests {
                 }
             }
         }
+    }
+
+    private func iosAppRoot() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func directoryExists(_ url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue
     }
 
     private func swiftFiles(in root: URL) throws -> [URL] {

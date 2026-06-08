@@ -8,6 +8,10 @@ pub(super) const FILE_INVENTORY_PATH: &str =
     "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv";
 pub(super) const MOVE_MAP_PATH: &str =
     "packages/agent/docs/hierarchical-rearchitecture-move-map.tsv";
+pub(super) const IOS_MOVE_MAP_PATH: &str =
+    "packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv";
+pub(super) const IOS_PROJECT_MAP_PATH: &str =
+    "packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md";
 pub(super) const SCORECARD_PATH: &str =
     "packages/agent/docs/hierarchical-rearchitecture-scorecard.md";
 pub(super) const EVIDENCE_PATH: &str =
