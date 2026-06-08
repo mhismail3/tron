@@ -125,6 +125,10 @@ Current living entry points:
   rearchitecture completion.
 - `packages/agent/docs/post-hra-adversarial-hardening-evidence-manifest.md`:
   companion evidence manifest for the post-HRA adversarial hardening campaign.
+- `packages/agent/docs/post-aha-adversarial-closeout-scorecard.md`: active
+  closeout campaign for adversarial audit findings after AHA completion.
+- `packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md`:
+  companion evidence manifest for the post-AHA adversarial closeout campaign.
 - `packages/agent/docs/hierarchical-rearchitecture-inventory.md`: HRA
   live-tree inventory summary and target architecture notes.
 - `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md`: in-repo
@@ -151,6 +155,9 @@ Current living entry points:
 - `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs`: completed
   post-HRA adversarial hardening gates for source identity, deleted-doc
   residue, CI parity, Rust ownership, iOS transport, inventory, and provenance.
+- `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs`: active
+  post-AHA closeout gates for Mac project policy, docs/runtime parity, Mac/iOS
+  ownership, Rust docs/budgets, CI parity, provenance, privacy, and residue.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
