@@ -454,7 +454,7 @@ Current primitive operations:
 
 Startup registration currently keeps only loop infrastructure domains: `system`,
 `capability`, `blob`, `message`, `settings`, `auth`, `agent`, `logs`, `session`,
-`context`, and model-provider modules. Product/tool domains such as `filesystem`,
+and model-provider modules. Product/tool domains such as `filesystem`,
 `process`, `program`, `web`, `git`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, `notifications`, `voice_notes`, and transcription/import surfaces are
@@ -858,7 +858,7 @@ attribution/content hashes after completion.
 | `engine_invocations` | Engine invocation ledger: function, worker, trace, parent, idempotency, status, result/error summaries |
 | `engine_grants`, `engine_grant_events` | Engine-owned authority model: parent/child grants, subject binding, allowed capabilities/namespaces/resource selectors/file roots/network/risk/budget/expiry/delegation, plus lifecycle events |
 | `engine_stream_events` | Engine stream publication history with cursor, topic, visibility, trace, and compact payload |
-| `engine_catalog_changes` | Live catalog audit trail for worker/function/trigger registration, health, visibility, and lifecycle changes |
+| `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
 | `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
