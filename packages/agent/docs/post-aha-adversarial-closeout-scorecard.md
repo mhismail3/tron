@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Scorecard
 
-Current score: **87/100**
+Current score: **94/100**
 
 Status: **active**
 
@@ -48,7 +48,7 @@ Total weight: **100**
 | PAC-6 | iOS hierarchy and mirrored tests | 9 | passed_after_fix | iOS hierarchy | Retry tests moved under `Tests/Engine/Transport/Retry`, WebSocket tests moved under `Tests/Engine/Transport/WebSocket`, and Chat tests moved under `Coordinators`, `Messaging`, and `ViewModel`. SourceGuard now watches the production Retry source root plus the mirrored test roots, iOS docs name the owner mirror, tracked Xcode was regenerated, and HRA/PCC inventory rows were repaired for the moved/new tracked files. | Closed. |
 | PAC-7 | Rust docs and LOC split budgets | 10 | passed_after_fix | Rust docs/budgets | Top-level Rust roots `app`, `domains`, `engine`, `shared`, and `transport` now carry `## Submodules`, `## Entry Points`, `## Invariants`, and `## Test Ownership` sections. The PAC split-plan watchlist now has the current 895 LOC row for `engine/catalog/registry/mod.rs` with a concrete split plan. | Closed. |
 | PAC-8 | Local/GitHub CI parity | 8 | passed_after_fix | local/CI parity | `scripts/tron ci test` now runs the full explicit closeout target set: `db_path_guard`, PET/PCC/HRA/AHA/PAC invariants, `primitive_trace_execution`, and serial `integration`. GitHub's Rust static-gates job runs the same named target set in the same order, and README/CONTRIBUTING document that parity. | Closed. |
-| PAC-9 | Provenance, privacy, and residue policy | 7 | pending | provenance/privacy/residue | Pending. | Add AHA plan digest, broaden personal-info scans, and define allowed fallback/compatibility wording contexts. |
+| PAC-9 | Provenance, privacy, and residue policy | 7 | passed_after_fix | provenance/privacy/residue | Added the redacted in-repo AHA plan digest, redirected the AHA scorecard and README to it, made the personal-info full-scan roots explicit for `packages/agent`, `packages/ios-app`, `packages/mac-app`, `AGENTS.md`, and `README.md`, and kept the allowed fallback/compatibility wording policy durable in this scorecard. | Closed. |
 | PAC-10 | Final closeout verification | 6 | pending | final closeout | Pending. | Run full Rust CI, focused iOS/Mac checks, privacy guard, ignored-artifact audit, residue scans, and final adversarial audit. |
 
 ## Static Gates
@@ -81,7 +81,7 @@ old paths and dual behavior. The allowed contexts are:
 
 ## Open Loops
 
-- PAC-9 through PAC-10 remain open. The current red target is the executable
+- PAC-10 remains open. The current red target is the executable
   punch list for those rows.
 
 ## Rust/Swift Split-Plan Watchlist

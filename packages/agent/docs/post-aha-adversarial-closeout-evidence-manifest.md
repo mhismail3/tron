@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Evidence Manifest
 
-Current score: **87/100**
+Current score: **94/100**
 
 Status: **active**
 
@@ -25,7 +25,7 @@ work is driven by executable evidence instead of the external Downloads plan.
 | PAC-6 | passed_after_fix | Moved iOS Retry, WebSocket, and Chat tests into directories that mirror their production owners; expanded `SourceGuardTests+Budgets` to watch `Sources/Engine/Transport/Retry`, `Tests/Engine/Transport/Retry`, `Tests/Engine/Transport/WebSocket`, and the Chat `Coordinators`/`Messaging`/`ViewModel` test roots; updated iOS docs, HRA near-budget rows, and HRA/PCC inventory rows; regenerated the tracked iOS Xcode project. | PAC iOS mirror static gate passed; HRA scorecard formalization passed; HRA/PCC inventory guards passed; iOS XcodeGen passed; focused `SourceGuardTests` and the moved test suites passed on `iPhone 17 Pro`. | Closed. | `efffbbe19` |
 | PAC-7 | passed_after_fix | Added progressive disclosure sections to top-level Rust `mod.rs` roots for `app`, `domains`, `engine`, `shared`, and `transport`; added the current 895 LOC concrete split-plan watch row for `packages/agent/src/engine/catalog/registry/mod.rs`. | PAC Rust docs/LOC static gate passed; Rust formatting check passed; rustdoc with denied warnings passed; whitespace check passed. | Closed. | `8e2221f74` |
 | PAC-8 | passed_after_fix | Aligned the local and GitHub CI closeout test sets. `scripts/tron ci test` now runs an explicit target list for `db_path_guard`, PET/PCC/HRA/AHA/PAC invariants, `primitive_trace_execution`, and serial `integration`; the GitHub Rust static-gates job runs the same named targets in the same order. README and CONTRIBUTING now document that parity. | PAC local/GitHub parity static gate passed; PAC scorecard formalization passed; `bash -n scripts/tron.d/quality.sh` passed; post-HRA closeout target passed. | Closed. | `f0e28f907` |
-| PAC-9 | pending | Pending. | Pending. | AHA provenance, privacy scope, and residue wording policy still need durable proof. | pending |
+| PAC-9 | passed_after_fix | Added `packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md` as the redacted in-repo digest for the operator AHA plan; redirected the AHA scorecard and README to that durable artifact; made the personal-info guard's full-scan roots explicit for root docs, packages, and scripts; and retained the PAC fallback/compatibility wording policy. Updated HRA/PCC inventories for the new tracked summary. | PAC provenance/privacy/residue static gate passed; the full PAC target passed; AHA scorecard formalization and provenance/inventory gates passed; HRA/PCC inventory coverage passed; full personal-info guard passed; script syntax, Rust formatting, and whitespace checks passed. | Closed. | pending |
 | PAC-10 | pending | Pending. | Pending. | Final closeout verification has not run. | pending |
 
 ## PAC-0 Red Proof
@@ -68,8 +68,38 @@ Expected red findings:
 
 ## Residual Risk Log
 
-- PAC-9 through PAC-10 remain open. No row will be marked complete until its
+- PAC-10 remains open. No row will be marked complete until its
   guard, docs, targeted verification, and evidence are green.
+
+## PAC-9 Verification
+
+Completed provenance, privacy, and residue policy cleanup:
+
+- Added `packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md`
+  as the redacted in-repo digest for the operator AHA plan.
+- Redirected the completed AHA scorecard and README living-doc list to the
+  in-repo digest.
+- Made full personal-info scans use an explicit tracked-root list covering
+  `packages/agent`, `packages/ios-app`, `packages/mac-app`, `AGENTS.md`,
+  `README.md`, `.codex`, `.github`, root release/config files, and `scripts`.
+- Added the new tracked summary to the PCC and HRA inventory artifacts.
+
+Focused proof:
+
+```bash
+bash -n scripts/personal-info-guard.sh
+scripts/personal-info-guard.sh
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants aha_provenance_privacy_and_residue_policy_are_in_repo -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants post_hra_adversarial_hardening_scorecard_stays_formalized -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants inventory_and_provenance_have_no_open_or_external_closeout_state -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants tracked_files_have_rearchitecture_inventory_rows -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants primitive_code_cleanup_inventory_covers_tracked_files -- --nocapture
+git diff --check
+```
+
+Result: exit 0 for all focused commands on 2026-06-08.
 
 ## PAC-8 Verification
 

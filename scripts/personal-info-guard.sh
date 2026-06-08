@@ -55,6 +55,22 @@ ALLOWLIST_PATHS=(
     '.tron/*'
 )
 
+# Full scans intentionally name every tracked source/documentation root so a
+# root can be added or removed only with a conscious scan-scope edit.
+SCAN_PATHS=(
+    '.codex'
+    '.github'
+    '.gitignore'
+    'AGENTS.md'
+    'CONTRIBUTING.md'
+    'README.md'
+    'VERSION.env'
+    'packages/agent'
+    'packages/ios-app'
+    'packages/mac-app'
+    'scripts'
+)
+
 # Build a single grep-include filter that excludes the allowlist.
 # `git grep` is fast and respects `.gitignore`.
 EXCLUDE_ARGS=()
@@ -91,8 +107,8 @@ scan_pattern() {
             | xargs -0r git grep --cached -nE "$pattern" -- "${EXCLUDE_ARGS[@]}" 2>/dev/null \
             || true)
     else
-        # Full repo scan via git grep (respects .gitignore)
-        hits=$(git grep -nE "$pattern" -- . "${EXCLUDE_ARGS[@]}" 2>/dev/null || true)
+        # Full repo scan via git grep (respects .gitignore).
+        hits=$(git grep -nE "$pattern" -- "${SCAN_PATHS[@]}" "${EXCLUDE_ARGS[@]}" 2>/dev/null || true)
     fi
 
     if [ -n "$hits" ]; then

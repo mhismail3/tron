@@ -34,6 +34,7 @@ packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md	retain	agent 
 packages/agent/docs/hierarchical-rearchitecture-plan-summary.md	retain	agent docs	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/docs/hierarchical-rearchitecture-scorecard.md	retain	agent docs	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/docs/post-hra-adversarial-hardening-evidence-manifest.md	retain	agent docs	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md	retain	closeout docs	PAC-9	Redacted AHA plan digest retained in repo so provenance does not depend on the operator Downloads file.
 packages/agent/docs/post-hra-adversarial-hardening-scorecard.md	retain	agent docs	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/docs/primitive-code-cleanup-evidence-manifest.md	retain	agent docs	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/docs/primitive-code-cleanup-file-inventory.tsv	retain	agent docs	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.

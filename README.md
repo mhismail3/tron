@@ -125,6 +125,8 @@ Current living entry points:
   rearchitecture completion.
 - `packages/agent/docs/post-hra-adversarial-hardening-evidence-manifest.md`:
   companion evidence manifest for the post-HRA adversarial hardening campaign.
+- `packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md`:
+  redacted in-repo digest of the operator post-HRA adversarial hardening plan.
 - `packages/agent/docs/post-aha-adversarial-closeout-scorecard.md`: active
   closeout campaign for adversarial audit findings after AHA completion.
 - `packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md`:

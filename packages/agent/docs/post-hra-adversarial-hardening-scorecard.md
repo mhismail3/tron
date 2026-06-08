@@ -8,8 +8,8 @@ Branch: `codex/primitive-engine-teardown`
 
 Baseline commit: `d63e8646a159802202a3ca48b217bedc5e944317`
 
-Plan: `/Users/<USER>/Downloads/PLAN (1).md`, redacted from the operator
-Downloads path used to seed this campaign.
+Plan: `packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md`,
+the redacted in-repo digest of `/Users/<USER>/Downloads/PLAN (1).md`.
 
 ## Operating Rules
 

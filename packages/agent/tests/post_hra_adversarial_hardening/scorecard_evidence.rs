@@ -22,6 +22,7 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
         "AHA-8 | iOS hierarchy, budgets, and docs | 9 | passed_after_fix",
         "AHA-9 | Inventory and provenance integrity | 8 | passed_after_fix",
         "AHA-10 | Final adversarial closeout | 10 | passed_after_fix",
+        "packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md",
         "external_cli_variance_has_no_compatibility_or_fallback_wording",
         "## Static Gates",
     ] {
@@ -72,7 +73,12 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
         );
     }
 
-    for required in [SCORECARD_PATH, EVIDENCE_PATH, INVARIANT_TEST_PATH] {
+    for required in [
+        SCORECARD_PATH,
+        EVIDENCE_PATH,
+        "packages/agent/docs/post-hra-adversarial-hardening-plan-summary.md",
+        INVARIANT_TEST_PATH,
+    ] {
         assert!(
             readme.contains(required),
             "README living architecture docs must link {required}"
