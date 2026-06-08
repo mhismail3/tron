@@ -47,7 +47,7 @@ Total weight: **100**
 | HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix | Rust engine owner | Moved grants/leases/compensation under `authority`; moved ledger/queue/resources/state/streams under `durability`; kept SQLite codecs under their owning stores; collapsed resource store into `resources/store/mod.rs`. | Authority/durability store modules remain cohesive but over 900 LOC with explicit temporary budgets. |
 | HRA-5 | Rust domain vertical slices | 10 | passed_after_fix | Rust domain owners | Moved registration helpers under `domains/registration`; moved agent prompt/loop/context, auth oauth/credentials, model routing/protocol, and settings profile owners; split capability operations, Kimi stream tests, and over-budget domain test modules. | Closed with no remaining HRA-5 temporary file budgets. |
 | HRA-6 | Rust session and event-store hierarchy | 7 | passed_after_fix | Rust session owner | Moved session lifecycle/query/reconstruction into owner folders, moved event-store envelope/factory/reconstruction/store/session repository tests to folder-backed modules, and split SQLite event repository tests by behavior. | HRA-7 still owns broader Rust test/doc budget cleanup. |
-| HRA-7 | Rust tests and progressive docs | 5 | pending | Rust docs/tests owners | Not started. | Mirror tests to new boundaries and update progressive docs. |
+| HRA-7 | Rust tests and progressive docs | 5 | running | Rust docs/tests owners | Red gates added for mirrored engine tests, Rust over-budget closure, and progressive module docs. | Mirror tests to new boundaries, update progressive docs, and remove temporary Rust budget rows. |
 | HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | pending | iOS architecture owner | Not started. | Add red SourceGuard hierarchy gates and iOS move map. |
 | HRA-9 | iOS Engine hierarchy | 8 | pending | iOS engine owner | Not started. | Reorganize transport, protocol, events, persistence, and model filtering. |
 | HRA-10 | iOS Session hierarchy | 7 | pending | iOS session owner | Not started. | Move chat, timeline, state, messaging, navigation, attachments, and parsing. |
@@ -124,6 +124,9 @@ checks:
 - `rust_domain_root_has_only_owned_boundaries`
 - `rust_capability_execute_operations_are_decomposed`
 - `rust_settings_domain_keeps_worker_root_thin`
+- `rust_engine_tests_are_mirrored_by_subsystem`
+- `rust_hra7_has_no_remaining_overbudget_rust_files`
+- `rust_progressive_docs_declare_dependency_and_test_ownership`
 - `ios_sources_do_not_use_broad_views_network_database_buckets`
 - `ios_tests_mirror_source_boundaries`
 - `large_files_have_decomposition_budget_rows`

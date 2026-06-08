@@ -176,6 +176,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix",
         "HRA-5 | Rust domain vertical slices | 10 | passed_after_fix",
         "HRA-6 | Rust session and event-store hierarchy | 7 | passed_after_fix",
+        "HRA-7 | Rust tests and progressive docs | 5 | running",
         "HRA-16 | Final adversarial review and closeout | 2 | pending",
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
@@ -857,6 +858,107 @@ fn rust_settings_domain_keeps_worker_root_thin() {
             "settings root must stay registration/docs only and not retain `{banned}`"
         );
     }
+}
+
+#[test]
+fn rust_engine_tests_are_mirrored_by_subsystem() {
+    let required = [
+        "packages/agent/src/engine/tests/authority/mod.rs",
+        "packages/agent/src/engine/tests/catalog/mod.rs",
+        "packages/agent/src/engine/tests/durability/mod.rs",
+        "packages/agent/src/engine/tests/invocation/mod.rs",
+        "packages/agent/src/engine/tests/kernel/mod.rs",
+        "packages/agent/src/engine/tests/runtime/mod.rs",
+        "packages/agent/src/engine/tests/fixtures/mod.rs",
+    ];
+    let banned = [
+        "packages/agent/src/engine/tests/catalog_discovery.rs",
+        "packages/agent/src/engine/tests/external_worker.rs",
+        "packages/agent/src/engine/tests/external_worker_soak.rs",
+        "packages/agent/src/engine/tests/grant_authority.rs",
+        "packages/agent/src/engine/tests/host_invocation.rs",
+        "packages/agent/src/engine/tests/idempotency.rs",
+        "packages/agent/src/engine/tests/ids_types.rs",
+        "packages/agent/src/engine/tests/ledger_idempotency.rs",
+        "packages/agent/src/engine/tests/meta_primitives.rs",
+        "packages/agent/src/engine/tests/resource_kernel.rs",
+        "packages/agent/src/engine/tests/restart_chaos.rs",
+        "packages/agent/src/engine/tests/state_queue.rs",
+        "packages/agent/src/engine/tests/streams.rs",
+        "packages/agent/src/engine/tests/support.rs",
+        "packages/agent/src/engine/tests/triggers.rs",
+    ];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "Engine tests must mirror engine subsystem owners after HRA-7; missing: {missing:#?}; old flat test files still present: {present_banned:#?}"
+    );
+}
+
+#[test]
+fn rust_hra7_has_no_remaining_overbudget_rust_files() {
+    let mut source_files = Vec::new();
+    for path in ["packages/agent/src", "packages/agent/tests"] {
+        list_source_files(&repo_path(path), &["rs"], &mut source_files);
+    }
+
+    let mut over_budget = Vec::new();
+    for path in source_files {
+        let lines = source_line_count(&path);
+        if lines > 900 {
+            over_budget.push(format!(
+                "{} has {lines} LOC over Rust HRA-7 limit 900",
+                path.strip_prefix(repo_root()).unwrap().display()
+            ));
+        }
+    }
+
+    assert!(
+        over_budget.is_empty(),
+        "HRA-7 must replace temporary Rust budget rows with real decomposition: {over_budget:#?}"
+    );
+}
+
+#[test]
+fn rust_progressive_docs_declare_dependency_and_test_ownership() {
+    let required_docs = [
+        "packages/agent/src/engine/authority/mod.rs",
+        "packages/agent/src/engine/durability/mod.rs",
+        "packages/agent/src/engine/runtime/mod.rs",
+        "packages/agent/src/domains/session/event_store/mod.rs",
+    ];
+
+    let mut missing_sections = Vec::new();
+    for path in required_docs {
+        let source = read_repo_file(path);
+        for section in [
+            "## Submodules",
+            "## Entry Points",
+            "## Dependency Direction",
+            "## Invariants",
+            "## Test Ownership",
+        ] {
+            if !source.contains(section) {
+                missing_sections.push(format!("{path} missing {section}"));
+            }
+        }
+    }
+
+    assert!(
+        missing_sections.is_empty(),
+        "HRA-7 progressive docs must name submodules, entry points, dependencies, invariants, and test ownership: {missing_sections:#?}"
+    );
 }
 
 #[test]
