@@ -12,7 +12,7 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 
 | ID | Status | Evidence | Verification | Open loops | Commit |
 |----|--------|----------|--------------|------------|--------|
-| HRA-0 | passed_after_fix | Created the scorecard, evidence manifest, human inventory, generated TSV inventory, generated move map, Rust invariant target, README living-doc links, and `scripts/tron.d/quality.sh` CI hook. The invariant target intentionally fails against the current tree on loose Rust root files, flat engine root modules, broad iOS source buckets, non-mirrored iOS test buckets, and over-budget files without decomposition rows. | Red output captured below. | Red gates are expected until HRA-2 through HRA-13 move the tree and HRA-1 records final budgets. | pending |
+| HRA-0 | passed_after_fix | Created the scorecard, evidence manifest, human inventory, generated TSV inventory, generated move map, Rust invariant target, README living-doc links, and `scripts/tron.d/quality.sh` CI hook. The invariant target intentionally fails against the current tree on loose Rust root files, flat engine root modules, broad iOS source buckets, non-mirrored iOS test buckets, and over-budget files without decomposition rows. | Red output captured below. | Red gates are expected until HRA-2 through HRA-13 move the tree and HRA-1 records final budgets. | `f14f7b60c` |
 | HRA-1 | pending | Not started. | pending | Complete final per-file target classification and folder owner table. | pending |
 | HRA-2 | pending | Not started. | pending | Move Rust app/transport/shared/platform roots. | pending |
 | HRA-3 | pending | Not started. | pending | Move Rust engine kernel/catalog/invocation/runtime. | pending |
