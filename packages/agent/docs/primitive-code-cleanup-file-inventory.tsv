@@ -50,200 +50,215 @@ packages/agent/src/app/lifecycle/mod.rs	retain	rust app lifecycle	PCC-3/PCC-9	Cu
 packages/agent/src/app/lifecycle/onboarding/mod.rs	retain	rust app lifecycle	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/app/lifecycle/shutdown.rs	retain	rust app lifecycle	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/app/mod.rs	retain	repo	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/commands.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/contract.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/deps.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/handlers.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/operations/commands.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/operations/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/operations/prompt.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/capability_invocation_executor.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/capability_invocation_executor/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/compaction_handler.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/compaction_handler/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/event_emitter.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/primitive_surface.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/stream_processor.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/stream_state.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/tron_agent.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/tron_agent_tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/turn_runner.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/turn_runner/capability_invocations.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/turn_runner/capability_invocations/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/turn_runner/persistence.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/turn_runner/provider.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/turn_runner/result.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/turn_runner/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/agent/turn_runner/turn_context.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/compaction_engine.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/compaction_trigger.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/constants.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/context_manager.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/context_manager/compaction_deps.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/context_manager/snapshot_deps.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/context_manager_tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/context_snapshot_builder.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/message_store.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/soul.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/summarizer.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/token_estimator.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/context/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/errors.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/agent_factory.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/agent_runner.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/capability_invocation_tracker.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/event_persister.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/invocation_abort_registry.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/orchestrator.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/orchestrator/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/recovery.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/session_context.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/session_manager.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/session_manager/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/session_reconstructor.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/streaming_journal.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/turn_accumulator.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/orchestrator/turn_accumulator/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/pipeline/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/pipeline/persistence.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/profile_runtime.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runner/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/cleanup.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/runtime/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/runtime/session_update.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/runtime/user_event.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/agent_build.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/completion.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/context.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/deps.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/events.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/execute.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/plan.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/request.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/runtime/service/spawn.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/stream.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/agent/worker.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/contract.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/deps.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/flows.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/handlers.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/operations/accounts.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/operations/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/operations/oauth.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/operations/provider_state.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/anthropic.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/errors.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/google.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/openai.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/openai/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/pkce.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/refresh.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/storage.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/storage/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/provider_credentials/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/auth/stream.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/bindings.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/blob/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/capability/contract.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/capability/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/capability/operations/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/catalog.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/contract.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/logs/client_logs.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/logs/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/message/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/catalog.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/contract.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/deps.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/handlers.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/operations/catalog.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/operations/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/presets.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/provider_protocol/capability_parsing.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/provider_protocol/id_remapping.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/provider_protocol/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/cache_pruning.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/message_converter.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/message_converter/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/message_sanitizer.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/provider.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/provider/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/stream_handler.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/stream_handler/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/anthropic/types/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/factory.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/google/message_converter.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/google/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/google/provider.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/google/provider/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/google/stream_handler.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/google/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/google/types/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/kimi/message_converter.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/kimi/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/kimi/provider.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/kimi/stream_handler.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/kimi/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/minimax/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/minimax/provider.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/minimax/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/models/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/models/model_ids.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/models/registry.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/models/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/ollama/message_converter.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/ollama/message_converter/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/ollama/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/ollama/provider.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/ollama/stream_handler.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/ollama/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/message_converter.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/provider.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/provider_tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/stream_handler.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/stream_handler/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types/config.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types/models.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types/models/catalog.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types/models/catalog/frontier.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types/models/catalog/retired.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types/models/catalog/specialized.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types/models/catalog/standard.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types/responses.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/openai/types/tests.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/shared/context_composition.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/shared/error_parsing.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/shared/health.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/shared/provider.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/shared/retry.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/shared/sse.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/shared/stream_common.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/tokens/errors.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/tokens/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/tokens/normalization.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/tokens/pricing.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/model/providers/tokens/types.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/registration.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/resource_projection.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
+packages/agent/src/domains/agent/context/compaction_engine/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/compaction_engine/tests/estimation_orphans.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/compaction_engine/tests/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/compaction_engine/tests/preview_execute.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/compaction_engine/tests/split_point.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/compaction_trigger.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/constants.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/context_manager/compaction_deps.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/context_manager/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/context_manager/snapshot_deps.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/context_manager/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/context_snapshot_builder.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/message_store.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/soul.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/summarizer.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/token_estimator.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/context/types.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/contract.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/deps.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/handlers.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/capability_invocation_executor/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/compaction_handler/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/compaction_handler/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/errors.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/event_emitter.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/agent_factory.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/agent_runner.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/capability_invocation_tracker.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/event_persister.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/invocation_abort_registry.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/orchestrator/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/orchestrator/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/recovery.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/session_context.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/session_manager/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/session_reconstructor.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/streaming_journal.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/turn_accumulator/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/orchestrator/turn_accumulator/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/pipeline/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/pipeline/persistence.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/primitive_surface.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/profile_runtime.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/stream_processor/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/stream_processor/tests/drain.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/stream_processor/tests/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/stream_processor/tests/stream_state.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/stream_state.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/tron_agent/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/tron_agent/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/turn_runner/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/turn_runner/persistence.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/turn_runner/provider.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/turn_runner/result.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/turn_runner/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/turn_runner/turn_context.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/loop/types.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/mod.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/prompt/commands.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/prompt/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/prompt/prompt.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/prompt/service.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/cleanup.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/mod.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/runtime/mod.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/runtime/session_update.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/runtime/user_event.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/agent_build.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/completion.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/context.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/deps.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/events.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/execute.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/mod.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/plan.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/request.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/runtime/service/spawn.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/stream.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/agent/worker.rs	retain	rust agent domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/contract.rs	retain	rust auth domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/accounts.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/anthropic.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/errors.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/google.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/openai/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/openai/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/pkce.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/provider_state.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/refresh.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/storage/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/storage/tests/credentials.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/storage/tests/extra_fields.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/storage/tests/google.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/storage/tests/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/credentials/types.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/deps.rs	retain	rust auth domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/handlers.rs	retain	rust auth domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/mod.rs	retain	rust auth domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/oauth/flows.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/oauth/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/oauth/operations.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/auth/stream.rs	retain	rust auth domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/blob/mod.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/capability/contract.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/capability/mod.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/capability/operations/filesystem.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/capability/operations/logs.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/capability/operations/mod.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/capability/operations/process.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/capability/operations/state.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/capability/operations/trace.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/logs/client_logs.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/logs/mod.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/message/mod.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/mod.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/contract.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/deps.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/handlers.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/protocol/capability_parsing.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/protocol/id_remapping.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/protocol/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/cache_pruning.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/message_converter/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/message_converter/tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/message_sanitizer.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/provider/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/provider/tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/stream_handler/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/stream_handler/tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/types/catalog.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/types/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/types/stream.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/anthropic/types/tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/factory.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/google/message_converter.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/google/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/google/provider/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/google/provider/tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/google/stream_handler.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/google/types/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/google/types/tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/kimi/message_converter.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/kimi/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/kimi/provider.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/kimi/stream_handler/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/kimi/stream_handler/tests.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/kimi/types.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/minimax/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/minimax/provider.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/minimax/types.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/ollama/message_converter/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/ollama/message_converter/tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/ollama/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/ollama/provider.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/ollama/stream_handler.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/ollama/types.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/message_converter.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/provider.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/provider_tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/stream_handler/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/stream_handler/tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/config.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/models/catalog/frontier.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/models/catalog/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/models/catalog/retired.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/models/catalog/specialized.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/models/catalog/standard.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/models/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/responses.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/openai/types/tests.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/shared/context_composition.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/shared/error_parsing.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/shared/health.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/shared/provider.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/shared/retry.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/shared/sse.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/shared/stream_common.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/tokens/errors.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/tokens/mod.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/tokens/normalization.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/tokens/pricing.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/providers/tokens/types.rs	retain	rust model domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/routing/catalog.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/routing/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/routing/models/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/routing/models/model_ids.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/routing/models/registry.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/routing/models/types.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/routing/operations.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/model/routing/presets.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/registration/bindings.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/registration/catalog.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/registration/contract.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/registration/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/registration/worker.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
 packages/agent/src/domains/session/commands/archive.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/domains/session/commands/create.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/domains/session/commands/delete.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
@@ -327,22 +342,22 @@ packages/agent/src/domains/session/mod.rs	retain	rust domain	PCC-3/PCC-9	Current
 packages/agent/src/domains/session/operations.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/domains/session/queries.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/domains/session/reconstruct.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/contract.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/deps.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/handlers.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/db_path_policy.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/errors.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/storage/loader.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/store.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/types/api.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/types/context.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/types/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/types/server.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/implementation/types/ui.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/settings/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/system/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/domains/worker.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
+packages/agent/src/domains/settings/contract.rs	retain	rust settings domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/deps.rs	retain	rust settings domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/handlers.rs	retain	rust settings domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/mod.rs	retain	rust settings domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/db_path_policy.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/errors.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/operations.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/storage/loader.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/store.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/types/api.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/types/context.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/types/mod.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/types/server.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/settings/profile/types/ui.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
+packages/agent/src/domains/system/mod.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
 packages/agent/src/engine/authority/compensation.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/authority/grants/mod.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/authority/grants/model.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update

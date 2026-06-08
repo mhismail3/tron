@@ -466,7 +466,7 @@ fn codex_models_use_codex_endpoint() {
 #[test]
 fn auth_oauth_serde() {
     let auth = OpenAIAuth::OAuth {
-        tokens: crate::domains::auth::provider_credentials::OAuthTokens {
+        tokens: crate::domains::auth::credentials::OAuthTokens {
             access_token: "at".into(),
             refresh_token: "rt".into(),
             expires_at: 99999,
@@ -497,7 +497,7 @@ fn config_serde() {
     let config = OpenAIConfig {
         model: "gpt-5.3-codex".into(),
         auth: OpenAIAuth::OAuth {
-            tokens: crate::domains::auth::provider_credentials::OAuthTokens {
+            tokens: crate::domains::auth::credentials::OAuthTokens {
                 access_token: "at".into(),
                 refresh_token: "rt".into(),
                 expires_at: 99999,

@@ -6,11 +6,11 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::models::model_ids::{
+use crate::domains::model::providers::retry::StreamRetryConfig;
+use crate::domains::model::routing::models::model_ids::{
     MINIMAX_M2, MINIMAX_M2_1, MINIMAX_M2_1_HIGHSPEED, MINIMAX_M2_5, MINIMAX_M2_5_HIGHSPEED,
     MINIMAX_M2_7, MINIMAX_M2_7_HIGHSPEED,
 };
-use crate::domains::model::providers::retry::StreamRetryConfig;
 
 /// Default base URL for the `MiniMax` Anthropic-compatible API.
 pub const DEFAULT_BASE_URL: &str = "https://api.minimax.io/anthropic";

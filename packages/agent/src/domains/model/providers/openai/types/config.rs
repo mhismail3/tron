@@ -110,7 +110,7 @@ pub enum OpenAIAuth {
     #[serde(rename = "oauth")]
     OAuth {
         /// OAuth tokens.
-        tokens: crate::domains::auth::provider_credentials::OAuthTokens,
+        tokens: crate::domains::auth::credentials::OAuthTokens,
     },
     /// API key authentication (Platform endpoint).
     #[serde(rename = "api_key")]

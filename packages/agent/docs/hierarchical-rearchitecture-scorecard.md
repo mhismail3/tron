@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Scorecard
 
-Current score: **37/100**
+Current score: **47/100**
 
 Status: **running**
 
@@ -45,7 +45,7 @@ Total weight: **100**
 | HRA-2 | Rust app, transport, shared, and platform roots | 6 | passed_after_fix | Rust app/transport/shared owners | Moved root binary helpers into app CLI/bootstrap, grouped app health/lifecycle/bootstrap, grouped transport HTTP/engine/runtime, collapsed shared into foundation/protocol/server/storage/observability, and updated README/static gates. | HRA-15 still owns broad stale-path doc scans outside current-code docs. |
 | HRA-3 | Rust engine kernel and invocation hierarchy | 10 | passed_after_fix | Rust engine owner | Moved kernel/catalog/invocation/runtime modules under owned subsystem roots, collapsed invocation host into `invocation/host`, split kernel types under `kernel/types`, and removed avoidable engine same-name file/folder pairs. | Runtime and authority/durability files that remain over budget have explicit budget rows; HRA-7 owns broader Rust test/doc decomposition. |
 | HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix | Rust engine owner | Moved grants/leases/compensation under `authority`; moved ledger/queue/resources/state/streams under `durability`; kept SQLite codecs under their owning stores; collapsed resource store into `resources/store/mod.rs`. | Authority/durability store modules remain cohesive but over 900 LOC with explicit temporary budgets. |
-| HRA-5 | Rust domain vertical slices | 10 | running | Rust domain owners | Red domain hierarchy gates added for non-session same-name module pairs, capability operation decomposition, and settings root operation ownership. | Reorganize domains by behavior instead of copied boilerplate. |
+| HRA-5 | Rust domain vertical slices | 10 | passed_after_fix | Rust domain owners | Moved registration helpers under `domains/registration`; moved agent prompt/loop/context, auth oauth/credentials, model routing/protocol, and settings profile owners; split capability operations, Kimi stream tests, and over-budget domain test modules. | HRA-6 still owns session/event-store; no HRA-5 temporary file budgets remain. |
 | HRA-6 | Rust session and event-store hierarchy | 7 | pending | Rust session owner | Not started. | Reorganize session lifecycle/query/reconstruction/event-store/trace and split oversized tests. |
 | HRA-7 | Rust tests and progressive docs | 5 | pending | Rust docs/tests owners | Not started. | Mirror tests to new boundaries and update progressive docs. |
 | HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | pending | iOS architecture owner | Not started. | Add red SourceGuard hierarchy gates and iOS move map. |
@@ -69,7 +69,7 @@ owners required to bootstrap the campaign.
 | `packages/agent/src/app` | Rust app/bootstrap owner | CLI, bootstrap, health, metrics, lifecycle, and server startup code after HRA-2. | pending |
 | `packages/agent/src/transport` | Rust transport owner | HTTP, engine socket, worker socket, runtime dispatch, and transport DTOs after HRA-2. | pending |
 | `packages/agent/src/engine` | Rust engine substrate owner | Kernel, catalog, invocation, authority, durability, runtime, primitives, and engine tests after HRA-3/HRA-4. | passed_after_fix |
-| `packages/agent/src/domains` | Rust vertical domain owner | Registration plus behavior-owned domain slices after HRA-5/HRA-6. | pending |
+| `packages/agent/src/domains` | Rust vertical domain owner | Registration plus behavior-owned domain slices; HRA-6 still owns session/event-store. | running |
 | `packages/agent/src/shared` | Rust cross-owner support owner | Foundation/protocol/server/storage/observability helpers used by multiple owners after HRA-2. | pending |
 | `packages/ios-app/Sources` | iOS app target boundary | App, Engine, Session, UI, Support, Resources, assets, and plist files after HRA-9/HRA-12. | pending |
 | `packages/ios-app/Tests` | iOS test target boundary | Infrastructure and tests mirroring Engine, Session, UI, and Support after HRA-13. | pending |
@@ -78,36 +78,29 @@ owners required to bootstrap the campaign.
 
 ## Large File Budgets
 
-HRA-0 intentionally starts with no approved over-budget source/test files. The
-`large_files_have_decomposition_budget_rows` gate lists every current over-budget
-file until HRA-1 records an explicit owner, reason, and decomposition or
-temporary budget.
+Every current over-budget source/test file has an explicit owner, limit, current
+LOC, and phase-owned decomposition plan. HRA-5 now closes without any remaining
+HRA-5 temporary budget rows.
 
 | Path | Owner | Limit | Current LOC | Decomposition plan | Status |
 |------|-------|-------|-------------|--------------------|--------|
-| `packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs` | rust agent domain owner | 900 | 1182 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | rust agent domain owner | 900 | 1038 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | rust auth domain owner | 900 | 1383 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/agent/src/domains/capability/operations/mod.rs` | rust compact domain owner | 900 | 927 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/agent/src/domains/model/providers/anthropic/types.rs` | rust model domain owner | 900 | 941 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/agent/src/domains/model/providers/kimi/stream_handler.rs` | rust model domain owner | 900 | 991 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | rust session domain owner | 900 | 1571 | HRA-6 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/agent/src/engine/runtime/external_workers.rs` | rust engine runtime owner | 900 | 901 | Retained as one worker lifecycle runtime while HRA-3 moved it under `runtime`; HRA-7/final closeout will split if it grows or a clearer sub-boundary appears. | temporary_budget |
-| `packages/agent/src/engine/authority/grants/mod.rs` | rust engine authority owner | 900 | 958 | Retained as one authority lifecycle store after HRA-4; split validation/store APIs only when a focused HRA-7 test/doc pass can preserve the authority invariant. | temporary_budget |
-| `packages/agent/src/engine/durability/ledger/mod.rs` | rust engine durability owner | 900 | 955 | Retained as one ledger/idempotency store boundary after HRA-4; split only with focused ledger tests. | temporary_budget |
-| `packages/agent/src/engine/durability/resources/store/mod.rs` | rust engine durability owner | 900 | 972 | Retained as one resource store boundary after HRA-4 with SQLite codec/tests under the store; split only with focused resource-store tests. | temporary_budget |
-| `packages/agent/src/engine/tests/grant_authority.rs` | rust engine test owner | 900 | 929 | HRA-7 owns engine test decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/src/engine/tests/resource_kernel.rs` | rust engine test owner | 900 | 1196 | HRA-7 owns engine test decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/src/engine/tests/state_queue.rs` | rust engine test owner | 900 | 910 | HRA-7 owns engine test decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/tests/primitive_code_cleanup_invariants.rs` | rust integration/static test owner | 900 | 943 | HRA-7 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | rust integration/static test owner | 900 | 2254 | HRA-7 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | ios engine transport owner | 700 | 958 | HRA-9 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/ios-app/Sources/Session/Messages/CapabilityInvocationDisplayModel.swift` | ios session timeline owner | 700 | 744 | HRA-10 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | ios runtime surface UI owner | 700 | 817 | HRA-11 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/ios-app/Sources/UI/Views/Settings/SettingsView.swift` | ios settings UI owner | 700 | 735 | HRA-11 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | ios engine test owner | 700 | 2140 | HRA-13 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | ios test infrastructure owner | 700 | 1531 | HRA-13 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
-| `packages/mac-app/Tests/Wizard/WizardStepTests.swift` | mac test owner | 700 | 717 | HRA-14 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | rust session domain owner | 900 | 1571 | HRA-6 owns session/event-store movement and decomposition. | temporary_budget |
+| `packages/agent/src/engine/authority/grants/mod.rs` | rust engine authority owner | 900 | 958 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
+| `packages/agent/src/engine/durability/ledger/mod.rs` | rust engine durability owner | 900 | 955 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
+| `packages/agent/src/engine/durability/resources/store/mod.rs` | rust engine durability owner | 900 | 972 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
+| `packages/agent/src/engine/runtime/external_workers.rs` | rust engine runtime owner | 900 | 901 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
+| `packages/agent/src/engine/tests/grant_authority.rs` | rust engine test owner | 900 | 929 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
+| `packages/agent/src/engine/tests/resource_kernel.rs` | rust engine test owner | 900 | 1196 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
+| `packages/agent/src/engine/tests/state_queue.rs` | rust engine test owner | 900 | 910 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
+| `packages/agent/tests/primitive_code_cleanup_invariants.rs` | rust integration/static test owner | 900 | 943 | HRA-7 owns focused Rust test/static-gate decomposition after production module moves stabilize. | temporary_budget |
+| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | rust integration/static test owner | 900 | 2266 | HRA-7 owns focused Rust test/static-gate decomposition after production module moves stabilize. | temporary_budget |
+| `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | ios engine owner | 700 | 958 | HRA-9 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Sources/Session/Messages/CapabilityInvocationDisplayModel.swift` | ios session owner | 700 | 744 | HRA-10 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | ios UI owner | 700 | 817 | HRA-11 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Sources/UI/Views/Settings/SettingsView.swift` | ios UI owner | 700 | 735 | HRA-11 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | ios test owner | 700 | 2140 | HRA-13 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | ios test owner | 700 | 1531 | HRA-13 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/mac-app/Tests/Wizard/WizardStepTests.swift` | mac wrapper owner | 700 | 717 | HRA-14 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
 
 ## Static Gates
 
@@ -122,6 +115,10 @@ checks:
 - `rust_engine_subsystem_roots_are_owned`
 - `rust_engine_has_no_same_name_file_folder_pairs`
 - `rust_non_session_domains_have_no_same_name_file_folder_pairs`
+- `rust_model_domain_uses_routing_and_protocol_owners`
+- `rust_auth_domain_uses_oauth_and_credentials_owners`
+- `rust_agent_domain_uses_prompt_loop_context_owners`
+- `rust_domain_root_has_only_owned_boundaries`
 - `rust_capability_execute_operations_are_decomposed`
 - `rust_settings_domain_keeps_worker_root_thin`
 - `ios_sources_do_not_use_broad_views_network_database_buckets`
@@ -130,9 +127,10 @@ checks:
 
 ## Open Loops
 
+- HRA-6 still owns Rust session/event-store hierarchy and decomposition.
+- HRA-7 still owns Rust test mirroring, progressive docs, and remaining
+  engine/static-test over-budget decomposition.
 - HRA-9 through HRA-13 still own iOS source/test hierarchy gates.
-- HRA-7 still owns Rust test mirroring, progressive docs, and any remaining
-  engine over-budget test/store decomposition that proves useful after moves.
 - The project `@self-inspect` skill referenced by `AGENTS.md` is not installed
   in this Codex environment; direct repository and database inspection will be
   used until an equivalent skill becomes available.

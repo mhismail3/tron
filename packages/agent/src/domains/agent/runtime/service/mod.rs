@@ -6,10 +6,10 @@
 
 use std::sync::atomic::AtomicI64;
 
-use crate::domains::agent::runner::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
-use crate::domains::agent::runner::orchestrator::agent_runner::run_agent;
-use crate::domains::agent::runner::orchestrator::orchestrator::StartedRun;
-use crate::domains::agent::runner::types::{AgentConfig, RunContext};
+use crate::domains::agent::r#loop::orchestrator::agent_factory::{AgentFactory, CreateAgentOpts};
+use crate::domains::agent::r#loop::orchestrator::agent_runner::run_agent;
+use crate::domains::agent::r#loop::orchestrator::orchestrator::StartedRun;
+use crate::domains::agent::r#loop::types::{AgentConfig, RunContext};
 
 use crate::engine::{CausalContext, FunctionId, InvocationId};
 use crate::shared::server::context::AgentDeps;

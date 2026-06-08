@@ -104,7 +104,7 @@ pub fn build_user_content_override(
         }
     }
 
-    if !crate::domains::model::providers::model_supports_images(model) {
+    if !crate::domains::model::routing::models::registry::model_supports_images(model) {
         blocks.retain(|block| {
             !matches!(
                 block,

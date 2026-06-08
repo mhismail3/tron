@@ -1,8 +1,8 @@
 //! Operation binding for the agent worker.
 
 use super::Deps;
-use super::operations::*;
-use crate::domains::bindings::operation_bindings;
+use super::prompt::*;
+use crate::domains::registration::bindings::operation_bindings;
 
 operation_bindings! {
     deps = Deps;

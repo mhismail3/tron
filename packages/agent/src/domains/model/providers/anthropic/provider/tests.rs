@@ -21,7 +21,7 @@ fn api_key_config() -> AnthropicConfig {
 
 fn oauth_config() -> AnthropicConfig {
     test_config(AnthropicAuth::OAuth {
-        tokens: crate::domains::auth::provider_credentials::OAuthTokens {
+        tokens: crate::domains::auth::credentials::OAuthTokens {
             access_token: "at-test".into(),
             refresh_token: "rt-test".into(),
             expires_at: 9_999_999_999_999,

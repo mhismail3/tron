@@ -6,10 +6,10 @@
 
 use serde_json::json;
 
-use crate::domains::catalog::{
+use crate::domains::registration::catalog::{
     CapabilitySpec, SYSTEM_AUTHORITY_GRANT, TransportIdempotencyMode, grant_id, worker_id,
 };
-use crate::domains::contract::CapabilityContract;
+use crate::domains::registration::contract::CapabilityContract;
 use crate::engine::{
     DeliveryMode, EffectClass, EngineError, IdempotencyContract, IdempotencyKeySource,
     Result as EngineResult, RiskLevel, TriggerDefinition, TriggerId, TriggerTypeDefinition,

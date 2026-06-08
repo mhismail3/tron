@@ -16,7 +16,7 @@ pub mod server;
 use crate::app::bootstrap::config::ServerConfig;
 use crate::app::bootstrap::server::TronServer;
 use crate::app::cli::{Cli, run_subcommand};
-use crate::domains::agent::runner::{Orchestrator, SessionManager, recover_incomplete_turns};
+use crate::domains::agent::r#loop::{Orchestrator, SessionManager, recover_incomplete_turns};
 use crate::domains::model::providers::factory as provider_factory;
 use crate::domains::model::providers::provider::ProviderFactory;
 use crate::domains::session::event_store::{ConnectionConfig, EventStore};
@@ -303,7 +303,7 @@ fn build_server_runtime_context(
     services: ServiceState,
     engine_host: crate::engine::EngineHostHandle,
     settings_path: PathBuf,
-    profile_runtime: Arc<crate::domains::agent::runner::ProfileRuntime>,
+    profile_runtime: Arc<crate::domains::agent::r#loop::ProfileRuntime>,
     origin: String,
 ) -> ServerRuntimeContext {
     ServerRuntimeContext {
@@ -373,7 +373,7 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     // compilation fails if it's ever moved out without an equivalent guard.
     let (pool, db_path, _db_lock) = init_database(args.db_path)?;
     let profile_runtime = Arc::new(
-        crate::domains::agent::runner::ProfileRuntime::load(
+        crate::domains::agent::r#loop::ProfileRuntime::load(
             crate::shared::foundation::paths::tron_home(),
         )
         .context("Failed to load active profile runtime")?,

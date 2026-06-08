@@ -6,11 +6,11 @@ use crate::domains::model::providers::openai::types::{
 use crate::shared::protocol::messages::Message;
 use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
-fn test_tokens() -> crate::domains::auth::provider_credentials::OAuthTokens {
-    crate::domains::auth::provider_credentials::OAuthTokens {
+fn test_tokens() -> crate::domains::auth::credentials::OAuthTokens {
+    crate::domains::auth::credentials::OAuthTokens {
         access_token: "test-token".into(),
         refresh_token: "test-refresh".into(),
-        expires_at: crate::domains::auth::provider_credentials::now_ms() + 3_600_000, // 1 hour from now
+        expires_at: crate::domains::auth::credentials::now_ms() + 3_600_000, // 1 hour from now
     }
 }
 
@@ -164,16 +164,16 @@ fn extract_account_id_empty_for_missing_auth_object() {
     assert_eq!(extract_account_id(&token), "");
 }
 
-// ── token refresh (via shared crate::domains::auth::provider_credentials::should_refresh) ────────
+// ── token refresh (via shared crate::domains::auth::credentials::should_refresh) ────────
 
 #[test]
 fn should_refresh_when_expired() {
-    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::credentials::OAuthTokens {
         access_token: "t".into(),
         refresh_token: "r".into(),
-        expires_at: crate::domains::auth::provider_credentials::now_ms().saturating_sub(600_000),
+        expires_at: crate::domains::auth::credentials::now_ms().saturating_sub(600_000),
     };
-    assert!(crate::domains::auth::provider_credentials::should_refresh(
+    assert!(crate::domains::auth::credentials::should_refresh(
         &tokens,
         TOKEN_EXPIRY_BUFFER_MS
     ));
@@ -181,12 +181,12 @@ fn should_refresh_when_expired() {
 
 #[test]
 fn should_refresh_within_buffer() {
-    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::credentials::OAuthTokens {
         access_token: "t".into(),
         refresh_token: "r".into(),
-        expires_at: crate::domains::auth::provider_credentials::now_ms() + 120_000,
+        expires_at: crate::domains::auth::credentials::now_ms() + 120_000,
     };
-    assert!(crate::domains::auth::provider_credentials::should_refresh(
+    assert!(crate::domains::auth::credentials::should_refresh(
         &tokens,
         TOKEN_EXPIRY_BUFFER_MS
     ));
@@ -194,12 +194,12 @@ fn should_refresh_within_buffer() {
 
 #[test]
 fn should_not_refresh_when_valid() {
-    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::credentials::OAuthTokens {
         access_token: "t".into(),
         refresh_token: "r".into(),
-        expires_at: crate::domains::auth::provider_credentials::now_ms() + 3_600_000,
+        expires_at: crate::domains::auth::credentials::now_ms() + 3_600_000,
     };
-    assert!(!crate::domains::auth::provider_credentials::should_refresh(
+    assert!(!crate::domains::auth::credentials::should_refresh(
         &tokens,
         TOKEN_EXPIRY_BUFFER_MS
     ));
@@ -207,13 +207,13 @@ fn should_not_refresh_when_valid() {
 
 #[test]
 fn should_refresh_at_exact_boundary() {
-    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::credentials::OAuthTokens {
         access_token: "t".into(),
         refresh_token: "r".into(),
-        expires_at: crate::domains::auth::provider_credentials::now_ms() + TOKEN_EXPIRY_BUFFER_MS,
+        expires_at: crate::domains::auth::credentials::now_ms() + TOKEN_EXPIRY_BUFFER_MS,
     };
     // Shared version uses >=, so at exact boundary it refreshes (safer)
-    assert!(crate::domains::auth::provider_credentials::should_refresh(
+    assert!(crate::domains::auth::credentials::should_refresh(
         &tokens,
         TOKEN_EXPIRY_BUFFER_MS
     ));
@@ -243,7 +243,7 @@ fn build_headers_includes_account_id() {
         base64url_encode(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_789"}}"#);
     let jwt = format!("{header}.{payload}.sig");
 
-    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::credentials::OAuthTokens {
         access_token: jwt,
         refresh_token: "rt".into(),
         expires_at: 9_999_999_999_999,
@@ -255,7 +255,7 @@ fn build_headers_includes_account_id() {
 
 #[test]
 fn build_headers_omits_account_id_for_non_jwt() {
-    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::credentials::OAuthTokens {
         access_token: "simple-token".into(),
         refresh_token: "rt".into(),
         expires_at: 9_999_999_999_999,
@@ -290,7 +290,7 @@ fn platform_headers_no_account_id_even_with_jwt() {
         base64url_encode(r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct_789"}}"#);
     let jwt = format!("{header}.{payload}.sig");
 
-    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::credentials::OAuthTokens {
         access_token: jwt,
         refresh_token: "rt".into(),
         expires_at: 9_999_999_999_999,
@@ -790,7 +790,7 @@ async fn refresh_tokens_success() {
 
     assert_eq!(tokens.access_token, "new-access-token");
     assert_eq!(tokens.refresh_token, "new-refresh-token");
-    assert!(tokens.expires_at > crate::domains::auth::provider_credentials::now_ms());
+    assert!(tokens.expires_at > crate::domains::auth::credentials::now_ms());
 }
 
 #[tokio::test]

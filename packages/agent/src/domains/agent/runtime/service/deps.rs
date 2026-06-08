@@ -4,9 +4,9 @@ use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct PromptRuntimeDeps {
-    pub orchestrator: Arc<crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator>,
+    pub orchestrator: Arc<crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator>,
     pub session_manager:
-        Arc<crate::domains::agent::runner::orchestrator::session_manager::SessionManager>,
+        Arc<crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager>,
     pub event_store: Arc<crate::domains::session::event_store::EventStore>,
     pub health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
     pub shutdown_coordinator: Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,

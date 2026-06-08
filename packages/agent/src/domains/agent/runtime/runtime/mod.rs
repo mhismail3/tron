@@ -5,8 +5,8 @@
 
 use std::time::Duration;
 
-use crate::domains::agent::runner::orchestrator::event_persister::EventPersister;
-use crate::domains::agent::runner::orchestrator::session_reconstructor::ReconstructedState;
+use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+use crate::domains::agent::r#loop::orchestrator::session_reconstructor::ReconstructedState;
 use crate::domains::session::event_store::{ActivitySummaryLine, MessagePreview};
 
 mod session_update;

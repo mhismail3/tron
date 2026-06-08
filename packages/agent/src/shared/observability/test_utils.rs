@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn filter_by_target() {
         let (logs, _guard) = capture_logs();
-        tracing::info!(target: "tron::domains::agent::runner::agent", "agent event");
+        tracing::info!(target: "tron::domains::agent::r#loop::agent", "agent event");
         tracing::info!(target: "tron::app::bootstrap::server", "app event");
 
         let agent_events = logs.events_for_target("tron::domains::agent");

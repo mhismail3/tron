@@ -122,19 +122,19 @@ fn to_standard_base64(input: &str) -> String {
 
 /// OAuth token refresh response.
 ///
-/// Uses the shared [`crate::domains::auth::provider_credentials::OAuthTokenRefreshResponse`] type.
-type TokenResponse = crate::domains::auth::provider_credentials::OAuthTokenRefreshResponse;
+/// Uses the shared [`crate::domains::auth::credentials::OAuthTokenRefreshResponse`] type.
+type TokenResponse = crate::domains::auth::credentials::OAuthTokenRefreshResponse;
 
 /// Refresh OAuth tokens using the `refresh_token` grant.
 ///
 /// Returns new tokens on success. The caller is responsible for persisting
-/// the new tokens (e.g., via `crate::domains::auth::provider_credentials::storage::save_account_oauth_tokens`).
+/// the new tokens (e.g., via `crate::domains::auth::credentials::storage::save_account_oauth_tokens`).
 #[instrument(skip_all)]
 async fn refresh_tokens(
     refresh_token: &str,
     settings: &OpenAIApiSettings,
     client: &reqwest::Client,
-) -> ProviderResult<crate::domains::auth::provider_credentials::OAuthTokens> {
+) -> ProviderResult<crate::domains::auth::credentials::OAuthTokens> {
     let token_url = settings.token_url.as_deref().unwrap_or(DEFAULT_TOKEN_URL);
     let client_id = settings.client_id.as_deref().unwrap_or(DEFAULT_CLIENT_ID);
 
@@ -164,12 +164,12 @@ async fn refresh_tokens(
 
     let data: TokenResponse = response.json().await.map_err(ProviderError::Http)?;
 
-    let new_tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+    let new_tokens = crate::domains::auth::credentials::OAuthTokens {
         access_token: data.access_token,
         refresh_token: data
             .refresh_token
             .unwrap_or_else(|| refresh_token.to_string()),
-        expires_at: crate::domains::auth::provider_credentials::now_ms() + data.expires_in * 1000,
+        expires_at: crate::domains::auth::credentials::now_ms() + data.expires_in * 1000,
     };
 
     info!("Successfully refreshed OpenAI OAuth tokens");
@@ -232,7 +232,7 @@ pub struct OpenAIProvider {
     /// Which API endpoint (Codex vs Platform) this provider targets.
     api_endpoint: ApiEndpoint,
     /// Mutable OAuth token state (refreshed before each request).
-    tokens: tokio::sync::Mutex<crate::domains::auth::provider_credentials::OAuthTokens>,
+    tokens: tokio::sync::Mutex<crate::domains::auth::credentials::OAuthTokens>,
     /// API settings (token URL, client ID, etc.).
     provider_settings: OpenAIApiSettings,
 }
@@ -248,7 +248,7 @@ impl OpenAIProvider {
     ) -> (
         ApiEndpoint,
         String,
-        crate::domains::auth::provider_credentials::OAuthTokens,
+        crate::domains::auth::credentials::OAuthTokens,
     ) {
         let auth_path = OpenAIAuthPath::from(&config.auth);
         let model_endpoint = get_openai_model_profile(&config.model, auth_path)
@@ -258,7 +258,7 @@ impl OpenAIProvider {
             OpenAIAuth::OAuth { tokens } => (model_endpoint, tokens.clone()),
             OpenAIAuth::ApiKey { api_key } => (
                 model_endpoint,
-                crate::domains::auth::provider_credentials::OAuthTokens {
+                crate::domains::auth::credentials::OAuthTokens {
                     access_token: api_key.clone(),
                     refresh_token: String::new(),
                     expires_at: i64::MAX,
@@ -315,10 +315,7 @@ impl OpenAIProvider {
     #[instrument(skip_all)]
     async fn ensure_valid_tokens(&self) -> ProviderResult<()> {
         let mut tokens = self.tokens.lock().await;
-        if crate::domains::auth::provider_credentials::should_refresh(
-            &tokens,
-            TOKEN_EXPIRY_BUFFER_MS,
-        ) {
+        if crate::domains::auth::credentials::should_refresh(&tokens, TOKEN_EXPIRY_BUFFER_MS) {
             let new_tokens =
                 refresh_tokens(&tokens.refresh_token, &self.provider_settings, &self.client)
                     .await?;
@@ -338,7 +335,7 @@ impl OpenAIProvider {
     /// Codex endpoint requires extra headers (`openai-beta`, `openai-originator`,
     /// `chatgpt-account-id`). Platform endpoint uses only standard auth headers.
     fn build_headers(
-        tokens: &crate::domains::auth::provider_credentials::OAuthTokens,
+        tokens: &crate::domains::auth::credentials::OAuthTokens,
         api_endpoint: ApiEndpoint,
     ) -> ProviderResult<HeaderMap> {
         let mut headers = HeaderMap::new();
@@ -601,7 +598,11 @@ impl Provider for OpenAIProvider {
 
     fn context_window(&self) -> u64 {
         self.active_profile().map_or_else(
-            || crate::domains::model::providers::model_context_window(&self.config.model),
+            || {
+                crate::domains::model::routing::models::registry::model_context_window(
+                    &self.config.model,
+                )
+            },
             |profile| profile.context_window,
         )
     }

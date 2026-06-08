@@ -4,12 +4,12 @@ use std::sync::Arc;
 
 use tracing::warn;
 
-use crate::domains::agent::runner::context::soul::AGENT_SOUL;
+use crate::domains::agent::context::soul::AGENT_SOUL;
 
 use super::{AgentConfig, AgentFactory, CreateAgentOpts};
 
 pub(super) struct BuiltPromptAgent {
-    pub(super) agent: crate::domains::agent::runner::agent::tron_agent::TronAgent,
+    pub(super) agent: crate::domains::agent::r#loop::tron_agent::TronAgent,
     pub(super) provider_type: String,
 }
 
@@ -17,7 +17,7 @@ pub(super) async fn build_prompt_agent(
     provider_factory: Arc<dyn crate::domains::model::providers::provider::ProviderFactory>,
     health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
     engine_host: crate::engine::EngineHostHandle,
-    broadcast: &Arc<crate::domains::agent::runner::EventEmitter>,
+    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
     settings: &crate::domains::settings::TronSettings,
     session_id: &str,
     model: &str,
@@ -61,7 +61,7 @@ pub(super) async fn build_prompt_agent(
         system_prompt: Some(AGENT_SOUL.to_owned()),
         enable_thinking: true,
         max_turns: settings.agent.max_turns,
-        compaction: crate::domains::agent::runner::context::types::CompactionConfig {
+        compaction: crate::domains::agent::context::types::CompactionConfig {
             threshold: compactor_settings.compaction_threshold,
             preserve_recent_turns: compactor_settings.preserve_recent_count,
             context_limit,

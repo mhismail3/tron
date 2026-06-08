@@ -56,13 +56,13 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         Err(error) => {
             warn!(session_id = %session_id, error = %error, "failed to resume session, starting fresh");
             let fresh_state =
-                crate::domains::agent::runner::orchestrator::session_reconstructor::ReconstructedState {
+                crate::domains::agent::r#loop::orchestrator::session_reconstructor::ReconstructedState {
                     model: model.clone(),
                     working_directory: Some(working_dir.clone()),
                     ..Default::default()
                 };
             let fresh_persister = Arc::new(
-                crate::domains::agent::runner::orchestrator::event_persister::EventPersister::new(
+                crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister::new(
                     event_store.clone(),
                 ),
             );
@@ -151,7 +151,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
 
     let run_context = RunContext {
         reasoning_level: reasoning_level.and_then(|level| {
-            crate::domains::agent::runner::types::ReasoningLevel::from_str_loose(&level)
+            crate::domains::agent::r#loop::types::ReasoningLevel::from_str_loose(&level)
         }),
         agent_state_context,
         user_content_override,

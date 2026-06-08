@@ -4,14 +4,14 @@
 //! Client log ingestion stays in `client_logs` because it is a real service
 //! boundary with parsing, dedupe, and storage behavior.
 
-use crate::domains::bindings::operation_bindings;
-use crate::domains::catalog::CapabilitySpec;
-use crate::domains::contract::CapabilityContract;
 use crate::domains::logs::client_logs::ClientLogEntry;
 use crate::domains::logs::client_logs::ClientLogsService;
+use crate::domains::registration::bindings::operation_bindings;
+use crate::domains::registration::catalog::CapabilitySpec;
+use crate::domains::registration::contract::CapabilityContract;
+use crate::domains::registration::worker::DomainRegistrationContext;
+use crate::domains::registration::worker::DomainWorkerModule;
 use crate::domains::session::event_store::EventStore;
-use crate::domains::worker::DomainRegistrationContext;
-use crate::domains::worker::DomainWorkerModule;
 use crate::engine::{
     CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
     Result as EngineResult, RiskLevel,
@@ -30,7 +30,7 @@ pub(crate) fn worker_module(
 ) -> crate::engine::Result<DomainWorkerModule> {
     {
         let domain_deps = Deps::from_engine(deps);
-        crate::domains::worker::domain_worker_module(
+        crate::domains::registration::worker::domain_worker_module(
             "logs",
             STREAM_TOPICS,
             function_registrations(capabilities()?, domain_deps)?,

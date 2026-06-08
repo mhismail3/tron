@@ -17,8 +17,8 @@ pub mod socket;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use crate::domains::catalog;
-use crate::domains::catalog::TransportIdempotencyMode;
+use crate::domains::registration::catalog;
+use crate::domains::registration::catalog::TransportIdempotencyMode;
 use crate::engine::{
     ActorKind, CausalContext, EngineTriggerRuntime, FunctionId, InvocationId, TraceId,
     TriggerDispatchRequest, TriggerId,

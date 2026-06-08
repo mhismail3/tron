@@ -2,11 +2,11 @@
 
 use std::sync::Arc;
 
-use crate::domains::agent::runner::orchestrator::orchestrator::StartedRun;
+use crate::domains::agent::r#loop::orchestrator::orchestrator::StartedRun;
 
 pub(super) struct PromptRunCleanup {
     session_manager:
-        Arc<crate::domains::agent::runner::orchestrator::session_manager::SessionManager>,
+        Arc<crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager>,
     session_id: String,
     started_run: Option<StartedRun>,
 }
@@ -15,7 +15,7 @@ impl PromptRunCleanup {
     pub(super) fn new(
         started_run: StartedRun,
         session_manager: Arc<
-            crate::domains::agent::runner::orchestrator::session_manager::SessionManager,
+            crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager,
         >,
         session_id: String,
     ) -> Self {

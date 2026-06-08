@@ -2,8 +2,8 @@
 
 use serde_json::json;
 
-use crate::domains::catalog::CapabilitySpec;
-use crate::domains::contract::CapabilityContract;
+use crate::domains::registration::catalog::CapabilitySpec;
+use crate::domains::registration::contract::CapabilityContract;
 use crate::engine::{
     CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
     Result as EngineResult, RiskLevel, VisibilityScope,

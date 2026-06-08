@@ -6,10 +6,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::domains::model::providers::models::registry::{
+use crate::domains::model::providers::provider::{Provider, ProviderError, ProviderFactory};
+use crate::domains::model::routing::models::registry::{
     detect_provider_from_model, strip_provider_prefix,
 };
-use crate::domains::model::providers::provider::{Provider, ProviderError, ProviderFactory};
 use async_trait::async_trait;
 use tracing::info;
 
@@ -99,64 +99,67 @@ impl DefaultProviderFactory {
     async fn create_anthropic_with_credential(
         &self,
         model: &str,
-        credential_override: Option<&crate::domains::auth::provider_credentials::ActiveCredential>,
+        credential_override: Option<&crate::domains::auth::credentials::ActiveCredential>,
     ) -> Result<Arc<dyn Provider>, ProviderError> {
-        let mut oauth_config =
-            crate::domains::auth::provider_credentials::anthropic::default_config();
+        let mut oauth_config = crate::domains::auth::credentials::anthropic::default_config();
         if !self.anthropic.client_id.is_empty() {
             oauth_config.client_id = self.anthropic.client_id.clone();
         }
 
-        let server_auth = match crate::domains::auth::provider_credentials::anthropic::load_server_auth_with_client(
-            &self.auth_path,
-            &oauth_config,
-            credential_override,
-            &self.http_client,
-        )
-        .await
-        {
-            Ok(Some(auth)) => auth,
-            Ok(None) => {
-                return Err(ProviderError::Auth {
-                    message:
-                        "no Anthropic auth configured — add credentials in Settings > Providers"
-                            .into(),
-                });
-            }
-            Err(e) => {
-                if e.is_transient() {
-                    return Err(ProviderError::Api {
-                        status: match &e {
-                            crate::domains::auth::provider_credentials::errors::AuthError::OAuth { status, .. } => *status,
-                            crate::domains::auth::provider_credentials::errors::AuthError::Http(he) => {
-                                he.status().map_or(503, |s| s.as_u16())
-                            }
-                            _ => 503,
-                        },
-                        message: format!("Anthropic auth failed (transient): {e}"),
-                        code: None,
-                        retryable: true,
+        let server_auth =
+            match crate::domains::auth::credentials::anthropic::load_server_auth_with_client(
+                &self.auth_path,
+                &oauth_config,
+                credential_override,
+                &self.http_client,
+            )
+            .await
+            {
+                Ok(Some(auth)) => auth,
+                Ok(None) => {
+                    return Err(ProviderError::Auth {
+                        message:
+                            "no Anthropic auth configured — add credentials in Settings > Providers"
+                                .into(),
                     });
                 }
-                return Err(ProviderError::Auth {
-                    message: format!("Anthropic auth failed: {e}"),
-                });
-            }
-        };
+                Err(e) => {
+                    if e.is_transient() {
+                        return Err(ProviderError::Api {
+                            status: match &e {
+                                crate::domains::auth::credentials::errors::AuthError::OAuth {
+                                    status,
+                                    ..
+                                } => *status,
+                                crate::domains::auth::credentials::errors::AuthError::Http(he) => {
+                                    he.status().map_or(503, |s| s.as_u16())
+                                }
+                                _ => 503,
+                            },
+                            message: format!("Anthropic auth failed (transient): {e}"),
+                            code: None,
+                            retryable: true,
+                        });
+                    }
+                    return Err(ProviderError::Auth {
+                        message: format!("Anthropic auth failed: {e}"),
+                    });
+                }
+            };
 
         let auth = match server_auth {
-            crate::domains::auth::provider_credentials::ServerAuth::OAuth {
+            crate::domains::auth::credentials::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
             } => crate::domains::model::providers::anthropic::types::AnthropicAuth::OAuth {
-                tokens: crate::domains::auth::provider_credentials::OAuthTokens {
+                tokens: crate::domains::auth::credentials::OAuthTokens {
                     access_token,
                     refresh_token,
                     expires_at,
                 },
             },
-            crate::domains::auth::provider_credentials::ServerAuth::ApiKey { api_key } => {
+            crate::domains::auth::credentials::ServerAuth::ApiKey { api_key } => {
                 crate::domains::model::providers::anthropic::types::AnthropicAuth::ApiKey {
                     api_key,
                 }
@@ -196,10 +199,10 @@ impl DefaultProviderFactory {
     async fn create_openai_with_credential(
         &self,
         model: &str,
-        credential_override: Option<&crate::domains::auth::provider_credentials::ActiveCredential>,
+        credential_override: Option<&crate::domains::auth::credentials::ActiveCredential>,
     ) -> Result<Arc<dyn Provider>, ProviderError> {
         let server_auth =
-            match crate::domains::auth::provider_credentials::openai::load_server_auth_with_client(
+            match crate::domains::auth::credentials::openai::load_server_auth_with_client(
                 &self.auth_path,
                 credential_override,
                 &self.http_client,
@@ -222,14 +225,14 @@ impl DefaultProviderFactory {
             };
 
         let (auth, auth_path) = match server_auth {
-            crate::domains::auth::provider_credentials::ServerAuth::OAuth {
+            crate::domains::auth::credentials::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
                 ..
             } => (
                 crate::domains::model::providers::openai::types::OpenAIAuth::OAuth {
-                    tokens: crate::domains::auth::provider_credentials::OAuthTokens {
+                    tokens: crate::domains::auth::credentials::OAuthTokens {
                         access_token,
                         refresh_token,
                         expires_at,
@@ -237,7 +240,7 @@ impl DefaultProviderFactory {
                 },
                 crate::domains::model::providers::openai::types::OpenAIAuthPath::ChatGptCodex,
             ),
-            crate::domains::auth::provider_credentials::ServerAuth::ApiKey { api_key } => (
+            crate::domains::auth::credentials::ServerAuth::ApiKey { api_key } => (
                 crate::domains::model::providers::openai::types::OpenAIAuth::ApiKey { api_key },
                 crate::domains::model::providers::openai::types::OpenAIAuthPath::PlatformApiKey,
             ),
@@ -277,10 +280,10 @@ impl DefaultProviderFactory {
     async fn create_google_with_credential(
         &self,
         model: &str,
-        credential_override: Option<&crate::domains::auth::provider_credentials::ActiveCredential>,
+        credential_override: Option<&crate::domains::auth::credentials::ActiveCredential>,
     ) -> Result<Arc<dyn Provider>, ProviderError> {
         let google_auth =
-            match crate::domains::auth::provider_credentials::google::load_server_auth_with_client(
+            match crate::domains::auth::credentials::google::load_server_auth_with_client(
                 &self.auth_path,
                 credential_override,
                 &self.http_client,
@@ -304,20 +307,20 @@ impl DefaultProviderFactory {
 
         let google_auth_is_oauth = google_auth.auth.is_oauth();
         let auth = match google_auth.auth {
-            crate::domains::auth::provider_credentials::ServerAuth::OAuth {
+            crate::domains::auth::credentials::ServerAuth::OAuth {
                 access_token,
                 refresh_token,
                 expires_at,
                 ..
             } => crate::domains::model::providers::google::types::GoogleAuth::Oauth {
-                tokens: crate::domains::auth::provider_credentials::OAuthTokens {
+                tokens: crate::domains::auth::credentials::OAuthTokens {
                     access_token,
                     refresh_token,
                     expires_at,
                 },
                 project_id: google_auth.project_id,
             },
-            crate::domains::auth::provider_credentials::ServerAuth::ApiKey { api_key } => {
+            crate::domains::auth::credentials::ServerAuth::ApiKey { api_key } => {
                 crate::domains::model::providers::google::types::GoogleAuth::ApiKey { api_key }
             }
         };
@@ -326,13 +329,12 @@ impl DefaultProviderFactory {
         // token refresh. Without this, ensure_valid_tokens() would fail after
         // the access token expires (~1 hour).
         let provider_settings = if google_auth_is_oauth {
-            let gpa =
-                crate::domains::auth::provider_credentials::storage::get_google_provider_auth(
-                    &self.auth_path,
-                )
-                .map_err(|e| ProviderError::Auth {
-                    message: e.to_string(),
-                })?;
+            let gpa = crate::domains::auth::credentials::storage::get_google_provider_auth(
+                &self.auth_path,
+            )
+            .map_err(|e| ProviderError::Auth {
+                message: e.to_string(),
+            })?;
             crate::domains::model::providers::google::types::GoogleApiSettings {
                 token_url: None,
                 client_id: gpa.as_ref().and_then(|g| g.client_id.clone()),
@@ -361,7 +363,7 @@ impl DefaultProviderFactory {
         ))
     }
     fn create_minimax(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let provider_auth = crate::domains::auth::provider_credentials::storage::get_provider_auth(
+        let provider_auth = crate::domains::auth::credentials::storage::get_provider_auth(
             &self.auth_path,
             "minimax",
         )
@@ -413,13 +415,11 @@ impl DefaultProviderFactory {
     }
 
     fn create_kimi(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let provider_auth = crate::domains::auth::provider_credentials::storage::get_provider_auth(
-            &self.auth_path,
-            "kimi",
-        )
-        .map_err(|e| ProviderError::Auth {
-            message: e.to_string(),
-        })?;
+        let provider_auth =
+            crate::domains::auth::credentials::storage::get_provider_auth(&self.auth_path, "kimi")
+                .map_err(|e| ProviderError::Auth {
+                    message: e.to_string(),
+                })?;
         let api_key = if let Some(pa) = provider_auth {
             if let Some(key) = pa
                 .api_keys
@@ -498,7 +498,7 @@ impl DefaultProviderFactory {
     async fn create_for_model_with_credential(
         &self,
         model: &str,
-        credential_override: Option<&crate::domains::auth::provider_credentials::ActiveCredential>,
+        credential_override: Option<&crate::domains::auth::credentials::ActiveCredential>,
     ) -> Result<Arc<dyn Provider>, ProviderError> {
         use crate::shared::protocol::messages::Provider as ProviderKind;
 
@@ -639,9 +639,9 @@ mod tests {
     async fn factory_openai_api_key_uses_platform_profile() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
-        crate::domains::auth::provider_credentials::storage::save_named_api_key(
+        crate::domains::auth::credentials::storage::save_named_api_key(
             &path,
-            crate::domains::auth::provider_credentials::openai::PROVIDER_KEY,
+            crate::domains::auth::credentials::openai::PROVIDER_KEY,
             "test",
             "sk-test",
         )
@@ -658,14 +658,14 @@ mod tests {
     async fn factory_openai_oauth_uses_codex_profile() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
-        let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+        let tokens = crate::domains::auth::credentials::OAuthTokens {
             access_token: "tok".into(),
             refresh_token: "ref".into(),
-            expires_at: crate::domains::auth::provider_credentials::now_ms() + 3_600_000,
+            expires_at: crate::domains::auth::credentials::now_ms() + 3_600_000,
         };
-        crate::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
+        crate::domains::auth::credentials::storage::save_account_oauth_tokens(
             &path,
-            crate::domains::auth::provider_credentials::openai::PROVIDER_KEY,
+            crate::domains::auth::credentials::openai::PROVIDER_KEY,
             "test",
             &tokens,
         )
@@ -682,9 +682,9 @@ mod tests {
     async fn factory_rejects_openai_model_unavailable_for_active_auth_path() {
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
-        crate::domains::auth::provider_credentials::storage::save_named_api_key(
+        crate::domains::auth::credentials::storage::save_named_api_key(
             &path,
-            crate::domains::auth::provider_credentials::openai::PROVIDER_KEY,
+            crate::domains::auth::credentials::openai::PROVIDER_KEY,
             "test",
             "sk-test",
         )
@@ -781,12 +781,12 @@ mod tests {
         // and NO API key available — should error
         let dir = tempfile::TempDir::new().unwrap();
         let path = dir.path().join("auth.json");
-        let expired_tokens = crate::domains::auth::provider_credentials::OAuthTokens {
+        let expired_tokens = crate::domains::auth::credentials::OAuthTokens {
             access_token: "expired-tok".into(),
             refresh_token: "old-ref".into(),
             expires_at: 0, // long expired
         };
-        crate::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
+        crate::domains::auth::credentials::storage::save_account_oauth_tokens(
             &path,
             "anthropic",
             "test",

@@ -88,7 +88,7 @@ impl SessionCommandService {
         let cutoff_for_filter = cutoff_rfc.clone();
         let candidates: Vec<String> =
             run_blocking_task("session.archiveOlderThan.list", move || {
-                let filter = crate::domains::agent::runner::SessionFilter {
+                let filter = crate::domains::agent::r#loop::SessionFilter {
                     include_archived: false,
                     ..Default::default()
                 };

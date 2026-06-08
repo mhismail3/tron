@@ -431,7 +431,7 @@ fn final_retired_product_residue_stays_deleted_from_runtime_surfaces() {
             ],
         ),
         (
-            "packages/agent/src/domains/model/presets.rs",
+            "packages/agent/src/domains/model/routing/presets.rs",
             &["policy_profile", "automation preset"],
         ),
         (
@@ -677,7 +677,7 @@ fn small_rust_domains_stay_collapsed_to_single_worker_modules() {
         }
     }
 
-    let domain_catalog = read_repo_file("packages/agent/src/domains/catalog.rs");
+    let domain_catalog = read_repo_file("packages/agent/src/domains/registration/catalog.rs");
     for required in [
         "super::blob::capabilities()?",
         "super::logs::capabilities()?",

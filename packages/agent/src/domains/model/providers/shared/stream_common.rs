@@ -10,9 +10,7 @@
 
 use serde_json::Map;
 
-use crate::domains::model::provider_protocol::{
-    CapabilityCallContext, parse_capability_call_arguments,
-};
+use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::CapabilityInvocationDraft;
 

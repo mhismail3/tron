@@ -386,9 +386,11 @@ fn context_has_soul_and_agent_state_not_rules_skills_hooks_or_policy_planes() {
 
     let home_and_runner_context = [
         read_repo_file("packages/agent/src/shared/foundation/constitution.rs"),
-        read_repo_file("packages/agent/src/domains/model/providers/anthropic/message_converter.rs"),
-        read_repo_file("packages/agent/src/domains/agent/runner/agent/turn_runner.rs"),
-        read_repo_file("packages/agent/src/domains/agent/runner/profile_runtime.rs"),
+        read_repo_file(
+            "packages/agent/src/domains/model/providers/anthropic/message_converter/mod.rs",
+        ),
+        read_repo_file("packages/agent/src/domains/agent/loop/turn_runner/mod.rs"),
+        read_repo_file("packages/agent/src/domains/agent/loop/profile_runtime.rs"),
     ]
     .join("\n");
     assert_absent(
@@ -406,7 +408,7 @@ fn context_has_soul_and_agent_state_not_rules_skills_hooks_or_policy_planes() {
         "home/profile/provider context comments",
     );
 
-    let soul = read_repo_file("packages/agent/src/domains/agent/runner/context/soul.rs");
+    let soul = read_repo_file("packages/agent/src/domains/agent/context/soul.rs");
     assert!(
         soul.contains("pub const AGENT_SOUL")
             && soul.contains("learn from the environment")
@@ -429,7 +431,7 @@ fn context_has_soul_and_agent_state_not_rules_skills_hooks_or_policy_planes() {
         "agent soul seed",
     );
 
-    let run_context = read_repo_file("packages/agent/src/domains/agent/runner/types.rs");
+    let run_context = read_repo_file("packages/agent/src/domains/agent/loop/types.rs");
     assert_absent(
         &run_context,
         &[
@@ -502,39 +504,39 @@ fn prompt_loop_internals_have_no_hidden_policy_or_worker_planes() {
     for (label, path) in [
         (
             "agent factory",
-            "packages/agent/src/domains/agent/runner/orchestrator/agent_factory.rs",
+            "packages/agent/src/domains/agent/loop/orchestrator/agent_factory.rs",
         ),
         (
             "tron agent",
-            "packages/agent/src/domains/agent/runner/agent/tron_agent.rs",
+            "packages/agent/src/domains/agent/loop/tron_agent/mod.rs",
         ),
         (
             "turn runner",
-            "packages/agent/src/domains/agent/runner/agent/turn_runner.rs",
+            "packages/agent/src/domains/agent/loop/turn_runner/mod.rs",
         ),
         (
             "capability phase",
-            "packages/agent/src/domains/agent/runner/agent/turn_runner/capability_invocations.rs",
+            "packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs",
         ),
         (
             "capability executor",
-            "packages/agent/src/domains/agent/runner/agent/capability_invocation_executor.rs",
+            "packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs",
         ),
         (
             "compaction handler",
-            "packages/agent/src/domains/agent/runner/agent/compaction_handler.rs",
+            "packages/agent/src/domains/agent/loop/compaction_handler/mod.rs",
         ),
         (
             "context manager",
-            "packages/agent/src/domains/agent/runner/context/context_manager.rs",
+            "packages/agent/src/domains/agent/context/context_manager/mod.rs",
         ),
         (
             "context manager types",
-            "packages/agent/src/domains/agent/runner/context/types.rs",
+            "packages/agent/src/domains/agent/context/types.rs",
         ),
         (
             "primitive surface resolver",
-            "packages/agent/src/domains/agent/runner/agent/primitive_surface.rs",
+            "packages/agent/src/domains/agent/loop/primitive_surface.rs",
         ),
     ] {
         if !repo_path(path).exists() {
@@ -586,11 +588,11 @@ fn server_capability_identity_stays_primitive_only() {
         ),
         (
             "capability invocation executor",
-            "packages/agent/src/domains/agent/runner/agent/capability_invocation_executor.rs",
+            "packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs",
         ),
         (
             "capability invocation phase",
-            "packages/agent/src/domains/agent/runner/agent/turn_runner/capability_invocations.rs",
+            "packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs",
         ),
         (
             "capability invocation stored payloads",
@@ -623,7 +625,7 @@ fn server_capability_identity_stays_primitive_only() {
     }
     for (label, path) in identity_paths
         .into_iter()
-        .filter(|(_, path)| !path.ends_with("capability_invocation_executor.rs"))
+        .filter(|(label, _)| *label != "capability invocation executor")
     {
         let source = read_repo_file(path);
         assert_absent(
@@ -656,7 +658,7 @@ fn startup_context_has_no_product_policy_or_worker_managers() {
         ),
         (
             "domain registration context",
-            "packages/agent/src/domains/worker.rs",
+            "packages/agent/src/domains/registration/worker.rs",
         ),
         (
             "agent domain deps",
@@ -1025,7 +1027,7 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         );
     }
 
-    let operations = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    let operations = read_repo_source_trees(&["packages/agent/src/domains/capability/operations"]);
     for required in [
         "append_trace_record(&trace_record)",
         "update_trace_record(&trace_record)",
@@ -1069,7 +1071,7 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
     );
 
     let primitive_surface =
-        read_repo_file("packages/agent/src/domains/agent/runner/agent/primitive_surface.rs");
+        read_repo_file("packages/agent/src/domains/agent/loop/primitive_surface.rs");
     assert!(
         primitive_surface.contains("\"capability.execute\""),
         "primitive surface resolver must authorize the one execute primitive"
@@ -1085,7 +1087,7 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
     );
 
     let executor = read_repo_file(
-        "packages/agent/src/domains/agent/runner/agent/capability_invocation_executor.rs",
+        "packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs",
     );
     for required in [
         "RUNTIME_METADATA_PROVIDER_INVOCATION_ID",
@@ -1219,7 +1221,7 @@ fn primitive_branch_has_no_product_update_surface() {
 fn prompt_media_uses_unified_attachment_primitive() {
     let rust_files = [
         "packages/agent/src/domains/agent/contract.rs",
-        "packages/agent/src/domains/agent/operations/prompt.rs",
+        "packages/agent/src/domains/agent/prompt/prompt.rs",
         "packages/agent/src/domains/agent/runtime/service/request.rs",
         "packages/agent/src/domains/agent/runtime/service/execute.rs",
         "packages/agent/src/domains/agent/runtime/runtime/user_event.rs",
@@ -1462,9 +1464,12 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
 
     for (path, label) in [
         ("README.md", "README primitive branch docs"),
-        ("packages/agent/src/domains/catalog.rs", "domain catalog"),
         (
-            "packages/agent/src/domains/registration.rs",
+            "packages/agent/src/domains/registration/catalog.rs",
+            "domain catalog",
+        ),
+        (
+            "packages/agent/src/domains/registration/mod.rs",
             "domain registration",
         ),
         (
@@ -1472,7 +1477,7 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "session reconstruction",
         ),
         (
-            "packages/agent/src/domains/settings/implementation/types/server.rs",
+            "packages/agent/src/domains/settings/profile/types/server.rs",
             "server settings",
         ),
         (
@@ -1617,11 +1622,11 @@ fn capability_policy_settings_plane_is_deleted() {
             "default profile",
         ),
         (
-            "packages/agent/src/domains/settings/implementation/types/mod.rs",
+            "packages/agent/src/domains/settings/profile/types/mod.rs",
             "settings root type",
         ),
         (
-            "packages/agent/src/domains/settings/implementation/storage/loader.rs",
+            "packages/agent/src/domains/settings/profile/storage/loader.rs",
             "settings loader tests",
         ),
         (
@@ -1662,11 +1667,11 @@ fn public_context_capability_plane_is_deleted() {
             "domain module registry",
         ),
         (
-            "packages/agent/src/domains/registration.rs",
+            "packages/agent/src/domains/registration/mod.rs",
             "domain startup registration",
         ),
         (
-            "packages/agent/src/domains/catalog.rs",
+            "packages/agent/src/domains/registration/catalog.rs",
             "canonical capability catalog",
         ),
         ("README.md", "README context docs"),
@@ -1869,7 +1874,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
     );
 
     let settings_surface = [
-        read_repo_file("packages/agent/src/domains/settings/implementation/types/server.rs"),
+        read_repo_file("packages/agent/src/domains/settings/profile/types/server.rs"),
         read_repo_file("packages/agent/defaults/profiles/default/profile.toml"),
         read_repo_file(
             "packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Settings.swift",
@@ -1895,7 +1900,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
     );
 
     let execute_contract = read_repo_file("packages/agent/src/domains/capability/contract.rs");
-    let execute_ops = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    let execute_ops = read_repo_source_trees(&["packages/agent/src/domains/capability/operations"]);
     let trace_proof = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
     for (source, label) in [
         (execute_contract.as_str(), "execute contract"),
@@ -2038,7 +2043,7 @@ fn queue_trigger_and_prompt_envelopes_do_not_pin_preexecution_catalog_state() {
         read_repo_file("packages/agent/src/engine/primitives/trigger.rs"),
         read_repo_file("packages/agent/src/engine/kernel/types/mod.rs"),
         read_repo_file("packages/agent/src/engine/kernel/policy.rs"),
-        read_repo_file("packages/agent/src/domains/agent/operations/prompt.rs"),
+        read_repo_file("packages/agent/src/domains/agent/prompt/prompt.rs"),
         read_repo_file("packages/agent/src/domains/agent/runtime/service/deps.rs"),
         read_repo_file("packages/agent/src/domains/agent/runtime/service/events.rs"),
         read_repo_file("packages/agent/src/domains/agent/runtime/service/execute.rs"),

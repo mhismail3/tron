@@ -239,7 +239,7 @@ pub trait Provider: Send + Sync {
     /// vary by credential or endpoint should override this so runtime
     /// compaction follows the same profile that request construction uses.
     fn context_window(&self) -> u64 {
-        crate::domains::model::providers::model_context_window(self.model())
+        crate::domains::model::routing::models::registry::model_context_window(self.model())
     }
 
     /// Provider request envelope for Constitution audit/replay.

@@ -19,12 +19,12 @@ pub(crate) mod operations;
 
 use std::sync::Arc;
 
-use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
-use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
-use crate::domains::bindings::operation_bindings;
+use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
+use crate::domains::registration::bindings::operation_bindings;
+use crate::domains::registration::worker::DomainRegistrationContext;
+use crate::domains::registration::worker::DomainWorkerModule;
 use crate::domains::session::event_store::EventStore;
-use crate::domains::worker::DomainRegistrationContext;
-use crate::domains::worker::DomainWorkerModule;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
@@ -55,7 +55,7 @@ pub(crate) fn worker_module(
 ) -> crate::engine::Result<DomainWorkerModule> {
     {
         let domain_deps = Deps::from_engine(deps);
-        crate::domains::worker::domain_worker_module(
+        crate::domains::registration::worker::domain_worker_module(
             "session",
             contract::STREAM_TOPICS,
             function_registrations(contract::capabilities()?, domain_deps)?,

@@ -4,10 +4,10 @@ use std::sync::Arc;
 pub(crate) struct PromptRunPlan {
     pub(super) started_run: StartedRun,
     pub(super) orchestrator:
-        Arc<crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator>,
+        Arc<crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator>,
     pub(super) session_manager:
-        Arc<crate::domains::agent::runner::orchestrator::session_manager::SessionManager>,
-    pub(super) broadcast: Arc<crate::domains::agent::runner::EventEmitter>,
+        Arc<crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager>,
+    pub(super) broadcast: Arc<crate::domains::agent::r#loop::EventEmitter>,
     pub(super) provider_factory:
         Arc<dyn crate::domains::model::providers::provider::ProviderFactory>,
     pub(super) health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,

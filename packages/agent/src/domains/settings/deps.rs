@@ -1,7 +1,7 @@
 //! Domain-specific dependency bundle for the settings worker.
 
-use crate::domains::agent::runner::profile_runtime::ProfileRuntime;
-use crate::domains::worker::DomainRegistrationContext;
+use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
+use crate::domains::registration::worker::DomainRegistrationContext;
 use std::path::PathBuf;
 use std::sync::Arc;
 

@@ -6,12 +6,12 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::models::model_ids::{
+use crate::domains::model::providers::retry::StreamRetryConfig;
+use crate::domains::model::routing::models::model_ids::{
     KIMI_K2_5, KIMI_K2_0711_PREVIEW, KIMI_K2_0905_PREVIEW, KIMI_K2_THINKING,
     KIMI_K2_THINKING_TURBO, KIMI_K2_TURBO_PREVIEW, MOONSHOT_V1_8K, MOONSHOT_V1_32K,
     MOONSHOT_V1_128K,
 };
-use crate::domains::model::providers::retry::StreamRetryConfig;
 
 /// Default base URL for the Kimi API.
 pub const DEFAULT_BASE_URL: &str = "https://api.moonshot.ai/v1";

@@ -13,14 +13,14 @@ use crate::engine::{
 };
 
 pub(super) struct PromptRunCompletion<'a> {
-    pub(super) result: crate::domains::agent::runner::types::RunResult,
+    pub(super) result: crate::domains::agent::r#loop::types::RunResult,
     pub(super) persister:
-        Arc<crate::domains::agent::runner::orchestrator::event_persister::EventPersister>,
+        Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>,
     pub(super) run_cleanup: &'a mut PromptRunCleanup,
     pub(super) session_manager:
-        Arc<crate::domains::agent::runner::orchestrator::session_manager::SessionManager>,
+        Arc<crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager>,
     pub(super) event_store: Arc<crate::domains::session::event_store::EventStore>,
-    pub(super) broadcast: Arc<crate::domains::agent::runner::EventEmitter>,
+    pub(super) broadcast: Arc<crate::domains::agent::r#loop::EventEmitter>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) engine_causality: Option<PromptEngineCausality>,
     pub(super) session_id: String,
@@ -95,7 +95,7 @@ async fn create_agent_result_resource(
     causality: Option<&PromptEngineCausality>,
     session_id: &str,
     run_id: &str,
-    result: &crate::domains::agent::runner::types::RunResult,
+    result: &crate::domains::agent::r#loop::types::RunResult,
 ) -> Option<Vec<serde_json::Value>> {
     let mut context = causality
         .map(|causality| causality.context.clone())
@@ -157,9 +157,9 @@ async fn create_agent_result_resource(
 }
 
 async fn persist_interrupted_if_needed(
-    persister: &Arc<crate::domains::agent::runner::orchestrator::event_persister::EventPersister>,
+    persister: &Arc<crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister>,
     session_id: &str,
-    result: &crate::domains::agent::runner::types::RunResult,
+    result: &crate::domains::agent::r#loop::types::RunResult,
 ) {
     if !result.interrupted {
         return;
@@ -189,11 +189,11 @@ async fn persist_interrupted_if_needed(
 }
 
 fn emit_run_error_if_needed(
-    broadcast: &Arc<crate::domains::agent::runner::EventEmitter>,
+    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
     session_id: &str,
     provider_type: &str,
     model_for_error: &str,
-    result: &crate::domains::agent::runner::types::RunResult,
+    result: &crate::domains::agent::r#loop::types::RunResult,
 ) {
     let Some(ref error_message) = result.error else {
         return;
@@ -216,10 +216,10 @@ fn emit_run_error_if_needed(
 
 async fn emit_session_update(
     session_manager: &Arc<
-        crate::domains::agent::runner::orchestrator::session_manager::SessionManager,
+        crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager,
     >,
     event_store: &Arc<crate::domains::session::event_store::EventStore>,
-    broadcast: &Arc<crate::domains::agent::runner::EventEmitter>,
+    broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
     session_id: &str,
 ) {
     match load_session_update_data(

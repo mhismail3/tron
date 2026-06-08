@@ -17,7 +17,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 use tron::app::bootstrap::config::ServerConfig;
 use tron::app::bootstrap::server::TronServer;
-use tron::domains::agent::runner::{Orchestrator, ProfileRuntime, SessionManager};
+use tron::domains::agent::r#loop::{Orchestrator, ProfileRuntime, SessionManager};
 use tron::domains::model::providers::ProviderHealthTracker;
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
 use tron::shared::protocol::model_capabilities::CapabilityResult;

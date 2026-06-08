@@ -50,8 +50,8 @@ use base64::{Engine as _, engine::general_purpose};
 use parking_lot::Mutex;
 use rand::RngCore;
 
-use crate::domains::auth::provider_credentials::errors::AuthError;
-use crate::domains::auth::provider_credentials::storage::{
+use crate::domains::auth::credentials::errors::AuthError;
+use crate::domains::auth::credentials::storage::{
     load_auth_storage, load_or_init_for_write, save_auth_storage,
 };
 

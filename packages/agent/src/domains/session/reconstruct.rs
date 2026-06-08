@@ -273,7 +273,7 @@ impl SessionReconstructService {
 
     /// Build the in-flight state from the turn accumulator.
     fn build_in_flight_state(
-        orchestrator: &crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator,
+        orchestrator: &crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator,
         session_id: &str,
     ) -> Option<Value> {
         let (text, capability_invocations, content_sequence) =

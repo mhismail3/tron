@@ -1,7 +1,7 @@
 //! Operation binding for the settings worker.
 
 use super::{Deps, settings_reset_to_defaults_value, settings_update_value};
-use crate::domains::bindings::operation_bindings;
+use crate::domains::registration::bindings::operation_bindings;
 use crate::shared::server::errors::CapabilityError;
 
 operation_bindings! {

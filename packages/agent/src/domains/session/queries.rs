@@ -37,7 +37,7 @@ impl SessionQueryService {
         working_directory: Option<String>,
         offset: Option<usize>,
     ) -> Result<Value, CapabilityError> {
-        let filter = crate::domains::agent::runner::SessionFilter {
+        let filter = crate::domains::agent::r#loop::SessionFilter {
             workspace_path: working_directory,
             include_archived,
             limit,

@@ -1,6 +1,6 @@
 //! Domain-specific dependency bundle for the auth worker.
 
-use crate::domains::worker::DomainRegistrationContext;
+use crate::domains::registration::worker::DomainRegistrationContext;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -10,7 +10,7 @@ pub(crate) struct Deps {
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) oauth_flows: Arc<
         tokio::sync::Mutex<
-            std::collections::HashMap<String, crate::domains::auth::flows::PendingOAuthFlow>,
+            std::collections::HashMap<String, crate::domains::auth::oauth::flows::PendingOAuthFlow>,
         >,
     >,
 }

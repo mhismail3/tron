@@ -10,11 +10,8 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `catalog` | Shared helpers for retained contract definitions |
 //! | `capability` | Single model-facing `execute` primitive |
-//! | `contract` | Method-agnostic builders for domain-owned `contract.rs` records |
-//! | `registration` | Startup loop that registers worker modules returned by domains |
-//! | `worker` | Shared setup-only domain worker module and function registration types |
+//! | `registration` | Startup registration plus shared domain contract/binding helpers |
 //! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, and system |
 //!
 //! Each retained domain `contract.rs` is the local source of truth for that
@@ -27,7 +24,7 @@
 //!
 //! The intended execution flow is:
 //! `/engine frame -> EngineTransportRequest -> EngineTriggerRuntime -> domain
-//! worker -> contract operation key -> handlers.rs -> operations/ -> narrow
+//! worker -> contract operation key -> handlers.rs -> domain owner -> narrow
 //! deps/service -> engine ledger/streams/queues/grants/leases`.
 //!
 //! # INVARIANT: no transport-owned behavior
@@ -38,11 +35,8 @@
 
 pub mod agent;
 pub mod auth;
-pub mod bindings;
 pub mod blob;
 pub mod capability;
-pub mod catalog;
-pub mod contract;
 pub mod logs;
 pub mod message;
 pub mod model;
@@ -51,4 +45,3 @@ pub mod registration;
 pub mod session;
 pub mod settings;
 pub mod system;
-pub mod worker;

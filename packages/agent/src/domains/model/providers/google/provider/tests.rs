@@ -4,7 +4,7 @@ fn oauth_tokens() -> OAuthTokens {
     OAuthTokens {
         access_token: "ya29.test".into(),
         refresh_token: "rt-test".into(),
-        expires_at: crate::domains::auth::provider_credentials::now_ms() + 3_600_000, // 1 hour
+        expires_at: crate::domains::auth::credentials::now_ms() + 3_600_000, // 1 hour
     }
 }
 
@@ -514,7 +514,7 @@ async fn refresh_tokens_success() {
 
     assert_eq!(new_tokens.access_token, "ya29.new");
     assert_eq!(new_tokens.refresh_token, "rt-new");
-    assert!(new_tokens.expires_at > crate::domains::auth::provider_credentials::now_ms());
+    assert!(new_tokens.expires_at > crate::domains::auth::credentials::now_ms());
 }
 
 #[tokio::test]

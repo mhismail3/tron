@@ -163,7 +163,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Scorecard",
-        "Current score: **37/100**",
+        "Current score: **47/100**",
         "Status: **running**",
         "Total weight: **100**",
         "## Folder Justification Table",
@@ -174,6 +174,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "HRA-2 | Rust app, transport, shared, and platform roots | 6 | passed_after_fix",
         "HRA-3 | Rust engine kernel and invocation hierarchy | 10 | passed_after_fix",
         "HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix",
+        "HRA-5 | Rust domain vertical slices | 10 | passed_after_fix",
         "HRA-16 | Final adversarial review and closeout | 2 | pending",
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
@@ -202,9 +203,10 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Evidence Manifest",
-        "Current score: **37/100**",
+        "Current score: **47/100**",
         "Status: **running**",
         "| HRA-0 | passed_after_fix |",
+        "| HRA-5 | passed_after_fix |",
         "## HRA-0 Red Static Gate",
     ] {
         assert!(
@@ -522,6 +524,147 @@ fn rust_non_session_domains_have_no_same_name_file_folder_pairs() {
 }
 
 #[test]
+fn rust_domain_root_has_only_owned_boundaries() {
+    let required = [
+        "packages/agent/src/domains/registration/mod.rs",
+        "packages/agent/src/domains/registration/bindings.rs",
+        "packages/agent/src/domains/registration/catalog.rs",
+        "packages/agent/src/domains/registration/contract.rs",
+        "packages/agent/src/domains/registration/worker.rs",
+    ];
+    let banned = [
+        "packages/agent/src/domains/bindings.rs",
+        "packages/agent/src/domains/catalog.rs",
+        "packages/agent/src/domains/contract.rs",
+        "packages/agent/src/domains/registration.rs",
+        "packages/agent/src/domains/resource_projection.rs",
+        "packages/agent/src/domains/worker.rs",
+    ];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "Domain root must be a map of domain owners plus registration helpers; missing: {missing:#?}; old loose helpers still present: {present_banned:#?}"
+    );
+}
+
+#[test]
+fn rust_agent_domain_uses_prompt_loop_context_owners() {
+    let required = [
+        "packages/agent/src/domains/agent/prompt/mod.rs",
+        "packages/agent/src/domains/agent/prompt/commands.rs",
+        "packages/agent/src/domains/agent/prompt/prompt.rs",
+        "packages/agent/src/domains/agent/prompt/service.rs",
+        "packages/agent/src/domains/agent/loop/mod.rs",
+        "packages/agent/src/domains/agent/loop/turn_runner/mod.rs",
+        "packages/agent/src/domains/agent/loop/orchestrator/mod.rs",
+        "packages/agent/src/domains/agent/context/mod.rs",
+        "packages/agent/src/domains/agent/context/context_manager/mod.rs",
+    ];
+    let banned = [
+        "packages/agent/src/domains/agent/commands.rs",
+        "packages/agent/src/domains/agent/operations",
+        "packages/agent/src/domains/agent/runner",
+    ];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "Agent domain must use prompt/loop/context ownership after HRA-5; missing: {missing:#?}; old paths still present: {present_banned:#?}"
+    );
+}
+
+#[test]
+fn rust_auth_domain_uses_oauth_and_credentials_owners() {
+    let required = [
+        "packages/agent/src/domains/auth/oauth/mod.rs",
+        "packages/agent/src/domains/auth/oauth/flows.rs",
+        "packages/agent/src/domains/auth/oauth/operations.rs",
+        "packages/agent/src/domains/auth/credentials/mod.rs",
+        "packages/agent/src/domains/auth/credentials/accounts.rs",
+        "packages/agent/src/domains/auth/credentials/provider_state.rs",
+        "packages/agent/src/domains/auth/credentials/storage/mod.rs",
+    ];
+    let banned = [
+        "packages/agent/src/domains/auth/flows.rs",
+        "packages/agent/src/domains/auth/operations",
+        "packages/agent/src/domains/auth/provider_credentials",
+    ];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "Auth domain must use oauth/ and credentials/ ownership after HRA-5; missing: {missing:#?}; old paths still present: {present_banned:#?}"
+    );
+}
+
+#[test]
+fn rust_model_domain_uses_routing_and_protocol_owners() {
+    let required = [
+        "packages/agent/src/domains/model/routing/mod.rs",
+        "packages/agent/src/domains/model/routing/catalog.rs",
+        "packages/agent/src/domains/model/routing/presets.rs",
+        "packages/agent/src/domains/model/routing/models/mod.rs",
+        "packages/agent/src/domains/model/protocol/mod.rs",
+        "packages/agent/src/domains/model/protocol/capability_parsing.rs",
+        "packages/agent/src/domains/model/protocol/id_remapping.rs",
+    ];
+    let banned = [
+        "packages/agent/src/domains/model/catalog.rs",
+        "packages/agent/src/domains/model/operations",
+        "packages/agent/src/domains/model/presets.rs",
+        "packages/agent/src/domains/model/provider_protocol",
+        "packages/agent/src/domains/model/providers/models",
+    ];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "Model domain must use routing/ and protocol/ ownership after HRA-5; missing: {missing:#?}; old paths still present: {present_banned:#?}"
+    );
+}
+
+#[test]
 fn rust_capability_execute_operations_are_decomposed() {
     let required = [
         "packages/agent/src/domains/capability/operations/filesystem.rs",
@@ -565,8 +708,13 @@ fn rust_capability_execute_operations_are_decomposed() {
 fn rust_settings_domain_keeps_worker_root_thin() {
     let root = read_repo_file("packages/agent/src/domains/settings/mod.rs");
     assert!(
-        repo_path("packages/agent/src/domains/settings/operations.rs").exists(),
-        "settings operation bodies should live under a settings operation owner"
+        repo_path("packages/agent/src/domains/settings/profile/operations.rs").exists(),
+        "settings operation bodies should live under the settings profile owner"
+    );
+    assert!(
+        !repo_path("packages/agent/src/domains/settings/implementation").exists()
+            && !repo_path("packages/agent/src/domains/settings/operations.rs").exists(),
+        "settings domain must not retain old implementation/ or root operations paths after HRA-5"
     );
     for banned in [
         "async fn settings_update_value",

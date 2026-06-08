@@ -13,12 +13,12 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 
-use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
-use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
-use crate::domains::model::providers::models::types::Provider as ProviderKind;
+use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
 };
+use crate::domains::model::routing::models::types::Provider as ProviderKind;
 use crate::domains::session::event_store::EventStore;
 use crate::shared::server::context::{AgentDeps, ServerRuntimeContext};
 
@@ -52,8 +52,8 @@ pub(crate) fn test_auth_path(home: &Path) -> PathBuf {
 
 pub(crate) fn test_profile_runtime(
     home: &Path,
-) -> Arc<crate::domains::agent::runner::ProfileRuntime> {
-    Arc::new(crate::domains::agent::runner::ProfileRuntime::load(home).unwrap())
+) -> Arc<crate::domains::agent::r#loop::ProfileRuntime> {
+    Arc::new(crate::domains::agent::r#loop::ProfileRuntime::load(home).unwrap())
 }
 
 /// A no-op mock provider for tests.

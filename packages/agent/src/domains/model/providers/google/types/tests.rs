@@ -63,7 +63,7 @@ fn default_safety_settings_has_all_categories() {
 #[test]
 fn auth_oauth_serde() {
     let auth = GoogleAuth::Oauth {
-        tokens: crate::domains::auth::provider_credentials::OAuthTokens {
+        tokens: crate::domains::auth::credentials::OAuthTokens {
             access_token: "at".into(),
             refresh_token: "rt".into(),
             expires_at: 99999,
@@ -89,7 +89,7 @@ fn auth_api_key_serde() {
 #[test]
 fn auth_oauth_has_no_endpoint_field() {
     let auth = GoogleAuth::Oauth {
-        tokens: crate::domains::auth::provider_credentials::OAuthTokens {
+        tokens: crate::domains::auth::credentials::OAuthTokens {
             access_token: "at".into(),
             refresh_token: "rt".into(),
             expires_at: 99999,
@@ -107,7 +107,7 @@ fn config_serde() {
     let config = GoogleConfig {
         model: "gemini-3-pro-preview".into(),
         auth: GoogleAuth::Oauth {
-            tokens: crate::domains::auth::provider_credentials::OAuthTokens {
+            tokens: crate::domains::auth::credentials::OAuthTokens {
                 access_token: "at".into(),
                 refresh_token: "rt".into(),
                 expires_at: 99999,

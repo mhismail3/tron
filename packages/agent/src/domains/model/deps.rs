@@ -1,9 +1,9 @@
 //! Domain-specific dependency bundle for the model worker.
 
-use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
-use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
+use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
+use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
-use crate::domains::worker::DomainRegistrationContext;
 use std::path::PathBuf;
 use std::sync::Arc;
 

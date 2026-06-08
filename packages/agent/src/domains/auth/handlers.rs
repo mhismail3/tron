@@ -1,8 +1,9 @@
 //! Operation binding for the auth worker.
 
 use super::Deps;
-use super::operations::*;
-use crate::domains::bindings::operation_bindings;
+use super::credentials::*;
+use super::oauth::*;
+use crate::domains::registration::bindings::operation_bindings;
 
 operation_bindings! {
     deps = Deps;

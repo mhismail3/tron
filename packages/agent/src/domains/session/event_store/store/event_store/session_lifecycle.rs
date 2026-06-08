@@ -45,7 +45,7 @@ pub(super) fn create_session_in_tx(
     )?;
 
     let provider = opts.provider.unwrap_or_else(|| {
-        crate::domains::model::providers::models::registry::detect_provider_from_model(opts.model)
+        crate::domains::model::routing::models::registry::detect_provider_from_model(opts.model)
             .map_or_else(
                 || {
                     if opts.model.starts_with("claude-") {

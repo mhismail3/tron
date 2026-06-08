@@ -1,5 +1,5 @@
 use super::{ActivitySummaryLine, Duration, EventPersister, MessagePreview, ReconstructedState};
-use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
+use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::session::event_store::EventStore;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;

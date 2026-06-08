@@ -26,11 +26,11 @@ pub(crate) use operations::execute_value;
 
 use std::sync::Arc;
 
-use crate::domains::catalog::{CapabilitySpec, function_definition_for_capability};
-use crate::domains::session::event_store::EventStore;
-use crate::domains::worker::{
+use crate::domains::registration::catalog::{CapabilitySpec, function_definition_for_capability};
+use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
+use crate::domains::session::event_store::EventStore;
 use crate::engine::{EngineError, InProcessFunctionHandler, Invocation};
 use crate::shared::server::error_mapping::capability_error_to_engine;
 use serde_json::Value;
@@ -61,7 +61,7 @@ pub(crate) fn worker_module(
             contract::model_metadata(registration.definition.id.as_str()),
         );
     }
-    crate::domains::worker::domain_worker_module(
+    crate::domains::registration::worker::domain_worker_module(
         "capability",
         contract::STREAM_TOPICS,
         registrations,

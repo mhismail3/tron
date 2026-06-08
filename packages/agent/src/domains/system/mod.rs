@@ -3,13 +3,13 @@
 //! This module owns the small system namespace end-to-end: contract metadata,
 //! registration dependencies, handler binding, and operation execution.
 
-use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
-use crate::domains::agent::runner::profile_runtime::ProfileRuntime;
-use crate::domains::bindings::operation_bindings;
-use crate::domains::catalog::CapabilitySpec;
-use crate::domains::contract::CapabilityContract;
-use crate::domains::worker::DomainRegistrationContext;
-use crate::domains::worker::DomainWorkerModule;
+use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
+use crate::domains::registration::bindings::operation_bindings;
+use crate::domains::registration::catalog::CapabilitySpec;
+use crate::domains::registration::contract::CapabilityContract;
+use crate::domains::registration::worker::DomainRegistrationContext;
+use crate::domains::registration::worker::DomainWorkerModule;
 use crate::engine::{
     CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
     ResourceLeaseRequirement, Result as EngineResult, RiskLevel,
@@ -52,7 +52,7 @@ pub(crate) fn worker_module(
 ) -> crate::engine::Result<DomainWorkerModule> {
     {
         let domain_deps = Deps::from_engine(deps);
-        crate::domains::worker::domain_worker_module(
+        crate::domains::registration::worker::domain_worker_module(
             "system",
             STREAM_TOPICS,
             function_registrations(capabilities()?, domain_deps)?,

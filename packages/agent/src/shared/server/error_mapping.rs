@@ -3,7 +3,7 @@
 //! Domain helpers here translate engine, event-store, and provider-auth errors
 //! into the JSON-RPC capability error shape used by the server transports.
 
-use crate::domains::auth::provider_credentials::errors::AuthError;
+use crate::domains::auth::credentials::errors::AuthError;
 use crate::domains::session::event_store::errors::EventStoreError;
 use crate::engine::{EngineError, InvocationResult};
 use crate::shared::server::errors::{self as codes, CapabilityError};
@@ -179,7 +179,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
 #[cfg(test)]
 mod tests {
     use super::{engine_error_to_capability_error, map_auth_error, map_event_store_error};
-    use crate::domains::auth::provider_credentials::errors::AuthError as A;
+    use crate::domains::auth::credentials::errors::AuthError as A;
     use crate::domains::session::event_store::errors::EventStoreError as E;
     use crate::engine::EngineError;
 

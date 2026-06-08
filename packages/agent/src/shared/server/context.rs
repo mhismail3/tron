@@ -5,8 +5,8 @@ use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
-use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
+use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::model::providers::ProviderHealthTracker;
 use crate::domains::model::providers::provider::ProviderFactory;
 use crate::domains::session::event_store::EventStore;
@@ -186,7 +186,7 @@ pub struct ServerRuntimeContext {
     /// Path to the sparse user profile settings overlay.
     pub settings_path: PathBuf,
     /// Compiled active profile runtime.
-    pub profile_runtime: Arc<crate::domains::agent::runner::profile_runtime::ProfileRuntime>,
+    pub profile_runtime: Arc<crate::domains::agent::r#loop::profile_runtime::ProfileRuntime>,
     /// Agent execution dependencies (None = prompt handler returns error).
     pub agent_deps: Option<AgentDeps>,
     /// When the server started (for uptime calculation).
@@ -202,7 +202,7 @@ pub struct ServerRuntimeContext {
     /// Pending OAuth flows keyed by flow ID (in-memory, TTL 10 min).
     pub oauth_flows: Arc<
         tokio::sync::Mutex<
-            std::collections::HashMap<String, crate::domains::auth::flows::PendingOAuthFlow>,
+            std::collections::HashMap<String, crate::domains::auth::oauth::flows::PendingOAuthFlow>,
         >,
     >,
     /// WebSocket listening port. Surfaced via `system.getInfo` so iOS clients

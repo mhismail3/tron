@@ -5,18 +5,18 @@
 //! This module defines the [`Provider`] trait that model backends implement,
 //! plus shared infrastructure used across providers. Provider-native
 //! function-call and tool-call wire details stay inside provider modules and
-//! `domains::model::provider_protocol`; the rest of Tron consumes canonical
+//! `domains::model::protocol`; the rest of Tron consumes canonical
 //! capability invocation drafts, results, and history. Provider modules must
 //! reject malformed or non-object capability arguments at the stream boundary
 //! instead of projecting them as empty canonical invocations.
 //!
 //! - [`provider`] — Core [`Provider`] trait, [`ProviderStreamOptions`], [`ProviderError`]
-//! - [`models`] — Model registry, ID constants, provider detection, capability queries
+//! - [`crate::domains::model::routing::models`] — Model registry, ID constants, provider detection, capability queries
 //! - [`sse`] — Shared SSE line parser for HTTP streaming responses
 //! - [`retry`] — Stream retry with exponential backoff + jitter
-//! - [`provider_protocol::capability_parsing`] — Fail-closed JSON parsing for provider capability invocation arguments
+//! - [`crate::domains::model::protocol::capability_parsing`] — Fail-closed JSON parsing for provider capability invocation arguments
 //! - [`context_composition`] — Context part ordering and stable/volatile grouping
-//! - [`provider_protocol::id_remapping`] — Capability invocation ID format conversion between providers
+//! - [`crate::domains::model::protocol::id_remapping`] — Capability invocation ID format conversion between providers
 //! - [`stream_common`] — Shared [`stream_common::StreamAccumulator`] for delta processing
 //!
 //! # Architecture
@@ -44,7 +44,6 @@ pub mod google;
 pub mod health;
 pub mod kimi;
 pub mod minimax;
-pub mod models;
 pub mod ollama;
 pub mod openai;
 #[path = "shared/provider.rs"]
@@ -59,8 +58,8 @@ pub mod stream_common;
 pub mod stream_pipeline;
 pub mod tokens;
 
-pub use crate::domains::model::provider_protocol::remap_invocation_id;
-pub use crate::domains::model::provider_protocol::{
+pub use crate::domains::model::protocol::remap_invocation_id;
+pub use crate::domains::model::protocol::{
     CapabilityArgumentParseError, CapabilityCallContext, IdFormat, build_invocation_id_mapping,
     capability_parsing, id_remapping, is_valid_capability_call_arguments,
     parse_capability_call_arguments,
@@ -69,11 +68,6 @@ pub use context_composition::{
     GroupedContextParts, compose_context_parts, compose_context_parts_grouped,
 };
 pub use health::ProviderHealthTracker;
-pub use models::model_ids;
-pub use models::registry::{
-    all_model_ids, detect_provider_from_model, is_model_supported, model_context_window,
-    model_supports_images, strip_provider_prefix,
-};
 pub use provider::{
     AnthropicEffortLevel, Provider, ProviderError, ProviderFactory, ProviderResult,
     ProviderStreamOptions, ReasoningEffort, StreamEventStream,
