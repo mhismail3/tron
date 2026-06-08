@@ -1440,7 +1440,7 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "engine primitive runtime",
         ),
         (
-            "packages/agent/src/domains/session/reconstruct.rs",
+            "packages/agent/src/domains/session/reconstruction/mod.rs",
             "session reconstruction",
         ),
         ("README.md", "README"),
@@ -1473,7 +1473,7 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "domain registration",
         ),
         (
-            "packages/agent/src/domains/session/reconstruct.rs",
+            "packages/agent/src/domains/session/reconstruction/mod.rs",
             "session reconstruction",
         ),
         (
@@ -1708,7 +1708,7 @@ fn fresh_session_store_has_no_product_tables_or_old_shape_migrations() {
     let row_types =
         read_repo_file("packages/agent/src/domains/session/event_store/sqlite/row_types.rs");
     let session_repo = read_repo_file(
-        "packages/agent/src/domains/session/event_store/sqlite/repositories/session.rs",
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/session/mod.rs",
     );
 
     assert_absent(

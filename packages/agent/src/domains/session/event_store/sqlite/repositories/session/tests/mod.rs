@@ -41,7 +41,5 @@ fn create_default_session(conn: &Connection, ws_id: &str) -> SessionRow {
     .unwrap()
 }
 
-#[path = "tests/core.rs"]
 mod core;
-#[path = "tests/projections.rs"]
 mod projections;

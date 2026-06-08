@@ -163,7 +163,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Scorecard",
-        "Current score: **47/100**",
+        "Current score: **54/100**",
         "Status: **running**",
         "Total weight: **100**",
         "## Folder Justification Table",
@@ -175,6 +175,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "HRA-3 | Rust engine kernel and invocation hierarchy | 10 | passed_after_fix",
         "HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix",
         "HRA-5 | Rust domain vertical slices | 10 | passed_after_fix",
+        "HRA-6 | Rust session and event-store hierarchy | 7 | passed_after_fix",
         "HRA-16 | Final adversarial review and closeout | 2 | pending",
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
@@ -203,10 +204,11 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Evidence Manifest",
-        "Current score: **47/100**",
+        "Current score: **54/100**",
         "Status: **running**",
         "| HRA-0 | passed_after_fix |",
         "| HRA-5 | passed_after_fix |",
+        "| HRA-6 | passed_after_fix |",
         "## HRA-0 Red Static Gate",
     ] {
         assert!(

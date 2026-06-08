@@ -102,5 +102,4 @@ impl EventRepo {
 
 #[cfg(test)]
 #[allow(unused_results)]
-#[path = "tests.rs"]
 mod tests;

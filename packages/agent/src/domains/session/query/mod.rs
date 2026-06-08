@@ -8,6 +8,13 @@ use crate::shared::server::errors::{self, CapabilityError};
 
 pub(crate) struct SessionQueryService;
 
+mod operations;
+
+pub(crate) use operations::{
+    session_export_value, session_get_head_value, session_get_history_value,
+    session_get_state_value, session_list_value, session_resume_value,
+};
+
 impl SessionQueryService {
     pub(crate) async fn resume(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
         let session_manager = deps.session_manager.clone();

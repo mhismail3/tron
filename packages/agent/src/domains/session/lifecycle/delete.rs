@@ -1,10 +1,10 @@
-use super::{BaseEvent, Deps, SessionCommandService, TronEvent};
+use super::{BaseEvent, Deps, SessionLifecycleService, TronEvent};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use serde_json::Value;
 use serde_json::json;
 
-impl SessionCommandService {
+impl SessionLifecycleService {
     pub(crate) async fn delete(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
         let session_manager = deps.session_manager.clone();
         let session_id_for_delete = session_id.clone();

@@ -1,10 +1,10 @@
-use super::{BaseEvent, CreateSessionRequest, Deps, SessionCommandService, TronEvent};
+use super::{BaseEvent, CreateSessionRequest, Deps, SessionLifecycleService, TronEvent};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use serde_json::Value;
 use serde_json::json;
 
-impl SessionCommandService {
+impl SessionLifecycleService {
     pub(crate) async fn create(
         deps: &Deps,
         request: CreateSessionRequest,

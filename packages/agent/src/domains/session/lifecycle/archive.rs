@@ -1,4 +1,4 @@
-use super::SessionCommandService;
+use super::SessionLifecycleService;
 use super::{BaseEvent, TronEvent};
 use crate::domains::session::Deps;
 use crate::shared::server::context::run_blocking_task;
@@ -6,7 +6,7 @@ use crate::shared::server::errors::CapabilityError;
 use serde_json::Value;
 use serde_json::json;
 
-impl SessionCommandService {
+impl SessionLifecycleService {
     pub(crate) async fn archive(deps: &Deps, session_id: String) -> Result<Value, CapabilityError> {
         let session_manager = deps.session_manager.clone();
         let session_id_for_archive = session_id.clone();
@@ -69,7 +69,7 @@ impl SessionCommandService {
     ///     point.
     ///
     /// Each candidate is archived one-at-a-time via the existing
-    /// `SessionCommandService::archive` path so sequence-counter cleanup and
+    /// `SessionLifecycleService::archive` path so sequence-counter cleanup and
     /// broadcast semantics stay identical to single-session archive.
     ///
     /// Returns `{ archivedCount, archivedSessionIds, skipped, cutoff }`.

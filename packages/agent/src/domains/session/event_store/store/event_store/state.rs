@@ -1,7 +1,7 @@
 use serde_json::Value;
 
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
-use crate::domains::session::event_store::reconstruct::{
+use crate::domains::session::event_store::reconstruction::{
     ReconstructionResult, reconstruct_from_events,
 };
 use crate::domains::session::event_store::sqlite::repositories::event::EventRepo;

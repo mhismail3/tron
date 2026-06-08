@@ -1,12 +1,26 @@
-//! session domain worker.
+//! Session domain worker.
 //!
-//! This module owns canonical function execution for the session namespace and keeps
-//! domain contracts, services, and tests beside the worker that uses them.
-//! Lifecycle, history, reconstruction, archive/delete, and export operation
-//! bodies live in `operations`; command/query/reconstruct services remain
-//! nearby and take the narrowed `SessionDeps` bundle. `commands/` is split by
-//! lifecycle action. The prompt context is owned by the agent runtime and
-//! primitive state; this domain does not preload external policy planes.
+//! This module owns canonical function execution for the `session::*`
+//! namespace and keeps domain contracts, services, and tests beside the worker
+//! that uses them.
+//!
+//! ## Submodules
+//!
+//! | Module | Responsibility |
+//! |--------|----------------|
+//! | `contract` | Capability contracts and stream topic declarations. |
+//! | `lifecycle` | Create, delete, fork, archive, and lifecycle operation wrappers. |
+//! | `query` | Resume, list, head/state/history, and export operation wrappers. |
+//! | `reconstruction` | Server-owned session reconstruction and in-flight reconciliation. |
+//! | `event_store` | Durable event/session/blob/log/trace storage and reconstruction primitives. |
+//!
+//! ## Invariants
+//!
+//! - The root module performs registration and dependency narrowing only.
+//! - Lifecycle, query, and reconstruction bodies stay in their owner folders;
+//!   no root `operations.rs` catch-all is retained.
+//! - The prompt context is owned by the agent runtime and primitive state; this
+//!   domain does not preload external policy planes.
 //! `session::list` is the server-owned session-list query for clients and
 //! supports domain-local filtering and pagination through the session event
 //! store. Its user-visible filter intentionally hides abandoned chat drafts
@@ -15,7 +29,9 @@
 
 pub(crate) mod contract;
 pub mod event_store;
-pub(crate) mod operations;
+pub(crate) mod lifecycle;
+pub(crate) mod query;
+pub(crate) mod reconstruction;
 
 use std::sync::Arc;
 
@@ -63,11 +79,15 @@ pub(crate) fn worker_module(
     }
 }
 
-pub(crate) mod commands;
-pub(crate) mod queries;
-pub(crate) mod reconstruct;
-
-use operations::*;
+use lifecycle::{
+    session_archive_older_than_value, session_archive_value, session_create_value,
+    session_delete_value, session_fork_value, session_unarchive_value,
+};
+use query::{
+    session_export_value, session_get_head_value, session_get_history_value,
+    session_get_state_value, session_list_value, session_resume_value,
+};
+use reconstruction::session_reconstruct_value;
 
 operation_bindings! {
     deps = Deps;

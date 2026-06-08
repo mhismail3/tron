@@ -274,7 +274,8 @@ fn runtime_does_not_use_global_active_profile_helpers() {
     let root = repo_root();
     let scan_roots = [
         root.join("packages/agent/src/domains/model/providers"),
-        root.join("packages/agent/src/domains/agent/runner"),
+        root.join("packages/agent/src/domains/agent/loop"),
+        root.join("packages/agent/src/domains/agent/context"),
         root.join("packages/agent/src/app"),
     ];
     let forbidden = [

@@ -8,7 +8,7 @@ async fn archive_without_external_workspace_succeeds() {
         .create_session("model", "/tmp", Some("test"))
         .unwrap();
 
-    SessionCommandService::archive(&Deps::from_test_context(&ctx), sid.clone())
+    SessionLifecycleService::archive(&Deps::from_test_context(&ctx), sid.clone())
         .await
         .unwrap();
 
@@ -24,7 +24,7 @@ async fn delete_without_external_workspace_succeeds() {
         .create_session("model", "/tmp", Some("test"))
         .unwrap();
 
-    SessionCommandService::delete(&Deps::from_test_context(&ctx), sid.clone())
+    SessionLifecycleService::delete(&Deps::from_test_context(&ctx), sid.clone())
         .await
         .unwrap();
 

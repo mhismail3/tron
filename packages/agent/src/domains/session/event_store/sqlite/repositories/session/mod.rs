@@ -12,10 +12,8 @@ use uuid::Uuid;
 use crate::domains::session::event_store::errors::Result;
 use crate::domains::session::event_store::sqlite::row_types::SessionRow;
 
-#[path = "session/projections.rs"]
 mod projections;
 #[cfg(test)]
-#[path = "session/tests.rs"]
 mod tests;
 
 #[cfg(test)]

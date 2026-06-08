@@ -2,7 +2,7 @@
 
 Status: `passed_after_fix`
 
-Generated from the live tracked checkout after HRA-5. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-5 have updated the Rust source, engine, and non-session domain hierarchy without compatibility shim modules.
+Generated from the live tracked checkout after HRA-6. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-6 have updated the Rust source, engine, non-session domain, and session/event-store hierarchy without compatibility shim modules.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -23,12 +23,12 @@ Allowed classifications: `retain_in_place`, `move`, `split`, `merge`, `delete`, 
 
 Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_unfixed`, `blocked`, `deferred_to_successor`.
 
-## HRA-1 Baseline Counts Updated After HRA-5
+## HRA-1 Baseline Counts Updated After HRA-6
 
 | Metric | Count |
 | ------ | ----- |
-| Tracked files from `git ls-files` after HRA-5 | 1302 |
-| Files under `packages/agent/src` | 497 |
+| Tracked files from `git ls-files` after HRA-6 | 1308 |
+| Files under `packages/agent/src` | 503 |
 | Files under `packages/agent/tests` | 6 |
 | Files under `packages/ios-app/Sources` | 408 |
 | Files under `packages/ios-app/Tests` | 192 |
@@ -40,7 +40,7 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 | Extension | Count |
 | --------- | ----- |
 | .swift | 630 |
-| .rs | 502 |
+| .rs | 508 |
 | .md | 21 |
 | .json | 20 |
 | .png | 20 |
@@ -70,7 +70,7 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 | Package | Count |
 | ------- | ----- |
 | ios-app | 624 |
-| agent | 527 |
+| agent | 533 |
 | mac-app | 114 |
 | scripts | 22 |
 | github | 8 |
@@ -84,7 +84,8 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 | Rust source root | Only `lib.rs` and `main.rs` remain at the crate root; app/bootstrap helpers live under `app`. | HRA-2 |
 | Rust app/transport/shared/platform | Use `app/bootstrap`, `app/health`, `app/lifecycle`, `transport/http`, `transport/engine`, `transport/workers`, and scoped shared foundations. | HRA-2 |
 | Rust engine | Flat root modules moved to `kernel`, `catalog`, `invocation`, `authority`, `durability`, and `runtime`; avoidable engine same-name pairs removed. | HRA-3/HRA-4 |
-| Rust domains | Registration helpers live under `domains/registration`; agent/auth/model/settings/capability use behavior-owned vertical folders; HRA-6 still owns session/event-store. | HRA-5/HRA-6 |
+| Rust non-session domains | Registration helpers live under `domains/registration`; agent/auth/model/settings/capability use behavior-owned vertical folders. | HRA-5 |
+| Rust session/event-store | Session lifecycle/query/reconstruction and event-store envelope/factory/reconstruction/store/sqlite owners use folder-backed modules; oversized event repository tests are split by behavior. | HRA-6 |
 | iOS Engine | Replace `Network`, `Database`, `EventStore`, and DTO buckets with `Transport`, `Protocol`, `Events`, and `Persistence`. | HRA-9 |
 | iOS Session | Move chat view-model, handlers, managers, state, messages, activity, reconstruction, and tokens to workflow owners. | HRA-10 |
 | iOS UI | Replace `UI/Views` with feature-owned UI folders. | HRA-11 |
@@ -94,7 +95,7 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 
 ## Completed Rust Root Findings
 
-The current Rust source root has only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`. Domain startup helpers now live under `packages/agent/src/domains/registration`, and non-session domains no longer have avoidable same-name file/folder module pairs.
+The current Rust source root has only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`. Domain startup helpers live under `packages/agent/src/domains/registration`; non-session domains and the session event-store no longer have avoidable same-name file/folder module pairs.
 
 ## Directories Over 12 Source Files
 
@@ -124,11 +125,14 @@ The current Rust source root has only `packages/agent/src/lib.rs` and `packages/
 | `packages/agent/src/domains/blob` | `mod.rs` | rust compact domain owner | HRA-5 |
 | `packages/agent/src/domains/message` | `mod.rs` | rust compact domain owner | HRA-5 |
 | `packages/agent/src/domains/model/providers/openai/types/models` | `mod.rs` | rust model domain owner | HRA-5 |
-| `packages/agent/src/domains/session/event_store/event/reconstruct` | `tests.rs` | rust session domain owner | HRA-6 |
-| `packages/agent/src/domains/session/event_store/sqlite/migrations/tests` | `primitive.rs` | rust session domain owner | HRA-6 |
+| `packages/agent/src/domains/session/event_store/envelope` | `mod.rs` | rust session domain owner | HRA-6 |
+| `packages/agent/src/domains/session/event_store/factory` | `mod.rs` | rust session domain owner | HRA-6 |
+| `packages/agent/src/domains/session/event_store/reconstruction` | `mod.rs` | rust session domain owner | HRA-6 |
+| `packages/agent/src/domains/session/event_store/sqlite/migrations` | `mod.rs` | rust session domain owner | HRA-6 |
+| `packages/agent/src/domains/session/event_store/store` | `mod.rs` | rust session domain owner | HRA-6 |
 | `packages/agent/src/domains/settings/profile/storage` | `loader.rs` | rust settings domain owner | HRA-5 |
 | `packages/agent/src/domains/system` | `mod.rs` | rust compact domain owner | HRA-5 |
-| `packages/agent/src/engine` | `mod.rs` | repo owner | HRA-15 |
+| `packages/agent/src/engine` | `mod.rs` | rust engine owner | HRA-7 |
 | `packages/agent/src/shared` | `mod.rs` | repo owner | HRA-15 |
 | `packages/agent/src/shared/protocol/events/tron` | `catalog.rs` | repo owner | HRA-15 |
 | `packages/agent/src/transport` | `mod.rs` | repo owner | HRA-15 |
@@ -186,13 +190,6 @@ The current Rust source root has only `packages/agent/src/lib.rs` and `packages/
 
 | File | Folder | Target phase |
 | ---- | ------ | ------------ |
-| `packages/agent/src/domains/session/event_store/event/reconstruct.rs` | `packages/agent/src/domains/session/event_store/event/reconstruct` | HRA-6 |
-| `packages/agent/src/domains/session/event_store/event/reconstruct/tests.rs` | `packages/agent/src/domains/session/event_store/event/reconstruct/tests` | HRA-6 |
-| `packages/agent/src/domains/session/event_store/sqlite/migrations/tests.rs` | `packages/agent/src/domains/session/event_store/sqlite/migrations/tests` | HRA-6 |
-| `packages/agent/src/domains/session/event_store/sqlite/repositories/session.rs` | `packages/agent/src/domains/session/event_store/sqlite/repositories/session` | HRA-6 |
-| `packages/agent/src/domains/session/event_store/sqlite/repositories/session/tests.rs` | `packages/agent/src/domains/session/event_store/sqlite/repositories/session/tests` | HRA-6 |
-| `packages/agent/src/domains/session/event_store/store/event_store.rs` | `packages/agent/src/domains/session/event_store/store/event_store` | HRA-6 |
-| `packages/agent/src/domains/session/event_store/store/tests.rs` | `packages/agent/src/domains/session/event_store/store/tests` | HRA-6 |
 | `packages/agent/src/shared/protocol/events/tests.rs` | `packages/agent/src/shared/protocol/events/tests` | HRA-15 |
 | `packages/agent/src/shared/protocol/events/tron.rs` | `packages/agent/src/shared/protocol/events/tron` | HRA-15 |
 
@@ -200,14 +197,14 @@ The current Rust source root has only `packages/agent/src/lib.rs` and `packages/
 
 | Path | LOC | Limit | Owner | Phase |
 | ---- | --- | ----- | ----- | ----- |
-| `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1571 | 900 | rust session domain owner | HRA-6 |
-| `packages/agent/src/engine/authority/grants/mod.rs` | 958 | 900 | rust engine authority owner | HRA-7 |
-| `packages/agent/src/engine/durability/ledger/mod.rs` | 955 | 900 | rust engine durability owner | HRA-7 |
-| `packages/agent/src/engine/durability/resources/store/mod.rs` | 972 | 900 | rust engine durability owner | HRA-7 |
-| `packages/agent/src/engine/runtime/external_workers.rs` | 901 | 900 | rust engine runtime owner | HRA-7 |
+| `packages/agent/src/engine/authority/grants/mod.rs` | 958 | 900 | rust engine owner | HRA-7 |
+| `packages/agent/src/engine/durability/ledger/mod.rs` | 955 | 900 | rust engine owner | HRA-7 |
+| `packages/agent/src/engine/durability/resources/store/mod.rs` | 972 | 900 | rust engine owner | HRA-7 |
+| `packages/agent/src/engine/runtime/external_workers.rs` | 901 | 900 | rust engine owner | HRA-7 |
 | `packages/agent/src/engine/tests/grant_authority.rs` | 929 | 900 | rust engine test owner | HRA-7 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1196 | 900 | rust engine test owner | HRA-7 |
 | `packages/agent/src/engine/tests/state_queue.rs` | 910 | 900 | rust engine test owner | HRA-7 |
+| `packages/agent/tests/hierarchical_rearchitecture_invariants.rs` | 967 | 900 | rust integration/static test owner | HRA-7 |
 | `packages/agent/tests/primitive_code_cleanup_invariants.rs` | 943 | 900 | rust integration/static test owner | HRA-7 |
 | `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | 2266 | 900 | rust integration/static test owner | HRA-7 |
 | `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | 958 | 700 | ios engine owner | HRA-9 |
@@ -220,11 +217,10 @@ The current Rust source root has only `packages/agent/src/lib.rs` and `packages/
 
 ## Docs And Scripts With Old Path Claims
 
-Old-path claims are intentionally still visible in historical HRA/PCC evidence artifacts. HRA-15 owns user-facing README/docs/scripts closeout after the code hierarchy is fully moved.
+Old-path claims are intentionally still visible in historical HRA/PCC evidence artifacts. HRA-15 owns remaining user-facing README/docs/scripts closeout after the code hierarchy is fully moved.
 
 ## Open Loops
 
-- HRA-6 still owns session/event-store hierarchy and the remaining Rust session over-budget tests.
 - HRA-7 still owns Rust test mirroring, progressive docs, and remaining engine/static-test budget work.
 - HRA-9 through HRA-13 still own iOS source and test hierarchy gates.
 - HRA-14 still owns the Mac wrapper audit.

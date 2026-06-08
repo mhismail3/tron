@@ -796,6 +796,7 @@ fn session_persistence_surface_stays_current_and_collapsed() {
     for path in [
         "packages/agent/src/domains/session/deps.rs",
         "packages/agent/src/domains/session/handlers.rs",
+        "packages/agent/src/domains/session/operations.rs",
         "packages/agent/src/domains/session/operations/mod.rs",
         "packages/agent/src/domains/session/operations/lifecycle.rs",
     ] {
@@ -804,10 +805,16 @@ fn session_persistence_surface_stays_current_and_collapsed() {
             "session helper shard must stay collapsed into its owner: {path}"
         );
     }
-    assert!(
-        repo_path("packages/agent/src/domains/session/operations.rs").exists(),
-        "session operation implementation must live in the direct session owner file"
-    );
+    for path in [
+        "packages/agent/src/domains/session/lifecycle/operations.rs",
+        "packages/agent/src/domains/session/query/operations.rs",
+        "packages/agent/src/domains/session/reconstruction/operations.rs",
+    ] {
+        assert!(
+            repo_path(path).exists(),
+            "session operation wrapper must live beside its owner: {path}"
+        );
+    }
 
     let session_mod = read_repo_file("packages/agent/src/domains/session/mod.rs");
     for required in [
@@ -833,6 +840,34 @@ fn session_persistence_surface_stays_current_and_collapsed() {
         assert!(
             !session_mod.contains(banned),
             "session worker must not retain stale helper/doc text `{banned}`"
+        );
+    }
+
+    let lifecycle_ops =
+        read_repo_file("packages/agent/src/domains/session/lifecycle/operations.rs");
+    let query_ops = read_repo_file("packages/agent/src/domains/session/query/operations.rs");
+    let reconstruction_ops =
+        read_repo_file("packages/agent/src/domains/session/reconstruction/operations.rs");
+    for (source, required, label) in [
+        (
+            lifecycle_ops.as_str(),
+            "SessionLifecycleService",
+            "lifecycle operations",
+        ),
+        (
+            query_ops.as_str(),
+            "SessionQueryService",
+            "query operations",
+        ),
+        (
+            reconstruction_ops.as_str(),
+            "SessionReconstructionService",
+            "reconstruction operations",
+        ),
+    ] {
+        assert!(
+            source.contains(required),
+            "{label} must route to the owning session service `{required}`"
         );
     }
 

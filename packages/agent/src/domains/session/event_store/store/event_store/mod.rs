@@ -98,5 +98,4 @@ impl EventStore {
 }
 
 #[cfg(test)]
-#[path = "tests.rs"]
 mod tests;

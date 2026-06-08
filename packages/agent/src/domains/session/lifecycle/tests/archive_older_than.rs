@@ -16,7 +16,7 @@ async fn archive_older_than_archives_stale_and_preserves_fresh() {
     let ten_days_ago = (chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339();
     set_last_activity(&ctx.event_store, &stale, &ten_days_ago);
 
-    let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
+    let result = SessionLifecycleService::archive_older_than(&Deps::from_test_context(&ctx), 7)
         .await
         .unwrap();
 
@@ -45,14 +45,14 @@ async fn archive_older_than_skips_already_archived() {
         .unwrap();
 
     // Pre-archive s1 by hand.
-    SessionCommandService::archive(&Deps::from_test_context(&ctx), s1.clone())
+    SessionLifecycleService::archive(&Deps::from_test_context(&ctx), s1.clone())
         .await
         .unwrap();
 
     let ten_days_ago = (chrono::Utc::now() - chrono::Duration::days(10)).to_rfc3339();
     set_last_activity(&ctx.event_store, &s1, &ten_days_ago);
 
-    let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
+    let result = SessionLifecycleService::archive_older_than(&Deps::from_test_context(&ctx), 7)
         .await
         .unwrap();
     assert_eq!(result["archivedCount"].as_u64().unwrap(), 0);
@@ -78,7 +78,7 @@ async fn archive_older_than_zero_days_archives_all_active() {
     set_last_activity(&ctx.event_store, &a, &one_hour_ago);
     set_last_activity(&ctx.event_store, &b, &one_hour_ago);
 
-    let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 0)
+    let result = SessionLifecycleService::archive_older_than(&Deps::from_test_context(&ctx), 0)
         .await
         .unwrap();
     assert_eq!(result["archivedCount"].as_u64().unwrap(), 2);
@@ -93,7 +93,7 @@ async fn archive_older_than_zero_days_archives_all_active() {
 async fn archive_older_than_returns_cutoff_in_the_past() {
     let ctx = make_test_context();
     let now = chrono::Utc::now();
-    let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 30)
+    let result = SessionLifecycleService::archive_older_than(&Deps::from_test_context(&ctx), 30)
         .await
         .unwrap();
     let cutoff_str = result["cutoff"].as_str().unwrap();
@@ -110,7 +110,7 @@ async fn archive_older_than_returns_cutoff_in_the_past() {
 #[tokio::test]
 async fn archive_older_than_on_empty_store_returns_zero() {
     let ctx = make_test_context();
-    let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
+    let result = SessionLifecycleService::archive_older_than(&Deps::from_test_context(&ctx), 7)
         .await
         .unwrap();
     assert_eq!(result["archivedCount"].as_u64().unwrap(), 0);
@@ -140,7 +140,7 @@ async fn archive_older_than_archives_batch_multiple_stale() {
         set_last_activity(&ctx.event_store, sid, &old);
     }
 
-    let result = SessionCommandService::archive_older_than(&Deps::from_test_context(&ctx), 7)
+    let result = SessionLifecycleService::archive_older_than(&Deps::from_test_context(&ctx), 7)
         .await
         .unwrap();
     assert_eq!(result["archivedCount"].as_u64().unwrap(), 3);

@@ -1,4 +1,4 @@
-//! # agent/runner/pipeline -- turn-execution helpers
+//! # agent/loop/pipeline -- turn-execution helpers
 //!
 //! Data transformations applied inside the agent turn loop, primarily
 //! to reshape LLM stream output into persistable events. The module

@@ -25,14 +25,14 @@ All commands were run from `/Users/moose/Downloads/projects/tron` on
 |----------|---------|------|
 | Git branch/worktree | `git status --short --branch` | 0 |
 | Rust domain roots | `find packages/agent/src/domains -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
-| Domain registration list | `sed -n '1,180p' packages/agent/src/domains/registration.rs` | 0 |
+| Domain registration list | `sed -n '1,180p' packages/agent/src/domains/registration/mod.rs` | 0 |
 | Engine primitive workers | `rg -n "pub\\(crate\\) const .*_WORKER_ID\|pub\\(crate\\) mod" packages/agent/src/engine/primitives/mod.rs` | 0 |
-| Runner context planes | `sed -n '1,140p' packages/agent/src/domains/agent/runner/context/mod.rs` | 0 |
+| Agent context planes | `sed -n '1,140p' packages/agent/src/domains/agent/context/mod.rs` | 0 |
 | Managed skills absence | `test ! -d packages/agent/skills` | 0 |
 | Agent docs | `find packages/agent/docs -maxdepth 1 -type f \| sort` | 0 |
 | iOS top-level roots | `find packages/ios-app/Sources -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
 | iOS primitive owner roots | `find packages/ios-app/Sources/{Engine,Session,Support,UI} -mindepth 1 -maxdepth 1 -type d -exec basename {} \; \| sort` | 0 |
-| Settings type roots | `find packages/agent/src/domains/settings/implementation/types -type f -name '*.rs' -maxdepth 1 -print \| sort` | 0 |
+| Settings type roots | `find packages/agent/src/domains/settings/profile/types -type f -name '*.rs' -maxdepth 1 -print \| sort` | 0 |
 | Settings UI parity | `rg -n "SettingsPage\|SettingsState\|ServerSettings" packages/ios-app/Sources/UI/Views/Settings packages/ios-app/Sources/Session/ViewModels/State/SettingsState.swift packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Settings.swift` | 0 |
 
 The covering gate was added first and failed red before this file existed:
@@ -53,7 +53,7 @@ PET-11's interim hosted-tool/computer-use checkpoint further removed the
 OpenAI hosted search/computer-call DTO and stream variants, stale iOS capability
 catalog DTO/rendering support, the fixed iOS SessionTree projection, and Mac
 Screen Recording/Accessibility onboarding gates. It also collapsed the
-top-level `capability_support` domain into the agent runner's primitive surface
+top-level `capability_support` domain into the agent loop's primitive surface
 resolver. The queue/trigger/prompt envelope checkpoint then removed
 pre-execution target revision, expected function revision, target function id,
 and catalog revision state from retained queue, trigger, and prompt handoff
@@ -76,8 +76,8 @@ before closeout.
 | `blob` | retain | Keep payload/blob resolution for event, resource, and invocation evidence. |
 | `browser` | delete | First-party browser/computer-use product capability. Any future browser helper must be agent-authored runtime state. |
 | `capability` | retain | Keep only the model-facing `execute` primitive. Delete search, inspect, status, registry snapshot, bindings, plugins, conformance, recipes, vector search, and policy-profile orchestration. |
-| `capability_support` | delete | PET-11 collapsed this non-domain support boundary into `domains/agent/runner/agent/primitive_surface.rs`. The provider-visible `execute` surface and per-call scheduling remain agent-runner primitives; the top-level domain root and separate scheduling module are deleted. |
-| `context` | delete | The public `context::*` capability plane is deleted. Minimal prompt context assembly, budgeting, compaction, and state/session summaries survive only under the agent runner infrastructure. |
+| `capability_support` | delete | PET-11 collapsed this non-domain support boundary into `domains/agent/loop/primitive_surface.rs`. The provider-visible `execute` surface and per-call scheduling remain agent-loop primitives; the top-level domain root and separate scheduling module are deleted. |
+| `context` | delete | The public `context::*` capability plane is deleted. Minimal prompt context assembly, budgeting, compaction, and state/session summaries survive only under the agent context infrastructure. |
 | `cron` | delete | Hard-coded scheduling/automation product plane. Future scheduling must be agent-owned state. |
 | `device` | delete | Push/device product workflow. APNs, device-token registration, and relay delivery are deleted; pairing and transport safety remain outside this domain if needed. |
 | `display` | delete | Fixed display/computer-use side channel. |
@@ -312,7 +312,7 @@ server settings shape and iOS controls together.
   residue and deleted it from fresh iOS draft storage. PET-11 also deleted
   `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift` after
   proving they were unreferenced product DTO residue.
-- PET-11 collapsed the former `capability_support` row into agent-runner
+- PET-11 collapsed the former `capability_support` row into agent-loop
   `primitive_surface`, deleted the product update-check surface from server,
   iOS, Mac, scripts, docs, and bundled default settings, and flattened
   diagnostics/logging to retained-log storage plus `execute.log_recent`.

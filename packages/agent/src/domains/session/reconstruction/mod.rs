@@ -49,7 +49,11 @@ use crate::shared::server::events::event_row_to_wire_with_payload;
 /// `beforeEventId`.
 pub const MAX_RECONSTRUCT_EVENTS: i64 = 10_000;
 
-pub(crate) struct SessionReconstructService;
+pub(crate) struct SessionReconstructionService;
+
+mod operations;
+
+pub(crate) use operations::session_reconstruct_value;
 
 fn paginate_ordered_chain(
     mut events: Vec<EventRow>,
@@ -81,7 +85,7 @@ fn paginate_ordered_chain(
     Ok((events, has_more))
 }
 
-impl SessionReconstructService {
+impl SessionReconstructionService {
     /// Reconstruct the full session state for a reconnecting client.
     #[instrument(skip(deps), fields(session_id = %session_id))]
     pub(crate) async fn reconstruct(
@@ -354,7 +358,7 @@ mod tests {
 
     #[test]
     fn strips_text_thinking_when_capabilities_executing() {
-        let result = SessionReconstructService::reconcile_in_flight(
+        let result = SessionReconstructionService::reconcile_in_flight(
             "I'll run sleep 10.".into(),
             json!([{
                 "invocationId": "tc_1",
@@ -389,7 +393,7 @@ mod tests {
 
     #[test]
     fn keeps_text_thinking_when_still_generating() {
-        let result = SessionReconstructService::reconcile_in_flight(
+        let result = SessionReconstructionService::reconcile_in_flight(
             "Let me think...".into(),
             json!([{
                 "invocationId": "tc_1",
@@ -417,7 +421,7 @@ mod tests {
 
     #[test]
     fn keeps_everything_when_no_capabilities() {
-        let result = SessionReconstructService::reconcile_in_flight(
+        let result = SessionReconstructionService::reconcile_in_flight(
             "Here is my response...".into(),
             json!([]),
             json!([
@@ -439,7 +443,7 @@ mod tests {
     #[test]
     fn strips_when_mixed_capability_statuses() {
         // One capability running, one still generating — strip because at least one is executing
-        let result = SessionReconstructService::reconcile_in_flight(
+        let result = SessionReconstructionService::reconcile_in_flight(
             "Running capabilities...".into(),
             json!([
                 { "invocationId": "tc_1", "modelPrimitiveName": "execute", "status": "running" },
@@ -465,7 +469,7 @@ mod tests {
 
     #[test]
     fn strips_when_capability_completed() {
-        let result = SessionReconstructService::reconcile_in_flight(
+        let result = SessionReconstructionService::reconcile_in_flight(
             "Done.".into(),
             json!([{
                 "invocationId": "tc_1",
@@ -488,7 +492,7 @@ mod tests {
 
     #[test]
     fn strips_when_capability_errored() {
-        let result = SessionReconstructService::reconcile_in_flight(
+        let result = SessionReconstructionService::reconcile_in_flight(
             "Trying...".into(),
             json!([{
                 "invocationId": "tc_1",
@@ -510,7 +514,7 @@ mod tests {
 
     #[test]
     fn preserves_streaming_output_and_timestamps() {
-        let result = SessionReconstructService::reconcile_in_flight(
+        let result = SessionReconstructionService::reconcile_in_flight(
             "text".into(),
             json!([{
                 "invocationId": "tc_1",
@@ -538,7 +542,7 @@ mod tests {
 
     #[test]
     fn no_streaming_when_text_empty_and_no_capabilities() {
-        let result = SessionReconstructService::reconcile_in_flight(
+        let result = SessionReconstructionService::reconcile_in_flight(
             String::new(),
             json!([]),
             json!([
@@ -553,7 +557,7 @@ mod tests {
     #[test]
     fn strips_multiple_text_and_thinking_blocks() {
         // Interleaved: thinking, text, capability, text, capability
-        let result = SessionReconstructService::reconcile_in_flight(
+        let result = SessionReconstructionService::reconcile_in_flight(
             "second text".into(),
             json!([
                 { "invocationId": "tc_1", "modelPrimitiveName": "execute", "status": "running" },

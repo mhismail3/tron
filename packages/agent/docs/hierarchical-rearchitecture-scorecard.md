@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Scorecard
 
-Current score: **47/100**
+Current score: **54/100**
 
 Status: **running**
 
@@ -45,8 +45,8 @@ Total weight: **100**
 | HRA-2 | Rust app, transport, shared, and platform roots | 6 | passed_after_fix | Rust app/transport/shared owners | Moved root binary helpers into app CLI/bootstrap, grouped app health/lifecycle/bootstrap, grouped transport HTTP/engine/runtime, collapsed shared into foundation/protocol/server/storage/observability, and updated README/static gates. | HRA-15 still owns broad stale-path doc scans outside current-code docs. |
 | HRA-3 | Rust engine kernel and invocation hierarchy | 10 | passed_after_fix | Rust engine owner | Moved kernel/catalog/invocation/runtime modules under owned subsystem roots, collapsed invocation host into `invocation/host`, split kernel types under `kernel/types`, and removed avoidable engine same-name file/folder pairs. | Runtime and authority/durability files that remain over budget have explicit budget rows; HRA-7 owns broader Rust test/doc decomposition. |
 | HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix | Rust engine owner | Moved grants/leases/compensation under `authority`; moved ledger/queue/resources/state/streams under `durability`; kept SQLite codecs under their owning stores; collapsed resource store into `resources/store/mod.rs`. | Authority/durability store modules remain cohesive but over 900 LOC with explicit temporary budgets. |
-| HRA-5 | Rust domain vertical slices | 10 | passed_after_fix | Rust domain owners | Moved registration helpers under `domains/registration`; moved agent prompt/loop/context, auth oauth/credentials, model routing/protocol, and settings profile owners; split capability operations, Kimi stream tests, and over-budget domain test modules. | HRA-6 still owns session/event-store; no HRA-5 temporary file budgets remain. |
-| HRA-6 | Rust session and event-store hierarchy | 7 | running | Rust session owner | Red gates added for session lifecycle/query/reconstruction ownership, event-store owned modules, same-name pair removal, and event repository test splitting. | Implement session/event-store moves and split oversized tests. |
+| HRA-5 | Rust domain vertical slices | 10 | passed_after_fix | Rust domain owners | Moved registration helpers under `domains/registration`; moved agent prompt/loop/context, auth oauth/credentials, model routing/protocol, and settings profile owners; split capability operations, Kimi stream tests, and over-budget domain test modules. | Closed with no remaining HRA-5 temporary file budgets. |
+| HRA-6 | Rust session and event-store hierarchy | 7 | passed_after_fix | Rust session owner | Moved session lifecycle/query/reconstruction into owner folders, moved event-store envelope/factory/reconstruction/store/session repository tests to folder-backed modules, and split SQLite event repository tests by behavior. | HRA-7 still owns broader Rust test/doc budget cleanup. |
 | HRA-7 | Rust tests and progressive docs | 5 | pending | Rust docs/tests owners | Not started. | Mirror tests to new boundaries and update progressive docs. |
 | HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | pending | iOS architecture owner | Not started. | Add red SourceGuard hierarchy gates and iOS move map. |
 | HRA-9 | iOS Engine hierarchy | 8 | pending | iOS engine owner | Not started. | Reorganize transport, protocol, events, persistence, and model filtering. |
@@ -65,12 +65,12 @@ owners required to bootstrap the campaign.
 
 | Folder | Owner | Allowed contents | Status |
 |--------|-------|------------------|--------|
-| `packages/agent/src` | Rust crate boundary | `lib.rs`, `main.rs`, and owned module folders after HRA-2. | running |
-| `packages/agent/src/app` | Rust app/bootstrap owner | CLI, bootstrap, health, metrics, lifecycle, and server startup code after HRA-2. | pending |
-| `packages/agent/src/transport` | Rust transport owner | HTTP, engine socket, worker socket, runtime dispatch, and transport DTOs after HRA-2. | pending |
+| `packages/agent/src` | Rust crate boundary | `lib.rs`, `main.rs`, and owned module folders after HRA-2. | passed_after_fix |
+| `packages/agent/src/app` | Rust app/bootstrap owner | CLI, bootstrap, health, metrics, lifecycle, and server startup code after HRA-2. | passed_after_fix |
+| `packages/agent/src/transport` | Rust transport owner | HTTP, engine socket, worker socket, runtime dispatch, and transport DTOs after HRA-2. | passed_after_fix |
 | `packages/agent/src/engine` | Rust engine substrate owner | Kernel, catalog, invocation, authority, durability, runtime, primitives, and engine tests after HRA-3/HRA-4. | passed_after_fix |
-| `packages/agent/src/domains` | Rust vertical domain owner | Registration plus behavior-owned domain slices; HRA-6 still owns session/event-store. | running |
-| `packages/agent/src/shared` | Rust cross-owner support owner | Foundation/protocol/server/storage/observability helpers used by multiple owners after HRA-2. | pending |
+| `packages/agent/src/domains` | Rust vertical domain owner | Registration plus behavior-owned domain slices, including session lifecycle/query/reconstruction and event-store owners after HRA-6. | passed_after_fix |
+| `packages/agent/src/shared` | Rust cross-owner support owner | Foundation/protocol/server/storage/observability helpers used by multiple owners after HRA-2. | passed_after_fix |
 | `packages/ios-app/Sources` | iOS app target boundary | App, Engine, Session, UI, Support, Resources, assets, and plist files after HRA-9/HRA-12. | pending |
 | `packages/ios-app/Tests` | iOS test target boundary | Infrastructure and tests mirroring Engine, Session, UI, and Support after HRA-13. | pending |
 | `packages/mac-app/Sources` | Mac wrapper target boundary | App, Server, MenuBar, Wizard, Support, Resources, and assets after HRA-14. | pending |
@@ -84,7 +84,6 @@ HRA-5 temporary budget rows.
 
 | Path | Owner | Limit | Current LOC | Decomposition plan | Status |
 |------|-------|-------|-------------|--------------------|--------|
-| `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | rust session domain owner | 900 | 1571 | HRA-6 owns session/event-store movement and decomposition. | temporary_budget |
 | `packages/agent/src/engine/authority/grants/mod.rs` | rust engine authority owner | 900 | 958 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
 | `packages/agent/src/engine/durability/ledger/mod.rs` | rust engine durability owner | 900 | 955 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
 | `packages/agent/src/engine/durability/resources/store/mod.rs` | rust engine durability owner | 900 | 972 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
@@ -131,7 +130,6 @@ checks:
 
 ## Open Loops
 
-- HRA-6 still owns Rust session/event-store hierarchy and decomposition.
 - HRA-7 still owns Rust test mirroring, progressive docs, and remaining
   engine/static-test over-budget decomposition.
 - HRA-9 through HRA-13 still own iOS source/test hierarchy gates.

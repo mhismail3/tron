@@ -8,7 +8,7 @@ async fn create_normalizes_home_alias_working_directory() {
         .display()
         .to_string();
 
-    let response = SessionCommandService::create(
+    let response = SessionLifecycleService::create(
         &Deps::from_test_context(&ctx),
         CreateSessionRequest {
             working_directory: "~".to_owned(),

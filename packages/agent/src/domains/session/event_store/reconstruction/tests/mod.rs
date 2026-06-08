@@ -48,7 +48,5 @@ fn session_start() -> SessionEvent {
     )
 }
 
-#[path = "tests/basic_capability.rs"]
 mod basic_capability;
-#[path = "tests/multimodal_performance.rs"]
 mod multimodal_performance;

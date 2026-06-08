@@ -17,15 +17,9 @@ fn setup() -> EventStore {
     EventStore::new(pool)
 }
 
-#[path = "tests/activity_summary.rs"]
 mod activity_summary;
-#[path = "tests/append_counters.rs"]
 mod append_counters;
-#[path = "tests/auto_sequence.rs"]
 mod auto_sequence;
-#[path = "tests/queries_state.rs"]
 mod queries_state;
-#[path = "tests/session_creation.rs"]
 mod session_creation;
-#[path = "tests/tree_sessions.rs"]
 mod tree_sessions;

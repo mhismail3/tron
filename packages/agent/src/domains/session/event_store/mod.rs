@@ -14,20 +14,32 @@
 //!   history, preserving separate client display text and model-facing capability result text
 //! - **Migrations**: Version-tracked SQL schema evolution
 //!
+//! ## Submodules
+//!
+//! | Module | Responsibility |
+//! |--------|----------------|
+//! | `envelope` | Broadcast envelope creation and event type cataloging. |
+//! | `factory` | Event ID creation and chain append helpers. |
+//! | `reconstruction` | Provider-context reconstruction from persisted event history. |
+//! | `sqlite` | Connection, migration, repository, lock, and row-type boundary. |
+//! | `store` | High-level transactional `EventStore` facade. |
+//! | `trace` | Agent trace record types and query options. |
+//! | `types` | Event payload, state, token, and generated event definitions. |
+//!
 //! ## Module Position
 //!
 //! Depends on: core, settings.
 //! Depended on by: the agent runner, transport layer, audit, and domain stores.
+//!
+//! INVARIANT: this root uses normal folder-backed modules only. It must not
+//! hide ownership behind `#[path]` aliases.
 
 #![deny(unsafe_code)]
 
-#[path = "event/envelope.rs"]
 pub mod envelope;
 pub mod errors;
-#[path = "event/factory.rs"]
 pub mod factory;
-#[path = "event/reconstruct.rs"]
-pub mod reconstruct;
+pub mod reconstruction;
 pub mod redaction;
 pub mod sqlite;
 pub mod store;
@@ -39,7 +51,7 @@ pub use envelope::{
 };
 pub use errors::{EventStoreError, Result};
 pub use factory::{EventChainBuilder, EventFactory};
-pub use reconstruct::{
+pub use reconstruction::{
     COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX, ReconstructionResult, reconstruct_from_events,
 };
 pub use sqlite::repositories::session::{ActivitySummaryLine, MessagePreview};

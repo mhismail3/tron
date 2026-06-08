@@ -13,5 +13,4 @@ fn open_memory() -> Connection {
     conn
 }
 
-#[path = "tests/primitive.rs"]
 mod primitive;

@@ -510,5 +510,4 @@ fn accumulate_tokens(payload: &Value, tokens: &mut TokenTotals) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[path = "reconstruct/tests.rs"]
 mod tests;

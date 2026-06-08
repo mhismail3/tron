@@ -1,4 +1,4 @@
-pub(super) use super::super::{CreateSessionRequest, Deps, SessionCommandService};
+pub(super) use super::super::{CreateSessionRequest, Deps, SessionLifecycleService};
 pub(super) use crate::domains::session::event_store::EventStore;
 pub(super) use crate::shared::server::test_support::make_test_context;
 

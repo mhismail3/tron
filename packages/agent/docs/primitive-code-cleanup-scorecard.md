@@ -107,13 +107,8 @@ Current over-budget exceptions:
 
 | Path | Current LOC | Owner | Reason | Cleanup row |
 |------|-------------|-------|--------|-------------|
-| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | 2243 | teardown static gates | Completed teardown gate is historical proof; new cleanup gates should move to separate files. | PCC-9 |
-| `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1571 | session persistence tests | Dense event-store behavior suite. | PCC-5 |
-| `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | 1383 | auth storage tests | Credential persistence behavior suite. | PCC-3 |
+| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | 2266 | teardown static gates | Completed teardown gate is historical proof; new cleanup gates should move to separate files. | PCC-9 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1196 | engine resource tests | Resource substrate behavior suite. | PCC-4 |
-| `packages/agent/src/engine/types.rs` | 1008 | engine metadata contracts | Public worker/function/trigger/catalog metadata contracts now include the collapsed catalog-change types and restored Rustdoc. | PCC-4 |
-| `packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs` | 1182 | agent stream tests | Provider stream reconstruction behavior. | PCC-3 |
-| `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | 1038 | context tests | Compaction behavior and edge-case coverage. | PCC-3 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2140 | iOS reconstruction tests | Large stored-event reconstruction suite. | PCC-6 |
 | `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | 1531 | iOS static guards | Primitive shell absence and source guards. | PCC-6 |
 | `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | 958 | iOS transport | WebSocket transport and request/response lifecycle. | PCC-6 |
