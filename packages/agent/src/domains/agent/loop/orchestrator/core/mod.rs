@@ -1,4 +1,37 @@
-//! Orchestrator — multi-session coordinator.
+//! Orchestrator core — multi-session coordinator.
+//!
+//! ## Submodules
+//!
+//! | Module | Purpose |
+//! |--------|---------|
+//! | `tests` | Coordinator capacity, sequencing, cancellation, and broadcast tests |
+//!
+//! ## Entry Points
+//!
+//! - [`Orchestrator::new`] wires the coordinator to `SessionManager`.
+//! - [`Orchestrator::run_agent`] starts a primitive agent turn for a session.
+//! - [`Orchestrator::try_begin_retain`] guards active-run retention and
+//!   concurrency permits.
+//!
+//! ## Dependency Direction
+//!
+//! Depends on sibling orchestrator helpers, agent loop event emission, session
+//! management, and shared protocol events. Depended on by bootstrap, prompt
+//! runtime services, and session reconstruction through the public
+//! `domains::agent::Orchestrator` export.
+//!
+//! ## Invariants
+//!
+//! - The active-run registry enforces [`MAX_CONCURRENT_SESSIONS`].
+//! - Dropping [`StartedRun`] releases both cancellation state and the semaphore
+//!   permit.
+//! - Runtime sequence assignment stays synchronized with durable event-store
+//!   sequence truth.
+//!
+//! ## Test Ownership
+//!
+//! Coordinator tests live in `tests`. Cross-module behavior is covered by
+//! prompt runtime, session reconstruction, and integration tests.
 
 use std::collections::HashMap;
 use std::sync::Arc;

@@ -13,7 +13,7 @@ use parking_lot::Mutex;
 use serde_json::{Map, Value};
 
 use crate::domains::settings::errors::{Result, SettingsError};
-use crate::domains::settings::loader::{
+use crate::domains::settings::profile::storage::loader::{
     deep_merge, load_settings_from_path, read_sparse_settings_overlay,
 };
 use crate::domains::settings::types::TronSettings;
@@ -225,8 +225,9 @@ fn ensure_object(value: &Value) -> Result<()> {
 
 fn validate_sparse_settings(value: &Value, path: &Path) -> Result<()> {
     ensure_object(value)?;
-    let defaults =
-        serde_json::to_value(crate::domains::settings::loader::load_settings_defaults_for(path)?)?;
+    let defaults = serde_json::to_value(
+        crate::domains::settings::profile::storage::loader::load_settings_defaults_for(path)?,
+    )?;
     let effective = deep_merge(defaults, value.clone());
     let validated: TronSettings = serde_json::from_value(effective)?;
     validated.validate_strict()?;

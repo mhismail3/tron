@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use crate::domains::agent::context::types::CompactionConfig;
-use crate::domains::model::providers::{
+use crate::domains::model::providers::shared::{
     AnthropicEffortLevel, ProviderHealthTracker, ReasoningEffort,
 };
 use crate::shared::protocol::messages::TokenUsage;

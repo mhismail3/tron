@@ -50,7 +50,7 @@ pub struct AnthropicConfig {
     /// Base URL override.
     pub base_url: Option<String>,
     /// Retry configuration override (None = use defaults).
-    pub retry: Option<crate::domains::model::providers::StreamRetryConfig>,
+    pub retry: Option<crate::domains::model::providers::shared::StreamRetryConfig>,
     /// Provider settings (shared settings from settings).
     pub provider_settings: AnthropicProviderSettings,
 }

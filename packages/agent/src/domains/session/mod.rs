@@ -35,7 +35,7 @@ pub(crate) mod reconstruction;
 
 use std::sync::Arc;
 
-use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::worker::DomainRegistrationContext;

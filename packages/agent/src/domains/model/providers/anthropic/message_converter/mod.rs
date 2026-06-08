@@ -10,8 +10,9 @@
 
 use std::collections::HashMap;
 
+use crate::domains::model::providers::shared::compose_context_parts_grouped;
 use crate::domains::model::providers::{
-    IdFormat, build_invocation_id_mapping, compose_context_parts_grouped, remap_invocation_id,
+    IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
 use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent, UserContent};
 use crate::shared::protocol::messages::{

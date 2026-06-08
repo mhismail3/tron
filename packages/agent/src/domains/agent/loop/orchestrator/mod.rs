@@ -4,7 +4,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `orchestrator` | Multi-session coordinator, broadcast channel, capacity limits, sequence counters |
+//! | `core` | Multi-session coordinator, broadcast channel, capacity limits, sequence counters |
 //! | `session_manager` | Session CRUD, active session cache, fork |
 //! | `session_reconstructor` | Rebuild session state from persisted events |
 //! | `session_context` | Per-session context and workspace path |
@@ -16,6 +16,20 @@
 //! | `recovery` | Startup crash recovery — persists orphaned journal content |
 //! | `capability_invocation_tracker` | Tracks in-flight capability invocations for cancellation |
 //! | `invocation_abort_registry` | Per-invocation `CancellationToken` registry for `agent.abortCapabilityInvocation` |
+//!
+//! ## Entry Points
+//!
+//! - [`core::Orchestrator`] coordinates sessions, runs, and stream broadcast.
+//! - [`session_manager::SessionManager`] owns durable session lifecycle state.
+//! - [`recovery::recover_incomplete_turns`] replays orphaned streaming journals
+//!   during startup.
+//!
+//! ## Dependency Direction
+//!
+//! Depends on agent loop primitives, session event-store contracts, and shared
+//! protocol events. Depended on by bootstrap, prompt runtime services, and
+//! session reconstruction. The core coordinator depends on sibling helpers, and
+//! sibling helpers import the concrete owner directly.
 //!
 //! ## Event Sequencing
 //!
@@ -38,13 +52,26 @@
 //! journals are recovered on next startup by `recovery::recover_incomplete_turns`,
 //! which persists partial content as assistant messages before accepting connections.
 //!
+//! ## Invariants
+//!
+//! - Per-session sequence counters are monotonic and reconciled against durable
+//!   event-store truth before runtime persistence.
+//! - Active runs must hold a registry permit and remove their active session
+//!   entry on drop.
+//! - Streaming journal recovery runs before accepting new connections.
+//!
+//! ## Test Ownership
+//!
+//! Coordinator tests live in [`core`]. Helper behavior tests live beside each
+//! helper module, and prompt/session integration tests exercise the public
+//! [`core::Orchestrator`] boundary.
+//!
 pub(crate) mod agent_factory;
 pub(crate) mod agent_runner;
 pub(crate) mod capability_invocation_tracker;
+pub(crate) mod core;
 pub(crate) mod event_persister;
 pub(crate) mod invocation_abort_registry;
-#[allow(clippy::module_inception)]
-pub(crate) mod orchestrator;
 pub(crate) mod recovery;
 pub(crate) mod session_context;
 pub(crate) mod session_manager;

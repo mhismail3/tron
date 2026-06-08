@@ -1,6 +1,6 @@
 use super::*;
 use crate::domains::agent::context::types::ContextManagerConfig;
-use crate::domains::model::providers::provider::{
+use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderStreamOptions, StreamEventStream,
 };
 use crate::domains::model::routing::models::types::Provider as ProviderKind;

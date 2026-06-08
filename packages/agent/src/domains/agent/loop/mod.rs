@@ -22,7 +22,7 @@ pub mod turn_runner;
 pub(crate) mod types;
 
 pub(crate) use event_emitter::EventEmitter;
-pub use orchestrator::orchestrator::Orchestrator;
+pub use orchestrator::core::Orchestrator;
 pub use orchestrator::recovery::recover_incomplete_turns;
 pub use orchestrator::session_manager::{SessionFilter, SessionManager};
 pub use profile_runtime::ProfileRuntime;

@@ -743,7 +743,7 @@ async fn stream_rejects_non_streaming_platform_model_before_request() {
     );
 }
 
-// ── parse_api_error (via shared crate::domains::model::providers::error_parsing) ─────────────
+// ── parse_api_error (via shared crate::domains::model::providers::shared::error_parsing) ─────────────
 
 // ── to_standard_base64 ──────────────────────────────────────────
 

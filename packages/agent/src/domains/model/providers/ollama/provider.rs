@@ -23,8 +23,8 @@ use reqwest::header::{CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, info, instrument};
 
-use crate::domains::model::providers::compose_context_parts;
-use crate::domains::model::providers::provider::{
+use crate::domains::model::providers::shared::compose_context_parts;
+use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
@@ -179,8 +179,9 @@ impl OllamaProvider {
                 retryable: false,
             }
         } else {
-            let err_info =
-                crate::domains::model::providers::error_parsing::parse_api_error(body_text, status);
+            let err_info = crate::domains::model::providers::shared::error_parsing::parse_api_error(
+                body_text, status,
+            );
             ProviderError::Api {
                 status,
                 message: format!("Ollama server error: {}", err_info.message),
@@ -275,7 +276,7 @@ impl Provider for OllamaProvider {
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
         debug!(message_count = context.messages.len(), "starting stream");
-        crate::domains::model::providers::stream_pipeline::wrap_provider_stream(
+        crate::domains::model::providers::shared::stream_pipeline::wrap_provider_stream(
             "ollama",
             self.stream_internal(context, options).await,
         )

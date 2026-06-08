@@ -1,9 +1,11 @@
 use std::sync::Arc;
 
-use crate::domains::model::providers::provider::{
+use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderStreamOptions, StreamEventStream,
 };
-use crate::domains::model::providers::{StreamFactory, StreamRetryConfig, with_provider_retry};
+use crate::domains::model::providers::shared::{
+    StreamFactory, StreamRetryConfig, with_provider_retry,
+};
 use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::protocol::messages::Context;
 use tokio_util::sync::CancellationToken;

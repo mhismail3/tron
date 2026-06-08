@@ -1,6 +1,6 @@
 use super::*;
 use crate::domains::model::providers::anthropic::types::AnthropicProviderSettings;
-use crate::domains::model::providers::provider::AnthropicEffortLevel;
+use crate::domains::model::providers::shared::provider::AnthropicEffortLevel;
 
 fn test_config(auth: AnthropicAuth) -> AnthropicConfig {
     AnthropicConfig {
@@ -561,7 +561,7 @@ fn build_request_basic() {
     assert!(req.output_config.is_none());
 }
 
-// ── API error parsing (via shared crate::domains::model::providers::error_parsing) ────────────
+// ── API error parsing (via shared crate::domains::model::providers::shared::error_parsing) ────────────
 
 // ── Cache breakpoint on last user message ───────────────────────────
 

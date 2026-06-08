@@ -12,7 +12,7 @@ mod responses;
 #[cfg(test)]
 mod tests;
 
-pub use crate::domains::model::providers::provider::ReasoningEffort;
+pub use crate::domains::model::providers::shared::provider::ReasoningEffort;
 pub use config::{
     ApiEndpoint, DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_MODEL,
     DEFAULT_PLATFORM_BASE_URL, OpenAIApiSettings, OpenAIAuth, OpenAIAuthPath, OpenAIConfig,

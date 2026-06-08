@@ -1,6 +1,6 @@
 # Post-HRA Adversarial Hardening Evidence Manifest
 
-Current score: **47/100**
+Current score: **63/100**
 
 Status: **active**
 
@@ -19,10 +19,10 @@ known audit findings are covered by executable proof.
 | AHA-0 | passed_after_fix | Created the scorecard, evidence manifest, README links, and red static gates for the adversarial audit findings. | Red proof captured by `cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants -- --nocapture`; see AHA-0 red proof below. | Closed; later rows own the remaining red gates. | `bc8b33246` |
 | AHA-1 | passed_after_fix | Redacted historical `/Users/<USER>` equivalents in evidence, moved ordinary iOS fixtures to neutral `/tmp/tron-fixtures/...` paths, removed tracked personal feedback email/domain/handle literals, replaced repo/release fallbacks with generic placeholders, made iOS feedback recipient blank by default with local/CI override, and expanded `scripts/personal-info-guard.sh` to catch personal handle/domain split constructions. | `scripts/personal-info-guard.sh`, the AHA full-repo personal-info gate, the Cargo repository regression, release-notes self-test, XcodeGen drift check, and focused iOS `AppConstantsTests`/`SourceGuardTests` all passed. Direct grep for raw home paths, personal handle/domain literals, and split handle constructions outside allowlisted guard tests returned no hits. | Closed. | `fb655244c` |
 | AHA-2 | passed_after_fix | Rewrote PR template and CONTRIBUTING references to `AGENTS.md`, removed stale skill-copy wording from AGENTS, marked PCC/HRA README scorecard links completed instead of active, replaced a deleted-doc absence claim with current evidence/source-of-truth wording, and redacted historical helper-tree strings from PCC/AHA docs. | `cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants live_docs_templates_and_scorecards_have_no_deleted_doc_residue -- --nocapture` -> exit 0. Direct scan for the deleted-doc/template residue needles returned no hits. | Closed. | `ff5ed492d` |
-| AHA-3 | passed_after_fix | Added a separate Ubuntu `rust-static-gates` CI job for docs/templates/iOS/Mac/script/CI path changes, wired it to PET/PCC/HRA/AHA invariant targets, changed GitHub Rust CI to run `scripts/tron ci test`, and aligned Clippy help/docs with the Cargo lint-policy contract. | AHA workflow path/static gate, Rust harness-shape gate, and Clippy contract gate all passed after the workflow/docs update. | Closed; later phases may extend the AHA target with additional static gates. | pending |
-| AHA-4 | passed_after_fix | Added post-XcodeGen `git diff --exit-code` checks for tracked iOS/Mac projects in CI and release workflows, kept Mac `build-for-testing`, and added focused CI execution for `TronPathsTests`, `ServerStatusPollerTests`, and `TailscaleProbeTests`. | AHA Xcode drift and Mac wrapper CI gates both passed after the workflow update. | Closed; final closeout still reruns local XcodeGen drift checks and focused Mac tests. | pending |
-| AHA-5 | pending | Not started. | Pending. | Rust module ownership aliases remain intentionally red. | pending |
-| AHA-6 | pending | Not started. | Pending. | Rust progressive docs and near-budget rows remain intentionally red. | pending |
+| AHA-3 | passed_after_fix | Added a separate Ubuntu `rust-static-gates` CI job for docs/templates/iOS/Mac/script/CI path changes, wired it to PET/PCC/HRA/AHA invariant targets, changed GitHub Rust CI to run `scripts/tron ci test`, and aligned Clippy help/docs with the Cargo lint-policy contract. | AHA workflow path/static gate, Rust harness-shape gate, and Clippy contract gate all passed after the workflow/docs update. | Closed; later phases may extend the AHA target with additional static gates. | `30862f603` |
+| AHA-4 | passed_after_fix | Added post-XcodeGen `git diff --exit-code` checks for tracked iOS/Mac projects in CI and release workflows, kept Mac `build-for-testing`, and added focused CI execution for `TronPathsTests`, `ServerStatusPollerTests`, and `TailscaleProbeTests`. | AHA Xcode drift and Mac wrapper CI gates both passed after the workflow update. | Closed; final closeout still reruns local XcodeGen drift checks and focused Mac tests. | `30862f603` |
+| AHA-5 | passed_after_fix | Removed production `#[path]` aliases and module-inception residue by moving provider shared helpers under `providers::shared`, moving settings loader ownership under `profile::storage::loader`, converting OpenAI provider tests to a normal `provider/tests.rs` module, removing the foundation error-test path alias, and renaming the nested orchestrator coordinator module to `core`. | `cargo check --manifest-path packages/agent/Cargo.toml --all-targets`, the AHA production path/module-inception gate, and the provider/settings physical-owner gate passed. | Closed; no compatibility reexports or old internal import paths remain for the moved ownership surfaces. | pending |
+| AHA-6 | passed_after_fix | Added progressive docs for the AHA-5 ownership roots, added explicit 850 LOC watch rows for all current Rust files at or above the warning band, replaced stale HRA temporary-budget wording with the current hard-limit/watch-band contract, and refreshed HRA/PCC machine-readable inventories for the moved Rust ownership paths. | The AHA near-budget row gate, progressive-doc ownership-root gate, HRA inventory coverage gate, and PCC inventory coverage gate passed. | Closed; the 900 LOC HRA hard limit remains enforced separately. | pending |
 | AHA-7 | pending | Not started. | Pending. | iOS `misc` client residue remains intentionally red. | pending |
 | AHA-8 | pending | Not started. | Pending. | iOS hierarchy/budget/doc gaps remain intentionally red. | pending |
 | AHA-9 | pending | Not started. | Pending. | Inventory/provenance integrity gaps remain intentionally red. | pending |
@@ -228,3 +228,74 @@ cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial
 Result: exit 0, 1 passed. A first attempt to run both focused Cargo filters in
 one command failed because Cargo accepts only one test name filter; the checks
 were rerun individually and passed.
+
+## AHA-5 Verification
+
+Rust module ownership cleanup:
+
+- Provider shared infrastructure now has a physical
+  `domains/model/providers/shared/mod.rs` owner. Provider call sites use
+  `providers::shared::*`; the provider root no longer uses `#[path]` aliases or
+  top-level shared-helper compatibility reexports.
+- Settings profile storage now has a physical `profile/storage/mod.rs` owner.
+  Runtime and tests call loader functions through
+  `domains::settings::profile::storage::loader`.
+- `openai/provider.rs` moved to `openai/provider/mod.rs` and
+  `openai/provider_tests.rs` moved to `openai/provider/tests.rs`.
+- `shared/foundation/errors/mod.rs` uses the normal `mod tests;` path.
+- `domains/agent/loop/orchestrator/orchestrator/` moved to
+  `domains/agent/loop/orchestrator/core/`, and imports now use
+  `orchestrator::core`.
+
+Proof:
+
+```bash
+cargo check --manifest-path packages/agent/Cargo.toml --all-targets
+```
+
+Result: exit 0.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants rust_production_modules_have_no_path_aliases_or_module_inception -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants rust_provider_shared_and_settings_loader_use_physical_owners -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+Direct production scan for `#[path =`, `module_inception`,
+`providers::provider`, `providers::retry`, `providers::sse`,
+`providers::stream_common`, `providers::stream_pipeline`, `settings::loader`,
+`profile::loader`, and `orchestrator::orchestrator` returned no hits under
+`packages/agent/src`.
+
+## AHA-6 Verification
+
+Rust progressive docs and near-budget guard cleanup:
+
+- Added a static gate requiring progressive docs on the ownership roots touched
+  by AHA-5: orchestrator root/core, provider root/shared, settings profile, and
+  settings profile storage.
+- Added an AHA scorecard 850 LOC watchlist for provider factory, engine catalog
+  registry, ledger, queue, invocation host, external workers, and engine socket.
+- Updated HRA scorecard/evidence wording so completed HRA no longer claims live
+  over-900 temporary Rust budgets. The HRA 900 LOC hard limit remains enforced;
+  the AHA 850 LOC band is an earlier warning/review trigger.
+
+Proof:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants rust_near_budget_files_have_explicit_warning_rows -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants rust_ownership_roots_have_progressive_docs -- --nocapture
+```
+
+Result: exit 0, 1 passed.

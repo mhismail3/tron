@@ -16,7 +16,7 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
 use crate::domains::agent::r#loop::types::StreamResult;
-use crate::domains::model::providers::provider::{ProviderError, StreamEventStream};
+use crate::domains::model::providers::shared::provider::{ProviderError, StreamEventStream};
 use crate::engine::{InvocationId, TraceId};
 
 use super::stream_state::{StreamAction, StreamState, StreamTraceContext};

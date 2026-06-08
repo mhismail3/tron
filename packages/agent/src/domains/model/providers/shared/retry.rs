@@ -22,7 +22,7 @@ use crate::shared::protocol::events::{RetryErrorInfo, StreamEvent};
 use futures::Stream;
 use tokio_util::sync::CancellationToken;
 
-use crate::domains::model::providers::provider::{ProviderError, StreamEventStream};
+use crate::domains::model::providers::shared::provider::{ProviderError, StreamEventStream};
 
 /// Configuration for stream retry behavior.
 #[derive(Clone, Debug)]

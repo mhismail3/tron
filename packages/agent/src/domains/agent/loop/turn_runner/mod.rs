@@ -17,8 +17,8 @@ use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 
 use crate::domains::agent::context::context_manager::ContextManager;
-use crate::domains::model::providers::ProviderHealthTracker;
-use crate::domains::model::providers::provider::Provider;
+use crate::domains::model::providers::shared::ProviderHealthTracker;
+use crate::domains::model::providers::shared::provider::Provider;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 
 use metrics::{counter, histogram};

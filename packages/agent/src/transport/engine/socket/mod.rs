@@ -3,7 +3,7 @@
 //! This module owns only WebSocket framing, protocol validation, correlation
 //! ids, heartbeat, and stream cursor subscription state. Worker/client
 //! discover/inspect/watch/invoke/promote messages are translated into
-//! [`EngineTransportRequest`] and then dispatched through the canonical engine
+//! [`crate::transport::engine::EngineTransportRequest`] and then dispatched through the canonical engine
 //! transport path. Model providers do not receive this transport surface; they
 //! receive only the capability-domain `execute` orchestrator.
 

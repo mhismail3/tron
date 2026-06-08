@@ -136,7 +136,7 @@ fn check_database(pool: &crate::domains::session::event_store::ConnectionPool) -
 }
 
 fn check_settings(path: &Path) -> DeepHealthCheck {
-    match crate::domains::settings::load_settings_from_path(path) {
+    match crate::domains::settings::profile::storage::loader::load_settings_from_path(path) {
         Ok(_) => DeepHealthCheck {
             name: "settings".into(),
             status: "ok".into(),

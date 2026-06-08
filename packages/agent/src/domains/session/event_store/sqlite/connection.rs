@@ -1,7 +1,7 @@
 //! `SQLite` connection pool with WAL mode and foreign keys enabled.
 //!
 //! Uses `r2d2` connection pooling with `r2d2_sqlite` backend.
-//! The [`PragmaCustomizer`] runs on each new connection to ensure
+//! The connection customizer runs on each new connection to ensure
 //! WAL mode, foreign keys, and performance pragmas are set.
 
 use r2d2::Pool;

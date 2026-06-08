@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::retry::StreamRetryConfig;
+use crate::domains::model::providers::shared::retry::StreamRetryConfig;
 use crate::domains::model::routing::models::model_ids::{GEMMA4_26B, GEMMA4_E4B};
 
 /// Default base URL for the Ollama API.

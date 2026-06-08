@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::pin::Pin;
 
 use super::super::stream_state::{build_message, finalize_capability_invocation};
-use crate::domains::model::providers::provider::ProviderError;
+use crate::domains::model::providers::shared::provider::ProviderError;
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, RetryErrorInfo, StreamEvent, TronEvent};
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};

@@ -1,6 +1,6 @@
 //! Domain-specific dependency bundle for the agent worker.
 
-use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::session::event_store::EventStore;
@@ -11,7 +11,7 @@ pub(crate) struct Deps {
     pub(super) agent_deps: Option<crate::shared::server::context::AgentDeps>,
     pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) event_store: Arc<EventStore>,
-    pub(super) health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
+    pub(super) health_tracker: Arc<crate::domains::model::providers::shared::ProviderHealthTracker>,
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) origin: String,
     pub(super) session_manager: Arc<SessionManager>,

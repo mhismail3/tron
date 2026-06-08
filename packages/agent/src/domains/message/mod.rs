@@ -3,7 +3,7 @@
 //! This module owns the small message namespace end-to-end: contract metadata,
 //! registration dependencies, handler binding, and operation execution.
 
-use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;

@@ -23,9 +23,9 @@ use base64::Engine as _;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tracing::{debug, error, info, instrument};
 
-use crate::domains::model::providers::compose_context_parts;
-use crate::domains::model::providers::provider::ReasoningEffort;
-use crate::domains::model::providers::provider::{
+use crate::domains::model::providers::shared::compose_context_parts;
+use crate::domains::model::providers::shared::provider::ReasoningEffort;
+use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
@@ -57,8 +57,8 @@ const TOKEN_EXPIRY_BUFFER_MS: i64 = 300 * 1000;
 ///
 /// `OpenAI` uses an explicit `[DONE]` marker, so we don't need to process
 /// remaining buffer content when the stream ends.
-static SSE_OPTIONS: crate::domains::model::providers::SseParserOptions =
-    crate::domains::model::providers::SseParserOptions {
+static SSE_OPTIONS: crate::domains::model::providers::shared::SseParserOptions =
+    crate::domains::model::providers::shared::SseParserOptions {
         process_remaining_buffer: false,
     };
 
@@ -546,7 +546,7 @@ impl OpenAIProvider {
                 .and_then(|v| v.to_str().ok())
                 .and_then(crate::shared::foundation::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
-            let err_info = crate::domains::model::providers::error_parsing::parse_api_error(
+            let err_info = crate::domains::model::providers::shared::error_parsing::parse_api_error(
                 &body_text,
                 status.as_u16(),
             );
@@ -572,7 +572,7 @@ impl OpenAIProvider {
         }
 
         Ok(
-            crate::domains::model::providers::stream_pipeline::sse_to_event_stream::<
+            crate::domains::model::providers::shared::stream_pipeline::sse_to_event_stream::<
                 ResponsesSseEvent,
                 _,
                 _,
@@ -623,7 +623,7 @@ impl Provider for OpenAIProvider {
     ) -> ProviderResult<StreamEventStream> {
         debug!(message_count = context.messages.len(), "starting stream");
         self.ensure_valid_tokens().await?;
-        crate::domains::model::providers::stream_pipeline::wrap_provider_stream(
+        crate::domains::model::providers::shared::stream_pipeline::wrap_provider_stream(
             "openai",
             self.stream_internal(context, options).await,
         )
@@ -635,5 +635,4 @@ impl Provider for OpenAIProvider {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[path = "provider_tests.rs"]
 mod tests;

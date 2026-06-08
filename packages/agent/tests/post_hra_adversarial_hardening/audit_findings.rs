@@ -239,6 +239,39 @@ fn rust_near_budget_files_have_explicit_warning_rows() {
 }
 
 #[test]
+fn rust_ownership_roots_have_progressive_docs() {
+    let required_docs = [
+        "packages/agent/src/domains/agent/loop/orchestrator/mod.rs",
+        "packages/agent/src/domains/agent/loop/orchestrator/core/mod.rs",
+        "packages/agent/src/domains/model/providers/mod.rs",
+        "packages/agent/src/domains/model/providers/shared/mod.rs",
+        "packages/agent/src/domains/settings/profile/mod.rs",
+        "packages/agent/src/domains/settings/profile/storage/mod.rs",
+    ];
+
+    let mut missing_sections = Vec::new();
+    for file in required_docs {
+        let source = read_repo_file(file);
+        for section in [
+            "## Submodules",
+            "## Entry Points",
+            "## Dependency Direction",
+            "## Invariants",
+            "## Test Ownership",
+        ] {
+            if !source.contains(section) {
+                missing_sections.push(format!("{file} missing {section}"));
+            }
+        }
+    }
+
+    assert_no_hits(
+        "ownership-critical Rust roots must carry progressive docs",
+        missing_sections,
+    );
+}
+
+#[test]
 fn ios_engine_clients_have_no_misc_facade() {
     let mut hits = Vec::new();
     for file in list_tracked_files_with_extension("swift") {

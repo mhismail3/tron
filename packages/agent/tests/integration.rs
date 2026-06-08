@@ -18,7 +18,7 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tron::app::bootstrap::config::ServerConfig;
 use tron::app::bootstrap::server::TronServer;
 use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
-use tron::domains::model::providers::ProviderHealthTracker;
+use tron::domains::model::providers::shared::ProviderHealthTracker;
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
 use tron::shared::protocol::model_capabilities::CapabilityResult;
 use tron::shared::server::context::ServerRuntimeContext;
@@ -62,7 +62,8 @@ async fn boot_server() -> TestServer {
         .join(tron::shared::foundation::paths::dirs::PROFILES)
         .join(tron::shared::foundation::paths::files::AUTH_JSON);
     let settings =
-        tron::domains::settings::load_settings_from_path(&settings_path).expect("settings load");
+        tron::domains::settings::profile::storage::loader::load_settings_from_path(&settings_path)
+            .expect("settings load");
     tron::domains::settings::init_settings(settings);
 
     let runtime_context = ServerRuntimeContext {

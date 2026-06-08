@@ -6,7 +6,7 @@ use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::agent::context::types::ContextManagerConfig;
 use crate::domains::agent::r#loop::tron_agent::{AgentDeps, TronAgent};
 use crate::domains::agent::r#loop::types::AgentConfig;
-use crate::domains::model::providers::provider::Provider;
+use crate::domains::model::providers::shared::provider::Provider;
 use crate::shared::protocol::messages::Message;
 
 pub struct CreateAgentOpts {
@@ -75,7 +75,7 @@ impl AgentFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::model::providers::provider::{
+    use crate::domains::model::providers::shared::provider::{
         Provider, ProviderError, ProviderStreamOptions, StreamEventStream,
     };
     use crate::domains::model::routing::models::types::Provider as ProviderKind;

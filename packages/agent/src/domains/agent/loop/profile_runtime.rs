@@ -223,7 +223,7 @@ fn load_harness_spec(home: &Path) -> std::io::Result<ResolvedHarnessSpec> {
 
 fn effective_settings(settings: &TronSettings) -> std::io::Result<TronSettings> {
     let mut settings = settings.clone();
-    crate::domains::settings::loader::apply_env_overrides(&mut settings);
+    crate::domains::settings::profile::storage::loader::apply_env_overrides(&mut settings);
     settings.validate();
     settings.validate_strict().map_err(|error| {
         std::io::Error::new(

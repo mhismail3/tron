@@ -11,7 +11,7 @@
 
 use tracing::{debug, warn};
 
-use crate::domains::model::providers::stream_common::StreamAccumulator;
+use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
 use crate::shared::protocol::messages::TokenUsage;

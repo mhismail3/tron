@@ -589,6 +589,6 @@ fn large_files_have_decomposition_budget_rows() {
 
     assert!(
         missing_budget_rows.is_empty(),
-        "over-budget files need explicit owner, reason, and decomposition or temporary budget rows: {missing_budget_rows:#?}"
+        "over-budget files need explicit owner, reason, and decomposition rows: {missing_budget_rows:#?}"
     );
 }

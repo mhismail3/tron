@@ -652,5 +652,4 @@ pub fn has_error_code(error: &TronError, code: &str) -> bool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[path = "tests.rs"]
 mod tests;

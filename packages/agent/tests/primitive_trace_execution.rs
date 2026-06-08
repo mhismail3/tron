@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
-use tron::domains::model::providers::ProviderHealthTracker;
+use tron::domains::model::providers::shared::ProviderHealthTracker;
 use tron::domains::session::event_store::{
     AgentTraceListOptions, ConnectionConfig, EventStore, new_file, run_migrations,
 };
@@ -57,7 +57,8 @@ fn test_runtime() -> TestRuntime {
         .join(tron::shared::foundation::paths::files::AUTH_JSON);
     let profile_runtime = Arc::new(ProfileRuntime::load(&home).unwrap());
     let settings =
-        tron::domains::settings::load_settings_from_path(&settings_path).expect("settings load");
+        tron::domains::settings::profile::storage::loader::load_settings_from_path(&settings_path)
+            .expect("settings load");
     tron::domains::settings::init_settings(settings);
 
     let ctx = ServerRuntimeContext {

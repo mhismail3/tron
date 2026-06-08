@@ -2,7 +2,7 @@
 
 Status: `completed`
 
-Generated from the live checkout after HRA-16. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs.
+Generated from the live checkout after HRA-16, then refreshed during AHA-6 to keep the current ownership TSVs aligned with the post-HRA Rust module cleanup. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -35,9 +35,9 @@ current_path	target_path	owner	phase	classification	status	reason
 
 | Metric | Count |
 | --- | --- |
-| Tracked files after HRA-16 staged additions | 1375 |
-| Files under `packages/agent/src` | 522 |
-| Files under `packages/agent/tests` | 28 |
+| Tracked files after AHA-6 staged additions | 1384 |
+| Files under `packages/agent/src` | 524 |
+| Files under `packages/agent/tests` | 33 |
 | Files under `packages/ios-app/Sources` | 414 |
 | Files under `packages/ios-app/Tests` | 205 |
 | Files under `packages/mac-app/Sources` | 74 |
@@ -48,37 +48,38 @@ current_path	target_path	owner	phase	classification	status	reason
 | Extension | Count |
 | --- | --- |
 | .swift | 654 |
-| .rs | 549 |
-| .md | 22 |
-| .json | 20 |
-| .png | 20 |
+| .rs | 556 |
+| .md | 24 |
 | .ttf | 20 |
+| .png | 20 |
+| .json | 20 |
 | .sh | 12 |
 | .toml | 10 |
 | .svg | 9 |
 | .yml | 9 |
 | .plist | 7 |
 | .xcconfig | 7 |
-| [none] | 10 |
+| [none] | 7 |
 | .entitlements | 6 |
 | .icns | 4 |
 | .tsv | 4 |
 | .xcscheme | 3 |
+| .gitignore | 3 |
 | .lock | 2 |
-| .env | 1 |
-| .mjs | 1 |
-| .pbxproj | 1 |
-| .py | 1 |
-| .sql | 1 |
-| .xcprivacy | 1 |
 | .xcworkspacedata | 1 |
+| .xcprivacy | 1 |
+| .sql | 1 |
+| .py | 1 |
+| .pbxproj | 1 |
+| .mjs | 1 |
+| .env | 1 |
 
 ## Package Counts
 
 | Package | Count |
 | --- | --- |
 | ios-app | 643 |
-| agent | 576 |
+| agent | 585 |
 | mac-app | 119 |
 | scripts | 22 |
 | github | 8 |

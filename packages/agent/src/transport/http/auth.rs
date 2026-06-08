@@ -22,7 +22,7 @@
 //!
 //! ## Constant-time comparison
 //!
-//! [`tokens_eq`] compares the candidate against the canonical token in
+//! `tokens_eq` compares the candidate against the canonical token in
 //! constant time. The token is a 43-character URL-safe base64 string, so
 //! length differs only when the client is sending obvious garbage; we
 //! still avoid early-exit on byte mismatch to defeat timing oracles.

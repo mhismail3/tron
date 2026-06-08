@@ -14,8 +14,8 @@ pub(super) struct BuiltPromptAgent {
 }
 
 pub(super) async fn build_prompt_agent(
-    provider_factory: Arc<dyn crate::domains::model::providers::provider::ProviderFactory>,
-    health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
+    provider_factory: Arc<dyn crate::domains::model::providers::shared::provider::ProviderFactory>,
+    health_tracker: Arc<crate::domains::model::providers::shared::ProviderHealthTracker>,
     engine_host: crate::engine::EngineHostHandle,
     broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
     settings: &crate::domains::settings::TronSettings,

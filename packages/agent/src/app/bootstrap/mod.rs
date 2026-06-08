@@ -18,7 +18,7 @@ use crate::app::bootstrap::server::TronServer;
 use crate::app::cli::{Cli, run_subcommand};
 use crate::domains::agent::r#loop::{Orchestrator, SessionManager, recover_incomplete_turns};
 use crate::domains::model::providers::factory as provider_factory;
-use crate::domains::model::providers::provider::ProviderFactory;
+use crate::domains::model::providers::shared::provider::ProviderFactory;
 use crate::domains::session::event_store::{ConnectionConfig, EventStore};
 use crate::domains::settings::db_path_policy::resolve_production_db_path;
 use crate::shared::server::context::{
@@ -107,7 +107,7 @@ pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
 
 /// Resolve the auth file path (`~/.tron/profiles/auth.json`).
 pub(crate) fn auth_path() -> PathBuf {
-    crate::domains::settings::loader::auth_path()
+    crate::domains::settings::profile::storage::loader::auth_path()
 }
 
 /// Ensure `~/.tron/` has the primitive Tron Home layout.
@@ -315,7 +315,9 @@ fn build_server_runtime_context(
         profile_runtime,
         agent_deps: services.agent_deps,
         server_start_time: std::time::Instant::now(),
-        health_tracker: Arc::new(crate::domains::model::providers::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(
+            crate::domains::model::providers::shared::ProviderHealthTracker::new(),
+        ),
         shutdown_coordinator: None,
         origin,
         auth_path: auth_path(),
@@ -378,7 +380,7 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
         )
         .context("Failed to load active profile runtime")?,
     );
-    let settings_path = crate::domains::settings::loader::settings_path();
+    let settings_path = crate::domains::settings::profile::storage::loader::settings_path();
     let settings = profile_runtime.current().settings.clone();
     crate::domains::settings::init_settings(settings.clone());
     let origin = format!("localhost:{}", args.port);

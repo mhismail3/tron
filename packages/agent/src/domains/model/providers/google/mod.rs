@@ -10,7 +10,7 @@
 //!
 //! | Module                | Content |
 //! |-----------------------|---------|
-//! | [`provider`]          | [`GoogleProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::provider`]); stream orchestration, retry, and tool translation |
+//! | [`provider`]          | [`GoogleProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::shared::provider`]); stream orchestration, retry, and tool translation |
 //! | [`message_converter`] | `Vec<Message>` → Gemini `contents` array; handles capability invocations, capability results, and multimodal parts |
 //! | [`stream_handler`]    | Gemini SSE `v1beta/{model}:streamGenerateContent` → `StreamEvent` sequence ([`crate::shared::protocol::events`]) |
 //! | [`types`]             | [`GoogleAuth`] (API key), [`GoogleConfig`] (model + generation parameters) |
@@ -19,7 +19,7 @@
 //!
 //! - [`GoogleProvider`] — the Google provider payload behind the shared
 //!   provider enum
-//! - [`GoogleAuth`], [`GoogleConfig`] — consumed by [`crate::domains::model::providers::auth`]
+//! - [`GoogleAuth`], [`GoogleConfig`] — consumed by provider construction
 //!
 //! ## Invariants
 //!
@@ -27,7 +27,7 @@
 //!   serialises only the documented schema. Adding a request feature
 //!   requires editing both converter and the Gemini API docs reference.
 //! - Streaming errors map to `ProviderError`
-//!   ([`crate::domains::model::providers::provider`]) before reaching the orchestrator;
+//!   ([`crate::domains::model::providers::shared::provider`]) before reaching the orchestrator;
 //!   provider-specific wire errors never leak past [`stream_handler`].
 
 pub mod message_converter;

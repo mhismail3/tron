@@ -20,7 +20,7 @@ fn rust_hra7_has_no_remaining_overbudget_rust_files() {
 
     assert!(
         over_budget.is_empty(),
-        "HRA-7 must replace temporary Rust budget rows with real decomposition: {over_budget:#?}"
+        "HRA-7 hard Rust limit remains 900 LOC; AHA-6 tracks the earlier 850 LOC warning band: {over_budget:#?}"
     );
 }
 

@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::retry::StreamRetryConfig;
+use crate::domains::model::providers::shared::retry::StreamRetryConfig;
 use crate::domains::model::routing::models::model_ids::{
     KIMI_K2_5, KIMI_K2_0711_PREVIEW, KIMI_K2_0905_PREVIEW, KIMI_K2_THINKING,
     KIMI_K2_THINKING_TURBO, KIMI_K2_TURBO_PREVIEW, MOONSHOT_V1_8K, MOONSHOT_V1_32K,

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 pub enum RuntimeError {
     /// LLM provider error (streaming, auth, rate limit).
     #[error("Provider error: {0}")]
-    Provider(#[from] crate::domains::model::providers::provider::ProviderError),
+    Provider(#[from] crate::domains::model::providers::shared::provider::ProviderError),
 
     /// Capability invocation error.
     #[error("Capability error: {model_primitive_name}: {message}")]

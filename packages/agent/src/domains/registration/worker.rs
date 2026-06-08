@@ -11,7 +11,7 @@ use std::sync::atomic::AtomicU16;
 use std::time::Instant;
 
 use crate::app::lifecycle::shutdown::ShutdownCoordinator;
-use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
 use crate::domains::agent::r#loop::profile_runtime::ProfileRuntime;
 use crate::domains::registration::catalog;
@@ -26,7 +26,7 @@ pub(crate) struct DomainRegistrationContext {
     pub(crate) event_store: Arc<EventStore>,
     pub(crate) agent_deps: Option<AgentDeps>,
     pub(crate) profile_runtime: Arc<ProfileRuntime>,
-    pub(crate) health_tracker: Arc<crate::domains::model::providers::ProviderHealthTracker>,
+    pub(crate) health_tracker: Arc<crate::domains::model::providers::shared::ProviderHealthTracker>,
     pub(crate) shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     pub(crate) origin: String,
     pub(crate) server_start_time: Instant,

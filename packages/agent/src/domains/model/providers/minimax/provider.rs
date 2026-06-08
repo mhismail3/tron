@@ -17,7 +17,7 @@ use crate::domains::model::providers::anthropic::stream_handler::{
 use crate::domains::model::providers::anthropic::types::{
     AnthropicMessageParam, AnthropicRequest, AnthropicSseEvent, AnthropicTool, CacheControl,
 };
-use crate::domains::model::providers::provider::{
+use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
@@ -30,8 +30,8 @@ use super::types::{
 const API_VERSION: &str = "2023-06-01";
 
 /// Default SSE parser options.
-static SSE_OPTIONS: crate::domains::model::providers::SseParserOptions =
-    crate::domains::model::providers::SseParserOptions {
+static SSE_OPTIONS: crate::domains::model::providers::shared::SseParserOptions =
+    crate::domains::model::providers::shared::SseParserOptions {
         process_remaining_buffer: true,
     };
 
@@ -257,7 +257,7 @@ impl MiniMaxProvider {
                 .and_then(|v| v.to_str().ok())
                 .and_then(crate::shared::foundation::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
-            let err_info = crate::domains::model::providers::error_parsing::parse_api_error(
+            let err_info = crate::domains::model::providers::shared::error_parsing::parse_api_error(
                 &body_text,
                 status.as_u16(),
             );
@@ -282,7 +282,7 @@ impl MiniMaxProvider {
         }
 
         Ok(
-            crate::domains::model::providers::stream_pipeline::sse_to_event_stream::<
+            crate::domains::model::providers::shared::stream_pipeline::sse_to_event_stream::<
                 AnthropicSseEvent,
                 _,
                 _,
@@ -326,7 +326,7 @@ impl Provider for MiniMaxProvider {
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
         debug!(message_count = context.messages.len(), "starting stream");
-        crate::domains::model::providers::stream_pipeline::wrap_provider_stream(
+        crate::domains::model::providers::shared::stream_pipeline::wrap_provider_stream(
             "minimax",
             self.stream_internal(context, options).await,
         )
@@ -609,5 +609,5 @@ mod tests {
         assert_eq!(messages[0].content.len(), 1);
     }
 
-    // ── parse_api_error (via shared crate::domains::model::providers::error_parsing) ─────────────
+    // ── parse_api_error (via shared crate::domains::model::providers::shared::error_parsing) ─────────────
 }

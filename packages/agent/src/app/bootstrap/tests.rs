@@ -4,7 +4,7 @@ use crate::app::bootstrap::server::TronServer;
 use crate::app::cli::{AuthAction, Command};
 use crate::domains::agent::r#loop::{Orchestrator, SessionManager};
 use crate::domains::model::providers::factory as provider_factory;
-use crate::domains::model::providers::provider::ProviderFactory;
+use crate::domains::model::providers::shared::provider::ProviderFactory;
 use crate::domains::session::event_store::{ConnectionConfig, EventStore};
 use crate::domains::settings::TronSettings;
 use crate::domains::settings::db_path_policy::{
@@ -188,7 +188,9 @@ async fn factory_unknown_model_returns_unsupported_model_error() {
     let result = factory.create_for_model("unknown-model").await;
     assert!(matches!(
         result,
-        Err(crate::domains::model::providers::provider::ProviderError::UnsupportedModel { .. })
+        Err(
+            crate::domains::model::providers::shared::provider::ProviderError::UnsupportedModel { .. }
+        )
     ));
 }
 
@@ -467,7 +469,9 @@ async fn server_boots_and_responds() {
         settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
-        health_tracker: Arc::new(crate::domains::model::providers::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(
+            crate::domains::model::providers::shared::ProviderHealthTracker::new(),
+        ),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),
@@ -651,7 +655,9 @@ async fn server_graceful_shutdown() {
         settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
-        health_tracker: Arc::new(crate::domains::model::providers::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(
+            crate::domains::model::providers::shared::ProviderHealthTracker::new(),
+        ),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),

@@ -105,7 +105,7 @@ mod tests {
     use crate::domains::agent::context::context_manager::ContextManager;
     use crate::domains::agent::context::types::ContextManagerConfig;
     use crate::domains::agent::r#loop::errors::StopReason;
-    use crate::domains::model::providers::provider::{
+    use crate::domains::model::providers::shared::provider::{
         ProviderError, ProviderStreamOptions, StreamEventStream,
     };
     use crate::domains::model::routing::models::types::Provider;
@@ -120,7 +120,7 @@ mod tests {
 
     struct MockProvider;
     #[async_trait]
-    impl crate::domains::model::providers::provider::Provider for MockProvider {
+    impl crate::domains::model::providers::shared::provider::Provider for MockProvider {
         fn provider_type(&self) -> Provider {
             Provider::Anthropic
         }
@@ -179,7 +179,7 @@ mod tests {
     }
 
     fn make_agent_with_provider(
-        provider: Arc<dyn crate::domains::model::providers::provider::Provider>,
+        provider: Arc<dyn crate::domains::model::providers::shared::provider::Provider>,
     ) -> (TronAgent, JournalCleanup) {
         let session_id = unique_test_session_id();
         let cleanup = JournalCleanup::new(&session_id);
@@ -290,7 +290,7 @@ mod tests {
     async fn run_agent_error_still_emits_ready() {
         struct ErrorProvider;
         #[async_trait]
-        impl crate::domains::model::providers::provider::Provider for ErrorProvider {
+        impl crate::domains::model::providers::shared::provider::Provider for ErrorProvider {
             fn provider_type(&self) -> Provider {
                 Provider::Anthropic
             }
@@ -331,7 +331,7 @@ mod tests {
         // Use a multi-turn provider to generate many events
         struct MultiEventProvider;
         #[async_trait]
-        impl crate::domains::model::providers::provider::Provider for MultiEventProvider {
+        impl crate::domains::model::providers::shared::provider::Provider for MultiEventProvider {
             fn provider_type(&self) -> Provider {
                 Provider::Anthropic
             }

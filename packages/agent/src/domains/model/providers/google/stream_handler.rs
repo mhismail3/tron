@@ -11,7 +11,7 @@
 use std::collections::HashSet;
 
 use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
-use crate::domains::model::providers::stream_common::StreamAccumulator;
+use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};

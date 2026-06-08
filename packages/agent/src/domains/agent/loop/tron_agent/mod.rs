@@ -11,7 +11,7 @@ use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::turn_runner;
 use crate::domains::agent::r#loop::types::{AgentConfig, RunContext, RunResult};
-use crate::domains::model::providers::provider::Provider;
+use crate::domains::model::providers::shared::provider::Provider;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::protocol::messages::{Message, TokenUsage, UserMessageContent};
 use tokio::sync::broadcast;

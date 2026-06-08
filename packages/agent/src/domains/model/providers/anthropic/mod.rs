@@ -9,7 +9,7 @@
 //!
 //! | Module                 | Content |
 //! |------------------------|---------|
-//! | [`provider`]           | [`AnthropicProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::provider`]); stream orchestration, retry, caching |
+//! | [`provider`]           | [`AnthropicProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::shared::provider`]); stream orchestration, retry, caching |
 //! | [`message_converter`]  | `Vec<Message>` → `messages`+`system` blocks; Anthropic `tool_use` / `tool_result` provider blocks, thinking blocks, content-block ordering |
 //! | [`stream_handler`]     | Anthropic SSE (`message_start`, `content_block_*`, `message_delta`, `message_stop`) → `StreamEvent` ([`crate::shared::protocol::events`]) |
 //! | [`cache_pruning`]      | Remove the oldest `cache_control` marker(s) when the 4-breakpoint cap is hit; preserves the system prompt marker |
@@ -20,7 +20,7 @@
 //!
 //! - [`AnthropicProvider`] — the Anthropic provider payload behind the
 //!   shared provider enum
-//! - [`AnthropicAuth`] — used by [`crate::domains::model::providers::auth`] to select an active credential
+//! - [`AnthropicAuth`] — used by provider construction to select an active credential
 //! - [`AnthropicProviderSettings`] — user-facing overrides plumbed from settings
 //!
 //! ## Invariants

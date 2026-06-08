@@ -17,7 +17,7 @@
 use std::collections::{HashMap, HashSet};
 
 use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
-use crate::domains::model::providers::stream_common::StreamAccumulator;
+use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
 use crate::domains::model::providers::{
     CapabilityArgumentParseError, CapabilityCallContext, parse_capability_call_arguments,
 };

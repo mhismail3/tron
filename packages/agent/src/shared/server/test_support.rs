@@ -13,9 +13,9 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 
-use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::model::providers::provider::{
+use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
 };
 use crate::domains::model::routing::models::types::Provider as ProviderKind;
@@ -155,8 +155,9 @@ pub fn make_test_context() -> ServerRuntimeContext {
     let settings_path = test_user_profile_path(&home);
     let auth_path = test_auth_path(&home);
     let profile_runtime = test_profile_runtime(&home);
-    let settings = crate::domains::settings::load_settings_from_path(&settings_path)
-        .expect("test profile settings should load from isolated Tron home");
+    let settings =
+        crate::domains::settings::profile::storage::loader::load_settings_from_path(&settings_path)
+            .expect("test profile settings should load from isolated Tron home");
     crate::domains::settings::init_settings(settings);
     let ctx = ServerRuntimeContext {
         orchestrator: orch,
@@ -167,7 +168,9 @@ pub fn make_test_context() -> ServerRuntimeContext {
         profile_runtime,
         agent_deps: None,
         server_start_time: Instant::now(),
-        health_tracker: Arc::new(crate::domains::model::providers::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(
+            crate::domains::model::providers::shared::ProviderHealthTracker::new(),
+        ),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         auth_path,

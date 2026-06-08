@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::domains::agent::r#loop::orchestrator::orchestrator::StartedRun;
+use crate::domains::agent::r#loop::orchestrator::core::StartedRun;
 
 pub(super) struct PromptRunCleanup {
     session_manager:

@@ -5,10 +5,10 @@ use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::domains::agent::r#loop::orchestrator::orchestrator::Orchestrator;
+use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::model::providers::ProviderHealthTracker;
-use crate::domains::model::providers::provider::ProviderFactory;
+use crate::domains::model::providers::shared::ProviderHealthTracker;
+use crate::domains::model::providers::shared::provider::ProviderFactory;
 use crate::domains::session::event_store::EventStore;
 use crate::engine::EngineHostHandle;
 use metrics::{counter, histogram};

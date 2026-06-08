@@ -10,7 +10,7 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, info, instrument};
 
-use crate::domains::model::providers::provider::{
+use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
@@ -31,8 +31,8 @@ use super::types::{
 const DEFAULT_BASE_URL: &str = "https://api.anthropic.com";
 
 /// Default SSE parser options.
-static SSE_OPTIONS: crate::domains::model::providers::SseParserOptions =
-    crate::domains::model::providers::SseParserOptions {
+static SSE_OPTIONS: crate::domains::model::providers::shared::SseParserOptions =
+    crate::domains::model::providers::shared::SseParserOptions {
         process_remaining_buffer: true,
     };
 
@@ -341,7 +341,7 @@ impl AnthropicProvider {
                 .and_then(|v| v.to_str().ok())
                 .and_then(crate::shared::foundation::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
-            let err_info = crate::domains::model::providers::error_parsing::parse_api_error(
+            let err_info = crate::domains::model::providers::shared::error_parsing::parse_api_error(
                 &body_text,
                 status.as_u16(),
             );
@@ -366,7 +366,7 @@ impl AnthropicProvider {
         }
 
         Ok(
-            crate::domains::model::providers::stream_pipeline::sse_to_event_stream::<
+            crate::domains::model::providers::shared::stream_pipeline::sse_to_event_stream::<
                 AnthropicSseEvent,
                 _,
                 _,
@@ -418,7 +418,7 @@ impl Provider for AnthropicProvider {
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
         debug!(message_count = context.messages.len(), "starting stream");
-        crate::domains::model::providers::stream_pipeline::wrap_provider_stream(
+        crate::domains::model::providers::shared::stream_pipeline::wrap_provider_stream(
             "anthropic",
             self.stream_internal(context, options).await,
         )

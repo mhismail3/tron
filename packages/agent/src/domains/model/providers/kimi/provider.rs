@@ -8,8 +8,8 @@ use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use serde_json::{Value, json};
 use tracing::{debug, error, instrument};
 
-use crate::domains::model::providers::compose_context_parts;
-use crate::domains::model::providers::provider::{
+use crate::domains::model::providers::shared::compose_context_parts;
+use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
@@ -21,8 +21,8 @@ use super::types::{
 };
 
 /// SSE parser options — Kimi uses `[DONE]` marker, no remaining buffer processing.
-static SSE_OPTIONS: crate::domains::model::providers::SseParserOptions =
-    crate::domains::model::providers::SseParserOptions {
+static SSE_OPTIONS: crate::domains::model::providers::shared::SseParserOptions =
+    crate::domains::model::providers::shared::SseParserOptions {
         process_remaining_buffer: false,
     };
 
@@ -188,7 +188,7 @@ impl KimiProvider {
                 .and_then(|v| v.to_str().ok())
                 .and_then(crate::shared::foundation::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
-            let err_info = crate::domains::model::providers::error_parsing::parse_api_error(
+            let err_info = crate::domains::model::providers::shared::error_parsing::parse_api_error(
                 &body_text,
                 status.as_u16(),
             );
@@ -213,7 +213,7 @@ impl KimiProvider {
         }
 
         Ok(
-            crate::domains::model::providers::stream_pipeline::sse_to_event_stream::<
+            crate::domains::model::providers::shared::stream_pipeline::sse_to_event_stream::<
                 ChatCompletionChunk,
                 KimiStreamState,
                 _,
@@ -252,7 +252,7 @@ impl Provider for KimiProvider {
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream> {
         debug!(message_count = context.messages.len(), "starting stream");
-        crate::domains::model::providers::stream_pipeline::wrap_provider_stream(
+        crate::domains::model::providers::shared::stream_pipeline::wrap_provider_stream(
             "kimi",
             self.stream_internal(context, options).await,
         )

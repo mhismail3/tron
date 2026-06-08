@@ -26,27 +26,57 @@
 //! println!("Default model: {}", settings.server.default_model);
 //! ```
 //!
-//! ## Module Position
+//! ## Submodules
+//!
+//! | Module | Purpose |
+//! |--------|---------|
+//! | [`storage`] | Profile file paths, default seeding, sparse overlay loading, and deep merge |
+//! | [`store`] | Atomic sparse settings writes and runtime reloads |
+//! | [`types`] | Server settings schema mirrored by iOS |
+//! | `operations` | Canonical settings capability operations |
+//! | [`db_path_policy`] | Database path guardrails |
+//! | [`errors`] | Settings error hierarchy |
+//!
+//! ## Entry Points
+//!
+//! - [`get_settings`] returns the lock-free global settings snapshot.
+//! - [`reload_settings_from_path`] reloads the runtime cache after sparse
+//!   profile writes.
+//! - [`SettingsStore`] owns strict settings persistence.
+//!
+//! ## Dependency Direction
 //!
 //! Depends on: core foundation paths and profile defaults.
 //! Depended on by: domain registration, profile runtime, transport handlers, and iOS settings sync.
+//! Loader-specific filesystem work stays under [`storage::loader`]; this root
+//! exposes no loader compatibility facade.
+//!
+//! ## Invariants
+//!
+//! - Server settings are authoritative and sparse user overrides stay in
+//!   `profiles/user/profile.toml`.
+//! - Malformed settings fail fast instead of being silently repaired.
+//! - The global settings cache swaps atomically so readers hold consistent
+//!   snapshots.
+//!
+//! ## Test Ownership
+//!
+//! Loader tests live in [`storage::loader`], persistence tests live in
+//! [`store`], and schema/default tests live in [`types`].
 
 #![deny(unsafe_code)]
 
 pub mod db_path_policy;
 pub mod errors;
-#[path = "storage/loader.rs"]
-pub mod loader;
 pub(crate) mod operations;
+pub mod storage;
 pub mod store;
 pub mod types;
 
 pub use errors::{Result, SettingsError};
-pub use loader::{
-    deep_merge, load_settings, load_settings_defaults_for, load_settings_from_path,
-    seed_settings_defaults, seed_settings_defaults_at, seed_settings_defaults_for_path,
-    settings_defaults_path, settings_path, tron_home_dir,
-};
+use storage::loader::load_settings_from_path;
+#[cfg(test)]
+use storage::loader::{deep_merge, settings_path};
 pub use store::SettingsStore;
 pub use types::*;
 
@@ -97,7 +127,7 @@ pub fn get_settings() -> Arc<TronSettings> {
     #[cfg(test)]
     let fresh = Arc::new(TronSettings::default());
     #[cfg(not(test))]
-    let fresh = Arc::new(load_settings().expect("failed to load settings"));
+    let fresh = Arc::new(storage::loader::load_settings().expect("failed to load settings"));
     slot.store(Some(Arc::clone(&fresh)));
     fresh
 }

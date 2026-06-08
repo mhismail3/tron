@@ -477,7 +477,7 @@ fn api_key_body_no_thinking_for_flash() {
     assert!(body["generationConfig"].get("thinkingConfig").is_none());
 }
 
-// ── parse_api_error (via shared crate::domains::model::providers::error_parsing) ─────────────
+// ── parse_api_error (via shared crate::domains::model::providers::shared::error_parsing) ─────────────
 
 // ── Token refresh (mock server) ──────────────────────────────────
 

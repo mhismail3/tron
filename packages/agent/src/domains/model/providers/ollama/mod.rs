@@ -24,7 +24,7 @@
 //! - [`types`] — Config, model registry, availability checking
 //! - [`message_converter`] — Tron messages → Ollama native `/api/chat` format
 //! - [`stream_handler`] — NDJSON chunk parsing → unified `StreamEvent`s ([`crate::shared::protocol::events`])
-//! - [`provider`] — `OllamaProvider` implementing the shared `Provider` trait ([`crate::domains::model::providers::provider`])
+//! - [`provider`] — `OllamaProvider` implementing the shared `Provider` trait ([`crate::domains::model::providers::shared::provider`])
 
 pub mod message_converter;
 pub mod provider;

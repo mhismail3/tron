@@ -1,6 +1,6 @@
 //! Test utilities for capturing and asserting on tracing events.
 //!
-//! Provides a [`TestSubscriber`] that captures tracing events in memory
+//! Provides an in-memory test subscriber layer that captures tracing events
 //! for assertions in tests.
 
 use std::sync::{Arc, Mutex};

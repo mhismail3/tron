@@ -1,6 +1,6 @@
 # Post-HRA Adversarial Hardening Scorecard
 
-Current score: **47/100**
+Current score: **63/100**
 
 Status: **active**
 
@@ -43,8 +43,8 @@ Total weight: **100**
 | AHA-2 | Deleted-doc and template residue | 10 | passed_after_fix | docs/templates owner | Live docs/templates/scorecards residue gate passes. PR template and contributor docs now point at `AGENTS.md`, stale active scorecard wording is completed/current, and historical helper-tree strings are redacted. | Closed; AHA-3 still owns workflow parity. |
 | AHA-3 | CI and static-gate parity | 12 | passed_after_fix | CI owner | GitHub CI now has an Ubuntu `rust-static-gates` job for docs/templates/iOS/Mac/script/CI changes, runs PET/PCC/HRA/AHA invariant targets, and the full Rust job invokes `scripts/tron ci test` so serial integration and trace targets match the local harness. `tron ci clippy` docs/help now describe the Cargo lint policy instead of a blanket `-D warnings` contract. | Closed; later phases may add more static gates but workflow parity is established. |
 | AHA-4 | Xcode project drift and Mac test execution | 8 | passed_after_fix | Apple CI owner | CI and release workflows fail on tracked iOS/Mac Xcode project drift after `xcodegen generate`. Mac CI keeps `build-for-testing` and adds focused `TronPathsTests`, `ServerStatusPollerTests`, and `TailscaleProbeTests` execution. | Closed; final closeout still reruns local XcodeGen drift checks and focused Mac tests. |
-| AHA-5 | Rust module ownership cleanup | 10 | pending | Rust architecture owner | Rust module ownership gate currently fails by design. | Remove production `#[path]` aliases, provider shared aliases, settings loader aliases, and module inception. |
-| AHA-6 | Rust progressive docs and near-budget guard | 6 | pending | Rust docs/tests owner | Rust near-budget gate currently fails by design. | Expand progressive docs gates and add 850 LOC warning rows for near-budget Rust files. |
+| AHA-5 | Rust module ownership cleanup | 10 | passed_after_fix | Rust architecture owner | Production `#[path]` aliases and module-inception allowances are removed. Provider shared helpers live under `providers::shared`, settings loader paths use `profile::storage::loader`, OpenAI provider tests use a normal folder module, and the orchestrator coordinator lives under `orchestrator::core`. | Closed; AHA-6 owns documentation and near-budget watch rows for the new ownership roots. |
+| AHA-6 | Rust progressive docs and near-budget guard | 6 | passed_after_fix | Rust docs/tests owner | Ownership-critical Rust roots touched by AHA-5 now carry progressive docs. Current Rust files at or above the 850 LOC warning band have explicit watch rows below without reviving HRA temporary-budget language, and the HRA/PCC inventories cover the moved Rust ownership paths. | Closed; final closeout still reruns the full Rust static targets. |
 | AHA-7 | iOS transport/domain residue | 10 | pending | iOS engine owner | iOS `misc` gate currently fails by design. | Replace `MiscClient` with concrete system/message/logs clients and remove residue. |
 | AHA-8 | iOS hierarchy, budgets, and docs | 9 | pending | iOS architecture owner | iOS hierarchy/budget gate currently fails by design. | Deepen SourceGuard, add Swift near-budget rows, refresh docs, and remove redundant availability noise. |
 | AHA-9 | Inventory and provenance integrity | 8 | pending | inventory/provenance owner | Inventory/provenance gate currently fails by design. | Rename current move maps or reconstruct lineage, reject open inventory states at completed score, and archive external HRA plan provenance in repo. |
@@ -66,6 +66,7 @@ The Rust integration target
 - `rust_production_modules_have_no_path_aliases_or_module_inception`
 - `rust_provider_shared_and_settings_loader_use_physical_owners`
 - `rust_near_budget_files_have_explicit_warning_rows`
+- `rust_ownership_roots_have_progressive_docs`
 - `ios_engine_clients_have_no_misc_facade`
 - `ios_sourceguard_has_deep_hierarchy_and_budget_gates`
 - `inventory_and_provenance_have_no_open_or_external_closeout_state`
@@ -73,5 +74,21 @@ The Rust integration target
 ## Open Loops
 
 - AHA-0 is complete after the red target is committed.
-- AHA-1 through AHA-4 are closed. AHA-5 through AHA-10 remain open and
+- AHA-1 through AHA-6 are closed. AHA-7 through AHA-10 remain open and
   intentionally red until their owners are implemented.
+
+## Rust Near-Budget Watchlist
+
+The hard HRA Rust source/test limit remains 900 LOC. AHA-6 adds an explicit
+850 LOC warning band so ownership-critical files cannot quietly cross into the
+hard limit without review.
+
+| Path | Current LOC | Owner | Warning-band action | Status |
+|------|-------------|-------|---------------------|--------|
+| `packages/agent/src/domains/model/providers/factory.rs` | 878 | model providers owner | Watch provider selection/auth construction; split provider-specific builders before adding new provider branches. | watch |
+| `packages/agent/src/engine/catalog/registry/mod.rs` | 895 | engine catalog owner | At the hard-limit edge; new catalog mutation or query behavior must move into `catalog_changes`, `invocation`, or a new registry helper module first. | watch |
+| `packages/agent/src/engine/durability/ledger/mod.rs` | 862 | engine durability owner | Keep ledger contracts in root; move new SQLite/raw-row behavior into `sqlite_codec` or dedicated helpers. | watch |
+| `packages/agent/src/engine/durability/queue/mod.rs` | 861 | engine durability owner | Keep queue contracts in root; move new drain/runtime or SQLite behavior into owned helper modules. | watch |
+| `packages/agent/src/engine/invocation/host/mod.rs` | 880 | engine invocation owner | Keep host type boundary in root; move new catalog/substrate/invocation/meta behavior into existing host helper modules. | watch |
+| `packages/agent/src/engine/runtime/external_workers/mod.rs` | 855 | engine runtime owner | Move new proxy, lifecycle, or protocol-specific behavior out before it approaches the 900 LOC hard limit. | watch |
+| `packages/agent/src/transport/engine/socket/mod.rs` | 873 | engine transport owner | Keep WebSocket session boundary in root; move new wire/projection/outbound behavior into existing socket helper modules. | watch |

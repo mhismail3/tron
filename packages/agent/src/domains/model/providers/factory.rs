@@ -6,7 +6,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use crate::domains::model::providers::provider::{Provider, ProviderError, ProviderFactory};
+use crate::domains::model::providers::shared::provider::{
+    Provider, ProviderError, ProviderFactory,
+};
 use crate::domains::model::routing::models::registry::{
     detect_provider_from_model, strip_provider_prefix,
 };
@@ -171,16 +173,18 @@ impl DefaultProviderFactory {
             auth,
             max_tokens: None,
             base_url: None,
-            retry: Some(crate::domains::model::providers::StreamRetryConfig {
-                retry: crate::shared::foundation::retry::RetryConfig {
-                    max_retries: self.retry.max_retries,
-                    base_delay_ms: self.retry.base_delay_ms,
-                    max_delay_ms: self.retry.max_delay_ms,
-                    jitter_factor: self.retry.jitter_factor,
+            retry: Some(
+                crate::domains::model::providers::shared::StreamRetryConfig {
+                    retry: crate::shared::foundation::retry::RetryConfig {
+                        max_retries: self.retry.max_retries,
+                        base_delay_ms: self.retry.base_delay_ms,
+                        max_delay_ms: self.retry.max_delay_ms,
+                        jitter_factor: self.retry.jitter_factor,
+                    },
+                    emit_retry_events: true,
+                    cancel_token: None,
                 },
-                emit_retry_events: true,
-                cancel_token: None,
-            }),
+            ),
             provider_settings:
                 crate::domains::model::providers::anthropic::types::AnthropicProviderSettings {
                     system_prompt_prefix: Some(self.anthropic.system_prompt_prefix.clone()),
@@ -395,16 +399,18 @@ impl DefaultProviderFactory {
             auth: crate::domains::model::providers::minimax::types::MiniMaxAuth::ApiKey { api_key },
             max_tokens: None,
             base_url: self.minimax_base_url.clone(),
-            retry: Some(crate::domains::model::providers::StreamRetryConfig {
-                retry: crate::shared::foundation::retry::RetryConfig {
-                    max_retries: self.retry.max_retries,
-                    base_delay_ms: self.retry.base_delay_ms,
-                    max_delay_ms: self.retry.max_delay_ms,
-                    jitter_factor: self.retry.jitter_factor,
+            retry: Some(
+                crate::domains::model::providers::shared::StreamRetryConfig {
+                    retry: crate::shared::foundation::retry::RetryConfig {
+                        max_retries: self.retry.max_retries,
+                        base_delay_ms: self.retry.base_delay_ms,
+                        max_delay_ms: self.retry.max_delay_ms,
+                        jitter_factor: self.retry.jitter_factor,
+                    },
+                    emit_retry_events: true,
+                    cancel_token: None,
                 },
-                emit_retry_events: true,
-                cancel_token: None,
-            }),
+            ),
         };
         Ok(Arc::new(
             crate::domains::model::providers::minimax::provider::MiniMaxProvider::with_client(
@@ -445,16 +451,18 @@ impl DefaultProviderFactory {
             auth: crate::domains::model::providers::kimi::types::KimiAuth::ApiKey { api_key },
             max_tokens: None,
             base_url: self.kimi_base_url.clone(),
-            retry: Some(crate::domains::model::providers::StreamRetryConfig {
-                retry: crate::shared::foundation::retry::RetryConfig {
-                    max_retries: self.retry.max_retries,
-                    base_delay_ms: self.retry.base_delay_ms,
-                    max_delay_ms: self.retry.max_delay_ms,
-                    jitter_factor: self.retry.jitter_factor,
+            retry: Some(
+                crate::domains::model::providers::shared::StreamRetryConfig {
+                    retry: crate::shared::foundation::retry::RetryConfig {
+                        max_retries: self.retry.max_retries,
+                        base_delay_ms: self.retry.base_delay_ms,
+                        max_delay_ms: self.retry.max_delay_ms,
+                        jitter_factor: self.retry.jitter_factor,
+                    },
+                    emit_retry_events: true,
+                    cancel_token: None,
                 },
-                emit_retry_events: true,
-                cancel_token: None,
-            }),
+            ),
         };
         Ok(Arc::new(
             crate::domains::model::providers::kimi::provider::KimiProvider::with_client(
@@ -471,16 +479,18 @@ impl DefaultProviderFactory {
             model: model.to_string(),
             base_url: self.ollama_base_url.clone(),
             max_tokens: None,
-            retry: Some(crate::domains::model::providers::StreamRetryConfig {
-                retry: crate::shared::foundation::retry::RetryConfig {
-                    max_retries: self.retry.max_retries,
-                    base_delay_ms: self.retry.base_delay_ms,
-                    max_delay_ms: self.retry.max_delay_ms,
-                    jitter_factor: self.retry.jitter_factor,
+            retry: Some(
+                crate::domains::model::providers::shared::StreamRetryConfig {
+                    retry: crate::shared::foundation::retry::RetryConfig {
+                        max_retries: self.retry.max_retries,
+                        base_delay_ms: self.retry.base_delay_ms,
+                        max_delay_ms: self.retry.max_delay_ms,
+                        jitter_factor: self.retry.jitter_factor,
+                    },
+                    emit_retry_events: true,
+                    cancel_token: None,
                 },
-                emit_retry_events: true,
-                cancel_token: None,
-            }),
+            ),
         };
         Ok(Arc::new(
             crate::domains::model::providers::ollama::provider::OllamaProvider::with_client(
@@ -542,7 +552,7 @@ impl ProviderFactory for DefaultProviderFactory {
 
 /// Resolve the auth file path (`~/.tron/profiles/auth.json`).
 fn auth_path() -> PathBuf {
-    crate::domains::settings::loader::auth_path()
+    crate::domains::settings::profile::storage::loader::auth_path()
 }
 
 #[cfg(test)]
