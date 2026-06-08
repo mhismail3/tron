@@ -65,7 +65,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **50/100**",
+        "Current score: **58/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
@@ -79,7 +79,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-2 | Root and generated artifact hygiene | 5 | passed_after_fix |",
         "| PCC-3 | Rust agent consolidation | 18 | passed_after_fix |",
         "| PCC-4 | Engine and primitive surface cleanup | 10 | passed_after_fix |",
-        "PCC-5 starts session, trace, and persistence cleanup.",
+        "| PCC-5 | Session, trace, and persistence cleanup | 8 | passed_after_fix |",
+        "PCC-6 starts iOS app consolidation.",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -91,13 +92,14 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **50/100**",
+        "Current score: **58/100**",
         "Status: **active**",
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
         "| PCC-2 | passed_after_fix |",
         "| PCC-3 | passed_after_fix |",
         "| PCC-4 | passed_after_fix |",
+        "| PCC-5 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -533,4 +535,104 @@ fn engine_primitive_surface_stays_flattened_to_owned_boundaries() {
             && capability_contract.contains("fn only_execute_is_registered_and_model_facing()"),
         "capability contract must retain the single execute primitive proof"
     );
+}
+
+#[test]
+fn session_persistence_surface_stays_current_and_collapsed() {
+    for path in [
+        "packages/agent/src/domains/session/deps.rs",
+        "packages/agent/src/domains/session/handlers.rs",
+        "packages/agent/src/domains/session/operations/mod.rs",
+        "packages/agent/src/domains/session/operations/lifecycle.rs",
+    ] {
+        assert!(
+            !repo_path(path).exists(),
+            "session helper shard must stay collapsed into its owner: {path}"
+        );
+    }
+    assert!(
+        repo_path("packages/agent/src/domains/session/operations.rs").exists(),
+        "session operation implementation must live in the direct session owner file"
+    );
+
+    let session_mod = read_repo_file("packages/agent/src/domains/session/mod.rs");
+    for required in [
+        "pub(crate) struct Deps",
+        "operation_bindings!",
+        "function_registrations(contract::capabilities()?, domain_deps)?",
+        "\"create\" => |invocation, deps|",
+        "\"export\" => |invocation, deps|",
+    ] {
+        assert!(
+            session_mod.contains(required),
+            "collapsed session worker missing `{required}`"
+        );
+    }
+    for banned in [
+        "pub(crate) mod deps;",
+        "pub(crate) mod handlers;",
+        "pub(crate) use deps::Deps;",
+        "handlers::function_registrations",
+        "operations/",
+        "dashboard query",
+    ] {
+        assert!(
+            !session_mod.contains(banned),
+            "session worker must not retain stale helper/doc text `{banned}`"
+        );
+    }
+
+    let sqlite_docs =
+        read_repo_file("packages/agent/src/domains/session/event_store/sqlite/mod.rs");
+    for banned in [
+        "Constitution",
+        "constitution",
+        "v002_constitution_audit",
+        "settings/instruction/context/provider",
+        "follow-up migrations",
+    ] {
+        assert!(
+            !sqlite_docs.contains(banned),
+            "SQLite event-store docs must describe only current primitive storage, found `{banned}`"
+        );
+    }
+
+    let message_ops = read_repo_file(
+        "packages/agent/src/domains/session/event_store/types/payloads/message_ops.rs",
+    );
+    for banned in [
+        "MessageQueuedPayload",
+        "MessageDequeuedPayload",
+        "message.queued",
+        "message.dequeued",
+    ] {
+        assert!(
+            !message_ops.contains(banned),
+            "retired message queue payload DTO must stay absent: `{banned}`"
+        );
+    }
+
+    let schema = read_repo_file(
+        "packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql",
+    );
+    for banned in [
+        "constitution",
+        "push_token",
+        "device_token",
+        "cron",
+        "session_profile",
+        "worktree",
+        "prompt_queue",
+        "config_mutation",
+        "rules",
+        "skills",
+        "hooks",
+        "capability_registry",
+        "policy_profile",
+    ] {
+        assert!(
+            !schema.contains(banned),
+            "fresh primitive schema must not recreate old product table/column text `{banned}`"
+        );
+    }
 }

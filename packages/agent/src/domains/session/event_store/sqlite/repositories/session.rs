@@ -3,8 +3,8 @@
 //! Sessions are pointers into the event tree with denormalized counters
 //! (event count, token usage, cost) for efficient queries.
 //!
-//! Dashboard projections live in `session/projections.rs`; this root stays on
-//! session lifecycle, listing, counters, and head/root mutation.
+//! Session-list projections live in `session/projections.rs`; this root stays
+//! on session lifecycle, listing, counters, and head/root mutation.
 
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;

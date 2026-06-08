@@ -499,7 +499,7 @@ impl EventStore {
         SessionRepo::get_message_previews(&conn, session_ids)
     }
 
-    /// Get activity summary lines for a single session's dashboard card.
+    /// Get activity summary lines for a single session list item.
     pub fn get_session_activity_summaries(
         &self,
         session_id: &str,

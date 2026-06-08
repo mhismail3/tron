@@ -265,7 +265,6 @@ packages/agent/src/domains/session/commands/tests/create.rs	retain	rust session 
 packages/agent/src/domains/session/commands/tests/mod.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/session/commands/tests/support.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/session/contract.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
-packages/agent/src/domains/session/deps.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/session/event_store/errors.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/session/event_store/event/envelope.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/session/event_store/event/factory.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
@@ -334,10 +333,8 @@ packages/agent/src/domains/session/event_store/types/payloads/token_usage.rs	ret
 packages/agent/src/domains/session/event_store/types/payloads/turn.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/session/event_store/types/state.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/session/event_store/types/tests.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
-packages/agent/src/domains/session/handlers.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/session/mod.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
-packages/agent/src/domains/session/operations/lifecycle.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
-packages/agent/src/domains/session/operations/mod.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
+packages/agent/src/domains/session/operations.rs	retain	rust session domain	PCC-5	Retained session operation implementation boundary
 packages/agent/src/domains/session/queries.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/session/reconstruct.rs	retain	rust session domain	PCC-3/PCC-5	Large retained loop infrastructure boundary
 packages/agent/src/domains/settings/contract.rs	retain	rust settings domain	PCC-3/PCC-5	Large retained loop infrastructure boundary

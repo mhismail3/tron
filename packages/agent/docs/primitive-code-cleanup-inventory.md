@@ -6,7 +6,7 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-08 during `PCC-4` engine substrate cleanup.
+Last updated: 2026-06-08 during `PCC-5` session persistence cleanup.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
@@ -36,12 +36,12 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 689 | Current package/config/test/doc boundaries |
-| `collapse` | 531 | Cleanup rows PCC-5 through PCC-9 |
+| `retain` | 686 | Current package/config/test/doc boundaries |
+| `collapse` | 531 | Cleanup rows PCC-6 through PCC-9 |
 | `asset` | 74 | iOS/Mac resources and benchmark baselines |
 | `delete` | 11 | PCC-9 delete candidates |
 | `generated` | 7 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1312** | Whole repo |
+| **Total** | **1309** | Whole repo |
 
 ## Current Tracked Package Counts
 
@@ -51,7 +51,7 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `.codex` | 2 |
 | `.github` | 8 |
 | root files | 5 |
-| `packages/agent` | 508 |
+| `packages/agent` | 505 |
 | `packages/ios-app` | 644 |
 | `packages/mac-app` | 115 |
 | `scripts` | 24 |
@@ -135,8 +135,6 @@ revise its classification with direct evidence.
 
 | Area | Inventory owner | Later row |
 |------|-----------------|-----------|
-| Rust engine substrate shards | `engine/*` | PCC-5/PCC-10 follow-up only if persistence or final scans find unowned leaves |
-| Session repository/store helper layers | session event store and SQLite repositories | PCC-5 |
 | iOS source roots | `Core`, `Database`, `Models`, `Services`, `ViewModels`, `Views`, `Theme`, `Utilities`, `Extensions`, `Protocols` | PCC-6 |
 | Mac source roots | root Swift files, `Services`, `Theme` | PCC-7 |
 | Scripts | dispatcher/module/helper split | PCC-8 |

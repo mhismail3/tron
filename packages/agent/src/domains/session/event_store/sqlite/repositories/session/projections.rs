@@ -1,4 +1,4 @@
-//! Dashboard projection DTOs and queries for session list/activity surfaces.
+//! Session-list projection types and queries.
 
 use std::collections::HashMap;
 
@@ -43,7 +43,7 @@ pub(super) fn extract_text_from_payload(payload_str: &str) -> String {
     }
 }
 
-/// Activity summary line for dashboard card display.
+/// Activity summary line for session list display.
 /// Lightweight: iOS enriches primitive operation lines with generic
 /// presentation helpers.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -72,7 +72,7 @@ pub struct ActivitySummaryLine {
     /// Runtime-owned presentation hints.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presentation_hints: Option<Value>,
-    /// Plain summary for the dashboard chip.
+    /// Plain activity summary.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
     /// Capability invocation arguments, present for capability lines.
@@ -89,7 +89,7 @@ pub struct ActivitySummaryLine {
     pub turns: Option<i64>,
 }
 
-/// Truncation constants matching iOS `DashboardConstants`.
+/// Truncation constants shared with the iOS session list.
 const MAX_USER_PROMPT_LEN: usize = 100;
 const MAX_ASSISTANT_TEXT_LEN: usize = 200;
 const MAX_ACTIVITY_LINES: usize = 5;
@@ -260,7 +260,7 @@ impl SessionRepo {
         Ok(result)
     }
 
-    /// Build activity summary lines for a session's dashboard card.
+    /// Build activity summary lines for a session list item.
     ///
     /// Walks persisted events to produce a compact summary of recent activity.
     /// iOS renders each line with generic primitive presentation helpers.

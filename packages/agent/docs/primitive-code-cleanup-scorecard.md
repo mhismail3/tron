@@ -4,7 +4,7 @@ Created: 2026-06-08
 
 Initial score: **0/100**
 
-Current score: **50/100**
+Current score: **58/100**
 
 Status: **active**
 
@@ -141,6 +141,10 @@ planning gates:
 - Rust engine cleanup shape stays flat where proven: the catalog type shard is
   folded into `engine/types.rs`, dead resource event shards stay deleted, and
   `engine/tests/mod.rs` remains declaration-only.
+- Session persistence cleanup shape stays current: session worker deps/handler
+  shards and one-file operation folders stay collapsed, SQLite docs describe
+  only the fresh primitive schema, retired message queue payload DTOs stay
+  absent, and v001 does not recreate old product tables.
 
 ## Operating Loop
 
@@ -161,7 +165,7 @@ planning gates:
 | PCC-2 | Root and generated artifact hygiene | 5 | passed_after_fix | repo_hygiene | Tracked generated/cache scan found no tracked `__pycache__`, `.pyc`, `.xcresult`, `target`, `node_modules`, or `DerivedData` paths. Root `.gitignore` now covers project-local Rust, Xcode, Node, Python, benchmark, temp, log, debug, and worktree artifacts, including `DerivedData/`, `*.dSYM/`, `*.pyc`, and `.pytest_cache/`. Static gates assert both absence and ignore coverage. No untracked build outputs were deleted. | Local untracked ignored outputs may exist and are intentionally left alone. | PCC-2 hygiene checkpoint |
 | PCC-3 | Rust agent consolidation | 18 | passed_after_fix | rust_agent | Removed unused `fastembed`, `sqlite-vec`, `rquickjs`, `rquickjs-serde`, `image`, and `resvg` dependencies, refreshed `Cargo.lock`, deleted the retired `packages/agent/assets/capability-search/` bundle, collapsed `blob`, `logs`, `message`, and `system` contract/deps/handler shards into their owning `mod.rs` files, retargeted the aggregate domain catalog, regenerated the file inventory, and added static gates for dead dependencies and small-domain shape. | Engine substrate flattening remains PCC-4; session persistence flattening remains PCC-5; client/script/docs consolidation remain later rows. | PCC-3 Rust consolidation checkpoint |
 | PCC-4 | Engine and primitive surface cleanup | 10 | passed_after_fix | engine_architecture | Collapsed the unowned `engine/types/catalog.rs` shard into `engine/types.rs`, folded the resource-store event/id helper into `resources/store.rs`, deleted the uncalled `resources/store/trace_events.rs` query extension, collapsed `capability::execute` deps/handler boilerplate into its worker module, removed empty local source directories left by earlier cleanup, regenerated the file inventory, and added a static gate for the retained engine/capability shape. Engine concern tests prove the retained catalog, grant, resource, state, queue, stream, trigger, ledger, host, worker, and `capability::execute` substrates still run. | Session/event persistence cleanup remains PCC-5; final adversarial scans remain PCC-10. | PCC-4 engine substrate checkpoint |
-| PCC-5 | Session, trace, and persistence cleanup | 8 | pending | storage | Persistence helpers collapsed where possible, schema/query owners retained only where needed, trace/session/event truth remains agent-queryable, and old product schema/event absence gates pass. | Existing large tests may need decomposition. | pending |
+| PCC-5 | Session, trace, and persistence cleanup | 8 | passed_after_fix | storage | Collapsed session worker `deps`/`handlers` into `session/mod.rs`, collapsed the one-file `operations/` folder into `session/operations.rs`, rewrote stale SQLite/event-store docs that still described retired migration planes, deleted retired `message.queued`/`message.dequeued` payload DTOs, added parser rejection proof for those event strings, regenerated the file inventory, and added a cleanup invariant for the retained session persistence shape and old product schema absence. | Existing dense event repository tests remain intentionally over budget and listed; iOS queue/event client surfaces remain PCC-6. | PCC-5 session persistence checkpoint |
 | PCC-6 | iOS app consolidation | 12 | pending | ios | `Sources` moves toward `App`, `Engine`, `Session`, `UI`, `Support`, `Resources`, assets, and extension boundaries; project regenerated; source guards and targeted UI tests pass. | Simulator/device proof may require environment availability. | pending |
 | PCC-7 | Mac app consolidation | 8 | pending | mac | `Sources` moves toward `App`, `Server`, `Wizard`, `MenuBar`, `Support`, and resources; project regenerated; targeted Mac tests pass. | macOS UI test breadth may stay source-level if no harness exists. | pending |
 | PCC-8 | Scripts cleanup | 6 | pending | scripts | Dispatcher/helper/module split matches README, stale helpers/caches deleted, syntax checks and relevant status/dev health-gated checks pass. | Live service checks depend on local environment. | pending |
@@ -172,9 +176,9 @@ Total weight: **100**
 
 ## Next Test
 
-PCC-5 starts session, trace, and persistence cleanup. Begin with retained
-session event-store ownership and helper-layer audit:
+PCC-6 starts iOS app consolidation. Begin with source-root ownership and
+generated project audit:
 
 ```bash
-find packages/agent/src/domains/session -maxdepth 4 -type f -print | sort
+find packages/ios-app/Sources -maxdepth 3 -type f -print | sort
 ```

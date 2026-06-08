@@ -1,7 +1,7 @@
 //! Schema migration runner for the event store database.
 //!
 //! Tron ships a single `v001_schema.sql` for the primitive branch.
-//! There are no old-shape migrations on this clean-break branch.
+//! The primitive branch ships only this fresh schema migration.
 //!
 //! The `schema_version` table tracks which migrations have been applied.
 //! Running the migrator is idempotent: already-applied versions are skipped.

@@ -206,6 +206,12 @@ mod tests {
     }
 
     #[test]
+    fn from_str_rejects_retired_message_queue_types() {
+        assert!("message.queued".parse::<EventType>().is_err());
+        assert!("message.dequeued".parse::<EventType>().is_err());
+    }
+
+    #[test]
     fn serde_roundtrip_from_string() {
         for et in &ALL_EVENT_TYPES {
             let s = et.as_str();

@@ -442,7 +442,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn list_accepts_ios_dashboard_pagination_payload() {
+    async fn list_accepts_ios_session_pagination_payload() {
         let ctx = make_test_context();
         let first = ctx
             .session_manager

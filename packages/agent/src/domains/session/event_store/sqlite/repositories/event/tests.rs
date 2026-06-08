@@ -1011,7 +1011,7 @@ fn count_all_by_types_cross_workspace() {
     assert_eq!(count, 3);
 }
 
-// ── v002 per-turn metadata extraction ───────────────────────────
+// ── Per-turn metadata extraction ────────────────────────────────
 
 #[test]
 fn extract_model_from_payload() {
@@ -1175,7 +1175,7 @@ fn new_columns_null_when_not_in_payload() {
 }
 
 #[test]
-fn extract_all_v002_fields_together() {
+fn extract_all_per_turn_fields_together() {
     let conn = setup();
     let event = make_event(
         "evt_1",
@@ -1267,7 +1267,7 @@ fn query_events_by_model() {
 }
 
 #[test]
-fn v002_columns_survive_ancestor_cte() {
+fn per_turn_columns_survive_ancestor_cte() {
     let conn = setup();
     let e1 = make_event("evt_1", 1, EventType::MessageUser, None, json!({}));
     let e2 = make_event(
@@ -1289,7 +1289,7 @@ fn v002_columns_survive_ancestor_cte() {
 
     let ancestors = EventRepo::get_ancestors(&conn, "evt_2").unwrap();
     assert_eq!(ancestors.len(), 2);
-    // The assistant message (last in chain) should have v002 fields
+    // The assistant message (last in chain) should have per-turn fields.
     let assistant = &ancestors[1];
     assert_eq!(assistant.model.as_deref(), Some("claude-opus-4-6"));
     assert_eq!(assistant.latency_ms, Some(1000));
@@ -1298,7 +1298,7 @@ fn v002_columns_survive_ancestor_cte() {
 }
 
 #[test]
-fn v002_columns_survive_descendant_cte() {
+fn per_turn_columns_survive_descendant_cte() {
     let conn = setup();
     let e1 = make_event("evt_1", 1, EventType::MessageUser, None, json!({}));
     let e2 = make_event(

@@ -23,7 +23,7 @@ impl EventRepo {
         let (input_tokens, output_tokens, cache_read, cache_create) =
             extract_tokens(&event.payload);
 
-        // Extract v002 per-turn metadata
+        // Extract current per-turn metadata.
         let model = extract_str(&event.payload, "model");
         let latency_ms = extract_i64(&event.payload, "latency");
         let stop_reason = extract_str(&event.payload, "stopReason");

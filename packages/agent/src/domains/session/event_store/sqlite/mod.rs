@@ -1,13 +1,11 @@
 //! `SQLite` backend for the event store.
 //!
 //! Provides connection pooling, schema migrations, and repository implementations
-//! for all database operations, including Constitution audit ledgers for home
-//! mutations, settings/instruction/context/provider resolution, and rendered
-//! context-block replay. Fresh databases start from consolidated
-//! `migrations/v001_schema.sql`; existing v001 installs receive additive
-//! follow-up migrations such as `v002_constitution_audit.sql`. Constraints
+//! for primitive sessions, events, blobs, logs, and trace records. Fresh
+//! databases start from consolidated `migrations/v001_schema.sql`; that single
+//! schema is the clean-break branch storage surface. Constraints
 //! (`CHECK`, `UNIQUE`, `FOREIGN KEY`, `COALESCE`-nullable unique indexes) are
-//! declared inline on `CREATE TABLE` — no triggers and no FTS virtual tables.
+//! declared inline on `CREATE TABLE` -- no triggers and no FTS virtual tables.
 //!
 //! # Architecture
 //!
