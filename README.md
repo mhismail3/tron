@@ -404,7 +404,7 @@ cargo check                        # Fast correctness check (no binary)
 cargo build --profile dev-server   # Dev server (thin LTO, fast iteration)
 cargo build --release              # Production (fat LTO, maximum optimization)
 cargo test                         # Run the full test suite
-cargo clippy -- -D warnings        # Lint with warnings as errors
+cargo clippy --workspace --all-targets # Lint with Cargo.toml policy
 ```
 
 ---

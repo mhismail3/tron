@@ -154,6 +154,9 @@ jobs:
         working-directory: ${{ env.IOS_APP_DIR }}
         run: xcodegen generate
 
+      - name: Verify generated Xcode project is committed
+        run: git diff --exit-code packages/ios-app/TronMobile.xcodeproj
+
       - name: Verify release build settings
         working-directory: ${{ env.IOS_APP_DIR }}
         shell: bash

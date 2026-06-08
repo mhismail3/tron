@@ -28,7 +28,7 @@ run_fmt_check() {
 }
 
 run_clippy() {
-    print_status "Running clippy..."
+    print_status "Running clippy with Cargo lint policy..."
     (cd "$RUST_WORKSPACE" && cargo clippy --workspace --all-targets) || { print_error "Clippy failed"; return 1; }
     print_success "Clippy passed"
 }
@@ -124,7 +124,7 @@ cmd_ci() {
                 echo "Steps (run in order listed):"
                 echo "  fmt        Check formatting (cargo fmt --check)"
                 echo "  check      Compile check (cargo check --all-targets)"
-                echo "  clippy     Lint with -D warnings"
+                echo "  clippy     Lint with Cargo.toml lint policy"
                 echo "  test       Run all tests"
                 echo "  bench      Run benchmark regression gate"
                 echo "  doc        Build docs with -D warnings"

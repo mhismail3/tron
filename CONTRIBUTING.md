@@ -12,9 +12,11 @@ scripts/install-hooks.sh                                           # one-time
 cd packages/agent && cargo check && cargo test -- --quiet          # baseline
 ```
 
-Open a PR against `main`. CI runs the same checks plus iOS tests if you touched
-`packages/ios-app/**`. Fill out the PR template — the checklist exists because
-`README.md` and the in-tree progressive-disclosure docs drift fast.
+Open a PR against `main`. CI always runs the personal-info/version guards, runs
+Rust-owned static gates for docs/template/iOS/Mac surfaces, and runs the full
+Rust, iOS, or Mac jobs when their source paths or labels apply. Fill out the PR
+template — the checklist exists because `README.md` and the in-tree
+progressive-disclosure docs drift fast.
 
 ## Project layout
 
@@ -94,8 +96,10 @@ xcodebuild test \
 
 CI exercises the same flow on every PR that touches `packages/mac-app/**` or
 `packages/agent/**` (the agent binary is embedded, so a Rust change affects
-the Mac app bundle). PRs also run a dry-run DMG assembly to catch breakage
-in `release-mac.yml` before tag push.
+the Mac app bundle). It verifies XcodeGen leaves the tracked project unchanged,
+runs focused non-flaky wrapper tests for paths/status/Tailscale coverage, and
+keeps a dry-run DMG assembly to catch breakage in `release-mac.yml` before tag
+push.
 
 ## Testing
 
@@ -110,9 +114,11 @@ work test-first whenever practical — write the failing test, then make it pass
 | Personal-info guard | `scripts/personal-info-guard.sh` |
 | All-in-one (workspace only) | `scripts/tron ci` |
 
-CI runs the same commands. The Rust job runs on every PR; iOS only runs on
-PRs that touch `packages/ios-app/**` or are labeled `ios` (macOS minutes are
-~10× the cost of Linux minutes).
+CI runs the same Rust test harness through `scripts/tron ci test` when the Rust
+job is selected. A separate Ubuntu static-gates job runs the PET/PCC/HRA/AHA
+invariant targets for docs/template/iOS/Mac changes. iOS and Mac jobs only run
+for their package paths, relevant labels, or pushes to `main` (macOS minutes
+are ~10× the cost of Linux minutes).
 
 ## Commits
 

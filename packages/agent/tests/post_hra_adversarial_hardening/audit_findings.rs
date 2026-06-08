@@ -102,6 +102,37 @@ fn github_rust_ci_matches_tron_ci_test_harness_shape() {
 }
 
 #[test]
+fn tron_ci_clippy_contract_matches_cargo_lint_policy() {
+    let quality = read_repo_file("scripts/tron.d/quality.sh");
+    let cargo_toml = read_repo_file("packages/agent/Cargo.toml");
+    assert!(
+        quality.contains("cargo clippy --workspace --all-targets")
+            && cargo_toml.contains("[lints.clippy]"),
+        "`tron ci clippy` must enforce the Cargo.toml lint policy"
+    );
+
+    let mut hits = Vec::new();
+    for file in [
+        "README.md",
+        "CONTRIBUTING.md",
+        "scripts/tron",
+        "scripts/tron-cli",
+        "scripts/tron.d/quality.sh",
+    ] {
+        let text = read_repo_file(file);
+        for (index, line) in text.lines().enumerate() {
+            if line.contains("clippy") && line.contains("-D warnings") {
+                hits.push(format!("{file}:{}: {line}", index + 1));
+            }
+        }
+    }
+    assert_no_hits(
+        "`tron ci clippy` docs/help must not claim a blanket -D warnings policy",
+        hits,
+    );
+}
+
+#[test]
 fn xcodegen_workflows_fail_on_tracked_project_drift() {
     let ci = read_repo_file(".github/workflows/ci.yml");
     let release_ios = read_repo_file(".github/workflows/release-ios.yml");

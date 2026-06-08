@@ -1,8 +1,11 @@
 # Continuous Integration
 #
-# Five workloads, two cost tiers:
+# Six workloads, two cost tiers:
 #   - personal-info-guard: ubuntu, ~30s, runs every PR + push (always).
 #   - version-drift:       ubuntu, ~10s, validates VERSION.env mirrors.
+#   - rust-static-gates:   ubuntu (1x), runs Rust-owned documentation and
+#                          architecture invariant targets for docs/templates,
+#                          iOS, Mac, agent, script, and CI changes.
 #   - rust:                ubuntu (1x), runs when packages/agent/** changes,
 #                          on every push to main, or when labeled `rust`.
 #   - ios:                 macos (10x), runs when packages/ios-app/** changes,
@@ -14,10 +17,10 @@
 #                          dry-run DMG assembly on PR to catch release-mac.yml
 #                          drift before tag push.
 #
-# Path-gating happens via `dorny/paths-filter` for Rust/iOS/Mac so PRs that
-# only touch docs or the other platform don't burn macos minutes. The guard
-# jobs always run. Pushes to main always run everything to catch cross-cutting
-# regressions.
+# Path-gating happens via `dorny/paths-filter` for static Rust gates, Rust,
+# iOS, and Mac so PRs that only touch docs or the other platform don't burn
+# macOS minutes. The guard jobs always run. Pushes to main always run
+# everything to catch cross-cutting regressions.
 #
 # Concurrency: in-flight runs for the same PR are cancelled on new pushes
 # (cheap on push to main — only one run can be in flight there anyway).
@@ -51,6 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
+      static_gates: ${{ steps.filter.outputs.static_gates }}
       ios: ${{ steps.filter.outputs.ios }}
       mac: ${{ steps.filter.outputs.mac }}
       scripts: ${{ steps.filter.outputs.scripts }}
@@ -63,6 +67,17 @@ jobs:
             rust:
               - 'packages/agent/**'
               - '.github/workflows/ci.yml'
+            static_gates:
+              - '.github/pull_request_template.md'
+              - '.github/ISSUE_TEMPLATE/**'
+              - '.github/workflows/ci.yml'
+              - 'README.md'
+              - 'CONTRIBUTING.md'
+              - 'AGENTS.md'
+              - 'packages/agent/docs/**'
+              - 'packages/ios-app/**'
+              - 'packages/mac-app/**'
+              - 'scripts/**'
             ios:
               - 'packages/ios-app/**'
               - '.github/workflows/ci.yml'
@@ -95,6 +110,33 @@ jobs:
         run: ./scripts/tron version test
       - name: Run release notes helper tests
         run: ./scripts/tron-release-notes --test
+
+  rust-static-gates:
+    name: Rust static gates
+    runs-on: ubuntu-latest
+    needs: changes
+    if: |
+      github.event_name == 'push' ||
+      needs.changes.outputs.static_gates == 'true' ||
+      needs.changes.outputs.rust == 'true' ||
+      needs.changes.outputs.scripts == 'true' ||
+      contains(github.event.pull_request.labels.*.name, 'rust')
+    defaults:
+      run:
+        working-directory: packages/agent
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          cache-workspaces: packages/agent
+
+      - name: Run Rust-owned documentation and architecture gates
+        run: |
+          cargo test --test primitive_engine_teardown_plan_invariants -- --quiet
+          cargo test --test primitive_code_cleanup_invariants -- --quiet
+          cargo test --test hierarchical_rearchitecture_invariants -- --quiet
+          cargo test --test post_hra_adversarial_hardening_invariants -- --quiet
 
   rust:
     name: Rust (fmt + clippy + test)
@@ -144,8 +186,12 @@ jobs:
       - name: cargo check
         run: cargo check
 
-      - name: cargo test
-        run: cargo test -- --quiet
+      # Match the local `scripts/tron ci test` harness exactly, including
+      # serial integration execution for `--test integration` and the
+      # `--test primitive_trace_execution` target.
+      - name: scripts/tron ci test
+        working-directory: ${{ github.workspace }}
+        run: scripts/tron ci test
 
   ios:
     name: iOS (xcodebuild test)
@@ -178,6 +224,10 @@ jobs:
 
       - name: Generate Xcode project
         run: xcodegen generate
+
+      - name: Verify generated Xcode project is committed
+        working-directory: ${{ github.workspace }}
+        run: git diff --exit-code packages/ios-app/TronMobile.xcodeproj
 
       - name: List available iOS simulators
         run: xcrun simctl list devices available | head -60
@@ -247,6 +297,10 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      - name: Verify generated Xcode project is committed
+        working-directory: ${{ github.workspace }}
+        run: git diff --exit-code packages/mac-app/TronMac.xcodeproj
+
       # Build the TronMac scheme in Debug and compile its unit-test bundle;
       # ad-hoc signing (CODE_SIGN_IDENTITY="-") keeps this portable to any
       # macOS runner without importing the Developer ID certificate.
@@ -267,6 +321,24 @@ jobs:
             -scheme TronMac \
             -destination "$destination" \
             -configuration Debug \
+            CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
+            -quiet
+
+      - name: xcodebuild focused wrapper tests
+        timeout-minutes: 20
+        env:
+          TRON_MAC_TEST_HOST: "1"
+        run: |
+          set -o pipefail
+          destination="platform=macOS,arch=$(uname -m)"
+          xcodebuild test \
+            -project TronMac.xcodeproj \
+            -scheme TronMac \
+            -destination "$destination" \
+            -configuration Debug \
+            -only-testing:TronMacTests/TronPathsTests \
+            -only-testing:TronMacTests/ServerStatusPollerTests \
+            -only-testing:TronMacTests/TailscaleProbeTests \
             CODE_SIGN_IDENTITY="-" CODE_SIGN_STYLE=Manual \
             -quiet
 
@@ -309,11 +381,12 @@ jobs:
   ci:
     name: CI summary
     runs-on: ubuntu-latest
-    needs: [personal-info-guard, version-drift, rust, ios, mac]
+    needs: [personal-info-guard, version-drift, rust-static-gates, rust, ios, mac]
     if: always()
     env:
       RESULT_GUARD: ${{ needs.personal-info-guard.result }}
       RESULT_VERSION: ${{ needs.version-drift.result }}
+      RESULT_STATIC_GATES: ${{ needs.rust-static-gates.result }}
       RESULT_RUST: ${{ needs.rust.result }}
       RESULT_IOS: ${{ needs.ios.result }}
       RESULT_MAC: ${{ needs.mac.result }}
@@ -328,8 +401,8 @@ jobs:
           if [[ "$RESULT_VERSION" != "success" ]]; then
             echo "::error::version-drift: $RESULT_VERSION"; fail=1
           fi
-          # rust + ios + mac may be `skipped` by the path filter — treat as success.
-          for name in RUST IOS MAC; do
+          # Static gates, rust, ios, and mac may be `skipped` by the path filter — treat as success.
+          for name in STATIC_GATES RUST IOS MAC; do
             var="RESULT_$name"
             result="${!var}"
             if [[ "$result" != "success" && "$result" != "skipped" ]]; then
