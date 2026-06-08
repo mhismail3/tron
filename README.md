@@ -120,6 +120,11 @@ Current living entry points:
 - `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md`:
   companion evidence manifest for the active hierarchical rearchitecture
   scorecard.
+- `packages/agent/docs/post-hra-adversarial-hardening-scorecard.md`: active
+  closeout campaign for adversarial audit findings after hierarchical
+  rearchitecture completion.
+- `packages/agent/docs/post-hra-adversarial-hardening-evidence-manifest.md`:
+  companion evidence manifest for the post-HRA adversarial hardening campaign.
 - `packages/agent/docs/hierarchical-rearchitecture-inventory.md`: HRA
   live-tree inventory summary and target architecture notes.
 - `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv`:
@@ -141,6 +146,9 @@ Current living entry points:
 - `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: active
   hierarchy scorecard, inventory, path-shape, broad-bucket, mirrored-test, and
   large-file-budget gates.
+- `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs`: active
+  post-HRA adversarial hardening gates for source identity, deleted-doc
+  residue, CI parity, Rust ownership, iOS transport, inventory, and provenance.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
