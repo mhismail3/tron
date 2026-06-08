@@ -5,7 +5,6 @@ import SwiftUI
 ///
 /// This intentionally mirrors the chat attachment camera sheet: a compact
 /// medium detent, a square live preview, and circular glass controls.
-@available(iOS 26.0, *)
 struct QRCodeScannerSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onCodeScanned: (String) -> Void

@@ -2,7 +2,6 @@ import SwiftUI
 
 // MARK: - Helper Methods
 
-@available(iOS 26.0, *)
 extension ChatView {
     /// Current model info (for attachment limits and reasoning support detection)
     var currentModelInfo: ModelInfo? {

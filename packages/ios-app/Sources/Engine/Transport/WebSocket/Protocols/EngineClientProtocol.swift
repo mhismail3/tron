@@ -24,7 +24,9 @@ protocol EngineClientProtocol: AnyObject {
     var agent: AgentClient { get }
     var model: ModelClient { get }
     var eventSync: EventSyncClient { get }
-    var misc: MiscClient { get }
+    var system: SystemClient { get }
+    var message: MessageClient { get }
+    var logs: LogsClient { get }
 
     // MARK: - Connection
     func connect() async

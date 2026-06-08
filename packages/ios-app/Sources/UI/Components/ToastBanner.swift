@@ -7,7 +7,6 @@ import SwiftUI
 /// Visual language matches `ConnectionStatusPill` — liquid-glass rounded rect, severity-tinted
 /// text/icons, smooth enter/exit transitions. Each toast is individually tappable (dismiss),
 /// drag-up-to-dismiss, and supports an optional Retry button.
-@available(iOS 26.0, *)
 enum ToastBannerLayout {
     static let horizontalPadding: CGFloat = 12
     static let topPadding: CGFloat = 8
@@ -17,7 +16,6 @@ enum ToastBannerLayout {
     static let contentFontSize: CGFloat = TronTypography.sizeBody3
 }
 
-@available(iOS 26.0, *)
 struct ToastBannerStack: View {
     @Bindable var toastCenter: ToastCenter
 
@@ -38,7 +36,6 @@ struct ToastBannerStack: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct SingleToastBanner: View {
     let toast: ToastCenter.Toast
     let onDismiss: () -> Void
@@ -131,7 +128,6 @@ private struct SingleToastBanner: View {
 
 // MARK: - View modifier
 
-@available(iOS 26.0, *)
 struct ToastBannerModifier: ViewModifier {
     @Bindable var toastCenter: ToastCenter
 
@@ -147,7 +143,6 @@ struct ToastBannerModifier: ViewModifier {
 extension View {
     /// Attach the global `ToastCenter`-driven banner stack to this view hierarchy.
     /// Install once at the app root (e.g., `TronMobileApp` content).
-    @available(iOS 26.0, *)
     func withToastBanner(center: ToastCenter = .shared) -> some View {
         modifier(ToastBannerModifier(toastCenter: center))
     }

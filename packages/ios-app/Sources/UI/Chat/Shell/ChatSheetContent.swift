@@ -3,7 +3,6 @@ import SwiftUI
 /// Renders the appropriate sheet content based on ChatSheet enum case.
 /// Isolates sheet content from main view body to aid Swift type-checking.
 /// This view is used with a single .sheet(item:) modifier in ChatView.
-@available(iOS 26.0, *)
 struct ChatSheetContent: View {
     let sheet: ChatSheet
     let viewModel: ChatViewModel

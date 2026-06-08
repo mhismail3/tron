@@ -3,7 +3,6 @@ import SwiftUI
 /// Final onboarding page: scan, paste, or manually enter the Mac pairing
 /// details, verify the server with `system::ping`, then persist the active
 /// paired server locally on this device.
-@available(iOS 26.0, *)
 struct PairingStep: View {
     @Bindable var state: OnboardingState
     let dependencies: DependencyContainer

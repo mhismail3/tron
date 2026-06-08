@@ -4,7 +4,6 @@ import SwiftUI
 
 /// Standard principal toolbar title used across all sheets.
 /// Renders mono semibold sizeTitle text in the given accent color.
-@available(iOS 26.0, *)
 struct SheetTitle: View {
     let title: String
     let color: Color
@@ -19,7 +18,6 @@ struct SheetTitle: View {
 // MARK: - Sheet Dismiss Button
 
 /// Standard checkmark dismiss button for sheet trailing toolbar.
-@available(iOS 26.0, *)
 struct SheetDismissButton: View {
     let color: Color
     @Environment(\.dismiss) private var dismiss
@@ -37,9 +35,7 @@ struct SheetDismissButton: View {
 // MARK: - Sheet Close Button
 
 /// Standard `xmark` dismiss button, used in the top-leading toolbar slot of
-/// git workflow sub-sheets so the top-trailing slot is free for a primary
-/// action (Pull / Merge / Push / Prune).
-@available(iOS 26.0, *)
+/// sheets whose top-trailing slot is reserved for a primary action.
 struct SheetCloseButton: View {
     let color: Color
     @Environment(\.dismiss) private var dismiss
@@ -59,7 +55,6 @@ struct SheetCloseButton: View {
 /// Glyph-only toolbar button used as the primary action of a sheet
 /// (top-trailing slot, replacing the checkmark dismiss). Shows a spinner
 /// while `isBusy`, and fades to muted when disabled.
-@available(iOS 26.0, *)
 struct SheetPrimaryActionButton: View {
     let icon: String
     let accent: Color
@@ -114,7 +109,6 @@ extension View {
 // MARK: - Loading Toolbar Button
 
 /// Toolbar button with a loading spinner that replaces the icon while an async action is in progress.
-@available(iOS 26.0, *)
 struct LoadingToolbarButton: View {
     let label: String
     let icon: String

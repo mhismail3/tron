@@ -2,7 +2,6 @@ import SwiftUI
 
 // MARK: - Flow Layout (wrapping layout for tags/pills)
 
-@available(iOS 26.0, *)
 struct FlowLayout: Layout {
     var spacing: CGFloat = 4
 

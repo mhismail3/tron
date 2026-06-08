@@ -7,7 +7,6 @@ import UIKit
 /// a short paged overlay: three lightweight preparation pages, then
 /// the pairing form that performs the actual connection.
 
-@available(iOS 26.0, *)
 struct OnboardingPage<Content: View>: View {
     let subtitle: String
     let content: Content
@@ -40,7 +39,6 @@ struct OnboardingPage<Content: View>: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct OnboardingGlassCard<Content: View>: View {
     let content: Content
 
@@ -63,7 +61,6 @@ struct OnboardingGlassCard<Content: View>: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct OnboardingInfoRow: View {
     let systemImage: String
     let title: String

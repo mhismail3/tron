@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(iOS 26.0, *)
 struct CapabilityResultRenderer: View {
     let content: String
     let details: [String: AnyCodable]?
@@ -45,7 +44,6 @@ struct CapabilityResultRenderer: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityInvocationCodeBlock: View {
     let text: String
 

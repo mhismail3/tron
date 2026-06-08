@@ -1,7 +1,6 @@
 import XCTest
 @testable import TronMobile
 
-@available(iOS 26.0, *)
 final class ToastBannerLayoutTests: XCTestCase {
     func testCompactCenteredTopPillLayout() {
         XCTAssertEqual(ToastBannerLayout.topPadding, 8)

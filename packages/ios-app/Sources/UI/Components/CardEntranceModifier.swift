@@ -2,7 +2,6 @@ import SwiftUI
 
 // MARK: - Card Entrance Modifier
 
-@available(iOS 26.0, *)
 enum CardEntranceConfiguration {
     static let initialOffsetY: CGFloat = 16
     static let response = 0.32
@@ -28,7 +27,6 @@ enum CardEntranceConfiguration {
     }
 }
 
-@available(iOS 26.0, *)
 struct CardEntranceModifier: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -51,7 +49,6 @@ struct CardEntranceModifier: ViewModifier {
     }
 }
 
-@available(iOS 26.0, *)
 extension View {
     func cardEntrance(visible: Bool, index: Int) -> some View {
         modifier(CardEntranceModifier(visible: visible, index: index))

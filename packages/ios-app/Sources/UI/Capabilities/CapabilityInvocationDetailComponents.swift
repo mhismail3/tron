@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(iOS 26.0, *)
 struct CapabilityDetailHeader: View {
     let data: CapabilityInvocationData
 
@@ -65,7 +64,6 @@ struct CapabilityDetailHeader: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityProgressJourneyView: View {
     let steps: [CapabilityProgressStep]
     let tint: TintedColors
@@ -85,7 +83,6 @@ struct CapabilityProgressJourneyView: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct CapabilityProgressStepCard: View {
     let step: CapabilityProgressStep
     let tint: TintedColors
@@ -160,7 +157,6 @@ private struct CapabilityProgressStepCard: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityExecutionGroupView: View {
     let group: CapabilityDisplayGroup
     let tint: TintedColors
@@ -284,7 +280,6 @@ struct CapabilityExecutionGroupView: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityHeaderDurationBadge: View {
     let duration: String
     let color: Color
@@ -305,7 +300,6 @@ struct CapabilityHeaderDurationBadge: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityHeaderMetric: View {
     let label: String
     let value: String
@@ -327,7 +321,6 @@ struct CapabilityHeaderMetric: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilitySourceBadge: View {
     let label: String
     let color: Color
@@ -345,7 +338,6 @@ struct CapabilitySourceBadge: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityArtifactRow: View {
     let artifact: CapabilityArtifactData
 
@@ -392,7 +384,6 @@ struct CapabilityArtifactRow: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityReadableRows: View {
     let rows: [CapabilityDisplayRow]
     let tint: TintedColors
@@ -406,7 +397,6 @@ struct CapabilityReadableRows: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityReadableRow: View {
     let row: CapabilityDisplayRow
     let tint: TintedColors
@@ -426,7 +416,6 @@ struct CapabilityReadableRow: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityRawDisclosure: View {
     let title: String
     let text: String

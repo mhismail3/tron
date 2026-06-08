@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(iOS 26.0, *)
 struct AppearanceSettingsPage: View {
     @Binding var confirmArchive: Bool
     @State private var appearanceSettings = AppearanceSettings.shared

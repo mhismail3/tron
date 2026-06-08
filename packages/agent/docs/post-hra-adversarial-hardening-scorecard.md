@@ -1,6 +1,6 @@
 # Post-HRA Adversarial Hardening Scorecard
 
-Current score: **63/100**
+Current score: **82/100**
 
 Status: **active**
 
@@ -45,8 +45,8 @@ Total weight: **100**
 | AHA-4 | Xcode project drift and Mac test execution | 8 | passed_after_fix | Apple CI owner | CI and release workflows fail on tracked iOS/Mac Xcode project drift after `xcodegen generate`. Mac CI keeps `build-for-testing` and adds focused `TronPathsTests`, `ServerStatusPollerTests`, and `TailscaleProbeTests` execution. | Closed; final closeout still reruns local XcodeGen drift checks and focused Mac tests. |
 | AHA-5 | Rust module ownership cleanup | 10 | passed_after_fix | Rust architecture owner | Production `#[path]` aliases and module-inception allowances are removed. Provider shared helpers live under `providers::shared`, settings loader paths use `profile::storage::loader`, OpenAI provider tests use a normal folder module, and the orchestrator coordinator lives under `orchestrator::core`. | Closed; AHA-6 owns documentation and near-budget watch rows for the new ownership roots. |
 | AHA-6 | Rust progressive docs and near-budget guard | 6 | passed_after_fix | Rust docs/tests owner | Ownership-critical Rust roots touched by AHA-5 now carry progressive docs. Current Rust files at or above the 850 LOC warning band have explicit watch rows below without reviving HRA temporary-budget language, and the HRA/PCC inventories cover the moved Rust ownership paths. | Closed; final closeout still reruns the full Rust static targets. |
-| AHA-7 | iOS transport/domain residue | 10 | pending | iOS engine owner | iOS `misc` gate currently fails by design. | Replace `MiscClient` with concrete system/message/logs clients and remove residue. |
-| AHA-8 | iOS hierarchy, budgets, and docs | 9 | pending | iOS architecture owner | iOS hierarchy/budget gate currently fails by design. | Deepen SourceGuard, add Swift near-budget rows, refresh docs, and remove redundant availability noise. |
+| AHA-7 | iOS transport/domain residue | 10 | passed_after_fix | iOS engine owner | `MiscClient` is deleted. `EngineClientProtocol` and call sites use concrete `system`, `message`, and `logs` clients; stale Git workflow error/comment residue and `Sub-Managers` terminology are removed. | Closed; no `misc` compatibility facade remains. |
+| AHA-8 | iOS hierarchy, budgets, and docs | 9 | passed_after_fix | iOS architecture owner | SourceGuard now enforces deep hierarchy/count/budget gates for Engine clients, shared capability UI, settings shell, shared components, and Session/Chat tests. Swift files at or above the 590 LOC warning band have explicit watch rows, iOS resource docs are current, and redundant iOS 26 availability annotations are removed. | Closed; final closeout reruns XcodeGen drift and focused iOS tests. |
 | AHA-9 | Inventory and provenance integrity | 8 | pending | inventory/provenance owner | Inventory/provenance gate currently fails by design. | Rename current move maps or reconstruct lineage, reject open inventory states at completed score, and archive external HRA plan provenance in repo. |
 | AHA-10 | Final adversarial closeout | 10 | pending | architecture campaign | Final proof is pending. | Rerun all gates, broad scans, iOS/Mac checks, adversarial audit, ledger append, hash record, and clean repo proof. |
 
@@ -68,13 +68,14 @@ The Rust integration target
 - `rust_near_budget_files_have_explicit_warning_rows`
 - `rust_ownership_roots_have_progressive_docs`
 - `ios_engine_clients_have_no_misc_facade`
+- `ios_transport_domain_residue_is_removed`
 - `ios_sourceguard_has_deep_hierarchy_and_budget_gates`
 - `inventory_and_provenance_have_no_open_or_external_closeout_state`
 
 ## Open Loops
 
 - AHA-0 is complete after the red target is committed.
-- AHA-1 through AHA-6 are closed. AHA-7 through AHA-10 remain open and
+- AHA-1 through AHA-8 are closed. AHA-9 and AHA-10 remain open and
   intentionally red until their owners are implemented.
 
 ## Rust Near-Budget Watchlist
@@ -92,3 +93,26 @@ hard limit without review.
 | `packages/agent/src/engine/invocation/host/mod.rs` | 880 | engine invocation owner | Keep host type boundary in root; move new catalog/substrate/invocation/meta behavior into existing host helper modules. | watch |
 | `packages/agent/src/engine/runtime/external_workers/mod.rs` | 855 | engine runtime owner | Move new proxy, lifecycle, or protocol-specific behavior out before it approaches the 900 LOC hard limit. | watch |
 | `packages/agent/src/transport/engine/socket/mod.rs` | 873 | engine transport owner | Keep WebSocket session boundary in root; move new wire/projection/outbound behavior into existing socket helper modules. | watch |
+
+## Swift Near-Budget Watchlist
+
+The hard HRA Swift source/test limit remains 700 LOC. AHA-8 adds an explicit
+590 LOC warning band so high-pressure UI, diagnostics, and test files cannot
+quietly become oversized modules.
+
+| Path | Current LOC | Owner | Warning-band action | Status |
+|------|-------------|-------|---------------------|--------|
+| `packages/ios-app/Sources/UI/Settings/Shell/SettingsView.swift` | 699 | settings shell owner | At the hard-limit edge; new settings navigation, toolbar, or modal behavior must move into shell support or page-owned files first. | watch |
+| `packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel.swift` | 658 | chat view-model owner | Keep orchestration only; move new behavior into coordinators, state slices, or focused extensions before adding branches. | watch |
+| `packages/ios-app/Tests/Session/Chat/StreamingManagerTests.swift` | 653 | chat streaming test owner | Split new streaming scenarios by behavior before adding another broad fixture block. | watch |
+| `packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift` | 653 | chat shell owner | Move new toolbar/sheet/rendering support into shell extensions or feature components before expanding the root view. | watch |
+| `packages/ios-app/Tests/Session/Chat/ChatViewModelEventRoutingTests.swift` | 652 | chat event-routing test owner | Split new event-routing coverage into coordinator- or event-family tests before expanding this file. | watch |
+| `packages/ios-app/Tests/Engine/Persistence/EventDatabaseTests.swift` | 650 | event database test owner | Add new persistence cases under behavior-specific test files before growing the broad database suite. | watch |
+| `packages/ios-app/Sources/UI/Onboarding/Steps/SetupSteps.swift` | 625 | onboarding setup owner | Move new setup card, step, or validation UI into focused step components before expanding this file. | watch |
+| `packages/ios-app/Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift` | 616 | diagnostics owner | Move new bundle sections or transforms into focused diagnostics helpers before adding more builder branches. | watch |
+| `packages/ios-app/Tests/UI/Chat/TurnGroupingTests.swift` | 611 | chat grouping test owner | Split new grouping cases into role/timeline-specific tests before expanding shared fixtures. | watch |
+| `packages/ios-app/Tests/Session/Chat/TurnLifecycleCoordinatorTests.swift` | 608 | turn lifecycle test owner | Add new lifecycle cases under focused coordinator tests before increasing this broad suite. | watch |
+| `packages/ios-app/Sources/UI/Theme/TronColors.swift` | 596 | theme owner | Move new palette derivation or semantic grouping into focused helpers before adding more color state. | watch |
+| `packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift` | 595 | settings shell owner | Move new settings section support into page-owned files before expanding the shared shell support file. | watch |
+| `packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift` | 593 | model picker owner | Move new provider/model row behavior into focused picker components before growing the sheet root. | watch |
+| `packages/ios-app/Tests/Session/Chat/Navigation/ScrollStateCoordinatorTests.swift` | 590 | chat navigation test owner | Move new scroll-state cases into focused navigation tests before this threshold row grows further. | watch |

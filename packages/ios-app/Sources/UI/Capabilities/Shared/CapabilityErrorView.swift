@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - Error View
 
 /// Structured error display with icon, title, path, error code badge, and suggestion
-@available(iOS 26.0, *)
 struct CapabilityErrorView: View {
     let icon: String
     let title: String

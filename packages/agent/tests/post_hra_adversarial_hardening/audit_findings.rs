@@ -291,15 +291,58 @@ fn ios_engine_clients_have_no_misc_facade() {
 }
 
 #[test]
+fn ios_transport_domain_residue_is_removed() {
+    let mut hits = Vec::new();
+    for file in list_tracked_files_with_extension("swift") {
+        if !file.starts_with("packages/ios-app/Sources/")
+            && !file.starts_with("packages/ios-app/Tests/")
+        {
+            continue;
+        }
+        let text = read_repo_file(&file);
+        for line in text.lines() {
+            if line.trim() == "@available(iOS 26.0, *)" {
+                hits.push(format!("{file}: redundant iOS 26 availability annotation"));
+            }
+        }
+        for needle in [
+            "Sub-Managers",
+            "git workflow sub-sheets",
+            "PROTECTED_BRANCH",
+            "NO_REMOTE",
+            "NON_FAST_FORWARD",
+            "GIT_AUTH_FAILED",
+            "GIT_NETWORK_ERROR",
+            "DIRTY_WORKING_TREE",
+            "MISSING_BASE_BRANCH",
+            "REF_NOT_FOUND",
+            "BRANCH_EXISTS",
+            "BRANCH_ACTIVE",
+            "NOT_GIT_REPO",
+            "GIT_ERROR",
+            "friendlyGitError",
+        ] {
+            if text.contains(needle) {
+                hits.push(format!("{file}: {needle}"));
+            }
+        }
+    }
+    assert_no_hits(
+        "iOS transport/domain cleanup must remove stale Git, availability, and manager residue",
+        hits,
+    );
+}
+
+#[test]
 fn ios_sourceguard_has_deep_hierarchy_and_budget_gates() {
-    let sourceguard = [
-        "packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests.swift",
-        "packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+Hierarchy.swift",
-    ]
-    .into_iter()
-    .map(read_repo_file)
-    .collect::<Vec<_>>()
-    .join("\n");
+    let sourceguard = list_tracked_files_with_extension("swift")
+        .into_iter()
+        .filter(|path| {
+            path.starts_with("packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests")
+        })
+        .map(|path| read_repo_file(&path))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     for required in [
         "Engine/Transport/Clients",
@@ -307,6 +350,9 @@ fn ios_sourceguard_has_deep_hierarchy_and_budget_gates() {
         "UI/Settings/Shell",
         "UI/Components",
         "Tests/Session/Chat",
+        "testIOSDeepHierarchyRootsHaveExplicitCountAndBudgetGates",
+        "testSwiftNearBudgetFilesHaveExplicitScorecardRows",
+        "testIOSDeploymentTargetAvailabilityAnnotationsAreNotDuplicated",
         "590",
         "near-budget",
     ] {

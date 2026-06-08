@@ -6,7 +6,6 @@ import UIKit
 /// The app opens to the normal session list first, then presents this compact
 /// sheet while `onboardingComplete == false`. The first pages orient and
 /// connect the user; the setup pages stay locked until pairing succeeds.
-@available(iOS 26.0, *)
 struct OnboardingFlowView: View {
     @State var state: OnboardingState
     let dependencies: DependencyContainer
@@ -229,7 +228,6 @@ internal enum OnboardingNavigationMetrics {
     static let buttonMinWidth: CGFloat = 112
 }
 
-@available(iOS 26.0, *)
 private struct OnboardingNavigationControls: View {
     let state: OnboardingState
 
@@ -281,7 +279,6 @@ private struct OnboardingNavigationControls: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct OnboardingPageDots: View {
     let currentStep: OnboardingState.Step
 
@@ -312,7 +309,6 @@ private struct OnboardingPageDots: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct OnboardingInfoRows: View {
     let rows: [OnboardingInfoCopy]
 
@@ -332,7 +328,6 @@ private struct OnboardingInfoRows: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct WelcomeOnboardingPage: View {
     var body: some View {
         OnboardingPage(
@@ -347,7 +342,6 @@ private struct WelcomeOnboardingPage: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct InstallTailscaleOnboardingPage: View {
     @Environment(\.openURL) private var openURL
 
@@ -371,7 +365,6 @@ private struct InstallTailscaleOnboardingPage: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct InstallMacOnboardingPage: View {
     @Environment(\.openURL) private var openURL
     @State private var didCopy = false
@@ -439,7 +432,6 @@ private struct InstallMacOnboardingPage: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct OnboardingLinkButton: View {
     let title: String
     let systemImage: String

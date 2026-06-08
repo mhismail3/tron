@@ -5,7 +5,6 @@ import WebKit
 ///
 /// Handles loading state, error reporting, scheme-restricted navigation,
 /// and popup prevention. Safari Web Inspector is enabled for debugging.
-@available(iOS 26.0, *)
 struct GenerativeWebView: UIViewRepresentable {
     let url: URL
     @Binding var isLoading: Bool

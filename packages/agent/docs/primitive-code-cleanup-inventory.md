@@ -6,7 +6,7 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-08 during `AHA-6` Rust ownership cleanup.
+Last updated: 2026-06-08 during `AHA-8` iOS hierarchy cleanup.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
@@ -36,10 +36,10 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 1328 | Current package/config/test/doc boundaries |
-| `asset` | 50 | iOS/Mac resources and benchmark baselines |
+| `retain` | 1313 | Current package/config/test/doc boundaries |
+| `asset` | 70 | iOS/Mac resources and benchmark baselines |
 | `generated` | 6 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1384** | Whole repo |
+| **Total** | **1389** | Whole repo |
 
 ## Current Tracked Package Counts
 
@@ -49,7 +49,7 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `.github` | 8 |
 | root files | 5 |
 | `packages/agent` | 585 |
-| `packages/ios-app` | 643 |
+| `packages/ios-app` | 648 |
 | `packages/mac-app` | 119 |
 | `scripts` | 22 |
 

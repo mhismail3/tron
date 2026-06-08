@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - Result Note
 
 /// Success note with checkmark icon, used by Write and Edit sheets.
-@available(iOS 26.0, *)
 struct CapabilityResultNote: View {
     let text: String
     let tint: TintedColors

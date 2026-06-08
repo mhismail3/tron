@@ -4,7 +4,6 @@ import SwiftUI
 
 /// Pill-shaped copy button with animated "Copied" feedback for section headers.
 /// Used across all capability detail sheets for section-level copy actions.
-@available(iOS 26.0, *)
 struct CapabilityCopyButton: View {
     let content: String
     let accent: Color

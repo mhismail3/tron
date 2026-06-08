@@ -3,7 +3,6 @@ import SwiftUI
 
 /// Custom camera capture sheet with styled UI matching the app aesthetic.
 /// Features a square viewport with rounded corners and control buttons.
-@available(iOS 26.0, *)
 struct CameraCaptureSheet: View {
     @Environment(\.dismiss) private var dismiss
     let onImageCaptured: (UIImage) -> Void

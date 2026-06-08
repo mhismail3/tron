@@ -32,7 +32,6 @@ func pendingSessionDeepLink(
 
 // MARK: - Content View
 
-@available(iOS 26.0, *)
 struct ContentView: View {
     @Environment(\.dependencies) var dependencies
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -419,7 +418,6 @@ func resolveQuickSessionWorkspace(
 
 // MARK: - Welcome Page
 
-@available(iOS 26.0, *)
 struct WelcomePage: View {
     /// When true, sidebar is visible so we hide the duplicate floating button.
     var isSidebarVisible: Bool = false

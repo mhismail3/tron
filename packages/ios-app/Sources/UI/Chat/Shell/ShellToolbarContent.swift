@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(iOS 26.0, *)
 struct ShellToolbarContent: ToolbarContent {
     let title: String
     let accent: Color

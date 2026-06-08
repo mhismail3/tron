@@ -2,7 +2,6 @@ import SwiftUI
 import XCTest
 @testable import TronMobile
 
-@available(iOS 26.0, *)
 @MainActor
 final class CapabilityInvocationDetailViewTests: XCTestCase {
     func testCapabilityInvocationDetailSourceKeepsRawProtocolDataAuditOnly() throws {

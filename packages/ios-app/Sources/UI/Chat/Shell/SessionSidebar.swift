@@ -2,7 +2,6 @@ import SwiftUI
 
 // MARK: - Session Sidebar
 
-@available(iOS 26.0, *)
 struct SessionSidebar: View {
     @Environment(\.dependencies) var dependencies
     @Environment(\.interactionPolicy) var interactionPolicy
@@ -182,7 +181,6 @@ internal enum FloatingNewSessionButtonAccessibility {
     static let hint = "Opens the new session sheet"
 }
 
-@available(iOS 26.0, *)
 struct FloatingNewSessionButton: View {
     let action: () -> Void
     var onLongPress: (() -> Void)? = nil
@@ -211,7 +209,6 @@ struct FloatingNewSessionButton: View {
 
 // MARK: - Cached Session Sidebar Row (uses CachedSession from EventDatabase)
 
-@available(iOS 26.0, *)
 struct CachedSessionSidebarRow: View {
     let session: CachedSession
     let isSelected: Bool
@@ -294,7 +291,6 @@ struct CachedSessionSidebarRow: View {
 
 // MARK: - Mini-Chat Activity View
 
-@available(iOS 26.0, *)
 struct MiniChatActivityView: View {
     let lines: [ActivityLine]
 
@@ -341,7 +337,6 @@ struct MiniChatActivityView: View {
 
 // MARK: - Mini-Chat Shared Components
 
-@available(iOS 26.0, *)
 struct MiniMessageRow: View {
     let text: String
     let isUser: Bool
@@ -382,7 +377,6 @@ struct MiniMessageRow: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct MiniThinkingRow: View {
     var body: some View {
         HStack(spacing: 0) {
@@ -400,7 +394,6 @@ struct MiniThinkingRow: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct MiniCapabilityChip: View {
     let name: String
     let icon: String
@@ -459,7 +452,6 @@ struct MiniCapabilityChip: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct ProcessingBar: View {
     @State private var isPulsing = false
 
@@ -475,7 +467,6 @@ struct ProcessingBar: View {
 
 // MARK: - Empty Sessions View
 
-@available(iOS 26.0, *)
 struct EmptySessionsView: View {
     let onNewSession: () -> Void
 

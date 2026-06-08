@@ -1,7 +1,6 @@
 import SwiftUI
 
 /// Energy pulses traveling along a horizontal wire with Gaussian glow
-@available(iOS 26.0, *)
 struct NeuralSparkIndicator: View {
     // Pulse configurations: (speed, intensity oscillation speed, sigma for glow width)
     private let pulses: [(speed: Double, intensitySpeed: Double, sigma: Double)] = [

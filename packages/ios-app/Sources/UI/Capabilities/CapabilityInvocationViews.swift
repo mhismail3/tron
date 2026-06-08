@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(iOS 26.0, *)
 struct CapabilityInvocationChip: View {
     let data: CapabilityInvocationData
     var onTap: (() -> Void)?
@@ -144,7 +143,6 @@ struct CapabilityInvocationChip: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityInvocationDetailSheet: View {
     let data: CapabilityInvocationData
 
@@ -403,7 +401,6 @@ struct CapabilityInvocationDetailSheet: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct CapabilityInvocationResultView: View {
     let result: CapabilityInvocationResultData
 

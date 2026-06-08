@@ -1,11 +1,9 @@
 import SwiftUI
 
-@available(iOS 26.0, *)
 internal enum NewSessionFlowPresentation {
     static let detents: Set<PresentationDetent> = [.large]
 }
 
-@available(iOS 26.0, *)
 struct NewSessionFlow: View {
     let engineClient: EngineClient
     let defaultModel: String

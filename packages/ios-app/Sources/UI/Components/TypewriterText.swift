@@ -5,7 +5,6 @@ import SwiftUI
 ///
 /// Changes during the settle window (first 500ms after appear) snap
 /// instantly so async-loaded titles don't trigger a stale animation.
-@available(iOS 26.0, *)
 struct TypewriterText: View {
     let text: String
     let font: Font

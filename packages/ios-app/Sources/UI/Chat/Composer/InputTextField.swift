@@ -2,7 +2,6 @@ import SwiftUI
 
 // MARK: - Glass Text Field (iOS 26 Liquid Glass)
 
-@available(iOS 26.0, *)
 struct GlassTextField: View {
     @Binding var text: String
     let isProcessing: Bool

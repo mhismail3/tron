@@ -4,7 +4,6 @@ import SwiftUI
 
 /// Shared error section that uses `ErrorClassification` to render structured error UI.
 /// Replaces duplicated error section patterns across generated capability sheets.
-@available(iOS 26.0, *)
 struct CapabilityClassifiedErrorSection<AdditionalContent: View>: View {
     let errorMessage: String
     let classification: ErrorClassification
@@ -40,7 +39,6 @@ struct CapabilityClassifiedErrorSection<AdditionalContent: View>: View {
     }
 }
 
-@available(iOS 26.0, *)
 extension CapabilityClassifiedErrorSection where AdditionalContent == EmptyView {
     init(errorMessage: String, classification: ErrorClassification, colorScheme: ColorScheme) {
         self.errorMessage = errorMessage

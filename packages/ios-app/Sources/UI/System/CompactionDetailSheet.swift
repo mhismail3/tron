@@ -2,7 +2,6 @@ import SwiftUI
 
 /// Detail sheet shown when tapping the compaction notification pill.
 /// Displays Before → After token visualization and the compaction summary.
-@available(iOS 26.0, *)
 struct CompactionDetailSheet: View {
     let tokensBefore: Int
     let tokensAfter: Int
@@ -160,7 +159,6 @@ struct CompactionDetailSheet: View {
 
 // MARK: - Helper Views
 
-@available(iOS 26.0, *)
 private struct CompactionTokenBox: View {
     let label: String
     let tokens: Int
@@ -185,7 +183,6 @@ private struct CompactionTokenBox: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct CompactionStatBadge: View {
     let label: String
     let value: String

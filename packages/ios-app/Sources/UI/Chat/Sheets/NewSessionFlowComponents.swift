@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(iOS 26.0, *)
 struct NewSessionCardIcon: View {
     let systemName: String
     let color: Color
@@ -14,7 +13,6 @@ struct NewSessionCardIcon: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct NewSessionCardCaption: View {
     let caption: String
     var font: Font = TronTypography.codeCaption
@@ -33,7 +31,6 @@ struct NewSessionCardCaption: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct NewSessionSetupCard: View {
     let icon: String
     let title: String
@@ -88,7 +85,6 @@ struct NewSessionSetupCard: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct NewSessionErrorCard: View {
     let message: String
     let onDismiss: () -> Void

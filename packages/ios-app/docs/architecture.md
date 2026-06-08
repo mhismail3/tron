@@ -53,7 +53,7 @@ Sources/
 +-- UI/                   Theme, chat, settings, onboarding, runtime
 |                         surfaces, capabilities, components, system sheets
 +-- Assets.xcassets/      App icons and image assets
-+-- Resources/            Fonts, localized strings, generated icon layers
++-- Resources/            Fonts and generated app-icon source layers
 ```
 
 The retained `UI/Capabilities` components render capability lifecycle
@@ -87,7 +87,9 @@ true but no active paired server exists, the shell stays visible.
 request tracking, receive/heartbeat loop, reconnect coordination, protocol
 frames, and transport types live in separate focused files. Typed domain client
 files live under `Engine/Transport/Clients` as thin method wrappers over
-`/engine` frames; they must not encode product policy. Any fixed
+`/engine` frames; system, message, and log operations use concrete
+`SystemClient`, `MessageClient`, and `LogsClient` domains rather than a
+miscellaneous facade. They must not encode product policy. Any fixed
 workflow-specific client removed in PET-8 must stay removed unless a later
 scorecard row proves it is boot infrastructure.
 

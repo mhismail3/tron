@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - Info Pill
 
 /// Generic glass pill (icon + label + color), reusable for line counts, truncation, etc.
-@available(iOS 26.0, *)
 struct CapabilityInfoPill: View {
     let icon: String
     let label: String

@@ -170,8 +170,8 @@ struct EngineChildError: Decodable, Sendable {
 
 /// Known engine error codes from the server.
 ///
-/// Adding a case here forces exhaustive switches such as `friendlyGitError` to
-/// handle new typed errors at compile time. Unknown server codes decode to nil
+/// Adding a case here forces exhaustive switches to handle new typed errors at
+/// compile time. Unknown server codes decode to nil
 /// through `EngineProtocolError.errorCode` and callers fall back to the raw message.
 enum EngineErrorCode: String, CaseIterable, Sendable {
     case sessionNotFound = "SESSION_NOT_FOUND"
@@ -183,20 +183,6 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case unauthorized = "UNAUTHORIZED"
     case idempotencyConflict = "IDEMPOTENCY_CONFLICT"
     case internalError = "INTERNAL_ERROR"
-
-    // Typed git workflow errors — mirror the current server error-code constants.
-    case protectedBranch = "PROTECTED_BRANCH"
-    case noRemote = "NO_REMOTE"
-    case nonFastForward = "NON_FAST_FORWARD"
-    case gitAuthFailed = "GIT_AUTH_FAILED"
-    case gitNetworkError = "GIT_NETWORK_ERROR"
-    case dirtyWorkingTree = "DIRTY_WORKING_TREE"
-    case missingBaseBranch = "MISSING_BASE_BRANCH"
-    case refNotFound = "REF_NOT_FOUND"
-    case branchExists = "BRANCH_EXISTS"
-    case branchActive = "BRANCH_ACTIVE"
-    case notGitRepo = "NOT_GIT_REPO"
-    case gitError = "GIT_ERROR"
 
     // Typed event-store errors — mirror the server's event-store error mapping.
     case eventNotFound = "EVENT_NOT_FOUND"

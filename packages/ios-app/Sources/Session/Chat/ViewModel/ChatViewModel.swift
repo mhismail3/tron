@@ -132,7 +132,7 @@ final class ChatViewModel {
     var streamingRecoverySnapshot: StreamingRecoverySnapshot?
     /// ID of the compaction-in-progress notification (replaced when compaction completes)
     var compactionInProgressMessageId: UUID?
-    // MARK: - Sub-Managers
+    // MARK: - Coordinators
 
     /// Coordinates pill morph animations, message cascade timing, and capability staggering
     let animationCoordinator = AnimationCoordinator()
@@ -572,7 +572,7 @@ final class ChatViewModel {
         logger.info("Deleting message: eventId=\(eventId)", category: .session)
 
         do {
-            let result = try await engineClient.misc.deleteMessage(
+            let result = try await engineClient.message.deleteMessage(
                 sessionId,
                 targetEventId: eventId,
                 idempotencyKey: .userAction("message.delete")

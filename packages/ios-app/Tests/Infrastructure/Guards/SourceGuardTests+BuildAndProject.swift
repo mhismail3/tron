@@ -43,8 +43,8 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/Support/Diagnostics/ClientLogIngestionService.swift"),
             encoding: .utf8
         )
-        let miscClient = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Engine/Transport/Clients/MiscClient.swift"),
+        let logsClient = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Engine/Transport/Clients/LogsClient.swift"),
             encoding: .utf8
         )
         let dependencyContainer = try String(
@@ -88,13 +88,13 @@ extension SourceGuardTests {
         #expect(dependencyContainer.contains("clientLogIngestionService.updateEngineClient(newClient)"))
         #expect(app.contains("container.clientLogIngestionService.handleConnectionChange"))
         #expect(app.contains("container.clientLogIngestionService.handleScenePhaseChange"))
-        #expect(miscClient.contains("func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult"))
-        #expect(!miscClient.contains("getDiagnostics"))
-        #expect(!miscClient.contains("system::get_diagnostics"))
-        #expect(!miscClient.contains("SystemDiagnosticsResult"))
+        #expect(logsClient.contains("func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult"))
+        #expect(!logsClient.contains("getDiagnostics"))
+        #expect(!logsClient.contains("system::get_diagnostics"))
+        #expect(!logsClient.contains("SystemDiagnosticsResult"))
 
-        let ingestStart = try #require(miscClient.range(of: "func ingestLogs(entries: [ClientLogEntry]"))
-        let ingestBlock = miscClient[ingestStart.lowerBound..<miscClient.endIndex]
+        let ingestStart = try #require(logsClient.range(of: "func ingestLogs(entries: [ClientLogEntry]"))
+        let ingestBlock = logsClient[ingestStart.lowerBound..<logsClient.endIndex]
         #expect(!ingestBlock.contains("#if DEBUG || BETA"))
         #expect(!ingestBlock.contains("logger.info"))
 

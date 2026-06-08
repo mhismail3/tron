@@ -8,7 +8,6 @@ import UIKit
 
 // MARK: - Chat View
 
-@available(iOS 26.0, *)
 struct ChatView: View {
     // MARK: - Environment & State (internal for extension access)
     @Environment(\.dismiss) var dismiss

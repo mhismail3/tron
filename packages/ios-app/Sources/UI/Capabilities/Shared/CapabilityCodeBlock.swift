@@ -6,7 +6,6 @@ import SwiftUI
 ///
 /// Renders a section header with optional copy button, followed by a scrollable code view
 /// with line numbers and configurable line transform.
-@available(iOS 26.0, *)
 struct CapabilityCodeBlock: View {
     let title: String
     let lines: [(lineNumber: Int, content: String)]

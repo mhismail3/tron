@@ -163,7 +163,7 @@ struct ClientLogIngestionEndpoint {
         ClientLogIngestionEndpoint(
             isConnected: { client.connectionState.isConnected },
             ingest: { entries, idempotencyKey in
-                try await client.misc.ingestLogs(entries: entries, idempotencyKey: idempotencyKey)
+                try await client.logs.ingestLogs(entries: entries, idempotencyKey: idempotencyKey)
             }
         )
     }

@@ -6,7 +6,6 @@ import PhotosUI
 
 // MARK: - Input Bar (iOS 26 Liquid Glass)
 
-@available(iOS 26.0, *)
 struct InputBar: View {
     // MARK: - Consolidated Input (State/Config/Actions pattern)
 
@@ -334,7 +333,6 @@ extension Notification.Name {
 // MARK: - Preview
 
 #if DEBUG
-@available(iOS 26.0, *)
 #Preview {
     @Previewable @State var previewState = InputBarState()
 

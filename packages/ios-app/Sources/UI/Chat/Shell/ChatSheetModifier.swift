@@ -2,7 +2,6 @@ import SwiftUI
 
 /// ViewModifier that applies all sheet-related modifiers to ChatView.
 /// Extracted from ChatView body to help Swift type-checker.
-@available(iOS 26.0, *)
 struct ChatSheetModifier: ViewModifier {
     let sheetCoordinator: SheetCoordinator
     let viewModel: ChatViewModel
@@ -42,7 +41,6 @@ struct ChatSheetModifier: ViewModifier {
     }
 }
 
-@available(iOS 26.0, *)
 extension View {
     func chatSheets(
         coordinator: SheetCoordinator,

@@ -7,7 +7,6 @@ import SwiftUI
 /// Takes the viewModel directly rather than `let` copies so that `@Observable`
 /// tracking keeps the UI reactive (stop button, toolbar, frame image all update
 /// in real time when stream state changes).
-@available(iOS 26.0, *)
 struct StreamSheetView: View {
     let viewModel: ChatViewModel
     let onClose: () -> Void

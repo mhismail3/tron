@@ -2,7 +2,6 @@ import SwiftUI
 
 /// Renders system events (notifications) in the chat
 /// Consolidates rendering for all SystemEvent cases
-@available(iOS 26.0, *)
 struct SystemEventView: View {
     let event: SystemEvent
     var onTap: ((MessageBubbleTapAction) -> Void)?

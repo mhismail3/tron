@@ -15,7 +15,6 @@ import SwiftUI
 ///     // capability-specific content sections
 /// }
 /// ```
-@available(iOS 26.0, *)
 struct CapabilityDetailSheetContainer<Content: View, LeadingToolbar: View>: View {
     let modelPrimitiveName: String
     let iconName: String
@@ -72,7 +71,6 @@ struct CapabilityDetailSheetContainer<Content: View, LeadingToolbar: View>: View
 
 // Convenience init for the common case with no custom leading toolbar.
 // Generic init supports sheets that need leading toolbar content.
-@available(iOS 26.0, *)
 extension CapabilityDetailSheetContainer where LeadingToolbar == EmptyView {
     init(
         modelPrimitiveName: String,

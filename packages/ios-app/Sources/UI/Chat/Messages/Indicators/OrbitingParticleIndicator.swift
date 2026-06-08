@@ -1,7 +1,6 @@
 import SwiftUI
 
 /// Luminous dots weaving around a central axis with trailing particles
-@available(iOS 26.0, *)
 struct OrbitingParticleIndicator: View {
     // Particle configurations: (horizontal radius, vertical amplitude, speed, size)
     // Sorted by radius (largest first) for depth layering

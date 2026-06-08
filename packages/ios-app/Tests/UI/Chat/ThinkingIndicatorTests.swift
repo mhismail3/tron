@@ -1,7 +1,6 @@
 import XCTest
 @testable import TronMobile
 
-@available(iOS 26.0, *)
 @MainActor
 final class AnimatedThinkingLineTests: XCTestCase {
 

@@ -6,7 +6,6 @@ import SwiftUI
 /// (bottom of list, detached from the feature) clashes with a sheet layout.
 /// Renders a magnifying-glass icon on the left, a bound `TextField`, and a
 /// trailing clear button that appears once text is entered.
-@available(iOS 26.0, *)
 struct TronSearchBar: View {
     @Binding var text: String
     var prompt: String = "Search"

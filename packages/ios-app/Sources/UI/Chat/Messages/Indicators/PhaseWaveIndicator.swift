@@ -1,7 +1,6 @@
 import SwiftUI
 
 /// Overlapping sine waves with frequency modulation for drifting interference patterns
-@available(iOS 26.0, *)
 struct PhaseWaveIndicator: View {
     // Wave configurations: (base frequency, phase speed, mod speed, opacity, linewidth)
     private let waves: [(baseFreq: Double, phaseSpeed: Double, modSpeed: Double, opacity: Double, lineWidth: CGFloat)] = [

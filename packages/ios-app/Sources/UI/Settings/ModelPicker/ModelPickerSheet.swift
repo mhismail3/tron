@@ -4,7 +4,6 @@ import SwiftUI
 
 /// Rich bottom sheet for model selection with Provider > Family > Model hierarchy.
 /// Uses the standard settings sheet shell: NavigationStack, ScrollView, collapsible sections.
-@available(iOS 26.0, *)
 struct ModelPickerSheet: View {
     let models: [ModelInfo]
     let currentModelId: String
@@ -195,7 +194,6 @@ enum ModelPickerReasoningVisibility {
 
 // MARK: - Provider Section
 
-@available(iOS 26.0, *)
 private struct ProviderSection: View {
     let provider: ProviderGroup
     let currentModelId: String
@@ -266,7 +264,6 @@ private struct ProviderSection: View {
 
 // MARK: - Family Section
 
-@available(iOS 26.0, *)
 private struct FamilySection: View {
     let family: FamilyGroup
     let providerColor: Color
@@ -355,7 +352,6 @@ private struct FamilySection: View {
 
 // MARK: - Model Card
 
-@available(iOS 26.0, *)
 private struct ModelCard: View {
     let model: ModelInfo
     let providerColor: Color
@@ -538,7 +534,6 @@ private struct ModelCard: View {
 
 // MARK: - Reasoning Level Popover
 
-@available(iOS 26.0, *)
 private struct ReasoningLevelPopover: View {
     let levels: [String]
     let currentLevel: String

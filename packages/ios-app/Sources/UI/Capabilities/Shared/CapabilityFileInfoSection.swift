@@ -4,7 +4,6 @@ import SwiftUI
 
 /// Reusable file info section (icon + name + extension capsule + full path) extracted from
 /// Shared file metadata rows for source and capability detail views.
-@available(iOS 26.0, *)
 struct CapabilityFileInfoSection: View {
     let fileInfo: FileInfoProperties
     let accent: Color

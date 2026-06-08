@@ -186,7 +186,7 @@ struct DiagnosticsBundleBuilder {
             return DiagnosticsServerLogsResult(entries: [], timestamps: [])
         }
         do {
-            let result = try await engineClient.misc.recentLogs(limit: Self.maxServerLogs)
+            let result = try await engineClient.logs.recentLogs(limit: Self.maxServerLogs)
             let includedEntries = Array(result.entries.prefix(Self.maxServerLogs))
             return DiagnosticsServerLogsResult(
                 entries: includedEntries.map { entry in

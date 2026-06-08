@@ -1,6 +1,5 @@
 import SwiftUI
 
-@available(iOS 26.0, *)
 struct WorkspaceSetupOnboardingPage: View {
     let state: OnboardingState
     let dependencies: DependencyContainer
@@ -93,7 +92,6 @@ struct WorkspaceSetupOnboardingPage: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct ProviderSetupOnboardingPage: View {
     let state: OnboardingState
     let provider: ProviderInfo
@@ -187,7 +185,6 @@ struct ProviderSetupOnboardingPage: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct RemainingProvidersOnboardingPage: View {
     let state: OnboardingState
     let dependencies: DependencyContainer
@@ -222,7 +219,6 @@ struct RemainingProvidersOnboardingPage: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct ServicesSetupOnboardingPage: View {
     let state: OnboardingState
     let dependencies: DependencyContainer
@@ -251,7 +247,6 @@ struct ServicesSetupOnboardingPage: View {
     }
 }
 
-@available(iOS 26.0, *)
 struct ModelSetupOnboardingPage: View {
     let state: OnboardingState
     let dependencies: DependencyContainer
@@ -384,7 +379,6 @@ struct ModelSetupOnboardingPage: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct CredentialEntryCard: View {
     let title: String
     @Binding var label: String
@@ -414,7 +408,6 @@ private struct CredentialEntryCard: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct CompactApiKeyCard: View {
     let title: String
     let placeholder: String
@@ -499,7 +492,6 @@ private struct CompactApiKeyCard: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct ExistingCredentialCard: View {
     let summary: OnboardingCredentialSummary
 
@@ -568,7 +560,6 @@ private struct ExistingCredentialCard: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct SetupActionButton: View {
     let title: String
     let systemImage: String
@@ -596,7 +587,6 @@ private struct SetupActionButton: View {
     }
 }
 
-@available(iOS 26.0, *)
 private struct SetupStatusText: View {
     let text: String
 
@@ -612,7 +602,6 @@ private struct SetupStatusText: View {
     }
 }
 
-@available(iOS 26.0, *)
 @MainActor
 private func setupField(_ placeholder: String, text: Binding<String>, secure: Bool) -> some View {
     Group {

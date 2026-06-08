@@ -102,7 +102,7 @@ packages/ios-app/
 │   ├── UI/                         # Chat, settings, onboarding, runtime surfaces
 │   ├── Support/                    # Composition, diagnostics, pairing, storage
 │   ├── Assets.xcassets/            # App icons and image assets
-│   └── Resources/                  # Fonts and generated icon layers
+│   └── Resources/                  # Fonts and generated app-icon source layers
 ├── Tests/
 │   ├── Engine/
 │   ├── Session/

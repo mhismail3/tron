@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - Status Badge
 
 /// Glass pill for capability invocation status.
-@available(iOS 26.0, *)
 struct CapabilityStatusBadge: View {
     let status: CapabilityInvocationStatus
 

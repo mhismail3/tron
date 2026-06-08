@@ -2,7 +2,6 @@ import SwiftUI
 
 /// Detail sheet shown when tapping the provider error notification pill.
 /// Displays error info in glass cards matching the CompactionDetailSheet pattern.
-@available(iOS 26.0, *)
 struct ProviderErrorDetailSheet: View {
     let data: ProviderErrorDetailData
     @Environment(\.dismiss) private var dismiss
@@ -141,7 +140,6 @@ struct ProviderErrorDetailSheet: View {
 
 // MARK: - Helper Views
 
-@available(iOS 26.0, *)
 private struct ErrorBadge: View {
     let label: String
     let value: String

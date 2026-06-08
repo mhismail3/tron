@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - Status Row
 
 /// Shared status row with horizontal scroll of pills: status badge + optional duration + additional pills.
-@available(iOS 26.0, *)
 struct CapabilityStatusRow<AdditionalPills: View>: View {
     let status: CapabilityInvocationStatus
     let durationMs: Int?
@@ -23,7 +22,6 @@ struct CapabilityStatusRow<AdditionalPills: View>: View {
     }
 }
 
-@available(iOS 26.0, *)
 extension CapabilityStatusRow where AdditionalPills == EmptyView {
     init(status: CapabilityInvocationStatus, durationMs: Int?) {
         self.status = status

@@ -12,7 +12,6 @@ import SwiftUI
 /// distinct red state with the "Re-pair this server (Tap to fix)" copy. Tapping
 /// invokes `onRePair` when supplied so the host view can present the
 /// re-pair flow; otherwise falls through to `onRetry`.
-@available(iOS 26.0, *)
 struct ConnectionStatusPill: View {
     let connectionState: ConnectionState
     let isReady: Bool
@@ -238,7 +237,6 @@ struct ConnectionStatusPill: View {
 // MARK: - Preview
 
 #if DEBUG
-@available(iOS 26.0, *)
 #Preview("Connection States") {
     VStack(spacing: 16) {
         ConnectionStatusPill(connectionState: .disconnected) { }

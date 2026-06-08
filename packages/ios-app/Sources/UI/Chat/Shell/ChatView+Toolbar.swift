@@ -2,7 +2,6 @@ import SwiftUI
 
 // MARK: - Toolbar Configuration
 
-@available(iOS 26.0, *)
 extension ChatView {
     /// Leading toolbar item (back button or sidebar toggle)
     @ToolbarContentBuilder

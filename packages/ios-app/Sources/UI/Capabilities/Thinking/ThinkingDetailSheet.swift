@@ -5,7 +5,6 @@ import SwiftUI
 /// When thinking is actively streaming, content updates live and auto-scrolls to the bottom.
 /// When the user scrolls up, auto-scroll pauses until they return to the bottom.
 /// When streaming has ended, displays the final content statically (scrolled to top).
-@available(iOS 26.0, *)
 struct ThinkingDetailSheet: View {
     let state: ThinkingDetailState
     @Environment(\.dismiss) private var dismiss

@@ -135,7 +135,7 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
     }
 
     let ios_surface = [
-        read_repo_file("packages/ios-app/Sources/Engine/Transport/Clients/MiscClient.swift"),
+        read_repo_file("packages/ios-app/Sources/Engine/Transport/Clients/LogsClient.swift"),
         read_repo_file(
             "packages/ios-app/Sources/Engine/Protocol/System/EngineProtocolTypes+System.swift",
         ),

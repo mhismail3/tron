@@ -1,7 +1,6 @@
 import XCTest
 @testable import TronMobile
 
-@available(iOS 26.0, *)
 final class CardEntranceModifierTests: XCTestCase {
     func testEntranceMotionStaysSubtle() {
         XCTAssertLessThanOrEqual(CardEntranceConfiguration.initialOffsetY, 16)

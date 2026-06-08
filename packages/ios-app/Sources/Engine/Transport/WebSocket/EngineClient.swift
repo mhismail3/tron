@@ -90,9 +90,17 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var settings: SettingsClient = SettingsClient(transport: self)
 
-    /// Miscellaneous operations client (system, device, memory, message, logs)
+    /// System operations client
     @ObservationIgnored
-    lazy var misc: MiscClient = MiscClient(transport: self)
+    lazy var system: SystemClient = SystemClient(transport: self)
+
+    /// Message mutation operations client
+    @ObservationIgnored
+    lazy var message: MessageClient = MessageClient(transport: self)
+
+    /// Log evidence operations client
+    @ObservationIgnored
+    lazy var logs: LogsClient = LogsClient(transport: self)
 
     /// Auth/provider operations client (API keys, OAuth tokens)
     @ObservationIgnored

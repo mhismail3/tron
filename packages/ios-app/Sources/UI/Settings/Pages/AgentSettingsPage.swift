@@ -75,8 +75,6 @@ struct AgentSettingsPage: View {
     }
 
     // MARK: - Quick Session
-
-    @available(iOS 26.0, *)
     private var quickSessionCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: AgentSettingsSection.quickSession.rawValue)

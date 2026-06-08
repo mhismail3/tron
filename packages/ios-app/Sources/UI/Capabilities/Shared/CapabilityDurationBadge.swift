@@ -3,7 +3,6 @@ import SwiftUI
 // MARK: - Duration Badge
 
 /// Glass pill with clock icon + formatted duration
-@available(iOS 26.0, *)
 struct CapabilityDurationBadge: View {
     let durationMs: Int
 

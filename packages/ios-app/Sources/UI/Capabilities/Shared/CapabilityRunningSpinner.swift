@@ -4,7 +4,6 @@ import SwiftUI
 
 /// Shared spinner for capability detail sheets in "running" state.
 /// Eliminates the duplicated ProgressView + label pattern across 10 capability sheets.
-@available(iOS 26.0, *)
 struct CapabilityRunningSpinner: View {
     let title: String
     let accent: Color

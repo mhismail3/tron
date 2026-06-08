@@ -4,7 +4,6 @@ import SwiftUI
 
 /// Solid detail container with the section header outside.
 /// Reusable across capability detail sheets where payload readability matters.
-@available(iOS 26.0, *)
 struct CapabilityDetailSection<Trailing: View, Content: View>: View {
     let title: String
     var accent: Color = .tronSlate
@@ -41,7 +40,6 @@ struct CapabilityDetailSection<Trailing: View, Content: View>: View {
     }
 }
 
-@available(iOS 26.0, *)
 extension CapabilityDetailSection where Trailing == EmptyView {
     init(title: String, accent: Color = .tronSlate, tint: TintedColors, @ViewBuilder content: @escaping () -> Content) {
         self.title = title

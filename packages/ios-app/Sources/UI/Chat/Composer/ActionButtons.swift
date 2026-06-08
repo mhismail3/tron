@@ -3,7 +3,6 @@ import PhotosUI
 
 // MARK: - Glass Action Button (Send/Abort)
 
-@available(iOS 26.0, *)
 struct GlassActionButton: View {
     /// Show stop icon (red) when true, send arrow when false.
     let showStop: Bool
@@ -67,7 +66,6 @@ struct ActionButtonDock: View {
 
 /// Custom ButtonStyle that applies glassEffect internally - fixes Menu morphing animation glitch
 /// See: https://juniperphoton.substack.com/p/adopting-liquid-glass-experiences
-@available(iOS 26.0, *)
 struct GlassCircleButtonStyle: ButtonStyle {
     let size: CGFloat
     let tint: Color
@@ -88,7 +86,6 @@ struct GlassCircleButtonStyle: ButtonStyle {
 
 // MARK: - Glass Attachment Button
 
-@available(iOS 26.0, *)
 struct GlassAttachmentButton: View {
     let isProcessing: Bool
     let buttonSize: CGFloat

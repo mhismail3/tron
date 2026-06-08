@@ -2,7 +2,6 @@ import SwiftUI
 
 // MARK: - Context Status Pill
 
-@available(iOS 26.0, *)
 struct ContextStatusPill: View {
     let contextPercentage: Int
     var modelName: String?
