@@ -1,0 +1,110 @@
+# Hierarchical Rearchitecture Scorecard
+
+Current score: **5/100**
+
+Status: **running**
+
+Branch: `codex/primitive-engine-teardown`
+
+Baseline commit: `7cedc8ac3`
+
+Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
+
+## Operating Rules
+
+- The campaign reorganizes ownership boundaries only after red static gates
+  describe the current drift.
+- Every retained folder must have an owner, reason, allowed contents, and test
+  responsibility before closeout.
+- Moves must remove old internal paths instead of preserving compatibility
+  shims, alias modules, or fallback wrappers.
+- Code, tests, docs, generated projects, scorecard, evidence, and inventory
+  move together in each checkpoint.
+- HRA-0 intentionally leaves the new invariant target red against the current
+  tree; later rows turn those gates green by changing the architecture.
+
+## Required Artifacts
+
+| Artifact | Status | Purpose |
+|----------|--------|---------|
+| `packages/agent/docs/hierarchical-rearchitecture-scorecard.md` | running | Weighted campaign scorecard and open-loop ledger. |
+| `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md` | running | Verification, red/green output, commit hashes, and residual risk. |
+| `packages/agent/docs/hierarchical-rearchitecture-inventory.md` | running | Human-readable inventory summary and target architecture notes. |
+| `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv` | running | Machine-readable tracked-file inventory. |
+| `packages/agent/docs/hierarchical-rearchitecture-move-map.tsv` | running | Machine-readable old-to-new path map. |
+| `packages/agent/tests/hierarchical_rearchitecture_invariants.rs` | running | Static hierarchy gates for this campaign. |
+
+## Scorecard
+
+Total weight: **100**
+
+| ID | Area | Weight | Status | Owner | Evidence | Open loops |
+|----|------|--------|--------|-------|----------|------------|
+| HRA-0 | Scorecard, evidence, and static-gate setup | 5 | passed_after_fix | architecture campaign | Required artifacts, README links, CI hook, and red hierarchy invariant target are present. | Red gates are expected until later rows move code. |
+| HRA-1 | Whole-repo inventory and target architecture | 8 | pending | architecture campaign | Initial HRA-0 inventory is generated from the live tracked tree. | Classify each retained file and folder with final owner and target path. |
+| HRA-2 | Rust app, transport, shared, and platform roots | 6 | pending | Rust app/transport/shared owners | Not started. | Move root helper files and audit shared ownership. |
+| HRA-3 | Rust engine kernel and invocation hierarchy | 10 | pending | Rust engine owner | Not started. | Replace flat engine root with kernel/catalog/invocation/runtime boundaries. |
+| HRA-4 | Rust engine durability and authority hierarchy | 8 | pending | Rust engine owner | Not started. | Group grants, leases, compensation, ledger, state, streams, queue, and resources. |
+| HRA-5 | Rust domain vertical slices | 10 | pending | Rust domain owners | Not started. | Reorganize domains by behavior instead of copied boilerplate. |
+| HRA-6 | Rust session and event-store hierarchy | 7 | pending | Rust session owner | Not started. | Reorganize session lifecycle/query/reconstruction/event-store/trace and split oversized tests. |
+| HRA-7 | Rust tests and progressive docs | 5 | pending | Rust docs/tests owners | Not started. | Mirror tests to new boundaries and update progressive docs. |
+| HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | pending | iOS architecture owner | Not started. | Add red SourceGuard hierarchy gates and iOS move map. |
+| HRA-9 | iOS Engine hierarchy | 8 | pending | iOS engine owner | Not started. | Reorganize transport, protocol, events, persistence, and model filtering. |
+| HRA-10 | iOS Session hierarchy | 7 | pending | iOS session owner | Not started. | Move chat, timeline, state, messaging, navigation, attachments, and parsing. |
+| HRA-11 | iOS UI hierarchy | 6 | pending | iOS UI owner | Not started. | Replace `UI/Views` with feature-owned folders. |
+| HRA-12 | iOS Support foundation hierarchy | 4 | pending | iOS support owner | Not started. | Split utilities, extensions, infrastructure, and services into concrete support concerns. |
+| HRA-13 | iOS tests and generated project closeout | 4 | pending | iOS test owner | Not started. | Mirror tests, decompose SourceGuard, regenerate XcodeGen, and run focused tests. |
+| HRA-14 | Mac wrapper hierarchy audit | 2 | pending | Mac wrapper owner | Not started. | Audit Mac source/test folders and move only justified drift. |
+| HRA-15 | Scripts, README, and docs path closeout | 2 | pending | docs/scripts owner | Not started. | Remove old-path claims and update README/docs/scripts/workflows. |
+| HRA-16 | Final adversarial review and closeout | 2 | pending | architecture campaign | Not started. | Run full verification, adversarial review, ledger append, and final commit. |
+
+## Folder Justification Table
+
+HRA-1 owns the exhaustive folder table. HRA-0 records only the active root
+owners required to bootstrap the campaign.
+
+| Folder | Owner | Allowed contents | Status |
+|--------|-------|------------------|--------|
+| `packages/agent/src` | Rust crate boundary | `lib.rs`, `main.rs`, and owned module folders after HRA-2. | running |
+| `packages/agent/src/app` | Rust app/bootstrap owner | CLI, bootstrap, health, metrics, lifecycle, and server startup code after HRA-2. | pending |
+| `packages/agent/src/transport` | Rust transport owner | HTTP, engine socket, worker socket, runtime dispatch, and transport DTOs after HRA-2. | pending |
+| `packages/agent/src/engine` | Rust engine substrate owner | Kernel, catalog, invocation, authority, durability, runtime, primitives, and engine tests after HRA-3/HRA-4. | pending |
+| `packages/agent/src/domains` | Rust vertical domain owner | Registration plus behavior-owned domain slices after HRA-5/HRA-6. | pending |
+| `packages/agent/src/shared` | Rust cross-owner support owner | Foundation/protocol/server/storage/observability helpers used by multiple owners after HRA-2. | pending |
+| `packages/ios-app/Sources` | iOS app target boundary | App, Engine, Session, UI, Support, Resources, assets, and plist files after HRA-9/HRA-12. | pending |
+| `packages/ios-app/Tests` | iOS test target boundary | Infrastructure and tests mirroring Engine, Session, UI, and Support after HRA-13. | pending |
+| `packages/mac-app/Sources` | Mac wrapper target boundary | App, Server, MenuBar, Wizard, Support, Resources, and assets after HRA-14. | pending |
+| `packages/mac-app/Tests` | Mac wrapper test target boundary | Tests mirroring Mac wrapper features after HRA-14. | pending |
+
+## Large File Budgets
+
+HRA-0 intentionally starts with no approved over-budget source/test files. The
+`large_files_have_decomposition_budget_rows` gate lists every current over-budget
+file until HRA-1 records an explicit owner, reason, and decomposition or
+temporary budget.
+
+| Path | Owner | Limit | Current LOC | Decomposition plan | Status |
+|------|-------|-------|-------------|--------------------|--------|
+
+## Static Gates
+
+The Rust integration target `hierarchical_rearchitecture_invariants` owns these
+checks:
+
+- `hierarchical_rearchitecture_scorecard_stays_formalized`
+- `tracked_files_have_rearchitecture_inventory_rows`
+- `rust_source_root_has_only_allowed_entry_files`
+- `rust_engine_root_has_no_unowned_flat_modules`
+- `ios_sources_do_not_use_broad_views_network_database_buckets`
+- `ios_tests_mirror_source_boundaries`
+- `large_files_have_decomposition_budget_rows`
+
+## Open Loops
+
+- HRA-0 red hierarchy gates remain failing by design until the relevant
+  implementation rows remove the drift.
+- HRA-1 must replace initial target-path placeholders with final classifications
+  and owner decisions.
+- The project `@self-inspect` skill referenced by `AGENTS.md` is not installed
+  in this Codex environment; direct repository and database inspection will be
+  used until an equivalent skill becomes available.

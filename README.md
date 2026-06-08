@@ -114,12 +114,29 @@ Current living entry points:
   cleanup target tree.
 - `packages/agent/docs/primitive-code-cleanup-file-inventory.tsv`:
   machine-readable per-file cleanup classification used by static gates.
+- `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: active
+  whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
+  scripts, docs, inventories, and static gates.
+- `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md`:
+  companion evidence manifest for the active hierarchical rearchitecture
+  scorecard.
+- `packages/agent/docs/hierarchical-rearchitecture-inventory.md`: HRA
+  live-tree inventory summary and target architecture notes.
+- `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv`:
+  machine-readable tracked-file inventory for the hierarchical rearchitecture
+  campaign.
+- `packages/agent/docs/hierarchical-rearchitecture-move-map.tsv`:
+  machine-readable old-to-new path map for the hierarchical rearchitecture
+  campaign.
 - `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
   absence, traceability, schema, registration, and documentation gates for the
   primitive branch.
 - `packages/agent/tests/primitive_code_cleanup_invariants.rs`: cleanup
   scorecard, folder-justification, file-budget, deleted-term, and tracked-junk
   gates.
+- `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: active
+  hierarchy scorecard, inventory, path-shape, broad-bucket, mirrored-test, and
+  large-file-budget gates.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
