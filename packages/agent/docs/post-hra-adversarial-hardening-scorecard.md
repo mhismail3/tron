@@ -48,7 +48,7 @@ Total weight: **100**
 | AHA-7 | iOS transport/domain residue | 10 | passed_after_fix | iOS engine owner | `MiscClient` is deleted. `EngineClientProtocol` and call sites use concrete `system`, `message`, and `logs` clients; stale Git workflow error/comment residue and `Sub-Managers` terminology are removed. | Closed; no `misc` compatibility facade remains. |
 | AHA-8 | iOS hierarchy, budgets, and docs | 9 | passed_after_fix | iOS architecture owner | SourceGuard now enforces deep hierarchy/count/budget gates for Engine clients, shared capability UI, settings shell, shared components, and Session/Chat tests. Swift files at or above the 590 LOC warning band have explicit watch rows, iOS resource docs are current, and redundant iOS 26 availability annotations are removed. | Closed; final closeout reruns XcodeGen drift and focused iOS tests. |
 | AHA-9 | Inventory and provenance integrity | 8 | passed_after_fix | inventory/provenance owner | HRA live maps are renamed current ownership maps, the completed-HRA inventory gate rejects open row statuses, and HRA provenance now points at the in-repo plan summary. | Closed; no current inventory or ownership-map row remains open. |
-| AHA-10 | Final adversarial closeout | 10 | passed_after_fix | architecture campaign | Full Rust CI, AHA/HRA/PCC/static gates, rustdoc, personal-info guard, XcodeGen drift checks, focused iOS/Mac tests, broad residue scans, and a fresh adversarial subagent audit passed after addressing closeout findings. | Closed; final hash-record commit backfills this row's implementation hash. |
+| AHA-10 | Final adversarial closeout | 10 | passed_after_fix | architecture campaign | Full Rust CI, AHA/HRA/PCC/static gates, rustdoc, personal-info guard, XcodeGen drift checks, focused iOS/Mac tests, broad residue scans, and a fresh adversarial subagent audit passed after addressing closeout findings. | Closed; implementation hash is recorded in the evidence manifest. |
 
 ## Static Gates
 
@@ -76,8 +76,7 @@ The Rust integration target
 ## Open Loops
 
 - No AHA implementation rows remain open. The evidence manifest records the
-  final closeout proof, adversarial audit findings, and the separate hash-record
-  backfill requirement.
+  final closeout proof, adversarial audit findings, and implementation hashes.
 
 ## Rust Near-Budget Watchlist
 

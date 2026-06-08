@@ -26,7 +26,7 @@ known audit findings are covered by executable proof.
 | AHA-7 | passed_after_fix | Deleted `MiscClient`, added concrete `SystemClient`, `MessageClient`, and `LogsClient`, changed `EngineClientProtocol` and call sites from `misc` to `system`/`message`/`logs`, removed stale Git workflow error/comment residue, and renamed the chat `Sub-Managers` marker to coordinator terminology. | AHA misc-facade and iOS transport residue gates passed after the client split. Focused iOS client tests cover system ping, message delete context, and log recent/ingest behavior. | Closed; no compatibility `misc` facade remains. | `b3c0e96bb` |
 | AHA-8 | passed_after_fix | Added SourceGuard deep hierarchy/count/budget gates for `Engine/Transport/Clients`, `UI/Capabilities/Shared`, `UI/Settings/Shell`, `UI/Components`, and `Tests/Session/Chat`; added Swift 590 LOC watch rows; refreshed root/iOS docs for actual resources and concrete engine clients; removed redundant iOS 26 availability annotations. | SourceGuard budget/availability tests and the AHA SourceGuard gate passed. XcodeGen regenerated the project and tracked project drift was checked. | Closed; final closeout still reruns focused iOS/Mac and full static proof. | `b3c0e96bb` |
 | AHA-9 | passed_after_fix | Renamed live HRA identity maps to current ownership maps, added an in-repo HRA plan summary, redirected HRA provenance to that summary, refreshed HRA/PCC inventories, and tightened completed-score inventory gates for the global and iOS TSV status columns. | HRA inventory coverage, completed-status, iOS ownership-map, AHA provenance, PCC inventory, personal-info, and residue scans pass after this checkpoint. | Closed. | `0cde80d2c` |
-| AHA-10 | passed_after_fix | Ran final full closeout proof, addressed adversarial audit blockers, removed ASC command-shape wording flagged by the audit, tightened source-identity guarding for the plain developer username, updated scorecard/evidence/README to completed, and recorded the remaining hash-record backfill step. | Full Rust CI, AHA/HRA/PCC gates, rustdoc, personal-info guard, XcodeGen drift checks, focused iOS/Mac tests, generated-junk scan, broad residue scans, and fresh adversarial subagent audit proof are recorded below. | Closed; this implementation checkpoint cannot contain its own hash, so a separate hash-record commit backfills this row. | pending |
+| AHA-10 | passed_after_fix | Ran final full closeout proof, addressed adversarial audit blockers, removed ASC command-shape wording flagged by the audit, tightened source-identity guarding for the plain developer username, updated scorecard/evidence/README to completed, and recorded the implementation hash in the hash-record checkpoint. | Full Rust CI, AHA/HRA/PCC gates, rustdoc, personal-info guard, XcodeGen drift checks, focused iOS/Mac tests, generated-junk scan, broad residue scans, and fresh adversarial subagent audit proof are recorded below. | Closed. | `b3cac324c` |
 
 ## AHA-0 Red Proof
 
@@ -75,9 +75,9 @@ Red findings covered by executable gates:
 
 ## Residual Risk Log
 
-- No AHA implementation rows remain open. The AHA-10 implementation commit
-  cannot contain its own hash; the required hash-record backfill commit records
-  the AHA-10 implementation hash after this checkpoint exists.
+- No AHA implementation rows remain open. The AHA-10 hash-record checkpoint
+  records the implementation commit because a commit cannot contain its own
+  hash.
 
 ## AHA-1 Verification
 
