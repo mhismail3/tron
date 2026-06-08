@@ -110,7 +110,6 @@ fn workspace_subdirs_chain_correctly() {
     assert!(screenshots_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::SCREENSHOTS)));
     assert!(renders_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::RENDERS)));
     assert!(reports_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::REPORTS)));
-    assert!(inbox_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::INBOX)));
     assert!(projects_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::PROJECTS)));
     assert!(labs_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::LABS)));
     assert!(archive_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::ARCHIVE)));

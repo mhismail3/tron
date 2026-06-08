@@ -181,7 +181,7 @@ grants are available before pairing.
 The iOS Beta step is a static handoff before pairing. It renders
 `https://testflight.apple.com/join/xbuX1Grx` as a QR code so the user's iPhone
 opens the public Tron TestFlight invite and installs the latest beta available
-to that tester group. The page also exposes copy/open fallbacks for the same
+to that tester group. The page also exposes copy/open actions for the same
 URL, but it does not call the server or mutate onboarding state beyond normal
 step persistence.
 
@@ -190,7 +190,7 @@ reads the agent-issued `auth.json` bearer token, confirms the server is answerin
 `system::ping`, probes the current Mac Tailscale state live, and only then
 caches `server.tailscaleIp` into `profiles/user/profile.toml` for future wrapper/menu-bar
 reads and later server settings reloads. If the cache write fails, the freshly
-resolved QR payload still works; settings are a fallback/cache, not a
+resolved QR payload still works; settings are cached support state, not a
 prerequisite for first-run pairing.
 
 ### Subsequent launches (menu-bar-only path)

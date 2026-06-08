@@ -49,9 +49,6 @@ pub const AUTH_TOKEN_EXPIRED: &str = "AUTH_TOKEN_EXPIRED";
 /// OAuth flow returned an error from the upstream provider.
 pub const AUTH_OAUTH_ERROR: &str = "AUTH_OAUTH_ERROR";
 
-/// Source session was already imported (idempotent guard).
-pub const IMPORT_ALREADY_IMPORTED: &str = "IMPORT_ALREADY_IMPORTED";
-
 // ── Version handshake (L6) ──────────────────────────────────────────
 //
 // `system::ping` requires a numeric `protocolVersion` from the client
@@ -213,17 +210,6 @@ mod tests {
             unique.len(),
             codes.len(),
             "auth error codes must be distinct"
-        );
-    }
-
-    #[test]
-    fn import_codes_are_distinct() {
-        let codes = [IMPORT_ALREADY_IMPORTED];
-        let unique: std::collections::HashSet<_> = codes.iter().collect();
-        assert_eq!(
-            unique.len(),
-            codes.len(),
-            "import error codes must be distinct"
         );
     }
 

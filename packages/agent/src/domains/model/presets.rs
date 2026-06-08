@@ -77,8 +77,6 @@ pub struct ModelRoutingPolicy {
     pub default_model: String,
     /// Local model observation.
     pub local: LocalModelAvailability,
-    /// Optional profile name for audit/Inspect.
-    pub profile_name: Option<String>,
 }
 
 impl ModelRoutingPolicy {
@@ -88,7 +86,6 @@ impl ModelRoutingPolicy {
         Self {
             default_model: settings.server.default_model.clone(),
             local: LocalModelAvailability::unavailable("Local model is unavailable for this flow."),
-            profile_name: None,
         }
     }
 
@@ -96,13 +93,6 @@ impl ModelRoutingPolicy {
     #[must_use]
     pub fn with_local(mut self, local: LocalModelAvailability) -> Self {
         self.local = local;
-        self
-    }
-
-    /// Attach the profile name used for the route.
-    #[must_use]
-    pub fn with_profile_name(mut self, profile_name: impl Into<String>) -> Self {
-        self.profile_name = Some(profile_name.into());
         self
     }
 }
@@ -138,13 +128,10 @@ pub struct ModelRoutingPresentation {
     /// Plain reason for the hosted route.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hosted_route_reason: Option<String>,
-    /// Profile that supplied the policy, when available.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub policy_profile: Option<String>,
 }
 
 impl ModelRoutingPresentation {
-    /// Pending schedule-time presentation for an automation preset.
+    /// Pending presentation before route resolution.
     #[must_use]
     pub fn pending(preset: ModelPreset) -> Self {
         Self {
@@ -158,7 +145,6 @@ impl ModelRoutingPresentation {
             hosted_route_used: false,
             hosted_route_label: None,
             hosted_route_reason: None,
-            policy_profile: None,
         }
     }
 
@@ -178,7 +164,7 @@ pub fn resolve_model_route(
     default_model: &str,
 ) -> ModelRoutingPresentation {
     if let Some(model) = exact_model.filter(|value| !value.trim().is_empty()) {
-        return selected_presentation(preset, model, false, None, policy.profile_name.clone());
+        return selected_presentation(preset, model, false, None);
     }
 
     match preset.unwrap_or(ModelPreset::Balanced) {
@@ -187,7 +173,6 @@ pub fn resolve_model_route(
             &policy.local.model,
             false,
             None,
-            policy.profile_name.clone(),
         ),
         ModelPreset::LocalWhenPossible => selected_presentation(
             Some(ModelPreset::LocalWhenPossible),
@@ -200,21 +185,15 @@ pub fn resolve_model_route(
                     .clone()
                     .unwrap_or_else(|| "Local model is unavailable for this flow.".to_owned()),
             ),
-            policy.profile_name.clone(),
         ),
-        ModelPreset::Balanced => selected_presentation(
-            Some(ModelPreset::Balanced),
-            default_model,
-            false,
-            None,
-            policy.profile_name.clone(),
-        ),
+        ModelPreset::Balanced => {
+            selected_presentation(Some(ModelPreset::Balanced), default_model, false, None)
+        }
         ModelPreset::Deep => selected_presentation(
             Some(ModelPreset::Deep),
             preferred_deep_model(default_model),
             false,
             None,
-            policy.profile_name.clone(),
         ),
     }
 }
@@ -263,7 +242,6 @@ fn selected_presentation(
     model: &str,
     hosted_route_used: bool,
     hosted_route_reason: Option<String>,
-    policy_profile: Option<String>,
 ) -> ModelRoutingPresentation {
     let model_class = if model_is_local(model) {
         "local"
@@ -281,7 +259,6 @@ fn selected_presentation(
         hosted_route_used,
         hosted_route_label: hosted_route_used.then(|| "Hosted route".to_owned()),
         hosted_route_reason,
-        policy_profile,
     }
 }
 
@@ -337,7 +314,6 @@ mod tests {
                 model: preferred_local_model(),
                 unavailable_reason: None,
             },
-            profile_name: Some("local".to_owned()),
         };
 
         let route = resolve_model_route(
@@ -358,7 +334,6 @@ mod tests {
         let policy = ModelRoutingPolicy {
             default_model: CLAUDE_SONNET_4_6.to_owned(),
             local: LocalModelAvailability::unavailable("Ollama is not running."),
-            profile_name: Some("normal".to_owned()),
         };
 
         let route = resolve_model_route(

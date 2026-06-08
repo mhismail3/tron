@@ -84,15 +84,14 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **92/100**",
-        "Status: **active**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
         "Folder Justification Table",
         "Large File Budgets",
         "Static Gates",
         "| PCC-0 | Scorecard, evidence, and static-gate setup | 5 | passed_after_fix |",
-        "| PCC-10 | Final adversarial pass | 8 | pending |",
         "Total weight: **100**",
         "| PCC-1 | Inventory and folder justification | 12 | passed_after_fix |",
         "| PCC-2 | Root and generated artifact hygiene | 5 | passed_after_fix |",
@@ -103,7 +102,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-7 | Mac app consolidation | 8 | passed_after_fix |",
         "| PCC-8 | Scripts cleanup | 6 | passed_after_fix |",
         "| PCC-9 | Docs and test cleanup | 8 | passed_after_fix |",
-        "PCC-10 starts the final adversarial pass.",
+        "| PCC-10 | Final adversarial pass | 8 | passed_after_fix |",
+        "Closeout complete.",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -115,8 +115,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **92/100**",
-        "Status: **active**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
         "| PCC-2 | passed_after_fix |",
@@ -127,6 +127,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-7 | passed_after_fix |",
         "| PCC-8 | passed_after_fix |",
         "| PCC-9 | passed_after_fix |",
+        "| PCC-10 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -335,7 +336,12 @@ fn scripts_surface_stays_manual_and_documented() {
 
 #[test]
 fn docs_and_examples_stay_cleaned_to_primitive_owned_artifacts() {
-    for path in [".claude", "packages/agent/examples/local-packs"] {
+    for path in [
+        ".claude",
+        "packages/ios-app/.claude",
+        "packages/mac-app/.claude",
+        "packages/agent/examples/local-packs",
+    ] {
         assert!(
             !repo_path(path).exists(),
             "stale contributor/example artifact must stay deleted: {path}"
@@ -345,6 +351,7 @@ fn docs_and_examples_stay_cleaned_to_primitive_owned_artifacts() {
     for path in git_ls_files() {
         assert!(
             !path.starts_with(".claude/")
+                && !path.contains("/.claude/")
                 && !path.starts_with("packages/agent/examples/local-packs/"),
             "tracked stale contributor/example artifact must stay deleted: {path}"
         );
@@ -396,6 +403,71 @@ fn docs_and_examples_stay_cleaned_to_primitive_owned_artifacts() {
             );
         }
     }
+}
+
+#[test]
+fn final_retired_product_residue_stays_deleted_from_runtime_surfaces() {
+    let checks: &[(&str, &[&str])] = &[
+        (
+            "scripts/tron-lib.sh",
+            &[
+                "$TRON_HOME\"/skills",
+                "$WORKSPACE_DIR/inbox",
+                "$WORKSPACE_DIR\"/{inbox",
+                "voice-notes",
+                "automations",
+            ],
+        ),
+        (
+            "packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes.swift",
+            &["CRON_", "IMPORT_", "cronNotFound", "importSessionNotFound"],
+        ),
+        (
+            "packages/agent/src/engine/grants/model.rs",
+            &[
+                "cron-scheduler",
+                "mcp-catalog-refresh",
+                "agent-worker-guide",
+            ],
+        ),
+        (
+            "packages/agent/src/domains/model/presets.rs",
+            &["policy_profile", "automation preset"],
+        ),
+        (
+            "packages/agent/src/domains/session/event_store/store/event_store/session_lifecycle.rs",
+            &[
+                "ImportAtomic",
+                "ImportEventSpec",
+                "import_atomic",
+                "DuplicateImport",
+            ],
+        ),
+        (
+            "packages/agent/src/shared/server/errors.rs",
+            &["IMPORT_ALREADY_IMPORTED", "import_codes_are_distinct"],
+        ),
+        (
+            "packages/agent/src/shared/server/error_mapping.rs",
+            &["DuplicateImport", "IMPORT_ALREADY_IMPORTED"],
+        ),
+    ];
+
+    for (path, banned_terms) in checks {
+        let text = read_repo_file(path);
+        for term in *banned_terms {
+            assert!(
+                !text.contains(term),
+                "retired product residue `{term}` must stay out of {path}"
+            );
+        }
+    }
+
+    assert!(
+        !repo_path("packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Git.swift")
+            .exists(),
+        "retired iOS git workflow DTO file must stay deleted"
+    );
 }
 
 #[test]
@@ -529,6 +601,32 @@ fn rust_dead_dependency_artifacts_stay_removed() {
         !cargo_toml.contains("\nimage = ") && !cargo_lock.contains("name = \"image\""),
         "standalone image conversion dependency must stay removed"
     );
+
+    for banned in [
+        "bytemuck",
+        "chrono-tz",
+        "ed25519-dalek",
+        "eventsource-stream",
+        "globset",
+        "hmac",
+        "html2text",
+        "indexmap",
+        "pin-project-lite",
+        "portable-pty",
+        "scraper",
+        "unicode-normalization",
+        "urlencoding",
+        "assert_matches",
+        "insta",
+        "mockall",
+        "proptest",
+        "enigo",
+    ] {
+        assert!(
+            !cargo_toml.contains(banned),
+            "Cargo.toml must not retain unused direct dependency `{banned}`"
+        );
+    }
 
     let retired_asset = repo_path("packages/agent/assets/capability-search");
     assert!(

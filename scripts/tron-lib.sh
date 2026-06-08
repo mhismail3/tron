@@ -205,10 +205,8 @@ ensure_tron_home() {
     mkdir -p "$DEFAULT_PROFILE_DIR"/{prompts,providers,context,tools}
     mkdir -p "$DEFAULT_PROFILE_DIR/prompts/processes"
     mkdir -p "$TRON_HOME"/memory/{rules,sessions}
-    mkdir -p "$WORKSPACE_DIR"/{inbox,projects,automations,plans,reports,renders,screenshots,scratch,labs,archive}
+    mkdir -p "$WORKSPACE_DIR"/{projects,plans,reports,renders,screenshots,scratch,labs,archive}
     mkdir -p "$WORKSPACE_KNOWLEDGE_DIR" "$WORKSPACE_VAULT_DIR"
-    mkdir -p "$TRON_HOME"/skills
-    mkdir -p "$WORKSPACE_DIR/inbox/voice-notes"
 }
 
 ensure_default_configs() {

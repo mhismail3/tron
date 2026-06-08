@@ -26,7 +26,6 @@ tokio-stream = "0.1"
 async-trait = "0.1"
 async-stream = "0.3"
 futures = "0.3"
-pin-project-lite = "0.2"
 
 # HTTP / WebSocket
 axum = { version = "0.8", features = ["ws"] }
@@ -34,7 +33,6 @@ tower = "0.5"
 tower-http = { version = "0.6", features = ["cors", "trace", "limit", "timeout", "request-id", "catch-panic", "compression-gzip"] }
 tokio-tungstenite = "0.26"
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "http2"], default-features = false }
-eventsource-stream = "0.2"
 
 # Database
 rusqlite = { version = "0.32", features = ["bundled", "serde_json", "functions"] }
@@ -62,30 +60,22 @@ anyhow = "1"
 # IDs and time
 uuid = { version = "1", features = ["v7", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
-chrono-tz = "0.10"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
 
 # Crypto
 sha2 = "0.10"
-hmac = "0.12"
 hex = "0.4"
 base64 = "0.22"
-ed25519-dalek = "2"
 rand = "0.9"
 percent-encoding = "2"
 
 # Filesystem
-globset = "0.4"
 walkdir = "2"
 regex = "1"
 rustix = { version = "1.1", features = ["fs"] }
 tempfile = "3"
-
-# HTML
-scraper = "0.22"
-html2text = "0.14"
 
 # Concurrency
 parking_lot = "0.12"
@@ -94,35 +84,19 @@ dashmap = "6"
 # Reads resolve in a handful of ns with no blocking; writers swap in O(1).
 arc-swap = "1"
 
-# Zero-copy
-bytemuck = { version = "1", features = ["derive"] }
-
 # Allocator
 mimalloc = { version = "0.1", default-features = false }
 
-# PTY support
-portable-pty = "0.8"
-
 # Misc
 bytes = "1"
-indexmap = "2"
 url = "2"
-urlencoding = "2"
-unicode-normalization = "0.1"
 home = "0.5"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-[target.'cfg(target_os = "macos")'.dependencies]
-enigo = { version = "0.6.1", default-features = false }
-
 [dev-dependencies]
 wiremock = "0.6"
-insta = { version = "1", features = ["json", "redactions"] }
-proptest = "1"
-mockall = "0.13"
-assert_matches = "1"
 tokio = { version = "1", features = ["test-util"] }
 tokio-tungstenite = "0.26"
 async-stream = "0.3"

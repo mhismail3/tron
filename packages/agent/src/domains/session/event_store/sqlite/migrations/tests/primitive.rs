@@ -103,7 +103,7 @@ fn sessions_table_has_no_product_metadata_columns() {
         .collect::<std::result::Result<Vec<_>, _>>()
         .unwrap();
 
-    for retired in vec![
+    for retired in [
         "origin".to_owned(),
         "source".to_owned(),
         "profile".to_owned(),

@@ -4,9 +4,9 @@ Created: 2026-06-08
 
 Initial score: **0/100**
 
-Current score: **92/100**
+Current score: **100/100**
 
-Status: **active**
+Status: **completed**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -60,7 +60,7 @@ trace, queue, log, or agent-owned state truth, not a hidden side channel.
 
 ## Folder Justification Table
 
-This table is the current retained baseline after PCC-9. Every listed directory
+This table is the current retained baseline after PCC-10. Every listed directory
 has a build, platform, persistence, provider, UI, generated/resource, test, or
 maintainability owner.
 
@@ -148,9 +148,13 @@ planning gates:
   `tron-lib.d/` contains installed-runtime helpers, and the automatic
   deployment watcher stays deleted.
 - Docs and examples stay current: the stale root `.claude` helper tree and
-  retired `packages/agent/examples/local-packs/` examples stay deleted, retained
-  docs/source stay free of their retired product terms, and the file inventory
-  has no unresolved `collapse` or `delete` rows.
+  retired `packages/agent/examples/local-packs/` examples stay deleted; package
+  `.claude` rule trees stay deleted; retained docs/source stay free of retired
+  product terms; and the file inventory has no unresolved `collapse` or
+  `delete` rows.
+- Final residue cleanup stays enforced: unused direct Rust dependencies,
+  dead setup directories, retired iOS git/cron/import DTOs, stale bootstrap
+  grants, and removed import-atomic persistence paths stay absent.
 
 ## Operating Loop
 
@@ -176,15 +180,15 @@ planning gates:
 | PCC-7 | Mac app consolidation | 8 | passed_after_fix | mac | Consolidated Mac `Sources` to `App`, `Server`, `Support`, `Wizard`, `MenuBar`, resources, and assets; moved app lifecycle, LaunchAgent/server, support/theme/pairing/feedback owners out of root `Services`/`Theme`; kept menu-bar feedback status formatting at the menu-bar boundary; regenerated XcodeGen; updated README/Mac docs/rules/tests/inventory; and added a static gate for the retained Mac primitive roots. | Final PCC-10 broad stale/fallback scan remains; no PCC-7-specific open loops. | PCC-7 Mac consolidation checkpoint |
 | PCC-8 | Scripts cleanup | 6 | passed_after_fix | scripts | Deleted the automatic `scripts/auto-deploy` watcher and its `tron auto-deploy` launchd module, removed the command from workspace/installed CLI dispatch, removed stale auto-deploy runtime constants and Mac path constants, kept manual `tron deploy` as the documented user-run contributor path, marked retained script helpers/modules in the inventory, and added a static gate proving the automatic deploy path stays absent. | Live service checks remain environment-dependent; syntax and static gates cover the script cleanup surface. | PCC-8 scripts cleanup checkpoint |
 | PCC-9 | Docs and test cleanup | 8 | passed_after_fix | docs_or_test_harness | Deleted the stale root `.claude` contributor helper tree and the retired `packages/agent/examples/local-packs/` worker-pack examples, removed the README `.claude` structure claim, rewrote the Mac test-organization note that still promised a future PCC-9 cleanup, audited iOS/Mac test roots as retained behavior-owned suites under recursive XcodeGen test targets, regenerated the file inventory to 1282 retained/generated/asset paths with no unresolved `collapse` or `delete` rows, and added a static gate for the deleted docs/example surfaces. | Historical scorecards and static gates may retain deleted terms as evidence. Final adversarial scans remain PCC-10. | PCC-9 docs/test cleanup checkpoint |
-| PCC-10 | Final adversarial pass | 8 | pending | test_harness | Stale product/fallback/compat/dead-code scans, unused dependency checks, subagent review, broad verification, score math/status closeout, ledger, and final checkpoint commit. | None acceptable at closeout; successor scope must be explicit. | pending |
+| PCC-10 | Final adversarial pass | 8 | passed_after_fix | test_harness | Ran retained-surface scans, unused-dependency checks, and an adversarial subagent review. Fixed real blockers: pruned unused direct Rust dependencies and lockfile residue; deleted package-local `.claude` rule trees; deleted the retired iOS git DTO file and regenerated XcodeGen; removed iOS cron/import error DTO cases; removed dead `~/.tron/skills`, `workspace/inbox`, `workspace/automations`, and `workspace/inbox/voice-notes` setup paths plus the unused inbox path helper; removed stale `cron-scheduler`, `mcp-catalog-refresh`, and `agent-worker-guide` bootstrap grants; removed dead model routing `policy_profile`/profile-name presentation residue; removed uncalled event-store import-atomic API and server import error mapping; and updated `scripts/tron ci` to run retained primitive invariant/trace targets instead of deleted `threat_model_invariants`. | None. | PCC-10 final cleanup checkpoint |
 
 Total weight: **100**
 
-## Next Test
+## Closeout
 
-PCC-10 starts the final adversarial pass. Begin with retained-surface stale
-artifact and fallback scans:
+Closeout complete. The final verification command set is recorded in
+[`primitive-code-cleanup-evidence-manifest.md`](primitive-code-cleanup-evidence-manifest.md).
 
 ```bash
-rg -n "\.claude|local-packs|Local Worker Pack|module::register_package|Generated Controls|Work dashboard|legacy|compat|fallback" README.md AGENTS.md packages/agent/src packages/ios-app/Sources packages/mac-app/Sources packages/ios-app/docs packages/mac-app/docs scripts --glob '!primitive-engine-teardown-*' --glob '!primitive-code-cleanup-*'
+scripts/tron ci fmt check clippy test
 ```

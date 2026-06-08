@@ -131,17 +131,6 @@ pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
             message: format!("Blob not found: {id}"),
         },
         E::InvalidOperation(m) => CapabilityError::InvalidParams { message: m },
-        E::DuplicateImport {
-            existing_session_id,
-        } => CapabilityError::Custom {
-            code: codes::IMPORT_ALREADY_IMPORTED.into(),
-            message: format!(
-                "This source has already been imported into session '{existing_session_id}'."
-            ),
-            details: Some(serde_json::json!({
-                "tronSessionId": existing_session_id,
-            })),
-        },
         E::Sqlite(_)
         | E::Pool(_)
         | E::Serde(_)

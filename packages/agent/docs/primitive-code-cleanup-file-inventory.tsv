@@ -506,19 +506,6 @@ packages/agent/tests/integration.rs	retain	rust tests	PCC-3/PCC-10	Rust regressi
 packages/agent/tests/primitive_code_cleanup_invariants.rs	retain	rust tests	PCC-3/PCC-10	Rust regression and cleanup invariant tests
 packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	retain	rust tests	PCC-3/PCC-10	Rust regression and cleanup invariant tests
 packages/agent/tests/primitive_trace_execution.rs	retain	rust tests	PCC-3/PCC-10	Rust regression and cleanup invariant tests
-packages/ios-app/.claude/rules/app-lifecycle.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/chat.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/database.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/di.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/events.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/handlers.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/onboarding.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/plugins.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/services.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/state.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/tools.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/transformer.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/ios-app/.claude/rules/views.md	retain	ios package	PCC-6/PCC-9	iOS package support artifact
 packages/ios-app/Configuration/Base.xcconfig	retain	ios build config	PCC-6	iOS build/package configuration boundary
 packages/ios-app/Configuration/Beta.xcconfig	retain	ios build config	PCC-6	iOS build/package configuration boundary
 packages/ios-app/Configuration/Prod.xcconfig	retain	ios build config	PCC-6	iOS build/package configuration boundary
@@ -662,7 +649,6 @@ packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Capability.swi
 packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Catalog.swift	retain	ios engine	PCC-6	Engine protocol, transport, event, and cache owner root
 packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Events.swift	retain	ios engine	PCC-6	Engine protocol, transport, event, and cache owner root
 packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+GeneratedUI.swift	retain	ios engine	PCC-6	Engine protocol, transport, event, and cache owner root
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Git.swift	retain	ios engine	PCC-6	Engine protocol, transport, event, and cache owner root
 packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Interaction.swift	retain	ios engine	PCC-6	Engine protocol, transport, event, and cache owner root
 packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Model.swift	retain	ios engine	PCC-6	Engine protocol, transport, event, and cache owner root
 packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Reconstruct.swift	retain	ios engine	PCC-6	Engine protocol, transport, event, and cache owner root
@@ -1144,7 +1130,6 @@ packages/ios-app/docs/onboarding.md	retain	ios docs	PCC-6/PCC-9	iOS architecture
 packages/ios-app/package.json	retain	ios package	PCC-6/PCC-9	iOS package support artifact
 packages/ios-app/project.yml	retain	ios build config	PCC-6	iOS build/package configuration boundary
 packages/ios-app/scripts/generate-icons.mjs	retain	ios package	PCC-6/PCC-9	iOS package support artifact
-packages/mac-app/.claude/rules/wizard-steps.md	retain	mac package	PCC-7/PCC-9	Mac package support artifact
 packages/mac-app/.gitignore	retain	mac package	PCC-7/PCC-9	Mac package support artifact
 packages/mac-app/Configuration/Base.xcconfig	retain	mac package	PCC-7/PCC-9	Mac package support artifact
 packages/mac-app/Configuration/Debug.xcconfig	retain	mac package	PCC-7/PCC-9	Mac package support artifact

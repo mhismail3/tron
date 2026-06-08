@@ -203,24 +203,10 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case workspaceNotFound = "WORKSPACE_NOT_FOUND"
     case blobNotFound = "BLOB_NOT_FOUND"
 
-    // Typed cron errors — mirror the server's cron error mapping.
-    case cronNotFound = "CRON_NOT_FOUND"
-    case cronDuplicateName = "CRON_DUPLICATE_NAME"
-    case cronInvalidExpression = "CRON_INVALID_EXPRESSION"
-    case cronInvalidTimezone = "CRON_INVALID_TIMEZONE"
-    case cronTimedOut = "CRON_TIMED_OUT"
-    case cronCancelled = "CRON_CANCELLED"
-
     // Typed auth errors — mirror the server's auth error mapping.
     case authNotConfigured = "AUTH_NOT_CONFIGURED"
     case authTokenExpired = "AUTH_TOKEN_EXPIRED"
     case authOauthError = "AUTH_OAUTH_ERROR"
-
-    // Typed import errors — mirror `map_import_error`.
-    case importSessionNotFound = "IMPORT_SESSION_NOT_FOUND"
-    case importAlreadyImported = "IMPORT_ALREADY_IMPORTED"
-    case importEmptySession = "IMPORT_EMPTY_SESSION"
-    case importNoClaudeDirectory = "IMPORT_NO_CLAUDE_DIRECTORY"
 }
 
 /// Structured engine protocol error details.

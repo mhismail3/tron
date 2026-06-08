@@ -30,10 +30,8 @@ fn resolve_payload_for_row(conn: &rusqlite::Connection, row: &EventRow) -> Resul
 
 /// Append a single event inside an existing transaction.
 ///
-/// This is the core write primitive shared by [`EventStore::append`] (which
-/// wraps it in per-session locking + tx + commit) and the multi-write atomic
-/// helpers like `import_atomic` (which drive the same primitive across many
-/// events under a single tx).
+/// This is the core write primitive used by [`EventStore::append`], which wraps
+/// it in per-session locking, a transaction, and commit.
 ///
 /// The caller is responsible for:
 /// - acquiring any required locks before opening the transaction,

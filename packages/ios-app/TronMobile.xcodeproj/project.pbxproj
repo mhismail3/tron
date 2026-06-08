@@ -142,7 +142,6 @@
 		382740800CC6867D4A1D7BE6 /* IBMPlexMono-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = D05A145BE8014E1D17C36824 /* IBMPlexMono-Regular.ttf */; };
 		38317572307F17BBC0A3869D /* TypewriterAnimationStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73F11AA5B7763CF597F396C0 /* TypewriterAnimationStateTests.swift */; };
 		38957E6EEF0D90A88692BF9A /* EngineProtocolTypesSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F12EABD14D69FC6D8D3DF4 /* EngineProtocolTypesSettingsTests.swift */; };
-		3A2AB1A25206F3C552D9EA25 /* EngineProtocolTypes+Git.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38FEA92F2F1E3B3585EB48EA /* EngineProtocolTypes+Git.swift */; };
 		3A5218E76A7EF5670D5EEB7E /* SourceGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26AC823152FA0E5F1CD4BD7A /* SourceGuardTests.swift */; };
 		3AE26C2155722EC826F0C12E /* DisplayFramePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = C70F897642A7D0B7A1BBE7DB /* DisplayFramePlugin.swift */; };
 		3B0DB16A7F308599125FCC9B /* AuthClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70C2B434E1D620C83D203B78 /* AuthClientTests.swift */; };
@@ -729,7 +728,6 @@
 		3792C8DC3FD730D31518DE16 /* TurnLifecycleCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TurnLifecycleCoordinator.swift; sourceTree = "<group>"; };
 		3857EF703C066E11ED73DC37 /* NotificationPillTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationPillTests.swift; sourceTree = "<group>"; };
 		38B48561A985D4D19269729A /* FolderCreationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FolderCreationTests.swift; sourceTree = "<group>"; };
-		38FEA92F2F1E3B3585EB48EA /* EngineProtocolTypes+Git.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EngineProtocolTypes+Git.swift"; sourceTree = "<group>"; };
 		394C626747DC358A1465D79A /* SessionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionClient.swift; sourceTree = "<group>"; };
 		3987A8647A11E3F4F1437B2A /* ToastBannerLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ToastBannerLayoutTests.swift; sourceTree = "<group>"; };
 		39B68F7758EA7072D9B65105 /* InteractivePopGestureEnabler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractivePopGestureEnabler.swift; sourceTree = "<group>"; };
@@ -1656,13 +1654,6 @@
 			path = Support;
 			sourceTree = "<group>";
 		};
-		65A3395537E69F2651AB20C0 /* State */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = State;
-			sourceTree = "<group>";
-		};
 		65B5124DEFFD6456C42279B2 /* Services */ = {
 			isa = PBXGroup;
 			children = (
@@ -2119,7 +2110,6 @@
 				D0E4069C509E341CD0F6EAFE /* ThinkingStateTests.swift */,
 				903CB684025087DD4BDBE925 /* TurnLifecycleCoordinatorTests.swift */,
 				8F75B251C76013187BEF047F /* UIUpdateQueueTests.swift */,
-				65A3395537E69F2651AB20C0 /* State */,
 			);
 			path = ViewModels;
 			sourceTree = "<group>";
@@ -2238,7 +2228,6 @@
 				B706ADF2296D64E747C545ED /* EngineProtocolTypes+Catalog.swift */,
 				6C5CD0C3CC4550EDF4AF6970 /* EngineProtocolTypes+Events.swift */,
 				99E493255F3AD082B661F6FC /* EngineProtocolTypes+GeneratedUI.swift */,
-				38FEA92F2F1E3B3585EB48EA /* EngineProtocolTypes+Git.swift */,
 				E6EAC2D25130C7EE2E1D9A03 /* EngineProtocolTypes+Interaction.swift */,
 				84775D84FC8B230A9B36B455 /* EngineProtocolTypes+Model.swift */,
 				F78818A3BB9B8EFCDE0A2453 /* EngineProtocolTypes+Reconstruct.swift */,
@@ -3014,7 +3003,6 @@
 				90F2F6B63FABBE2A96307296 /* EngineProtocolTypes+Catalog.swift in Sources */,
 				EDD67F6AEFF12537F1896EE8 /* EngineProtocolTypes+Events.swift in Sources */,
 				CEAFB0F5098A8E1F4B2A4137 /* EngineProtocolTypes+GeneratedUI.swift in Sources */,
-				3A2AB1A25206F3C552D9EA25 /* EngineProtocolTypes+Git.swift in Sources */,
 				F15582FD2124B4F7E794135B /* EngineProtocolTypes+Interaction.swift in Sources */,
 				7BEA760354479EBC5005038E /* EngineProtocolTypes+Model.swift in Sources */,
 				26C0A67201C56F5A1D79BA3B /* EngineProtocolTypes+Reconstruct.swift in Sources */,

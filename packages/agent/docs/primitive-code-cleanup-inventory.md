@@ -6,7 +6,7 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-08 during `PCC-9` docs and test cleanup.
+Last updated: 2026-06-08 during `PCC-10` final adversarial cleanup.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
@@ -36,10 +36,10 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 1205 | Current package/config/test/doc boundaries |
+| `retain` | 1190 | Current package/config/test/doc boundaries |
 | `asset` | 71 | iOS/Mac resources and benchmark baselines |
 | `generated` | 6 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1282** | Whole repo |
+| **Total** | **1267** | Whole repo |
 
 ## Current Tracked Package Counts
 
@@ -49,8 +49,8 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `.github` | 8 |
 | root files | 5 |
 | `packages/agent` | 492 |
-| `packages/ios-app` | 638 |
-| `packages/mac-app` | 115 |
+| `packages/ios-app` | 624 |
+| `packages/mac-app` | 114 |
 | `scripts` | 22 |
 
 The count excludes untracked local build outputs. PCC-2 owns recurring local
@@ -126,7 +126,9 @@ During PCC-3, the retired capability-search asset bundle was deleted after
 source and lockfile audits proved no retained primitive used it. During PCC-9,
 the old `packages/agent/examples/local-packs/` examples were deleted after the
 stale-doc audit found they described retired worker-pack product surfaces rather
-than current primitive runtime behavior.
+than current primitive runtime behavior. During PCC-10, package-local `.claude`
+rule trees and the retired iOS git workflow DTO were deleted after adversarial
+review proved they were stale branch/product residue.
 
 ## Collapse-Audit Hotspots
 
@@ -135,15 +137,13 @@ than current primitive runtime behavior.
 | iOS source roots | old `Core`, `Database`, `Models`, `Services`, `ViewModels`, `Views`, `Theme`, `Utilities`, `Extensions`, `Protocols` roots now collapsed to the retained primitive shell | PCC-6 passed |
 | Mac source roots | root Swift files, old `Services`, and old `Theme` now collapsed to `App`, `Server`, and `Support` | PCC-7 passed |
 | Scripts | manual dispatcher, command modules, installed runtime helpers, release helpers, hooks, benchmarks, and device helpers retained; automatic deploy watcher deleted | PCC-8 passed |
-| Contributor rule docs and large tests | root `.claude` helper tree deleted; package docs and behavior-owned test suites audited | PCC-9 passed |
+| Contributor rule docs and large tests | root/package `.claude` helper trees deleted; package docs and behavior-owned test suites audited | PCC-10 passed |
 
 ## Open Loops
 
-- No files remain classified as `collapse` or `delete`; future rows must add a
-  new scorecard-backed classification before introducing unresolved cleanup
-  inventory.
-- The target tree is canonical for future moves, but Xcode project files must
-  be regenerated from `project.yml` after iOS or Mac source moves.
+- No files remain classified as `collapse` or `delete`.
+- The target tree is canonical for future moves; Xcode project files must be
+  regenerated from `project.yml` after iOS or Mac source moves.
 - Historical teardown scorecards/evidence retain old product vocabulary as
   evidence; ordinary source/docs are guarded by
   `primitive_code_cleanup_invariants`.

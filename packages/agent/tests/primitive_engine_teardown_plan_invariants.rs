@@ -859,7 +859,6 @@ fn capability_registry_recipe_and_conformance_scaffolding_is_deleted() {
         "packages/agent/src/domains/capability/operations/audit.rs",
         "packages/agent/src/domains/capability/operations/execute.rs",
         "packages/agent/src/domains/capability/operations/inspect.rs",
-        "packages/agent/src/domains/capability/operations/policy_profile.rs",
         "packages/agent/src/domains/capability/operations/presentation.rs",
         "packages/agent/src/domains/capability/operations/run.rs",
         "packages/agent/src/domains/capability/operations/schema_validation.rs",

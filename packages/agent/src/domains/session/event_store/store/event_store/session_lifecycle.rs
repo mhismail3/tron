@@ -1,12 +1,9 @@
 use std::collections::HashMap;
 
-use serde_json::Value;
 use uuid::Uuid;
 
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
-use crate::domains::session::event_store::sqlite::repositories::event::{
-    EventRepo, ListEventsOptions,
-};
+use crate::domains::session::event_store::sqlite::repositories::event::EventRepo;
 use crate::domains::session::event_store::sqlite::repositories::session::{
     ActivitySummaryLine, CreateSessionOptions, IncrementCounters, ListSessionsOptions,
     MessagePreview, SessionRepo,
@@ -16,8 +13,7 @@ use crate::domains::session::event_store::sqlite::row_types::SessionRow;
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::base::SessionEvent;
 
-use super::event_log::append_event_in_tx;
-use super::{AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult};
+use super::{CreateSessionResult, EventStore, ForkOptions, ForkResult};
 
 /// Options for creating a session inside an already-open transaction.
 pub(super) struct CreateSessionInTxOptions<'a> {
@@ -30,9 +26,6 @@ pub(super) struct CreateSessionInTxOptions<'a> {
 /// Core session-creation primitive: workspace get-or-create, sessions row
 /// insert, root `session.start` event, root/head pointer updates, and counter
 /// increments — all inside the caller's transaction. The caller commits.
-///
-/// Shared by [`EventStore::create_session`] (one tx per session) and
-/// [`EventStore::import_atomic`] (many appends under one tx).
 pub(super) fn create_session_in_tx(
     tx: &rusqlite::Transaction<'_>,
     opts: &CreateSessionInTxOptions<'_>,
@@ -114,73 +107,6 @@ pub(super) fn create_session_in_tx(
     })
 }
 
-/// A single event to append during an atomic import.
-pub struct ImportEventSpec<'a> {
-    /// Canonical event type to persist.
-    pub event_type: EventType,
-    /// Event payload (caller retains ownership; the import borrows it).
-    pub payload: &'a Value,
-}
-
-/// Options for [`EventStore::import_atomic`].
-pub struct ImportAtomicOptions<'a> {
-    /// Primary model for the imported session.
-    pub model: &'a str,
-    /// Workspace path associated with the session.
-    pub workspace_path: &'a str,
-    /// Optional initial title (extracted from the source, e.g. a custom title line).
-    pub title: Option<&'a str>,
-    /// Pre-transformed events to append after the root `session.start` event,
-    /// in order. Each receives a monotonically increasing sequence starting at 1.
-    pub events: &'a [ImportEventSpec<'a>],
-    /// Dedup tag value. Written as a `metadata.tag` event with
-    /// `{ "action": "add", "tag": <value> }`. If another session in the store
-    /// already carries this tag, the import is aborted with
-    /// [`EventStoreError::DuplicateImport`] — checked INSIDE the transaction
-    /// so concurrent imports of the same source file race to a single winner.
-    pub dedup_tag: &'a str,
-    /// Additional user-supplied tags, each written as its own `metadata.tag` event.
-    pub extra_tags: &'a [String],
-}
-
-/// Result of a successful [`EventStore::import_atomic`] call.
-pub struct ImportAtomicResult {
-    /// Fully-populated session row after the import transaction commits.
-    pub session: SessionRow,
-    /// Total number of events written (session.start + imported events + dedup tag + extra tags).
-    pub event_count: i64,
-}
-
-/// Scan the event log for a `metadata.tag` event carrying the given tag with
-/// `action = "add"`, returning the owning session ID if any.
-///
-/// Accepts any type that derefs to `&rusqlite::Connection`, so callers can
-/// run it inside a transaction (for atomic import dedup) or against a bare
-/// connection (for read-only previews). Import atomicity is enforced by
-/// calling this INSIDE the transaction that does the write.
-fn find_session_id_with_tag_in_conn(
-    conn: &rusqlite::Connection,
-    tag: &str,
-) -> Result<Option<String>> {
-    let sessions = SessionRepo::list(conn, &ListSessionsOptions::default())?;
-    let opts = ListEventsOptions::default();
-
-    for session in sessions {
-        let events = EventRepo::get_by_session(conn, &session.id, &opts)?;
-        for event in &events {
-            if event.event_type == "metadata.tag"
-                && let Ok(payload) = serde_json::from_str::<Value>(&event.payload)
-                && payload.get("tag").and_then(Value::as_str) == Some(tag)
-                && payload.get("action").and_then(Value::as_str) == Some("add")
-            {
-                return Ok(Some(session.id));
-            }
-        }
-    }
-
-    Ok(None)
-}
-
 impl EventStore {
     /// Create a new session with a root `session.start` event.
     ///
@@ -212,126 +138,6 @@ impl EventStore {
             tx.commit()?;
             tracing::debug!(session_id = %result.session.id, "session created");
             Ok(result)
-        })
-    }
-
-    /// Return the ID of any session holding the given metadata tag
-    /// (`metadata.tag` event with `{"action": "add", "tag": <tag>}`), or `None`.
-    ///
-    /// Acquires no write lock — intended for read-only previews (e.g. the
-    /// import UI asking "would this source be a duplicate?"). The authoritative
-    /// dedup check runs inside [`EventStore::import_atomic`], so a Yes from this
-    /// method is advisory; a No does not guarantee the subsequent import will
-    /// succeed if another caller wins the race.
-    pub fn find_session_id_with_metadata_tag(&self, tag: &str) -> Result<Option<String>> {
-        let conn = self.conn()?;
-        find_session_id_with_tag_in_conn(&conn, tag)
-    }
-
-    /// Atomically create a session, append an initial batch of pre-transformed
-    /// events, and record a dedup tag — all inside a single transaction.
-    ///
-    /// Either every write commits or none do: there is no observable window in
-    /// which a session exists without its dedup tag. Concurrent imports of the
-    /// same source file (same `dedup_tag`) serialize on `with_global_write_lock`
-    /// and every loser receives [`EventStoreError::DuplicateImport`] carrying
-    /// the ID of the session that won.
-    ///
-    /// INVARIANT: the dedup tag is scanned for INSIDE the transaction, so the
-    /// check-then-write is atomic. Callers must not rely on any external
-    /// "already imported?" probe before this call.
-    #[tracing::instrument(skip(self, opts), fields(dedup_tag = %opts.dedup_tag))]
-    pub fn import_atomic(&self, opts: &ImportAtomicOptions<'_>) -> Result<ImportAtomicResult> {
-        self.with_global_write_lock(|| {
-            let mut conn = self.conn()?;
-            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-
-            if let Some(existing) = find_session_id_with_tag_in_conn(&tx, opts.dedup_tag)? {
-                return Err(EventStoreError::DuplicateImport {
-                    existing_session_id: existing,
-                });
-            }
-
-            let created = create_session_in_tx(
-                &tx,
-                &CreateSessionInTxOptions {
-                    model: opts.model,
-                    workspace_path: opts.workspace_path,
-                    title: opts.title,
-                    provider: None,
-                },
-            )?;
-
-            let mut session_mut = created.session.clone();
-            let mut next_sequence: i64 = 1;
-            let mut written: i64 = 1; // session.start already
-
-            for spec in opts.events {
-                let event = append_event_in_tx(
-                    &tx,
-                    &session_mut,
-                    &AppendOptions {
-                        session_id: &session_mut.id,
-                        event_type: spec.event_type,
-                        payload: spec.payload.clone(),
-                        parent_id: None,
-                        sequence: Some(next_sequence),
-                    },
-                )?;
-                session_mut.head_event_id = Some(event.id);
-                next_sequence += 1;
-                written += 1;
-            }
-
-            let dedup_payload = serde_json::json!({ "action": "add", "tag": opts.dedup_tag });
-            let event = append_event_in_tx(
-                &tx,
-                &session_mut,
-                &AppendOptions {
-                    session_id: &session_mut.id,
-                    event_type: EventType::MetadataTag,
-                    payload: dedup_payload,
-                    parent_id: None,
-                    sequence: Some(next_sequence),
-                },
-            )?;
-            session_mut.head_event_id = Some(event.id);
-            next_sequence += 1;
-            written += 1;
-
-            for tag in opts.extra_tags {
-                let payload = serde_json::json!({ "action": "add", "tag": tag });
-                let event = append_event_in_tx(
-                    &tx,
-                    &session_mut,
-                    &AppendOptions {
-                        session_id: &session_mut.id,
-                        event_type: EventType::MetadataTag,
-                        payload,
-                        parent_id: None,
-                        sequence: Some(next_sequence),
-                    },
-                )?;
-                session_mut.head_event_id = Some(event.id);
-                next_sequence += 1;
-                written += 1;
-            }
-
-            tx.commit()?;
-
-            let final_session = SessionRepo::get_by_id(&conn, &session_mut.id)?
-                .ok_or(EventStoreError::SessionNotFound(session_mut.id))?;
-
-            tracing::debug!(
-                session_id = %final_session.id,
-                event_count = written,
-                "atomic import committed"
-            );
-
-            Ok(ImportAtomicResult {
-                session: final_session,
-                event_count: written,
-            })
         })
     }
 

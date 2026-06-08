@@ -9,7 +9,9 @@ run_tests() {
     if (cd "$RUST_WORKSPACE" \
         && cargo test --workspace --lib --bins -- --quiet 2>&1 \
         && cargo test --test db_path_guard -- --quiet 2>&1 \
-        && cargo test --test threat_model_invariants -- --quiet 2>&1 \
+        && cargo test --test primitive_engine_teardown_plan_invariants -- --quiet 2>&1 \
+        && cargo test --test primitive_code_cleanup_invariants -- --quiet 2>&1 \
+        && cargo test --test primitive_trace_execution -- --quiet 2>&1 \
         && cargo test --test integration -- --test-threads=1 --quiet 2>&1); then
         print_success "Tests passed"
         return 0

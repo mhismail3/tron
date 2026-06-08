@@ -183,7 +183,6 @@ fn profile_first_dirs(home: &Path) -> Vec<PathBuf> {
         home.join(dirs::PROFILES).join(LOCAL_PROFILE),
         home.join(dirs::PROFILES).join(USER_PROFILE),
         home.join(dirs::WORKSPACE),
-        home.join(dirs::WORKSPACE).join(dirs::INBOX),
         home.join(dirs::WORKSPACE).join(dirs::PROJECTS),
         home.join(dirs::WORKSPACE).join(dirs::REPORTS),
         home.join(dirs::WORKSPACE).join(dirs::RENDERS),

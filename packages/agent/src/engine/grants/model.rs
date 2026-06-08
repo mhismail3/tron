@@ -170,11 +170,8 @@ pub const BOOTSTRAP_GRANT_IDS: &[&str] = &[
     "sandbox-spawn-worker",
     "agent-runtime",
     "agent-capability-runtime",
-    "agent-worker-guide",
     "capability-grant",
     "prompt-runtime",
-    "mcp-catalog-refresh",
-    "cron-scheduler",
     "test-grant",
     "grant:test",
 ];

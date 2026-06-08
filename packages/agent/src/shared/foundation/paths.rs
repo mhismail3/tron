@@ -41,8 +41,6 @@ pub mod dirs {
     pub const JOURNALS: &str = "journals";
     // ── Under workspace/ ──
 
-    /// Incoming captures that need later routing.
-    pub const INBOX: &str = "inbox";
     /// Active project spaces.
     pub const PROJECTS: &str = "projects";
     /// Analysis, research, and investigation reports.
@@ -234,11 +232,6 @@ pub fn renders_dir() -> PathBuf {
 /// `~/.tron/workspace/screenshots/`
 pub fn screenshots_dir() -> PathBuf {
     workspace_dir().join(dirs::SCREENSHOTS)
-}
-
-/// `~/.tron/workspace/inbox/`
-pub fn inbox_dir() -> PathBuf {
-    workspace_dir().join(dirs::INBOX)
 }
 
 /// `~/.tron/workspace/projects/`

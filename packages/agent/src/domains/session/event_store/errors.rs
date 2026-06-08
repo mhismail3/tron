@@ -57,16 +57,6 @@ pub enum EventStoreError {
     #[error("invalid operation: {0}")]
     InvalidOperation(String),
 
-    /// An atomic import was aborted because another session already carries
-    /// the requested dedup tag. Carries the existing session's ID so callers
-    /// can surface it (e.g. "this Claude Code file was imported earlier into
-    /// session X").
-    #[error("import already committed to session {existing_session_id}")]
-    DuplicateImport {
-        /// Existing Tron session that already holds the dedup tag.
-        existing_session_id: String,
-    },
-
     /// Internal error (e.g. poisoned lock).
     #[error("internal error: {0}")]
     Internal(String),

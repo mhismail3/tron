@@ -1009,7 +1009,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- sessions/                  Optional agent-owned session summaries
 +-- workspace/                    Active work and generated artifacts
 |   +-- projects/                  Project-local active work
-|   +-- plans/                     Plan files and TODOs
+|   +-- plans/                     Plan files and task lists
 |   +-- reports/                   Analysis and investigation reports
 |   +-- renders/                   Rendered pages displayed in chat
 |   +-- screenshots/               Saved screenshots from runtime execution

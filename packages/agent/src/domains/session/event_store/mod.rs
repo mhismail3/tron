@@ -48,8 +48,8 @@ pub use sqlite::{
     acquire_database_lock, check_integrity, new_file, new_in_memory, run_migrations,
 };
 pub use store::{
-    AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult, ImportAtomicOptions,
-    ImportAtomicResult, ImportEventSpec, event_rows_to_session_events,
+    AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult,
+    event_rows_to_session_events,
 };
 pub use trace::{AGENT_TRACE_VERSION, AgentTraceListOptions, AgentTraceRecord};
 pub use types::{
