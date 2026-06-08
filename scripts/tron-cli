@@ -66,7 +66,6 @@ cmd_help() {
         echo "  version         Print/check/sync centralized release version mirrors"
         echo "  setup           First-time project setup"
         echo "  install         Initial setup (launchd + CLI)"
-        echo "  auto-deploy     Remote auto-deploy watcher"
         echo ""
     else
         echo -e "${DIM}Dev commands available when workspace is installed.${NC}"
@@ -93,7 +92,7 @@ case "$1" in
     rollback)        shift; cmd_rollback "$@" ;;
     login)           shift; cmd_login "$@" ;;
     # Dev (delegate to workspace)
-    dev|deploy|ci|bench|version|preflight|setup|install|auto-deploy)
+    dev|deploy|ci|bench|version|preflight|setup|install)
         delegate_to_workspace "$@" ;;
     *)
         print_error "Unknown command: $1"

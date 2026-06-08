@@ -110,12 +110,6 @@ enum TronPaths {
         "Contents/Library/LoginItems/\(agentBundleName(environment: environment)).app/Contents/MacOS/tron"
     }
 
-    static var autoDeployPlistPath: URL {
-        homeDirectory
-            .appendingPathComponent("Library/LaunchAgents", isDirectory: true)
-            .appendingPathComponent("com.tron.auto-deploy.plist", isDirectory: false)
-    }
-
     static var launchAgentLabel: String {
         launchAgentLabel(environment: ProcessInfo.processInfo.environment)
     }

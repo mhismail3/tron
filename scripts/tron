@@ -19,7 +19,6 @@
 #   install         Contributor launchd setup (not used by the Mac app)
 #   rollback        Restore previous binary (--yes to skip confirmation)
 #   uninstall       Remove service and reset Mac onboarding (optionally reset settings/auth)
-#   auto-deploy     Contributor auto-deploy watcher (install|uninstall|status|pause|resume|logs)
 #
 # Auth:
 #   login           Authenticate with a provider (--label for multi-account)
@@ -100,7 +99,6 @@ cmd_help() {
     echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
     echo "  install         Initial setup (launchd + CLI)"
     echo "  uninstall       Remove service and reset Mac onboarding (add --reset-settings and/or --reset-credentials)"
-    echo "  auto-deploy     Contributor auto-deploy watcher (install|uninstall|status|pause|resume|logs)"
     echo ""
     echo -e "${BOLD}Runtime:${NC}"
     echo "  start           Start launchd service"
@@ -149,6 +147,5 @@ case "$1" in
     login)     shift; cmd_login "$@" ;;
     auth)      shift; cmd_auth "$@" ;;
     uninstall) shift; cmd_uninstall "$@" ;;
-    auto-deploy) shift; cmd_auto_deploy "$@" ;;
     *) print_error "Unknown command: $1"; cmd_help; exit 1 ;;
 esac

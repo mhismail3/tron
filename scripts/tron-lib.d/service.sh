@@ -490,9 +490,7 @@ cmd_uninstall() {
         "$CONTRIBUTOR_DIR/workspace-path" \
         "$CONTRIBUTOR_DIR/deployed-commit" \
         "$CONTRIBUTOR_DIR/last-deployment.json" \
-        "$CONTRIBUTOR_DIR/restart-sentinel.json" \
-        "$CONTRIBUTOR_DIR/auto-deploy.log" \
-        "$CONTRIBUTOR_DIR/auto-deploy-launchd.log"
+        "$CONTRIBUTOR_DIR/restart-sentinel.json"
 
     print_status "Resetting Mac onboarding state..."
     rm -f "$ONBOARDED_MARKER_PATH"

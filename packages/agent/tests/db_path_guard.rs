@@ -183,7 +183,6 @@ fn contributor_scripts_keep_runtime_artifacts_under_internal_run() {
         root.join("scripts/tron-lib.sh"),
         root.join("scripts/tron"),
         root.join("scripts/tron-cli"),
-        root.join("scripts/auto-deploy"),
     ];
 
     for script in scripts {
@@ -240,9 +239,7 @@ fn retired_tron_home_paths_are_absent() {
         "~/.tron/instructions".to_owned(),
         "~/.tron/user".to_owned(),
         "master-default".to_owned(),
-        "~/.tron/auto-deploy.pause".to_owned(),
         "~/.tron/deploy.lock".to_owned(),
-        "~/.tron/auto-deploy.lock".to_owned(),
         concat!("~/.tron/", "to", "ols", "/json-render").to_owned(),
     ];
     let mut files = Vec::new();

@@ -1277,26 +1277,24 @@ packages/mac-app/docs/development.md	retain	mac docs	PCC-7/PCC-9	Mac architectur
 packages/mac-app/project.yml	retain	mac build config	PCC-7	Mac build/package configuration boundary
 packages/mac-app/scripts/bundle-agent.sh	retain	mac build config	PCC-7	Mac build/package configuration boundary
 scripts/AppIcon.icns	asset	script benchmark baseline	PCC-8	Asset/resource boundary
-scripts/asc-jwt	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/auto-deploy	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
+scripts/asc-jwt	retain	scripts helper	PCC-8	App Store Connect JWT helper for local release diagnostics
 scripts/benchmarks/baselines/macos-aarch64.json	asset	script benchmark baseline	PCC-8	Asset/resource boundary
-scripts/benchmarks/bench.py	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/install-hooks.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/personal-info-guard.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/reset-db	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-agent.entitlements	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-cli	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-ios-beta	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-lib.d/auth.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-lib.d/bundle.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-lib.d/logs.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-lib.d/service.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-lib.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-release-notes	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron-version	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron.d/automation.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron.d/deploy.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron.d/dev.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron.d/quality.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
-scripts/tron.d/workspace.sh	collapse	scripts	PCC-8	CLI/helper file must justify dispatcher/shared-module split
+scripts/benchmarks/bench.py	retain	scripts benchmark	PCC-8	Benchmark command implementation
+scripts/install-hooks.sh	retain	repo hooks	PCC-8	Local hook installer for rustfmt and personal-info guards
+scripts/personal-info-guard.sh	retain	repo hooks	PCC-8	Commit/source guard for personal-info literals
+scripts/reset-db	retain	scripts helper	PCC-8	Local database reset helper
+scripts/tron	retain	scripts dispatcher	PCC-8	Workspace CLI dispatcher
+scripts/tron-agent.entitlements	retain	scripts build config	PCC-8	Contributor bundle signing entitlements
+scripts/tron-cli	retain	installed runtime CLI	PCC-8	Installed runtime entrypoint
+scripts/tron-ios-beta	retain	ios device helper	PCC-8	Physical-device iOS beta helper
+scripts/tron-lib.d/auth.sh	retain	shared CLI library	PCC-8	Auth helper loaded by workspace and installed CLIs
+scripts/tron-lib.d/bundle.sh	retain	shared CLI library	PCC-8	Contributor app-bundle helper loaded by workspace and installed CLIs
+scripts/tron-lib.d/logs.sh	retain	shared CLI library	PCC-8	Log query helper loaded by workspace and installed CLIs
+scripts/tron-lib.d/service.sh	retain	shared CLI library	PCC-8	Service helper loaded by workspace and installed CLIs
+scripts/tron-lib.sh	retain	shared CLI library	PCC-8	Shared CLI configuration and module loader
+scripts/tron-release-notes	retain	release helper	PCC-8	Deterministic GitHub release changelog generator
+scripts/tron-version	retain	release helper	PCC-8	Version print/check/sync helper used by CI and releases
+scripts/tron.d/deploy.sh	retain	command module	PCC-8	Manual contributor deploy command family
+scripts/tron.d/dev.sh	retain	command module	PCC-8	Development server command family
+scripts/tron.d/quality.sh	retain	command module	PCC-8	CI and benchmark command family
+scripts/tron.d/workspace.sh	retain	command module	PCC-8	Workspace setup command family

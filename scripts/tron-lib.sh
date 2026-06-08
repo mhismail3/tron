@@ -2,7 +2,7 @@
 # tron-lib.sh - Shared library for Tron CLI scripts
 #
 # SINGLE SOURCE OF TRUTH for all paths, config, and shared functions.
-# Sourced by: scripts/tron, scripts/tron-cli, scripts/auto-deploy, scripts/reset-db
+# Sourced by: scripts/tron, scripts/tron-cli, scripts/reset-db
 #
 # Do NOT execute this file directly.
 
@@ -30,8 +30,6 @@ WORKSPACE_VAULT_DIR="$WORKSPACE_DIR/vault"
 WORKSPACE_KNOWLEDGE_DIR="$WORKSPACE_DIR/knowledge"
 CONTRIBUTOR_DIR="$RUN_DIR"
 DEPLOY_LOCK_FILE="$RUN_DIR/deploy.lock"
-AUTO_DEPLOY_PAUSE_FILE="$RUN_DIR/auto-deploy.pause"
-AUTO_DEPLOY_LOCK_FILE="$RUN_DIR/auto-deploy.lock"
 INSTALLED_BUNDLE="$CONTRIBUTOR_DIR/Tron-Deploy.app"
 INSTALLED_BINARY="$INSTALLED_BUNDLE/Contents/MacOS/tron"
 DEV_BUNDLE="$RUN_DIR/Tron-Dev.app"

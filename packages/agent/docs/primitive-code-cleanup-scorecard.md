@@ -4,7 +4,7 @@ Created: 2026-06-08
 
 Initial score: **0/100**
 
-Current score: **78/100**
+Current score: **84/100**
 
 Status: **active**
 
@@ -69,7 +69,7 @@ only until the owning scorecard row proves whether they remain a boundary.
 | `.codex` | retain | Codex app integration | Local Codex environment actions for this workspace. | Retain if actions match current CLI surface. |
 | `.github` | retain | CI/release boundary | GitHub workflows, templates, and dependency policy. | Audit only if commands or package layout change. |
 | `packages` | retain | package boundary | Contains the Rust agent, iOS app, and Mac wrapper package roots. | Retain. |
-| `scripts` | retain | CLI boundary | Workspace and installed helper scripts. | Consolidate helpers during PCC-8. |
+| `scripts` | retain | CLI boundary | Workspace and installed helper scripts. | Retain cleaned manual dispatcher, command modules, installed runtime helpers, release helpers, hooks, benchmarks, and device helpers. |
 | `packages/agent` | retain | Rust server package | Single Rust crate plus server docs/assets/tests. | Retain; remove stale examples/assets if unowned. |
 | `packages/ios-app` | retain | iOS package | SwiftUI mobile shell and generated Xcode project boundary. | Retain consolidated primitive shell source roots. |
 | `packages/mac-app` | retain | Mac package | SwiftUI menu-bar wrapper and generated Xcode project boundary. | Retain consolidated primitive wrapper source roots. |
@@ -143,6 +143,10 @@ planning gates:
   support services live under `Sources/App`, `Sources/Server`, and
   `Sources/Support`; root Swift files plus old `Sources/Services` and
   `Sources/Theme` roots stay absent.
+- Scripts cleanup shape stays manual and documented: `scripts/tron` remains the
+  dispatcher, `tron.d/` contains only large manual command families,
+  `tron-lib.d/` contains installed-runtime helpers, and the automatic
+  deployment watcher stays deleted.
 
 ## Operating Loop
 
@@ -166,7 +170,7 @@ planning gates:
 | PCC-5 | Session, trace, and persistence cleanup | 8 | passed_after_fix | storage | Collapsed session worker `deps`/`handlers` into `session/mod.rs`, collapsed the one-file `operations/` folder into `session/operations.rs`, rewrote stale SQLite/event-store docs that still described retired migration planes, deleted retired `message.queued`/`message.dequeued` payload DTOs, added parser rejection proof for those event strings, regenerated the file inventory, and added a cleanup invariant for the retained session persistence shape and old product schema absence. | Existing dense event repository tests remain intentionally over budget and listed; iOS queue/event client surfaces remain PCC-6. | PCC-5 session persistence checkpoint |
 | PCC-6 | iOS app consolidation | 12 | passed_after_fix | ios | Deleted the prompt-queue UI/event/settings/client plane, removed Rust prompt queue message metadata shims, consolidated iOS `Sources` to `App`, `Engine`, `Session`, `Support`, `UI`, `Resources`, and assets, moved shared App Group transfer types into `Support/Share`, regenerated XcodeGen, updated README/iOS docs/path guards, renamed stale synchronous prompt stream wording to `apply_invoked`, regenerated the file inventory, and proved the shell with focused source guards/settings/share/session tests plus a retained-source residue scan. | Full app-wide iOS suite remains a final PCC-10 candidate; no open PCC-6 cleanup loops. | PCC-6 iOS consolidation checkpoint |
 | PCC-7 | Mac app consolidation | 8 | passed_after_fix | mac | Consolidated Mac `Sources` to `App`, `Server`, `Support`, `Wizard`, `MenuBar`, resources, and assets; moved app lifecycle, LaunchAgent/server, support/theme/pairing/feedback owners out of root `Services`/`Theme`; kept menu-bar feedback status formatting at the menu-bar boundary; regenerated XcodeGen; updated README/Mac docs/rules/tests/inventory; and added a static gate for the retained Mac primitive roots. | Final PCC-10 broad stale/fallback scan remains; no PCC-7-specific open loops. | PCC-7 Mac consolidation checkpoint |
-| PCC-8 | Scripts cleanup | 6 | pending | scripts | Dispatcher/helper/module split matches README, stale helpers/caches deleted, syntax checks and relevant status/dev health-gated checks pass. | Live service checks depend on local environment. | pending |
+| PCC-8 | Scripts cleanup | 6 | passed_after_fix | scripts | Deleted the automatic `scripts/auto-deploy` watcher and its `tron auto-deploy` launchd module, removed the command from workspace/installed CLI dispatch, removed stale auto-deploy runtime constants and Mac path constants, kept manual `tron deploy` as the documented user-run contributor path, marked retained script helpers/modules in the inventory, and added a static gate proving the automatic deploy path stays absent. | Live service checks remain environment-dependent; syntax and static gates cover the script cleanup surface. | PCC-8 scripts cleanup checkpoint |
 | PCC-9 | Docs and test cleanup | 8 | pending | docs_or_test_harness | Stale docs deleted or rewritten, redundant tests consolidated, static gates cover deleted product surfaces and folder drift, progressive disclosure docs updated. | Historical scorecards may retain deleted terms as evidence. | pending |
 | PCC-10 | Final adversarial pass | 8 | pending | test_harness | Stale product/fallback/compat/dead-code scans, unused dependency checks, subagent review, broad verification, score math/status closeout, ledger, and final checkpoint commit. | None acceptable at closeout; successor scope must be explicit. | pending |
 
@@ -174,8 +178,8 @@ Total weight: **100**
 
 ## Next Test
 
-PCC-8 starts scripts cleanup. Begin with dispatcher/helper/module inventory:
+PCC-9 starts docs and test cleanup. Begin with stale-doc/test inventory:
 
 ```bash
-find scripts -maxdepth 3 -type f -print | sort
+find packages/agent/docs packages/ios-app/docs packages/mac-app/docs -maxdepth 2 -type f -print | sort
 ```

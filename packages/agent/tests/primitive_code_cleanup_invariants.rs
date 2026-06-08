@@ -65,7 +65,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **78/100**",
+        "Current score: **84/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
@@ -82,7 +82,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-5 | Session, trace, and persistence cleanup | 8 | passed_after_fix |",
         "| PCC-6 | iOS app consolidation | 12 | passed_after_fix |",
         "| PCC-7 | Mac app consolidation | 8 | passed_after_fix |",
-        "PCC-8 starts scripts cleanup.",
+        "| PCC-8 | Scripts cleanup | 6 | passed_after_fix |",
+        "PCC-9 starts docs and test cleanup.",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -94,7 +95,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **78/100**",
+        "Current score: **84/100**",
         "Status: **active**",
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
@@ -104,6 +105,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-5 | passed_after_fix |",
         "| PCC-6 | passed_after_fix |",
         "| PCC-7 | passed_after_fix |",
+        "| PCC-8 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -270,6 +272,37 @@ fn mac_app_sources_stay_consolidated_to_primitive_roots() {
             !repo_path(path).exists(),
             "Mac source root must not retain old grouping path `{path}`"
         );
+    }
+}
+
+#[test]
+fn scripts_surface_stays_manual_and_documented() {
+    for path in ["scripts/auto-deploy", "scripts/tron.d/automation.sh"] {
+        assert!(
+            !repo_path(path).exists(),
+            "automatic deployment helper must stay deleted: {path}"
+        );
+    }
+
+    for path in [
+        "README.md",
+        "scripts/tron",
+        "scripts/tron-cli",
+        "scripts/tron-lib.sh",
+        "packages/mac-app/Sources/Server/TronPaths.swift",
+    ] {
+        let text = read_repo_file(path);
+        for banned in [
+            concat!("auto", "-", "deploy"),
+            "AUTO_DEPLOY",
+            concat!("cmd_", "auto", "_deploy"),
+            "com.tron.auto-deploy",
+        ] {
+            assert!(
+                !text.contains(banned),
+                "manual script surface must not retain `{banned}` in {path}"
+            );
+        }
     }
 }
 

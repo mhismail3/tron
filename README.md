@@ -151,7 +151,11 @@ tron/
 |   +-- tron-lib.d/         Runtime CLI service/log/auth/bundle modules
 |   +-- tron-cli            Contributor CLI helper for local service management
 |   +-- tron-ios-beta       Local physical-device build/install/stop helper for iOS app variants
-|   +-- auto-deploy         Background auto-deploy worker (contributor-only; refuses to run outside a git repo)
+|   +-- benchmarks/         Performance benchmark runner and baselines
+|   +-- asc-jwt             Local App Store Connect JWT helper
+|   +-- install-hooks.sh    Installs repo-managed commit hooks
+|   +-- personal-info-guard.sh
+|   +-- reset-db            Local database reset helper
 +-- .github/
 |   +-- workflows/          CI + Mac/iOS release pipelines
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
@@ -320,10 +324,9 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | Command | Description |
 |---------|-------------|
 | `tron preflight` | Pre-deploy infrastructure check |
-| `tron deploy` | Build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive) |
+| `tron deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive). No automatic deploy watcher is retained. |
 | `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 | `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
-| `tron auto-deploy` | Contributor-only auto-deploy watcher (`install`, `uninstall`, `status`, `pause`, `resume`, `logs`). Refuses to run outside a git repo. |
 
 ### Runtime
 
@@ -1026,8 +1029,6 @@ Base directories in the tree below are resolved through helpers in `packages/age
     |   +-- journals/              Streaming journals for crash recovery of partial LLM output
     +-- run/                       Mutable runtime state and local contributor artifacts
     |   +-- auth.lock              Auth-file refresh lock
-    |   +-- auto-deploy.lock       Contributor deploy concurrency lock
-    |   +-- auto-deploy.pause      Contributor deploy pause sentinel
     |   +-- deploy.lock            Manual deploy concurrency lock
     |   +-- .mac-wrapper.*.lock    Per-wrapper menu app lock
     |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`

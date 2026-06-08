@@ -1190,16 +1190,11 @@ fn primitive_branch_has_no_product_update_surface() {
         "retained source product update surface",
     );
 
-    let scripts = [
-        "scripts/tron",
-        "scripts/tron-lib.sh",
-        "scripts/tron.d/automation.sh",
-        "scripts/auto-deploy",
-    ]
-    .into_iter()
-    .map(read_repo_file)
-    .collect::<Vec<_>>()
-    .join("\n");
+    let scripts = ["scripts/tron", "scripts/tron-lib.sh"]
+        .into_iter()
+        .map(read_repo_file)
+        .collect::<Vec<_>>()
+        .join("\n");
     assert_absent(
         &scripts,
         &["self-update", "auto-update.pause", "updater-state.json"],
