@@ -34,7 +34,7 @@ enum PairingURLBuilder {
     }
 
     /// Parses a URL of the form `tron://pair?host=…&port=…&token=…[&label=…]`.
-    /// Returns nil on any malformed input. Used by `Tests/Services/PairingURLBuilderTests`
+    /// Returns nil on any malformed input. Used by `Tests/Support/Pairing/PairingURLBuilderTests`
     /// to verify round-trip with iOS.
     static func parse(_ url: URL) -> PairingPayload? {
         guard url.scheme == scheme,

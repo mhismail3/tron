@@ -37,7 +37,7 @@ enum MenuItemDescriptor: Equatable {
 enum MenuBarItemBuilder {
     /// Builds the menu sequence for a given snapshot. Order matches
     /// plan §A "Menu bar" layout. Tests in
-    /// `Tests/MenuBar/MenuBarItemBuilderTests.swift` pin the ordering.
+    /// `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift` pin the ordering.
     static func build(
         snapshot: ServerStatusSnapshot,
         paths: EnvironmentSetup

@@ -3,13 +3,13 @@ use super::support::*;
 #[test]
 fn mac_app_sources_stay_consolidated_to_primitive_roots() {
     for path in [
-        "packages/mac-app/Sources/App/TronMacApp.swift",
-        "packages/mac-app/Sources/App/EnvironmentSetup.swift",
-        "packages/mac-app/Sources/App/MacCommandLineMode.swift",
-        "packages/mac-app/Sources/Server/LaunchAgentManaging.swift",
-        "packages/mac-app/Sources/Server/ServerPing.swift",
-        "packages/mac-app/Sources/Server/TronPaths.swift",
-        "packages/mac-app/Sources/Support/Models.swift",
+        "packages/mac-app/Sources/App/Lifecycle/TronMacApp.swift",
+        "packages/mac-app/Sources/App/Composition/EnvironmentSetup.swift",
+        "packages/mac-app/Sources/App/CommandMode/MacCommandLineMode.swift",
+        "packages/mac-app/Sources/Server/LaunchAgent/LaunchAgentManaging.swift",
+        "packages/mac-app/Sources/Server/Health/ServerPing.swift",
+        "packages/mac-app/Sources/Server/Paths/TronPaths.swift",
+        "packages/mac-app/Sources/Support/Onboarding/OnboardingModels.swift",
         "packages/mac-app/Sources/Support/Theme/TronColors.swift",
         "packages/mac-app/Sources/Support/Pairing/PairingURLBuilder.swift",
     ] {
@@ -24,6 +24,10 @@ fn mac_app_sources_stay_consolidated_to_primitive_roots() {
         "packages/mac-app/Sources/EnvironmentSetup.swift",
         "packages/mac-app/Sources/Services",
         "packages/mac-app/Sources/Theme",
+        "packages/mac-app/Sources/Support/Observability",
+        "packages/mac-app/Tests/Mocks",
+        "packages/mac-app/Tests/Services",
+        "packages/mac-app/Tests/Observability",
     ] {
         assert!(
             !repo_path(path).exists(),
@@ -46,7 +50,7 @@ fn scripts_surface_stays_manual_and_documented() {
         "scripts/tron",
         "scripts/tron-cli",
         "scripts/tron-lib.sh",
-        "packages/mac-app/Sources/Server/TronPaths.swift",
+        "packages/mac-app/Sources/Server/Paths/TronPaths.swift",
     ] {
         let text = read_repo_file(path);
         for banned in [

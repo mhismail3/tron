@@ -1,6 +1,6 @@
 # Mac App Development
 
-> Last verified: 2026-06-08 (PCC-7 source-root consolidation, primitive helper bundle, health-gated recovery, isolated helper registration, and two-helper signing)
+> Last verified: 2026-06-08 (HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated recovery, isolated helper registration, and two-helper signing)
 
 ## Setup
 
@@ -140,10 +140,12 @@ Do not use this scheme for normal menu-bar UI iteration. The default `TronMac` D
 
 ```
 Tests/
-├── MenuBar/              # MenuBarItemBuilderTests, ServerStatusPollerTests
-├── Mocks/                # MockLaunchAgentManager, TestTempDir
-├── Services/             # Server/support behavior tests
-└── Wizard/               # WizardStateTests, WizardStepTests, …
+├── App/                  # Lifecycle and command-mode tests
+├── Infrastructure/       # Test fakes such as MockLaunchAgentManager and TestTempDir
+├── MenuBar/              # Controller and presentation tests
+├── Server/               # Health, paths, pairing token, and process-control tests
+├── Support/              # Diagnostics, feedback, foundation, onboarding, pairing tests
+└── Wizard/               # Flow, step ordering, install-stage, and visual layout tests
 ```
 
 All tests use **Swift Testing** (`@Test`, `@Suite`, `#expect`) rather than XCTest. `TestTempDir` creates throwaway directories under `NSTemporaryDirectory()` for any test that touches the filesystem.
@@ -186,17 +188,17 @@ See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac
 
 ### Add a new wizard step
 
-1. Add a case to `WizardStep` enum in `Sources/Support/Models.swift`.
+1. Add a case to `WizardStep` enum in `Sources/Support/Onboarding/OnboardingModels.swift`.
 2. Create a new view file under `Sources/Wizard/Steps/`.
 3. Add a case to the `switch state.step` dispatcher in `WizardView.swift`.
-4. Add tests to `Tests/Wizard/WizardStepTests.swift` — at minimum, verify the step renders and the back/next buttons behave correctly.
+4. Add tests to `Tests/Wizard/Flow/`, `Tests/Wizard/Steps/`, or `Tests/Wizard/Components/` based on the behavior being pinned; at minimum, verify the step ordering, rendering, and back/next behavior.
 5. Update `packages/mac-app/docs/architecture.md` with the step's role.
 
 ### Add a new menu-bar item
 
 1. Extend `MenuItemDescriptor` enum in `MenuBarItemBuilder.swift` if the row needs new semantics (most new items are `.action` or `.openLink`; pairing/log detail belongs in dedicated windows).
 2. Add the item to the returned array in `MenuBarItemBuilder.build(snapshot:paths:)`.
-3. Pin the ordering in `Tests/MenuBar/MenuBarItemBuilderTests.swift`.
+3. Pin the ordering in `Tests/MenuBar/Presentation/MenuBarItemBuilderTests.swift`.
 
 ### Debug the `.onboarded` sentinel logic
 

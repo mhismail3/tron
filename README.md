@@ -933,20 +933,34 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 ```
 packages/mac-app/Sources/
-+-- App/                       App entry, environment setup, command-mode startup
-+-- Server/                    LaunchAgent/SMAppService, health checks, paths, server control
-+-- Wizard/                    First-run flow
-|   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
-|   +-- WizardView.swift       NavigationStack shell
++-- App/
+|   +-- Lifecycle/             App entry, runtime variant, and startup maintenance
+|   +-- CommandMode/           Internal start/uninstall command modes
+|   +-- Composition/           Sendable environment setup and live/test DI
++-- Server/
+|   +-- LaunchAgent/           SMAppService-backed LaunchAgent boundary
+|   +-- Health/                Server ping, health wait, and status polling
+|   +-- Paths/                 TronPaths and profile settings TOML cache
+|   +-- PairingToken/          Bearer-token reader
+|   +-- ProcessControl/        Dev stopper, process probe, lock, uninstall
++-- MenuBar/
+|   +-- Controller/            NSStatusItem lifecycle
+|   +-- Actions/               Menu command handlers and feedback action
+|   +-- Presentation/          Menu descriptors, log reader, logs window
++-- Wizard/
+|   +-- Flow/                  Wizard state machine and shell view
 |   +-- Steps/                 Welcome, Tailscale, Install, Permissions, iOS Beta, Pairing, Done
-+-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
-+-- Support/                   Shared models, theme, onboarding probes, pairing, feedback, diagnostics
+|   +-- Components/            Window and visual layout primitives
++-- Support/
+|   +-- Diagnostics/           Redaction for diagnostics and logs
+|   +-- Feedback/              GitHub issue composer
+|   +-- Foundation/            Shared display helpers
+|   +-- Onboarding/            Wizard models, probes, install planning
+|   +-- Pairing/               Pairing URL, QR, local computer-name helpers
+|   +-- Theme/                 Colors, font loading, typography
 +-- Resources/
-    +-- Library/
-        +-- LoginItems/Tron Server.app/Contents/MacOS/tron
-        +-- LoginItems/Tron Server Dev.app/Contents/MacOS/tron
-        +-- LaunchAgents/com.tron.server.plist
-        +-- LaunchAgents/com.tron.server.dev.plist
++-- Assets.xcassets/
++-- Info.plist
 ```
 
 ### Wizard Steps

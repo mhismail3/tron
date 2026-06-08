@@ -2,217 +2,11 @@ import Foundation
 import Testing
 @testable import TronMac
 
-/// Pins the canonical step ordering so a silent reorder triggers a
-/// failing test instead of a confused user.
-@Suite("WizardStep ordering")
-struct WizardStepOrderingTests {
-    @Test("allCases is in canonical order (iOS beta precedes pairing)")
-    func canonicalOrder() {
-        // Install runs BEFORE permissions on purpose: the wrapper first
-        // registers the LaunchAgent with its associated bundle IDs, then
-        // probes/prompts the wrapper-owned TCC rows that macOS shows in
-        // System Settings. The iOS beta handoff then runs before the
-        // pairing QR.
-        #expect(WizardStep.allCases == [
-            .welcome,
-            .tailscale,
-            .install,
-            .permissions,
-            .iosBeta,
-            .pairingInfo,
-            .done,
-        ])
-    }
-
-    @Test("rawValues are stable strings (used as UserDefaults keys)")
-    func rawValuesStable() {
-        #expect(WizardStep.welcome.rawValue == "welcome")
-        #expect(WizardStep.tailscale.rawValue == "tailscale")
-        #expect(WizardStep.permissions.rawValue == "permissions")
-        #expect(WizardStep.install.rawValue == "install")
-        #expect(WizardStep.iosBeta.rawValue == "iosBeta")
-        #expect(WizardStep.pairingInfo.rawValue == "pairingInfo")
-        #expect(WizardStep.done.rawValue == "done")
-    }
-
-    @Test("WizardStep round-trips through Codable")
-    func codableRoundTrip() throws {
-        let encoder = JSONEncoder()
-        let decoder = JSONDecoder()
-        for step in WizardStep.allCases {
-            let data = try encoder.encode(step)
-            let decoded = try decoder.decode(WizardStep.self, from: data)
-            #expect(decoded == step)
-        }
-    }
-}
-
-@Suite("InstallPipelineStage ordering")
-struct InstallPipelineStageOrderingTests {
-    @Test("stages run validate app, validate helper, register, ping")
-    func canonicalOrder() {
-        #expect(InstallPipelineStage.allCases == [
-            .validateApplication,
-            .validateHelper,
-            .registerAgent,
-            .awaitPing,
-        ])
-    }
-
-    @Test("each install stage has visible labels and deliberate pacing")
-    func installStageCopyAndPacing() {
-        #expect(InstallStepContent.intro == "Install Tron Server on this Mac. It runs quietly in the background so your iPhone can connect.")
-        #expect(InstallStepContent.notStartedPlaceholder == "Installation not started")
-        #expect(InstallStepContent.stagePaceDelayNanoseconds >= 300_000_000)
-        #expect(InstallStepContent.stagePaceDelayNanoseconds <= 600_000_000)
-        #expect(InstallStepLayout.sectionSpacing >= 16)
-        #expect(InstallStepLayout.completedStageSpacing <= InstallStepLayout.runningStageSpacing)
-        #expect(InstallStepLayout.stageIconColumnWidth == 24)
-        #expect(InstallStepLayout.stageRowMinHeight >= 22)
-        #expect(InstallStepLayout.stageIconGlyphSize <= 13)
-        #expect(InstallStepContent.label(for: .validateApplication) == "Confirm app location")
-        #expect(InstallStepContent.label(for: .registerAgent) == "Register Login Item")
-        for stage in InstallPipelineStage.allCases {
-            #expect(!InstallStepContent.label(for: stage).isEmpty)
-        }
-    }
-
-    @Test("successful install stage rows restore synchronously on remount")
-    func successfulInstallStageRowsRestoreSynchronously() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let step = packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift")
-        let source = try String(contentsOf: step, encoding: .utf8)
-
-        #expect(source.contains("private func stageState(for stage"))
-        #expect(source.contains("stageState(for: stage)"))
-        #expect(source.contains("case .success:"))
-        #expect(source.contains("guard !stages.isEmpty else { return false }"))
-        #expect(!source.contains("case .alreadyInstalled:"))
-        #expect(source.contains("private func stageIcon"))
-    }
-
-    @Test("install progress is hidden until stages actually start")
-    func installProgressRevealsOnlyActiveStages() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let step = packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift")
-        let source = try String(contentsOf: step, encoding: .utf8)
-
-        #expect(source.contains("private var visibleStages"))
-        #expect(source.contains("stageState(for: stage) != .pending"))
-        #expect(source.contains("private var stageProgressArea"))
-        #expect(source.contains("Text(InstallStepContent.notStartedPlaceholder)"))
-        #expect(source.contains("ForEach(visibleStages"))
-        #expect(source.contains("stages[.validateApplication] = .running"))
-        #expect(source.contains("completedStageSpacing"))
-        #expect(source.contains("if shouldShowRegisteredServiceLayout"))
-        #expect(source.contains("private var registeredServiceSummary"))
-        #expect(source.contains("Open the logs window from the Tron menu bar"))
-        #expect(!source.contains("Check Console.app"))
-    }
-
-    @Test("completed install page shows a status banner")
-    func completedInstallPageShowsStatusBanner() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let step = packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift")
-        let source = try String(contentsOf: step, encoding: .utf8)
-
-        #expect(source.contains("private var serverReadyBanner"))
-        #expect(source.contains("Tron Server is ready"))
-        #expect(source.contains("Current status:"))
-        #expect(source.contains("refreshInstallStatus"))
-        #expect(source.contains("private var currentInstallRunSucceeded"))
-        #expect(source.contains("InstallPipelineStage.allCases.allSatisfy"))
-        #expect(source.contains("readySummaryCards"))
-        #expect(source.contains("readySummaryTransition"))
-        #expect(source.contains(".animation(WizardLayout.transitionAnimation, value: installIsComplete)"))
-        #expect(source.contains("withAnimation(WizardLayout.transitionAnimation)"))
-        #expect(source.contains("stages[.awaitPing] = .succeeded"))
-        #expect(!source.contains("cleanupMessage"))
-        #expect(!source.contains("Need a fresh start?"))
-    }
-}
-
-@Suite("Permission ordering")
-struct PermissionOrderingTests {
-    @Test("only FDA is required")
-    func canonicalOrder() {
-        #expect(Permission.allCases == [
-            .fullDiskAccess,
-        ])
-    }
-}
-
-@Suite("WizardStep preferred heights")
-struct WizardStepPreferredHeightTests {
-    @Test("every step has a plausible height in [280, 560]")
-    func heightsAreInRange() {
-        // Guards against accidental 0/negative heights and against
-        // runaway numbers that would break the 480×H canvas.
-        for step in WizardStep.allCases {
-            let h = step.preferredHeight
-            #expect(h >= 280, "\(step) height \(h) is below the 280pt floor")
-            #expect(h <= 560, "\(step) height \(h) is above the 560pt ceiling")
-        }
-    }
-
-    @Test("Install is the tallest step")
-    func installIsTallest() {
-        let heights = WizardStep.allCases.map { $0.preferredHeight }
-        let max = heights.max() ?? 0
-        #expect(WizardStep.install.preferredHeight == max,
-                "Install must be tallest so the explicit confirmation fits without scrolling")
-    }
-
-    @Test("opening gate steps share one lower-height band")
-    func openingStepsShareLowerHeightBand() {
-        let gateHeight = WizardStep.welcome.preferredHeight
-        #expect(WizardStep.tailscale.preferredHeight == gateHeight)
-        #expect(WizardStep.permissions.preferredHeight == gateHeight)
-        #expect(gateHeight < WizardLayout.height)
-    }
-
-    @Test("install step leaves room for explicit confirmation")
-    func installStepConfirmationBand() {
-        #expect(WizardStep.install.preferredHeight > WizardStep.tailscale.preferredHeight)
-        #expect(WizardStep.install.preferredHeight == WizardLayout.height)
-    }
-
-    @Test("wizard canvas is fixed to the tallest step height")
-    func wizardCanvasUsesTallestStepHeight() throws {
-        let tallestStepHeight = try #require(WizardStep.allCases.map { $0.preferredHeight }.max())
-        #expect(WizardLayout.height == tallestStepHeight)
-        #expect(WizardLayout.height == WizardStep.install.preferredHeight)
-
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let wizardView = packageRoot.appending(path: "Sources/Wizard/WizardView.swift")
-        let source = try String(contentsOf: wizardView, encoding: .utf8)
-
-        #expect(source.contains(".frame(width: WizardLayout.width, height: WizardLayout.height)"))
-        #expect(!source.contains("animateHostingWindow"))
-        #expect(!source.contains("displayStep.preferredHeight"))
-    }
-}
-
 @Suite("Wizard visual layout tokens")
 struct WizardVisualLayoutTests {
     @Test("welcome page shows only centered intro copy")
     func welcomePageShowsOnlyCenteredIntroCopy() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/WelcomeStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
@@ -237,11 +31,8 @@ struct WizardVisualLayoutTests {
 
     @Test("progress count renders as bare text without a nested pill")
     func progressCountHasNoNestedCapsule() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let wizardView = packageRoot.appending(path: "Sources/Wizard/WizardView.swift")
+        let packageRoot = macAppRoot()
+        let wizardView = packageRoot.appending(path: "Sources/Wizard/Flow/WizardView.swift")
         let source = try String(contentsOf: wizardView, encoding: .utf8)
         let start = try #require(source.range(of: "private func progressCount"))
         let end = try #require(source.range(of: "private func progressTrack"))
@@ -253,11 +44,8 @@ struct WizardVisualLayoutTests {
 
     @Test("progress fill animates inside one rendered track")
     func progressFillAnimatesInsideSingleTrack() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let wizardView = packageRoot.appending(path: "Sources/Wizard/WizardView.swift")
+        let packageRoot = macAppRoot()
+        let wizardView = packageRoot.appending(path: "Sources/Wizard/Flow/WizardView.swift")
         let source = try String(contentsOf: wizardView, encoding: .utf8)
         let start = try #require(source.range(of: "private func progressTrack"))
         let end = try #require(source.range(of: "// MARK: - Direction-aware slide transition"))
@@ -274,11 +62,8 @@ struct WizardVisualLayoutTests {
 
     @Test("header owns icon title and progress alignment in one row")
     func headerOwnsProgressAlignment() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let wizardView = packageRoot.appending(path: "Sources/Wizard/WizardView.swift")
+        let packageRoot = macAppRoot()
+        let wizardView = packageRoot.appending(path: "Sources/Wizard/Flow/WizardView.swift")
         let source = try String(contentsOf: wizardView, encoding: .utf8)
 
         #expect(source.contains("HStack(alignment: .center, spacing: 12)"))
@@ -314,10 +99,7 @@ struct WizardVisualLayoutTests {
         #expect(InstallStepLayout.detectedSummaryTopPadding > InstallStepLayout.readySummaryTopPadding)
         #expect(InstallStepLayout.readySummaryTopPadding == 0)
 
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/InstallStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
@@ -333,12 +115,9 @@ struct WizardVisualLayoutTests {
         #expect(WizardCardLayout.iconColumnWidth >= 28)
         #expect(WizardCardLayout.cornerRadius == 10)
 
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let layout = try String(
-            contentsOf: packageRoot.appending(path: "Sources/Wizard/WizardLayout.swift"),
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/Components/WizardLayout.swift"),
             encoding: .utf8
         )
         #expect(layout.contains("WizardGlassCardBackground"))
@@ -373,13 +152,10 @@ struct WizardVisualLayoutTests {
 
     @Test("iOS beta page owns the public TestFlight QR handoff")
     func iosBetaPageOwnsPublicTestFlightQRHandoff() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/IOSBetaStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
-        let shell = try String(contentsOf: packageRoot.appending(path: "Sources/Wizard/WizardView.swift"), encoding: .utf8)
+        let shell = try String(contentsOf: packageRoot.appending(path: "Sources/Wizard/Flow/WizardView.swift"), encoding: .utf8)
 
         #expect(IOSBetaStepContent.testFlightURL.absoluteString == "https://testflight.apple.com/join/xbuX1Grx")
         #expect(IOSBetaStepContent.testFlightURL.host == "testflight.apple.com")
@@ -416,10 +192,7 @@ struct WizardVisualLayoutTests {
         #expect(InstallStepLayout.detectedSummaryTopPadding > 48)
         #expect(InstallStepLayout.readySummarySpacing > WizardCardLayout.verticalInset)
 
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
 
         let tailscale = try String(
             contentsOf: packageRoot.appending(path: "Sources/Wizard/Steps/TailscaleStep.swift"),
@@ -448,10 +221,7 @@ struct WizardVisualLayoutTests {
         #expect(PermissionsStepContent.initialProbeDelayNanoseconds >= 500_000_000)
         #expect(PermissionsStepContent.initialProbeDelayNanoseconds < 1_000_000_000)
 
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/PermissionsStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
@@ -506,10 +276,7 @@ struct WizardVisualLayoutTests {
 
     @Test("pairing page resolves Tailscale live and treats profile settings as cache")
     func pairingPageResolvesTailscaleLiveAndCachesSettings() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/PairingInfoStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
@@ -570,10 +337,7 @@ struct WizardVisualLayoutTests {
 
     @Test("permission settings buttons only open System Settings")
     func permissionSettingsButtonsOnlyOpenSettings() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/PermissionsStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
@@ -586,10 +350,7 @@ struct WizardVisualLayoutTests {
 
     @Test("permissions page has no draggable app shortcut")
     func permissionsPageHasNoDraggableAppShortcut() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let step = packageRoot.appending(path: "Sources/Wizard/Steps/PermissionsStep.swift")
         let source = try String(contentsOf: step, encoding: .utf8)
 
@@ -607,11 +368,8 @@ struct WizardVisualLayoutTests {
 
     @Test("wizard keeps background window dragging enabled on permissions")
     func wizardKeepsBackgroundWindowDraggingEnabledOnPermissions() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let wizardView = packageRoot.appending(path: "Sources/Wizard/WizardView.swift")
+        let packageRoot = macAppRoot()
+        let wizardView = packageRoot.appending(path: "Sources/Wizard/Flow/WizardView.swift")
         let source = try String(contentsOf: wizardView, encoding: .utf8)
 
         #expect(source.contains(".configureHostingWindow"))
@@ -620,7 +378,7 @@ struct WizardVisualLayoutTests {
         #expect(!source.contains("step != .permissions"))
 
         let app = try String(
-            contentsOf: packageRoot.appending(path: "Sources/App/TronMacApp.swift"),
+            contentsOf: packageRoot.appending(path: "Sources/App/Lifecycle/TronMacApp.swift"),
             encoding: .utf8
         )
         #expect(!app.contains("window.isMovableByWindowBackground = true"))
@@ -628,16 +386,13 @@ struct WizardVisualLayoutTests {
 
     @Test("permissions continue restarts helper once before pairing")
     func permissionsContinueRestartsHelperOnceBeforePairing() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let wizardView = try String(
-            contentsOf: packageRoot.appending(path: "Sources/Wizard/WizardView.swift"),
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/Flow/WizardView.swift"),
             encoding: .utf8
         )
         let wizardState = try String(
-            contentsOf: packageRoot.appending(path: "Sources/Wizard/WizardState.swift"),
+            contentsOf: packageRoot.appending(path: "Sources/Wizard/Flow/WizardState.swift"),
             encoding: .utf8
         )
 
@@ -651,11 +406,8 @@ struct WizardVisualLayoutTests {
 
     @Test("primary button has a distinct disabled visual state")
     func primaryButtonDisabledStateIsDistinct() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let style = packageRoot.appending(path: "Sources/Wizard/WizardButtonStyle.swift")
+        let packageRoot = macAppRoot()
+        let style = packageRoot.appending(path: "Sources/Wizard/Components/WizardButtonStyle.swift")
         let source = try String(contentsOf: style, encoding: .utf8)
 
         #expect(source.contains("@Environment(\\.isEnabled)"))
@@ -664,11 +416,8 @@ struct WizardVisualLayoutTests {
 
     @Test("Tailscale primary action rechecks before advancing")
     func tailscalePrimaryActionRechecksBeforeAdvancing() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-        let wizardView = packageRoot.appending(path: "Sources/Wizard/WizardView.swift")
+        let packageRoot = macAppRoot()
+        let wizardView = packageRoot.appending(path: "Sources/Wizard/Flow/WizardView.swift")
         let source = try String(contentsOf: wizardView, encoding: .utf8)
 
         #expect(source.contains("case .tailscale:"))
@@ -680,10 +429,7 @@ struct WizardVisualLayoutTests {
 
     @Test("wizard step content uses TronTypography instead of ad-hoc system text fonts")
     func wizardStepContentFontsUseTypographyTokens() throws {
-        let packageRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
+        let packageRoot = macAppRoot()
         let stepsDir = packageRoot.appending(path: "Sources/Wizard/Steps")
         let files = try FileManager.default.contentsOfDirectory(
             at: stepsDir,

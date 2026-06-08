@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-06-08 (PCC-7 source-root consolidation, primitive helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
+> Last verified: 2026-06-08 (HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
 
 ## Overview
 
@@ -26,42 +26,39 @@ packages/mac-app/
 ├── Sources/
 │   ├── Info.plist                  # Bundle metadata (starts regular; switches to accessory after onboarding)
 │   ├── App/
-│   │   ├── TronMacApp.swift        # @main entry, AppDelegate, RootView
-│   │   ├── EnvironmentSetup.swift  # Sendable DI struct (live + test values)
-│   │   ├── MacAppStartupMaintenance.swift
-│   │   ├── MacCommandLineMode.swift
-│   │   ├── MacCommandModeServerStarter.swift
-│   │   └── MacRuntimeVariant.swift # Debug vs installed-release path/ownership rules
+│   │   ├── Lifecycle/              # @main entry, AppDelegate, startup maintenance, runtime variant
+│   │   ├── CommandMode/            # Internal start/uninstall command-mode entry points
+│   │   └── Composition/            # Sendable DI struct (live + test values)
 │   ├── MenuBar/
-│   │   ├── MenuBarActionHandler.swift # routes menu-item descriptors → side effects (subprocess, NSWorkspace, notifications)
-│   │   ├── MenuBarController.swift    # NSStatusItem lifecycle + poller task + custom header view
-│   │   └── MenuBarItemBuilder.swift   # Pure builder: snapshot → [MenuItemDescriptor]
+│   │   ├── Actions/                # Menu descriptor side effects and feedback issue action
+│   │   ├── Controller/             # NSStatusItem lifecycle + poller task + custom header view
+│   │   └── Presentation/           # Pure menu builder, logs reader, logs window
 │   ├── Resources/                  # bundled Library tree, defaults, AppIcon.icns, fonts
 │   │   ├── Fonts/
 │   │   │   └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
 │   │   └── Constitution/           # copied from packages/agent/defaults/
 │   ├── Server/
-│   │   ├── LaunchAgentManaging.swift # protocol + SMAppService-backed LiveLaunchAgentManager
-│   │   ├── TronPaths.swift         # Single source of truth for all on-disk paths
-│   │   ├── BearerTokenReader.swift # reads auth.json bearerToken; caches pairing Tailscale IP in profile.toml
-│   │   ├── ServerHealthAwaiter.swift
-│   │   ├── ServerPing.swift        # one-shot string-id system::ping over WS → ServerPingResult
-│   │   ├── ServerStatusPoller.swift
-│   │   ├── SingleInstanceLock.swift
-│   │   └── TronUninstaller.swift
+│   │   ├── LaunchAgent/            # protocol + SMAppService-backed LiveLaunchAgentManager
+│   │   ├── Health/                 # one-shot ping, health waiting, status polling
+│   │   ├── Paths/                  # TronPaths plus profile settings TOML cache
+│   │   ├── PairingToken/           # auth.json bearer-token reader
+│   │   └── ProcessControl/         # dev stopper, process probe, wrapper lock, uninstall
 │   ├── Support/
-│   │   ├── Models.swift            # TailscaleStatus, PermissionStatus, ExistingInstallStatus…
-│   │   ├── VersionDisplay.swift
+│   │   ├── Diagnostics/
+│   │   │   └── DiagnosticsRedactor.swift   # strip paths, mask tokens, drop chat content
 │   │   ├── Feedback/
 │   │   │   └── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
-│   │   ├── Observability/
-│   │   │   └── DiagnosticsRedactor.swift   # strip paths, mask tokens, drop chat content
+│   │   ├── Foundation/
+│   │   │   └── VersionDisplay.swift
 │   │   ├── Onboarding/
 │   │   │   ├── ExistingInstallDetector.swift
 │   │   │   ├── InstallPlanner.swift    # pure-value plan + plist renderer
+│   │   │   ├── OnboardedSentinelWriter.swift
+│   │   │   ├── OnboardingModels.swift  # WizardStep, status, and install model values
 │   │   │   ├── PermissionDeepLink.swift # System Settings deep-link URLs only; probes stay wrapper-owned
 │   │   │   └── TailscaleProbe.swift
 │   │   ├── Pairing/
+│   │   │   ├── LocalComputerName.swift
 │   │   │   ├── PairingURLBuilder.swift # builds `tron://pair?…` URL
 │   │   │   └── QRCodeGenerator.swift   # CoreImage CIQRCodeGenerator wrapper
 │   │   └── Theme/
@@ -69,10 +66,10 @@ packages/mac-app/
 │   │       ├── TronFontLoader.swift    # CoreText registration for bundled fonts
 │   │       └── TronTypography.swift    # compact Mac wizard type tokens
 │   └── Wizard/
-│       ├── WizardState.swift       # @Observable, step persistence, navigation
-│       ├── WizardView.swift        # NavigationStack + per-step dispatcher
-│       └── Steps/                  # One view per WizardStep case
-└── Tests/                          # Behavior-oriented Mac wrapper tests
+│       ├── Flow/                   # @Observable state machine + NavigationStack shell
+│       ├── Steps/                  # One view per WizardStep case
+│       └── Components/             # Window sizing, button style, layout constants
+└── Tests/                          # Behavior-oriented Mac wrapper tests mirroring App/Server/MenuBar/Support/Wizard
 ```
 
 ## Key Architectural Patterns

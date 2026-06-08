@@ -5,7 +5,7 @@ import AppKit
 
 /// Wraps `CIQRCodeGenerator` to produce an `NSImage` from a string.
 ///
-/// Pure-value tests live in `Tests/Services/QRCodeGeneratorTests.swift`.
+/// Pure-value tests live in `Tests/Support/Pairing/QRCodeGeneratorTests.swift`.
 /// They assert that the generator returns nil for empty input, returns a
 /// non-empty `NSImage` for valid pairing URLs, and round-trips the input
 /// through a CoreImage `CIDetector` to confirm encoding correctness.

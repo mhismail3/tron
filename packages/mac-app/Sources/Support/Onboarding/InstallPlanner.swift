@@ -4,7 +4,7 @@ import Foundation
 /// effects; the View validates the bundled files and registers the
 /// LaunchAgent through `LaunchAgentManaging`.
 ///
-/// Tests in `Tests/Services/InstallPlannerTests.swift` cover:
+/// Tests in `Tests/Support/Onboarding/InstallPlannerTests.swift` cover:
 /// - happy path produces correct paths and plist contents
 /// - registered services still produce a plan that the view must start
 ///   and ping before continuing

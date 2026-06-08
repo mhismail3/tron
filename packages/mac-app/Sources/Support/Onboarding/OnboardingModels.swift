@@ -1,7 +1,7 @@
 import Foundation
 
 /// Steps in the first-run wizard. `allCases` is the canonical flow;
-/// tests in `WizardStepTests` pin it to prevent silent reorderings.
+/// tests in `WizardStepOrderingTests` pin it to prevent silent reorderings.
 enum WizardStep: String, CaseIterable, Identifiable, Codable, Sendable {
     case welcome
     case tailscale

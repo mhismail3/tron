@@ -36,10 +36,10 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 1190 | Current package/config/test/doc boundaries |
-| `asset` | 71 | iOS/Mac resources and benchmark baselines |
-| `generated` | 6 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1267** | Whole repo |
+| `retain` | 1314 | Current package/config/test/doc boundaries |
+| `asset` | 53 | iOS/Mac resources and benchmark baselines |
+| `generated` | 7 | XcodeGen, Cargo, and package-manager outputs |
+| **Total** | **1374** | Whole repo |
 
 ## Current Tracked Package Counts
 
@@ -48,9 +48,9 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `.codex` | 2 |
 | `.github` | 8 |
 | root files | 5 |
-| `packages/agent` | 492 |
-| `packages/ios-app` | 624 |
-| `packages/mac-app` | 114 |
+| `packages/agent` | 575 |
+| `packages/ios-app` | 643 |
+| `packages/mac-app` | 119 |
 | `scripts` | 22 |
 
 The count excludes untracked local build outputs. PCC-2 owns recurring local
@@ -96,15 +96,23 @@ tron/
 |   |   +-- project.yml         XcodeGen source of truth
 |   +-- mac-app/
 |       +-- Sources/
-|       |   +-- App/            Entry, environment setup, command mode
-|       |   +-- Server/         SMAppService, LaunchAgent, health, paths
-|       |   +-- Wizard/         Install/pairing wizard state and views
-|       |   +-- MenuBar/        Menu model, controller, actions
-|       |   +-- Support/        Pairing, feedback, diagnostics, theme
+|       |   +-- App/
+|       |   |   +-- Lifecycle/   Entry, runtime variant, startup maintenance
+|       |   |   +-- CommandMode/ Internal command-mode entry points
+|       |   |   +-- Composition/ Environment setup and DI
+|       |   +-- Server/
+|       |   |   +-- LaunchAgent/ SMAppService and LaunchAgent protocol boundary
+|       |   |   +-- Health/      Ping, health awaiter, status poller
+|       |   |   +-- Paths/       TronPaths and profile settings TOML cache
+|       |   |   +-- PairingToken/ Bearer token reader
+|       |   |   +-- ProcessControl/Dev stopper, probe, lock, uninstall
+|       |   +-- MenuBar/        Actions, controller, presentation
+|       |   +-- Wizard/         Flow, steps, and components
+|       |   +-- Support/        Diagnostics, feedback, foundation, onboarding, pairing, theme
 |       |   +-- Resources/
 |       |   +-- Assets.xcassets/
 |       |   +-- Info.plist
-|       +-- Tests/
+|       +-- Tests/              Mirrors App, Server, MenuBar, Support, Wizard, Infrastructure
 |       +-- project.yml         XcodeGen source of truth
 +-- scripts/
     +-- tron                    Dispatcher
@@ -135,7 +143,7 @@ review proved they were stale branch/product residue.
 | Area | Inventory owner | Later row |
 |------|-----------------|-----------|
 | iOS source roots | old `Core`, `Database`, `Models`, `Services`, `ViewModels`, `Views`, `Theme`, `Utilities`, `Extensions`, `Protocols` roots now collapsed to the retained primitive shell | PCC-6 passed |
-| Mac source roots | root Swift files, old `Services`, and old `Theme` now collapsed to `App`, `Server`, and `Support` | PCC-7 passed |
+| Mac source roots | root Swift files, old `Services`, old `Observability`, old `Mocks`, and old `Theme` now collapsed to HRA-14 App, Server, MenuBar, Wizard, Support, and Infrastructure owners | PCC-7/HRA-14 passed |
 | Scripts | manual dispatcher, command modules, installed runtime helpers, release helpers, hooks, benchmarks, and device helpers retained; automatic deploy watcher deleted | PCC-8 passed |
 | Contributor rule docs and large tests | root/package `.claude` helper trees deleted; package docs and behavior-owned test suites audited | PCC-10 passed |
 

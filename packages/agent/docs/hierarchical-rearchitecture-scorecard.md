@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Scorecard
 
-Current score: **94/100**
+Current score: **96/100**
 
 Status: **running**
 
@@ -55,8 +55,8 @@ Total weight: **100**
 | HRA-10 | iOS Session hierarchy | 7 | passed_after_fix | iOS session owner | Moved Session chat view models, coordinators, messaging, navigation, state, attachments, timeline activity/messages/reconstruction/tokens, and retained parsing under workflow-owned folders; split `CapabilityInvocationDisplayModel` presentation helpers. | Closed; later iOS test mirroring is complete in HRA-13. |
 | HRA-11 | iOS UI hierarchy | 6 | passed_after_fix | iOS UI owner | Replaced `UI/Views` with `UI/Chat`, `UI/Settings`, `UI/Onboarding`, `UI/RuntimeSurfaces`, `UI/Capabilities`, `UI/Components`, `UI/System`, and `UI/Theme`; split runtime surface and settings support files. | Closed; later iOS test mirroring is complete in HRA-13. |
 | HRA-12 | iOS Support foundation hierarchy | 4 | passed_after_fix | iOS support owner | Moved app entry points under `App/Lifecycle`; moved dependency assembly to `Support/Composition`; split support helpers into diagnostics, feedback, foundation, pairing, share, and storage owners; removed broad utility, extension, infrastructure, observability, settings, and service buckets. | Closed; later iOS test mirroring and SourceGuard decomposition are complete in HRA-13. |
-| HRA-13 | iOS tests and generated project closeout | 4 | passed_after_fix | iOS test owner | Moved all iOS tests into `Engine`, `Session`, `UI`, `Support`, and `Infrastructure` mirrors; decomposed `SourceGuardTests` and `UnifiedEventTransformerTests`; regenerated XcodeGen; SourceGuard and moved-test batches pass. | HRA-14/HRA-15/HRA-16 remain. |
-| HRA-14 | Mac wrapper hierarchy audit | 2 | pending | Mac wrapper owner | Not started. | Audit Mac source/test folders and move only justified drift. |
+| HRA-13 | iOS tests and generated project closeout | 4 | passed_after_fix | iOS test owner | Moved all iOS tests into `Engine`, `Session`, `UI`, `Support`, and `Infrastructure` mirrors; decomposed `SourceGuardTests` and `UnifiedEventTransformerTests`; regenerated XcodeGen; SourceGuard and moved-test batches pass. | HRA-14 closed; HRA-15/HRA-16 remain. |
+| HRA-14 | Mac wrapper hierarchy audit | 2 | passed_after_fix | Mac wrapper owner | Moved App, Server, MenuBar, Wizard, and Support sources into target owner folders; mirrored Mac tests to App, Server, MenuBar, Support, Wizard, and Infrastructure; split `WizardStepTests`; XcodeGen and Mac tests pass. | HRA-15/HRA-16 remain. |
 | HRA-15 | Scripts, README, and docs path closeout | 2 | pending | docs/scripts owner | Not started. | Remove old-path claims and update README/docs/scripts/workflows. |
 | HRA-16 | Final adversarial review and closeout | 2 | pending | architecture campaign | Not started. | Run full verification, adversarial review, ledger append, and final commit. |
 
@@ -75,18 +75,18 @@ owners required to bootstrap the campaign.
 | `packages/agent/src/shared` | Rust cross-owner support owner | Foundation/protocol/server/storage/observability helpers used by multiple owners after HRA-2. | passed_after_fix |
 | `packages/ios-app/Sources` | iOS app target boundary | App/Lifecycle, Engine, Session, UI, scoped Support, Resources, assets, and plist files after HRA-12. | passed_after_fix |
 | `packages/ios-app/Tests` | iOS test target boundary | Infrastructure and tests mirroring Engine, Session, UI, and Support after HRA-13. | passed_after_fix |
-| `packages/mac-app/Sources` | Mac wrapper target boundary | App, Server, MenuBar, Wizard, Support, Resources, and assets after HRA-14. | pending |
-| `packages/mac-app/Tests` | Mac wrapper test target boundary | Tests mirroring Mac wrapper features after HRA-14. | pending |
+| `packages/mac-app/Sources` | Mac wrapper target boundary | App/Lifecycle, App/CommandMode, App/Composition, Server/LaunchAgent, Server/Health, Server/Paths, Server/PairingToken, Server/ProcessControl, MenuBar, Wizard, Support, Resources, and assets after HRA-14. | passed_after_fix |
+| `packages/mac-app/Tests` | Mac wrapper test target boundary | Tests mirroring Mac wrapper App, Server, MenuBar, Support, Wizard, and Infrastructure fake owners after HRA-14. | passed_after_fix |
 
 ## Large File Budgets
 
 Every current over-budget source/test file has an explicit owner, limit, current
-LOC, and phase-owned decomposition plan. HRA-13 closes without any remaining iOS
-test temporary budget rows.
+LOC, and phase-owned decomposition plan. HRA-14 closes without any remaining
+temporary budget rows in Rust, iOS, or Mac source/test files.
 
 | Path | Owner | Limit | Current LOC | Decomposition plan | Status |
 |------|-------|-------|-------------|--------------------|--------|
-| `packages/mac-app/Tests/Wizard/WizardStepTests.swift` | mac wrapper owner | 700 | 717 | HRA-14 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| _none_ | architecture campaign | n/a | n/a | All previously over-budget current files have been split or closed by owner-specific rows. | passed_after_fix |
 
 ## Static Gates
 
@@ -122,10 +122,12 @@ checks:
 - `ios_sources_do_not_use_broad_views_network_database_buckets`
 - `ios_tests_mirror_source_boundaries`
 - `large_files_have_decomposition_budget_rows`
+- `mac_sources_use_hra14_target_boundaries`
+- `mac_tests_mirror_source_boundaries`
+- `mac_tests_have_no_remaining_overbudget_swift_files`
 
 ## Open Loops
 
-- HRA-14 still owns the Mac wrapper hierarchy audit.
 - HRA-15 still owns stale path claims in docs/scripts/README outside evidence
   history.
 - The project `@self-inspect` skill referenced by `AGENTS.md` is not installed

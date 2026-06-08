@@ -104,3 +104,14 @@ enum TestTempDir {
         try? FileManager.default.removeItem(at: url)
     }
 }
+
+func macAppRoot(filePath: String = #filePath) -> URL {
+    var candidate = URL(fileURLWithPath: filePath)
+    while candidate.path != "/" {
+        if FileManager.default.fileExists(atPath: candidate.appending(path: "project.yml").path) {
+            return candidate
+        }
+        candidate.deleteLastPathComponent()
+    }
+    fatalError("Could not locate packages/mac-app root from \\(filePath)")
+}

@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Evidence Manifest
 
-Current score: **94/100**
+Current score: **96/100**
 
 Status: **running**
 
@@ -25,8 +25,8 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 | HRA-10 | passed_after_fix | Moved Session `ViewModels`, `Activity`, `Features`, `Messages`, `Reconstruction`, and `Tokens` into chat workflow, attachments, parsing, and timeline owners. Split `CapabilityInvocationDisplayModel` presentation helpers and placed `UnifiedEventTransformer` under `Session/Timeline/Reconstruction` because it projects stored events into chat timeline state. | XcodeGen passed; SourceGuard expected-red run passed the new HRA-10 Session hierarchy guard and failed only future UI/Support/test hierarchy gates; focused Session/view-model/reconstruction test batch passed 169 tests. | Closed; iOS test hierarchy is complete in HRA-13. | `9e0e05a00` |
 | HRA-11 | passed_after_fix | Replaced `UI/Views` with feature-owned UI roots for chat, settings, onboarding, runtime surfaces, capabilities, components, system sheets, and theme. Split `GeneratedRuntimeSurfaceView` support types and `SettingsView` footer support so no iOS production UI file remains over the HRA line budget. | XcodeGen passed; SourceGuard expected-red run passed the new HRA-11 UI hierarchy guard and failed only Support/test hierarchy future gates; focused UI batch passed after updating source-reading tests to the new Settings paths; Rust teardown/cleanup invariants passed and HRA static target is expected partial red only on HRA-12/HRA-13 gates. | Closed; iOS test hierarchy is complete in HRA-13. | `b8c1c7c02` |
 | HRA-12 | passed_after_fix | Moved App entry points under `App/Lifecycle`; moved dependency assembly to `Support/Composition`; collapsed diagnostics/storage service buckets; moved utilities, extensions, infrastructure, observability, and settings support files into diagnostics, feedback, foundation, pairing, share, and storage owners without compatibility shims. | XcodeGen passed; SourceGuard expected-red run passed the new HRA-12 Support hierarchy guard and failed only the HRA-13 test mirror gate; focused Support/App batch passed after fixing a stale cleanup terminology comment and retired Mac-path assertion. | Closed; iOS test hierarchy and SourceGuard decomposition are complete in HRA-13. | `d76384d2d` |
-| HRA-13 | passed_after_fix | Moved 192 pre-existing iOS tests from old technical buckets into mirrored `Engine`, `Session`, `UI`, `Support`, and `Infrastructure` owners; split SourceGuard into same-suite guard extensions; split the large unified event transformer test into focused reconstruction suites; regenerated XcodeGen. | SourceGuard red proof failed on split self-scan and stale old test paths, then passed 34 tests after fixes. The moved-test batch red proof failed only stale capability UI source paths, then the rerun exited 0 with `** TEST SUCCEEDED **` and 124 Swift Testing cases in 9 suites passed. Rust formatting, primitive teardown, cleanup, and HRA static gates pass. | HRA-14/HRA-15/HRA-16 remain. | `69f73bfa8` |
-| HRA-14 | pending | Not started. | pending | Audit Mac hierarchy and move justified drift. | pending |
+| HRA-13 | passed_after_fix | Moved 192 pre-existing iOS tests from old technical buckets into mirrored `Engine`, `Session`, `UI`, `Support`, and `Infrastructure` owners; split SourceGuard into same-suite guard extensions; split the large unified event transformer test into focused reconstruction suites; regenerated XcodeGen. | SourceGuard red proof failed on split self-scan and stale old test paths, then passed 34 tests after fixes. The moved-test batch red proof failed only stale capability UI source paths, then the rerun exited 0 with `** TEST SUCCEEDED **` and 124 Swift Testing cases in 9 suites passed. Rust formatting, primitive teardown, cleanup, and HRA static gates pass. | HRA-14 closed; HRA-15/HRA-16 remain. | `69f73bfa8` |
+| HRA-14 | passed_after_fix | Added Mac hierarchy red gates, moved Mac production sources into target App/Server/MenuBar/Wizard/Support owners, mirrored tests by feature owner, split `WizardStepTests`, split mixed pairing/settings/onboarding helpers, regenerated XcodeGen, and updated Mac docs/README/inventories. | Red HRA proof failed only the three new Mac gates. First Mac test rerun failed 21 split-test path assumptions, then the rerun exited 0 with `** TEST SUCCEEDED **` and 271 Swift Testing cases in 42 suites passed. Final HRA static gates pass after inventory/docs regeneration; primitive cleanup and focused iOS SourceGuard also pass after removing stale retired-product labels exposed by the cleanup guard. | HRA-15/HRA-16 remain. | `b763a57d5` |
 | HRA-15 | pending | Not started. | pending | Close docs/scripts/README old path references. | pending |
 | HRA-16 | pending | Not started. | pending | Final verification, adversarial review, ledger, and closeout. | pending |
 
@@ -825,3 +825,67 @@ Open loops after HRA-13:
 - HRA-16 still owns final adversarial review and closeout.
 
 Checkpoint commit: `69f73bfa8`.
+
+## HRA-14 Mac Wrapper Hierarchy Verification
+
+Commands:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture
+cd packages/mac-app && xcodegen generate
+xcodebuild test -scheme TronMac -destination 'platform=macOS'
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture
+```
+
+Results:
+
+- Added three red static gates for the Mac wrapper: production source owner
+  roots, mirrored test roots, and Mac test files over the HRA line budget.
+- First HRA rerun: exit 101, expected red proof. It ran 32 tests with 29
+  passed and 3 failed:
+  - `mac_sources_use_hra14_target_boundaries`
+  - `mac_tests_mirror_source_boundaries`
+  - `mac_tests_have_no_remaining_overbudget_swift_files`
+- Moved Mac production sources into the target owner folders: App lifecycle,
+  command mode, and composition; Server launch-agent, health, paths, pairing
+  token, and process control; MenuBar actions, controller, and presentation;
+  Wizard flow, steps, and components; Support diagnostics, feedback,
+  foundation, onboarding, pairing, and theme.
+- Split mixed helpers so pairing-token reading, settings-profile TOML caching,
+  and onboarded sentinel writes have separate owner files.
+- Moved Mac tests to mirror App, Server, MenuBar, Support, Wizard, and
+  Infrastructure fake owners. Split the old 717-line
+  `WizardStepTests.swift` into ordering, preferred-height, install-stage, and
+  visual-layout suites.
+- `xcodegen generate`: passed.
+- First Mac test rerun: exit 65 red proof. It compiled and ran the Mac test
+  target, then failed 21 split wizard tests because their source-reading helper
+  still assumed the old `Tests/Wizard` depth and resolved paths under
+  `packages/mac-app/Tests/Sources`. The helper now discovers the package root by
+  walking upward to `project.yml`.
+- Mac test rerun: exit 0, `** TEST SUCCEEDED **`; 271 tests in 42 Swift Testing
+  suites passed.
+- Mac test xcresult:
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMac-fjgdtjmmbndhtwfqnfyaagtxvdvs/Logs/Test/Test-TronMac-2026.06.08_04-12-43--0700.xcresult`
+- Primitive cleanup reruns exposed direct retired-product labels in split iOS
+  SourceGuard descriptions and path literals. The guard terms remain active
+  through concatenated fragments, while live labels and function names are now
+  neutral.
+- Focused iOS SourceGuard rerun: exit 0, `** TEST SUCCEEDED **`; 34 tests in
+  the Source Guards suite passed.
+- SourceGuard xcresult:
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.08_04-21-56--0700.xcresult`
+- primitive code cleanup invariants: 16 passed.
+- Final HRA static target after docs and inventory regeneration: 32 passed, 0
+  failed.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`:
+  passed.
+- `git diff --check`: passed.
+
+Open loops after HRA-14:
+
+- HRA-15 still owns stale path claims in docs/scripts/README outside evidence
+  history.
+- HRA-16 still owns final adversarial review and closeout.
+
+Checkpoint commit: `b763a57d5`.

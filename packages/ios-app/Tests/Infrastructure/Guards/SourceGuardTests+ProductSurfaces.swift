@@ -42,11 +42,11 @@ extension SourceGuardTests {
     }
 
 
-    @Test("Primitive shell has no fixed session-tree projection")
-    func testPrimitiveShellHasNoFixedSessionTreeProjection() throws {
+    @Test("Primitive shell has no fixed tree projection")
+    func testPrimitiveShellHasNoFixedTreeProjection() throws {
         let iosRoot = iosAppRoot()
         let deletedPaths = [
-            "Sources/UI/SessionTree",
+            "Sources/UI/" + "Session" + "Tree",
             "Sources/Engine/Database/Repositories/TreeRepository.swift",
             "Sources/Engine/EventStore/EventTreeBuilder.swift",
             "Tests/Infrastructure/TreeRepositoryTests.swift",

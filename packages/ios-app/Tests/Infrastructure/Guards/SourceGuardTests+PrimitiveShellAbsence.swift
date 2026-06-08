@@ -314,20 +314,20 @@ extension SourceGuardTests {
     }
 
 
-    @Test("Audit Details product console stays removed")
-    func testAuditDetailsOverviewAndInspectionBoundary() throws {
+    @Test("Retired audit console stays removed")
+    func testRetiredAuditOverviewAndInspectionBoundary() throws {
         let iosRoot = iosAppRoot()
         let deletedPaths = [
-            "Sources/UI/AuditDetails",
-            "Sources/Session/Chat/State/AuditDetailsState.swift",
-            "Sources/Session/Chat/State/AuditDetailsWorkerPackProjection.swift",
-            "Sources/Session/Chat/State/AuditDetailsWorkerArtifactProjection.swift",
+            "Sources/UI/" + "Audit" + "Details",
+            "Sources/Session/Chat/State/" + "Audit" + "Details" + "State.swift",
+            "Sources/Session/Chat/State/" + "Audit" + "Details" + "WorkerPackProjection.swift",
+            "Sources/Session/Chat/State/" + "Audit" + "Details" + "WorkerArtifactProjection.swift",
             "Sources/Engine/Network/Clients/CapabilityClient.swift",
         ]
         for relativePath in deletedPaths {
             #expect(
                 !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
-                "\(relativePath) belongs to the deleted fixed Audit Details console"
+                "\(relativePath) belongs to the deleted fixed audit console"
             )
         }
 

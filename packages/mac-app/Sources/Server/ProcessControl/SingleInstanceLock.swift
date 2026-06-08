@@ -11,7 +11,7 @@ import AppKit
 /// stale lockfiles. The PID is written to the file body so `tron
 /// status` can report "held by PID 12345".
 ///
-/// Tests in `Tests/Services/SingleInstanceLockTests.swift` validate
+/// Tests in `Tests/Server/ProcessControl/SingleInstanceLockTests.swift` validate
 /// the file-lock semantics in isolation; AppKit-side tests are skipped
 /// by default since they require a running NSApplication.
 ///

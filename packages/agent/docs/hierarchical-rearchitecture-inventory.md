@@ -2,7 +2,7 @@
 
 Status: `running`
 
-Generated from the live checkout after HRA-13. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, and HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors.
+Generated from the live checkout after HRA-14. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, and HRA-14 consumed the Mac wrapper rows.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -31,24 +31,24 @@ The HRA iOS move map uses this HRA-8-specific header:
 current_path	target_path	owner	phase	classification	status	reason
 ```
 
-## HRA-1 Baseline Counts Updated After HRA-13
+## HRA-1 Baseline Counts Updated After HRA-14
 
 | Metric | Count |
 | --- | --- |
-| Tracked files after HRA-13 staged additions | 1368 |
+| Tracked files after HRA-14 staged additions | 1374 |
 | Files under `packages/agent/src` | 522 |
-| Files under `packages/agent/tests` | 26 |
+| Files under `packages/agent/tests` | 27 |
 | Files under `packages/ios-app/Sources` | 414 |
 | Files under `packages/ios-app/Tests` | 205 |
-| Files under `packages/mac-app/Sources` | 72 |
-| Files under `packages/mac-app/Tests` | 33 |
+| Files under `packages/mac-app/Sources` | 74 |
+| Files under `packages/mac-app/Tests` | 36 |
 
 ## Extension Counts
 
 | Extension | Count |
 | --- | --- |
-| .swift | 649 |
-| .rs | 547 |
+| .swift | 654 |
+| .rs | 548 |
 | .md | 22 |
 | .json | 20 |
 | .png | 20 |
@@ -59,11 +59,10 @@ current_path	target_path	owner	phase	classification	status	reason
 | .yml | 9 |
 | .plist | 7 |
 | .xcconfig | 7 |
-| [none] | 7 |
+| [none] | 10 |
 | .entitlements | 6 |
 | .icns | 4 |
 | .tsv | 4 |
-| .gitignore | 3 |
 | .xcscheme | 3 |
 | .lock | 2 |
 | .env | 1 |
@@ -79,8 +78,8 @@ current_path	target_path	owner	phase	classification	status	reason
 | Package | Count |
 | --- | --- |
 | ios-app | 643 |
-| agent | 574 |
-| mac-app | 114 |
+| agent | 575 |
+| mac-app | 119 |
 | scripts | 22 |
 | github | 8 |
 | repo | 5 |
@@ -100,13 +99,13 @@ current_path	target_path	owner	phase	classification	status	reason
 | iOS UI | `UI/Views` is removed; chat, settings, onboarding, runtime surfaces, capability evidence, reusable components, system sheets, and theme live under feature-owned UI roots. Runtime surface and settings root views are split below the HRA Swift line budget. | HRA-11 |
 | iOS Support | App entry points live under `App/Lifecycle`; dependency assembly lives under `Support/Composition`; diagnostics, feedback, foundation, pairing, share, and storage are concrete owners with no broad utilities/extensions/services buckets. | HRA-12 |
 | iOS tests | Old technical buckets moved to `Infrastructure`, `Engine`, `Session`, `UI`, and `Support` mirrors; oversized guard/reconstruction tests are decomposed. | HRA-13 |
-| Mac wrapper | Audit and move only justified Mac wrapper drift. | HRA-14 |
+| Mac wrapper | App, Server, MenuBar, Wizard, Support, and tests now use target owner subfolders; old Services, Mocks, Observability, and loose root files are gone. | HRA-14 |
 
 ## Completed Rust Root Findings
 
 The current Rust source root has only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`. Domain startup helpers live under `packages/agent/src/domains/registration`; non-session domains and the session event-store no longer have avoidable same-name file/folder module pairs. HRA-7 mirrors engine tests under `engine/tests/{authority,catalog,durability,invocation,kernel,runtime}` and splits root static integration targets into folder-backed modules while preserving their integration target names.
 
-HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 550 live Swift rows after the `EngineConnection` split and marked the Engine rows `passed_after_fix`. HRA-10 updated the map to 551 live Swift rows after the Session display-model split and marked the Session rows `passed_after_fix`. HRA-11 updated the map to 553 live Swift rows after the UI support splits, HRA-12 kept the same 553-row coverage while marking the App/Support rows `passed_after_fix`, and HRA-13 updates the map to 566 live Swift rows after the SourceGuard and reconstruction test splits. All iOS source/test map rows are now `passed_after_fix`; the map has no fallback rows, points no live file at old broad-bucket targets, and is guarded by `ios_hra8_move_map_covers_every_source_and_test_swift_file`.
+HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 550 live Swift rows after the `EngineConnection` split and marked the Engine rows `passed_after_fix`. HRA-10 updated the map to 551 live Swift rows after the Session display-model split and marked the Session rows `passed_after_fix`. HRA-11 updated the map to 553 live Swift rows after the UI support splits, HRA-12 kept the same 553-row coverage while marking the App/Support rows `passed_after_fix`, and HRA-13 updated the map to 566 live Swift rows after the SourceGuard and reconstruction test splits. All iOS source/test map rows are now `passed_after_fix`; the map has no fallback rows, points no live file at old broad-bucket targets, and is guarded by `ios_hra8_move_map_covers_every_source_and_test_swift_file`. HRA-14 updates the global HRA TSV inventory to include 74 Mac source files and 36 Mac test files under the target owner roots.
 
 ## Directories Over 12 Source Files
 
@@ -118,7 +117,6 @@ HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 
 | `packages/ios-app/Sources/UI/Settings/Shell` | 13 | ios UI settings owner | HRA-11 |
 | `packages/ios-app/Tests/Engine/Transport/Clients` | 20 | ios test owner | HRA-13 |
 | `packages/ios-app/Tests/Session/Chat` | 28 | ios test owner | HRA-13 |
-| `packages/mac-app/Tests/Services` | 20 | mac wrapper owner | HRA-14 |
 
 ## One-File Source Directories
 
@@ -185,15 +183,26 @@ HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 
 | `packages/ios-app/Tests/Support/Foundation/Concurrency` | `AsyncSemaphoreTests.swift` | ios test owner | HRA-13 |
 | `packages/ios-app/Tests/Support/Foundation/Validation` | `FolderCreationTests.swift` | ios test owner | HRA-13 |
 | `packages/ios-app/Tests/UI/RuntimeSurfaces` | `GeneratedUIRendererTests.swift` | ios test owner | HRA-13 |
+| `packages/mac-app/Sources/App/Composition` | `EnvironmentSetup.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Sources/MenuBar/Controller` | `MenuBarController.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Sources/Server/LaunchAgent` | `LaunchAgentManaging.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Sources/Server/PairingToken` | `BearerTokenReader.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Sources/Support/Diagnostics` | `DiagnosticsRedactor.swift` | mac wrapper owner | HRA-14 |
 | `packages/mac-app/Sources/Support/Feedback` | `FeedbackComposer.swift` | mac wrapper owner | HRA-14 |
-| `packages/mac-app/Sources/Support/Observability` | `DiagnosticsRedactor.swift` | mac wrapper owner | HRA-14 |
-| `packages/mac-app/Tests/Mocks` | `MockLaunchAgentManager.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Sources/Support/Foundation` | `VersionDisplay.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Tests/App/CommandMode` | `MacCommandModeServerStarterTests.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Tests/Server/PairingToken` | `BearerTokenReaderTests.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Tests/Support/Diagnostics` | `DiagnosticsRedactorTests.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Tests/Support/Feedback` | `FeedbackComposerTests.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Tests/Support/Foundation` | `VersionDisplayTests.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Tests/Wizard/Components` | `WizardVisualLayoutTests.swift` | mac wrapper owner | HRA-14 |
+| `packages/mac-app/Tests/Wizard/Steps` | `InstallPipelineStageOrderingTests.swift` | mac wrapper owner | HRA-14 |
 
 ## Generic Bucket Directories
 
 | Directory | Owner | Phase |
 | --- | --- | --- |
-| `packages/mac-app/Tests/Services` | mac wrapper owner | HRA-14 |
+| _none_ | architecture campaign | HRA-14 |
 
 ## Same-Name File/Folder Pairs
 
@@ -206,7 +215,7 @@ HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 
 
 | Path | LOC | Limit | Owner | Phase |
 | --- | --- | --- | --- | --- |
-| `packages/mac-app/Tests/Wizard/WizardStepTests.swift` | 717 | 700 | mac wrapper owner | HRA-14 |
+| _none_ | n/a | n/a | architecture campaign | HRA-14 |
 
 ## Docs And Scripts With Old Path Claims
 
@@ -214,5 +223,4 @@ Old-path claims are intentionally still visible in historical HRA/PCC evidence a
 
 ## Open Loops
 
-- HRA-14 still owns the Mac wrapper audit.
 - HRA-15 still owns stale path claims in docs/scripts/README outside evidence history.

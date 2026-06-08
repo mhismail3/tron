@@ -42,7 +42,7 @@ struct LaunchAgentRuntimeInfo: Equatable, Sendable {
 
 /// Indirection over `SMAppService` and launchd diagnostics so the
 /// wizard's install step is testable without mutating Login Items.
-/// Mocks live in `Tests/Mocks/MockLaunchAgentManager.swift`.
+/// Mocks live in `Tests/Infrastructure/Fakes/MockLaunchAgentManager.swift`.
 protocol LaunchAgentManaging: Sendable {
     /// `SMAppService.agent(plistName:).register()` — registers the
     /// bundled LaunchAgent. Returns `.requiresApproval` when macOS is
