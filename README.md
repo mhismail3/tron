@@ -161,9 +161,6 @@ tron/
 |   +-- ISSUE_TEMPLATE/     Structured bug/feature report forms
 |   +-- dependabot.yml      Weekly Cargo + GitHub Actions updates, monthly Swift
 |   +-- pull_request_template.md
-+-- .claude/
-    +-- CLAUDE.md           AI agent project instructions
-    +-- skills/             Repo-local Claude helper skills for contributors
 ```
 
 ---

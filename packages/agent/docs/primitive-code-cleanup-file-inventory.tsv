@@ -1,10 +1,4 @@
 path	classification	owner	cleanup_row	reason
-.claude/CLAUDE.md	collapse	contributor rules	PCC-9	Contributor helper guidance needs stale-claim audit
-.claude/skills/deep-plan/SKILL.md	collapse	contributor rules	PCC-9	Contributor helper guidance needs stale-claim audit
-.claude/skills/publish/SKILL.md	collapse	contributor rules	PCC-9	Contributor helper guidance needs stale-claim audit
-.claude/skills/tron-db/SKILL.md	collapse	contributor rules	PCC-9	Contributor helper guidance needs stale-claim audit
-.claude/skills/tron-db/scripts/tron-db.py	collapse	contributor rules	PCC-9	Contributor helper guidance needs stale-claim audit
-.claude/skills/xcode/SKILL.md	collapse	contributor rules	PCC-9	Contributor helper guidance needs stale-claim audit
 .codex/environments/environment.toml	retain	codex integration	PCC-9	Codex workspace action or local skill boundary
 .codex/skills/tron-ios-beta/SKILL.md	retain	codex integration	PCC-9	Codex workspace action or local skill boundary
 .github/ISSUE_TEMPLATE/bug_report.yml	retain	ci configuration	PCC-8/PCC-9	CI, release, and contributor workflow boundary
@@ -38,17 +32,6 @@ packages/agent/docs/primitive-code-cleanup-scorecard.md	retain	cleanup scorecard
 packages/agent/docs/primitive-engine-teardown-evidence-manifest.md	retain	teardown evidence	PCC-9	Historical primitive teardown proof retained as evidence
 packages/agent/docs/primitive-engine-teardown-inventory.md	retain	teardown evidence	PCC-9	Historical primitive teardown proof retained as evidence
 packages/agent/docs/primitive-engine-teardown-scorecard.md	retain	teardown evidence	PCC-9	Historical primitive teardown proof retained as evidence
-packages/agent/examples/local-packs/README.md	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/creative-knowledge/README.md	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/creative-knowledge/manifest.template.json	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/creative-knowledge/worker.py	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/everyday-organizer/README.md	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/everyday-organizer/manifest.template.json	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/everyday-organizer/worker.py	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/pack_runtime.py	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/tron-maintainer/README.md	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/tron-maintainer/manifest.template.json	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
-packages/agent/examples/local-packs/tron-maintainer/worker.py	delete	retired local-pack examples	PCC-4/PCC-9	Old worker-pack examples are not primitive runtime source
 packages/agent/rust-toolchain.toml	retain	rust package	PCC-3/PCC-9	Retained Rust package support artifact
 packages/agent/src/app/config.rs	retain	rust agent source	PCC-3/PCC-5	Retained Rust primitive/server source boundary
 packages/agent/src/app/disk.rs	retain	rust agent source	PCC-3/PCC-5	Retained Rust primitive/server source boundary

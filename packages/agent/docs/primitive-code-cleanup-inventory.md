@@ -6,7 +6,7 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-08 during `PCC-8` scripts cleanup.
+Last updated: 2026-06-08 during `PCC-9` docs and test cleanup.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
@@ -37,21 +37,18 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
 | `retain` | 1205 | Current package/config/test/doc boundaries |
-| `collapse` | 6 | Cleanup row PCC-9 |
 | `asset` | 71 | iOS/Mac resources and benchmark baselines |
-| `delete` | 11 | PCC-9 delete candidates |
 | `generated` | 6 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1299** | Whole repo |
+| **Total** | **1282** | Whole repo |
 
 ## Current Tracked Package Counts
 
 | Area | Files |
 |------|-------|
-| `.claude` | 6 |
 | `.codex` | 2 |
 | `.github` | 8 |
 | root files | 5 |
-| `packages/agent` | 503 |
+| `packages/agent` | 492 |
 | `packages/ios-app` | 638 |
 | `packages/mac-app` | 115 |
 | `scripts` | 22 |
@@ -70,7 +67,6 @@ evidence.
 tron/
 +-- .codex/                    Codex workspace actions and local skills
 +-- .github/                   CI, release, issue, and PR workflow config
-+-- .claude/                   Contributor helper docs after stale-rule audit
 +-- packages/
 |   +-- agent/
 |   |   +-- src/
@@ -125,16 +121,12 @@ tron/
 
 ## Delete Candidates
 
-The inventory classifies these tracked files as `delete` for later proof rows:
-
-| Path family | Files | Owning row | Reason |
-|-------------|-------|------------|--------|
-| `packages/agent/examples/local-packs/` | 11 | PCC-9 | Old local-pack examples are not primitive runtime source unless host infrastructure docs/tests prove otherwise. |
-
-No files were deleted in PCC-1. During PCC-3, the retired capability-search
-asset bundle was deleted after source and lockfile audits proved no retained
-primitive used it. PCC-9 must either delete the remaining local-pack family or
-revise its classification with direct evidence.
+No tracked files remain classified as `delete`. No files were deleted in PCC-1.
+During PCC-3, the retired capability-search asset bundle was deleted after
+source and lockfile audits proved no retained primitive used it. During PCC-9,
+the old `packages/agent/examples/local-packs/` examples were deleted after the
+stale-doc audit found they described retired worker-pack product surfaces rather
+than current primitive runtime behavior.
 
 ## Collapse-Audit Hotspots
 
@@ -143,13 +135,13 @@ revise its classification with direct evidence.
 | iOS source roots | old `Core`, `Database`, `Models`, `Services`, `ViewModels`, `Views`, `Theme`, `Utilities`, `Extensions`, `Protocols` roots now collapsed to the retained primitive shell | PCC-6 passed |
 | Mac source roots | root Swift files, old `Services`, and old `Theme` now collapsed to `App`, `Server`, and `Support` | PCC-7 passed |
 | Scripts | manual dispatcher, command modules, installed runtime helpers, release helpers, hooks, benchmarks, and device helpers retained; automatic deploy watcher deleted | PCC-8 passed |
-| Contributor rule docs and large tests | `.claude`, package rule docs, over-budget suites | PCC-9 |
+| Contributor rule docs and large tests | root `.claude` helper tree deleted; package docs and behavior-owned test suites audited | PCC-9 passed |
 
 ## Open Loops
 
-- 6 files are still `collapse` until their owning cleanup rows run.
-- 11 files are `delete` candidates and intentionally remain in place until
-  their owning rows prove deletion.
+- No files remain classified as `collapse` or `delete`; future rows must add a
+  new scorecard-backed classification before introducing unresolved cleanup
+  inventory.
 - The target tree is canonical for future moves, but Xcode project files must
   be regenerated from `project.yml` after iOS or Mac source moves.
 - Historical teardown scorecards/evidence retain old product vocabulary as

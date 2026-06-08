@@ -47,6 +47,25 @@ fn line_count(path: &Path) -> usize {
         .count()
 }
 
+fn collect_text_files(path: &Path, files: &mut Vec<PathBuf>) {
+    if path.is_file() {
+        if matches!(
+            path.extension().and_then(|extension| extension.to_str()),
+            Some("md" | "rs" | "swift")
+        ) {
+            files.push(path.to_path_buf());
+        }
+        return;
+    }
+
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        collect_text_files(&entry.path(), files);
+    }
+}
+
 fn is_static_or_evidence_path(path: &str) -> bool {
     path.contains("scorecard")
         || path.contains("evidence")
@@ -65,7 +84,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **84/100**",
+        "Current score: **92/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
@@ -83,7 +102,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-6 | iOS app consolidation | 12 | passed_after_fix |",
         "| PCC-7 | Mac app consolidation | 8 | passed_after_fix |",
         "| PCC-8 | Scripts cleanup | 6 | passed_after_fix |",
-        "PCC-9 starts docs and test cleanup.",
+        "| PCC-9 | Docs and test cleanup | 8 | passed_after_fix |",
+        "PCC-10 starts the final adversarial pass.",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -95,7 +115,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **84/100**",
+        "Current score: **92/100**",
         "Status: **active**",
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
@@ -106,6 +126,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-6 | passed_after_fix |",
         "| PCC-7 | passed_after_fix |",
         "| PCC-8 | passed_after_fix |",
+        "| PCC-9 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -195,10 +216,17 @@ fn primitive_code_cleanup_inventory_covers_tracked_files() {
         );
     }
 
-    for classification in ["retain", "collapse", "delete", "generated", "asset"] {
+    for classification in ["retain", "generated", "asset"] {
         assert!(
             counts.get(classification).copied().unwrap_or_default() > 0,
             "inventory must contain at least one `{classification}` row"
+        );
+    }
+    for classification in ["collapse", "delete"] {
+        assert_eq!(
+            counts.get(classification).copied().unwrap_or_default(),
+            0,
+            "inventory must not retain unresolved `{classification}` rows after PCC-9"
         );
     }
 }
@@ -207,7 +235,6 @@ fn primitive_code_cleanup_inventory_covers_tracked_files() {
 fn retained_top_level_source_directories_are_justified() {
     let scorecard = read_repo_file("packages/agent/docs/primitive-code-cleanup-scorecard.md");
     for path in [
-        ".claude",
         ".codex",
         ".github",
         "packages",
@@ -301,6 +328,71 @@ fn scripts_surface_stays_manual_and_documented() {
             assert!(
                 !text.contains(banned),
                 "manual script surface must not retain `{banned}` in {path}"
+            );
+        }
+    }
+}
+
+#[test]
+fn docs_and_examples_stay_cleaned_to_primitive_owned_artifacts() {
+    for path in [".claude", "packages/agent/examples/local-packs"] {
+        assert!(
+            !repo_path(path).exists(),
+            "stale contributor/example artifact must stay deleted: {path}"
+        );
+    }
+
+    for path in git_ls_files() {
+        assert!(
+            !path.starts_with(".claude/")
+                && !path.starts_with("packages/agent/examples/local-packs/"),
+            "tracked stale contributor/example artifact must stay deleted: {path}"
+        );
+    }
+
+    let scan_roots = [
+        "README.md",
+        "packages/agent/src",
+        "packages/ios-app/docs",
+        "packages/ios-app/Sources",
+        "packages/mac-app/docs",
+        "packages/mac-app/Sources",
+    ];
+    let banned_terms = [
+        ".claude",
+        "local-packs",
+        "Local Worker Pack",
+        "module::register_package",
+        "Generated Controls",
+        "Work dashboard",
+        "retained until PCC-9",
+    ];
+
+    let mut files = Vec::new();
+    for root in scan_roots {
+        let path = repo_path(root);
+        if path.is_file() {
+            files.push(path);
+        } else {
+            collect_text_files(&path, &mut files);
+        }
+    }
+
+    for file in files {
+        let relative = file
+            .strip_prefix(repo_root())
+            .expect("scan file should live under repo root")
+            .to_string_lossy()
+            .to_string();
+        if is_static_or_evidence_path(&relative) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&file)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", file.display()));
+        for term in banned_terms {
+            assert!(
+                !text.contains(term),
+                "stale contributor/example term `{term}` must stay out of {relative}"
             );
         }
     }

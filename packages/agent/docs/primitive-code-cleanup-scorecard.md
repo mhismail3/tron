@@ -4,7 +4,7 @@ Created: 2026-06-08
 
 Initial score: **0/100**
 
-Current score: **84/100**
+Current score: **92/100**
 
 Status: **active**
 
@@ -60,12 +60,12 @@ trace, queue, log, or agent-owned state truth, not a hidden side channel.
 
 ## Folder Justification Table
 
-This table is the current baseline. Rows marked `collapse audit` are retained
-only until the owning scorecard row proves whether they remain a boundary.
+This table is the current retained baseline after PCC-9. Every listed directory
+has a build, platform, persistence, provider, UI, generated/resource, test, or
+maintainability owner.
 
 | Path | Classification | Owner | Reason | Target action |
 |------|----------------|-------|--------|---------------|
-| `.claude` | retain | contributor tooling | Repo-local contributor guidance and automation metadata. | Audit for stale branch claims during docs cleanup. |
 | `.codex` | retain | Codex app integration | Local Codex environment actions for this workspace. | Retain if actions match current CLI surface. |
 | `.github` | retain | CI/release boundary | GitHub workflows, templates, and dependency policy. | Audit only if commands or package layout change. |
 | `packages` | retain | package boundary | Contains the Rust agent, iOS app, and Mac wrapper package roots. | Retain. |
@@ -75,8 +75,8 @@ only until the owning scorecard row proves whether they remain a boundary.
 | `packages/mac-app` | retain | Mac package | SwiftUI menu-bar wrapper and generated Xcode project boundary. | Retain consolidated primitive wrapper source roots. |
 | `packages/agent/src/app` | retain | Rust bootstrap | Server bootstrap, health, metrics, onboarding, shutdown. | Keep as top-level Rust root. |
 | `packages/agent/src/transport` | retain | Rust transport | `/engine` client protocol, worker socket, auth gate. | Keep as top-level Rust root. |
-| `packages/agent/src/engine` | collapse audit | Rust engine substrate | Live catalog, workers, queues, resources, traces, ledger, host. | Flatten unowned shards during PCC-4. |
-| `packages/agent/src/domains` | collapse audit | Rust worker domains | Vertical retained domains and provider/session implementation. | Collapse small domains during PCC-3/PCC-5. |
+| `packages/agent/src/engine` | retain | Rust engine substrate | Live catalog, workers, queues, resources, traces, ledger, host. | Retain after PCC-4 flattened unowned shards. |
+| `packages/agent/src/domains` | retain | Rust worker domains | Vertical retained domains and provider/session implementation. | Retain after PCC-3/PCC-5 collapsed small-domain and session boilerplate. |
 | `packages/agent/src/shared` | retain | Rust foundation/protocol | IDs, errors, paths, DTOs, storage helpers, logging. | Keep if helpers remain shared by at least two owners. |
 | `packages/agent/src/platform` | retain | platform integration | OS/vendor platform boundary. | Keep only platform-specific code. |
 | `packages/ios-app/Sources/App` | retain | iOS app lifecycle | App entry, scene, delegates, lifecycle. | Keep. |
@@ -107,7 +107,7 @@ Current over-budget exceptions:
 
 | Path | Current LOC | Owner | Reason | Cleanup row |
 |------|-------------|-------|--------|-------------|
-| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | 2258 | teardown static gates | Completed teardown gate is historical proof; new cleanup gates should move to separate files. | PCC-9 |
+| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | 2243 | teardown static gates | Completed teardown gate is historical proof; new cleanup gates should move to separate files. | PCC-9 |
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1571 | session persistence tests | Dense event-store behavior suite. | PCC-5 |
 | `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | 1383 | auth storage tests | Credential persistence behavior suite. | PCC-3 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1196 | engine resource tests | Resource substrate behavior suite. | PCC-4 |
@@ -147,6 +147,10 @@ planning gates:
   dispatcher, `tron.d/` contains only large manual command families,
   `tron-lib.d/` contains installed-runtime helpers, and the automatic
   deployment watcher stays deleted.
+- Docs and examples stay current: the stale root `.claude` helper tree and
+  retired `packages/agent/examples/local-packs/` examples stay deleted, retained
+  docs/source stay free of their retired product terms, and the file inventory
+  has no unresolved `collapse` or `delete` rows.
 
 ## Operating Loop
 
@@ -171,15 +175,16 @@ planning gates:
 | PCC-6 | iOS app consolidation | 12 | passed_after_fix | ios | Deleted the prompt-queue UI/event/settings/client plane, removed Rust prompt queue message metadata shims, consolidated iOS `Sources` to `App`, `Engine`, `Session`, `Support`, `UI`, `Resources`, and assets, moved shared App Group transfer types into `Support/Share`, regenerated XcodeGen, updated README/iOS docs/path guards, renamed stale synchronous prompt stream wording to `apply_invoked`, regenerated the file inventory, and proved the shell with focused source guards/settings/share/session tests plus a retained-source residue scan. | Full app-wide iOS suite remains a final PCC-10 candidate; no open PCC-6 cleanup loops. | PCC-6 iOS consolidation checkpoint |
 | PCC-7 | Mac app consolidation | 8 | passed_after_fix | mac | Consolidated Mac `Sources` to `App`, `Server`, `Support`, `Wizard`, `MenuBar`, resources, and assets; moved app lifecycle, LaunchAgent/server, support/theme/pairing/feedback owners out of root `Services`/`Theme`; kept menu-bar feedback status formatting at the menu-bar boundary; regenerated XcodeGen; updated README/Mac docs/rules/tests/inventory; and added a static gate for the retained Mac primitive roots. | Final PCC-10 broad stale/fallback scan remains; no PCC-7-specific open loops. | PCC-7 Mac consolidation checkpoint |
 | PCC-8 | Scripts cleanup | 6 | passed_after_fix | scripts | Deleted the automatic `scripts/auto-deploy` watcher and its `tron auto-deploy` launchd module, removed the command from workspace/installed CLI dispatch, removed stale auto-deploy runtime constants and Mac path constants, kept manual `tron deploy` as the documented user-run contributor path, marked retained script helpers/modules in the inventory, and added a static gate proving the automatic deploy path stays absent. | Live service checks remain environment-dependent; syntax and static gates cover the script cleanup surface. | PCC-8 scripts cleanup checkpoint |
-| PCC-9 | Docs and test cleanup | 8 | pending | docs_or_test_harness | Stale docs deleted or rewritten, redundant tests consolidated, static gates cover deleted product surfaces and folder drift, progressive disclosure docs updated. | Historical scorecards may retain deleted terms as evidence. | pending |
+| PCC-9 | Docs and test cleanup | 8 | passed_after_fix | docs_or_test_harness | Deleted the stale root `.claude` contributor helper tree and the retired `packages/agent/examples/local-packs/` worker-pack examples, removed the README `.claude` structure claim, rewrote the Mac test-organization note that still promised a future PCC-9 cleanup, audited iOS/Mac test roots as retained behavior-owned suites under recursive XcodeGen test targets, regenerated the file inventory to 1282 retained/generated/asset paths with no unresolved `collapse` or `delete` rows, and added a static gate for the deleted docs/example surfaces. | Historical scorecards and static gates may retain deleted terms as evidence. Final adversarial scans remain PCC-10. | PCC-9 docs/test cleanup checkpoint |
 | PCC-10 | Final adversarial pass | 8 | pending | test_harness | Stale product/fallback/compat/dead-code scans, unused dependency checks, subagent review, broad verification, score math/status closeout, ledger, and final checkpoint commit. | None acceptable at closeout; successor scope must be explicit. | pending |
 
 Total weight: **100**
 
 ## Next Test
 
-PCC-9 starts docs and test cleanup. Begin with stale-doc/test inventory:
+PCC-10 starts the final adversarial pass. Begin with retained-surface stale
+artifact and fallback scans:
 
 ```bash
-find packages/agent/docs packages/ios-app/docs packages/mac-app/docs -maxdepth 2 -type f -print | sort
+rg -n "\.claude|local-packs|Local Worker Pack|module::register_package|Generated Controls|Work dashboard|legacy|compat|fallback" README.md AGENTS.md packages/agent/src packages/ios-app/Sources packages/mac-app/Sources packages/ios-app/docs packages/mac-app/docs scripts --glob '!primitive-engine-teardown-*' --glob '!primitive-code-cleanup-*'
 ```

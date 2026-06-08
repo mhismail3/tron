@@ -142,7 +142,7 @@ Do not use this scheme for normal menu-bar UI iteration. The default `TronMac` D
 Tests/
 ├── MenuBar/              # MenuBarItemBuilderTests, ServerStatusPollerTests
 ├── Mocks/                # MockLaunchAgentManager, TestTempDir
-├── Services/             # Server/support behavior tests retained until PCC-9 test cleanup
+├── Services/             # Server/support behavior tests
 └── Wizard/               # WizardStateTests, WizardStepTests, …
 ```
 
