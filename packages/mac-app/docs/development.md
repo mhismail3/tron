@@ -68,9 +68,13 @@ packages/mac-app/scripts/bundle-agent.sh --skip-build
 # Or, to use a binary built elsewhere:
 packages/mac-app/scripts/bundle-agent.sh --source /absolute/path/to/tron
 
-# Or, to wipe the stage (for a clean `xcodebuild`):
+# Or, to wipe only the ignored helper executables (for a clean `xcodebuild`):
 packages/mac-app/scripts/bundle-agent.sh --clean
 ```
+
+`--clean` preserves the tracked helper-resource layout: both LaunchAgent plists,
+both helper `Info.plist` files, and helper icons stay in the repository. It only
+removes ignored payload binaries under each helper's `Contents/MacOS/`.
 
 The Xcode target also copies `packages/agent/defaults/` into `Contents/Resources/Constitution/` on every build. Constitution defaults seed `~/.tron/profiles/` on first Constitution initialization. The primitive branch does not bundle managed skills, transcription sidecars, or product capability assets.
 

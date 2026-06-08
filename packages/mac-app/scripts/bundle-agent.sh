@@ -15,7 +15,7 @@
 #   bundle-agent.sh --profile debug # build debug profile instead
 #   bundle-agent.sh --skip-build    # assume target/release/tron exists
 #   bundle-agent.sh --source PATH   # explicit path to prebuilt tron
-#   bundle-agent.sh --clean         # remove staged helper binaries and launch metadata
+#   bundle-agent.sh --clean         # remove ignored staged helper binaries
 #
 # Exit codes:
 #   0  — staged binary is up to date
@@ -49,6 +49,8 @@ DEV_HELPER_RESOURCES="$DEV_HELPER_CONTENTS/Resources"
 LAUNCH_AGENT_DIR="$LIBRARY_DIR/LaunchAgents"
 STAGING_PATH="$HELPER_MACOS/tron"
 DEV_STAGING_PATH="$DEV_HELPER_MACOS/tron"
+WORKER_STAGING_PATH="$HELPER_MACOS/tron-program-worker"
+DEV_WORKER_STAGING_PATH="$DEV_HELPER_MACOS/tron-program-worker"
 HELPER_INFO_PLIST="$HELPER_CONTENTS/Info.plist"
 DEV_HELPER_INFO_PLIST="$DEV_HELPER_CONTENTS/Info.plist"
 LAUNCH_AGENT_PLIST="$LAUNCH_AGENT_DIR/com.tron.server.plist"
@@ -78,8 +80,8 @@ done
 # --- clean mode ----------------------------------------------------------
 
 if [ "$do_clean" -eq 1 ]; then
-    rm -rf "$HELPER_BUNDLE" "$DEV_HELPER_BUNDLE" "$LAUNCH_AGENT_PLIST" "$DEV_LAUNCH_AGENT_PLIST"
-    echo "cleaned helper bundles and launch agent plists"
+    rm -f "$STAGING_PATH" "$WORKER_STAGING_PATH" "$DEV_STAGING_PATH" "$DEV_WORKER_STAGING_PATH"
+    echo "cleaned ignored staged helper binaries"
     exit 0
 fi
 

@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Evidence Manifest
 
-Current score: **50/100**
+Current score: **60/100**
 
 Status: **active**
 
@@ -21,7 +21,7 @@ work is driven by executable evidence instead of the external Downloads plan.
 | PAC-2 | passed_after_fix | Repaired README/AGENTS source-truth paths for settings, auth credentials, protocol events, and path helpers; removed the dead `domains/tools` maintenance row; and made the settings parity instructions name the current iOS owner files. | PAC source-truth path guard passed; stale path scan hits only the guard's banned-needle list. | Closed. | `93a38fc4d` |
 | PAC-3 | passed_after_fix | Removed the stale README `context` startup-domain claim and added the missing `engine_catalog_workers`/`engine_catalog_functions` rows to the database table inventory. | PAC runtime/docs parity guard and the primitive SQLite migration table test passed. | Closed. | `62d089682` |
 | PAC-4 | passed_after_fix | Split Mac runtime ownership so `LiveLaunchAgentManager` lives under `Server/LaunchAgent`, `Subprocess` lives under `Support/Foundation`, live-manager tests live under `Tests/Server/LaunchAgent`, and `ServerPing.swift` contains only ping/status capture behavior. README and Mac architecture docs now name those owners. | PAC Mac ownership guard passed; Mac XcodeGen regenerated the ignored project; focused Mac ping, launch-agent, install-runner, and fake-manager tests passed. | Closed; PAC-5 still owns guard breadth for roots, helper resources, staged binaries, clean mode, and LOC warnings. | `57fbcf537` |
-| PAC-5 | pending | Pending. | Pending. | Mac SourceGuard-style coverage still needs implementation. | pending |
+| PAC-5 | passed_after_fix | Added Mac SourceGuard-style tests for required roots, banned roots, helper-resource layout, staged-binary policy, `bundle-agent --clean`, and 590 LOC warning rows. Narrowed `bundle-agent.sh --clean` so it removes only ignored staged helper binaries, not tracked helper skeletons or LaunchAgent plists. Mac development docs now spell out the clean-mode boundary. | PAC Mac guard static gate passed; `bash -n packages/mac-app/scripts/bundle-agent.sh` passed; XcodeGen regenerated the ignored project; focused `MacSourceGuardTests` passed. | Closed. | pending |
 | PAC-6 | pending | Pending. | Pending. | iOS hierarchy and mirrored tests still need expansion. | pending |
 | PAC-7 | pending | Pending. | Pending. | Rust docs and 890+ LOC split-plan rows still need proof. | pending |
 | PAC-8 | pending | Pending. | Pending. | Local/GitHub CI parity still needs PAC target wiring. | pending |
@@ -68,8 +68,32 @@ Expected red findings:
 
 ## Residual Risk Log
 
-- PAC-5 through PAC-10 remain open. No row will be marked complete until its
+- PAC-6 through PAC-10 remain open. No row will be marked complete until its
   guard, docs, targeted verification, and evidence are green.
+
+## PAC-5 Verification
+
+Completed Mac guard parity:
+
+- Added `packages/mac-app/Tests/Infrastructure/Guards/MacSourceGuardTests.swift`.
+- Guard coverage includes required roots, banned roots, helper-resource layout,
+  staged-binary policy, `bundle-agent --clean`, and Mac Swift files at or above
+  590 LOC.
+- `bundle-agent.sh --clean` now removes only ignored staged helper binaries:
+  `tron` and `tron-program-worker` in both helper bundles.
+- Clean mode preserves tracked helper `Info.plist` files, LaunchAgent plists,
+  helper icons, and the shared `AppIcon.icns`.
+
+Focused proof:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants mac_source_guards_cover_wrapper_contracts -- --nocapture
+bash -n packages/mac-app/scripts/bundle-agent.sh
+cd packages/mac-app && xcodegen generate
+TRON_MAC_TEST_HOST=1 xcodebuild test -project TronMac.xcodeproj -scheme TronMac -destination 'platform=macOS,arch=arm64' -configuration Debug -only-testing:TronMacTests/MacSourceGuardTests CODE_SIGN_IDENTITY='-' CODE_SIGN_STYLE=Manual -quiet
+```
+
+Result: exit 0 for all focused commands on 2026-06-08.
 
 ## PAC-4 Verification
 
