@@ -65,7 +65,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **17/100**",
+        "Current score: **22/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
@@ -76,7 +76,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-10 | Final adversarial pass | 8 | pending |",
         "Total weight: **100**",
         "| PCC-1 | Inventory and folder justification | 12 | passed_after_fix |",
-        "PCC-2 starts root and generated artifact hygiene.",
+        "| PCC-2 | Root and generated artifact hygiene | 5 | passed_after_fix |",
+        "PCC-3 starts Rust agent consolidation.",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -88,10 +89,11 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **17/100**",
+        "Current score: **22/100**",
         "Status: **active**",
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
+        "| PCC-2 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -310,6 +312,32 @@ fn tracked_generated_and_cache_junk_stays_absent() {
                 && !path.contains("/target/")
                 && !path.contains(".xcresult/"),
             "tracked generated/cache artifact must not be committed: {path}"
+        );
+    }
+}
+
+#[test]
+fn project_gitignore_covers_recurring_local_artifacts() {
+    let gitignore = read_repo_file(".gitignore");
+    for pattern in [
+        "**/target/",
+        "packages/ios-app/.build/",
+        "packages/ios-app/build/",
+        "DerivedData/",
+        "*.xcresult",
+        "*.dSYM/",
+        "node_modules/",
+        "__pycache__/",
+        "*.pyc",
+        ".pytest_cache/",
+        "scripts/artifacts/",
+        "tmp/",
+        "*.log",
+        ".worktrees/",
+    ] {
+        assert!(
+            gitignore.contains(pattern),
+            "root .gitignore must cover recurring local artifact pattern `{pattern}`"
         );
     }
 }

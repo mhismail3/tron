@@ -4,7 +4,7 @@ Created: 2026-06-08
 
 Initial score: **0/100**
 
-Current score: **17/100**
+Current score: **22/100**
 
 Status: **active**
 
@@ -154,7 +154,7 @@ planning gates:
 |----|------|--------|--------|-------|-------------------|---------------|------------|
 | PCC-0 | Scorecard, evidence, and static-gate setup | 5 | passed_after_fix | docs_or_scorecard | New cleanup scorecard, evidence manifest, README links, static invariant test, folder-justification baseline, large-file budget, tracked-junk scan, and focused cleanup invariant output. The gate first failed on stale deleted-product wording in iOS rule docs and a non-static settings test, then passed after the wording was removed or generalized. | None. | PCC-0 setup checkpoint |
 | PCC-1 | Inventory and folder justification | 12 | passed_after_fix | architecture | Added [`primitive-code-cleanup-inventory.md`](primitive-code-cleanup-inventory.md) and [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv). The inventory classifies all 1339 tracked/current cleanup artifact paths: 686 `retain`, 551 `collapse`, 74 `asset`, 21 `delete`, and 7 `generated`; records the canonical target tree; and names every delete/collapse owner row. Static gates now prove every tracked file has an inventory row and the README links both inventory artifacts. | Collapse/delete work remains owned by PCC-3 through PCC-9; no folder is unowned because every unresolved area has a cleanup row. | PCC-1 inventory checkpoint |
-| PCC-2 | Root and generated artifact hygiene | 5 | pending | repo_hygiene | Tracked generated/cache artifacts absent, `.gitignore` covers recurring local outputs, and no untracked build output is deleted without approval. | Local untracked junk may remain intentionally. | pending |
+| PCC-2 | Root and generated artifact hygiene | 5 | passed_after_fix | repo_hygiene | Tracked generated/cache scan found no tracked `__pycache__`, `.pyc`, `.xcresult`, `target`, `node_modules`, or `DerivedData` paths. Root `.gitignore` now covers project-local Rust, Xcode, Node, Python, benchmark, temp, log, debug, and worktree artifacts, including `DerivedData/`, `*.dSYM/`, `*.pyc`, and `.pytest_cache/`. Static gates assert both absence and ignore coverage. No untracked build outputs were deleted. | Local untracked ignored outputs may exist and are intentionally left alone. | PCC-2 hygiene checkpoint |
 | PCC-3 | Rust agent consolidation | 18 | pending | rust_agent | Rust top-level roots limited to `app`, `transport`, `engine`, `domains`, `shared`, and `platform`; small domains/folders collapsed; unused dependencies removed; focused Rust tests pass. | Large domains may require staged follow-up if row evidence proves boundary. | pending |
 | PCC-4 | Engine and primitive surface cleanup | 10 | pending | engine_architecture | Engine shards flattened where unowned; runtime need for resources/state/queues/traces/catalog/grants/workers proven; primitive loop tests pass. | Some substrate may remain until final adversarial proof. | pending |
 | PCC-5 | Session, trace, and persistence cleanup | 8 | pending | storage | Persistence helpers collapsed where possible, schema/query owners retained only where needed, trace/session/event truth remains agent-queryable, and old product schema/event absence gates pass. | Existing large tests may need decomposition. | pending |
@@ -168,9 +168,9 @@ Total weight: **100**
 
 ## Next Test
 
-PCC-2 starts root and generated artifact hygiene. Re-run tracked-junk and
-ignore coverage proof:
+PCC-3 starts Rust agent consolidation. Begin with the delete-candidate and
+dependency audit:
 
 ```bash
-git ls-files | rg '(^|/)__pycache__/|\\.pyc$|\\.xcresult/|(^|/)target/|(^|/)node_modules/'
+rg -n "fastembed|sqlite-vec|capability-search|local-packs|operation|handlers|pub mod" packages/agent/Cargo.toml packages/agent/src packages/agent/docs
 ```
