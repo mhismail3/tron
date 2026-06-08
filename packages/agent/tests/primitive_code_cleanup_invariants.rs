@@ -1,5 +1,6 @@
 //! Static gates for the whole-repo primitive code cleanup campaign.
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -64,7 +65,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **5/100**",
+        "Current score: **17/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
@@ -74,8 +75,10 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-0 | Scorecard, evidence, and static-gate setup | 5 | passed_after_fix |",
         "| PCC-10 | Final adversarial pass | 8 | pending |",
         "Total weight: **100**",
-        "PCC-1 starts the exhaustive inventory and target-tree proof.",
-        "git ls-files",
+        "| PCC-1 | Inventory and folder justification | 12 | passed_after_fix |",
+        "PCC-2 starts root and generated artifact hygiene.",
+        "primitive-code-cleanup-inventory.md",
+        "primitive-code-cleanup-file-inventory.tsv",
     ] {
         assert!(
             scorecard.contains(required),
@@ -85,10 +88,10 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **5/100**",
+        "Current score: **17/100**",
         "Status: **active**",
         "| PCC-0 | passed_after_fix |",
-        "Tracked junk scan",
+        "| PCC-1 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -101,6 +104,89 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
             && readme.contains("packages/agent/docs/primitive-code-cleanup-evidence-manifest.md"),
         "README living-doc map must link the active cleanup scorecard and evidence manifest"
     );
+}
+
+#[test]
+fn primitive_code_cleanup_inventory_covers_tracked_files() {
+    let inventory = read_repo_file("packages/agent/docs/primitive-code-cleanup-inventory.md");
+    let file_inventory =
+        read_repo_file("packages/agent/docs/primitive-code-cleanup-file-inventory.tsv");
+    let readme = read_repo_file("README.md");
+
+    for required in [
+        "# Primitive Code Cleanup Inventory",
+        "Status: `passed_after_fix`",
+        "Machine-readable inventory",
+        "Classification Vocabulary",
+        "Canonical Target Tree",
+        "Delete Candidates",
+        "Collapse-Audit Hotspots",
+        "Open Loops",
+    ] {
+        assert!(
+            inventory.contains(required),
+            "cleanup inventory missing required text: {required}"
+        );
+    }
+
+    assert!(
+        readme.contains("packages/agent/docs/primitive-code-cleanup-inventory.md")
+            && readme.contains("packages/agent/docs/primitive-code-cleanup-file-inventory.tsv"),
+        "README living-doc map must link cleanup inventory artifacts"
+    );
+
+    let mut seen_paths = HashSet::new();
+    let mut counts = HashMap::<&str, usize>::new();
+    let mut lines = file_inventory.lines();
+    assert_eq!(
+        lines.next(),
+        Some("path\tclassification\towner\tcleanup_row\treason"),
+        "file inventory must keep a stable TSV header"
+    );
+    for line in lines {
+        let columns: Vec<_> = line.split('\t').collect();
+        assert_eq!(
+            columns.len(),
+            5,
+            "inventory row must have five TSV columns: {line}"
+        );
+        assert!(
+            matches!(
+                columns[1],
+                "retain" | "collapse" | "delete" | "generated" | "asset"
+            ),
+            "invalid inventory classification `{}` for {}",
+            columns[1],
+            columns[0]
+        );
+        assert!(
+            !columns[2].is_empty() && !columns[3].is_empty() && !columns[4].is_empty(),
+            "inventory row must name owner, cleanup row, and reason: {line}"
+        );
+        *counts.entry(columns[1]).or_insert(0) += 1;
+        assert!(
+            seen_paths.insert(columns[0].to_owned()),
+            "duplicate file inventory row for {}",
+            columns[0]
+        );
+    }
+
+    for path in git_ls_files().into_iter().chain([
+        "packages/agent/docs/primitive-code-cleanup-inventory.md".to_owned(),
+        "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv".to_owned(),
+    ]) {
+        assert!(
+            seen_paths.contains(&path),
+            "tracked file missing cleanup inventory classification: {path}"
+        );
+    }
+
+    for classification in ["retain", "collapse", "delete", "generated", "asset"] {
+        assert!(
+            counts.get(classification).copied().unwrap_or_default() > 0,
+            "inventory must contain at least one `{classification}` row"
+        );
+    }
 }
 
 #[test]

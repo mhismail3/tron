@@ -109,6 +109,11 @@ Current living entry points:
   artifact hygiene, and final retained-surface proof.
 - `packages/agent/docs/primitive-code-cleanup-evidence-manifest.md`: companion
   evidence manifest for the active primitive cleanup scorecard.
+- `packages/agent/docs/primitive-code-cleanup-inventory.md`: PCC-1
+  whole-repo tracked-file inventory, classification summary, and canonical
+  cleanup target tree.
+- `packages/agent/docs/primitive-code-cleanup-file-inventory.tsv`:
+  machine-readable per-file cleanup classification used by static gates.
 - `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
   absence, traceability, schema, registration, and documentation gates for the
   primitive branch.
