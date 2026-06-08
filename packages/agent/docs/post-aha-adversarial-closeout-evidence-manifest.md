@@ -16,7 +16,7 @@ work is driven by executable evidence instead of the external Downloads plan.
 
 | ID | Status | Change summary | Verification | Residuals | Commit |
 |----|--------|----------------|--------------|-----------|--------|
-| PAC-0 | passed_after_fix | Created the scorecard, evidence manifest, README links, and intentionally red static gate target for the PAC findings. | Red proof captured by `cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants -- --nocapture`; see PAC-0 red proof below. | Closed; PAC-1 through PAC-10 own the remaining red gates. | pending |
+| PAC-0 | passed_after_fix | Created the scorecard, evidence manifest, README links, and intentionally red static gate target for the PAC findings. | Red proof captured by `cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants -- --nocapture`; see PAC-0 red proof below. | Closed; PAC-1 through PAC-10 own the remaining red gates. | `1d1aa2f34` |
 | PAC-1 | pending | Pending. | Pending. | Mac generated-project policy still needs repair. | pending |
 | PAC-2 | pending | Pending. | Pending. | README/AGENTS source-truth paths still need repair. | pending |
 | PAC-3 | pending | Pending. | Pending. | Runtime docs and database inventory still need parity proof. | pending |
