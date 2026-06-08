@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-07 (PET-11 SessionTree projection cleanup).
+> Last verified: 2026-06-08 (primitive cleanup setup).
 
 ## Overview
 
@@ -10,9 +10,9 @@ The iOS app is a SwiftUI `/engine` client. On the primitive teardown branch it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,
 renders session messages, persists a local event cache for reconstruction, and
 renders generic runtime surfaces emitted by the engine. It does not own fixed
-product modes for Work, Audit Details, Source Control, Prompt Library, Voice
-Notes, Skills, Agent Control, subagents, worktrees, audio transcription,
-plugin sources, memory-retain, or rules.
+product dashboards, repository-specific panels, media workflow surfaces,
+assistant-management panels, extension-source surfaces, audio transcription,
+memory-retain, or rules.
 
 The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
@@ -33,25 +33,11 @@ source-control state, worker state, or product dashboards locally.
 
 ## Deleted Fixed Product Modes
 
-The primary source tree must not contain these view roots or their matching
-state/client objects:
-
-- `Views/Work`
-- `Views/AuditDetails`
-- `Views/SourceChanges`
-- `Views/PromptLibrary`
-- `Views/VoiceNotes`
-- `Views/Skills`
-- `Views/Subagents`
-- `Views/AgentControl`
-- `Services/Network/Clients/CapabilityClient.swift`
-- `Services/Network/Clients/GitClient.swift`
-- `Services/Network/Clients/PromptLibraryClient.swift`
-- `Services/Network/Clients/SkillClient.swift`
-- `Services/Network/Clients/WorktreeClient.swift`
-
-`SourceGuardTests.testPrimitiveShellHasNoFixedProductModes` is the regression
-gate for this boundary.
+The primary source tree must not contain fixed dashboard roots, repository
+workflow panels, assistant-management panels, extension-source panels, or their
+matching state/client objects. Static source guards and the cleanup invariant
+test are the regression gates for this boundary; product names live only in
+scorecards, evidence manifests, inventory docs, and static absence tests.
 
 ## Directory Structure
 
@@ -77,10 +63,10 @@ operator policy surface. Capability identity is limited to the model-visible
 primitive name, optional operation name, trace/root invocation ids, theme
 color, and runtime-supplied presentation hints.
 
-The deleted `Views/SessionTree` projection is not a shell primitive. Fork
+The deleted parallel session-tree projection is not a shell primitive. Fork
 lineage remains in session metadata and stored events; iOS reconstructs history
-through generic session/event repositories without a parallel tree-only DTO,
-builder, icon catalog, or fork-row state model.
+through generic session/event repositories without a tree-only DTO, builder,
+icon catalog, or fork-row state model.
 
 ## Data Flow
 

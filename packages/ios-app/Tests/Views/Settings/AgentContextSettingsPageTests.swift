@@ -51,7 +51,7 @@ struct AgentContextSettingsPageTests {
             .app,
             .server,
         ])
-        let deletedTitles = ["Hooks", "Plugin Sources", "Git Workflow", "Mem" + "ory", "Ru" + "les"]
+        let deletedTitles = ["Hooks", "Extension Sources", "Git Workflow", "Mem" + "ory", "Ru" + "les"]
         #expect(ServerSettingsCategory.allCases.map(\.title).allSatisfy { title in
             !deletedTitles.contains(title)
         })

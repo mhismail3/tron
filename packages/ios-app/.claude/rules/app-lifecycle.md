@@ -73,7 +73,6 @@ URL scheme: `tron://`
 |--------|-------------|
 | Session | `tron://session/{id}` |
 | Settings | `tron://settings` |
-| Voice Notes | `tron://voice-notes` |
 | Notification inbox | `tron://notifications/{toolCallId}` |
 | Share extension | `tron://share` |
 | Pairing (Mac QR) | `tron://pair?host=…&port=…&token=…[&label=…]` — handled by `TronMobileApp` before `DeepLinkRouter`; `label` is the server name |

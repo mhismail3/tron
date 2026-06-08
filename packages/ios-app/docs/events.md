@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-07 (PET-11 process dashboard teardown).
+> Last verified: 2026-06-08 (primitive cleanup setup).
 
 The iOS app handles engine events through two paths:
 
@@ -10,9 +10,9 @@ Stored: EventDatabase -> UnifiedEventTransformer -> ChatMessage array
 ```
 
 The live path updates the mounted session UI. The stored path reconstructs
-history from durable event rows. Neither path owns source-control state,
-worker/subagent state, prompt-library state, skill state, or Audit Details
-state on the primitive teardown branch.
+history from durable event rows. Neither path owns repository workflow state,
+assistant-management state, curated prompt state, skill state, or fixed audit
+dashboard state on the primitive teardown branch.
 
 ## Plugin Boundary
 
@@ -32,10 +32,10 @@ Current retained plugin groups:
 | Queue | `Plugins/Queue/` | Prompt queue/dequeue/send status. |
 | Display | `Plugins/Display/` | Generic display frames for runtime surfaces. |
 | Server | `Plugins/Server/` | Server/auth/restart status messages. |
-| Hook | `Plugins/Hook/` | Generic LLM hook result display while PET-10 audits remaining hook labels. |
+| Hook | `Plugins/Hook/` | Generic LLM hook result display while cleanup audits remaining hook labels. |
 
-Deleted plugin roots such as `Plugins/Subagent/`, `Plugins/Worktree/`, and
-`Plugins/Repo/` must stay absent.
+Deleted workflow-specific plugin roots must stay absent. Static tests keep
+their exact retired names out of ordinary source and docs.
 
 ## Registration
 
@@ -70,8 +70,9 @@ presentation hints. Reconstruction must not recover retired contract,
 implementation, worker, risk, or binding metadata from old payloads.
 
 Unsupported event payloads should remain visible as diagnostics or no-op
-transport facts. They should not be converted into Work, Source Control,
-Subagent, Skill, Prompt Library, or Voice Notes models.
+transport facts. They should not be converted into fixed dashboard,
+repository, assistant-management, skill, curated prompt, or media workflow
+models.
 
 ## Session Updates
 

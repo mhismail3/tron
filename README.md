@@ -104,9 +104,17 @@ Current living entry points:
   source-audited deletion map for every current Rust domain, engine primitive
   worker, runner context plane, managed skill, doc, iOS source/view root, and
   settings surface.
+- `packages/agent/docs/primitive-code-cleanup-scorecard.md`: active whole-repo
+  primitive cleanup scorecard for folder ownership, file budgets, generated
+  artifact hygiene, and final retained-surface proof.
+- `packages/agent/docs/primitive-code-cleanup-evidence-manifest.md`: companion
+  evidence manifest for the active primitive cleanup scorecard.
 - `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
   absence, traceability, schema, registration, and documentation gates for the
   primitive branch.
+- `packages/agent/tests/primitive_code_cleanup_invariants.rs`: cleanup
+  scorecard, folder-justification, file-budget, deleted-term, and tracked-junk
+  gates.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
@@ -485,9 +493,10 @@ when available, result/error hashes, and file attribution with content hashes.
 PET-10 owns deleting or collapsing any remaining substrate workers that are not
 required once this trace path and the primitive loop are sufficient.
 
-Subagent routes are not registered on the primitive teardown branch. Any future
-parallel helper behavior must be created by the agent through `execute` and
-recorded as agent-owned state or generic runtime artifacts.
+Fixed helper-orchestration routes are not registered on the primitive teardown
+branch. Any future parallel helper behavior must be created by the agent
+through `execute` and recorded as agent-owned state or generic runtime
+artifacts.
 
 ---
 
@@ -823,7 +832,12 @@ packages/ios-app/Sources/
 - **Coordinator pattern**: Stateless logic in coordinators, state in view models via context protocols
 - **Event plugins**: Live WebSocket events parsed by plugins, dispatched by `EventDispatchCoordinator`
 - **History transformer**: Stored events reconstructed into `ChatMessage` arrays by `UnifiedEventTransformer`
-- **Primitive chat shell**: the app keeps connection/onboarding/settings, session navigation, prompt input, message rendering, local reconstruction, diagnostics, and generic runtime surfaces. Fixed Work, Audit Details, Source Control, Prompt Library, Voice Notes, Skills, Subagents, Agent Control, Plugin Sources, audio transcription, memory-retain, rules, and SessionTree projection product modes are removed from the primary source tree.
+- **Primitive chat shell**: the app keeps connection/onboarding/settings,
+  session navigation, prompt input, message rendering, local reconstruction,
+  diagnostics, and generic runtime surfaces. Fixed product dashboards,
+  repository-specific panels, media workflow surfaces, assistant-management
+  panels, extension-source surfaces, audio transcription, memory-retain, rules,
+  and parallel tree-only projections are removed from the primary source tree.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`
 - **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token before Connect is enabled; an already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
