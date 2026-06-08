@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Scorecard
 
-Current score: **16/100**
+Current score: **28/100**
 
 Status: **active**
 
@@ -41,7 +41,7 @@ Total weight: **100**
 |----|------|--------|--------|-------|----------|------------|
 | PAC-0 | Scorecard, evidence, README, and red-gate setup | 6 | passed_after_fix | docs/static gates | Added this scorecard, the evidence manifest, README living-doc links, and the intentionally red `post_aha_adversarial_closeout_invariants` target. | Later rows turn the red gates green. |
 | PAC-1 | Mac generated-project CI policy | 10 | passed_after_fix | CI/project generation | Mac workflows now generate `TronMac.xcodeproj`, verify it is ignored, and build/test/archive from that generated project; iOS workflows keep tracked `TronMobile.xcodeproj` drift checks. The older AHA policy gate was revised to enforce this split policy instead of the superseded tracked-Mac rule. | Closed; focused Mac guard/source organization remains PAC-4/PAC-5. |
-| PAC-2 | README/AGENTS source-truth path repair | 12 | pending | docs/source truth | Pending. | Repair stale canonical paths and guard documented paths. |
+| PAC-2 | README/AGENTS source-truth path repair | 12 | passed_after_fix | docs/source truth | README and AGENTS now point to `settings/profile/types/`, `auth/credentials/`, `shared/protocol/events/`, and `shared/foundation/paths/`; the dead `domains/tools` maintenance path was removed. The PAC source-truth guard passes and stale paths remain only as regression needles. | Closed. |
 | PAC-3 | Runtime/docs parity and database inventory | 10 | pending | runtime/docs parity | Pending. | Remove stale `context` startup-domain claim and align database table inventory with booted runtime storage. |
 | PAC-4 | Mac launch-agent/process ownership | 12 | pending | Mac architecture | Pending. | Move `LiveLaunchAgentManager`, `Subprocess`, and live-manager tests to physical owners. |
 | PAC-5 | Mac guard parity | 10 | pending | Mac guard parity | Pending. | Add Mac SourceGuard-style coverage for roots, helper resources, staged binaries, clean mode, and LOC warnings. |

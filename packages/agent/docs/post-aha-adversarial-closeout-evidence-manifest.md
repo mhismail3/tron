@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Evidence Manifest
 
-Current score: **16/100**
+Current score: **28/100**
 
 Status: **active**
 
@@ -18,7 +18,7 @@ work is driven by executable evidence instead of the external Downloads plan.
 |----|--------|----------------|--------------|-----------|--------|
 | PAC-0 | passed_after_fix | Created the scorecard, evidence manifest, README links, and intentionally red static gate target for the PAC findings. | Red proof captured by `cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants -- --nocapture`; see PAC-0 red proof below. | Closed; PAC-1 through PAC-10 own the remaining red gates. | `1d1aa2f34` |
 | PAC-1 | passed_after_fix | Removed Mac `git diff --exit-code packages/mac-app/TronMac.xcodeproj` checks from CI/release, added ignored-project existence checks after XcodeGen, kept iOS tracked-project drift checks, and revised the older AHA Xcode policy gate/docs to the split iOS-tracked/Mac-untracked rule. | PAC Mac policy gate, revised AHA Xcode policy gate, and AHA scorecard formalization passed. | Closed; PAC-4/PAC-5 still own Mac source organization and guard breadth. | `e0fe3adb9` |
-| PAC-2 | pending | Pending. | Pending. | README/AGENTS source-truth paths still need repair. | pending |
+| PAC-2 | passed_after_fix | Repaired README/AGENTS source-truth paths for settings, auth credentials, protocol events, and path helpers; removed the dead `domains/tools` maintenance row; and made the settings parity instructions name the current iOS owner files. | PAC source-truth path guard passed; stale path scan hits only the guard's banned-needle list. | Closed. | pending |
 | PAC-3 | pending | Pending. | Pending. | Runtime docs and database inventory still need parity proof. | pending |
 | PAC-4 | pending | Pending. | Pending. | Mac launch-agent and subprocess ownership still need physical moves. | pending |
 | PAC-5 | pending | Pending. | Pending. | Mac SourceGuard-style coverage still needs implementation. | pending |
@@ -68,8 +68,41 @@ Expected red findings:
 
 ## Residual Risk Log
 
-- PAC-2 through PAC-10 remain open. No row will be marked complete until its
+- PAC-3 through PAC-10 remain open. No row will be marked complete until its
   guard, docs, targeted verification, and evidence are green.
+
+## PAC-2 Verification
+
+Completed source-truth path repair:
+
+- README settings schema path is now
+  `packages/agent/src/domains/settings/profile/types/`.
+- README authentication schema path is now
+  `packages/agent/src/domains/auth/credentials/types.rs`.
+- README Event System points to
+  `packages/agent/src/shared/protocol/events/`.
+- README Install Directory points to
+  `packages/agent/src/shared/foundation/paths/`.
+- AGENTS README-maintenance rows use the current settings, auth, event, and
+  path-helper source roots.
+- AGENTS no longer names the deleted `packages/agent/src/domains/tools/`
+  source-truth path.
+
+Focused proof:
+
+```bash
+rg -n "settings/implementation|provider_credentials|shared/protocol/events\\.rs|shared/foundation/paths\\.rs|settings/types/|domains/tools" README.md AGENTS.md packages/agent/docs/post-aha-adversarial-closeout-scorecard.md packages/agent/docs/post-aha-adversarial-closeout-evidence-manifest.md packages/agent/tests/post_aha_adversarial_closeout
+```
+
+Result: exit 0 with hits only in
+`packages/agent/tests/post_aha_adversarial_closeout/audit_findings.rs`, where
+the stale paths are banned regression needles.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants documented_source_truth_paths_exist_or_use_supported_globs -- --nocapture
+```
+
+Result: exit 0, 1 passed.
 
 ## PAC-1 Verification
 
