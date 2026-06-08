@@ -20,7 +20,7 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 | HRA-5 | passed_after_fix | Added expanded red domain hierarchy gates, then moved non-session domain helpers into owned vertical trees: registration helpers, agent prompt/loop/context, auth oauth/credentials, model routing/protocol, settings profile, capability operation modules, Kimi stream handler tests, and split over-budget HRA-5 domain tests. Deleted unused `resource_projection.rs` instead of preserving a dead module. | Focused checks passed for compaction engine, stream processor, auth storage, and Kimi stream handler; final HRA target rerun passed all Rust/HRA-5 gates and remains partial red only on iOS source/test gates. | Session/event-store closure moved to HRA-6; Rust test/doc budget cleanup moved to HRA-7. | `f8c8f356c` |
 | HRA-6 | passed_after_fix | Added red session/event-store hierarchy gates, then moved session lifecycle/query/reconstruction into owner folders, moved event-store envelope/factory/reconstruction/store/session repository modules to folder-backed owners, removed session event-store same-name file/folder pairs, and split SQLite event repository tests by behavior. | Session domain tests passed; final HRA target rerun passed all Rust/HRA-6 gates and remains partial red only on iOS source/test gates. | Rust test/doc budget cleanup moved to HRA-7. | `18268fc26` |
 | HRA-7 | passed_after_fix | Added red Rust test/progressive-doc gates, then mirrored engine tests to subsystem folders, split root static integration targets into folder-backed modules, decomposed over-budget Rust stores/runtime helpers, updated progressive docs and README, and regenerated inventories. | Engine tests passed; teardown, cleanup, and DB guards passed; final HRA target rerun passed all Rust/HRA-7 gates and remains partial red only on iOS source/test gates. | HRA-9 starts iOS Engine source moves. | `b846c6e4e` |
-| HRA-8 | passed_after_fix | Added HRA SourceGuard red hierarchy checks, generated the 547-row iOS source/test Swift move map, recorded the XcodeGen/share-extension project map, added HRA artifact inventory rows, and added a Rust map-coverage invariant. | XcodeGen exited 0 with no generated project drift; focused SourceGuard red proof compiled and failed only the two new HRA hierarchy tests; HRA invariant target now has the new iOS move-map guard passing and remains expected partial red only on iOS source/test hierarchy gates. | HRA-9 through HRA-13 must consume pending iOS move-map rows and turn SourceGuard green. | pending |
+| HRA-8 | passed_after_fix | Added HRA SourceGuard red hierarchy checks, generated the 547-row iOS source/test Swift move map, recorded the XcodeGen/share-extension project map, added HRA artifact inventory rows, and added a Rust map-coverage invariant. | XcodeGen exited 0 with no generated project drift; focused SourceGuard red proof compiled and failed only the two new HRA hierarchy tests; HRA invariant target now has the new iOS move-map guard passing and remains expected partial red only on iOS source/test hierarchy gates. | HRA-9 through HRA-13 must consume pending iOS move-map rows and turn SourceGuard green. | `c21cdc6f8` |
 | HRA-9 | pending | Not started. | pending | Move iOS Engine hierarchy and split transport. | pending |
 | HRA-10 | pending | Not started. | pending | Move iOS Session hierarchy. | pending |
 | HRA-11 | pending | Not started. | pending | Move iOS UI hierarchy. | pending |
@@ -442,7 +442,7 @@ Results:
   - `SourceGuardTests.testIOSSourcesUseHRAFeatureOwnedHierarchy`
   - `SourceGuardTests.testIOSTestsMirrorHRASourceBoundaries`
 - SourceGuard xcresult:
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.08_02-07-15--0700.xcresult`
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.08_02-07-15--0700.xcresult`
 - First `cargo fmt --all -- --check`: failed only because the new Rust
   move-map guard needed rustfmt wrapping; `cargo fmt --all` was run.
 - HRA invariant target before final doc staging: expected partial red with 23
@@ -461,4 +461,4 @@ Remaining failures are the intended HRA-9 through HRA-13 implementation gates:
 - `ios_sources_do_not_use_broad_views_network_database_buckets`
 - `ios_tests_mirror_source_boundaries`
 
-Checkpoint commit: pending.
+Checkpoint commit: `c21cdc6f8`.

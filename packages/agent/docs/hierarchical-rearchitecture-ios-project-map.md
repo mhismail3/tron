@@ -4,7 +4,7 @@ Status: `running`
 
 Last updated: 2026-06-08
 
-Plan source: `/Users/moose/Downloads/TRON_REARCHITECTURE_PLAN.md`.
+Plan source: `/Users/<USER>/Downloads/TRON_REARCHITECTURE_PLAN.md`.
 
 ## Scope
 
