@@ -492,6 +492,97 @@ fn rust_engine_has_no_same_name_file_folder_pairs() {
 }
 
 #[test]
+fn rust_non_session_domains_have_no_same_name_file_folder_pairs() {
+    let mut pairs = Vec::new();
+    let mut source_files = Vec::new();
+    list_source_files(
+        &repo_path("packages/agent/src/domains"),
+        &["rs"],
+        &mut source_files,
+    );
+    for file in source_files {
+        let relative = file
+            .strip_prefix(repo_root())
+            .unwrap()
+            .display()
+            .to_string();
+        if relative.starts_with("packages/agent/src/domains/session/") {
+            continue;
+        }
+        let sibling_folder = file.with_extension("");
+        if sibling_folder.is_dir() {
+            pairs.push(relative);
+        }
+    }
+
+    assert!(
+        pairs.is_empty(),
+        "Non-session Rust domains must not retain avoidable same-name file/folder module pairs after HRA-5: {pairs:#?}"
+    );
+}
+
+#[test]
+fn rust_capability_execute_operations_are_decomposed() {
+    let required = [
+        "packages/agent/src/domains/capability/operations/filesystem.rs",
+        "packages/agent/src/domains/capability/operations/logs.rs",
+        "packages/agent/src/domains/capability/operations/process.rs",
+        "packages/agent/src/domains/capability/operations/state.rs",
+        "packages/agent/src/domains/capability/operations/trace.rs",
+    ];
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let root = repo_path("packages/agent/src/domains/capability/operations/mod.rs");
+    let root_source = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+
+    assert!(
+        missing.is_empty(),
+        "capability::execute operations must be decomposed by primitive concern: {missing:#?}"
+    );
+    assert!(
+        source_line_count(&root) <= 500,
+        "capability operations root should be dispatch/audit glue only after HRA-5"
+    );
+    for banned in [
+        "async fn file_read",
+        "async fn file_write",
+        "async fn process_run",
+        "fn trace_list",
+        "fn trace_get",
+        "async fn log_recent",
+    ] {
+        assert!(
+            !root_source.contains(banned),
+            "capability operations root must not retain primitive body `{banned}`"
+        );
+    }
+}
+
+#[test]
+fn rust_settings_domain_keeps_worker_root_thin() {
+    let root = read_repo_file("packages/agent/src/domains/settings/mod.rs");
+    assert!(
+        repo_path("packages/agent/src/domains/settings/operations.rs").exists(),
+        "settings operation bodies should live under a settings operation owner"
+    );
+    for banned in [
+        "async fn settings_update_value",
+        "async fn settings_reset_to_defaults_value",
+        "async fn read_sparse_settings_snapshot",
+        "async fn rollback_sparse_settings",
+        "async fn reload_profile_runtime_or_rollback",
+    ] {
+        assert!(
+            !root.contains(banned),
+            "settings root must stay registration/docs only and not retain `{banned}`"
+        );
+    }
+}
+
+#[test]
 fn ios_sources_do_not_use_broad_views_network_database_buckets() {
     let banned = [
         "packages/ios-app/Sources/UI/Views",

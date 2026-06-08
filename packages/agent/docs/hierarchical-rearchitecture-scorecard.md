@@ -45,7 +45,7 @@ Total weight: **100**
 | HRA-2 | Rust app, transport, shared, and platform roots | 6 | passed_after_fix | Rust app/transport/shared owners | Moved root binary helpers into app CLI/bootstrap, grouped app health/lifecycle/bootstrap, grouped transport HTTP/engine/runtime, collapsed shared into foundation/protocol/server/storage/observability, and updated README/static gates. | HRA-15 still owns broad stale-path doc scans outside current-code docs. |
 | HRA-3 | Rust engine kernel and invocation hierarchy | 10 | passed_after_fix | Rust engine owner | Moved kernel/catalog/invocation/runtime modules under owned subsystem roots, collapsed invocation host into `invocation/host`, split kernel types under `kernel/types`, and removed avoidable engine same-name file/folder pairs. | Runtime and authority/durability files that remain over budget have explicit budget rows; HRA-7 owns broader Rust test/doc decomposition. |
 | HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix | Rust engine owner | Moved grants/leases/compensation under `authority`; moved ledger/queue/resources/state/streams under `durability`; kept SQLite codecs under their owning stores; collapsed resource store into `resources/store/mod.rs`. | Authority/durability store modules remain cohesive but over 900 LOC with explicit temporary budgets. |
-| HRA-5 | Rust domain vertical slices | 10 | pending | Rust domain owners | Not started. | Reorganize domains by behavior instead of copied boilerplate. |
+| HRA-5 | Rust domain vertical slices | 10 | running | Rust domain owners | Red domain hierarchy gates added for non-session same-name module pairs, capability operation decomposition, and settings root operation ownership. | Reorganize domains by behavior instead of copied boilerplate. |
 | HRA-6 | Rust session and event-store hierarchy | 7 | pending | Rust session owner | Not started. | Reorganize session lifecycle/query/reconstruction/event-store/trace and split oversized tests. |
 | HRA-7 | Rust tests and progressive docs | 5 | pending | Rust docs/tests owners | Not started. | Mirror tests to new boundaries and update progressive docs. |
 | HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | pending | iOS architecture owner | Not started. | Add red SourceGuard hierarchy gates and iOS move map. |
@@ -121,6 +121,9 @@ checks:
 - `rust_engine_root_has_no_unowned_flat_modules`
 - `rust_engine_subsystem_roots_are_owned`
 - `rust_engine_has_no_same_name_file_folder_pairs`
+- `rust_non_session_domains_have_no_same_name_file_folder_pairs`
+- `rust_capability_execute_operations_are_decomposed`
+- `rust_settings_domain_keeps_worker_root_thin`
 - `ios_sources_do_not_use_broad_views_network_database_buckets`
 - `ios_tests_mirror_source_boundaries`
 - `large_files_have_decomposition_budget_rows`

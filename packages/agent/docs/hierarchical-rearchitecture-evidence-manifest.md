@@ -17,7 +17,7 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 | HRA-2 | passed_after_fix | Moved `main_cli.rs`, `main_runtime.rs`, and `main_tests.rs` under `app/cli` and `app/bootstrap`; moved app config/disk/server/health/metrics/onboarding/shutdown under bootstrap/health/lifecycle; moved transport auth/contracts/engine/engine_ws/setup under http/engine/runtime; collapsed shared root into foundation/protocol/server/storage/observability; removed old path modules instead of re-exporting them. | `cargo check --manifest-path packages/agent/Cargo.toml --bin tron` passed; `cargo test --manifest-path packages/agent/Cargo.toml --lib app::bootstrap -- --quiet` passed 80 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --quiet` passed 27 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --quiet` passed 16 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test db_path_guard -- --quiet` passed 13 tests; HRA invariant target is expected partial red with Rust source-root and HRA-2 shape gates passing. | iOS source/test gates remain red for HRA-9 through HRA-13. | `67b8a5aa6` |
 | HRA-3 | passed_after_fix | Moved flat engine root modules into `kernel`, `catalog`, `invocation`, and `runtime`; collapsed `host.rs` plus `host/` into `invocation/host`; split the over-budget kernel type file into `kernel/types/{catalog,function,trigger,worker}.rs`; moved primitive `resource` and `ui` files to folder `mod.rs` owners so no engine same-name file/folder pairs remain. | Command batch passed except the expected partial-red HRA target: Rust engine gates pass and only iOS source/test gates fail. Full command outcomes recorded in HRA-3/HRA-4 verification below. | Engine runtime/store files still over budget are listed with explicit temporary budgets; HRA-7 owns test/doc decomposition after the production hierarchy stabilizes. | `ff4640ce8` |
 | HRA-4 | passed_after_fix | Moved grants, leases, and compensation under `authority`; moved ledger, queue, resources, state, and streams under `durability`; kept SQLite codecs under their owning store folders; collapsed resource store into `durability/resources/store/mod.rs`; regenerated HRA and primitive cleanup inventories. | Command batch passed except the expected partial-red HRA target: authority/durability compile and engine tests pass. Full command outcomes recorded in HRA-3/HRA-4 verification below. | Authority/durability store modules remain cohesive but over 900 LOC with explicit temporary budget rows; no compatibility modules preserve old paths. | `ff4640ce8` |
-| HRA-5 | pending | Not started. | pending | Move Rust domains to vertical slices. | pending |
+| HRA-5 | running | Added red domain hierarchy gates for non-session same-name module pairs, capability operation decomposition, and settings root operation ownership. | Red gate captured: HRA target ran 13 tests, 8 passed and 5 failed. The three new Rust failures are HRA-5 implementation work; two existing iOS failures remain HRA-9 through HRA-13 work. | Implement domain moves/splits until the new HRA-5 gates pass. | pending |
 | HRA-6 | pending | Not started. | pending | Move Rust session/event-store and split oversized tests. | pending |
 | HRA-7 | pending | Not started. | pending | Mirror Rust tests and update progressive docs. | pending |
 | HRA-8 | pending | Not started. | pending | Add iOS SourceGuard red hierarchy gates and project map. | pending |
@@ -156,3 +156,32 @@ Results:
   same-name file/folder guard, and large-file budget rows. The two remaining
   failures are `ios_sources_do_not_use_broad_views_network_database_buckets`
   and `ios_tests_mirror_source_boundaries`, owned by HRA-9 through HRA-13.
+
+## HRA-5 Red Domain Gates
+
+Command:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture
+```
+
+Result: exit 101, expected red gate.
+
+Summary:
+
+```text
+running 13 tests
+test rust_non_session_domains_have_no_same_name_file_folder_pairs ... FAILED
+test rust_capability_execute_operations_are_decomposed ... FAILED
+test rust_settings_domain_keeps_worker_root_thin ... FAILED
+test ios_sources_do_not_use_broad_views_network_database_buckets ... FAILED
+test ios_tests_mirror_source_boundaries ... FAILED
+
+test result: FAILED. 8 passed; 5 failed
+```
+
+New HRA-5 failures before implementation:
+
+- `rust_non_session_domains_have_no_same_name_file_folder_pairs`
+- `rust_capability_execute_operations_are_decomposed`
+- `rust_settings_domain_keeps_worker_root_thin`
