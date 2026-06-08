@@ -28,8 +28,8 @@ struct TronPathsTests {
 
     @Test("agent display name is 'Tron Server'")
     func agentDisplayNameMatches() {
-        // System Settings lists CFBundleDisplayName (fallback
-        // CFBundleName). Calling the agent "Tron Server" keeps the
+        // System Settings lists CFBundleDisplayName, then CFBundleName.
+        // Calling the agent "Tron Server" keeps the
         // helper entry distinct from the responsible wrapper entry
         // used by Full Disk Access.
         #expect(TronPaths.agentDisplayName(environment: [:]) == "Tron Server")
@@ -84,9 +84,9 @@ struct TronPathsTests {
         #expect(TronPaths.runDir.path.hasSuffix("/internal/run"))
     }
 
-    @Test("database lock stays beside log.db")
+    @Test("database lock stays beside tron.sqlite")
     func databaseLockShape() {
-        #expect(TronPaths.databaseLockPath.path.hasSuffix("/internal/database/log.db.lock"))
+        #expect(TronPaths.databaseLockPath.path.hasSuffix("/internal/database/tron.sqlite.lock"))
     }
 
     @Test("LaunchAgent plist is bundled in Contents/Library/LaunchAgents")

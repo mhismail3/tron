@@ -9,7 +9,7 @@ use std::time::Instant;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Mutex;
-use tron::domains::agent::r#loop::{Orchestrator, ProfileRuntime, SessionManager};
+use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
 use tron::domains::model::providers::ProviderHealthTracker;
 use tron::domains::session::event_store::{
     AgentTraceListOptions, ConnectionConfig, EventStore, new_file, run_migrations,

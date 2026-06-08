@@ -4,31 +4,6 @@ use rusqlite::{Connection, params};
 use std::fs;
 
 #[test]
-fn archives_non_current_files_once() {
-    let dir = tempfile::tempdir().unwrap();
-    let active = dir.path().join(UNIFIED_DB_FILENAME);
-    fs::write(dir.path().join("log.db"), b"log").unwrap();
-    fs::write(dir.path().join("engine-ledger.sqlite"), b"ledger").unwrap();
-
-    let report = archive_non_current_database_files(&active).unwrap();
-    assert!(report.moved_any());
-    assert_eq!(report.files.len(), 2);
-    assert!(!dir.path().join("log.db").exists());
-    assert!(!dir.path().join("engine-ledger.sqlite").exists());
-    assert!(
-        report
-            .archive_dir
-            .as_ref()
-            .expect("archive dir")
-            .join("log.db")
-            .exists()
-    );
-
-    let second = archive_non_current_database_files(&active).unwrap();
-    assert!(!second.moved_any());
-}
-
-#[test]
 fn non_current_active_database_is_archived_for_modular_engine_generation() {
     let dir = tempfile::tempdir().unwrap();
     let active = dir.path().join(UNIFIED_DB_FILENAME);

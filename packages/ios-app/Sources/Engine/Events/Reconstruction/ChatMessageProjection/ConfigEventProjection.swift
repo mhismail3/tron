@@ -1,9 +1,9 @@
 import Foundation
 
-/// Handlers for transforming configuration change events into ChatMessages.
+/// Event projections for transforming configuration change events into ChatMessages.
 ///
-/// Handles: config.model_switch, config.reasoning_level
-enum ConfigHandlers {
+/// Projects: config.model_switch, config.reasoning_level
+enum ConfigEventProjection {
 
     /// Transform config.model_switch event into a ChatMessage.
     ///

@@ -312,7 +312,7 @@ final class CapabilityInvocationCoordinatorTests: XCTestCase {
             modelPrimitiveName: "execute",
             invocationId: "inv_789",
             arguments: nil,
-            formattedArguments: "{\"operation\":\"text_search\",\"payload\":{\"pattern\":\"TODO\"}}",
+            formattedArguments: "{\"operation\":\"text_search\",\"payload\":{\"pattern\":\"needle\"}}",
             identity: CapabilityIdentity(modelPrimitiveName: "execute", operationName: "text_search")
         )
 

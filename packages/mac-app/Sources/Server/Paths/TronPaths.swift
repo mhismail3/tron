@@ -51,9 +51,9 @@ enum TronPaths {
     static var userProfileDir: URL { profilesDir.appendingPathComponent(HomeComponent.userProfileDir, isDirectory: true) }
     static var runDir: URL { internalDir.appendingPathComponent(HomeComponent.runDir, isDirectory: true) }
     static var databaseLockPath: URL {
-        internalDir
-            .appendingPathComponent(HomeComponent.databaseDir, isDirectory: true)
-            .appendingPathComponent("log.db.lock", isDirectory: false)
+            internalDir
+                .appendingPathComponent(HomeComponent.databaseDir, isDirectory: true)
+                .appendingPathComponent("tron.sqlite.lock", isDirectory: false)
     }
 
     static let releaseApplicationURL = URL(fileURLWithPath: "/Applications/Tron.app", isDirectory: true)

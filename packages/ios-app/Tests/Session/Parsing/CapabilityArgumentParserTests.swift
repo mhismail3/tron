@@ -269,8 +269,8 @@ struct CapabilityArgumentParserTests {
 
     @Test("Parses real Search capability arguments")
     func testRealSearchArgs() {
-        let args = "{\"pattern\": \"TODO\", \"path\": \"./src\"}"
-        #expect(CapabilityArgumentParser.pattern(from: args) == "TODO")
+        let args = "{\"pattern\": \"needle\", \"path\": \"./src\"}"
+        #expect(CapabilityArgumentParser.pattern(from: args) == "needle")
         #expect(CapabilityArgumentParser.path(from: args) == "./src")
     }
 

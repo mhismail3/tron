@@ -123,8 +123,8 @@ struct ServerStatusPollerTests {
         #expect(snapshot.state == .failed(reason: "malformed response"))
     }
 
-    @Test("falls back to profile TOML Tailscale IP when server doesn't report one")
-    func fallbackTailscaleFromSettings() async throws {
+    @Test("uses cached profile TOML Tailscale IP when server doesn't report one")
+    func cachedTailscaleFromSettings() async throws {
         let setup = Self.makeSetup(
             token: "abc",
             pingResult: .success(ServerInfo(version: "0.5.0", port: 9847, tailscaleIp: nil, paired: false)),

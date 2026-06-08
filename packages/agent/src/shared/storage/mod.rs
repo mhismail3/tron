@@ -4,10 +4,11 @@
 //! `~/.tron/internal/database/tron.sqlite`. Runtime connections use WAL for
 //! safe concurrent reads/writes; checkpoints and exports create compact
 //! single-file artifacts when the operator needs one. The `modular-engine-v4`
-//! generation is a clean break for the collapsed substrate: startup moves
-//! non-current active DB, WAL, and SHM files aside before creating the grant,
-//! resource, ledger, stream, state, queue, grant, lease, compensation, storage,
-//! and session-harness tables from the current schema only.
+//! generation is a clean break for the collapsed substrate: startup accepts only
+//! the canonical active DB path and moves a non-current `tron.sqlite` generation
+//! aside before creating the grant, resource, ledger, stream, state, queue,
+//! lease, compensation, storage, and session-harness tables from the current
+//! schema only.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,10 +27,7 @@ mod stats;
 #[cfg(test)]
 mod tests;
 
-pub use archive::{
-    archive_non_current_active_database, archive_non_current_database_files,
-    prepare_active_database,
-};
+pub use archive::{archive_non_current_active_database, prepare_active_database};
 pub use maintenance::{checkpoint_database, enforce_size_budget, export_snapshot, retention_run};
 pub use payloads::{
     decode_blob_content, encode_blob_content, register_existing_blob_owner,
@@ -51,20 +49,6 @@ pub const CURRENT_STORAGE_GENERATION: &str = "modular-engine-v4";
 
 /// Metadata key storing the active storage generation.
 pub const STORAGE_GENERATION_KEY: &str = "storage_generation";
-
-/// Non-current active database artifacts moved aside on first unified startup.
-pub const NON_CURRENT_DATABASE_FILES: &[&str] = &[
-    "log.db",
-    "log.db-wal",
-    "log.db-shm",
-    "log.db.lock",
-    "engine-ledger.sqlite",
-    "engine-ledger.sqlite-wal",
-    "engine-ledger.sqlite-shm",
-    "tron.db",
-    "tron.db-wal",
-    "tron.db-shm",
-];
 
 /// Default inline payload threshold. Larger payloads should store compact
 /// previews and blob refs instead of duplicating full JSON in primary rows.
@@ -409,7 +393,7 @@ impl StorageRuntime {
         Ok(conn)
     }
 
-    /// Move any non-current active DB artifacts aside before startup.
+    /// Move a non-current `tron.sqlite` generation aside before startup.
     pub fn prepare_for_startup(&self) -> Result<ArchiveReport> {
         prepare_active_database(&self.path)
     }

@@ -32,6 +32,10 @@
 //! - `context`: context assembly and compaction.
 //! - `runtime` and `stream`: run lifecycle coordination and client stream
 //!   projection.
+//!
+//! External integration tests construct a real server runtime through the
+//! narrow re-exports below. The loop module itself remains private so tests do
+//! not grow a dependency on its internal submodule layout.
 
 pub(crate) mod context;
 pub(crate) mod contract;
@@ -40,6 +44,7 @@ pub(crate) mod handlers;
 pub(crate) mod r#loop;
 pub(crate) mod prompt;
 pub(crate) use deps::Deps;
+pub use r#loop::{Orchestrator, ProfileRuntime, SessionManager};
 pub(crate) use worker::worker_module;
 
 pub(crate) mod runtime;

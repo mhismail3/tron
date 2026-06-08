@@ -350,8 +350,8 @@ jobs:
       # WITHOUT `--deep` so the helper's signature is preserved. The
       # earlier `--deep` flag was a footgun: it recursively re-signs every
       # already-signed binary, blowing away the hardened-runtime + entitlements
-      # we just applied to `Tron Server.app`. Apple has deprecated `--deep` for
-      # exactly this reason (`man codesign`, "DEEP DEPRECATION").
+      # we just applied to `Tron Server.app`. Apple now warns against `--deep`
+      # for exactly this reason (`man codesign`, "DEEP DEPRECATION").
       #
       # Verification uses `--deep` because it's a read-only walk and we
       # want to confirm the entire bundle tree validates.

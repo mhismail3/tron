@@ -123,7 +123,7 @@ Low-density steps are deliberately top-biased rather than perfectly centered: Ta
 
 ### Single-instance lock via POSIX `fcntl`
 
-`SingleInstanceLock.acquire()` opens `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` and tries `fcntl(F_SETLK, F_WRLCK)`. A second instance of the same wrapper build fails, `AppDelegate` logs + `NSApp.terminate(nil)`. Release (`com.tron.mac`) and Debug companion (`com.tron.mac.dev`) intentionally use different lock files so their menu icons can coexist while they observe the same production server. Locks are automatically released on process exit (kernel drops fd locks with the process). Re-acquire from the same process is idempotent (returns true if a valid `fileDescriptor` is already held). The headless agent has its own per-process lock at `~/.tron/internal/database/log.db.lock`.
+`SingleInstanceLock.acquire()` opens `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` and tries `fcntl(F_SETLK, F_WRLCK)`. A second instance of the same wrapper build fails, `AppDelegate` logs + `NSApp.terminate(nil)`. Release (`com.tron.mac`) and Debug companion (`com.tron.mac.dev`) intentionally use different lock files so their menu icons can coexist while they observe the same production server. Locks are automatically released on process exit (kernel drops fd locks with the process). Re-acquire from the same process is idempotent (returns true if a valid `fileDescriptor` is already held). The headless agent has its own per-process lock at `~/.tron/internal/database/tron.sqlite.lock`.
 
 **XCTest bypass**: `AppDelegate.applicationDidFinishLaunching` checks for `XCTestSessionIdentifier` in the process environment and skips `SingleInstanceLock.acquire()` entirely when it's set. Without this, `xcodebuild test` would fail to launch the test host whenever a real `Tron.app` is running on the same machine — a routine state for any contributor who dogfoods. The bypass is benign in production because Xcode never sets that env var outside test runs.
 
@@ -350,13 +350,13 @@ Production workflows operate against the same `~/.tron/internal/` data tree and 
 | Layer | Guard | What it prevents |
 |---|---|---|
 | Wrapper instance | `~/.tron/internal/run/.mac-wrapper.<bundle-id>.lock` (`fcntl(F_SETLK, F_WRLCK)`) | More than one copy of the same SwiftUI wrapper. Release and Debug companion use different lock files and may coexist. |
-| Agent instance | `~/.tron/internal/database/log.db.lock` (cross-process exclusive `flock`) | Two Rust agents running at once. Server refuses to start if held. |
+| Agent instance | `~/.tron/internal/database/tron.sqlite.lock` (cross-process exclusive `flock`) | Two Rust agents running at once. Server refuses to start if held. |
 | Port `9847` | OS-level bind | Workflow 5 starting `tron dev` on top of workflow 1/2's running agent — `tron dev` first calls `launchctl bootout` on `com.tron.server`, then binds. |
 | LaunchAgent | `SMAppService.register` / `unregister` | One Login Item agent per session is enforced by ServiceManagement; `requiresApproval` is surfaced to the user. |
 
 Wrapper ownership is explicit: installed Release owns production registration; default Debug is companion-only and never installs or repairs the production Login Item. The isolated install scheme is the Debug path that may register a server, but only under `com.tron.server.dev` and `~/.tron-dev`. Production and local Release testing share the same bundle ID/path, so they are intentionally indistinguishable at runtime.
 
-If no LaunchAgent owns `com.tron.server` but port `9847` is already bound or `~/.tron/internal/database/log.db.lock` is held, registration stops with an "another Tron server is running" error. The app never chooses an alternate port and never treats a direct dev server as a successful install.
+If no LaunchAgent owns `com.tron.server` but port `9847` is already bound or `~/.tron/internal/database/tron.sqlite.lock` is held, registration stops with an "another Tron server is running" error. The app never chooses an alternate port and never treats a direct dev server as a successful install.
 
 **Result**: a contributor can have the production DMG installed, run the default Xcode Debug wrapper for UI work, and switch to `tron dev` to iterate on the agent without uninstalling anything. Both wrappers observe the production port. While `tron dev` owns the port the menu bar shows `Dev Server active`; quitting `tron dev` calls `/Applications/Tron.app/Contents/MacOS/Tron --tron-start-server-and-quit`, registers/starts through `SMAppService`, records the finalized app-version marker only after `/health` passes, and exits without showing the wizard.
 

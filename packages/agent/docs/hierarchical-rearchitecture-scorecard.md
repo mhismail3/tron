@@ -1,8 +1,8 @@
 # Hierarchical Rearchitecture Scorecard
 
-Current score: **98/100**
+Current score: **100/100**
 
-Status: **running**
+Status: **completed**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -27,14 +27,14 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 
 | Artifact | Status | Purpose |
 |----------|--------|---------|
-| `packages/agent/docs/hierarchical-rearchitecture-scorecard.md` | running | Weighted campaign scorecard and open-loop ledger. |
-| `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md` | running | Verification, red/green output, commit hashes, and residual risk. |
-| `packages/agent/docs/hierarchical-rearchitecture-inventory.md` | running | Human-readable inventory summary and target architecture notes. |
-| `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv` | running | Machine-readable tracked-file inventory. |
-| `packages/agent/docs/hierarchical-rearchitecture-move-map.tsv` | running | Machine-readable old-to-new path map. |
-| `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv` | running | HRA-8 machine-readable source/test Swift move map for iOS hierarchy phases. |
-| `packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md` | running | HRA-8 XcodeGen, ShareExtension, SourceGuard, and iOS phase-ownership project map. |
-| `packages/agent/tests/hierarchical_rearchitecture_invariants.rs` | running | Static hierarchy gates for this campaign. |
+| `packages/agent/docs/hierarchical-rearchitecture-scorecard.md` | completed | Weighted campaign scorecard and open-loop ledger. |
+| `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md` | completed | Verification, red/green output, commit hashes, and residual risk. |
+| `packages/agent/docs/hierarchical-rearchitecture-inventory.md` | completed | Human-readable inventory summary and target architecture notes. |
+| `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv` | completed | Machine-readable tracked-file inventory. |
+| `packages/agent/docs/hierarchical-rearchitecture-move-map.tsv` | completed | Machine-readable old-to-new path map. |
+| `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv` | completed | HRA-8 machine-readable source/test Swift move map for iOS hierarchy phases. |
+| `packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md` | completed | HRA-8 XcodeGen, ShareExtension, SourceGuard, and iOS phase-ownership project map. |
+| `packages/agent/tests/hierarchical_rearchitecture_invariants.rs` | completed | Static hierarchy gates for this campaign. |
 
 ## Scorecard
 
@@ -50,15 +50,15 @@ Total weight: **100**
 | HRA-5 | Rust domain vertical slices | 10 | passed_after_fix | Rust domain owners | Moved registration helpers under `domains/registration`; moved agent prompt/loop/context, auth oauth/credentials, model routing/protocol, and settings profile owners; split capability operations, Kimi stream tests, and over-budget domain test modules. | Closed with no remaining HRA-5 temporary file budgets. |
 | HRA-6 | Rust session and event-store hierarchy | 7 | passed_after_fix | Rust session owner | Moved session lifecycle/query/reconstruction into owner folders, moved event-store envelope/factory/reconstruction/store/session repository tests to folder-backed modules, and split SQLite event repository tests by behavior. | HRA-7 still owns broader Rust test/doc budget cleanup. |
 | HRA-7 | Rust tests and progressive docs | 5 | passed_after_fix | Rust docs/tests owners | Mirrored engine tests to subsystem folders, split root static integration gates into folder-backed modules, decomposed over-budget Rust stores/runtime helpers, and updated progressive docs/README. | iOS hierarchy closure is owned by HRA-9 through HRA-13. |
-| HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | passed_after_fix | iOS architecture owner | Added HRA SourceGuard red hierarchy checks, generated the iOS source/test Swift move map, recorded the XcodeGen/share-extension project map, and added a Rust map-coverage invariant. | HRA-13 consumed the remaining iOS test rows; HRA-14/HRA-15/HRA-16 remain. |
+| HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | passed_after_fix | iOS architecture owner | Added HRA SourceGuard red hierarchy checks, generated the iOS source/test Swift move map, recorded the XcodeGen/share-extension project map, and added a Rust map-coverage invariant. | Closed; later iOS/Mac/docs/final closeout rows are complete. |
 | HRA-9 | iOS Engine hierarchy | 8 | passed_after_fix | iOS engine owner | Moved Engine transport, protocol DTOs, event live/payload/plugin/reconstruction code, persistence, and repositories into target owner folders; split `EngineConnection` into focused WebSocket request, receive, reconnect, frame, and type units; regenerated XcodeGen. | Closed; later iOS test mirroring is complete in HRA-13. |
 | HRA-10 | iOS Session hierarchy | 7 | passed_after_fix | iOS session owner | Moved Session chat view models, coordinators, messaging, navigation, state, attachments, timeline activity/messages/reconstruction/tokens, and retained parsing under workflow-owned folders; split `CapabilityInvocationDisplayModel` presentation helpers. | Closed; later iOS test mirroring is complete in HRA-13. |
 | HRA-11 | iOS UI hierarchy | 6 | passed_after_fix | iOS UI owner | Replaced `UI/Views` with `UI/Chat`, `UI/Settings`, `UI/Onboarding`, `UI/RuntimeSurfaces`, `UI/Capabilities`, `UI/Components`, `UI/System`, and `UI/Theme`; split runtime surface and settings support files. | Closed; later iOS test mirroring is complete in HRA-13. |
 | HRA-12 | iOS Support foundation hierarchy | 4 | passed_after_fix | iOS support owner | Moved app entry points under `App/Lifecycle`; moved dependency assembly to `Support/Composition`; split support helpers into diagnostics, feedback, foundation, pairing, share, and storage owners; removed broad utility, extension, infrastructure, observability, settings, and service buckets. | Closed; later iOS test mirroring and SourceGuard decomposition are complete in HRA-13. |
-| HRA-13 | iOS tests and generated project closeout | 4 | passed_after_fix | iOS test owner | Moved all iOS tests into `Engine`, `Session`, `UI`, `Support`, and `Infrastructure` mirrors; decomposed `SourceGuardTests` and `UnifiedEventTransformerTests`; regenerated XcodeGen; SourceGuard and moved-test batches pass. | HRA-14 closed; HRA-15/HRA-16 remain. |
-| HRA-14 | Mac wrapper hierarchy audit | 2 | passed_after_fix | Mac wrapper owner | Moved App, Server, MenuBar, Wizard, and Support sources into target owner folders; mirrored Mac tests to App, Server, MenuBar, Support, Wizard, and Infrastructure; split `WizardStepTests`; XcodeGen and Mac tests pass. | HRA-15 closed; HRA-16 remains. |
-| HRA-15 | Scripts, README, and docs path closeout | 2 | passed_after_fix | docs/scripts owner | Added a live docs/scripts/workflows old-path static gate; fixed stale README, iOS development docs, Mac architecture docs, and personal-info guard paths; regenerated inventories. | HRA-16 remains. |
-| HRA-16 | Final adversarial review and closeout | 2 | pending | architecture campaign | Not started. | Run full verification, adversarial review, ledger append, and final commit. |
+| HRA-13 | iOS tests and generated project closeout | 4 | passed_after_fix | iOS test owner | Moved all iOS tests into `Engine`, `Session`, `UI`, `Support`, and `Infrastructure` mirrors; decomposed `SourceGuardTests` and `UnifiedEventTransformerTests`; regenerated XcodeGen; SourceGuard and moved-test batches pass. | Closed; HRA-16 added a WebSocket test mirror guard for the final reconnect-test move. |
+| HRA-14 | Mac wrapper hierarchy audit | 2 | passed_after_fix | Mac wrapper owner | Moved App, Server, MenuBar, Wizard, and Support sources into target owner folders; mirrored Mac tests to App, Server, MenuBar, Support, Wizard, and Infrastructure; split `WizardStepTests`; XcodeGen and Mac tests pass. | Closed; HRA-16 corrected the Mac DB lock path to `tron.sqlite.lock`. |
+| HRA-15 | Scripts, README, and docs path closeout | 2 | passed_after_fix | docs/scripts owner | Added a live docs/scripts/workflows old-path static gate; fixed stale README, iOS development docs, Mac architecture docs, and personal-info guard paths; regenerated inventories. | Closed; HRA-16 fixed adversarially found live docs/scripts path drift. |
+| HRA-16 | Final adversarial review and closeout | 2 | passed_after_fix | architecture campaign | Ran full closeout verification and adversarial review; removed live retired DB filename handling, renamed iOS reconstruction projection owners, moved WebSocket reconnect tests to the mirrored owner, eliminated Rust event same-name module pairs, refreshed live docs/inventories, regenerated Xcode projects, and appended the ledger. | Closed; no HRA implementation loops remain. |
 
 ## Folder Justification Table
 
@@ -121,6 +121,7 @@ checks:
 - `ios_support_hra12_sources_use_target_boundaries`
 - `ios_sources_do_not_use_broad_views_network_database_buckets`
 - `ios_tests_mirror_source_boundaries`
+- `ios_engine_transport_tests_mirror_websocket_owner`
 - `large_files_have_decomposition_budget_rows`
 - `mac_sources_use_hra14_target_boundaries`
 - `mac_tests_mirror_source_boundaries`
@@ -129,7 +130,6 @@ checks:
 
 ## Open Loops
 
-- HRA-16 still owns final adversarial review and closeout.
-- The project `@self-inspect` skill referenced by `AGENTS.md` is not installed
-  in this Codex environment; direct repository and database inspection will be
-  used until an equivalent skill becomes available.
+- No HRA implementation rows remain open. Historical evidence artifacts and
+  static absence tests intentionally retain old path strings as regression
+  needles; live source, docs, scripts, and generated projects are current.

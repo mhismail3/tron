@@ -275,7 +275,7 @@ struct TailscaleProbeTests {
         if case .signedIn(let ip) = status {
             #expect(ip == "100.95.255.62")
         } else {
-            Issue.record("expected .signedIn after fallback CLI, got \(status)")
+            Issue.record("expected .signedIn after secondary CLI, got \(status)")
         }
     }
 

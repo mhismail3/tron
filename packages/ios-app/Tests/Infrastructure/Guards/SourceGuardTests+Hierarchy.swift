@@ -154,6 +154,7 @@ extension SourceGuardTests {
             "Sources/Engine/Events/Payloads",
             "Sources/Engine/Events/Plugins",
             "Sources/Engine/Events/Reconstruction",
+            "Sources/Engine/Events/Reconstruction/ChatMessageProjection",
             "Sources/Engine/Persistence/SQLite",
             "Sources/Engine/Persistence/Repositories",
             "Sources/Engine/Persistence/Sync",
@@ -167,6 +168,7 @@ extension SourceGuardTests {
             "Sources/Engine/Repositories",
             "Sources/Engine/Events/Core",
             "Sources/Engine/Events/Types",
+            "Sources/Engine/Events/Reconstruction/Handlers",
         ]
         let connectionFiles = [
             "Sources/Engine/Transport/WebSocket/EngineConnection.swift",
@@ -187,6 +189,28 @@ extension SourceGuardTests {
         #expect(
             missingRequired.isEmpty && presentBanned.isEmpty && missingConnectionFiles.isEmpty,
             "HRA-9 Engine hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingConnectionFiles)"
+        )
+    }
+
+    @Test("iOS Engine transport tests mirror WebSocket owners")
+    func testIOSEngineTransportTestsMirrorWebSocketOwners() throws {
+        let iosRoot = iosAppRoot()
+        let required = [
+            "Tests/Engine/Transport/WebSocket",
+            "Tests/Engine/Transport/WebSocket/EngineConnectionReconnectTests.swift",
+        ]
+        let banned = [
+            "Tests/Engine/Transport/Clients/EngineConnectionReconnectTests.swift",
+        ]
+
+        let missing = required
+            .filter { !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
+        let presentBanned = banned
+            .filter { FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
+
+        #expect(
+            missing.isEmpty && presentBanned.isEmpty,
+            "HRA iOS transport test mirror drift. Missing: \(missing); stale client-path tests: \(presentBanned)"
         )
     }
 

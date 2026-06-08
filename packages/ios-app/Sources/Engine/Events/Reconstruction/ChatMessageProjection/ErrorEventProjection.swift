@@ -1,9 +1,9 @@
 import Foundation
 
-/// Handlers for transforming error events into ChatMessages.
+/// Event projections for transforming error events into ChatMessages.
 ///
-/// Handles: error.agent, error.capability, error.provider
-enum ErrorHandlers {
+/// Projects: error.agent, error.capability, error.provider
+enum ErrorEventProjection {
 
     /// Transform error.agent event into a ChatMessage.
     ///

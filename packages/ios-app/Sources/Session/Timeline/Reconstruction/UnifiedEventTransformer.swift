@@ -137,31 +137,31 @@ struct UnifiedEventTransformer {
 
         switch eventType {
         case .messageUser:
-            return MessageHandlers.transformUserMessage(payload, timestamp: ts)
+            return MessageEventProjection.transformUserMessage(payload, timestamp: ts)
         case .messageAssistant:
-            return MessageHandlers.transformAssistantMessage(payload, timestamp: ts)
+            return MessageEventProjection.transformAssistantMessage(payload, timestamp: ts)
         case .messageSystem:
-            return MessageHandlers.transformSystemMessage(payload, timestamp: ts)
+            return MessageEventProjection.transformSystemMessage(payload, timestamp: ts)
         case .capabilityInvocationStarted:
-            return CapabilityInvocationHandlers.transformInvocationStarted(payload, timestamp: ts)
+            return CapabilityInvocationEventProjection.transformInvocationStarted(payload, timestamp: ts)
         case .capabilityInvocationCompleted:
-            return CapabilityInvocationHandlers.transformInvocationCompleted(payload, timestamp: ts)
+            return CapabilityInvocationEventProjection.transformInvocationCompleted(payload, timestamp: ts)
         case .configModelSwitch:
-            return ConfigHandlers.transformModelSwitch(payload, timestamp: ts)
+            return ConfigEventProjection.transformModelSwitch(payload, timestamp: ts)
         case .configReasoningLevel:
-            return ConfigHandlers.transformReasoningLevelChange(payload, timestamp: ts)
+            return ConfigEventProjection.transformReasoningLevelChange(payload, timestamp: ts)
         case .errorAgent:
-            return ErrorHandlers.transformAgentError(payload, timestamp: ts)
+            return ErrorEventProjection.transformAgentError(payload, timestamp: ts)
         case .errorCapability:
-            return ErrorHandlers.transformCapabilityError(payload, timestamp: ts)
+            return ErrorEventProjection.transformCapabilityError(payload, timestamp: ts)
         case .errorProvider:
-            return ErrorHandlers.transformProviderError(payload, timestamp: ts)
+            return ErrorEventProjection.transformProviderError(payload, timestamp: ts)
         case .turnFailed:
-            return ErrorHandlers.transformTurnFailed(payload, timestamp: ts)
+            return ErrorEventProjection.transformTurnFailed(payload, timestamp: ts)
         case .contextCleared:
-            return SystemEventHandlers.transformContextCleared(payload, timestamp: ts)
+            return SystemEventProjection.transformContextCleared(payload, timestamp: ts)
         case .compactBoundary:
-            return SystemEventHandlers.transformCompactBoundary(payload, timestamp: ts)
+            return SystemEventProjection.transformCompactBoundary(payload, timestamp: ts)
         default:
             return nil
         }

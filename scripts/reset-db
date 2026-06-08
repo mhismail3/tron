@@ -5,7 +5,7 @@
 # Usage: scripts/reset-db
 #
 # Stops the tron server, clears primitive session/event/log/trace data
-# from log.db, vacuums, and restarts the server.
+# from tron.sqlite, vacuums, and restarts the server.
 
 set -euo pipefail
 
@@ -22,7 +22,7 @@ DATA_TABLES=(
 usage() {
   echo "Usage: $(basename "$0")"
   echo ""
-  echo "Clears session/event/log data from log.db."
+  echo "Clears session/event/log data from tron.sqlite."
   echo "Stops the server, clears data, vacuums, and restarts."
   exit 0
 }
@@ -81,10 +81,10 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
 fi
 
-db_path="$DB_DIR/log.db"
+db_path="$DB_DIR/tron.sqlite"
 
 # Confirm
-echo "This will DELETE all sessions, events, logs, traces, and blobs from log.db"
+echo "This will DELETE all sessions, events, logs, traces, and blobs from tron.sqlite"
 read -rp "Continue? [y/N] " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
   echo "Aborted."

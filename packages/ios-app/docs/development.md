@@ -409,16 +409,16 @@ version normally skip that review wait and move straight to group assignment.
 
 ### Adding a New Screen
 
-1. Create view in `Views/<Feature>/`
-2. Create view model if needed in `ViewModels/`
-3. Add navigation in parent view or sheet coordinator
+1. Create the view under the matching `UI/<Feature>/` owner.
+2. Put session/chat state under `Session/Chat` or the relevant `Session/Timeline` owner.
+3. Add navigation in the parent view or coordinator.
 4. Add deep link route if applicable
 
 ### Adding Runtime Presentation
 
 1. Emit operation, trace ids, and runtime-owned presentation hints from the server or generated runtime data.
 2. Reuse the generic capability chip, detail sheet, result renderer, and `GeneratedRuntimeSurfaceView`.
-3. Add a reusable renderer under `Views/Capabilities/` only when primitive trace/result rendering is not expressive enough.
+3. Add a reusable renderer under `UI/Capabilities/` or `UI/RuntimeSurfaces/` only when primitive trace/result rendering is not expressive enough.
 4. Add focused tests for the primitive payload/result shape and the generic sheet route.
 
 ### Updating Event Handling

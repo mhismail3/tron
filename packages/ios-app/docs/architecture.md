@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-08 (HRA-11 UI hierarchy).
+> Last verified: 2026-06-08 (HRA-16 final hierarchy closeout).
 
 ## Overview
 
@@ -105,7 +105,9 @@ diagnostics only; it does not use them as an alternate truth store.
 
 Live events use self-dispatching plugins registered in
 `Engine/Events/Plugins/EventRegistry.swift`. Stored events use
-`Engine/Events/Reconstruction` for stored-event helper types and
+`Engine/Events/Reconstruction` for stored-event helper types,
+`Engine/Events/Reconstruction/ChatMessageProjection` for event-to-chat
+projection helpers, and
 `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift` for the
 session-owned projection into `ChatMessage` timeline state. Unsupported or
 malformed events are diagnostics; they are not normalized through retired

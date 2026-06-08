@@ -83,7 +83,7 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
         "{IOS_MOVE_MAP_PATH} must keep the HRA-8 iOS move-map header"
     );
 
-    let allowed_phases = HashSet::from(["HRA-9", "HRA-10", "HRA-11", "HRA-12", "HRA-13"]);
+    let allowed_phases = HashSet::from(["HRA-9", "HRA-10", "HRA-11", "HRA-12", "HRA-13", "HRA-16"]);
     let allowed_classifications = HashSet::from(["move", "retain_in_place", "split"]);
     let banned_target_prefixes = [
         "packages/ios-app/Sources/UI/Views",
@@ -164,10 +164,11 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
             || *phase == "HRA-11"
             || *phase == "HRA-12"
             || *phase == "HRA-13"
+            || *phase == "HRA-16"
         {
             assert_eq!(
                 *status, "passed_after_fix",
-                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10/HRA-11/HRA-12/HRA-13 rows should be complete after the Engine, Session, UI, Support, and test hierarchy moves: {line}"
+                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10/HRA-11/HRA-12/HRA-13/HRA-16 rows should be complete after the Engine, Session, UI, Support, test hierarchy, and closeout moves: {line}"
             );
         } else {
             assert_eq!(
@@ -236,6 +237,7 @@ fn ios_engine_hra9_sources_use_target_boundaries() {
         "packages/ios-app/Sources/Engine/Events/Payloads",
         "packages/ios-app/Sources/Engine/Events/Plugins",
         "packages/ios-app/Sources/Engine/Events/Reconstruction",
+        "packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection",
         "packages/ios-app/Sources/Engine/Persistence/SQLite",
         "packages/ios-app/Sources/Engine/Persistence/Repositories",
         "packages/ios-app/Sources/Engine/Persistence/Sync",
@@ -249,6 +251,7 @@ fn ios_engine_hra9_sources_use_target_boundaries() {
         "packages/ios-app/Sources/Engine/Repositories",
         "packages/ios-app/Sources/Engine/Events/Core",
         "packages/ios-app/Sources/Engine/Events/Types",
+        "packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers",
     ];
     let split_connection_files = [
         "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection.swift",
@@ -289,6 +292,32 @@ fn ios_engine_hra9_sources_use_target_boundaries() {
             && missing_connection_files.is_empty()
             && oversized_connection_files.is_empty(),
         "HRA-9 Engine hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_connection_files:#?}; oversized split files: {oversized_connection_files:#?}"
+    );
+}
+
+#[test]
+fn ios_engine_transport_tests_mirror_websocket_owner() {
+    let required = [
+        "packages/ios-app/Tests/Engine/Transport/WebSocket",
+        "packages/ios-app/Tests/Engine/Transport/WebSocket/EngineConnectionReconnectTests.swift",
+    ];
+    let banned =
+        ["packages/ios-app/Tests/Engine/Transport/Clients/EngineConnectionReconnectTests.swift"];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "iOS Engine WebSocket tests must mirror the source owner; missing: {missing:#?}; stale client-path tests: {present_banned:#?}"
     );
 }
 

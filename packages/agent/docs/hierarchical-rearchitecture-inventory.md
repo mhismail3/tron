@@ -1,8 +1,8 @@
 # Hierarchical Rearchitecture Inventory
 
-Status: `running`
+Status: `completed`
 
-Generated from the live checkout after HRA-15. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, and HRA-15 closed live docs/scripts/workflow old-path claims.
+Generated from the live checkout after HRA-16. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -31,11 +31,11 @@ The HRA iOS move map uses this HRA-8-specific header:
 current_path	target_path	owner	phase	classification	status	reason
 ```
 
-## HRA-1 Baseline Counts Updated After HRA-15
+## HRA-1 Baseline Counts Updated After HRA-16
 
 | Metric | Count |
 | --- | --- |
-| Tracked files after HRA-15 staged additions | 1375 |
+| Tracked files after HRA-16 staged additions | 1375 |
 | Files under `packages/agent/src` | 522 |
 | Files under `packages/agent/tests` | 28 |
 | Files under `packages/ios-app/Sources` | 414 |
@@ -101,12 +101,13 @@ current_path	target_path	owner	phase	classification	status	reason
 | iOS tests | Old technical buckets moved to `Infrastructure`, `Engine`, `Session`, `UI`, and `Support` mirrors; oversized guard/reconstruction tests are decomposed. | HRA-13 |
 | Mac wrapper | App, Server, MenuBar, Wizard, Support, and tests now use target owner subfolders; old Services, Mocks, Observability, and loose root files are gone. | HRA-14 |
 | Live docs/scripts/workflows | README, iOS docs, Mac docs, scripts, and workflows are guarded against known old path claims outside historical evidence and static absence tests. | HRA-15 |
+| Final closeout blockers | Retired DB filename handling was removed from live startup/scripts/Mac paths, `events/tests.rs` and `events/tron.rs` became folder `mod.rs` modules, iOS stored-event projection moved from `Handlers` to `ChatMessageProjection`, and WebSocket reconnect tests now mirror the WebSocket source owner. | HRA-16 |
 
 ## Completed Rust Root Findings
 
 The current Rust source root has only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`. Domain startup helpers live under `packages/agent/src/domains/registration`; non-session domains and the session event-store no longer have avoidable same-name file/folder module pairs. HRA-7 mirrors engine tests under `engine/tests/{authority,catalog,durability,invocation,kernel,runtime}` and splits root static integration targets into folder-backed modules while preserving their integration target names.
 
-HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 550 live Swift rows after the `EngineConnection` split and marked the Engine rows `passed_after_fix`. HRA-10 updated the map to 551 live Swift rows after the Session display-model split and marked the Session rows `passed_after_fix`. HRA-11 updated the map to 553 live Swift rows after the UI support splits, HRA-12 kept the same 553-row coverage while marking the App/Support rows `passed_after_fix`, and HRA-13 updated the map to 566 live Swift rows after the SourceGuard and reconstruction test splits. All iOS source/test map rows are now `passed_after_fix`; the map has no fallback rows, points no live file at old broad-bucket targets, and is guarded by `ios_hra8_move_map_covers_every_source_and_test_swift_file`. HRA-14 updates the global HRA TSV inventory to include 74 Mac source files and 36 Mac test files under the target owner roots.
+HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 550 live Swift rows after the `EngineConnection` split and marked the Engine rows `passed_after_fix`. HRA-10 updated the map to 551 live Swift rows after the Session display-model split and marked the Session rows `passed_after_fix`. HRA-11 updated the map to 553 live Swift rows after the UI support splits, HRA-12 kept the same 553-row coverage while marking the App/Support rows `passed_after_fix`, and HRA-13 updated the map to 566 live Swift rows after the SourceGuard and reconstruction test splits. HRA-16 keeps 566 live Swift rows while replacing the generic reconstruction `Handlers` bucket with `ChatMessageProjection` and moving `EngineConnectionReconnectTests` into the WebSocket test mirror. All iOS source/test map rows are now `passed_after_fix`; the map has no fallback rows, points no live file at old broad-bucket targets, and is guarded by `ios_hra8_move_map_covers_every_source_and_test_swift_file`. HRA-14 updates the global HRA TSV inventory to include 74 Mac source files and 36 Mac test files under the target owner roots.
 
 ## Directories Over 12 Source Files
 
@@ -116,7 +117,7 @@ HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 
 | `packages/ios-app/Sources/Session/Timeline/Messages` | 13 | ios session timeline owner | HRA-10 |
 | `packages/ios-app/Sources/UI/Capabilities/Shared` | 19 | ios UI capabilities owner | HRA-11 |
 | `packages/ios-app/Sources/UI/Settings/Shell` | 13 | ios UI settings owner | HRA-11 |
-| `packages/ios-app/Tests/Engine/Transport/Clients` | 20 | ios test owner | HRA-13 |
+| `packages/ios-app/Tests/Engine/Transport/Clients` | 19 | ios test owner | HRA-13 |
 | `packages/ios-app/Tests/Session/Chat` | 28 | ios test owner | HRA-13 |
 
 ## One-File Source Directories
@@ -144,7 +145,6 @@ HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 
 | `packages/agent/src/engine/tests` | `mod.rs` | rust engine owner | HRA-7 |
 | `packages/agent/src/engine/tests/fixtures` | `mod.rs` | rust engine owner | HRA-7 |
 | `packages/agent/src/shared` | `mod.rs` | repo owner | HRA-15 |
-| `packages/agent/src/shared/protocol/events/tron` | `catalog.rs` | repo owner | HRA-15 |
 | `packages/agent/src/transport` | `mod.rs` | repo owner | HRA-15 |
 | `packages/ios-app/ShareExtension` | `ShareViewController.swift` | repo owner | HRA-15 |
 | `packages/ios-app/Sources/Engine/Events/Plugins/Display` | `DisplayFramePlugin.swift` | ios engine owner | HRA-9 |
@@ -177,6 +177,7 @@ HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 
 | `packages/ios-app/Sources/UI/Settings/ModelPicker` | `ModelPickerSheet.swift` | ios UI settings owner | HRA-11 |
 | `packages/ios-app/Tests/Engine/Models` | `ModelFilteringServiceTests.swift` | ios test owner | HRA-13 |
 | `packages/ios-app/Tests/Engine/Transport/DeepLinks` | `DeepLinkRouterTests.swift` | ios test owner | HRA-13 |
+| `packages/ios-app/Tests/Engine/Transport/WebSocket` | `EngineConnectionReconnectTests.swift` | ios test owner | HRA-16 |
 | `packages/ios-app/Tests/Session/Parsing` | `CapabilityArgumentParserTests.swift` | ios test owner | HRA-13 |
 | `packages/ios-app/Tests/Session/Timeline/Messages` | `CapabilityInvocationDisplayModelTests.swift` | ios test owner | HRA-13 |
 | `packages/ios-app/Tests/Support/Feedback` | `FeedbackComposerTests.swift` | ios test owner | HRA-13 |
@@ -203,20 +204,19 @@ HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 
 
 | Directory | Owner | Phase |
 | --- | --- | --- |
-| _none_ | architecture campaign | HRA-14 |
+| _none_ | architecture campaign | HRA-16 |
 
 ## Same-Name File/Folder Pairs
 
 | File | Folder | Target phase |
 | ---- | ------ | ------------ |
-| `packages/agent/src/shared/protocol/events/tests.rs` | `packages/agent/src/shared/protocol/events/tests` | HRA-15 |
-| `packages/agent/src/shared/protocol/events/tron.rs` | `packages/agent/src/shared/protocol/events/tron` | HRA-15 |
+| _none_ | _none_ | HRA-16 |
 
 ## Over-Budget Files
 
 | Path | LOC | Limit | Owner | Phase |
 | --- | --- | --- | --- | --- |
-| _none_ | n/a | n/a | architecture campaign | HRA-14 |
+| _none_ | n/a | n/a | architecture campaign | HRA-16 |
 
 ## Docs And Scripts With Old Path Claims
 
@@ -224,4 +224,6 @@ Old-path claims are intentionally still visible in historical HRA/PCC evidence a
 
 ## Open Loops
 
-- HRA-16 still owns final adversarial review and closeout.
+- No HRA implementation rows remain open. Historical evidence and static absence
+  tests retain old path strings only as regression needles, not live runtime or
+  documentation paths.

@@ -1,13 +1,13 @@
 import Foundation
 
-/// Handlers for transforming capability invocation events into ChatMessages.
+/// Event projections for transforming capability invocation events into ChatMessages.
 ///
-/// Handles: capability.invocation.started, capability.invocation.completed
+/// Projects: capability.invocation.started, capability.invocation.completed
 ///
-/// Note: These handlers are for standalone capability event transformation.
+/// Note: These projections are for standalone capability event transformation.
 /// The interleaved content processor handles provider capability_invocation content blocks
 /// within message.assistant events differently.
-enum CapabilityInvocationHandlers {
+enum CapabilityInvocationEventProjection {
 
     /// Transform capability.invocation.started event into a ChatMessage.
     ///

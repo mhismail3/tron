@@ -1,7 +1,7 @@
 import Foundation
 
-/// Handlers for transforming system events into ChatMessages.
-enum SystemEventHandlers {
+/// Event projections for transforming system events into ChatMessages.
+enum SystemEventProjection {
 
     /// Transform context.cleared event into a ChatMessage.
     ///

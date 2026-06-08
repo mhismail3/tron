@@ -9,8 +9,8 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Scorecard",
-        "Current score: **98/100**",
-        "Status: **running**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "Total weight: **100**",
         "## Folder Justification Table",
         "## Large File Budgets",
@@ -31,7 +31,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "HRA-13 | iOS tests and generated project closeout | 4 | passed_after_fix",
         "HRA-14 | Mac wrapper hierarchy audit | 2 | passed_after_fix",
         "HRA-15 | Scripts, README, and docs path closeout | 2 | passed_after_fix",
-        "HRA-16 | Final adversarial review and closeout | 2 | pending",
+        "HRA-16 | Final adversarial review and closeout | 2 | passed_after_fix",
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
         IOS_MOVE_MAP_PATH,
@@ -61,8 +61,8 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Evidence Manifest",
-        "Current score: **98/100**",
-        "Status: **running**",
+        "Current score: **100/100**",
+        "Status: **completed**",
         "| HRA-0 | passed_after_fix |",
         "| HRA-5 | passed_after_fix |",
         "| HRA-6 | passed_after_fix |",
@@ -75,6 +75,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "| HRA-13 | passed_after_fix |",
         "| HRA-14 | passed_after_fix |",
         "| HRA-15 | passed_after_fix |",
+        "| HRA-16 | passed_after_fix |",
         "## HRA-0 Red Static Gate",
     ] {
         assert!(
@@ -85,11 +86,11 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Inventory",
-        "Status: `running`",
+        "Status: `completed`",
         "Machine-Readable Artifacts",
         "Allowed classifications",
         "Allowed statuses",
-        "HRA-1 Baseline Counts Updated After HRA-15",
+        "HRA-1 Baseline Counts Updated After HRA-16",
         IOS_MOVE_MAP_PATH,
         IOS_PROJECT_MAP_PATH,
     ] {

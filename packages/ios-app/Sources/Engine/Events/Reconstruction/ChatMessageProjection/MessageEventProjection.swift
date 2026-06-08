@@ -1,12 +1,12 @@
 import Foundation
 
-/// Handlers for transforming message events into ChatMessages.
+/// Event projections for transforming message events into ChatMessages.
 ///
-/// Handles: message.user, message.assistant, message.system
+/// Projects: message.user, message.assistant, message.system
 ///
 /// Note: The interleaved message.assistant transformation (preserving text/capability order)
 /// is handled separately in InterleavedContentProcessor.
-enum MessageHandlers {
+enum MessageEventProjection {
 
     /// Transform message.user event into a ChatMessage.
     ///
@@ -36,7 +36,7 @@ enum MessageHandlers {
 
     /// Transform message.assistant event into a ChatMessage.
     ///
-    /// This handler extracts only TEXT content from assistant messages.
+    /// This projection extracts only TEXT content from assistant messages.
     /// Capability blocks are handled separately by capability.invocation.started/capability.invocation.completed events
     /// or by the interleaved content processor.
     static func transformAssistantMessage(

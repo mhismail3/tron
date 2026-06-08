@@ -8,7 +8,7 @@ import XCTest
 final class IPadSheetPresentationTests: XCTestCase {
 
     func testAdaptivePresentationHelperCentralizesIPadSizingAndPhonePreservation() throws {
-        let content = try source(pathComponents: ["Sources", "Support", "Extensions", "Swift", "View+Extensions.swift"])
+        let content = try source(pathComponents: ["Sources", "Support", "Foundation", "SwiftUI", "View+Extensions.swift"])
 
         XCTAssertTrue(
             content.contains("func targetSize(referenceWidth: CGFloat, referenceHeight: CGFloat, intrinsicSize: CGSize? = nil) -> CGSize"),
@@ -63,27 +63,27 @@ final class IPadSheetPresentationTests: XCTestCase {
     func testRepresentativeAppSheetsUseCanonicalIPadSizing() throws {
         let expected: [(path: [String], fragment: String)] = [
             (
-                ["Sources", "App", "TronMobileApp.swift"],
+                ["Sources", "App", "Lifecycle", "TronMobileApp.swift"],
                 ".adaptivePresentationDetents([.medium, .large], selection: $onboardingDetent, ipadSizing: .largeForm, phoneBackground: .clear)"
             ),
             (
-                ["Sources", "UI", "Views", "Attachments", "CameraCaptureSheet.swift"],
+                ["Sources", "UI", "Chat", "Composer", "CameraCaptureSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
-                ["Sources", "UI", "Views", "Onboarding", "QRCodeScannerSheet.swift"],
+                ["Sources", "UI", "Onboarding", "Pairing", "QRCodeScannerSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
-                ["Sources", "UI", "Views", "Capabilities", "Display", "StreamSheetView.swift"],
+                ["Sources", "UI", "RuntimeSurfaces", "Display", "StreamSheetView.swift"],
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
             ),
             (
-                ["Sources", "UI", "Views", "System", "CompactionDetailSheet.swift"],
+                ["Sources", "UI", "System", "CompactionDetailSheet.swift"],
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             ),
             (
-                ["Sources", "UI", "Views", "System", "ProviderErrorDetailSheet.swift"],
+                ["Sources", "UI", "System", "ProviderErrorDetailSheet.swift"],
                 ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm)"
             )
         ]
@@ -100,7 +100,7 @@ final class IPadSheetPresentationTests: XCTestCase {
     func testReusableSheetViewsOwnCanonicalIPadSizing() throws {
         let expected: [(path: [String], anchor: String, fragment: String)] = [
             (
-                ["Sources", "UI", "Views", "System", "LogViewer.swift"],
+                ["Sources", "UI", "System", "LogViewer.swift"],
                 "struct LogViewer: View",
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
             )
@@ -121,7 +121,7 @@ final class IPadSheetPresentationTests: XCTestCase {
     }
 
     func testSettingsDoesNotWrapLogViewerWithDuplicateSizing() throws {
-        let content = try source(pathComponents: ["Sources", "UI", "Views", "Settings", "SettingsView.swift"])
+        let content = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView.swift"])
         let sheetRange = try XCTUnwrap(
             content.range(of: ".sheet(isPresented: $showLogViewer)"),
             "SettingsView should still present LogViewer through its logs sheet"
@@ -283,6 +283,7 @@ final class IPadSheetPresentationTests: XCTestCase {
     private func projectRoot() throws -> URL {
         let fileURL = URL(fileURLWithPath: #filePath)
         return fileURL
+            .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()

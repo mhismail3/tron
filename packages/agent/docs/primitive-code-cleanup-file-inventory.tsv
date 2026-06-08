@@ -507,14 +507,14 @@ packages/agent/src/shared/protocol/events/capability.rs	retain	rust shared	PCC-1
 packages/agent/src/shared/protocol/events/factory.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/agent/src/shared/protocol/events/mod.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/agent/src/shared/protocol/events/stream.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
-packages/agent/src/shared/protocol/events/tests.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/agent/src/shared/protocol/events/tests/base_sequence.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
+packages/agent/src/shared/protocol/events/tests/mod.rs	retain	rust agent	PCC-10	Current tracked file retained after HRA-16 final closeout inventory regeneration
 packages/agent/src/shared/protocol/events/tests/session_process.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/agent/src/shared/protocol/events/tests/stream.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/agent/src/shared/protocol/events/tests/tron_catalog.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/agent/src/shared/protocol/events/tests/tron_core.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
-packages/agent/src/shared/protocol/events/tron.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/agent/src/shared/protocol/events/tron/catalog.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
+packages/agent/src/shared/protocol/events/tron/mod.rs	retain	rust agent	PCC-10	Current tracked file retained after HRA-16 final closeout inventory regeneration
 packages/agent/src/shared/protocol/memory.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/agent/src/shared/protocol/messages/mod.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/agent/src/shared/protocol/messages/tests.rs	retain	rust shared	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
@@ -668,13 +668,13 @@ packages/ios-app/Sources/Engine/Events/Plugins/Streaming/ThinkingDeltaPlugin.swi
 packages/ios-app/Sources/Engine/Events/Plugins/Streaming/TurnEndPlugin.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Sources/Engine/Events/Plugins/Streaming/TurnStartPlugin.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Sources/Engine/Events/Reconstruction/CapabilityArgumentExtractor.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/CapabilityInvocationEventProjection.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-16 final closeout inventory regeneration
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/ConfigEventProjection.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-16 final closeout inventory regeneration
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/ErrorEventProjection.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-16 final closeout inventory regeneration
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/MessageEventProjection.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-16 final closeout inventory regeneration
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/SystemEventProjection.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-16 final closeout inventory regeneration
 packages/ios-app/Sources/Engine/Events/Reconstruction/EventSorter.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Sources/Engine/Events/Reconstruction/EventTransformable.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
-packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/CapabilityInvocationHandlers.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
-packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/ConfigHandlers.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
-packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/ErrorHandlers.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
-packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/MessageHandlers.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
-packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/SystemEventHandlers.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Sources/Engine/Events/Reconstruction/InterleavedContentProcessor.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Sources/Engine/Events/Reconstruction/Reconstruction/ReconstructedState.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Sources/Engine/Models/ModelFilteringService.swift	retain	ios app	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
@@ -1016,7 +1016,7 @@ packages/ios-app/Sources/UI/Theme/TronTypography.swift	retain	ios app	PCC-10	Cur
 packages/ios-app/Tests/Engine/Events/AsyncEventStreamTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Events/CapabilityArgumentExtractorTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Events/DispatchableEventPluginTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
-packages/ios-app/Tests/Engine/Events/ErrorHandlersTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
+packages/ios-app/Tests/Engine/Events/ErrorEventProjectionTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-16 final closeout inventory regeneration
 packages/ios-app/Tests/Engine/Events/EventRegistryReferenceCycleTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Events/EventTypeRegistryTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Events/MessagePayloadTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
@@ -1062,7 +1062,6 @@ packages/ios-app/Tests/Engine/Transport/Clients/ConnectionManagerTests.swift	ret
 packages/ios-app/Tests/Engine/Transport/Clients/ConnectionToastPolicyTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Transport/Clients/EngineClientObservationTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Transport/Clients/EngineClientTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
-packages/ios-app/Tests/Engine/Transport/Clients/EngineConnectionReconnectTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Transport/Clients/EngineTransportConnectionGuardTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Transport/Clients/EngineTransportHelpersTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Transport/Clients/EventSyncClientTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
@@ -1078,6 +1077,7 @@ packages/ios-app/Tests/Engine/Transport/Clients/SessionClientTests.swift	retain	
 packages/ios-app/Tests/Engine/Transport/Clients/SettingsClientTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Transport/Clients/WebSocketAuthTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Engine/Transport/DeepLinks/DeepLinkRouterTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
+packages/ios-app/Tests/Engine/Transport/WebSocket/EngineConnectionReconnectTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-16 final closeout inventory regeneration
 packages/ios-app/Tests/Infrastructure/Fakes/MockAsyncClock.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Infrastructure/Fakes/MockAsyncClockTests.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration
 packages/ios-app/Tests/Infrastructure/Fakes/MockEngineTransport.swift	retain	ios test	PCC-10	Current tracked file retained after HRA-15 path-closeout inventory regeneration

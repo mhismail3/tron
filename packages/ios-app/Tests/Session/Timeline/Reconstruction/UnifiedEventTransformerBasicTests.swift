@@ -286,7 +286,7 @@ final class UnifiedEventTransformerBasicTests: UnifiedEventTransformerTestCase {
     func testTransformProviderError() {
         // I6 scorched-earth: category is required on error.provider.
         // The handler renders every well-formed event as a system-role
-        // provider-error pill — the old assistant-role plain-text fallback
+        // provider-error pill — the old assistant-role plain-text recovery
         // is gone.
         let event = rawEvent(
             type: "error.provider",

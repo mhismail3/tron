@@ -6,7 +6,7 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-08 during `PCC-10` final adversarial cleanup.
+Last updated: 2026-06-08 during `HRA-16` final adversarial closeout.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
@@ -85,7 +85,7 @@ tron/
 |   |   |   +-- Engine/         WebSocket transport, DTOs, event plugins, cache
 |   |   |   +-- Session/        Chat/session state and message transformation
 |   |   |   +-- UI/             Chat, input, settings, onboarding, dynamic surfaces
-|   |   |   +-- Support/        Diagnostics, pairing, storage, utilities
+|   |   |   +-- Support/        Composition, diagnostics, feedback, foundation, pairing, share, storage
 |   |   |   +-- Resources/      Fonts, strings, fixtures
 |   |   |   +-- Assets.xcassets/
 |   |   |   +-- IconLayers/

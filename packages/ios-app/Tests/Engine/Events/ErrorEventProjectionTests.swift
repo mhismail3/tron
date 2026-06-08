@@ -1,26 +1,26 @@
 import XCTest
 @testable import TronMobile
 
-/// Tests for ErrorHandlers — focused on I6 (scorched-earth provider-error
+/// Tests for ErrorEventProjection — focused on I6 (scorched-earth provider-error
 /// decoding). `category` is required on `error.provider` events; missing
 /// category drops the event entirely (no plain-text recovery). `"unknown"`
 /// is a legitimate classification that routes through the generic-pill path,
 /// never the retired error-text path (which has been deleted).
-final class ErrorHandlersTests: XCTestCase {
+final class ErrorEventProjectionTests: XCTestCase {
 
     private func timestamp() -> Date { Date(timeIntervalSince1970: 1_700_000_000) }
 
     // MARK: - transformProviderError
 
     func test_provider_error_missing_category_drops_event() {
-        // No category field — strict decoder rejects, handler returns nil.
+        // No category field — strict decoder rejects, projection returns nil.
         // Matches Rust `deny_unknown_fields` on ErrorProviderPayload.
         let payload: [String: AnyCodable] = [
             "provider": AnyCodable("anthropic"),
             "error": AnyCodable("rate limited"),
             "retryable": AnyCodable(true),
         ]
-        let msg = ErrorHandlers.transformProviderError(payload, timestamp: timestamp())
+        let msg = ErrorEventProjection.transformProviderError(payload, timestamp: timestamp())
         XCTAssertNil(msg, "missing category must drop the event, never render plain text")
     }
 
@@ -31,7 +31,7 @@ final class ErrorHandlersTests: XCTestCase {
             "category": AnyCodable("rate_limit"),
             "retryable": AnyCodable(true),
         ]
-        let msg = ErrorHandlers.transformProviderError(payload, timestamp: timestamp())
+        let msg = ErrorEventProjection.transformProviderError(payload, timestamp: timestamp())
         guard let msg else {
             XCTFail("expected a rendered message")
             return
@@ -59,7 +59,7 @@ final class ErrorHandlersTests: XCTestCase {
             "category": AnyCodable("unknown"),
             "retryable": AnyCodable(false),
         ]
-        let msg = ErrorHandlers.transformProviderError(payload, timestamp: timestamp())
+        let msg = ErrorEventProjection.transformProviderError(payload, timestamp: timestamp())
         guard let msg else {
             XCTFail("expected a rendered message")
             return
@@ -82,7 +82,7 @@ final class ErrorHandlersTests: XCTestCase {
             "category": AnyCodable("rate_limit"),
             "retryable": AnyCodable(true),
         ]
-        let msg = ErrorHandlers.transformProviderError(payload, timestamp: timestamp())
+        let msg = ErrorEventProjection.transformProviderError(payload, timestamp: timestamp())
         XCTAssertNil(msg, "missing provider must drop the event")
     }
 
@@ -92,13 +92,13 @@ final class ErrorHandlersTests: XCTestCase {
             "category": AnyCodable("rate_limit"),
             "retryable": AnyCodable(true),
         ]
-        let msg = ErrorHandlers.transformProviderError(payload, timestamp: timestamp())
+        let msg = ErrorEventProjection.transformProviderError(payload, timestamp: timestamp())
         XCTAssertNil(msg, "missing error must drop the event")
     }
 
     // MARK: - No Retired Plain-Text Recovery
 
-    /// Regression guard: this handler must never emit assistant-role plain
+    /// Regression guard: this projection must never emit assistant-role plain
     /// text for a well-formed payload. The retired plain-text branch is gone
     /// — any category (including "unknown") routes through the pill.
     func test_no_plain_text_path_for_any_valid_category() {
@@ -110,7 +110,7 @@ final class ErrorHandlersTests: XCTestCase {
                 "category": AnyCodable(category),
                 "retryable": AnyCodable(false),
             ]
-            let msg = ErrorHandlers.transformProviderError(payload, timestamp: timestamp())
+            let msg = ErrorEventProjection.transformProviderError(payload, timestamp: timestamp())
             guard let msg else {
                 XCTFail("category \(category): expected pill message, got nil")
                 continue
