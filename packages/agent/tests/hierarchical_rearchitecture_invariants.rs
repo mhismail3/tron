@@ -163,7 +163,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Scorecard",
-        "Current score: **19/100**",
+        "Current score: **37/100**",
         "Status: **running**",
         "Total weight: **100**",
         "## Folder Justification Table",
@@ -172,6 +172,8 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "HRA-0 | Scorecard, evidence, and static-gate setup | 5 | passed_after_fix",
         "HRA-1 | Whole-repo inventory and target architecture | 8 | passed_after_fix",
         "HRA-2 | Rust app, transport, shared, and platform roots | 6 | passed_after_fix",
+        "HRA-3 | Rust engine kernel and invocation hierarchy | 10 | passed_after_fix",
+        "HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix",
         "HRA-16 | Final adversarial review and closeout | 2 | pending",
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
@@ -200,7 +202,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Evidence Manifest",
-        "Current score: **19/100**",
+        "Current score: **37/100**",
         "Status: **running**",
         "| HRA-0 | passed_after_fix |",
         "## HRA-0 Red Static Gate",
@@ -386,6 +388,106 @@ fn rust_engine_root_has_no_unowned_flat_modules() {
     assert!(
         unexpected.is_empty(),
         "Rust engine root must be subsystem folders plus mod.rs, not unowned flat modules: {unexpected:#?}"
+    );
+}
+
+#[test]
+fn rust_engine_subsystem_roots_are_owned() {
+    let required_files = [
+        "packages/agent/src/engine/authority/mod.rs",
+        "packages/agent/src/engine/authority/grants/mod.rs",
+        "packages/agent/src/engine/catalog/mod.rs",
+        "packages/agent/src/engine/catalog/registry/mod.rs",
+        "packages/agent/src/engine/durability/mod.rs",
+        "packages/agent/src/engine/durability/ledger/mod.rs",
+        "packages/agent/src/engine/durability/queue/mod.rs",
+        "packages/agent/src/engine/durability/resources/store/mod.rs",
+        "packages/agent/src/engine/invocation/mod.rs",
+        "packages/agent/src/engine/invocation/host/mod.rs",
+        "packages/agent/src/engine/kernel/mod.rs",
+        "packages/agent/src/engine/kernel/types/mod.rs",
+        "packages/agent/src/engine/kernel/types/catalog.rs",
+        "packages/agent/src/engine/kernel/types/function.rs",
+        "packages/agent/src/engine/kernel/types/trigger.rs",
+        "packages/agent/src/engine/kernel/types/worker.rs",
+        "packages/agent/src/engine/primitives/resource/mod.rs",
+        "packages/agent/src/engine/primitives/ui/mod.rs",
+        "packages/agent/src/engine/runtime/mod.rs",
+        "packages/agent/src/engine/runtime/external_workers.rs",
+        "packages/agent/src/engine/runtime/worker_protocol.rs",
+    ];
+    let banned_paths = [
+        "packages/agent/src/engine/capabilities.rs",
+        "packages/agent/src/engine/compensation.rs",
+        "packages/agent/src/engine/discovery.rs",
+        "packages/agent/src/engine/errors.rs",
+        "packages/agent/src/engine/external.rs",
+        "packages/agent/src/engine/grants",
+        "packages/agent/src/engine/grants.rs",
+        "packages/agent/src/engine/host",
+        "packages/agent/src/engine/host.rs",
+        "packages/agent/src/engine/ids.rs",
+        "packages/agent/src/engine/invocation.rs",
+        "packages/agent/src/engine/ledger",
+        "packages/agent/src/engine/ledger.rs",
+        "packages/agent/src/engine/leases.rs",
+        "packages/agent/src/engine/policy.rs",
+        "packages/agent/src/engine/protocol.rs",
+        "packages/agent/src/engine/queue",
+        "packages/agent/src/engine/queue.rs",
+        "packages/agent/src/engine/registry",
+        "packages/agent/src/engine/registry.rs",
+        "packages/agent/src/engine/resources",
+        "packages/agent/src/engine/schema.rs",
+        "packages/agent/src/engine/state.rs",
+        "packages/agent/src/engine/streams.rs",
+        "packages/agent/src/engine/triggers.rs",
+        "packages/agent/src/engine/types.rs",
+        "packages/agent/src/engine/primitives/resource.rs",
+        "packages/agent/src/engine/primitives/ui.rs",
+    ];
+
+    let missing: Vec<_> = required_files
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned_paths
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "Rust engine HRA-3/HRA-4 subsystem roots are not clean; missing: {missing:#?}; old paths still present: {present_banned:#?}"
+    );
+}
+
+#[test]
+fn rust_engine_has_no_same_name_file_folder_pairs() {
+    let mut pairs = Vec::new();
+    let mut source_files = Vec::new();
+    list_source_files(
+        &repo_path("packages/agent/src/engine"),
+        &["rs"],
+        &mut source_files,
+    );
+    for file in source_files {
+        let sibling_folder = file.with_extension("");
+        if sibling_folder.is_dir() {
+            pairs.push(
+                file.strip_prefix(repo_root())
+                    .unwrap()
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+
+    assert!(
+        pairs.is_empty(),
+        "Rust engine must not retain avoidable same-name file/folder module pairs: {pairs:#?}"
     );
 }
 

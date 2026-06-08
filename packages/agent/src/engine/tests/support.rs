@@ -10,23 +10,26 @@ pub(in crate::engine::tests) use chrono::{Duration as ChronoDuration, Utc};
 pub(in crate::engine::tests) use serde_json::{Value, json};
 pub(in crate::engine::tests) use tokio::sync::{Barrier, Notify};
 
-pub(in crate::engine::tests) use crate::engine::discovery::{
+pub(in crate::engine::tests) use crate::engine::catalog::discovery::{
     ActorContext, ActorKind, FunctionQuery,
 };
-pub(in crate::engine::tests) use crate::engine::errors::{EngineError, Result};
-pub(in crate::engine::tests) use crate::engine::ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
-    WorkerId,
-};
-pub(in crate::engine::tests) use crate::engine::invocation::{
-    CausalContext, InProcessFunctionHandler, Invocation,
-};
-pub(in crate::engine::tests) use crate::engine::ledger::{
+pub(in crate::engine::tests) use crate::engine::catalog::registry::LiveCatalog;
+pub(in crate::engine::tests) use crate::engine::durability::ledger::{
     EngineLedgerStore, IdempotencyKey, IdempotencyReservation, IdempotencyReservationOutcome,
     IdempotencyStatus, InMemoryEngineLedgerStore, SqliteEngineLedgerStore, StoredInvocationOutcome,
 };
-pub(in crate::engine::tests) use crate::engine::registry::LiveCatalog;
-pub(in crate::engine::tests) use crate::engine::types::{
+pub(in crate::engine::tests) use crate::engine::durability::queue;
+pub(in crate::engine::tests) use crate::engine::invocation::host;
+pub(in crate::engine::tests) use crate::engine::invocation::model::{
+    CausalContext, InProcessFunctionHandler, Invocation,
+};
+pub(in crate::engine::tests) use crate::engine::kernel::errors::{EngineError, Result};
+pub(in crate::engine::tests) use crate::engine::kernel::ids;
+pub(in crate::engine::tests) use crate::engine::kernel::ids::{
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
+    WorkerId,
+};
+pub(in crate::engine::tests) use crate::engine::kernel::types::{
     AuthorityRequirement, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
     CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode,
     DurableOutputContract, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
@@ -34,6 +37,7 @@ pub(in crate::engine::tests) use crate::engine::types::{
     ReplayBehavior, ResourceLeaseRequirement, RiskLevel, TriggerDefinition, TriggerTypeDefinition,
     VisibilityScope, WorkerDefinition, WorkerKind,
 };
+pub(in crate::engine::tests) use crate::engine::runtime::external_workers as external;
 pub(in crate::engine::tests) use crate::engine::{
     CatalogWatchRequest, EngineExternalWorkerRuntime, EngineHost, EngineHostHandle,
     EngineQueueDrainer, EngineResourceLeaseStatus, EngineTriggerRuntime, PublishStreamEvent,
@@ -41,7 +45,6 @@ pub(in crate::engine::tests) use crate::engine::{
     TriggerDispatchRequest, WorkerDisconnect, WorkerHello, WorkerInvocationResult, WorkerInvoke,
     WorkerLifecycleState, WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish,
 };
-pub(in crate::engine::tests) use crate::engine::{external, host, ids, queue};
 
 pub(in crate::engine::tests) fn wid(value: &str) -> WorkerId {
     WorkerId::new(value).unwrap()
@@ -230,12 +233,12 @@ pub(in crate::engine::tests) struct ReserveFailingLedger;
 impl EngineLedgerStore for ReserveFailingLedger {
     fn append_catalog_change(
         &mut self,
-        _change: &crate::engine::types::CatalogChange,
+        _change: &crate::engine::kernel::types::CatalogChange,
     ) -> Result<()> {
         Ok(())
     }
 
-    fn list_catalog_changes(&self) -> Result<Vec<crate::engine::types::CatalogChange>> {
+    fn list_catalog_changes(&self) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
         Ok(Vec::new())
     }
 
@@ -243,18 +246,18 @@ impl EngineLedgerStore for ReserveFailingLedger {
         &self,
         _revision: CatalogRevision,
         _limit: usize,
-    ) -> Result<Vec<crate::engine::types::CatalogChange>> {
+    ) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
         Ok(Vec::new())
     }
 
     fn append_invocation(
         &mut self,
-        _record: &crate::engine::invocation::InvocationRecord,
+        _record: &crate::engine::invocation::model::InvocationRecord,
     ) -> Result<()> {
         Ok(())
     }
 
-    fn list_invocations(&self) -> Result<Vec<crate::engine::invocation::InvocationRecord>> {
+    fn list_invocations(&self) -> Result<Vec<crate::engine::invocation::model::InvocationRecord>> {
         Ok(Vec::new())
     }
 
@@ -283,7 +286,7 @@ pub(in crate::engine::tests) struct CatalogChangeFailingLedger;
 impl EngineLedgerStore for CatalogChangeFailingLedger {
     fn append_catalog_change(
         &mut self,
-        _change: &crate::engine::types::CatalogChange,
+        _change: &crate::engine::kernel::types::CatalogChange,
     ) -> Result<()> {
         Err(EngineError::LedgerFailure {
             operation: "append_catalog_change",
@@ -291,7 +294,7 @@ impl EngineLedgerStore for CatalogChangeFailingLedger {
         })
     }
 
-    fn list_catalog_changes(&self) -> Result<Vec<crate::engine::types::CatalogChange>> {
+    fn list_catalog_changes(&self) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
         Ok(Vec::new())
     }
 
@@ -299,18 +302,18 @@ impl EngineLedgerStore for CatalogChangeFailingLedger {
         &self,
         _revision: CatalogRevision,
         _limit: usize,
-    ) -> Result<Vec<crate::engine::types::CatalogChange>> {
+    ) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
         Ok(Vec::new())
     }
 
     fn append_invocation(
         &mut self,
-        _record: &crate::engine::invocation::InvocationRecord,
+        _record: &crate::engine::invocation::model::InvocationRecord,
     ) -> Result<()> {
         Ok(())
     }
 
-    fn list_invocations(&self) -> Result<Vec<crate::engine::invocation::InvocationRecord>> {
+    fn list_invocations(&self) -> Result<Vec<crate::engine::invocation::model::InvocationRecord>> {
         Ok(Vec::new())
     }
 
@@ -363,7 +366,7 @@ pub(in crate::engine::tests) fn host_invocation(
 }
 
 pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLedgerStore) {
-    let change = crate::engine::types::CatalogChange {
+    let change = crate::engine::kernel::types::CatalogChange {
         id: "catalog_change_test".to_owned(),
         before: CatalogRevision(0),
         after: CatalogRevision(1),
@@ -391,7 +394,7 @@ pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLed
             .with_session_id("session-a")
             .with_workspace_id("workspace-a"),
     );
-    let result = crate::engine::invocation::InvocationResult::success(
+    let result = crate::engine::invocation::model::InvocationResult::success(
         &invocation,
         wid("w1"),
         FunctionRevision(1),
@@ -399,7 +402,7 @@ pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLed
         json!({"ok": true}),
     );
     let record =
-        crate::engine::invocation::InvocationRecord::from_result(&invocation, &result, None);
+        crate::engine::invocation::model::InvocationRecord::from_result(&invocation, &result, None);
     store.append_invocation(&record).unwrap();
     let records = store.list_invocations().unwrap();
     assert_eq!(records.len(), 1);

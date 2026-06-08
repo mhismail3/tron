@@ -263,7 +263,7 @@ pub(super) fn damaged_materialized_file_response(
         expected_current_version_id: inspection.resource.current_version_id.clone(),
         lifecycle: Some("damaged".to_owned()),
         payload: damaged_payload,
-        state: Some(crate::engine::resources::EngineResourceVersionState::Damaged),
+        state: Some(crate::engine::durability::resources::EngineResourceVersionState::Damaged),
         locations: current.locations.clone(),
         trace_id: invocation.causal_context.trace_id.clone(),
         invocation_id: Some(invocation.id.clone()),

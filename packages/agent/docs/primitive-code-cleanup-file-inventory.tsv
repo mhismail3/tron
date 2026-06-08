@@ -343,88 +343,98 @@ packages/agent/src/domains/settings/implementation/types/ui.rs	retain	rust domai
 packages/agent/src/domains/settings/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/domains/system/mod.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/domains/worker.rs	retain	rust domain	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/capabilities.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/compensation.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/discovery.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/errors.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/external.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/grants.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/grants/model.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/grants/sqlite_codec.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/host.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/host/catalog_handle.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/host/handle.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/host/invocation_handle.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/host/invocation_support.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/host/meta.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/host/runtime_host.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/host/substrate_handle.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/ids.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/invocation.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/leases.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/ledger.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/ledger/outcome.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/ledger/sqlite_codec.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/mod.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/policy.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/catalog.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/grant.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/mod.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/queue.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/resource.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/resource/artifact.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/resource/common.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/resource/input.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/resource/materialized_file.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/resource/registrations.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/resource/schemas.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/runtime.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/state.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/storage.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/stream.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/trigger.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/ui.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/ui/schemas.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/ui/validation.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/primitives/worker.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/protocol.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/queue.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/queue/runtime.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/queue/sqlite_codec.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/registry.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/registry/catalog_changes.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/registry/invocation.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/registry/output_contract.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/resources/definitions.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/resources/mod.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/resources/store.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/resources/store/sqlite_codec.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/resources/store/tests.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/resources/types.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/resources/ui_surface.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/resources/validation.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/resources/versions.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/schema.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/state.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/streams.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/catalog_discovery.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/external_worker.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/external_worker_soak.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/grant_authority.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/host_invocation.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/idempotency.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/ids_types.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/ledger_idempotency.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/meta_primitives.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/mod.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/resource_kernel.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/restart_chaos.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/state_queue.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/streams.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/support.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/tests/triggers.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/triggers.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/src/engine/types.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
+packages/agent/src/engine/authority/compensation.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/authority/grants/mod.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/authority/grants/model.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/authority/grants/sqlite_codec.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/authority/leases.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/authority/mod.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/catalog/capabilities.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/catalog/discovery.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/catalog/mod.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/catalog/registry/catalog_changes.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/catalog/registry/invocation.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/catalog/registry/mod.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/catalog/registry/output_contract.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/ledger/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/ledger/outcome.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/ledger/sqlite_codec.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/queue/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/queue/runtime.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/queue/sqlite_codec.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/resources/definitions.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/resources/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/resources/store/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/resources/store/sqlite_codec.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/resources/store/tests.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/resources/types.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/resources/ui_surface.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/resources/validation.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/resources/versions.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/state.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/streams.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/host/catalog_handle.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/host/handle.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/host/invocation_handle.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/host/invocation_support.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/host/meta.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/host/mod.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/host/runtime_host.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/host/substrate_handle.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/mod.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/invocation/model.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/errors.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/ids.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/mod.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/policy.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/schema.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/types/catalog.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/types/function.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/types/mod.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/types/trigger.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/kernel/types/worker.rs	retain	rust engine kernel	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/mod.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/catalog.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/grant.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/mod.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/queue.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/resource/artifact.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/resource/common.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/resource/input.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/resource/materialized_file.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/resource/mod.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/resource/registrations.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/resource/schemas.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/runtime.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/state.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/storage.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/stream.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/trigger.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/ui/mod.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/ui/schemas.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/ui/validation.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/primitives/worker.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/runtime/external_workers.rs	retain	rust engine runtime	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/runtime/mod.rs	retain	rust engine runtime	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/runtime/triggers.rs	retain	rust engine runtime	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/runtime/worker_protocol.rs	retain	rust engine runtime	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/catalog_discovery.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/external_worker.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/external_worker_soak.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/grant_authority.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/host_invocation.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/idempotency.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/ids_types.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/ledger_idempotency.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/meta_primitives.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/mod.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/resource_kernel.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/restart_chaos.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/state_queue.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/streams.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/support.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/triggers.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/lib.rs	retain	repo	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/main.rs	retain	repo	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/platform/device_broker.rs	retain	repo	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update

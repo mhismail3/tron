@@ -750,7 +750,7 @@ fn retained_registered_contracts_do_not_encode_approval_or_policy_planes() {
 
 #[test]
 fn engine_registration_policy_has_no_approval_metadata_exceptions() {
-    let policy = read_repo_file("packages/agent/src/engine/policy.rs");
+    let policy = read_repo_file("packages/agent/src/engine/kernel/policy.rs");
     assert_absent(
         &policy,
         &[
@@ -764,7 +764,14 @@ fn engine_registration_policy_has_no_approval_metadata_exceptions() {
         "engine registration policy",
     );
 
-    let types = read_repo_file("packages/agent/src/engine/types.rs");
+    let types = [
+        read_repo_file("packages/agent/src/engine/kernel/types/mod.rs"),
+        read_repo_file("packages/agent/src/engine/kernel/types/catalog.rs"),
+        read_repo_file("packages/agent/src/engine/kernel/types/function.rs"),
+        read_repo_file("packages/agent/src/engine/kernel/types/trigger.rs"),
+        read_repo_file("packages/agent/src/engine/kernel/types/worker.rs"),
+    ]
+    .join("\n");
     assert_absent(
         &types,
         &[
@@ -1388,7 +1395,7 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
         "engine primitive registrations",
     );
 
-    let capability_client = read_repo_file("packages/agent/src/engine/capabilities.rs");
+    let capability_client = read_repo_file("packages/agent/src/engine/catalog/capabilities.rs");
     assert_absent(
         &capability_client,
         &[
@@ -1403,7 +1410,7 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
         "agent capability client",
     );
 
-    let host = read_repo_file("packages/agent/src/engine/host.rs");
+    let host = read_repo_file("packages/agent/src/engine/invocation/host/mod.rs");
     assert_absent(
         &host,
         &[
@@ -1419,11 +1426,11 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
 
     for (path, label) in [
         (
-            "packages/agent/src/engine/host/invocation_handle.rs",
+            "packages/agent/src/engine/invocation/host/invocation_handle.rs",
             "engine host invocation path",
         ),
         (
-            "packages/agent/src/engine/host/substrate_handle.rs",
+            "packages/agent/src/engine/invocation/host/substrate_handle.rs",
             "engine host substrate methods",
         ),
         (
@@ -1469,17 +1476,26 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "server settings",
         ),
         (
-            "packages/agent/src/engine/capabilities.rs",
+            "packages/agent/src/engine/catalog/capabilities.rs",
             "capability client",
         ),
-        ("packages/agent/src/engine/grants.rs", "grant store"),
-        ("packages/agent/src/engine/grants/model.rs", "grant model"),
         (
-            "packages/agent/src/engine/grants/sqlite_codec.rs",
+            "packages/agent/src/engine/authority/grants/mod.rs",
+            "grant store",
+        ),
+        (
+            "packages/agent/src/engine/authority/grants/model.rs",
+            "grant model",
+        ),
+        (
+            "packages/agent/src/engine/authority/grants/sqlite_codec.rs",
             "grant sqlite codec",
         ),
         ("packages/agent/src/engine/mod.rs", "engine docs/root"),
-        ("packages/agent/src/engine/policy.rs", "engine policy"),
+        (
+            "packages/agent/src/engine/kernel/policy.rs",
+            "engine policy",
+        ),
         (
             "packages/agent/src/engine/primitives/action_summary.rs",
             "action summary projection",
@@ -1497,7 +1513,7 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "runtime primitive",
         ),
         (
-            "packages/agent/src/engine/primitives/ui.rs",
+            "packages/agent/src/engine/primitives/ui/mod.rs",
             "ui primitive target validation",
         ),
         (
@@ -1509,11 +1525,11 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "worker primitive",
         ),
         (
-            "packages/agent/src/engine/resources/definitions.rs",
+            "packages/agent/src/engine/durability/resources/definitions.rs",
             "resource definitions",
         ),
         (
-            "packages/agent/src/engine/resources/ui_surface.rs",
+            "packages/agent/src/engine/durability/resources/ui_surface.rs",
             "ui surface resource validation",
         ),
         (
@@ -1556,7 +1572,10 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "packages/agent/src/engine/tests/support.rs",
             "engine test support",
         ),
-        ("packages/agent/src/engine/types.rs", "engine core types"),
+        (
+            "packages/agent/src/engine/kernel/types/mod.rs",
+            "engine core types",
+        ),
         ("packages/agent/src/transport/engine.rs", "engine transport"),
     ] {
         if !repo_path(path).exists() {
@@ -1933,11 +1952,11 @@ fn dynamic_runtime_surfaces_are_schema_rendering_not_target_authoring() {
     );
 
     let rust_surface = [
-        read_repo_file("packages/agent/src/engine/primitives/ui.rs"),
+        read_repo_file("packages/agent/src/engine/primitives/ui/mod.rs"),
         read_repo_file("packages/agent/src/engine/primitives/ui/schemas.rs"),
         read_repo_file("packages/agent/src/engine/primitives/ui/validation.rs"),
-        read_repo_file("packages/agent/src/engine/resources/types.rs"),
-        read_repo_file("packages/agent/src/engine/resources/ui_surface.rs"),
+        read_repo_file("packages/agent/src/engine/durability/resources/types.rs"),
+        read_repo_file("packages/agent/src/engine/durability/resources/ui_surface.rs"),
     ]
     .join("\n");
     assert_absent(
@@ -2011,14 +2030,14 @@ fn dynamic_runtime_surfaces_are_schema_rendering_not_target_authoring() {
 #[test]
 fn queue_trigger_and_prompt_envelopes_do_not_pin_preexecution_catalog_state() {
     let retained_envelope = [
-        read_repo_file("packages/agent/src/engine/queue.rs"),
-        read_repo_file("packages/agent/src/engine/queue/runtime.rs"),
-        read_repo_file("packages/agent/src/engine/queue/sqlite_codec.rs"),
+        read_repo_file("packages/agent/src/engine/durability/queue/mod.rs"),
+        read_repo_file("packages/agent/src/engine/durability/queue/runtime.rs"),
+        read_repo_file("packages/agent/src/engine/durability/queue/sqlite_codec.rs"),
         read_repo_file("packages/agent/src/engine/primitives/queue.rs"),
-        read_repo_file("packages/agent/src/engine/triggers.rs"),
+        read_repo_file("packages/agent/src/engine/runtime/triggers.rs"),
         read_repo_file("packages/agent/src/engine/primitives/trigger.rs"),
-        read_repo_file("packages/agent/src/engine/types.rs"),
-        read_repo_file("packages/agent/src/engine/policy.rs"),
+        read_repo_file("packages/agent/src/engine/kernel/types/mod.rs"),
+        read_repo_file("packages/agent/src/engine/kernel/policy.rs"),
         read_repo_file("packages/agent/src/domains/agent/operations/prompt.rs"),
         read_repo_file("packages/agent/src/domains/agent/runtime/service/deps.rs"),
         read_repo_file("packages/agent/src/domains/agent/runtime/service/events.rs"),
@@ -2044,14 +2063,14 @@ fn queue_trigger_and_prompt_envelopes_do_not_pin_preexecution_catalog_state() {
 fn engine_invocation_and_transport_do_not_require_expected_revision_tokens() {
     let retained_invocation_surface = [
         read_repo_file("README.md"),
-        read_repo_file("packages/agent/src/engine/host.rs"),
-        read_repo_file("packages/agent/src/engine/host/meta.rs"),
-        read_repo_file("packages/agent/src/engine/invocation.rs"),
-        read_repo_file("packages/agent/src/engine/registry/invocation.rs"),
-        read_repo_file("packages/agent/src/engine/protocol.rs"),
-        read_repo_file("packages/agent/src/engine/external.rs"),
-        read_repo_file("packages/agent/src/engine/ledger/outcome.rs"),
-        read_repo_file("packages/agent/src/engine/errors.rs"),
+        read_repo_file("packages/agent/src/engine/invocation/host/mod.rs"),
+        read_repo_file("packages/agent/src/engine/invocation/host/meta.rs"),
+        read_repo_file("packages/agent/src/engine/invocation/model.rs"),
+        read_repo_file("packages/agent/src/engine/catalog/registry/invocation.rs"),
+        read_repo_file("packages/agent/src/engine/runtime/worker_protocol.rs"),
+        read_repo_file("packages/agent/src/engine/runtime/external_workers.rs"),
+        read_repo_file("packages/agent/src/engine/durability/ledger/outcome.rs"),
+        read_repo_file("packages/agent/src/engine/kernel/errors.rs"),
         read_repo_file("packages/agent/src/transport/engine/socket/mod.rs"),
         read_repo_file("packages/agent/src/transport/engine/socket/wire.rs"),
         read_repo_file("packages/agent/src/transport/engine/contracts.rs"),
@@ -2155,8 +2174,8 @@ fn public_catalog_readout_state_is_not_client_envelope_state() {
     );
 
     let public_catalog_read_surface = [
-        read_repo_file("packages/agent/src/engine/host.rs"),
-        read_repo_file("packages/agent/src/engine/host/meta.rs"),
+        read_repo_file("packages/agent/src/engine/invocation/host/mod.rs"),
+        read_repo_file("packages/agent/src/engine/invocation/host/meta.rs"),
         read_repo_file("packages/agent/src/engine/primitives/catalog.rs"),
         read_repo_file("packages/agent/src/engine/primitives/runtime.rs"),
         read_repo_file("packages/agent/src/engine/primitives/worker.rs"),

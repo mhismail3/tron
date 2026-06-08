@@ -7,14 +7,14 @@
 use serde_json::{Value, json};
 
 use super::{catalog, storage, ui, worker};
-use crate::engine::discovery::{ActorContext, FunctionQuery};
-use crate::engine::errors::{EngineError, Result};
-use crate::engine::ids::WorkerId;
-use crate::engine::invocation::{CausalContext, Invocation};
-use crate::engine::resources::{
+use crate::engine::catalog::discovery::{ActorContext, FunctionQuery};
+use crate::engine::durability::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion, UpdateResource,
 };
-use crate::engine::types::{
+use crate::engine::invocation::model::{CausalContext, Invocation};
+use crate::engine::kernel::errors::{EngineError, Result};
+use crate::engine::kernel::ids::WorkerId;
+use crate::engine::kernel::types::{
     FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
 };
 
@@ -270,18 +270,20 @@ fn is_visibility_visible(
         VisibilityScope::Client => {
             matches!(
                 actor.actor_kind,
-                crate::engine::discovery::ActorKind::Client
+                crate::engine::catalog::discovery::ActorKind::Client
             ) || actor.actor_kind.is_admin_like()
         }
         VisibilityScope::Worker => {
             matches!(
                 actor.actor_kind,
-                crate::engine::discovery::ActorKind::Worker
+                crate::engine::catalog::discovery::ActorKind::Worker
             ) || actor.actor_kind.is_admin_like()
         }
         VisibilityScope::Agent => {
-            matches!(actor.actor_kind, crate::engine::discovery::ActorKind::Agent)
-                || actor.actor_kind.is_admin_like()
+            matches!(
+                actor.actor_kind,
+                crate::engine::catalog::discovery::ActorKind::Agent
+            ) || actor.actor_kind.is_admin_like()
         }
         VisibilityScope::Admin => actor.actor_kind.is_admin_like(),
     }

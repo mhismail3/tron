@@ -172,7 +172,7 @@ async fn enqueue_trigger_returns_receipt_and_queue_drain_preserves_causality() {
     );
     assert_eq!(
         item.runtime_metadata
-            .get(crate::engine::invocation::RUNTIME_METADATA_TRIGGER_DEPTH)
+            .get(crate::engine::invocation::model::RUNTIME_METADATA_TRIGGER_DEPTH)
             .map(String::as_str),
         Some("1")
     );
@@ -379,7 +379,10 @@ async fn queue_failure_event_records_updated_retry_state() {
         .await
         .unwrap()
         .expect("queue item should remain inspectable");
-    assert_eq!(updated.status, crate::engine::queue::QueueItemStatus::Ready);
+    assert_eq!(
+        updated.status,
+        crate::engine::durability::queue::QueueItemStatus::Ready
+    );
     assert_eq!(updated.attempts, 1);
     assert_eq!(updated.lease_owner, None);
     assert_eq!(updated.lease_expires_at, None);

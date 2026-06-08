@@ -14,7 +14,7 @@ use tron::domains::model::providers::ProviderHealthTracker;
 use tron::domains::session::event_store::{
     AgentTraceListOptions, ConnectionConfig, EventStore, new_file, run_migrations,
 };
-use tron::engine::invocation::{
+use tron::engine::invocation::model::{
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
     RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
     RUNTIME_METADATA_WORKING_DIRECTORY,

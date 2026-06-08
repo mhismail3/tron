@@ -88,7 +88,7 @@ Current living entry points:
 
 - `packages/agent/src/lib.rs`: Rust crate/module tree.
 - `packages/agent/src/engine/mod.rs`: engine fabric ownership.
-- `packages/agent/src/engine/resources/mod.rs`: resource substrate ownership.
+- `packages/agent/src/engine/durability/resources/mod.rs`: resource substrate ownership.
 - `packages/agent/src/engine/primitives/mod.rs`: primitive capability surface.
 - `packages/agent/src/domains/capability/mod.rs`: model-facing `execute`
   primitive and provider export.
@@ -196,7 +196,14 @@ transport/
 ├── http/         HTTP-adjacent auth helpers
 ├── engine/       /engine contracts, request routing, socket session, stream cursors
 └── runtime/      Runtime services, external-worker socket, stream projection, setup
-engine/           Live capability fabric: catalog, workers, triggers, ledger, streams, queues
+engine/
+├── authority/    Grants, leases, and compensation audit records
+├── catalog/      Discovery, capability client, live registry, catalog changes
+├── durability/   Ledger, queue, resources, state, streams, and SQLite codecs
+├── invocation/   Invocation model, host, handles, dispatch, idempotency flow
+├── kernel/       IDs, errors, policy, schemas, and core catalog type contracts
+├── primitives/   Model-facing primitive worker definitions and handlers
+└── runtime/      External-worker runtime, worker protocol, trigger runtime
 domains/          Every Tron worker: contracts, deps, handlers, operations, local services, tests
 platform/         OS/vendor integrations retained by the primitive loop
 shared/
@@ -1012,7 +1019,7 @@ The deploy process (`scripts/tron.d/deploy.sh::cmd_deploy`) is retained for loca
 
 ### Install Directory
 
-Base directories in the tree below are resolved through helpers in `packages/agent/src/shared/foundation/paths.rs`. To rename a directory, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/host.rs`.
+Base directories in the tree below are resolved through helpers in `packages/agent/src/shared/foundation/paths.rs`. To rename a directory, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/invocation/host/mod.rs`.
 
 ```
 ~/.tron/

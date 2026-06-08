@@ -423,7 +423,7 @@ fn final_retired_product_residue_stays_deleted_from_runtime_surfaces() {
             &["CRON_", "IMPORT_", "cronNotFound", "importSessionNotFound"],
         ),
         (
-            "packages/agent/src/engine/grants/model.rs",
+            "packages/agent/src/engine/authority/grants/model.rs",
             &[
                 "cron-scheduler",
                 "mcp-catalog-refresh",
@@ -692,11 +692,10 @@ fn small_rust_domains_stay_collapsed_to_single_worker_modules() {
 }
 
 #[test]
-fn engine_primitive_surface_stays_flattened_to_owned_boundaries() {
+fn engine_primitive_surface_stays_in_owned_boundaries() {
     for path in [
-        "packages/agent/src/engine/types/catalog.rs",
-        "packages/agent/src/engine/resources/store/events.rs",
-        "packages/agent/src/engine/resources/store/trace_events.rs",
+        "packages/agent/src/engine/durability/resources/store/events.rs",
+        "packages/agent/src/engine/durability/resources/store/trace_events.rs",
         "packages/agent/src/domains/capability/deps.rs",
         "packages/agent/src/domains/capability/handlers.rs",
     ] {
@@ -706,7 +705,8 @@ fn engine_primitive_surface_stays_flattened_to_owned_boundaries() {
         );
     }
 
-    let engine_types = read_repo_file("packages/agent/src/engine/types.rs");
+    let engine_type_mod = read_repo_file("packages/agent/src/engine/kernel/types/mod.rs");
+    let catalog_types = read_repo_file("packages/agent/src/engine/kernel/types/catalog.rs");
     for required in [
         "pub enum CatalogSubjectKind",
         "pub enum CatalogChangeClass",
@@ -714,18 +714,19 @@ fn engine_primitive_surface_stays_flattened_to_owned_boundaries() {
         "pub enum CatalogChangeKind",
     ] {
         assert!(
-            engine_types.contains(required),
-            "engine types owner missing collapsed catalog type `{required}`"
+            catalog_types.contains(required),
+            "engine catalog type shard missing retained catalog type `{required}`"
         );
     }
-    for banned in ["mod catalog;", "pub use catalog::*"] {
+    for required in ["mod catalog;", "pub use catalog::{"] {
         assert!(
-            !engine_types.contains(banned),
-            "engine types owner must not recreate catalog submodule glue `{banned}`"
+            engine_type_mod.contains(required),
+            "engine type aggregator missing explicit catalog boundary `{required}`"
         );
     }
 
-    let resource_store = read_repo_file("packages/agent/src/engine/resources/store.rs");
+    let resource_store =
+        read_repo_file("packages/agent/src/engine/durability/resources/store/mod.rs");
     for required in ["fn resource_event(", "fn generated_id("] {
         assert!(
             resource_store.contains(required),

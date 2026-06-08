@@ -12,7 +12,7 @@ use crate::domains::agent::runner::orchestrator::invocation_abort_registry::{
     InvocationAbortGuard, InvocationAbortRegistry,
 };
 use crate::domains::agent::runner::types::CapabilityInvocationExecutionResult;
-use crate::engine::invocation::{
+use crate::engine::invocation::model::{
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
     RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
     RUNTIME_METADATA_WORKING_DIRECTORY,

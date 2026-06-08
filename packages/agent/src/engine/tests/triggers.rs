@@ -257,7 +257,7 @@ async fn trigger_runtime_void_dispatch_records_causal_metadata_once() {
     assert_eq!(
         invocation
             .causal_context
-            .runtime_metadata(crate::engine::invocation::RUNTIME_METADATA_TRIGGER_DEPTH),
+            .runtime_metadata(crate::engine::invocation::model::RUNTIME_METADATA_TRIGGER_DEPTH),
         Some("1")
     );
 
@@ -324,11 +324,11 @@ async fn direct_void_invocation_without_trigger_runtime_stays_unsupported() {
                 )
                 .with_trigger_id(TriggerId::new("forged-trigger").unwrap())
                 .with_runtime_metadata(
-                    crate::engine::invocation::RUNTIME_METADATA_TRIGGER_DEPTH,
+                    crate::engine::invocation::model::RUNTIME_METADATA_TRIGGER_DEPTH,
                     "1",
                 )
                 .with_runtime_metadata(
-                    crate::engine::invocation::RUNTIME_METADATA_TRIGGER_PATH,
+                    crate::engine::invocation::model::RUNTIME_METADATA_TRIGGER_PATH,
                     "[\"forged-trigger\"]",
                 )
                 .with_idempotency_key("forged-void-key"),

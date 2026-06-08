@@ -155,7 +155,7 @@ struct SocketWorkerInvoker {
 }
 
 #[async_trait]
-impl crate::engine::external::ExternalWorkerInvoker for SocketWorkerInvoker {
+impl crate::engine::runtime::external_workers::ExternalWorkerInvoker for SocketWorkerInvoker {
     async fn invoke(&self, invoke: WorkerInvoke) -> crate::engine::Result<WorkerInvocationResult> {
         let invocation_id = invoke.invocation_id.to_string();
         let (tx, rx) = oneshot::channel();
@@ -198,7 +198,7 @@ mod tests {
     use super::*;
     use crate::engine::{
         ActorKind, AuthorityGrantId, FunctionId, TraceId, WorkerInvoke,
-        external::ExternalWorkerInvoker,
+        runtime::external_workers::ExternalWorkerInvoker,
     };
     use serde_json::json;
 

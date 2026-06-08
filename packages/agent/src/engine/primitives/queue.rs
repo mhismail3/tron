@@ -9,7 +9,7 @@ use super::{
     PrimitiveFunctionRegistration, PrimitiveStores, QUEUE_WORKER_ID, handled_registration,
     optional_u64, primitive_function, required_str, required_string_owned,
 };
-use crate::engine::queue::{queue_failure_event_type, queue_lifecycle_stream_event};
+use crate::engine::durability::queue::{queue_failure_event_type, queue_lifecycle_stream_event};
 use crate::engine::{
     EffectClass, EngineError, IdempotencyContract, InProcessFunctionHandler, Invocation, Result,
 };
@@ -128,7 +128,7 @@ impl QueuePrimitiveHandler {
     fn publish_lifecycle(
         &self,
         event_type: &str,
-        item: &crate::engine::queue::EngineQueueItem,
+        item: &crate::engine::durability::queue::EngineQueueItem,
     ) -> Result<()> {
         let mut streams = self
             .streams

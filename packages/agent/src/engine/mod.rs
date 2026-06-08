@@ -92,85 +92,64 @@
 
 #![deny(unsafe_code)]
 
-pub mod capabilities;
-pub mod compensation;
-pub mod discovery;
-pub mod errors;
-pub mod external;
-pub mod grants;
-pub mod host;
-pub mod ids;
+pub mod authority;
+pub mod catalog;
+pub mod durability;
 pub mod invocation;
-pub mod leases;
-pub mod ledger;
-pub mod policy;
+pub mod kernel;
 pub mod primitives;
-pub mod protocol;
-pub mod queue;
-pub mod registry;
-pub mod resources;
-pub mod schema;
-pub mod state;
-pub mod streams;
-pub mod triggers;
-pub mod types;
+pub mod runtime;
 
-pub use capabilities::AgentCapabilityClient;
-pub use compensation::{
+pub use authority::compensation::{
     EngineCompensationRecord, EngineCompensationStatus, InMemoryEngineCompensationStore,
     SqliteEngineCompensationStore,
 };
-pub use discovery::{ActorContext, ActorKind, FunctionQuery};
-pub use errors::{EngineError, Result};
-pub use external::{EngineExternalWorkerRuntime, ExternalWorkerConnection};
-pub use grants::{
+pub use authority::grants::{
     DeriveGrant, EngineGrant, EngineGrantEvent, EngineGrantLifecycle, EngineGrantStoreBackend,
     InMemoryEngineGrantStore, ListGrants, SqliteEngineGrantStore,
 };
-pub use host::{CatalogWatchRequest, CatalogWatchResponse, EngineHost, EngineHostHandle};
-pub use ids::{
-    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
-    WorkerId,
-};
-pub use invocation::{
-    CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
-};
-pub use leases::{
+pub use authority::leases::{
     AcquireResourceLease, EngineResourceLease, EngineResourceLeaseStatus,
     InMemoryEngineResourceLeaseStore, SqliteEngineResourceLeaseStore,
 };
-pub use ledger::{
+pub use catalog::capabilities::AgentCapabilityClient;
+pub use catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
+pub use catalog::registry::LiveCatalog;
+pub use durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
     IdempotencyReservationOutcome, IdempotencyStatus, InMemoryEngineLedgerStore,
     SqliteEngineLedgerStore, StoredEngineError, StoredInvocationOutcome,
 };
-pub use protocol::{
-    CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy,
-    WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
-    WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
-    WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
-};
-pub use queue::{
+pub use durability::queue::{
     EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime,
     EnqueueInvocation, InMemoryEngineQueueStore, QueueAttemptOutcome, QueueItemStatus,
     SqliteEngineQueueStore,
 };
-pub use registry::LiveCatalog;
-pub use resources::{
+pub use durability::resources::{
     CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
     EngineResourceLink, EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
     EngineResourceVersion, EngineResourceVersioningMode, InMemoryEngineResourceStore,
     LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
 };
-pub use state::{
+pub use durability::state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
 };
-pub use streams::{
+pub use durability::streams::{
     EngineStreamEvent, EngineStreamPage, EngineStreamSubscription, InMemoryEngineStreamStore,
     PublishStreamEvent, SqliteEngineStreamStore, StreamActorScope, StreamCursor,
 };
-pub use triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
-pub use types::{
+pub use invocation::host::{
+    CatalogWatchRequest, CatalogWatchResponse, EngineHost, EngineHostHandle,
+};
+pub use invocation::model::{
+    CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
+};
+pub use kernel::errors::{EngineError, Result};
+pub use kernel::ids::{
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
+    WorkerId,
+};
+pub use kernel::types::{
     AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
     CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode,
     DurableOutputContract, EffectClass, FunctionDefinition, FunctionHealth, FunctionRevision,
@@ -178,6 +157,14 @@ pub use types::{
     ReplayBehavior, ResourceLeaseFailureBehavior, ResourceLeaseRequirement, RiskLevel,
     TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
     WorkerKind, WorkerLifecycleState, WorkerRevision,
+};
+pub use runtime::external_workers::{EngineExternalWorkerRuntime, ExternalWorkerConnection};
+pub use runtime::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
+pub use runtime::worker_protocol::{
+    CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy,
+    WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
+    WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
+    WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
 
 #[cfg(test)]

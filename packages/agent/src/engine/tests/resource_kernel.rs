@@ -1,5 +1,5 @@
 use super::*;
-use crate::engine::resources::{
+use crate::engine::durability::resources::{
     CreateResource, EngineResourceLocation, EngineResourceScope, EngineResourceVersionState,
     InMemoryEngineResourceStore, LinkResources, UpdateResource, builtin_resource_type_definitions,
 };
@@ -184,7 +184,7 @@ async fn materialized_file_update_resolves_relative_paths_with_runtime_working_d
     let causal = mutating_causal("materialized-file-runtime-cwd")
         .with_scope("resource.write")
         .with_runtime_metadata(
-            crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY,
+            crate::engine::invocation::model::RUNTIME_METADATA_WORKING_DIRECTORY,
             tmp.path().to_string_lossy(),
         );
 
@@ -216,7 +216,7 @@ async fn materialized_file_update_rejects_relative_runtime_path_escape() {
     let causal = mutating_causal("materialized-file-runtime-cwd-escape")
         .with_scope("resource.write")
         .with_runtime_metadata(
-            crate::engine::invocation::RUNTIME_METADATA_WORKING_DIRECTORY,
+            crate::engine::invocation::model::RUNTIME_METADATA_WORKING_DIRECTORY,
             tmp.path().to_string_lossy(),
         );
 

@@ -63,7 +63,7 @@ fn sqlite_engine_ledger_blobs_large_results_but_replays_public_value() {
             .with_session_id("session-large")
             .with_workspace_id("workspace-large"),
     );
-    let result = crate::engine::invocation::InvocationResult::success(
+    let result = crate::engine::invocation::model::InvocationResult::success(
         &invocation,
         wid("w1"),
         FunctionRevision(1),
@@ -71,7 +71,7 @@ fn sqlite_engine_ledger_blobs_large_results_but_replays_public_value() {
         large.clone(),
     );
     let record =
-        crate::engine::invocation::InvocationRecord::from_result(&invocation, &result, None);
+        crate::engine::invocation::model::InvocationRecord::from_result(&invocation, &result, None);
 
     {
         let mut store = SqliteEngineLedgerStore::open(&db_path).unwrap();

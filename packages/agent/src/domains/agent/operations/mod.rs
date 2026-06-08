@@ -6,7 +6,7 @@
 
 use crate::domains::agent::commands::AgentCommandService;
 use crate::domains::agent::runtime::service::{PromptEngineCausality, PromptRequest};
-use crate::engine::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
+use crate::engine::kernel::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::shared::server::errors;
 
 // Operation modules grouped by workflow.

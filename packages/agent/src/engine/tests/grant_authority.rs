@@ -35,7 +35,7 @@ async fn derive_grant(
     handle: &EngineHostHandle,
     payload: Value,
     key: &str,
-) -> crate::engine::invocation::InvocationResult {
+) -> crate::engine::invocation::model::InvocationResult {
     handle
         .invoke(host_invocation(
             "grant::derive",
@@ -67,7 +67,7 @@ async fn derive_bootstrap_grant(
     handle: &EngineHostHandle,
     grant_id: &str,
     mut payload: Value,
-) -> crate::engine::invocation::InvocationResult {
+) -> crate::engine::invocation::model::InvocationResult {
     let object = payload.as_object_mut().unwrap();
     object.insert("grantId".to_owned(), json!(grant_id));
     object.insert("parentGrantId".to_owned(), json!("grant"));

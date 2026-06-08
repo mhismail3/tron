@@ -1,8 +1,8 @@
 //! Stored runtime-surface validation and generic action submissions.
 
 use super::*;
-use crate::engine::ids::FunctionId;
-use crate::engine::schema;
+use crate::engine::kernel::ids::FunctionId;
+use crate::engine::kernel::schema;
 
 pub(super) fn validate_surface(
     host: &mut dyn PrimitiveRuntimeHost,

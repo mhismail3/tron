@@ -25,36 +25,38 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock, Weak};
 use serde_json::{Value, json};
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::compensation::{
+use crate::engine::authority::compensation::{
     EngineCompensationRecord, InMemoryEngineCompensationStore, SqliteEngineCompensationStore,
 };
-use super::errors::{EngineError, Result};
-use super::grants::{EngineGrantStoreBackend, InMemoryEngineGrantStore, SqliteEngineGrantStore};
-use super::host::{EngineHost, EngineHostHandle};
-use super::ids::{ActorId, AuthorityGrantId, FunctionId, WorkerId};
-use super::invocation::{InProcessFunctionHandler, Invocation};
-use super::leases::{
+use crate::engine::authority::grants::{
+    EngineGrantStoreBackend, InMemoryEngineGrantStore, SqliteEngineGrantStore,
+};
+use crate::engine::authority::leases::{
     AcquireResourceLease, EngineResourceLease, InMemoryEngineResourceLeaseStore,
     SqliteEngineResourceLeaseStore,
 };
-use super::queue::{
+use crate::engine::durability::queue::{
     EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation, InMemoryEngineQueueStore,
     SqliteEngineQueueStore,
 };
-use super::resources::{
+use crate::engine::durability::resources::{
     CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
     EngineResourceVersion, InMemoryEngineResourceStore, LinkResources, ListResources,
     RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
     builtin_resource_type_definitions,
 };
-use super::state::{
+use crate::engine::durability::state::{
     EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
 };
-use super::streams::{
+use crate::engine::durability::streams::{
     EngineStreamPage, EngineStreamSubscription, InMemoryEngineStreamStore, PublishStreamEvent,
     SqliteEngineStreamStore, StreamActorScope, StreamCursor,
 };
-use super::types::{
+use crate::engine::invocation::host::{EngineHost, EngineHostHandle};
+use crate::engine::invocation::model::{InProcessFunctionHandler, Invocation};
+use crate::engine::kernel::errors::{EngineError, Result};
+use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, FunctionId, WorkerId};
+use crate::engine::kernel::types::{
     AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, FunctionDefinition,
     RiskLevel, VisibilityScope, WorkerDefinition, WorkerKind,
 };
@@ -465,7 +467,7 @@ impl ResourceStoreBackend {
     pub(in crate::engine) fn link(
         &mut self,
         request: LinkResources,
-    ) -> Result<super::resources::EngineResourceLink> {
+    ) -> Result<crate::engine::durability::resources::EngineResourceLink> {
         match self {
             Self::InMemory(store) => store.link(request),
             Self::Sqlite(store) => store.link(request),

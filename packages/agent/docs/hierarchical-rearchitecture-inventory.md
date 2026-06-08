@@ -99,9 +99,7 @@ only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`.
 
 | Path | Target | Phase |
 |------|--------|-------|
-| `packages/agent/src/main_cli.rs` | `packages/agent/src/app/cli/mod.rs` | HRA-2 |
 | `packages/agent/src/main_runtime.rs` | `packages/agent/src/app/bootstrap/mod.rs` | HRA-2 |
-| `packages/agent/src/main_tests.rs` | `packages/agent/src/app/bootstrap/tests.rs` | HRA-2 |
 
 ## Directories Over 12 Source Files
 
@@ -229,22 +227,6 @@ only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`.
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/session/tests.rs` | `packages/agent/src/domains/session/event_store/sqlite/repositories/session/tests` | HRA-6 |
 | `packages/agent/src/domains/session/event_store/store/event_store.rs` | `packages/agent/src/domains/session/event_store/store/event_store` | HRA-6 |
 | `packages/agent/src/domains/session/event_store/store/tests.rs` | `packages/agent/src/domains/session/event_store/store/tests` | HRA-6 |
-| `packages/agent/src/engine/grants.rs` | `packages/agent/src/engine/grants` | HRA-4 |
-| `packages/agent/src/engine/host.rs` | `packages/agent/src/engine/host` | HRA-3 |
-| `packages/agent/src/engine/ledger.rs` | `packages/agent/src/engine/ledger` | HRA-4 |
-| `packages/agent/src/engine/primitives/resource.rs` | `packages/agent/src/engine/primitives/resource` | HRA-3 |
-| `packages/agent/src/engine/primitives/ui.rs` | `packages/agent/src/engine/primitives/ui` | HRA-3 |
-| `packages/agent/src/engine/queue.rs` | `packages/agent/src/engine/queue` | HRA-4 |
-| `packages/agent/src/engine/registry.rs` | `packages/agent/src/engine/registry` | HRA-3 |
-| `packages/agent/src/engine/resources/store.rs` | `packages/agent/src/engine/resources/store` | HRA-4 |
-| `packages/agent/src/shared/foundation/paths.rs` | `packages/agent/src/shared/foundation/paths` | HRA-2 |
-| `packages/agent/src/shared/foundation/profile.rs` | `packages/agent/src/shared/foundation/profile` | HRA-2 |
-| `packages/agent/src/shared/protocol/events.rs` | `packages/agent/src/shared/protocol/events` | HRA-2 |
-| `packages/agent/src/shared/protocol/events/tests.rs` | `packages/agent/src/shared/protocol/events/tests` | HRA-2 |
-| `packages/agent/src/shared/protocol/events/tron.rs` | `packages/agent/src/shared/protocol/events/tron` | HRA-2 |
-| `packages/agent/src/shared/protocol/messages.rs` | `packages/agent/src/shared/protocol/messages` | HRA-2 |
-| `packages/agent/src/shared/storage.rs` | `packages/agent/src/shared/storage` | HRA-2 |
-| `packages/agent/src/transport/engine_ws.rs` | `packages/agent/src/transport/engine_ws` | HRA-2 |
 
 ## Over-Budget Files
 
@@ -257,16 +239,15 @@ only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`.
 | `packages/agent/src/domains/model/providers/anthropic/types.rs` | 941 | 900 | rust model domain owner | HRA-5 |
 | `packages/agent/src/domains/model/providers/kimi/stream_handler.rs` | 991 | 900 | rust model domain owner | HRA-5 |
 | `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | 1571 | 900 | rust session domain owner | HRA-6 |
-| `packages/agent/src/engine/external.rs` | 906 | 900 | rust engine runtime owner | HRA-3 |
-| `packages/agent/src/engine/grants.rs` | 956 | 900 | rust engine authority owner | HRA-4 |
-| `packages/agent/src/engine/ledger.rs` | 955 | 900 | rust engine durability owner | HRA-4 |
-| `packages/agent/src/engine/resources/store.rs` | 972 | 900 | rust engine durability owner | HRA-4 |
+| `packages/agent/src/engine/runtime/external_workers.rs` | 901 | 900 | rust engine runtime owner | HRA-3 |
+| `packages/agent/src/engine/authority/grants/mod.rs` | 956 | 900 | rust engine authority owner | HRA-4 |
+| `packages/agent/src/engine/durability/ledger/mod.rs` | 955 | 900 | rust engine durability owner | HRA-4 |
+| `packages/agent/src/engine/durability/resources/store/mod.rs` | 972 | 900 | rust engine durability owner | HRA-4 |
 | `packages/agent/src/engine/tests/grant_authority.rs` | 929 | 900 | rust engine test owner | HRA-4 |
 | `packages/agent/src/engine/tests/resource_kernel.rs` | 1196 | 900 | rust engine test owner | HRA-4 |
-| `packages/agent/src/engine/tests/state_queue.rs` | 907 | 900 | rust engine test owner | HRA-4 |
-| `packages/agent/src/engine/types.rs` | 1008 | 900 | rust engine kernel owner | HRA-3 |
-| `packages/agent/tests/primitive_code_cleanup_invariants.rs` | 942 | 900 | rust integration/static test owner | HRA-7 |
-| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | 2242 | 900 | rust integration/static test owner | HRA-7 |
+| `packages/agent/src/engine/tests/state_queue.rs` | 910 | 900 | rust engine test owner | HRA-4 |
+| `packages/agent/tests/primitive_code_cleanup_invariants.rs` | 943 | 900 | rust integration/static test owner | HRA-7 |
+| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | 2254 | 900 | rust integration/static test owner | HRA-7 |
 | `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | 958 | 700 | ios engine transport owner | HRA-9 |
 | `packages/ios-app/Sources/Session/Messages/CapabilityInvocationDisplayModel.swift` | 744 | 700 | ios session timeline owner | HRA-10 |
 | `packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | 817 | 700 | ios runtime surface UI owner | HRA-11 |
@@ -279,14 +260,10 @@ only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`.
 
 | Path | Matched terms | Closeout phase |
 |------|---------------|----------------|
-| `README.md` | engine/host.rs, main_cli.rs, main_runtime.rs, main_tests.rs | HRA-15 |
 | `packages/agent/docs/primitive-code-cleanup-evidence-manifest.md` | Tests/Services, UI/Views | HRA-15 |
 | `packages/agent/docs/primitive-code-cleanup-scorecard.md` | Engine/Network, UI/Views | HRA-15 |
 | `packages/agent/docs/primitive-engine-teardown-evidence-manifest.md` | engine/host.rs | HRA-15 |
 | `packages/agent/docs/primitive-engine-teardown-inventory.md` | Session/ViewModels, UI/Views | HRA-15 |
-| `packages/agent/src/main.rs` | main_tests.rs | HRA-2 |
-| `packages/agent/src/main_cli.rs` | main_runtime.rs | HRA-2 |
-| `packages/agent/src/main_tests.rs` | main_runtime.rs | HRA-2 |
 | `packages/agent/tests/hierarchical_rearchitecture_invariants.rs` | Engine/Database, Engine/Network, Session/ViewModels, Support/Extensions, Support/Utilities, Tests/Services, UI/Views | HRA-7 |
 | `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | Engine/Database, Engine/Network, Session/ViewModels, Tests/Services, UI/Views, engine/host.rs, main_runtime.rs | HRA-7 |
 | `packages/ios-app/Tests/Infrastructure/CleanupGuardTests.swift` | Support/Utilities | HRA-13 |
@@ -386,15 +363,15 @@ only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`.
 | `packages/agent/src/domains/system` | rust compact domain owner | one-source-file folder flagged for collapse or explicit boundary | pending |
 | `packages/agent/src/engine` | rust engine catalog owner | large folder flagged for split or explicit budget | pending |
 | `packages/agent/src/engine/grants` | rust engine authority owner | owned source/test boundary under target hierarchy | passed |
-| `packages/agent/src/engine/host` | rust engine invocation owner | owned source/test boundary under target hierarchy | passed |
-| `packages/agent/src/engine/ledger` | rust engine durability owner | owned source/test boundary under target hierarchy | passed |
+| `packages/agent/src/engine/invocation/host` | rust engine invocation owner | owned source/test boundary under target hierarchy | passed |
+| `packages/agent/src/engine/durability/ledger` | rust engine durability owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/engine/primitives` | rust engine primitives owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/engine/primitives/resource` | rust engine primitives owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/engine/primitives/ui` | rust engine primitives owner | owned source/test boundary under target hierarchy | passed |
-| `packages/agent/src/engine/queue` | rust engine durability owner | owned source/test boundary under target hierarchy | passed |
-| `packages/agent/src/engine/registry` | rust engine catalog owner | owned source/test boundary under target hierarchy | passed |
-| `packages/agent/src/engine/resources` | rust engine durability owner | owned source/test boundary under target hierarchy | passed |
-| `packages/agent/src/engine/resources/store` | rust engine durability owner | owned source/test boundary under target hierarchy | passed |
+| `packages/agent/src/engine/durability/queue` | rust engine durability owner | owned source/test boundary under target hierarchy | passed |
+| `packages/agent/src/engine/catalog/registry` | rust engine catalog owner | owned source/test boundary under target hierarchy | passed |
+| `packages/agent/src/engine/durability/resources` | rust engine durability owner | owned source/test boundary under target hierarchy | passed |
+| `packages/agent/src/engine/durability/resources/store` | rust engine durability owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/engine/tests` | rust engine test owner | large folder flagged for split or explicit budget | pending |
 | `packages/agent/src/platform` | rust platform owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/shared` | rust shared owner | owned source/test boundary under target hierarchy | passed |
@@ -411,7 +388,7 @@ only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`.
 | `packages/agent/src/shared/server` | rust shared owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/shared/storage` | rust shared owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/transport` | rust transport owner | owned source/test boundary under target hierarchy | passed |
-| `packages/agent/src/transport/engine_ws` | rust transport owner | owned source/test boundary under target hierarchy | passed |
+| `packages/agent/src/transport/engine/socket` | rust transport owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/transport/runtime` | rust transport owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/transport/runtime/streams` | rust transport owner | owned source/test boundary under target hierarchy | passed |
 | `packages/agent/src/transport/runtime/streams/session` | rust transport owner | owned source/test boundary under target hierarchy | passed |
