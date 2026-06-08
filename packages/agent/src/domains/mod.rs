@@ -22,16 +22,35 @@
 //! `bindings` helper, so completeness failures happen during worker
 //! construction instead of as late runtime branches.
 //!
+//! ## Entry Points
+//!
 //! The intended execution flow is:
 //! `/engine frame -> EngineTransportRequest -> EngineTriggerRuntime -> domain
 //! worker -> contract operation key -> handlers.rs -> domain owner -> narrow
 //! deps/service -> engine ledger/streams/queues/grants/leases`.
 //!
-//! # INVARIANT: no transport-owned behavior
+//! Startup calls `registration::catalog` and `registration::worker` to bind the
+//! retained domain contracts into the engine catalog. Individual domains expose
+//! their public behavior through `contract.rs` definitions and handler tables,
+//! not through transport-specific functions.
+//!
+//! ## Invariants
 //!
 //! Domain methods here are canonical operation keys only. Public client
 //! protocols translate into the transport-neutral engine envelope before
 //! reaching these handlers.
+//!
+//! Product/tool domains retired by the primitive teardown must remain absent
+//! from this module tree and startup registration. New domain behavior must add
+//! a contract, deps narrowing, handler binding, tests, and README/domain-doc
+//! updates together.
+//!
+//! ## Test Ownership
+//!
+//! Domain-local tests live next to the domain service, provider, or store they
+//! exercise. Shared registration/binding behavior belongs under
+//! `domains/registration`; end-to-end transport/domain routing belongs in
+//! integration/static tests rather than a broad domain root test.
 
 pub mod agent;
 pub mod auth;

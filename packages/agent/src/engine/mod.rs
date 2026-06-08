@@ -6,7 +6,32 @@
 //! engine functions. Model providers do not see that transport surface
 //! directly; agents receive one model-facing capability, `execute`, which
 //! routes through this fabric and records durable invocation/trace evidence.
-//! The core invariants are:
+//!
+//! ## Submodules
+//!
+//! | Module | Purpose |
+//! |--------|---------|
+//! | [`authority`] | Grants, leases, compensation, and authorization policy |
+//! | [`catalog`] | Live catalog registry, discovery, capability views, and revision changes |
+//! | [`durability`] | SQLite/in-memory ledgers, queues, resources, streams, state, and traces |
+//! | [`invocation`] | Host handle, invocation records, handler dispatch, and model-facing context |
+//! | [`kernel`] | Engine ids, definitions, shared types, and error model |
+//! | [`primitives`] | Engine-native primitive workers such as resource/grant/ui support |
+//! | [`runtime`] | Trigger dispatch, external-worker runtime, and worker protocol DTOs |
+//!
+//! ## Entry Points
+//!
+//! - [`EngineHost`] owns the in-process catalog, policy checks, invocation
+//!   lifecycle, idempotency, ledgers, queues, streams, resources, grants, and
+//!   runtime handles.
+//! - [`EngineHostHandle`] is the intent-shaped boundary used by transports,
+//!   startup, and domain services.
+//! - [`EngineTriggerRuntime`] dispatches trigger-originated work through the
+//!   same canonical invocation lifecycle as direct requests.
+//! - [`EngineExternalWorkerRuntime`] owns loopback external-worker connection,
+//!   registration, health, and invocation proxy state.
+//!
+//! ## Invariants
 //!
 //! - the catalog is live, revisioned, and discoverable;
 //! - workers own the functions and triggers they register;

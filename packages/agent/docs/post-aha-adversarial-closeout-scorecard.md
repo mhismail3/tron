@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Scorecard
 
-Current score: **69/100**
+Current score: **79/100**
 
 Status: **active**
 
@@ -46,7 +46,7 @@ Total weight: **100**
 | PAC-4 | Mac launch-agent/process ownership | 12 | passed_after_fix | Mac architecture | `LiveLaunchAgentManager` moved to `Server/LaunchAgent`, `Subprocess` moved to `Support/Foundation`, live launch-agent tests moved to `Tests/Server/LaunchAgent`, and `ServerPing.swift` now owns only ping/status capture behavior. PAC ownership and focused Mac launch-agent/ping tests pass. | Closed; PAC-5 owns broader Mac SourceGuard coverage. |
 | PAC-5 | Mac guard parity | 10 | passed_after_fix | Mac guard parity | Added `MacSourceGuardTests` coverage for required roots, banned roots, helper-resource layout, staged-binary policy, `bundle-agent --clean`, and 590 LOC warning rows. `bundle-agent --clean` now removes only ignored staged binaries and preserves tracked helper plists, Info.plists, and icons. | Closed. |
 | PAC-6 | iOS hierarchy and mirrored tests | 9 | passed_after_fix | iOS hierarchy | Retry tests moved under `Tests/Engine/Transport/Retry`, WebSocket tests moved under `Tests/Engine/Transport/WebSocket`, and Chat tests moved under `Coordinators`, `Messaging`, and `ViewModel`. SourceGuard now watches the production Retry source root plus the mirrored test roots, iOS docs name the owner mirror, tracked Xcode was regenerated, and HRA/PCC inventory rows were repaired for the moved/new tracked files. | Closed. |
-| PAC-7 | Rust docs and LOC split budgets | 10 | pending | Rust docs/budgets | Pending. | Expand top-level progressive docs and require concrete split plan rows at 890+ LOC. |
+| PAC-7 | Rust docs and LOC split budgets | 10 | passed_after_fix | Rust docs/budgets | Top-level Rust roots `app`, `domains`, `engine`, `shared`, and `transport` now carry `## Submodules`, `## Entry Points`, `## Invariants`, and `## Test Ownership` sections. The PAC split-plan watchlist now has the current 895 LOC row for `engine/catalog/registry/mod.rs` with a concrete split plan. | Closed. |
 | PAC-8 | Local/GitHub CI parity | 8 | pending | local/CI parity | Pending. | Add PAC plus missing closeout targets to local `scripts/tron ci test` and GitHub static gates. |
 | PAC-9 | Provenance, privacy, and residue policy | 7 | pending | provenance/privacy/residue | Pending. | Add AHA plan digest, broaden personal-info scans, and define allowed fallback/compatibility wording contexts. |
 | PAC-10 | Final closeout verification | 6 | pending | final closeout | Pending. | Run full Rust CI, focused iOS/Mac checks, privacy guard, ignored-artifact audit, residue scans, and final adversarial audit. |
@@ -81,10 +81,14 @@ old paths and dual behavior. The allowed contexts are:
 
 ## Open Loops
 
-- PAC-7 through PAC-10 remain open. The current red target is the executable
+- PAC-8 through PAC-10 remain open. The current red target is the executable
   punch list for those rows.
 
 ## Rust/Swift Split-Plan Watchlist
 
 PAC-7 owns this section. Files at or above 890 LOC must have a current LOC row
 with a concrete split plan before PAC-7 can close.
+
+| Path | Current LOC | Owner | Concrete split plan | Status |
+|------|-------------|-------|---------------------|--------|
+| `packages/agent/src/engine/catalog/registry/mod.rs` | 895 | engine catalog registry owner | concrete split plan: keep the revisioned registry type and public mutation/query boundary in `registry/mod.rs`; move the next new catalog-change projection, idempotency registration helper, or function query helper into a focused sibling module before adding behavior here. | watch |

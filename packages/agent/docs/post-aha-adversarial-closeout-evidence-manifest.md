@@ -1,6 +1,6 @@
 # Post-AHA Adversarial Closeout Evidence Manifest
 
-Current score: **69/100**
+Current score: **79/100**
 
 Status: **active**
 
@@ -23,7 +23,7 @@ work is driven by executable evidence instead of the external Downloads plan.
 | PAC-4 | passed_after_fix | Split Mac runtime ownership so `LiveLaunchAgentManager` lives under `Server/LaunchAgent`, `Subprocess` lives under `Support/Foundation`, live-manager tests live under `Tests/Server/LaunchAgent`, and `ServerPing.swift` contains only ping/status capture behavior. README and Mac architecture docs now name those owners. | PAC Mac ownership guard passed; Mac XcodeGen regenerated the ignored project; focused Mac ping, launch-agent, install-runner, and fake-manager tests passed. | Closed; PAC-5 still owns guard breadth for roots, helper resources, staged binaries, clean mode, and LOC warnings. | `57fbcf537` |
 | PAC-5 | passed_after_fix | Added Mac SourceGuard-style tests for required roots, banned roots, helper-resource layout, staged-binary policy, `bundle-agent --clean`, and 590 LOC warning rows. Narrowed `bundle-agent.sh --clean` so it removes only ignored staged helper binaries, not tracked helper skeletons or LaunchAgent plists. Mac development docs now spell out the clean-mode boundary. | PAC Mac guard static gate passed; `bash -n packages/mac-app/scripts/bundle-agent.sh` passed; XcodeGen regenerated the ignored project; focused `MacSourceGuardTests` passed. | Closed. | `1455a59a9` |
 | PAC-6 | passed_after_fix | Moved iOS Retry, WebSocket, and Chat tests into directories that mirror their production owners; expanded `SourceGuardTests+Budgets` to watch `Sources/Engine/Transport/Retry`, `Tests/Engine/Transport/Retry`, `Tests/Engine/Transport/WebSocket`, and the Chat `Coordinators`/`Messaging`/`ViewModel` test roots; updated iOS docs, HRA near-budget rows, and HRA/PCC inventory rows; regenerated the tracked iOS Xcode project. | PAC iOS mirror static gate passed; HRA scorecard formalization passed; HRA/PCC inventory guards passed; iOS XcodeGen passed; focused `SourceGuardTests` and the moved test suites passed on `iPhone 17 Pro`. | Closed. | `efffbbe19` |
-| PAC-7 | pending | Pending. | Pending. | Rust docs and 890+ LOC split-plan rows still need proof. | pending |
+| PAC-7 | passed_after_fix | Added progressive disclosure sections to top-level Rust `mod.rs` roots for `app`, `domains`, `engine`, `shared`, and `transport`; added the current 895 LOC concrete split-plan watch row for `packages/agent/src/engine/catalog/registry/mod.rs`. | PAC Rust docs/LOC static gate passed; Rust formatting check passed; rustdoc with denied warnings passed; whitespace check passed. | Closed. | pending |
 | PAC-8 | pending | Pending. | Pending. | Local/GitHub CI parity still needs PAC target wiring. | pending |
 | PAC-9 | pending | Pending. | Pending. | AHA provenance, privacy scope, and residue wording policy still need durable proof. | pending |
 | PAC-10 | pending | Pending. | Pending. | Final closeout verification has not run. | pending |
@@ -68,8 +68,35 @@ Expected red findings:
 
 ## Residual Risk Log
 
-- PAC-7 through PAC-10 remain open. No row will be marked complete until its
+- PAC-8 through PAC-10 remain open. No row will be marked complete until its
   guard, docs, targeted verification, and evidence are green.
+
+## PAC-7 Verification
+
+Completed Rust docs and LOC budget repair:
+
+- `packages/agent/src/app/mod.rs`
+- `packages/agent/src/domains/mod.rs`
+- `packages/agent/src/engine/mod.rs`
+- `packages/agent/src/shared/mod.rs`
+- `packages/agent/src/transport/mod.rs`
+
+Each top-level root now has `## Submodules`, `## Entry Points`,
+`## Invariants`, and `## Test Ownership` sections. The PAC watchlist has a
+current row for the only tracked Rust/Swift file at or above 890 LOC:
+`packages/agent/src/engine/catalog/registry/mod.rs` at 895 LOC, with a concrete
+split plan.
+
+Focused proof:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_aha_adversarial_closeout_invariants rust_progressive_docs_and_loc_split_plans_are_current -- --nocapture
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+RUSTDOCFLAGS='-D warnings' cargo doc --manifest-path packages/agent/Cargo.toml --no-deps
+git diff --check
+```
+
+Result: exit 0 for all focused commands on 2026-06-08.
 
 ## PAC-6 Verification
 
