@@ -118,7 +118,7 @@ Current living entry points:
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md`:
-  companion evidence manifest for the active hierarchical rearchitecture
+  companion evidence manifest for the completed hierarchical rearchitecture
   scorecard.
 - `packages/agent/docs/post-hra-adversarial-hardening-scorecard.md`: active
   closeout campaign for adversarial audit findings after hierarchical
@@ -127,14 +127,16 @@ Current living entry points:
   companion evidence manifest for the post-HRA adversarial hardening campaign.
 - `packages/agent/docs/hierarchical-rearchitecture-inventory.md`: HRA
   live-tree inventory summary and target architecture notes.
+- `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md`: in-repo
+  summary of the operator HRA handoff plan and provenance boundary.
 - `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv`:
   machine-readable tracked-file inventory for the hierarchical rearchitecture
   campaign.
-- `packages/agent/docs/hierarchical-rearchitecture-move-map.tsv`:
-  machine-readable old-to-new path map for the hierarchical rearchitecture
+- `packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv`:
+  machine-readable current ownership map for the hierarchical rearchitecture
   campaign.
-- `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`:
-  HRA-8 source/test Swift move map for the iOS hierarchy phases.
+- `packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv`:
+  HRA-8 source/test Swift current ownership map for the iOS hierarchy phases.
 - `packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md`:
   HRA-8 XcodeGen, ShareExtension, SourceGuard, and iOS phase-ownership map.
 - `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:

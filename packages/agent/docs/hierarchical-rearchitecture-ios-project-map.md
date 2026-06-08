@@ -1,10 +1,10 @@
 # HRA-8 iOS Project Map
 
-Status: `running`
+Status: `completed`
 
 Last updated: 2026-06-08
 
-Plan source: `/Users/<USER>/Downloads/TRON_REARCHITECTURE_PLAN.md`.
+Plan summary: `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md`.
 
 ## Scope
 
@@ -19,13 +19,13 @@ must preserve.
 
 Machine-readable map:
 
-- `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`
+- `packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv`
 
-Coverage after HRA-13:
+Coverage after AHA-9:
 
-- `packages/ios-app/Sources`: 361 Swift files
-- `packages/ios-app/Tests`: 205 Swift files
-- Total mapped Swift source/test files: 566
+- `packages/ios-app/Sources`: 363 Swift files
+- `packages/ios-app/Tests`: 208 Swift files
+- Total mapped Swift source/test files: 571
 
 ## Target Phase Ownership
 
@@ -61,7 +61,7 @@ The ShareExtension target has its own source root and explicitly includes
 `Support/Share`, so the share-extension include remains valid after XcodeGen
 regeneration.
 
-## Open Loops
+## Closed State
 
 - HRA-9 consumed the map rows whose target phase is `HRA-9`; those rows now
   live under the target Engine owners and are marked `passed_after_fix`.
@@ -75,3 +75,8 @@ regeneration.
 - HRA-13 consumed the map rows whose target phase is `HRA-13`; those rows now
   live under mirrored Engine, Session, UI, Support, and Infrastructure test
   owners and are marked `passed_after_fix`.
+- HRA-16 kept the map aligned after the WebSocket test mirror and
+  reconstruction projection closeout.
+- AHA-8 and AHA-9 refreshed the live map for the concrete engine client split,
+  SourceGuard budget checks, and current ownership-map terminology. No iOS map
+  rows remain open.

@@ -1,6 +1,6 @@
 # Post-HRA Adversarial Hardening Scorecard
 
-Current score: **82/100**
+Current score: **90/100**
 
 Status: **active**
 
@@ -47,7 +47,7 @@ Total weight: **100**
 | AHA-6 | Rust progressive docs and near-budget guard | 6 | passed_after_fix | Rust docs/tests owner | Ownership-critical Rust roots touched by AHA-5 now carry progressive docs. Current Rust files at or above the 850 LOC warning band have explicit watch rows below without reviving HRA temporary-budget language, and the HRA/PCC inventories cover the moved Rust ownership paths. | Closed; final closeout still reruns the full Rust static targets. |
 | AHA-7 | iOS transport/domain residue | 10 | passed_after_fix | iOS engine owner | `MiscClient` is deleted. `EngineClientProtocol` and call sites use concrete `system`, `message`, and `logs` clients; stale Git workflow error/comment residue and `Sub-Managers` terminology are removed. | Closed; no `misc` compatibility facade remains. |
 | AHA-8 | iOS hierarchy, budgets, and docs | 9 | passed_after_fix | iOS architecture owner | SourceGuard now enforces deep hierarchy/count/budget gates for Engine clients, shared capability UI, settings shell, shared components, and Session/Chat tests. Swift files at or above the 590 LOC warning band have explicit watch rows, iOS resource docs are current, and redundant iOS 26 availability annotations are removed. | Closed; final closeout reruns XcodeGen drift and focused iOS tests. |
-| AHA-9 | Inventory and provenance integrity | 8 | pending | inventory/provenance owner | Inventory/provenance gate currently fails by design. | Rename current move maps or reconstruct lineage, reject open inventory states at completed score, and archive external HRA plan provenance in repo. |
+| AHA-9 | Inventory and provenance integrity | 8 | passed_after_fix | inventory/provenance owner | HRA live maps are renamed current ownership maps, the completed-HRA inventory gate rejects open row statuses, and HRA provenance now points at the in-repo plan summary. | Closed; no current inventory or ownership-map row remains open. |
 | AHA-10 | Final adversarial closeout | 10 | pending | architecture campaign | Final proof is pending. | Rerun all gates, broad scans, iOS/Mac checks, adversarial audit, ledger append, hash record, and clean repo proof. |
 
 ## Static Gates
@@ -75,8 +75,8 @@ The Rust integration target
 ## Open Loops
 
 - AHA-0 is complete after the red target is committed.
-- AHA-1 through AHA-8 are closed. AHA-9 and AHA-10 remain open and
-  intentionally red until their owners are implemented.
+- AHA-1 through AHA-9 are closed. AHA-10 remains open until final closeout proof
+  reruns the full static, Rust, Apple, scan, and adversarial audit suite.
 
 ## Rust Near-Budget Watchlist
 

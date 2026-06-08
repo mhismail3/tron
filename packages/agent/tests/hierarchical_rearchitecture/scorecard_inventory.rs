@@ -33,9 +33,10 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "HRA-15 | Scripts, README, and docs path closeout | 2 | passed_after_fix",
         "HRA-16 | Final adversarial review and closeout | 2 | passed_after_fix",
         FILE_INVENTORY_PATH,
-        MOVE_MAP_PATH,
-        IOS_MOVE_MAP_PATH,
+        OWNERSHIP_MAP_PATH,
+        IOS_OWNERSHIP_MAP_PATH,
         IOS_PROJECT_MAP_PATH,
+        PLAN_SUMMARY_PATH,
     ] {
         assert!(
             scorecard.contains(required),
@@ -91,7 +92,8 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "Allowed classifications",
         "Allowed statuses",
         "HRA-1 Baseline Counts Updated After HRA-16",
-        IOS_MOVE_MAP_PATH,
+        PLAN_SUMMARY_PATH,
+        IOS_OWNERSHIP_MAP_PATH,
         IOS_PROJECT_MAP_PATH,
     ] {
         assert!(
@@ -105,9 +107,10 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         EVIDENCE_PATH,
         INVENTORY_PATH,
         FILE_INVENTORY_PATH,
-        MOVE_MAP_PATH,
-        IOS_MOVE_MAP_PATH,
+        OWNERSHIP_MAP_PATH,
+        IOS_OWNERSHIP_MAP_PATH,
         IOS_PROJECT_MAP_PATH,
+        PLAN_SUMMARY_PATH,
         INVARIANT_TEST_PATH,
     ] {
         assert!(
@@ -120,16 +123,17 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 #[test]
 fn tracked_files_have_rearchitecture_inventory_rows() {
     let file_rows = parse_inventory(FILE_INVENTORY_PATH);
-    let move_rows = parse_inventory(MOVE_MAP_PATH);
+    let ownership_rows = parse_inventory(OWNERSHIP_MAP_PATH);
 
     let required_artifacts = [
         SCORECARD_PATH,
         EVIDENCE_PATH,
         INVENTORY_PATH,
         FILE_INVENTORY_PATH,
-        MOVE_MAP_PATH,
-        IOS_MOVE_MAP_PATH,
+        OWNERSHIP_MAP_PATH,
+        IOS_OWNERSHIP_MAP_PATH,
         IOS_PROJECT_MAP_PATH,
+        PLAN_SUMMARY_PATH,
         INVARIANT_TEST_PATH,
     ];
 
@@ -142,8 +146,50 @@ fn tracked_files_have_rearchitecture_inventory_rows() {
             "tracked file missing HRA file-inventory row: {path}"
         );
         assert!(
-            move_rows.contains_key(&path),
-            "tracked file missing HRA move-map row: {path}"
+            ownership_rows.contains_key(&path),
+            "tracked file missing HRA current-ownership-map row: {path}"
         );
     }
+}
+
+#[test]
+fn completed_rearchitecture_has_no_open_inventory_statuses() {
+    let scorecard = read_repo_file(SCORECARD_PATH);
+    if !scorecard.contains("Current score: **100/100**")
+        || !scorecard.contains("Status: **completed**")
+    {
+        return;
+    }
+
+    let open_statuses = HashSet::from([
+        "pending",
+        "running",
+        "blocked",
+        "failed_unfixed",
+        "deferred_to_successor",
+    ]);
+    let mut hits = Vec::new();
+
+    for (path, status_column) in [
+        (FILE_INVENTORY_PATH, 8),
+        (OWNERSHIP_MAP_PATH, 8),
+        (IOS_OWNERSHIP_MAP_PATH, 5),
+    ] {
+        let text = read_repo_file(path);
+        for line in text.lines().skip(1) {
+            let columns: Vec<_> = line.split('\t').collect();
+            let Some(status) = columns.get(status_column) else {
+                hits.push(format!("{path}: malformed row `{line}`"));
+                continue;
+            };
+            if open_statuses.contains(*status) {
+                hits.push(format!("{path}: open status `{status}` in `{line}`"));
+            }
+        }
+    }
+
+    assert!(
+        hits.is_empty(),
+        "completed HRA scorecard must not retain open inventory statuses: {hits:#?}"
+    );
 }

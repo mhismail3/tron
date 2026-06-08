@@ -2,20 +2,21 @@
 
 Status: `completed`
 
-Generated from the live checkout after HRA-16, then refreshed during AHA-6 and AHA-8 to keep the current ownership TSVs aligned with the post-HRA Rust and iOS cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test move map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs.
+Generated from the live checkout after HRA-16, then refreshed during AHA-6, AHA-8, and AHA-9 to keep the current ownership TSVs aligned with the post-HRA cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test current ownership map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
-Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
+Plan summary: `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md`.
 
 ## Machine-Readable Artifacts
 
 - `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv`
-- `packages/agent/docs/hierarchical-rearchitecture-move-map.tsv`
-- `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`
+- `packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv`
+- `packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv`
 - `packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md`
+- `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md`
 
-The global HRA inventory and move-map TSV files use this stable header:
+The global HRA inventory and current-ownership-map TSV files use this stable header:
 
 ```text
 current_path	target_path	package	area	owner	classification	reason	phase	status	notes
@@ -23,9 +24,9 @@ current_path	target_path	package	area	owner	classification	reason	phase	status	n
 
 Allowed classifications: `retain_in_place`, `move`, `split`, `merge`, `delete`, `asset`, `generated`, `external_boundary`.
 
-Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_unfixed`, `blocked`, `deferred_to_successor`.
+Allowed statuses during an active campaign: `pending`, `running`, `passed`, `passed_after_fix`, `failed_unfixed`, `blocked`, `deferred_to_successor`. Because this HRA scorecard is `100/100 completed`, the current machine-readable inventory and ownership maps must not retain `pending`, `running`, `blocked`, `failed_unfixed`, or `deferred_to_successor` rows.
 
-The HRA iOS move map uses this HRA-8-specific header:
+The HRA iOS current ownership map uses this HRA-8-specific header:
 
 ```text
 current_path	target_path	owner	phase	classification	status	reason
@@ -35,7 +36,7 @@ current_path	target_path	owner	phase	classification	status	reason
 
 | Metric | Count |
 | --- | --- |
-| Tracked files after AHA-8 staged additions | 1389 |
+| Tracked files after AHA-9 staged additions | 1390 |
 | Files under `packages/agent/src` | 524 |
 | Files under `packages/agent/tests` | 33 |
 | Files under `packages/ios-app/Sources` | 416 |
@@ -49,7 +50,7 @@ current_path	target_path	owner	phase	classification	status	reason
 | --- | --- |
 | .swift | 659 |
 | .rs | 556 |
-| .md | 24 |
+| .md | 25 |
 | .ttf | 20 |
 | .png | 20 |
 | .json | 20 |
@@ -79,7 +80,7 @@ current_path	target_path	owner	phase	classification	status	reason
 | Package | Count |
 | --- | --- |
 | ios-app | 648 |
-| agent | 585 |
+| agent | 586 |
 | mac-app | 119 |
 | scripts | 22 |
 | github | 8 |
@@ -108,7 +109,7 @@ current_path	target_path	owner	phase	classification	status	reason
 
 The current Rust source root has only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`. Domain startup helpers live under `packages/agent/src/domains/registration`; non-session domains and the session event-store no longer have avoidable same-name file/folder module pairs. HRA-7 mirrors engine tests under `engine/tests/{authority,catalog,durability,invocation,kernel,runtime}` and splits root static integration targets into folder-backed modules while preserving their integration target names.
 
-HRA-8 added a 547-row iOS source/test Swift move map. HRA-9 updated that map to 550 live Swift rows after the `EngineConnection` split and marked the Engine rows `passed_after_fix`. HRA-10 updated the map to 551 live Swift rows after the Session display-model split and marked the Session rows `passed_after_fix`. HRA-11 updated the map to 553 live Swift rows after the UI support splits, HRA-12 kept the same 553-row coverage while marking the App/Support rows `passed_after_fix`, and HRA-13 updated the map to 566 live Swift rows after the SourceGuard and reconstruction test splits. HRA-16 kept 566 live Swift rows while replacing the generic reconstruction `Handlers` bucket with `ChatMessageProjection` and moving `EngineConnectionReconnectTests` into the WebSocket test mirror. AHA-8 refreshes the current map to 571 live Swift rows after the concrete engine client split and SourceGuard budget checks. All iOS source/test map rows are now `passed_after_fix`; the map has no fallback rows, points no live file at old broad-bucket targets, and is guarded by `ios_hra8_move_map_covers_every_source_and_test_swift_file`. HRA-14 updates the global HRA TSV inventory to include 74 Mac source files and 36 Mac test files under the target owner roots.
+HRA-8 added a 547-row iOS source/test Swift current ownership map. HRA-9 updated that map to 550 live Swift rows after the `EngineConnection` split and marked the Engine rows `passed_after_fix`. HRA-10 updated the map to 551 live Swift rows after the Session display-model split and marked the Session rows `passed_after_fix`. HRA-11 updated the map to 553 live Swift rows after the UI support splits, HRA-12 kept the same 553-row coverage while marking the App/Support rows `passed_after_fix`, and HRA-13 updated the map to 566 live Swift rows after the SourceGuard and reconstruction test splits. HRA-16 kept 566 live Swift rows while replacing the generic reconstruction `Handlers` bucket with `ChatMessageProjection` and moving `EngineConnectionReconnectTests` into the WebSocket test mirror. AHA-8 refreshed the current map to 571 live Swift rows after the concrete engine client split and SourceGuard budget checks. AHA-9 renamed the live identity maps to current ownership maps and added a completed-score inventory gate. All iOS source/test map rows are now `passed_after_fix`; the map has no fallback rows, points no live file at old broad-bucket targets, and is guarded by `ios_hra8_ownership_map_covers_every_source_and_test_swift_file`. HRA-14 updates the global HRA TSV inventory to include 74 Mac source files and 36 Mac test files under the target owner roots.
 
 ## Directories Over 12 Source Files
 

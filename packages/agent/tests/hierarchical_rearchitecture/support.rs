@@ -6,12 +6,14 @@ use std::process::Command;
 
 pub(super) const FILE_INVENTORY_PATH: &str =
     "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv";
-pub(super) const MOVE_MAP_PATH: &str =
-    "packages/agent/docs/hierarchical-rearchitecture-move-map.tsv";
-pub(super) const IOS_MOVE_MAP_PATH: &str =
-    "packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv";
+pub(super) const OWNERSHIP_MAP_PATH: &str =
+    "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv";
+pub(super) const IOS_OWNERSHIP_MAP_PATH: &str =
+    "packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv";
 pub(super) const IOS_PROJECT_MAP_PATH: &str =
     "packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md";
+pub(super) const PLAN_SUMMARY_PATH: &str =
+    "packages/agent/docs/hierarchical-rearchitecture-plan-summary.md";
 pub(super) const SCORECARD_PATH: &str =
     "packages/agent/docs/hierarchical-rearchitecture-scorecard.md";
 pub(super) const EVIDENCE_PATH: &str =

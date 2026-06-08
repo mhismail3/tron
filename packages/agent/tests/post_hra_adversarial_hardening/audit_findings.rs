@@ -370,9 +370,11 @@ fn inventory_and_provenance_have_no_open_or_external_closeout_state() {
         "packages/agent/docs/hierarchical-rearchitecture-scorecard.md",
         "packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md",
         "packages/agent/docs/hierarchical-rearchitecture-inventory.md",
+        "packages/agent/docs/hierarchical-rearchitecture-plan-summary.md",
+        "packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md",
         "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
-        "packages/agent/docs/hierarchical-rearchitecture-move-map.tsv",
-        "packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv",
+        "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
+        "packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv",
     ] {
         let text = read_repo_file(file);
         if text.contains("TRON_REARCHITECTURE_PLAN.md") {
@@ -380,15 +382,24 @@ fn inventory_and_provenance_have_no_open_or_external_closeout_state() {
         }
     }
 
-    for file in [
-        "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
-        "packages/agent/docs/hierarchical-rearchitecture-move-map.tsv",
-        "packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv",
+    for (file, status_column) in [
+        (
+            "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv",
+            8,
+        ),
+        (
+            "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv",
+            8,
+        ),
+        (
+            "packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv",
+            5,
+        ),
     ] {
         let text = read_repo_file(file);
         for line in text.lines().skip(1) {
             let columns: Vec<_> = line.split('\t').collect();
-            if let Some(status) = columns.get(8) {
+            if let Some(status) = columns.get(status_column) {
                 if matches!(
                     *status,
                     "pending" | "running" | "blocked" | "failed_unfixed" | "deferred_to_successor"

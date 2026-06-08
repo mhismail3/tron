@@ -1,6 +1,6 @@
 # Post-HRA Adversarial Hardening Evidence Manifest
 
-Current score: **82/100**
+Current score: **90/100**
 
 Status: **active**
 
@@ -23,9 +23,9 @@ known audit findings are covered by executable proof.
 | AHA-4 | passed_after_fix | Added post-XcodeGen `git diff --exit-code` checks for tracked iOS/Mac projects in CI and release workflows, kept Mac `build-for-testing`, and added focused CI execution for `TronPathsTests`, `ServerStatusPollerTests`, and `TailscaleProbeTests`. | AHA Xcode drift and Mac wrapper CI gates both passed after the workflow update. | Closed; final closeout still reruns local XcodeGen drift checks and focused Mac tests. | `30862f603` |
 | AHA-5 | passed_after_fix | Removed production `#[path]` aliases and module-inception residue by moving provider shared helpers under `providers::shared`, moving settings loader ownership under `profile::storage::loader`, converting OpenAI provider tests to a normal `provider/tests.rs` module, removing the foundation error-test path alias, and renaming the nested orchestrator coordinator module to `core`. | `cargo check --manifest-path packages/agent/Cargo.toml --all-targets`, the AHA production path/module-inception gate, and the provider/settings physical-owner gate passed. | Closed; no compatibility reexports or old internal import paths remain for the moved ownership surfaces. | `ebd37a6b7` |
 | AHA-6 | passed_after_fix | Added progressive docs for the AHA-5 ownership roots, added explicit 850 LOC watch rows for all current Rust files at or above the warning band, replaced stale HRA temporary-budget wording with the current hard-limit/watch-band contract, and refreshed HRA/PCC machine-readable inventories for the moved Rust ownership paths. | The AHA near-budget row gate, progressive-doc ownership-root gate, HRA inventory coverage gate, and PCC inventory coverage gate passed. | Closed; the 900 LOC HRA hard limit remains enforced separately. | `ebd37a6b7` |
-| AHA-7 | passed_after_fix | Deleted `MiscClient`, added concrete `SystemClient`, `MessageClient`, and `LogsClient`, changed `EngineClientProtocol` and call sites from `misc` to `system`/`message`/`logs`, removed stale Git workflow error/comment residue, and renamed the chat `Sub-Managers` marker to coordinator terminology. | AHA misc-facade and iOS transport residue gates passed after the client split. Focused iOS client tests cover system ping, message delete context, and log recent/ingest behavior. | Closed; no compatibility `misc` facade remains. | pending |
-| AHA-8 | passed_after_fix | Added SourceGuard deep hierarchy/count/budget gates for `Engine/Transport/Clients`, `UI/Capabilities/Shared`, `UI/Settings/Shell`, `UI/Components`, and `Tests/Session/Chat`; added Swift 590 LOC watch rows; refreshed root/iOS docs for actual resources and concrete engine clients; removed redundant iOS 26 availability annotations. | SourceGuard budget/availability tests and the AHA SourceGuard gate passed. XcodeGen regenerated the project and tracked project drift was checked. | Closed; final closeout still reruns focused iOS/Mac and full static proof. | pending |
-| AHA-9 | pending | Not started. | Pending. | Inventory/provenance integrity gaps remain intentionally red. | pending |
+| AHA-7 | passed_after_fix | Deleted `MiscClient`, added concrete `SystemClient`, `MessageClient`, and `LogsClient`, changed `EngineClientProtocol` and call sites from `misc` to `system`/`message`/`logs`, removed stale Git workflow error/comment residue, and renamed the chat `Sub-Managers` marker to coordinator terminology. | AHA misc-facade and iOS transport residue gates passed after the client split. Focused iOS client tests cover system ping, message delete context, and log recent/ingest behavior. | Closed; no compatibility `misc` facade remains. | `b3c0e96bb` |
+| AHA-8 | passed_after_fix | Added SourceGuard deep hierarchy/count/budget gates for `Engine/Transport/Clients`, `UI/Capabilities/Shared`, `UI/Settings/Shell`, `UI/Components`, and `Tests/Session/Chat`; added Swift 590 LOC watch rows; refreshed root/iOS docs for actual resources and concrete engine clients; removed redundant iOS 26 availability annotations. | SourceGuard budget/availability tests and the AHA SourceGuard gate passed. XcodeGen regenerated the project and tracked project drift was checked. | Closed; final closeout still reruns focused iOS/Mac and full static proof. | `b3c0e96bb` |
+| AHA-9 | passed_after_fix | Renamed live HRA identity maps to current ownership maps, added an in-repo HRA plan summary, redirected HRA provenance to that summary, refreshed HRA/PCC inventories, and tightened completed-score inventory gates for the global and iOS TSV status columns. | HRA inventory coverage, completed-status, iOS ownership-map, AHA provenance, PCC inventory, personal-info, and residue scans pass after this checkpoint. | Closed; the AHA-9 implementation checkpoint hash is recorded in the ledger and will be backfilled in the final hash-record update. | pending |
 | AHA-10 | pending | Not started. | Pending. | Final closeout proof remains pending. | pending |
 
 ## AHA-0 Red Proof
@@ -299,3 +299,60 @@ cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial
 ```
 
 Result: exit 0, 1 passed.
+
+## AHA-9 Verification
+
+Inventory and provenance integrity cleanup:
+
+- Renamed the live HRA TSVs from identity-style move maps to current ownership
+  maps.
+- Added `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md` so
+  the completed HRA campaign no longer depends on an external handoff plan path.
+- Redirected HRA scorecard, evidence, inventory, README, and iOS project-map
+  provenance to the in-repo summary.
+- Added a completed-HRA inventory gate that rejects `pending`, `running`,
+  `blocked`, `failed_unfixed`, and `deferred_to_successor` rows across the
+  global and iOS TSV status columns.
+- Regenerated HRA and PCC machine-readable inventories from the live file list.
+
+Proof:
+
+```bash
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+```
+
+Result: exit 0.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture
+```
+
+Result: exit 0, 35 passed.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants -- --nocapture
+```
+
+Result: exit 0, 16 passed.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants primitive_code_cleanup_inventory_covers_tracked_files -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+```bash
+scripts/personal-info-guard.sh
+```
+
+Result: exit 0; full source scan passed.
+
+```bash
+git diff --check
+```
+
+Result: exit 0.
+
+Direct scans for the old HRA external-plan filename, old move-map artifact
+filenames, the old iOS move-map guard name, and open TSV statuses returned no
+hits in live HRA docs, README links, and HRA tests.

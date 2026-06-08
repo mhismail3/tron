@@ -74,13 +74,13 @@ fn ios_tests_mirror_source_boundaries() {
 }
 
 #[test]
-fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
-    let map = read_repo_file(IOS_MOVE_MAP_PATH);
+fn ios_hra8_ownership_map_covers_every_source_and_test_swift_file() {
+    let map = read_repo_file(IOS_OWNERSHIP_MAP_PATH);
     let mut lines = map.lines();
     assert_eq!(
         lines.next(),
         Some("current_path\ttarget_path\towner\tphase\tclassification\tstatus\treason"),
-        "{IOS_MOVE_MAP_PATH} must keep the HRA-8 iOS move-map header"
+        "{IOS_OWNERSHIP_MAP_PATH} must keep the HRA-8 iOS ownership-map header"
     );
 
     let allowed_phases = HashSet::from(["HRA-9", "HRA-10", "HRA-11", "HRA-12", "HRA-13", "HRA-16"]);
@@ -121,7 +121,7 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
         assert_eq!(
             columns.len(),
             7,
-            "{IOS_MOVE_MAP_PATH} row must have seven TSV columns: {line}"
+            "{IOS_OWNERSHIP_MAP_PATH} row must have seven TSV columns: {line}"
         );
         let [
             current,
@@ -139,57 +139,44 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
             current.ends_with(".swift")
                 && (current.starts_with("packages/ios-app/Sources/")
                     || current.starts_with("packages/ios-app/Tests/")),
-            "{IOS_MOVE_MAP_PATH} row must cover only iOS source/test Swift files: {line}"
+            "{IOS_OWNERSHIP_MAP_PATH} row must cover only iOS source/test Swift files: {line}"
         );
         assert!(
             target.ends_with(".swift")
                 && (target.starts_with("packages/ios-app/Sources/")
                     || target.starts_with("packages/ios-app/Tests/")),
-            "{IOS_MOVE_MAP_PATH} row must map to an iOS source/test Swift target: {line}"
+            "{IOS_OWNERSHIP_MAP_PATH} row must map to an iOS source/test Swift target: {line}"
         );
         assert!(
             !owner.is_empty(),
-            "{IOS_MOVE_MAP_PATH} row must name an owner: {line}"
+            "{IOS_OWNERSHIP_MAP_PATH} row must name an owner: {line}"
         );
         assert!(
             allowed_phases.contains(*phase),
-            "{IOS_MOVE_MAP_PATH} row has invalid target phase `{phase}`: {line}"
+            "{IOS_OWNERSHIP_MAP_PATH} row has invalid target phase `{phase}`: {line}"
         );
         assert!(
             allowed_classifications.contains(*classification),
-            "{IOS_MOVE_MAP_PATH} row has invalid classification `{classification}`: {line}"
+            "{IOS_OWNERSHIP_MAP_PATH} row has invalid classification `{classification}`: {line}"
         );
-        if *phase == "HRA-9"
-            || *phase == "HRA-10"
-            || *phase == "HRA-11"
-            || *phase == "HRA-12"
-            || *phase == "HRA-13"
-            || *phase == "HRA-16"
-        {
-            assert_eq!(
-                *status, "passed_after_fix",
-                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10/HRA-11/HRA-12/HRA-13/HRA-16 rows should be complete after the Engine, Session, UI, Support, test hierarchy, and closeout moves: {line}"
-            );
-        } else {
-            assert_eq!(
-                *status, "pending",
-                "{IOS_MOVE_MAP_PATH} rows for future iOS hierarchy phases remain pending until their phase moves the files: {line}"
-            );
-        }
+        assert_eq!(
+            *status, "passed_after_fix",
+            "{IOS_OWNERSHIP_MAP_PATH} HRA-9/HRA-10/HRA-11/HRA-12/HRA-13/HRA-16 rows must all be complete in the closed HRA map: {line}"
+        );
         assert!(
             !reason.is_empty(),
-            "{IOS_MOVE_MAP_PATH} row must explain the target owner: {line}"
+            "{IOS_OWNERSHIP_MAP_PATH} row must explain the target owner: {line}"
         );
         assert!(
             banned_target_prefixes
                 .iter()
                 .all(|prefix| !target.starts_with(prefix)),
-            "{IOS_MOVE_MAP_PATH} target still points at an old technical bucket: {line}"
+            "{IOS_OWNERSHIP_MAP_PATH} target still points at an old technical bucket: {line}"
         );
         assert!(
             rows.insert((*current).to_owned(), (*target).to_owned())
                 .is_none(),
-            "{IOS_MOVE_MAP_PATH} has duplicate current path row: {current}"
+            "{IOS_OWNERSHIP_MAP_PATH} has duplicate current path row: {current}"
         );
     }
 
@@ -219,7 +206,7 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
 
     assert!(
         missing.is_empty() && extra.is_empty(),
-        "{IOS_MOVE_MAP_PATH} must cover every live iOS source/test Swift file exactly once; missing: {missing:#?}; extra: {extra:#?}"
+        "{IOS_OWNERSHIP_MAP_PATH} must cover every live iOS source/test Swift file exactly once; missing: {missing:#?}; extra: {extra:#?}"
     );
 }
 

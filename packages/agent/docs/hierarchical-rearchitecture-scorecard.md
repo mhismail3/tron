@@ -8,7 +8,7 @@ Branch: `codex/primitive-engine-teardown`
 
 Baseline commit: `7cedc8ac3`
 
-Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
+Plan summary: `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md`.
 
 ## Operating Rules
 
@@ -30,9 +30,10 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 | `packages/agent/docs/hierarchical-rearchitecture-scorecard.md` | completed | Weighted campaign scorecard and open-loop ledger. |
 | `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md` | completed | Verification, red/green output, commit hashes, and residual risk. |
 | `packages/agent/docs/hierarchical-rearchitecture-inventory.md` | completed | Human-readable inventory summary and target architecture notes. |
+| `packages/agent/docs/hierarchical-rearchitecture-plan-summary.md` | completed | In-repo summary of the operator HRA handoff plan and provenance boundary. |
 | `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv` | completed | Machine-readable tracked-file inventory. |
-| `packages/agent/docs/hierarchical-rearchitecture-move-map.tsv` | completed | Machine-readable old-to-new path map. |
-| `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv` | completed | HRA-8 machine-readable source/test Swift move map for iOS hierarchy phases. |
+| `packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv` | completed | Machine-readable current ownership map. |
+| `packages/agent/docs/hierarchical-rearchitecture-ios-current-ownership-map.tsv` | completed | HRA-8 machine-readable source/test Swift current ownership map for iOS hierarchy phases. |
 | `packages/agent/docs/hierarchical-rearchitecture-ios-project-map.md` | completed | HRA-8 XcodeGen, ShareExtension, SourceGuard, and iOS phase-ownership project map. |
 | `packages/agent/tests/hierarchical_rearchitecture_invariants.rs` | completed | Static hierarchy gates for this campaign. |
 
@@ -43,14 +44,14 @@ Total weight: **100**
 | ID | Area | Weight | Status | Owner | Evidence | Open loops |
 |----|------|--------|--------|-------|----------|------------|
 | HRA-0 | Scorecard, evidence, and static-gate setup | 5 | passed_after_fix | architecture campaign | Required artifacts, README links, CI hook, and red hierarchy invariant target are present. | Red gates are expected until later rows move code. |
-| HRA-1 | Whole-repo inventory and target architecture | 8 | passed_after_fix | architecture campaign | Live tracked-file inventory, target move map, folder owner table, drift findings, and large-file budgets are recorded. | Pending move/split rows are implementation work for HRA-2 through HRA-14, not unclassified inventory. |
+| HRA-1 | Whole-repo inventory and target architecture | 8 | passed_after_fix | architecture campaign | Live tracked-file inventory, current ownership map, folder owner table, drift findings, and large-file budgets are recorded. | Closed; all current inventory and ownership-map rows are complete after AHA-9. |
 | HRA-2 | Rust app, transport, shared, and platform roots | 6 | passed_after_fix | Rust app/transport/shared owners | Moved root binary helpers into app CLI/bootstrap, grouped app health/lifecycle/bootstrap, grouped transport HTTP/engine/runtime, collapsed shared into foundation/protocol/server/storage/observability, and updated README/static gates. | HRA-15 still owns broad stale-path doc scans outside current-code docs. |
 | HRA-3 | Rust engine kernel and invocation hierarchy | 10 | passed_after_fix | Rust engine owner | Moved kernel/catalog/invocation/runtime modules under owned subsystem roots, collapsed invocation host into `invocation/host`, split kernel types under `kernel/types`, and removed avoidable engine same-name file/folder pairs. | Closed by HRA-7 decomposition and AHA-6 near-budget watch rows. |
 | HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix | Rust engine owner | Moved grants/leases/compensation under `authority`; moved ledger/queue/resources/state/streams under `durability`; kept SQLite codecs under their owning stores; collapsed resource store into `resources/store/mod.rs`. | Closed by HRA-7 decomposition. AHA-6 records current Rust files at or above the 850 LOC warning band as active watch rows. |
 | HRA-5 | Rust domain vertical slices | 10 | passed_after_fix | Rust domain owners | Moved registration helpers under `domains/registration`; moved agent prompt/loop/context, auth oauth/credentials, model routing/protocol, and settings profile owners; split capability operations, Kimi stream tests, and over-budget domain test modules. | Closed with no remaining HRA-5 temporary file budgets. |
 | HRA-6 | Rust session and event-store hierarchy | 7 | passed_after_fix | Rust session owner | Moved session lifecycle/query/reconstruction into owner folders, moved event-store envelope/factory/reconstruction/store/session repository tests to folder-backed modules, and split SQLite event repository tests by behavior. | HRA-7 still owns broader Rust test/doc budget cleanup. |
 | HRA-7 | Rust tests and progressive docs | 5 | passed_after_fix | Rust docs/tests owners | Mirrored engine tests to subsystem folders, split root static integration gates into folder-backed modules, decomposed over-budget Rust stores/runtime helpers, and updated progressive docs/README. | iOS hierarchy closure is owned by HRA-9 through HRA-13. |
-| HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | passed_after_fix | iOS architecture owner | Added HRA SourceGuard red hierarchy checks, generated the iOS source/test Swift move map, recorded the XcodeGen/share-extension project map, and added a Rust map-coverage invariant. | Closed; later iOS/Mac/docs/final closeout rows are complete. |
+| HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | passed_after_fix | iOS architecture owner | Added HRA SourceGuard red hierarchy checks, generated the iOS source/test Swift current ownership map, recorded the XcodeGen/share-extension project map, and added a Rust map-coverage invariant. | Closed; later iOS/Mac/docs/final closeout rows are complete. |
 | HRA-9 | iOS Engine hierarchy | 8 | passed_after_fix | iOS engine owner | Moved Engine transport, protocol DTOs, event live/payload/plugin/reconstruction code, persistence, and repositories into target owner folders; split `EngineConnection` into focused WebSocket request, receive, reconnect, frame, and type units; regenerated XcodeGen. | Closed; later iOS test mirroring is complete in HRA-13. |
 | HRA-10 | iOS Session hierarchy | 7 | passed_after_fix | iOS session owner | Moved Session chat view models, coordinators, messaging, navigation, state, attachments, timeline activity/messages/reconstruction/tokens, and retained parsing under workflow-owned folders; split `CapabilityInvocationDisplayModel` presentation helpers. | Closed; later iOS test mirroring is complete in HRA-13. |
 | HRA-11 | iOS UI hierarchy | 6 | passed_after_fix | iOS UI owner | Replaced `UI/Views` with `UI/Chat`, `UI/Settings`, `UI/Onboarding`, `UI/RuntimeSurfaces`, `UI/Capabilities`, `UI/Components`, `UI/System`, and `UI/Theme`; split runtime surface and settings support files. | Closed; later iOS test mirroring is complete in HRA-13. |
@@ -115,7 +116,7 @@ checks:
 - `rust_engine_tests_are_mirrored_by_subsystem`
 - `rust_hra7_has_no_remaining_overbudget_rust_files`
 - `rust_progressive_docs_declare_dependency_and_test_ownership`
-- `ios_hra8_move_map_covers_every_source_and_test_swift_file`
+- `ios_hra8_ownership_map_covers_every_source_and_test_swift_file`
 - `ios_engine_hra9_sources_use_target_boundaries`
 - `ios_session_hra10_sources_use_target_boundaries`
 - `ios_ui_hra11_sources_use_target_boundaries`
