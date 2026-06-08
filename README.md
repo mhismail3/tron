@@ -203,8 +203,9 @@ engine/
 ├── invocation/   Invocation model, host, handles, dispatch, idempotency flow
 ├── kernel/       IDs, errors, policy, schemas, and core catalog type contracts
 ├── primitives/   Model-facing primitive worker definitions and handlers
-└── runtime/      External-worker runtime, worker protocol, trigger runtime
-domains/          Every Tron worker: contracts, deps, handlers, operations, local services, tests
+├── runtime/      External-worker runtime, worker protocol, trigger runtime
+└── tests/        Subsystem-mirrored engine tests and shared fixtures
+domains/          Worker-owned behavior slices, contracts, services, and tests
 platform/         OS/vendor integrations retained by the primitive loop
 shared/
 ├── foundation/   Constants, IDs, paths, profiles, retry/text helpers, shared errors
@@ -244,6 +245,11 @@ the loop, ledger, audit, or iOS DTO layers.
 `stream.rs` publishes only that domain's declared topics. Cross-domain access
 goes through explicit domain services or shared DTOs, so an engineer can follow
 a capability by reading one domain folder instead of a central dispatch table.
+
+Rust tests mirror the production owners. Root `packages/agent/tests` contains
+only cross-crate integration/static gates, while engine unit tests live under
+`engine/tests/{authority,catalog,durability,invocation,kernel,runtime}` with
+shared fixtures isolated in `engine/tests/fixtures`.
 
 ---
 

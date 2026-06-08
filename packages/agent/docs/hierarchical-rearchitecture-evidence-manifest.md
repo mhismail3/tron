@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Evidence Manifest
 
-Current score: **54/100**
+Current score: **59/100**
 
 Status: **running**
 
@@ -15,11 +15,11 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 | HRA-0 | passed_after_fix | Created the scorecard, evidence manifest, human inventory, generated TSV inventory, generated move map, Rust invariant target, README living-doc links, and `scripts/tron.d/quality.sh` CI hook. The invariant target intentionally fails against the current tree on loose Rust root files, flat engine root modules, broad iOS source buckets, non-mirrored iOS test buckets, and over-budget files without decomposition rows. | Red output captured below. | Red gates are expected until HRA-2 through HRA-13 move the tree and HRA-1 records final budgets. | `f14f7b60c` |
 | HRA-1 | passed_after_fix | Replaced HRA-0 placeholder TSVs with a live tracked-file target map; recorded counts, extension counts, package counts, loose root files, overfull folders, one-file folders, generic bucket folders, same-name file/folder pairs, over-budget files, docs/scripts old-path claims, and retained folder owners. No code files were moved in this row. | Focused HRA invariant rerun improved from 2 passed/5 failed to 3 passed/4 failed: formalization, inventory coverage, and large-file budget gates pass; root Rust, engine root, iOS source bucket, and iOS test mirror gates remain red for implementation rows. | Pending move/split implementation rows remain HRA-2 through HRA-14; docs closeout remains HRA-15. | `58be3f8df` |
 | HRA-2 | passed_after_fix | Moved `main_cli.rs`, `main_runtime.rs`, and `main_tests.rs` under `app/cli` and `app/bootstrap`; moved app config/disk/server/health/metrics/onboarding/shutdown under bootstrap/health/lifecycle; moved transport auth/contracts/engine/engine_ws/setup under http/engine/runtime; collapsed shared root into foundation/protocol/server/storage/observability; removed old path modules instead of re-exporting them. | `cargo check --manifest-path packages/agent/Cargo.toml --bin tron` passed; `cargo test --manifest-path packages/agent/Cargo.toml --lib app::bootstrap -- --quiet` passed 80 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --quiet` passed 27 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --quiet` passed 16 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test db_path_guard -- --quiet` passed 13 tests; HRA invariant target is expected partial red with Rust source-root and HRA-2 shape gates passing. | iOS source/test gates remain red for HRA-9 through HRA-13. | `67b8a5aa6` |
-| HRA-3 | passed_after_fix | Moved flat engine root modules into `kernel`, `catalog`, `invocation`, and `runtime`; collapsed `host.rs` plus `host/` into `invocation/host`; split the over-budget kernel type file into `kernel/types/{catalog,function,trigger,worker}.rs`; moved primitive `resource` and `ui` files to folder `mod.rs` owners so no engine same-name file/folder pairs remain. | Command batch passed except the expected partial-red HRA target: Rust engine gates pass and only iOS source/test gates fail. Full command outcomes recorded in HRA-3/HRA-4 verification below. | Engine runtime/store files still over budget are listed with explicit temporary budgets; HRA-7 owns test/doc decomposition after the production hierarchy stabilizes. | `ff4640ce8` |
+| HRA-3 | passed_after_fix | Moved flat engine root modules into `kernel`, `catalog`, `invocation`, and `runtime`; collapsed `host.rs` plus `host/` into `invocation/host`; split the over-budget kernel type file into `kernel/types/{catalog,function,trigger,worker}.rs`; moved primitive `resource` and `ui` files to folder `mod.rs` owners so no engine same-name file/folder pairs remain. | Command batch passed except the expected partial-red HRA target: Rust engine gates pass and only iOS source/test gates fail. Full command outcomes recorded in HRA-3/HRA-4 verification below. | Runtime/test decomposition closed in HRA-7; later Rust loops are only broad final verification. | `ff4640ce8` |
 | HRA-4 | passed_after_fix | Moved grants, leases, and compensation under `authority`; moved ledger, queue, resources, state, and streams under `durability`; kept SQLite codecs under their owning store folders; collapsed resource store into `durability/resources/store/mod.rs`; regenerated HRA and primitive cleanup inventories. | Command batch passed except the expected partial-red HRA target: authority/durability compile and engine tests pass. Full command outcomes recorded in HRA-3/HRA-4 verification below. | Authority/durability store modules remain cohesive but over 900 LOC with explicit temporary budget rows; no compatibility modules preserve old paths. | `ff4640ce8` |
-| HRA-5 | passed_after_fix | Added expanded red domain hierarchy gates, then moved non-session domain helpers into owned vertical trees: registration helpers, agent prompt/loop/context, auth oauth/credentials, model routing/protocol, settings profile, capability operation modules, Kimi stream handler tests, and split over-budget HRA-5 domain tests. Deleted unused `resource_projection.rs` instead of preserving a dead module. | Focused checks passed for compaction engine, stream processor, auth storage, and Kimi stream handler; final HRA target rerun passed all Rust/HRA-5 gates and remains partial red only on iOS source/test gates. | Session/event-store closure moved to HRA-6; HRA-7 owns remaining Rust test/doc budgets. | `f8c8f356c` |
-| HRA-6 | passed_after_fix | Added red session/event-store hierarchy gates, then moved session lifecycle/query/reconstruction into owner folders, moved event-store envelope/factory/reconstruction/store/session repository modules to folder-backed owners, removed session event-store same-name file/folder pairs, and split SQLite event repository tests by behavior. | Session domain tests passed; final HRA target rerun passed all Rust/HRA-6 gates and remains partial red only on iOS source/test gates. | HRA-7 owns remaining Rust test/doc budget cleanup. | `18268fc26` |
-| HRA-7 | running | Added red Rust test/progressive-doc gates for engine test mirroring, Rust over-budget closure, and module documentation sections. | Red gate pending. | Mirror tests to new boundaries, update progressive docs, and remove temporary Rust budget rows. | pending |
+| HRA-5 | passed_after_fix | Added expanded red domain hierarchy gates, then moved non-session domain helpers into owned vertical trees: registration helpers, agent prompt/loop/context, auth oauth/credentials, model routing/protocol, settings profile, capability operation modules, Kimi stream handler tests, and split over-budget HRA-5 domain tests. Deleted unused `resource_projection.rs` instead of preserving a dead module. | Focused checks passed for compaction engine, stream processor, auth storage, and Kimi stream handler; final HRA target rerun passed all Rust/HRA-5 gates and remains partial red only on iOS source/test gates. | Session/event-store closure moved to HRA-6; Rust test/doc budget cleanup moved to HRA-7. | `f8c8f356c` |
+| HRA-6 | passed_after_fix | Added red session/event-store hierarchy gates, then moved session lifecycle/query/reconstruction into owner folders, moved event-store envelope/factory/reconstruction/store/session repository modules to folder-backed owners, removed session event-store same-name file/folder pairs, and split SQLite event repository tests by behavior. | Session domain tests passed; final HRA target rerun passed all Rust/HRA-6 gates and remains partial red only on iOS source/test gates. | Rust test/doc budget cleanup moved to HRA-7. | `18268fc26` |
+| HRA-7 | passed_after_fix | Added red Rust test/progressive-doc gates, then mirrored engine tests to subsystem folders, split root static integration targets into folder-backed modules, decomposed over-budget Rust stores/runtime helpers, updated progressive docs and README, and regenerated inventories. | Engine tests passed; teardown, cleanup, and DB guards passed; final HRA target rerun passed all Rust/HRA-7 gates and remains partial red only on iOS source/test gates. | HRA-8 owns iOS inventory and SourceGuard red gates. | pending |
 | HRA-8 | pending | Not started. | pending | Add iOS SourceGuard red hierarchy gates and project map. | pending |
 | HRA-9 | pending | Not started. | pending | Move iOS Engine hierarchy and split transport. | pending |
 | HRA-10 | pending | Not started. | pending | Move iOS Session hierarchy. | pending |
@@ -380,3 +380,45 @@ New HRA-7 failures before implementation:
 - `rust_progressive_docs_declare_dependency_and_test_ownership`
 
 Existing failures remain the iOS hierarchy gates owned by HRA-9 through HRA-13.
+
+## HRA-7 Rust Test/Doc Verification
+
+Commands:
+
+```bash
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+cargo check --manifest-path packages/agent/Cargo.toml --bin tron
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests:: --lib -- --quiet
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --quiet
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --quiet
+cargo test --manifest-path packages/agent/Cargo.toml --test db_path_guard -- --quiet
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture
+```
+
+Results:
+
+- `cargo fmt --all -- --check`: passed.
+- `cargo check --bin tron`: passed.
+- `engine::tests::` unit slice: 175 passed.
+- primitive engine teardown invariants: 27 passed.
+- primitive code cleanup invariants: 16 passed.
+- DB path guard: 13 passed.
+- HRA invariant target: expected partial red with 22 passed and 2 failed.
+
+Final HRA-7 static-gate rerun:
+
+```text
+running 24 tests
+22 passed; 2 failed
+```
+
+Passing gates cover mirrored Rust engine tests, Rust over-budget closure,
+progressive module docs, root/static test decomposition, inventory coverage,
+scorecard formalization, Rust source/app/transport/shared roots, engine roots,
+domain hierarchy, session/event-store hierarchy, and large-file budget rows. The
+remaining failures are:
+
+- `ios_sources_do_not_use_broad_views_network_database_buckets`
+- `ios_tests_mirror_source_boundaries`
+
+Checkpoint commit: pending.

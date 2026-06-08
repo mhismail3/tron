@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Scorecard
 
-Current score: **54/100**
+Current score: **59/100**
 
 Status: **running**
 
@@ -47,7 +47,7 @@ Total weight: **100**
 | HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix | Rust engine owner | Moved grants/leases/compensation under `authority`; moved ledger/queue/resources/state/streams under `durability`; kept SQLite codecs under their owning stores; collapsed resource store into `resources/store/mod.rs`. | Authority/durability store modules remain cohesive but over 900 LOC with explicit temporary budgets. |
 | HRA-5 | Rust domain vertical slices | 10 | passed_after_fix | Rust domain owners | Moved registration helpers under `domains/registration`; moved agent prompt/loop/context, auth oauth/credentials, model routing/protocol, and settings profile owners; split capability operations, Kimi stream tests, and over-budget domain test modules. | Closed with no remaining HRA-5 temporary file budgets. |
 | HRA-6 | Rust session and event-store hierarchy | 7 | passed_after_fix | Rust session owner | Moved session lifecycle/query/reconstruction into owner folders, moved event-store envelope/factory/reconstruction/store/session repository tests to folder-backed modules, and split SQLite event repository tests by behavior. | HRA-7 still owns broader Rust test/doc budget cleanup. |
-| HRA-7 | Rust tests and progressive docs | 5 | running | Rust docs/tests owners | Red gates added for mirrored engine tests, Rust over-budget closure, and progressive module docs. | Mirror tests to new boundaries, update progressive docs, and remove temporary Rust budget rows. |
+| HRA-7 | Rust tests and progressive docs | 5 | passed_after_fix | Rust docs/tests owners | Mirrored engine tests to subsystem folders, split root static integration gates into folder-backed modules, decomposed over-budget Rust stores/runtime helpers, and updated progressive docs/README. | HRA-8 starts iOS inventory and SourceGuard red gates. |
 | HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | pending | iOS architecture owner | Not started. | Add red SourceGuard hierarchy gates and iOS move map. |
 | HRA-9 | iOS Engine hierarchy | 8 | pending | iOS engine owner | Not started. | Reorganize transport, protocol, events, persistence, and model filtering. |
 | HRA-10 | iOS Session hierarchy | 7 | pending | iOS session owner | Not started. | Move chat, timeline, state, messaging, navigation, attachments, and parsing. |
@@ -84,15 +84,6 @@ HRA-5 temporary budget rows.
 
 | Path | Owner | Limit | Current LOC | Decomposition plan | Status |
 |------|-------|-------|-------------|--------------------|--------|
-| `packages/agent/src/engine/authority/grants/mod.rs` | rust engine authority owner | 900 | 958 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/src/engine/durability/ledger/mod.rs` | rust engine durability owner | 900 | 955 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/src/engine/durability/resources/store/mod.rs` | rust engine durability owner | 900 | 972 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/src/engine/runtime/external_workers.rs` | rust engine runtime owner | 900 | 901 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/src/engine/tests/grant_authority.rs` | rust engine test owner | 900 | 929 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/src/engine/tests/resource_kernel.rs` | rust engine test owner | 900 | 1196 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/src/engine/tests/state_queue.rs` | rust engine test owner | 900 | 910 | HRA-7 owns focused Rust test/store decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/tests/primitive_code_cleanup_invariants.rs` | rust integration/static test owner | 900 | 943 | HRA-7 owns focused Rust test/static-gate decomposition after production module moves stabilize. | temporary_budget |
-| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | rust integration/static test owner | 900 | 2266 | HRA-7 owns focused Rust test/static-gate decomposition after production module moves stabilize. | temporary_budget |
 | `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | ios engine owner | 700 | 958 | HRA-9 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
 | `packages/ios-app/Sources/Session/Messages/CapabilityInvocationDisplayModel.swift` | ios session owner | 700 | 744 | HRA-10 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
 | `packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | ios UI owner | 700 | 817 | HRA-11 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
@@ -133,8 +124,6 @@ checks:
 
 ## Open Loops
 
-- HRA-7 still owns Rust test mirroring, progressive docs, and remaining
-  engine/static-test over-budget decomposition.
 - HRA-9 through HRA-13 still own iOS source/test hierarchy gates.
 - The project `@self-inspect` skill referenced by `AGENTS.md` is not installed
   in this Codex environment; direct repository and database inspection will be

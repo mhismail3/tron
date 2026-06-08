@@ -95,13 +95,12 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 
 ## Completed Rust Root Findings
 
-The current Rust source root has only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`. Domain startup helpers live under `packages/agent/src/domains/registration`; non-session domains and the session event-store no longer have avoidable same-name file/folder module pairs.
+The current Rust source root has only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`. Domain startup helpers live under `packages/agent/src/domains/registration`; non-session domains and the session event-store no longer have avoidable same-name file/folder module pairs. HRA-7 mirrors engine tests under `engine/tests/{authority,catalog,durability,invocation,kernel,runtime}` and splits root static integration targets into folder-backed modules while preserving their integration target names.
 
 ## Directories Over 12 Source Files
 
 | Directory | Source files | Owner | Phase |
 | --------- | ------------ | ----- | ----- |
-| `packages/agent/src/engine/tests` | 16 | rust engine test owner | HRA-7 |
 | `packages/ios-app/Sources/Engine/Network` | 16 | ios engine owner | HRA-9 |
 | `packages/ios-app/Sources/Engine/Protocol/DTOs` | 15 | ios engine owner | HRA-9 |
 | `packages/ios-app/Sources/UI/Views/Capabilities/Shared` | 19 | ios UI owner | HRA-11 |
@@ -197,16 +196,6 @@ The current Rust source root has only `packages/agent/src/lib.rs` and `packages/
 
 | Path | LOC | Limit | Owner | Phase |
 | ---- | --- | ----- | ----- | ----- |
-| `packages/agent/src/engine/authority/grants/mod.rs` | 958 | 900 | rust engine owner | HRA-7 |
-| `packages/agent/src/engine/durability/ledger/mod.rs` | 955 | 900 | rust engine owner | HRA-7 |
-| `packages/agent/src/engine/durability/resources/store/mod.rs` | 972 | 900 | rust engine owner | HRA-7 |
-| `packages/agent/src/engine/runtime/external_workers.rs` | 901 | 900 | rust engine owner | HRA-7 |
-| `packages/agent/src/engine/tests/grant_authority.rs` | 929 | 900 | rust engine test owner | HRA-7 |
-| `packages/agent/src/engine/tests/resource_kernel.rs` | 1196 | 900 | rust engine test owner | HRA-7 |
-| `packages/agent/src/engine/tests/state_queue.rs` | 910 | 900 | rust engine test owner | HRA-7 |
-| `packages/agent/tests/hierarchical_rearchitecture_invariants.rs` | 967 | 900 | rust integration/static test owner | HRA-7 |
-| `packages/agent/tests/primitive_code_cleanup_invariants.rs` | 943 | 900 | rust integration/static test owner | HRA-7 |
-| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | 2266 | 900 | rust integration/static test owner | HRA-7 |
 | `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | 958 | 700 | ios engine owner | HRA-9 |
 | `packages/ios-app/Sources/Session/Messages/CapabilityInvocationDisplayModel.swift` | 744 | 700 | ios session owner | HRA-10 |
 | `packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | 817 | 700 | ios UI owner | HRA-11 |
@@ -221,7 +210,6 @@ Old-path claims are intentionally still visible in historical HRA/PCC evidence a
 
 ## Open Loops
 
-- HRA-7 still owns Rust test mirroring, progressive docs, and remaining engine/static-test budget work.
 - HRA-9 through HRA-13 still own iOS source and test hierarchy gates.
 - HRA-14 still owns the Mac wrapper audit.
 - HRA-15 still owns stale path claims in docs/scripts/README outside evidence history.

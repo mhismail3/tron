@@ -26,13 +26,31 @@
 //! | `trace` | Agent trace record types and query options. |
 //! | `types` | Event payload, state, token, and generated event definitions. |
 //!
-//! ## Module Position
+//! ## Entry Points
 //!
-//! Depends on: core, settings.
-//! Depended on by: the agent runner, transport layer, audit, and domain stores.
+//! `EventStore` is the high-level transactional facade for session/event truth.
+//! `EventFactory` and `EventChainBuilder` build append-ready events, while
+//! `reconstruct_from_events` rebuilds provider-facing message context from the
+//! durable event stream.
 //!
-//! INVARIANT: this root uses normal folder-backed modules only. It must not
-//! hide ownership behind `#[path]` aliases.
+//! ## Dependency Direction
+//!
+//! Depends on: shared protocol/foundation types, SQLite storage helpers, and
+//! event payload DTOs. Depended on by session lifecycle/query/reconstruction,
+//! the agent loop, logs/blob/message domains, and transport read surfaces.
+//!
+//! ## Invariants
+//!
+//! - This root uses normal folder-backed modules only and must not hide
+//!   ownership behind `#[path]` aliases.
+//! - SQLite row shape and migrations stay under the SQLite owner.
+//! - Reconstruction is deterministic over persisted event order.
+//!
+//! ## Test Ownership
+//!
+//! Store tests live under `store/event_store/tests`; SQLite repository tests
+//! live under their repository owners; reconstruction tests live under
+//! `reconstruction/tests`.
 
 #![deny(unsafe_code)]
 

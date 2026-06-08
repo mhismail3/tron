@@ -1,23 +1,13 @@
-//! Engine test suite organized by substrate concern.
+//! Engine test suite mirrored by production subsystem.
 //!
-//! Keep new engine tests in one of the focused modules below. This file should
-//! stay limited to module declarations and shared fixture re-exports.
+//! Keep this root declaration-only. Shared fixtures live in `fixtures`, while
+//! behavior tests live under the subsystem they verify.
 
-mod support;
+mod fixtures;
 
-pub(in crate::engine::tests) use support::*;
-
-mod catalog_discovery;
-mod external_worker;
-mod external_worker_soak;
-mod grant_authority;
-mod host_invocation;
-mod idempotency;
-mod ids_types;
-mod ledger_idempotency;
-mod meta_primitives;
-mod resource_kernel;
-mod restart_chaos;
-mod state_queue;
-mod streams;
-mod triggers;
+mod authority;
+mod catalog;
+mod durability;
+mod invocation;
+mod kernel;
+mod runtime;

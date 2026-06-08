@@ -107,8 +107,6 @@ Current over-budget exceptions:
 
 | Path | Current LOC | Owner | Reason | Cleanup row |
 |------|-------------|-------|--------|-------------|
-| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | 2266 | teardown static gates | Completed teardown gate is historical proof; new cleanup gates should move to separate files. | PCC-9 |
-| `packages/agent/src/engine/tests/resource_kernel.rs` | 1196 | engine resource tests | Resource substrate behavior suite. | PCC-4 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2140 | iOS reconstruction tests | Large stored-event reconstruction suite. | PCC-6 |
 | `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | 1531 | iOS static guards | Primitive shell absence and source guards. | PCC-6 |
 | `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | 958 | iOS transport | WebSocket transport and request/response lifecycle. | PCC-6 |

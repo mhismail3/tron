@@ -364,12 +364,14 @@ packages/agent/src/domains/settings/profile/types/mod.rs	retain	repo	PCC-9	Curre
 packages/agent/src/domains/settings/profile/types/server.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
 packages/agent/src/domains/settings/profile/types/ui.rs	retain	repo	PCC-9	Current tracked file retained after HRA-5 path update
 packages/agent/src/domains/system/mod.rs	retain	rust compact domain	PCC-3/PCC-9	Current tracked file retained after HRA-5 path update
-packages/agent/src/engine/authority/compensation.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/authority/grants/mod.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/authority/grants/model.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/authority/grants/sqlite_codec.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/authority/leases.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/authority/mod.rs	retain	rust engine authority	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/authority/compensation.rs	retain	rust engine authority owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/authority/grants/authorization.rs	retain	rust engine authority owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/authority/grants/derivation.rs	retain	rust engine authority owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/authority/grants/mod.rs	retain	rust engine authority owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/authority/grants/model.rs	retain	rust engine authority owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/authority/grants/sqlite_codec.rs	retain	rust engine authority owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/authority/leases.rs	retain	rust engine authority owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/authority/mod.rs	retain	rust engine authority owner	PCC-9	Current tracked file retained after HRA-7 path update
 packages/agent/src/engine/catalog/capabilities.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/catalog/discovery.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/catalog/mod.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
@@ -377,24 +379,26 @@ packages/agent/src/engine/catalog/registry/catalog_changes.rs	retain	rust engine
 packages/agent/src/engine/catalog/registry/invocation.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/catalog/registry/mod.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/catalog/registry/output_contract.rs	retain	rust engine catalog	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/ledger/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/ledger/outcome.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/ledger/sqlite_codec.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/queue/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/queue/runtime.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/queue/sqlite_codec.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/resources/definitions.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/resources/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/resources/store/mod.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/resources/store/sqlite_codec.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/resources/store/tests.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/resources/types.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/resources/ui_surface.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/resources/validation.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/resources/versions.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/state.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/durability/streams.rs	retain	rust engine durability	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/durability/ledger/memory.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/durability/ledger/mod.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/ledger/outcome.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/ledger/sqlite_codec.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/mod.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/queue/mod.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/queue/runtime.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/queue/sqlite_codec.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/resources/definitions.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/resources/mod.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/resources/store/memory.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/durability/resources/store/mod.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/resources/store/sqlite_codec.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/resources/store/tests.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/resources/types.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/resources/ui_surface.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/resources/validation.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/resources/versions.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/state.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/durability/streams.rs	retain	rust engine durability owner	PCC-9	Current tracked file retained after HRA-7 path update
 packages/agent/src/engine/invocation/host/catalog_handle.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/invocation/host/handle.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/invocation/host/invocation_handle.rs	retain	rust engine invocation	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
@@ -436,26 +440,41 @@ packages/agent/src/engine/primitives/ui/mod.rs	retain	rust engine primitive	PCC-
 packages/agent/src/engine/primitives/ui/schemas.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/primitives/ui/validation.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/primitives/worker.rs	retain	rust engine primitive	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/runtime/external_workers.rs	retain	rust engine runtime	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/runtime/external_workers/mod.rs	retain	rust engine runtime owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/runtime/external_workers/proxy.rs	retain	rust engine runtime owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
 packages/agent/src/engine/runtime/mod.rs	retain	rust engine runtime	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/runtime/triggers.rs	retain	rust engine runtime	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
 packages/agent/src/engine/runtime/worker_protocol.rs	retain	rust engine runtime	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/catalog_discovery.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/external_worker.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/external_worker_soak.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/grant_authority.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/host_invocation.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/idempotency.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/ids_types.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/ledger_idempotency.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/meta_primitives.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/mod.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/resource_kernel.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/restart_chaos.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/state_queue.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/streams.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/support.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
-packages/agent/src/engine/tests/triggers.rs	retain	rust engine	PCC-3/PCC-9	Current tracked file retained after HRA-3/HRA-4 path update
+packages/agent/src/engine/tests/authority/grant_derivation.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/authority/helpers.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/authority/invocation_authorization.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/authority/mod.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/authority/worker_grants.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/catalog/catalog_discovery.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/catalog/mod.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/ledger_idempotency.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/materialized_files.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/mod.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/queue_inspection_persistence.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/queue_lifecycle.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/resource_contracts.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/resource_output_contracts.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/resource_wrappers.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/state_primitives.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/durability/streams.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/fixtures/mod.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/invocation/host_invocation.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/invocation/idempotency.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/invocation/meta_primitives.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/invocation/mod.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/kernel/ids_types.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/kernel/mod.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/mod.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/src/engine/tests/runtime/external_worker.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/runtime/external_worker_soak.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/runtime/mod.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/runtime/restart_chaos.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/src/engine/tests/runtime/triggers.rs	retain	rust engine test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
 packages/agent/src/lib.rs	retain	repo	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/main.rs	retain	repo	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/platform/device_broker.rs	retain	repo	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
@@ -541,12 +560,32 @@ packages/agent/src/transport/runtime/streams/tests.rs	retain	rust transport runt
 packages/agent/src/transport/runtime/streams/tron.rs	retain	rust transport runtime	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/transport/runtime/streams/turn.rs	retain	rust transport runtime	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
 packages/agent/src/transport/runtime/worker_heartbeat.rs	retain	rust transport runtime	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/tests/db_path_guard.rs	retain	rust integration/static test	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/tests/hierarchical_rearchitecture_invariants.rs	retain	rust integration/static test	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/tests/integration.rs	retain	rust integration/static test	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/tests/primitive_code_cleanup_invariants.rs	retain	rust integration/static test	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	retain	rust integration/static test	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
-packages/agent/tests/primitive_trace_execution.rs	retain	rust integration/static test	PCC-3/PCC-9	Current tracked file retained after HRA-2 path update
+packages/agent/tests/db_path_guard.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/tests/hierarchical_rearchitecture/ios_and_budgets.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/hierarchical_rearchitecture/mod.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/hierarchical_rearchitecture/rust_domains.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/hierarchical_rearchitecture/rust_hra7_docs.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/hierarchical_rearchitecture/rust_roots_engine.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/hierarchical_rearchitecture/scorecard_inventory.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/hierarchical_rearchitecture/support.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/hierarchical_rearchitecture_invariants.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/tests/integration.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/tests/primitive_code_cleanup/budgets_generated_dependencies.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_code_cleanup/docs_scripts_junk.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_code_cleanup/mod.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_code_cleanup/runtime_boundaries.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_code_cleanup/scorecard_inventory.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_code_cleanup/support.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_code_cleanup_invariants.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/tests/primitive_engine_teardown/context_prompt_identity.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_engine_teardown/domain_capability_deletions.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_engine_teardown/ios_settings_storage.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_engine_teardown/mod.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_engine_teardown/runtime_surfaces.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_engine_teardown/support.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 inventory regeneration
+packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 path update
+packages/agent/tests/primitive_trace_execution.rs	retain	rust integration/static test owner	PCC-9	Current tracked file retained after HRA-7 path update
 packages/ios-app/Configuration/Base.xcconfig	retain	repo	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
 packages/ios-app/Configuration/Beta.xcconfig	retain	repo	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
 packages/ios-app/Configuration/Prod.xcconfig	retain	repo	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
