@@ -524,6 +524,133 @@ fn rust_non_session_domains_have_no_same_name_file_folder_pairs() {
 }
 
 #[test]
+fn rust_session_domain_uses_lifecycle_query_reconstruction_owners() {
+    let required = [
+        "packages/agent/src/domains/session/lifecycle/mod.rs",
+        "packages/agent/src/domains/session/query/mod.rs",
+        "packages/agent/src/domains/session/reconstruction/mod.rs",
+    ];
+    let banned = [
+        "packages/agent/src/domains/session/commands",
+        "packages/agent/src/domains/session/operations.rs",
+        "packages/agent/src/domains/session/queries.rs",
+        "packages/agent/src/domains/session/reconstruct.rs",
+    ];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "Session domain must use lifecycle/query/reconstruction ownership after HRA-6; missing: {missing:#?}; old paths still present: {present_banned:#?}"
+    );
+}
+
+#[test]
+fn rust_session_event_store_has_no_same_name_file_folder_pairs() {
+    let mut pairs = Vec::new();
+    let mut source_files = Vec::new();
+    list_source_files(
+        &repo_path("packages/agent/src/domains/session/event_store"),
+        &["rs"],
+        &mut source_files,
+    );
+    for file in source_files {
+        let sibling_folder = file.with_extension("");
+        if sibling_folder.is_dir() {
+            pairs.push(
+                file.strip_prefix(repo_root())
+                    .unwrap()
+                    .display()
+                    .to_string(),
+            );
+        }
+    }
+
+    assert!(
+        pairs.is_empty(),
+        "Session event-store must not retain avoidable same-name file/folder module pairs after HRA-6: {pairs:#?}"
+    );
+}
+
+#[test]
+fn rust_session_event_store_uses_owned_modules_without_path_attrs() {
+    let required = [
+        "packages/agent/src/domains/session/event_store/envelope/mod.rs",
+        "packages/agent/src/domains/session/event_store/factory/mod.rs",
+        "packages/agent/src/domains/session/event_store/reconstruction/mod.rs",
+        "packages/agent/src/domains/session/event_store/store/event_store/mod.rs",
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/session/mod.rs",
+        "packages/agent/src/domains/session/event_store/sqlite/migrations/tests/mod.rs",
+    ];
+    let banned = [
+        "packages/agent/src/domains/session/event_store/event",
+        "packages/agent/src/domains/session/event_store/store/event_store.rs",
+        "packages/agent/src/domains/session/event_store/store/tests.rs",
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/session.rs",
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/session/tests.rs",
+        "packages/agent/src/domains/session/event_store/sqlite/migrations/tests.rs",
+    ];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+    let session_event_store_source =
+        read_repo_file("packages/agent/src/domains/session/event_store/mod.rs");
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "Session event-store must expose owned module files after HRA-6; missing: {missing:#?}; old paths still present: {present_banned:#?}"
+    );
+    assert!(
+        !session_event_store_source.contains("#[path ="),
+        "Session event-store root must not route around owned module paths with #[path] aliases"
+    );
+}
+
+#[test]
+fn rust_session_event_repository_tests_are_behavior_split() {
+    let required = [
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/append_order_counters.rs",
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/pagination_filters.rs",
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/payload_blob_resolution.rs",
+        "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/reconstruction_state.rs",
+    ];
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty(),
+        "Session event repository tests must be split by behavior after HRA-6: {missing:#?}"
+    );
+    assert!(
+        !repo_path(
+            "packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs"
+        )
+        .exists(),
+        "Session event repository must not retain one oversized tests.rs after HRA-6"
+    );
+}
+
+#[test]
 fn rust_domain_root_has_only_owned_boundaries() {
     let required = [
         "packages/agent/src/domains/registration/mod.rs",

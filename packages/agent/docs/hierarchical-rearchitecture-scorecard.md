@@ -46,7 +46,7 @@ Total weight: **100**
 | HRA-3 | Rust engine kernel and invocation hierarchy | 10 | passed_after_fix | Rust engine owner | Moved kernel/catalog/invocation/runtime modules under owned subsystem roots, collapsed invocation host into `invocation/host`, split kernel types under `kernel/types`, and removed avoidable engine same-name file/folder pairs. | Runtime and authority/durability files that remain over budget have explicit budget rows; HRA-7 owns broader Rust test/doc decomposition. |
 | HRA-4 | Rust engine durability and authority hierarchy | 8 | passed_after_fix | Rust engine owner | Moved grants/leases/compensation under `authority`; moved ledger/queue/resources/state/streams under `durability`; kept SQLite codecs under their owning stores; collapsed resource store into `resources/store/mod.rs`. | Authority/durability store modules remain cohesive but over 900 LOC with explicit temporary budgets. |
 | HRA-5 | Rust domain vertical slices | 10 | passed_after_fix | Rust domain owners | Moved registration helpers under `domains/registration`; moved agent prompt/loop/context, auth oauth/credentials, model routing/protocol, and settings profile owners; split capability operations, Kimi stream tests, and over-budget domain test modules. | HRA-6 still owns session/event-store; no HRA-5 temporary file budgets remain. |
-| HRA-6 | Rust session and event-store hierarchy | 7 | pending | Rust session owner | Not started. | Reorganize session lifecycle/query/reconstruction/event-store/trace and split oversized tests. |
+| HRA-6 | Rust session and event-store hierarchy | 7 | running | Rust session owner | Red gates added for session lifecycle/query/reconstruction ownership, event-store owned modules, same-name pair removal, and event repository test splitting. | Implement session/event-store moves and split oversized tests. |
 | HRA-7 | Rust tests and progressive docs | 5 | pending | Rust docs/tests owners | Not started. | Mirror tests to new boundaries and update progressive docs. |
 | HRA-8 | iOS inventory, SourceGuard, and target project map | 6 | pending | iOS architecture owner | Not started. | Add red SourceGuard hierarchy gates and iOS move map. |
 | HRA-9 | iOS Engine hierarchy | 8 | pending | iOS engine owner | Not started. | Reorganize transport, protocol, events, persistence, and model filtering. |
@@ -115,6 +115,10 @@ checks:
 - `rust_engine_subsystem_roots_are_owned`
 - `rust_engine_has_no_same_name_file_folder_pairs`
 - `rust_non_session_domains_have_no_same_name_file_folder_pairs`
+- `rust_session_domain_uses_lifecycle_query_reconstruction_owners`
+- `rust_session_event_store_has_no_same_name_file_folder_pairs`
+- `rust_session_event_store_uses_owned_modules_without_path_attrs`
+- `rust_session_event_repository_tests_are_behavior_split`
 - `rust_model_domain_uses_routing_and_protocol_owners`
 - `rust_auth_domain_uses_oauth_and_credentials_owners`
 - `rust_agent_domain_uses_prompt_loop_context_owners`
