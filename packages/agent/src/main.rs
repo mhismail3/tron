@@ -36,24 +36,10 @@
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-mod main_cli;
-mod main_runtime;
-
 use anyhow::Result;
 use clap::Parser;
 
-pub(crate) use main_cli::*;
-pub(crate) use main_runtime::*;
-
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = Cli::parse();
-    if let Some(ref cmd) = args.command {
-        return run_subcommand(cmd);
-    }
-    run_server(args).await
+    tron::app::bootstrap::run(tron::app::cli::Cli::parse()).await
 }
-
-#[cfg(test)]
-#[path = "main_tests.rs"]
-mod tests;

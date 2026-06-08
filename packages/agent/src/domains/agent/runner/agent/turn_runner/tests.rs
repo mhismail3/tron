@@ -49,8 +49,16 @@ fn turn_result_success() {
 #[test]
 fn build_execution_waves_parallel_execute_calls_share_one_wave() {
     let calls = vec![
-        crate::shared::messages::CapabilityInvocationDraft::new("1", "execute", Default::default()),
-        crate::shared::messages::CapabilityInvocationDraft::new("2", "execute", Default::default()),
+        crate::shared::protocol::messages::CapabilityInvocationDraft::new(
+            "1",
+            "execute",
+            Default::default(),
+        ),
+        crate::shared::protocol::messages::CapabilityInvocationDraft::new(
+            "2",
+            "execute",
+            Default::default(),
+        ),
     ];
     let surface = surface(ExecutionMode::Parallel);
     let waves = capability_invocations::build_execution_waves(&calls, &surface);
@@ -60,9 +68,21 @@ fn build_execution_waves_parallel_execute_calls_share_one_wave() {
 #[test]
 fn build_execution_waves_serialized_execute_calls_are_sequenced() {
     let calls = vec![
-        crate::shared::messages::CapabilityInvocationDraft::new("1", "execute", Default::default()),
-        crate::shared::messages::CapabilityInvocationDraft::new("2", "execute", Default::default()),
-        crate::shared::messages::CapabilityInvocationDraft::new("3", "execute", Default::default()),
+        crate::shared::protocol::messages::CapabilityInvocationDraft::new(
+            "1",
+            "execute",
+            Default::default(),
+        ),
+        crate::shared::protocol::messages::CapabilityInvocationDraft::new(
+            "2",
+            "execute",
+            Default::default(),
+        ),
+        crate::shared::protocol::messages::CapabilityInvocationDraft::new(
+            "3",
+            "execute",
+            Default::default(),
+        ),
     ];
     let surface = surface(ExecutionMode::Serialized("capability-execute".into()));
     let waves = capability_invocations::build_execution_waves(&calls, &surface);

@@ -169,7 +169,7 @@ impl DefaultProviderFactory {
             max_tokens: None,
             base_url: None,
             retry: Some(crate::domains::model::providers::StreamRetryConfig {
-                retry: crate::shared::retry::RetryConfig {
+                retry: crate::shared::foundation::retry::RetryConfig {
                     max_retries: self.retry.max_retries,
                     base_delay_ms: self.retry.base_delay_ms,
                     max_delay_ms: self.retry.max_delay_ms,
@@ -394,7 +394,7 @@ impl DefaultProviderFactory {
             max_tokens: None,
             base_url: self.minimax_base_url.clone(),
             retry: Some(crate::domains::model::providers::StreamRetryConfig {
-                retry: crate::shared::retry::RetryConfig {
+                retry: crate::shared::foundation::retry::RetryConfig {
                     max_retries: self.retry.max_retries,
                     base_delay_ms: self.retry.base_delay_ms,
                     max_delay_ms: self.retry.max_delay_ms,
@@ -446,7 +446,7 @@ impl DefaultProviderFactory {
             max_tokens: None,
             base_url: self.kimi_base_url.clone(),
             retry: Some(crate::domains::model::providers::StreamRetryConfig {
-                retry: crate::shared::retry::RetryConfig {
+                retry: crate::shared::foundation::retry::RetryConfig {
                     max_retries: self.retry.max_retries,
                     base_delay_ms: self.retry.base_delay_ms,
                     max_delay_ms: self.retry.max_delay_ms,
@@ -472,7 +472,7 @@ impl DefaultProviderFactory {
             base_url: self.ollama_base_url.clone(),
             max_tokens: None,
             retry: Some(crate::domains::model::providers::StreamRetryConfig {
-                retry: crate::shared::retry::RetryConfig {
+                retry: crate::shared::foundation::retry::RetryConfig {
                     max_retries: self.retry.max_retries,
                     base_delay_ms: self.retry.base_delay_ms,
                     max_delay_ms: self.retry.max_delay_ms,
@@ -500,7 +500,7 @@ impl DefaultProviderFactory {
         model: &str,
         credential_override: Option<&crate::domains::auth::provider_credentials::ActiveCredential>,
     ) -> Result<Arc<dyn Provider>, ProviderError> {
-        use crate::shared::messages::Provider as ProviderKind;
+        use crate::shared::protocol::messages::Provider as ProviderKind;
 
         let bare_model = strip_provider_prefix(model);
         let provider_type =
@@ -820,7 +820,7 @@ mod tests {
         let provider = result.unwrap();
         assert_eq!(
             provider.provider_type(),
-            crate::shared::messages::Provider::Ollama
+            crate::shared::protocol::messages::Provider::Ollama
         );
         assert_eq!(provider.model(), "gemma4:e4b");
     }

@@ -43,7 +43,7 @@ async fn subscribe_to_events() {
 
     let _ = orch
         .broadcast()
-        .emit(crate::shared::events::agent_start_event("s1"));
+        .emit(crate::shared::protocol::events::agent_start_event("s1"));
 
     let event = rx.try_recv().unwrap();
     assert_eq!(event.event_type(), "agent_start");

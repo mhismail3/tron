@@ -29,7 +29,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, trace, warn};
 
-use crate::shared::paths;
+use crate::shared::foundation::paths;
 
 /// A single delta entry in the journal WAL.
 #[derive(Debug, Serialize, Deserialize)]

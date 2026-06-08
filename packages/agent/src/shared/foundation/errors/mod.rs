@@ -20,7 +20,7 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::shared::errors::parse::{ErrorCategory, ErrorSeverity, parse_error};
+use crate::shared::foundation::errors::parse::{ErrorCategory, ErrorSeverity, parse_error};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TronError — top-level error enum
@@ -348,7 +348,7 @@ impl PersistenceError {
 // ProviderError
 // ─────────────────────────────────────────────────────────────────────────────
 
-use crate::shared::messages::Provider;
+use crate::shared::protocol::messages::Provider;
 
 /// Rate limit information from a provider error.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -578,7 +578,7 @@ impl CapabilityResponseError {
 /// # Example
 ///
 /// ```
-/// use crate::shared::errors::ErrorCollector;
+/// use crate::shared::foundation::errors::ErrorCollector;
 ///
 /// let mut collector = ErrorCollector::new();
 /// collector.collect("task 1 failed");

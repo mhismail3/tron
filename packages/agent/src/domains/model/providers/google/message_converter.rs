@@ -6,11 +6,11 @@
 use crate::domains::model::providers::id_remapping::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
-use crate::shared::content::{AssistantContent, UserContent};
-use crate::shared::messages::{
+use crate::shared::protocol::content::{AssistantContent, UserContent};
+use crate::shared::protocol::messages::{
     CapabilityResultMessageContent, Context, Message, UserMessageContent,
 };
-use crate::shared::model_capabilities::ModelCapability;
+use crate::shared::protocol::model_capabilities::ModelCapability;
 
 use super::types::{
     FunctionCallData, FunctionDeclaration, FunctionResponseData, GeminiContent, GeminiPart,
@@ -153,10 +153,10 @@ fn extract_capability_result_text(content: &CapabilityResultMessageContent) -> S
         CapabilityResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|b| match b {
-                crate::shared::content::CapabilityResultContent::Text { text } => {
+                crate::shared::protocol::content::CapabilityResultContent::Text { text } => {
                     Some(text.as_str())
                 }
-                crate::shared::content::CapabilityResultContent::Image { .. } => None,
+                crate::shared::protocol::content::CapabilityResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -275,7 +275,8 @@ fn truncate_capability_result(content: &str) -> String {
     if content.len() <= TOOL_RESULT_MAX_LENGTH {
         content.to_string()
     } else {
-        let truncated = crate::shared::text::truncate_str(content, TOOL_RESULT_MAX_LENGTH);
+        let truncated =
+            crate::shared::foundation::text::truncate_str(content, TOOL_RESULT_MAX_LENGTH);
         format!("{truncated}\n\n[Content truncated — {TOOL_RESULT_MAX_LENGTH} char limit]")
     }
 }
@@ -288,8 +289,8 @@ fn truncate_capability_result(content: &str) -> String {
 #[allow(unused_results)]
 mod tests {
     use super::*;
-    use crate::shared::content::AssistantContent;
-    use crate::shared::messages::UserMessageContent;
+    use crate::shared::protocol::content::AssistantContent;
+    use crate::shared::protocol::messages::UserMessageContent;
     use serde_json::Map;
 
     fn ctx(messages: Vec<Message>) -> Context {
@@ -464,7 +465,7 @@ mod tests {
         let capabilities = vec![ModelCapability {
             name: "execute".into(),
             description: "Run a command".into(),
-            parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
+            parameters: crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
                 schema_type: "object".into(),
                 properties: Some(props),
                 required: Some(vec!["command".into()]),

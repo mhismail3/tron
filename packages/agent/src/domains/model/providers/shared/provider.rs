@@ -9,7 +9,7 @@
 use std::pin::Pin;
 use std::sync::Arc;
 
-use crate::shared::events::StreamEvent;
+use crate::shared::protocol::events::StreamEvent;
 use async_trait::async_trait;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -228,7 +228,7 @@ impl ProviderError {
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// Provider identifier (e.g., `"anthropic"`, `"openai"`, `"google"`).
-    fn provider_type(&self) -> crate::shared::messages::Provider;
+    fn provider_type(&self) -> crate::shared::protocol::messages::Provider;
 
     /// Current model ID (e.g., `"claude-opus-4-6"`).
     fn model(&self) -> &str;
@@ -249,7 +249,7 @@ pub trait Provider: Send + Sync {
     /// providers still produce an audit record instead of disappearing.
     fn audit_payload(
         &self,
-        context: &crate::shared::messages::Context,
+        context: &crate::shared::protocol::messages::Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<Value> {
         Ok(json!({
@@ -267,7 +267,7 @@ pub trait Provider: Send + Sync {
     /// until [`StreamEvent::Done`] or [`StreamEvent::Error`] is received.
     async fn stream(
         &self,
-        context: &crate::shared::messages::Context,
+        context: &crate::shared::protocol::messages::Context,
         options: &ProviderStreamOptions,
     ) -> ProviderResult<StreamEventStream>;
 }

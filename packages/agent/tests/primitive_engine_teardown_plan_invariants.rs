@@ -335,7 +335,7 @@ fn primitive_engine_teardown_inventory_stays_exhaustive() {
 
 #[test]
 fn context_has_soul_and_agent_state_not_rules_skills_hooks_or_policy_planes() {
-    let messages = read_repo_file("packages/agent/src/shared/protocol/messages.rs");
+    let messages = read_repo_file("packages/agent/src/shared/protocol/messages/mod.rs");
     assert!(
         messages.contains("pub agent_state_context: Option<String>"),
         "provider Context must expose agent-owned state as the only durable behavior context"
@@ -649,7 +649,7 @@ fn server_capability_identity_stays_primitive_only() {
 #[test]
 fn startup_context_has_no_product_policy_or_worker_managers() {
     for (label, path) in [
-        ("server startup", "packages/agent/src/main_runtime.rs"),
+        ("server startup", "packages/agent/src/app/bootstrap/mod.rs"),
         (
             "server runtime context",
             "packages/agent/src/shared/server/context.rs",
@@ -1825,8 +1825,8 @@ fn diagnostics_logging_surface_is_flattened_to_execute_evidence() {
         "unused generic log query abstraction",
     );
 
-    let logging_mod = read_repo_file("packages/agent/src/shared/logging/mod.rs");
-    let logging_types = read_repo_file("packages/agent/src/shared/logging/types.rs");
+    let logging_mod = read_repo_file("packages/agent/src/shared/observability/mod.rs");
+    let logging_types = read_repo_file("packages/agent/src/shared/observability/types.rs");
     for (source, label) in [
         (logging_mod.as_str(), "shared logging module"),
         (logging_types.as_str(), "shared logging types"),
@@ -2052,9 +2052,9 @@ fn engine_invocation_and_transport_do_not_require_expected_revision_tokens() {
         read_repo_file("packages/agent/src/engine/external.rs"),
         read_repo_file("packages/agent/src/engine/ledger/outcome.rs"),
         read_repo_file("packages/agent/src/engine/errors.rs"),
-        read_repo_file("packages/agent/src/transport/engine_ws.rs"),
-        read_repo_file("packages/agent/src/transport/engine_ws/wire.rs"),
-        read_repo_file("packages/agent/src/transport/contracts.rs"),
+        read_repo_file("packages/agent/src/transport/engine/socket/mod.rs"),
+        read_repo_file("packages/agent/src/transport/engine/socket/wire.rs"),
+        read_repo_file("packages/agent/src/transport/engine/contracts.rs"),
         read_repo_file("packages/agent/src/engine/tests/host_invocation.rs"),
         read_repo_file("packages/agent/src/engine/tests/meta_primitives.rs"),
         read_repo_file("packages/agent/src/engine/tests/external_worker.rs"),
@@ -2114,8 +2114,8 @@ fn control_projection_primitive_is_deleted() {
 #[test]
 fn public_catalog_readout_state_is_not_client_envelope_state() {
     let transport_surface = [
-        read_repo_file("packages/agent/src/transport/contracts.rs"),
-        read_repo_file("packages/agent/src/transport/engine_ws.rs"),
+        read_repo_file("packages/agent/src/transport/engine/contracts.rs"),
+        read_repo_file("packages/agent/src/transport/engine/socket/mod.rs"),
         read_repo_file(
             "packages/ios-app/Sources/Engine/Network/EngineConnectionProtocolFrames.swift",
         ),

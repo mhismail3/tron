@@ -5,9 +5,9 @@ use std::pin::Pin;
 
 use super::super::stream_state::{build_message, finalize_capability_invocation};
 use crate::domains::model::providers::provider::ProviderError;
-use crate::shared::content::AssistantContent;
-use crate::shared::events::{AssistantMessage, RetryErrorInfo, StreamEvent, TronEvent};
-use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::events::{AssistantMessage, RetryErrorInfo, StreamEvent, TronEvent};
+use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
 
 fn make_emitter() -> Arc<EventEmitter> {
     Arc::new(EventEmitter::new())

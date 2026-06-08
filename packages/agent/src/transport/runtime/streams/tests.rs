@@ -1,6 +1,6 @@
 use super::*;
 use crate::engine::{EngineHostHandle, StreamActorScope, StreamCursor, VisibilityScope};
-use crate::shared::events::{BaseEvent, TronEvent, agent_start_event};
+use crate::shared::protocol::events::{BaseEvent, TronEvent, agent_start_event};
 
 #[test]
 fn tron_events_project_to_neutral_server_payloads() {

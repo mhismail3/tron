@@ -22,7 +22,7 @@ use tron::engine::invocation::{
 use tron::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
 };
-use tron::shared::model_capabilities::CapabilityResult;
+use tron::shared::protocol::model_capabilities::CapabilityResult;
 use tron::shared::server::context::ServerRuntimeContext;
 
 struct TestRuntime {
@@ -32,7 +32,7 @@ struct TestRuntime {
 
 fn unique_home(root: &Path) -> PathBuf {
     let home = root.join(".tron");
-    tron::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    tron::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
     home
 }
 
@@ -49,12 +49,12 @@ fn test_runtime() -> TestRuntime {
     let session_manager = Arc::new(SessionManager::new(Arc::clone(&event_store)));
     let orchestrator = Arc::new(Orchestrator::new(Arc::clone(&session_manager)));
     let settings_path = home
-        .join(tron::shared::paths::dirs::PROFILES)
-        .join(tron::shared::profile::USER_PROFILE)
-        .join(tron::shared::paths::files::PROFILE_TOML);
+        .join(tron::shared::foundation::paths::dirs::PROFILES)
+        .join(tron::shared::foundation::profile::USER_PROFILE)
+        .join(tron::shared::foundation::paths::files::PROFILE_TOML);
     let auth_path = home
-        .join(tron::shared::paths::dirs::PROFILES)
-        .join(tron::shared::paths::files::AUTH_JSON);
+        .join(tron::shared::foundation::paths::dirs::PROFILES)
+        .join(tron::shared::foundation::paths::files::AUTH_JSON);
     let profile_runtime = Arc::new(ProfileRuntime::load(&home).unwrap());
     let settings =
         tron::domains::settings::load_settings_from_path(&settings_path).expect("settings load");
@@ -77,7 +77,7 @@ fn test_runtime() -> TestRuntime {
         ws_port: Arc::new(AtomicU16::new(9847)),
         onboarded_marker_path: temp.path().join(".onboarded"),
     };
-    tron::transport::setup::register_server_domains_for_context(&ctx).unwrap();
+    tron::transport::runtime::setup::register_server_domains_for_context(&ctx).unwrap();
     TestRuntime { _temp: temp, ctx }
 }
 
@@ -284,7 +284,7 @@ async fn execute_process_run_expands_home_alias_in_trace_working_directory() {
         .create_session("gpt-5.5", "~", Some("home trace proof"), Some("openai"))
         .unwrap();
     let trace_id = TraceId::generate();
-    let expected_home = tron::shared::paths::normalize_working_directory("~")
+    let expected_home = tron::shared::foundation::paths::normalize_working_directory("~")
         .unwrap()
         .display()
         .to_string();

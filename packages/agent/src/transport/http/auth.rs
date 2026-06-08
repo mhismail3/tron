@@ -2,7 +2,7 @@
 //!
 //! Gates `/engine` and `/engine/workers` upgrades behind a bearer token stored as `bearerToken`
 //! in `~/.tron/profiles/auth.json`. The token is created lazily by
-//! [`crate::app::onboarding::load_or_create_bearer_token`] at server
+//! [`crate::app::lifecycle::onboarding::load_or_create_bearer_token`] at server
 //! startup; the upgrade handlers ask this module to verify the
 //! `Authorization: Bearer <token>` header before starting an engine protocol
 //! session.
@@ -37,7 +37,7 @@ use std::time::SystemTime;
 use axum::http::{HeaderMap, StatusCode, header};
 use parking_lot::Mutex;
 
-use crate::app::onboarding::load_or_create_bearer_token;
+use crate::app::lifecycle::onboarding::load_or_create_bearer_token;
 
 /// In-memory cache of the bearer token loaded from disk.
 ///
@@ -274,7 +274,8 @@ mod tests {
         // covers both.
         std::thread::sleep(std::time::Duration::from_millis(1100));
 
-        let rotated = crate::app::onboarding::rotate_bearer_token(store.path()).expect("rotate");
+        let rotated =
+            crate::app::lifecycle::onboarding::rotate_bearer_token(store.path()).expect("rotate");
         assert_ne!(rotated, original, "rotation must produce a new token");
 
         let observed = store.current_token().expect("reload");
@@ -379,7 +380,8 @@ mod tests {
         let original = store.current_token().expect("seed");
 
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let _ = crate::app::onboarding::rotate_bearer_token(store.path()).expect("rotate");
+        let _ =
+            crate::app::lifecycle::onboarding::rotate_bearer_token(store.path()).expect("rotate");
 
         // Same store; old token should now be rejected.
         let headers = header_with_bearer(&format!("Bearer {original}"));
@@ -393,7 +395,8 @@ mod tests {
         let _ = store.current_token().expect("seed");
 
         std::thread::sleep(std::time::Duration::from_millis(1100));
-        let rotated = crate::app::onboarding::rotate_bearer_token(store.path()).expect("rotate");
+        let rotated =
+            crate::app::lifecycle::onboarding::rotate_bearer_token(store.path()).expect("rotate");
 
         let headers = header_with_bearer(&format!("Bearer {rotated}"));
         assert!(verify_bearer_header(&headers, &store).is_ok());
@@ -444,7 +447,8 @@ mod tests {
 
         for _ in 0..50 {
             std::thread::sleep(Duration::from_millis(5));
-            let _ = crate::app::onboarding::rotate_bearer_token(store.path()).expect("rotate");
+            let _ = crate::app::lifecycle::onboarding::rotate_bearer_token(store.path())
+                .expect("rotate");
         }
 
         stop.store(true, Ordering::Relaxed);

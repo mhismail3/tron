@@ -1,10 +1,10 @@
 //! Provider-independent composition for the primitive agent context.
 
-use crate::shared::constitution::{
+use crate::shared::foundation::constitution::{
     ContextBlock, ContextCacheClass, ContextSensitivity, ProviderSurface, TronHome,
     context_block_for_text,
 };
-use crate::shared::messages::Context;
+use crate::shared::protocol::messages::Context;
 
 /// Compose provider prompt text from the primitive context.
 pub fn compose_context_parts(context: &Context) -> Vec<String> {
@@ -177,19 +177,22 @@ mod tests {
     #[test]
     fn audit_blocks_include_capabilities_and_messages() {
         let mut ctx = make_context();
-        ctx.capabilities = Some(vec![crate::shared::model_capabilities::ModelCapability {
-            name: "execute".into(),
-            description: "primitive".into(),
-            parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
-                schema_type: "object".into(),
-                properties: None,
-                required: None,
-                description: None,
-                extra: Default::default(),
+        ctx.capabilities = Some(vec![
+            crate::shared::protocol::model_capabilities::ModelCapability {
+                name: "execute".into(),
+                description: "primitive".into(),
+                parameters:
+                    crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+                        schema_type: "object".into(),
+                        properties: None,
+                        required: None,
+                        description: None,
+                        extra: Default::default(),
+                    },
             },
-        }]);
-        ctx.messages = vec![crate::shared::messages::Message::User {
-            content: crate::shared::messages::UserMessageContent::Text("hello".into()),
+        ]);
+        ctx.messages = vec![crate::shared::protocol::messages::Message::User {
+            content: crate::shared::protocol::messages::UserMessageContent::Text("hello".into()),
             timestamp: None,
         }]
         .into();

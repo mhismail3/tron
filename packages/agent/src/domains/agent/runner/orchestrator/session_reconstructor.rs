@@ -1,7 +1,7 @@
 //! Session reconstructor — rebuild runtime state from event history.
 
 use crate::domains::session::event_store::{EventStore, SessionState};
-use crate::shared::messages::{Message, TokenUsage};
+use crate::shared::protocol::messages::{Message, TokenUsage};
 
 use crate::domains::agent::runner::errors::RuntimeError;
 
@@ -284,7 +284,7 @@ mod tests {
                 .iter()
                 .find(|c| c.is_capability_invocation())
                 .expect("should have capability_invocation");
-            if let crate::shared::content::AssistantContent::CapabilityInvocation {
+            if let crate::shared::protocol::content::AssistantContent::CapabilityInvocation {
                 id,
                 name,
                 arguments,
@@ -372,12 +372,14 @@ mod tests {
         // Verify the typed Message::User has Blocks content with image data
         if let Message::User { content, .. } = &state.messages[0] {
             match content {
-                crate::shared::messages::UserMessageContent::Blocks(blocks) => {
+                crate::shared::protocol::messages::UserMessageContent::Blocks(blocks) => {
                     assert_eq!(blocks.len(), 2);
                     assert!(blocks[0].is_text());
                     assert!(blocks[1].is_image());
-                    if let crate::shared::content::UserContent::Image { data, mime_type } =
-                        &blocks[1]
+                    if let crate::shared::protocol::content::UserContent::Image {
+                        data,
+                        mime_type,
+                    } = &blocks[1]
                     {
                         assert_eq!(data, "base64data");
                         assert_eq!(mime_type, "image/png");
@@ -385,7 +387,7 @@ mod tests {
                         panic!("Expected image block");
                     }
                 }
-                crate::shared::messages::UserMessageContent::Text(_) => {
+                crate::shared::protocol::messages::UserMessageContent::Text(_) => {
                     panic!("Expected Blocks content, got Text");
                 }
             }

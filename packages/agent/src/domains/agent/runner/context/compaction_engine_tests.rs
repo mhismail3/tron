@@ -151,7 +151,9 @@ fn assistant_with_capability_invocation(ids: &[&str]) -> Message {
 fn capability_result(id: &str) -> Message {
     Message::CapabilityResult {
         invocation_id: id.into(),
-        content: crate::shared::messages::CapabilityResultMessageContent::Text("ok".into()),
+        content: crate::shared::protocol::messages::CapabilityResultMessageContent::Text(
+            "ok".into(),
+        ),
         is_error: None,
     }
 }

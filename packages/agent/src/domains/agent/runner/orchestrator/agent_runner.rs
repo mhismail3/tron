@@ -6,7 +6,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
 
-use crate::shared::events::{BaseEvent, TronEvent};
+use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 
@@ -109,9 +109,9 @@ mod tests {
     use crate::domains::model::providers::provider::{
         ProviderError, ProviderStreamOptions, StreamEventStream,
     };
-    use crate::shared::content::AssistantContent;
-    use crate::shared::events::{AssistantMessage, StreamEvent};
-    use crate::shared::messages::TokenUsage;
+    use crate::shared::protocol::content::AssistantContent;
+    use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
+    use crate::shared::protocol::messages::TokenUsage;
     use async_trait::async_trait;
     use futures::stream;
 
@@ -129,7 +129,7 @@ mod tests {
         }
         async fn stream(
             &self,
-            _c: &crate::shared::messages::Context,
+            _c: &crate::shared::protocol::messages::Context,
             _o: &ProviderStreamOptions,
         ) -> Result<StreamEventStream, ProviderError> {
             let s = stream::iter(vec![
@@ -167,7 +167,7 @@ mod tests {
 
     impl Drop for JournalCleanup {
         fn drop(&mut self) {
-            let dir = crate::shared::paths::journals_dir().join(&self.session_id);
+            let dir = crate::shared::foundation::paths::journals_dir().join(&self.session_id);
             if dir.exists() {
                 let _ = std::fs::remove_dir_all(&dir);
             }
@@ -301,7 +301,7 @@ mod tests {
             }
             async fn stream(
                 &self,
-                _c: &crate::shared::messages::Context,
+                _c: &crate::shared::protocol::messages::Context,
                 _o: &ProviderStreamOptions,
             ) -> Result<StreamEventStream, ProviderError> {
                 Err(ProviderError::Auth {
@@ -342,7 +342,7 @@ mod tests {
             }
             async fn stream(
                 &self,
-                _c: &crate::shared::messages::Context,
+                _c: &crate::shared::protocol::messages::Context,
                 _o: &ProviderStreamOptions,
             ) -> Result<StreamEventStream, ProviderError> {
                 let s = stream::iter(vec![

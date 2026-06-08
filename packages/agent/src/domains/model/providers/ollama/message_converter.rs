@@ -16,9 +16,11 @@ use serde_json::Value;
 use crate::domains::model::providers::id_remapping::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
-use crate::shared::content::{AssistantContent, UserContent};
-use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
-use crate::shared::model_capabilities::ModelCapability;
+use crate::shared::protocol::content::{AssistantContent, UserContent};
+use crate::shared::protocol::messages::{
+    CapabilityResultMessageContent, Message, UserMessageContent,
+};
+use crate::shared::protocol::model_capabilities::ModelCapability;
 
 // ─── Wire types ──────────────────────────────────────────────────────────────
 
@@ -248,7 +250,7 @@ fn convert_capability_result(
     let text = match content {
         CapabilityResultMessageContent::Text(t) => t.clone(),
         CapabilityResultMessageContent::Blocks(blocks) => {
-            use crate::shared::content::CapabilityResultContent;
+            use crate::shared::protocol::content::CapabilityResultContent;
             blocks
                 .iter()
                 .filter_map(|b| match b {

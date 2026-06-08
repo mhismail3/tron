@@ -143,11 +143,13 @@ fn sparse_settings_profile_toml(value: &Value) -> Result<String> {
     let mut table = toml::value::Table::new();
     table.insert(
         "version".to_string(),
-        toml::Value::String(crate::shared::profile::CURRENT_PROFILE_VERSION.to_string()),
+        toml::Value::String(
+            crate::shared::foundation::profile::CURRENT_PROFILE_VERSION.to_string(),
+        ),
     );
     table.insert(
         "name".to_string(),
-        toml::Value::String(crate::shared::profile::USER_PROFILE.to_string()),
+        toml::Value::String(crate::shared::foundation::profile::USER_PROFILE.to_string()),
     );
     table.insert("managed".to_string(), toml::Value::Boolean(false));
     table.insert(
@@ -157,7 +159,7 @@ fn sparse_settings_profile_toml(value: &Value) -> Result<String> {
     table.insert("inherits".to_string(), toml::Value::Array(Vec::new()));
     table.insert(
         "authProfile".to_string(),
-        toml::Value::String(crate::shared::profile::DEFAULT_AUTH_PROFILE.to_string()),
+        toml::Value::String(crate::shared::foundation::profile::DEFAULT_AUTH_PROFILE.to_string()),
     );
     if value.as_object().is_some_and(|object| !object.is_empty()) {
         table.insert("settings".to_string(), json_to_toml_value(value)?);
@@ -256,10 +258,10 @@ mod tests {
 
     fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
         let home = dir.path().join(".tron");
-        crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
-        home.join(crate::shared::paths::dirs::PROFILES)
-            .join(crate::shared::profile::USER_PROFILE)
-            .join(crate::shared::paths::files::PROFILE_TOML)
+        crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+        home.join(crate::shared::foundation::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::profile::USER_PROFILE)
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML)
     }
 
     fn sparse_profile(settings_toml: &str) -> String {

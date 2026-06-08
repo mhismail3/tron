@@ -10,12 +10,13 @@
 
 use std::time::Duration;
 
-use crate::app::server::TronServer;
+use crate::app::bootstrap::server::TronServer;
 use queue_drainer::EngineQueueDrainerService;
 use worker_heartbeat::ExternalWorkerHeartbeatService;
 
 pub mod external_workers;
 mod queue_drainer;
+pub mod setup;
 pub mod streams;
 mod worker_heartbeat;
 

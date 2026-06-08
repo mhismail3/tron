@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::shared::content::CapabilityResultContent;
+use crate::shared::protocol::content::CapabilityResultContent;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ModelCapability schema

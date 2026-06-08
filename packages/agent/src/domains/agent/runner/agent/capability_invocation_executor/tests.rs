@@ -8,8 +8,8 @@ use crate::engine::{
     AuthorityRequirement, EffectClass, FunctionDefinition, FunctionId, RiskLevel, VisibilityScope,
     WorkerDefinition, WorkerId, WorkerKind,
 };
-use crate::shared::content::CapabilityResultContent;
-use crate::shared::model_capabilities::CapabilityResultBody;
+use crate::shared::protocol::content::CapabilityResultContent;
+use crate::shared::protocol::model_capabilities::CapabilityResultBody;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashSet};
@@ -190,14 +190,16 @@ struct StopTurnCapabilityHandler;
 #[async_trait]
 impl crate::engine::InProcessFunctionHandler for StopTurnCapabilityHandler {
     async fn invoke(&self, _invocation: Invocation) -> crate::engine::Result<Value> {
-        serde_json::to_value(crate::shared::model_capabilities::CapabilityResult {
-            content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
-                "authority blocked",
-            )]),
-            details: None,
-            is_error: Some(true),
-            stop_turn: Some(true),
-        })
+        serde_json::to_value(
+            crate::shared::protocol::model_capabilities::CapabilityResult {
+                content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+                    "authority blocked",
+                )]),
+                details: None,
+                is_error: Some(true),
+                stop_turn: Some(true),
+            },
+        )
         .map_err(|error| crate::engine::EngineError::HandlerFailed(error.to_string()))
     }
 }

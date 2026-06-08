@@ -44,7 +44,7 @@ fn bundled_default_profile_parses_as_primitive_profile() {
 fn managed_profiles_resolve_from_seeded_defaults() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
 
     let normal = resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
     let chat = resolve_profile_at(&home, CHAT_PROFILE).unwrap();
@@ -61,7 +61,7 @@ fn managed_profiles_resolve_from_seeded_defaults() {
 fn product_control_plane_tables_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
     write(
         &home
             .join(dirs::PROFILES)
@@ -87,7 +87,7 @@ modelPolicy = "sessionDefault"
 fn user_sparse_settings_overlay_is_retained() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
     write(
         &home
             .join(dirs::PROFILES)
@@ -113,7 +113,7 @@ defaultProvider = "openai"
 fn user_runtime_policy_overlay_is_ignored_before_schema_validation() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
     write(
         &home
             .join(dirs::PROFILES)
@@ -142,7 +142,7 @@ allowedPrimitives = ["execute"]
 fn spec_hash_changes_when_auth_registry_changes() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
 
     let before = resolve_profile_at(&home, NORMAL_PROFILE).unwrap().spec_hash;
     write(
@@ -165,7 +165,7 @@ store = "auth.json"
 fn settings_tables_deep_merge_and_arrays_replace() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
     write(
         &home
             .join(dirs::PROFILES)
@@ -202,7 +202,7 @@ chars = ["*"]
 fn profile_auth_validation_uses_profile_registry_ref() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
     write(
         &home.join(dirs::PROFILES).join("custom-auth.toml"),
         r#"

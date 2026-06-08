@@ -27,8 +27,8 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 
 | Metric | Count |
 |--------|-------|
-| Tracked files from `git ls-files` | 1273 |
-| Files under `packages/agent/src` | 468 |
+| Tracked files from `git ls-files` plus HRA-2 new module maps | 1277 |
+| Files under `packages/agent/src` | 471 |
 | Files under `packages/agent/tests` | 6 |
 | Files under `packages/ios-app/Sources` | 408 |
 | Files under `packages/ios-app/Tests` | 192 |
@@ -92,12 +92,15 @@ Allowed statuses: `pending`, `running`, `passed`, `passed_after_fix`, `failed_un
 | iOS tests | Move old technical buckets to `Infrastructure`, `Engine`, `Session`, `UI`, and `Support` mirrors. | HRA-13 |
 | Mac wrapper | Audit and, when useful, split App/Server/MenuBar/Wizard/Tests into wrapper feature subfolders. | HRA-14 |
 
-## Source Root Loose Files
+## HRA-1 Source Root Loose Files (HRA-2 Completed)
+
+These HRA-1 findings are now implemented in HRA-2. The current source root has
+only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`.
 
 | Path | Target | Phase |
 |------|--------|-------|
 | `packages/agent/src/main_cli.rs` | `packages/agent/src/app/cli/mod.rs` | HRA-2 |
-| `packages/agent/src/main_runtime.rs` | `packages/agent/src/app/bootstrap/runtime.rs` | HRA-2 |
+| `packages/agent/src/main_runtime.rs` | `packages/agent/src/app/bootstrap/mod.rs` | HRA-2 |
 | `packages/agent/src/main_tests.rs` | `packages/agent/src/app/bootstrap/tests.rs` | HRA-2 |
 
 ## Directories Over 12 Source Files

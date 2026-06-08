@@ -23,8 +23,8 @@
 //! ...preserved messages...
 //! ```
 
-use crate::shared::content::AssistantContent;
-use crate::shared::messages::{Message, UserMessageContent};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::messages::{Message, UserMessageContent};
 use tracing::{instrument, trace};
 
 use super::constants::{COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX};

@@ -197,6 +197,6 @@ fn system_info_value(payload: &Value, deps: &Deps, allow_server_context: bool) -
         "runtime": "agent",
         "port": deps.ws_port.load(Ordering::SeqCst),
         "tailscaleIp": deps.profile_runtime.current().settings.server.tailscale_ip,
-        "paired": crate::app::onboarding::is_onboarded(&marker_path),
+        "paired": crate::app::lifecycle::onboarding::is_onboarded(&marker_path),
     })
 }

@@ -1,4 +1,4 @@
-use crate::shared::messages::Message;
+use crate::shared::protocol::messages::Message;
 
 use super::super::context_snapshot_builder::SnapshotDeps;
 use super::super::types::CapabilitySummary;
@@ -56,8 +56,10 @@ impl SnapshotDeps for ManagerSnapshotDeps<'_> {
             .iter()
             .map(|capability| CapabilitySummary {
                 name: capability.name.clone(),
-                description: crate::shared::text::first_sentence(&capability.description)
-                    .to_owned(),
+                description: crate::shared::foundation::text::first_sentence(
+                    &capability.description,
+                )
+                .to_owned(),
             })
             .collect()
     }

@@ -9,9 +9,9 @@ use serde_json::{Map, Value};
 use crate::domains::model::provider_protocol::{
     CapabilityCallContext, parse_capability_call_arguments,
 };
-use crate::shared::content::AssistantContent;
-use crate::shared::events::StreamEvent;
-use crate::shared::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::events::StreamEvent;
+use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
 
 // ─── SSE chunk types ──────────────────────────────────────────────────────
 
@@ -415,7 +415,7 @@ fn emit_done(state: &mut KimiStreamState, events: &mut Vec<StreamEvent>) {
     let content = std::mem::take(&mut state.content_blocks);
 
     events.push(StreamEvent::Done {
-        message: crate::shared::events::AssistantMessage {
+        message: crate::shared::protocol::events::AssistantMessage {
             content,
             token_usage: usage,
         },

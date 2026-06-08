@@ -11,7 +11,7 @@
 /// # Examples
 ///
 /// ```
-/// use crate::shared::text::truncate_str;
+/// use crate::shared::foundation::text::truncate_str;
 ///
 /// assert_eq!(truncate_str("hello", 3), "hel");
 /// // Em dash '—' (3 bytes) at boundary snaps back:
@@ -40,7 +40,7 @@ pub fn truncate_str(s: &str, max_bytes: usize) -> &str {
 /// # Examples
 ///
 /// ```
-/// use crate::shared::text::truncate_with_suffix;
+/// use crate::shared::foundation::text::truncate_with_suffix;
 ///
 /// assert_eq!(truncate_with_suffix("hello", 10, "..."), "hello".to_string());
 /// assert_eq!(truncate_with_suffix("hello world", 8, "..."), "hello...");

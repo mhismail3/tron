@@ -21,9 +21,9 @@ use crate::domains::model::providers::stream_common::StreamAccumulator;
 use crate::domains::model::providers::{
     CapabilityArgumentParseError, CapabilityCallContext, parse_capability_call_arguments,
 };
-use crate::shared::content::AssistantContent;
-use crate::shared::events::{AssistantMessage, StreamEvent};
-use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
+use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
 
 /// State for tracking accumulated stream content.
 #[derive(Clone, Debug)]
@@ -469,7 +469,7 @@ fn build_done_event(state: &StreamState) -> StreamEvent {
                 cached_input_tokens: nonzero(state.acc.cache_read_tokens),
                 reasoning_output_tokens: nonzero(state.acc.reasoning_output_tokens),
                 total_tokens: nonzero(state.acc.total_tokens),
-                provider_type: Some(crate::shared::messages::Provider::OpenAi),
+                provider_type: Some(crate::shared::protocol::messages::Provider::OpenAi),
                 ..TokenUsage::default()
             }),
         },

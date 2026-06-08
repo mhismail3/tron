@@ -48,7 +48,7 @@ fn provider_type_is_google() {
     let provider = GoogleProvider::new(oauth_config());
     assert_eq!(
         provider.provider_type(),
-        crate::shared::messages::Provider::Google
+        crate::shared::protocol::messages::Provider::Google
     );
 }
 

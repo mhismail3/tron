@@ -187,25 +187,35 @@ tron/
 The agent is a single `tron` crate (see `packages/agent/Cargo.toml`). The crate tree now mirrors the pure engine model: app/bootstrap, thin transports, the engine fabric, worker-owned domains, platform integrations, and shared foundation/protocol helpers. Dependencies flow inward: transports build engine requests, domains own behavior, and the engine owns policy/ledger/streams/queues/workers.
 
 ```
-app/        Binary/server bootstrap, health, metrics, onboarding, shutdown
-transport/  /engine client protocol, /engine/workers socket transport, auth gate
-engine/     Live capability fabric: catalog, workers, triggers, ledger, streams, queues
-domains/    Every Tron worker: contracts, deps, handlers, operations, local services, tests
-platform/   OS/vendor integrations retained by the primitive loop
-shared/     Foundation IDs/errors/paths, protocol DTOs, unified storage helpers
-main.rs     Thin binary entry point
-main_cli.rs CLI parsing and auth subcommand dispatch
-main_runtime.rs Server startup/runtime wiring
+app/
+├── cli/          CLI parsing and auth subcommand dispatch
+├── bootstrap/    Runtime assembly, database open, service wiring, server bind
+├── health/       Health, deep-health, disk checks, and metrics
+└── lifecycle/    Onboarding, bearer-token state, and shutdown coordination
+transport/
+├── http/         HTTP-adjacent auth helpers
+├── engine/       /engine contracts, request routing, socket session, stream cursors
+└── runtime/      Runtime services, external-worker socket, stream projection, setup
+engine/           Live capability fabric: catalog, workers, triggers, ledger, streams, queues
+domains/          Every Tron worker: contracts, deps, handlers, operations, local services, tests
+platform/         OS/vendor integrations retained by the primitive loop
+shared/
+├── foundation/   Constants, IDs, paths, profiles, retry/text helpers, shared errors
+├── protocol/     Content, events, memory, messages, and model capability DTOs
+├── server/       Runtime context, validation, params, and capability errors
+├── storage/      Unified SQLite storage helpers
+└── observability/ tracing subscriber and SQLite log transport
+main.rs           Thin binary entry point
 ```
 
 | Module | Purpose | Key Types |
 |--------|---------|-----------|
-| `app` | Startup/bootstrap + HTTP shell | `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
+| `app` | CLI, startup/bootstrap, health, metrics, onboarding, and shutdown | `Cli`, `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
 | `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor integrations | paired-device broker |
-| `shared` | Foundation vocabulary, protocol DTOs, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
+| `shared` | Foundation vocabulary, protocol DTOs, server context/errors, observability, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
 The domain package is intentionally vertical. A domain root is only docs,
 exports, and worker registration. Shared worker registration types live in
@@ -1102,7 +1112,7 @@ cargo test paths::           # Filter by module path
 cargo test --quiet           # Quiet output
 ```
 
-The agent is a single `tron` crate, so `cargo test` runs everything (lib unit tests, integration tests, doc tests, the `main_tests.rs` binary tests). Test counts are intentionally not hardcoded in this README — they drift within days and mislead readers. Re-derive from `cargo test --quiet` output when you need the current number.
+The agent is a single `tron` crate, so `cargo test` runs everything: library unit tests, app/bootstrap tests, integration tests, doc tests, and static gates. Test counts are intentionally not hardcoded in this README — they drift within days and mislead readers. Re-derive from `cargo test --quiet` output when you need the current number.
 
 ### iOS Tests
 

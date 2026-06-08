@@ -338,13 +338,13 @@ pub fn onboarded_marker_path() -> PathBuf {
 /// `~/.tron/profiles/user/profile.toml`
 pub fn user_profile_path() -> PathBuf {
     profiles_dir()
-        .join(crate::shared::profile::USER_PROFILE)
+        .join(crate::shared::foundation::profile::USER_PROFILE)
         .join(files::PROFILE_TOML)
 }
 
 /// `~/.tron/profiles/default/`
 pub fn default_profile_dir() -> PathBuf {
-    profiles_dir().join(crate::shared::profile::DEFAULT_PROFILE)
+    profiles_dir().join(crate::shared::foundation::profile::DEFAULT_PROFILE)
 }
 
 /// `~/.tron/profiles/active.toml`
@@ -360,5 +360,4 @@ pub fn auth_registry_path() -> PathBuf {
 // ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[path = "paths/tests.rs"]
 mod tests;

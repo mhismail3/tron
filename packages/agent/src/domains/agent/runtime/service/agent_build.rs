@@ -23,7 +23,7 @@ pub(super) async fn build_prompt_agent(
     model: &str,
     working_dir: &str,
     server_origin: String,
-    messages: Vec<crate::shared::messages::Message>,
+    messages: Vec<crate::shared::protocol::messages::Message>,
     initial_turn_count: u32,
     resolved_workspace_id: Option<String>,
 ) -> Result<BuiltPromptAgent, ()> {
@@ -35,8 +35,8 @@ pub(super) async fn build_prompt_agent(
                 error = %error,
                 "failed to create provider for model"
             );
-            let _ = broadcast.emit(crate::shared::events::TronEvent::Error {
-                base: crate::shared::events::BaseEvent::now(session_id),
+            let _ = broadcast.emit(crate::shared::protocol::events::TronEvent::Error {
+                base: crate::shared::protocol::events::BaseEvent::now(session_id),
                 error: error.to_string(),
                 context: None,
                 code: None,
@@ -66,7 +66,7 @@ pub(super) async fn build_prompt_agent(
             preserve_recent_turns: compactor_settings.preserve_recent_count,
             context_limit,
         },
-        retry: Some(crate::shared::retry::RetryConfig {
+        retry: Some(crate::shared::foundation::retry::RetryConfig {
             max_retries: settings.retry.max_retries,
             base_delay_ms: settings.retry.base_delay_ms,
             max_delay_ms: settings.retry.max_delay_ms,

@@ -1,6 +1,6 @@
 //! Token subsystem error types.
 
-use crate::shared::messages::Provider;
+use crate::shared::protocol::messages::Provider;
 
 /// Errors that can occur during token processing.
 #[derive(Debug, thiserror::Error)]

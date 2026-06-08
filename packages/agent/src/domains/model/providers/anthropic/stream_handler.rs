@@ -12,9 +12,9 @@
 use tracing::{debug, warn};
 
 use crate::domains::model::providers::stream_common::StreamAccumulator;
-use crate::shared::content::AssistantContent;
-use crate::shared::events::{AssistantMessage, StreamEvent};
-use crate::shared::messages::TokenUsage;
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
+use crate::shared::protocol::messages::TokenUsage;
 
 use super::types::{AnthropicSseEvent, SseContentBlock, SseDelta};
 
@@ -22,7 +22,7 @@ use super::types::{AnthropicSseEvent, SseContentBlock, SseDelta};
 #[derive(Clone, Debug)]
 pub struct StreamState {
     /// Provider type for token attribution in Done events.
-    pub provider_type: crate::shared::messages::Provider,
+    pub provider_type: crate::shared::protocol::messages::Provider,
     /// Shared delta accumulator for text, thinking, signature, and tool args.
     pub acc: StreamAccumulator,
     /// Current content block type being accumulated.
@@ -46,7 +46,7 @@ pub struct StreamState {
 impl Default for StreamState {
     fn default() -> Self {
         Self {
-            provider_type: crate::shared::messages::Provider::Anthropic,
+            provider_type: crate::shared::protocol::messages::Provider::Anthropic,
             acc: StreamAccumulator::new(),
             current_block_type: None,
             current_invocation_id: None,
@@ -73,7 +73,9 @@ pub enum BlockType {
 
 /// Create a new stream state for a specific provider.
 #[must_use]
-pub fn create_stream_state_for(provider_type: crate::shared::messages::Provider) -> StreamState {
+pub fn create_stream_state_for(
+    provider_type: crate::shared::protocol::messages::Provider,
+) -> StreamState {
     StreamState {
         provider_type,
         ..StreamState::default()
@@ -83,7 +85,7 @@ pub fn create_stream_state_for(provider_type: crate::shared::messages::Provider)
 /// Create a new stream state (defaults to Anthropic).
 #[must_use]
 pub fn create_stream_state() -> StreamState {
-    create_stream_state_for(crate::shared::messages::Provider::Anthropic)
+    create_stream_state_for(crate::shared::protocol::messages::Provider::Anthropic)
 }
 
 /// Process a single Anthropic SSE event and return zero or more [`StreamEvent`]s.

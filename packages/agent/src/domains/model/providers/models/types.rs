@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 // Re-export from core as the canonical Provider type.
-pub use crate::shared::messages::Provider;
+pub use crate::shared::protocol::messages::Provider;
 
 /// Model tier classification.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]

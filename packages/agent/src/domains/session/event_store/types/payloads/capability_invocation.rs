@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::shared::events::CapabilityEventIdentity;
+use crate::shared::protocol::events::CapabilityEventIdentity;
 
 /// Payload for `capability.invocation.started` events.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

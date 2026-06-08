@@ -5,7 +5,7 @@
 //! event truth stays in the session/event-store and engine stream substrate.
 //! This module only routes to concern-owned converters.
 
-use crate::shared::events::TronEvent;
+use crate::shared::protocol::events::TronEvent;
 use serde_json::json;
 
 use super::routed::{ProjectedEvent, global, session_scoped, set_opt};

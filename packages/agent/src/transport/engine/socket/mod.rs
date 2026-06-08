@@ -37,11 +37,8 @@ const STREAM_DEFAULT_LIMIT: usize = 100;
 const STREAM_MAX_LIMIT: usize = 500;
 const PUSH_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
 
-#[path = "engine_ws/outbound.rs"]
 mod outbound;
-#[path = "engine_ws/stream_projection.rs"]
 mod stream_projection;
-#[path = "engine_ws/wire.rs"]
 mod wire;
 
 use outbound::{send_engine_ws_value, send_engine_ws_value_async};

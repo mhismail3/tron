@@ -12,9 +12,11 @@
 //!   - Minimum 85 tokens per image
 //!   - Default 1500 tokens for URL images (typical 1024×1024)
 
-use crate::shared::content::{AssistantContent, CapabilityResultContent, UserContent};
-use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
-use crate::shared::model_capabilities::ModelCapability;
+use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent, UserContent};
+use crate::shared::protocol::messages::{
+    CapabilityResultMessageContent, Message, UserMessageContent,
+};
+use crate::shared::protocol::model_capabilities::ModelCapability;
 #[cfg(test)]
 use serde_json::Value;
 
@@ -488,7 +490,7 @@ mod tests {
         ModelCapability {
             name: name.to_string(),
             description: description.to_string(),
-            parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
+            parameters: crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
                 schema_type: "object".to_string(),
                 properties: None,
                 required: None,

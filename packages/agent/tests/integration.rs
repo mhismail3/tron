@@ -15,12 +15,12 @@ use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-use tron::app::config::ServerConfig;
-use tron::app::server::TronServer;
+use tron::app::bootstrap::config::ServerConfig;
+use tron::app::bootstrap::server::TronServer;
 use tron::domains::agent::runner::{Orchestrator, ProfileRuntime, SessionManager};
 use tron::domains::model::providers::ProviderHealthTracker;
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
-use tron::shared::model_capabilities::CapabilityResult;
+use tron::shared::protocol::model_capabilities::CapabilityResult;
 use tron::shared::server::context::ServerRuntimeContext;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -37,7 +37,7 @@ struct TestServer {
 
 fn unique_home(root: &Path) -> PathBuf {
     let home = root.join(".tron");
-    tron::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    tron::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
     home
 }
 
@@ -55,12 +55,12 @@ async fn boot_server() -> TestServer {
     let session_manager = Arc::new(SessionManager::new(Arc::clone(&event_store)));
     let orchestrator = Arc::new(Orchestrator::new(Arc::clone(&session_manager)));
     let settings_path = home
-        .join(tron::shared::paths::dirs::PROFILES)
-        .join(tron::shared::profile::USER_PROFILE)
-        .join(tron::shared::paths::files::PROFILE_TOML);
+        .join(tron::shared::foundation::paths::dirs::PROFILES)
+        .join(tron::shared::foundation::profile::USER_PROFILE)
+        .join(tron::shared::foundation::paths::files::PROFILE_TOML);
     let auth_path = home
-        .join(tron::shared::paths::dirs::PROFILES)
-        .join(tron::shared::paths::files::AUTH_JSON);
+        .join(tron::shared::foundation::paths::dirs::PROFILES)
+        .join(tron::shared::foundation::paths::files::AUTH_JSON);
     let settings =
         tron::domains::settings::load_settings_from_path(&settings_path).expect("settings load");
     tron::domains::settings::init_settings(settings);
@@ -82,7 +82,7 @@ async fn boot_server() -> TestServer {
         ws_port: Arc::new(AtomicU16::new(0)),
         onboarded_marker_path: temp.path().join(".onboarded"),
     };
-    tron::transport::setup::register_server_domains_for_context(&runtime_context)
+    tron::transport::runtime::setup::register_server_domains_for_context(&runtime_context)
         .expect("primitive domains register");
 
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
@@ -108,7 +108,7 @@ async fn boot_server() -> TestServer {
 }
 
 async fn connect(url: &str, auth_path: &Path) -> WsStream {
-    let token = tron::app::onboarding::load_or_create_bearer_token(auth_path).unwrap();
+    let token = tron::app::lifecycle::onboarding::load_or_create_bearer_token(auth_path).unwrap();
     let mut request = url.into_client_request().unwrap();
     request
         .headers_mut()

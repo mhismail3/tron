@@ -21,8 +21,8 @@ use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
     InvocationId, TraceId,
 };
-use crate::shared::events::{BaseEvent, CapabilityEventIdentity, TronEvent};
-use crate::shared::messages::CapabilityInvocationDraft;
+use crate::shared::protocol::events::{BaseEvent, CapabilityEventIdentity, TronEvent};
+use crate::shared::protocol::messages::CapabilityInvocationDraft;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
@@ -76,7 +76,7 @@ fn primitive_capability_identity(
 fn capability_identity_from_result(
     model_primitive_name: &str,
     base_identity: &CapabilityEventIdentity,
-    result: &crate::shared::model_capabilities::CapabilityResult,
+    result: &crate::shared::protocol::model_capabilities::CapabilityResult,
 ) -> CapabilityEventIdentity {
     let Some(details) = result.details.as_ref() else {
         return base_identity.clone();
@@ -148,7 +148,7 @@ pub async fn execute_capability_invocation(
     else {
         error!(model_primitive_name, "capability primitive not found");
         return CapabilityInvocationExecutionResult {
-            result: crate::shared::model_capabilities::error_result(format!(
+            result: crate::shared::protocol::model_capabilities::error_result(format!(
                 "Capability primitive not found: {model_primitive_name}"
             )),
             duration_ms: duration_ceil_ms(start.elapsed()),
@@ -188,7 +188,7 @@ pub async fn execute_capability_invocation(
     };
 
     let capability_result = if per_invocation_cancel.is_cancelled() {
-        crate::shared::model_capabilities::error_result("Operation cancelled")
+        crate::shared::protocol::model_capabilities::error_result("Operation cancelled")
     } else if let Some(engine_host) = ctx.engine_host {
         execute_capability_primitive_via_engine(
             engine_host,
@@ -208,7 +208,7 @@ pub async fn execute_capability_invocation(
         .await
     } else {
         return CapabilityInvocationExecutionResult {
-            result: crate::shared::model_capabilities::error_result(format!(
+            result: crate::shared::protocol::model_capabilities::error_result(format!(
                 "Engine host is required to execute capability primitive '{model_primitive_name}'"
             )),
             duration_ms: duration_ceil_ms(start.elapsed()),
@@ -281,7 +281,7 @@ async fn execute_capability_primitive_via_engine(
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     effective_args: Value,
-) -> crate::shared::model_capabilities::CapabilityResult {
+) -> crate::shared::protocol::model_capabilities::CapabilityResult {
     let idempotency_key = model_capability_invocation_idempotency_key(
         run_id,
         session_id,
@@ -294,11 +294,15 @@ async fn execute_capability_primitive_via_engine(
     );
     let actor_id = match ActorId::new(format!("agent:{session_id}")) {
         Ok(id) => id,
-        Err(error) => return crate::shared::model_capabilities::error_result(error.to_string()),
+        Err(error) => {
+            return crate::shared::protocol::model_capabilities::error_result(error.to_string());
+        }
     };
     let grant_id = match AuthorityGrantId::new("agent-capability-runtime") {
         Ok(id) => id,
-        Err(error) => return crate::shared::model_capabilities::error_result(error.to_string()),
+        Err(error) => {
+            return crate::shared::protocol::model_capabilities::error_result(error.to_string());
+        }
     };
     let trace_id = inherited_trace_id
         .cloned()
@@ -340,17 +344,17 @@ async fn execute_capability_primitive_via_engine(
     let result = engine_host.invoke(invocation).await;
 
     if let Some(error) = result.error {
-        return crate::shared::model_capabilities::error_result(format!(
+        return crate::shared::protocol::model_capabilities::error_result(format!(
             "Engine capability invocation failed for {function_id}: {error}"
         ));
     }
     let Some(value) = result.value else {
-        return crate::shared::model_capabilities::error_result(format!(
+        return crate::shared::protocol::model_capabilities::error_result(format!(
             "Engine capability invocation returned no result for {function_id}"
         ));
     };
     serde_json::from_value(value).unwrap_or_else(|error| {
-        crate::shared::model_capabilities::error_result(format!(
+        crate::shared::protocol::model_capabilities::error_result(format!(
             "Engine capability invocation returned invalid capability result for {function_id}: {error}"
         ))
     })

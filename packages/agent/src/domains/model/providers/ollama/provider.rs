@@ -27,7 +27,7 @@ use crate::domains::model::providers::compose_context_parts;
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::shared::messages::Context;
+use crate::shared::protocol::messages::Context;
 
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{OllamaChatChunk, OllamaStreamState, process_chunk};
@@ -252,8 +252,8 @@ impl OllamaProvider {
 
 #[async_trait]
 impl Provider for OllamaProvider {
-    fn provider_type(&self) -> crate::shared::messages::Provider {
-        crate::shared::messages::Provider::Ollama
+    fn provider_type(&self) -> crate::shared::protocol::messages::Provider {
+        crate::shared::protocol::messages::Provider::Ollama
     }
 
     fn model(&self) -> &str {
@@ -406,7 +406,7 @@ mod tests {
         let provider = OllamaProvider::new(test_config());
         assert_eq!(
             provider.provider_type(),
-            crate::shared::messages::Provider::Ollama
+            crate::shared::protocol::messages::Provider::Ollama
         );
     }
 
@@ -584,17 +584,20 @@ mod tests {
     fn request_body_with_tools() {
         let provider = OllamaProvider::new(test_config());
         let ctx = Context {
-            capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
-                name: "execute".into(),
-                description: "Run commands".into(),
-                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::default(),
+            capabilities: Some(vec![
+                crate::shared::protocol::model_capabilities::ModelCapability {
+                    name: "execute".into(),
+                    description: "Run commands".into(),
+                    parameters:
+                        crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+                            schema_type: "object".into(),
+                            properties: None,
+                            required: None,
+                            description: None,
+                            extra: serde_json::Map::default(),
+                        },
                 },
-            }]),
+            ]),
             ..Context::default()
         };
         let options = ProviderStreamOptions::default();

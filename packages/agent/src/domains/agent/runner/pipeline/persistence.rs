@@ -7,8 +7,8 @@
 use crate::domains::model::providers::tokens::normalization::normalize_tokens;
 use crate::domains::model::providers::tokens::pricing::calculate_pricing;
 use crate::domains::model::providers::tokens::types::{TokenMeta, TokenSource};
-use crate::shared::content::AssistantContent;
-use crate::shared::messages::{Provider, TokenUsage};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::messages::{Provider, TokenUsage};
 use serde_json::{Value, json};
 
 /// Build a JSON content array from assistant content blocks.

@@ -1,5 +1,5 @@
 use super::*;
-pub(super) use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
+pub(super) use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
 pub(super) use serde_json::json;
 
 #[path = "tests/base_sequence.rs"]

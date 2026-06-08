@@ -1,5 +1,5 @@
 use super::*;
-use crate::shared::events::BaseEvent;
+use crate::shared::protocol::events::BaseEvent;
 
 // ── TurnAccumulator unit tests ──
 
@@ -406,14 +406,14 @@ fn update_from_capability_lifecycle_events() {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
         model_primitive_name: "execute".into(),
-        capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
+        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
     });
     map.update_from_event(&TronEvent::CapabilityInvocationStarted {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
         model_primitive_name: "execute".into(),
         arguments: None,
-        capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
+        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
     });
     map.update_from_event(&TronEvent::CapabilityInvocationCompleted {
         base: BaseEvent::now("s1"),
@@ -422,7 +422,7 @@ fn update_from_capability_lifecycle_events() {
         duration: 100,
         is_error: Some(false),
         result: None,
-        capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
+        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
     });
     let (_, capabilities, _) = map.get_state("s1").unwrap();
     assert_eq!(capabilities[0]["status"], "completed");
@@ -439,14 +439,14 @@ fn update_from_capability_invocation_output_event() {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
         model_primitive_name: "execute".into(),
-        capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
+        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
     });
     map.update_from_event(&TronEvent::CapabilityInvocationStarted {
         base: BaseEvent::now("s1"),
         invocation_id: "tc_1".into(),
         model_primitive_name: "execute".into(),
         arguments: None,
-        capability_identity: crate::shared::events::CapabilityEventIdentity::default(),
+        capability_identity: crate::shared::protocol::events::CapabilityEventIdentity::default(),
     });
     map.update_from_event(&TronEvent::CapabilityInvocationOutput {
         base: BaseEvent::now("s1"),

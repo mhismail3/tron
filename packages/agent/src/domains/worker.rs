@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU16;
 use std::time::Instant;
 
-use crate::app::shutdown::ShutdownCoordinator;
+use crate::app::lifecycle::shutdown::ShutdownCoordinator;
 use crate::domains::agent::runner::orchestrator::orchestrator::Orchestrator;
 use crate::domains::agent::runner::orchestrator::session_manager::SessionManager;
 use crate::domains::agent::runner::profile_runtime::ProfileRuntime;

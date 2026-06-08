@@ -10,5 +10,5 @@ use crate::shared::server::context::ServerRuntimeContext;
 /// Register server-owned domain workers, canonical functions, and trigger types.
 pub fn register_server_domains_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     crate::domains::registration::register_domain_workers_for_context(ctx)?;
-    crate::transport::contracts::register_engine_transport_triggers_for_context(ctx)
+    crate::transport::engine::contracts::register_engine_transport_triggers_for_context(ctx)
 }

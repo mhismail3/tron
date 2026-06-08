@@ -11,7 +11,7 @@
 //! |------------------------|---------|
 //! | [`provider`]           | [`AnthropicProvider`] — implements the shared `Provider` trait ([`crate::domains::model::providers::provider`]); stream orchestration, retry, caching |
 //! | [`message_converter`]  | `Vec<Message>` → `messages`+`system` blocks; Anthropic `tool_use` / `tool_result` provider blocks, thinking blocks, content-block ordering |
-//! | [`stream_handler`]     | Anthropic SSE (`message_start`, `content_block_*`, `message_delta`, `message_stop`) → `StreamEvent` ([`crate::shared::events`]) |
+//! | [`stream_handler`]     | Anthropic SSE (`message_start`, `content_block_*`, `message_delta`, `message_stop`) → `StreamEvent` ([`crate::shared::protocol::events`]) |
 //! | [`cache_pruning`]      | Remove the oldest `cache_control` marker(s) when the 4-breakpoint cap is hit; preserves the system prompt marker |
 //! | [`message_sanitizer`]  | Drop empty assistant messages and normalise internal capability-result ordering before provider conversion |
 //! | [`types`]              | [`AnthropicAuth`] (ApiKey / Oauth / ClaudeAgentSdk), [`AnthropicConfig`], [`AnthropicProviderSettings`] |

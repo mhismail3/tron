@@ -137,11 +137,9 @@ pub(crate) async fn switch_model(
     deps.session_manager.invalidate_session(&session_id);
 
     let is_active = deps.session_manager.is_active(&session_id);
-    let _ = deps
-        .orchestrator
-        .broadcast()
-        .emit(crate::shared::events::TronEvent::SessionUpdated {
-            base: crate::shared::events::BaseEvent::now(&session_id),
+    let _ = deps.orchestrator.broadcast().emit(
+        crate::shared::protocol::events::TronEvent::SessionUpdated {
+            base: crate::shared::protocol::events::BaseEvent::now(&session_id),
             title: session.title.clone(),
             model: Some(model.clone()),
             event_count: Some(session.event_count),
@@ -159,7 +157,8 @@ pub(crate) async fn switch_model(
             last_assistant_response: None,
             parent_session_id: session.parent_session_id.clone(),
             activity_lines: None,
-        });
+        },
+    );
 
     Ok(serde_json::json!({
         "previousModel": previous_model,

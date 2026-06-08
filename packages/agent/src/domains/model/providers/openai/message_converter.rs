@@ -13,9 +13,11 @@
 use crate::domains::model::providers::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
-use crate::shared::content::{AssistantContent, CapabilityResultContent, UserContent};
-use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
-use crate::shared::model_capabilities::ModelCapability;
+use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent, UserContent};
+use crate::shared::protocol::messages::{
+    CapabilityResultMessageContent, Message, UserMessageContent,
+};
+use crate::shared::protocol::model_capabilities::ModelCapability;
 
 use super::types::{
     MessageContent, ResponsesInputItem, ResponsesToolEntry, TOOL_RESULT_MAX_LENGTH,
@@ -324,9 +326,11 @@ fn convert_capability_result(
 #[allow(unused_results)]
 mod tests {
     use super::*;
-    use crate::shared::content::AssistantContent;
-    use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
-    use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
+    use crate::shared::protocol::content::AssistantContent;
+    use crate::shared::protocol::messages::{
+        CapabilityResultMessageContent, Message, UserMessageContent,
+    };
+    use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
     use serde_json::{Map, Value, json};
 
     fn make_tool(name: &str, desc: &str) -> ModelCapability {

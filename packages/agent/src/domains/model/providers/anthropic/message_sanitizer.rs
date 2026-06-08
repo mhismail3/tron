@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 
 use tracing::debug;
 
-use crate::shared::content::AssistantContent;
-use crate::shared::messages::{CapabilityResultMessageContent, Message};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
 
 /// Content for synthetic capability results when execution was interrupted.
 const INTERRUPTED_CONTENT: &str = "[Interrupted]";
@@ -195,10 +195,12 @@ fn has_content_surviving_conversion(content: &[AssistantContent]) -> bool {
 }
 
 /// Check if user message content is non-empty.
-fn is_valid_user_content(content: &crate::shared::messages::UserMessageContent) -> bool {
+fn is_valid_user_content(content: &crate::shared::protocol::messages::UserMessageContent) -> bool {
     match content {
-        crate::shared::messages::UserMessageContent::Text(text) => !text.trim().is_empty(),
-        crate::shared::messages::UserMessageContent::Blocks(blocks) => !blocks.is_empty(),
+        crate::shared::protocol::messages::UserMessageContent::Text(text) => {
+            !text.trim().is_empty()
+        }
+        crate::shared::protocol::messages::UserMessageContent::Blocks(blocks) => !blocks.is_empty(),
     }
 }
 
@@ -217,8 +219,8 @@ fn is_valid_capability_result_content(content: &CapabilityResultMessageContent) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::content::AssistantContent;
-    use crate::shared::messages::{CapabilityResultMessageContent, Message};
+    use crate::shared::protocol::content::AssistantContent;
+    use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
     use serde_json::Map;
 
     fn capability_invocation(id: &str, name: &str) -> AssistantContent {
@@ -255,7 +257,7 @@ mod tests {
         let messages = vec![
             Message::user("hello"),
             Message::User {
-                content: crate::shared::messages::UserMessageContent::Text("  ".into()),
+                content: crate::shared::protocol::messages::UserMessageContent::Text("  ".into()),
                 timestamp: None,
             },
             Message::assistant("world"),
@@ -403,7 +405,7 @@ mod tests {
         assert_eq!(result.len(), 2);
         assert!(result[0].is_user());
         if let Message::User {
-            content: crate::shared::messages::UserMessageContent::Text(text),
+            content: crate::shared::protocol::messages::UserMessageContent::Text(text),
             ..
         } = &result[0]
         {

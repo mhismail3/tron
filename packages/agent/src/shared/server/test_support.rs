@@ -35,19 +35,19 @@ pub(crate) fn unique_test_path(name: &str, extension: &str) -> PathBuf {
 pub(crate) fn unique_tron_home() -> PathBuf {
     let dir = unique_test_path("tron-home", "dir");
     let home = dir.join(".tron");
-    crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
     home
 }
 
 pub(crate) fn test_user_profile_path(home: &Path) -> PathBuf {
-    home.join(crate::shared::paths::dirs::PROFILES)
-        .join(crate::shared::profile::USER_PROFILE)
-        .join(crate::shared::paths::files::PROFILE_TOML)
+    home.join(crate::shared::foundation::paths::dirs::PROFILES)
+        .join(crate::shared::foundation::profile::USER_PROFILE)
+        .join(crate::shared::foundation::paths::files::PROFILE_TOML)
 }
 
 pub(crate) fn test_auth_path(home: &Path) -> PathBuf {
-    home.join(crate::shared::paths::dirs::PROFILES)
-        .join(crate::shared::paths::files::AUTH_JSON)
+    home.join(crate::shared::foundation::paths::dirs::PROFILES)
+        .join(crate::shared::foundation::paths::files::AUTH_JSON)
 }
 
 pub(crate) fn test_profile_runtime(
@@ -68,7 +68,7 @@ impl Provider for MockProvider {
     }
     async fn stream(
         &self,
-        _c: &crate::shared::messages::Context,
+        _c: &crate::shared::protocol::messages::Context,
         _o: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
         Err(ProviderError::Other {
@@ -107,7 +107,7 @@ impl Provider for ModelAwareMockProvider {
     }
     async fn stream(
         &self,
-        _c: &crate::shared::messages::Context,
+        _c: &crate::shared::protocol::messages::Context,
         _o: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
         Err(ProviderError::Other {
@@ -175,7 +175,7 @@ pub fn make_test_context() -> ServerRuntimeContext {
         ws_port: Arc::new(std::sync::atomic::AtomicU16::new(9847)),
         onboarded_marker_path: unique_test_path("onboarded", "marker"),
     };
-    crate::transport::setup::register_server_domains_for_context(&ctx).unwrap();
+    crate::transport::runtime::setup::register_server_domains_for_context(&ctx).unwrap();
     ctx
 }
 

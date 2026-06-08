@@ -1,4 +1,4 @@
-use crate::shared::events::TronEvent;
+use crate::shared::protocol::events::TronEvent;
 use serde_json::json;
 
 use super::routed::{ProjectedEvent, session_scoped};
@@ -27,7 +27,7 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::events::BaseEvent;
+    use crate::shared::protocol::events::BaseEvent;
 
     #[test]
     fn thinking_delta_projection_produces_correct_wire_type() {

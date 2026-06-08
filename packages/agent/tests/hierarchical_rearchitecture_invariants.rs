@@ -163,13 +163,15 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Scorecard",
-        "Current score: **13/100**",
+        "Current score: **19/100**",
         "Status: **running**",
         "Total weight: **100**",
         "## Folder Justification Table",
         "## Large File Budgets",
         "## Static Gates",
         "HRA-0 | Scorecard, evidence, and static-gate setup | 5 | passed_after_fix",
+        "HRA-1 | Whole-repo inventory and target architecture | 8 | passed_after_fix",
+        "HRA-2 | Rust app, transport, shared, and platform roots | 6 | passed_after_fix",
         "HRA-16 | Final adversarial review and closeout | 2 | pending",
         FILE_INVENTORY_PATH,
         MOVE_MAP_PATH,
@@ -198,7 +200,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Evidence Manifest",
-        "Current score: **13/100**",
+        "Current score: **19/100**",
         "Status: **running**",
         "| HRA-0 | passed_after_fix |",
         "## HRA-0 Red Static Gate",
@@ -294,6 +296,71 @@ fn rust_source_root_has_only_allowed_entry_files() {
     assert!(
         unexpected.is_empty(),
         "Rust source root must contain only true crate entry files; move these into owned modules: {unexpected:#?}"
+    );
+}
+
+#[test]
+fn rust_app_transport_shared_roots_are_owned() {
+    let required = [
+        "packages/agent/src/app/cli/mod.rs",
+        "packages/agent/src/app/bootstrap/mod.rs",
+        "packages/agent/src/app/bootstrap/config.rs",
+        "packages/agent/src/app/bootstrap/server.rs",
+        "packages/agent/src/app/health/mod.rs",
+        "packages/agent/src/app/health/metrics.rs",
+        "packages/agent/src/app/lifecycle/mod.rs",
+        "packages/agent/src/app/lifecycle/onboarding/mod.rs",
+        "packages/agent/src/app/lifecycle/shutdown.rs",
+        "packages/agent/src/transport/http/auth.rs",
+        "packages/agent/src/transport/engine/contracts.rs",
+        "packages/agent/src/transport/engine/mod.rs",
+        "packages/agent/src/transport/engine/socket/mod.rs",
+        "packages/agent/src/transport/runtime/setup.rs",
+        "packages/agent/src/shared/foundation/mod.rs",
+        "packages/agent/src/shared/protocol/mod.rs",
+        "packages/agent/src/shared/observability/mod.rs",
+        "packages/agent/src/shared/storage/mod.rs",
+    ];
+    let banned = [
+        "packages/agent/src/main_cli.rs",
+        "packages/agent/src/main_runtime.rs",
+        "packages/agent/src/main_tests.rs",
+        "packages/agent/src/app/config.rs",
+        "packages/agent/src/app/disk.rs",
+        "packages/agent/src/app/health.rs",
+        "packages/agent/src/app/metrics.rs",
+        "packages/agent/src/app/onboarding",
+        "packages/agent/src/app/server.rs",
+        "packages/agent/src/app/shutdown.rs",
+        "packages/agent/src/transport/auth.rs",
+        "packages/agent/src/transport/contracts.rs",
+        "packages/agent/src/transport/engine.rs",
+        "packages/agent/src/transport/engine_ws",
+        "packages/agent/src/transport/engine_ws.rs",
+        "packages/agent/src/transport/setup.rs",
+        "packages/agent/src/shared/errors",
+        "packages/agent/src/shared/logging",
+        "packages/agent/src/shared/storage.rs",
+        "packages/agent/src/shared/foundation/paths.rs",
+        "packages/agent/src/shared/foundation/profile.rs",
+        "packages/agent/src/shared/protocol/events.rs",
+        "packages/agent/src/shared/protocol/messages.rs",
+    ];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "Rust app/transport/shared HRA-2 roots are not clean; missing: {missing:#?}; old paths still present: {present_banned:#?}"
     );
 }
 

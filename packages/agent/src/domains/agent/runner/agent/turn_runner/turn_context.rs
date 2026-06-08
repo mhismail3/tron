@@ -3,14 +3,14 @@
 use crate::domains::agent::runner::agent::primitive_surface::{self, ResolvedPrimitiveSurface};
 use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::types::RunContext;
-use crate::shared::messages::Context;
+use crate::shared::protocol::messages::Context;
 use tracing::debug;
 
 pub(super) fn build_turn_context(
     context_manager: &mut ContextManager,
     run_context: &RunContext,
     server_origin: Option<&str>,
-    primitive_surface: Vec<crate::shared::model_capabilities::ModelCapability>,
+    primitive_surface: Vec<crate::shared::protocol::model_capabilities::ModelCapability>,
 ) -> Context {
     context_manager.set_volatile_tokens(0, 0, 0);
     context_manager.set_server_origin(server_origin.map(String::from));

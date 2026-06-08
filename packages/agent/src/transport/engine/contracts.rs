@@ -185,7 +185,7 @@ fn public_spec(
     CapabilityContract::new(method, "engine", effect, risk, Some(authority_for(effect)))
         .function_id(function_id)
         .domain_worker("engine")
-        .domain_module("transport::engine_ws")
+        .domain_module("transport::engine::socket")
 }
 
 fn authority_for(effect: EffectClass) -> &'static str {

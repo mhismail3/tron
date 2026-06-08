@@ -13,7 +13,7 @@ use crate::domains::model::providers::models::model_ids::{
 use crate::domains::model::providers::models::registry::{
     detect_provider_from_model, strip_provider_prefix,
 };
-use crate::shared::messages::Provider;
+use crate::shared::protocol::messages::Provider;
 
 /// User-facing model presets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]

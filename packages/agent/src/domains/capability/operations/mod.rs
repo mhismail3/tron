@@ -27,8 +27,8 @@ use crate::engine::invocation::{
 use crate::engine::{
     CausalContext, FunctionId, Invocation, invocation::RUNTIME_METADATA_WORKING_DIRECTORY,
 };
-use crate::shared::content::CapabilityResultContent;
-use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
+use crate::shared::protocol::content::CapabilityResultContent;
+use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
@@ -853,7 +853,7 @@ fn working_directory(invocation: &Invocation) -> Result<PathBuf, CapabilityError
                 .display()
                 .to_string()
         });
-    crate::shared::paths::normalize_working_directory(&raw).map_err(internal)
+    crate::shared::foundation::paths::normalize_working_directory(&raw).map_err(internal)
 }
 
 fn required_str<'a>(payload: &'a Value, field: &str) -> Result<&'a str, CapabilityError> {

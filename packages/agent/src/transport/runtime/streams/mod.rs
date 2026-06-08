@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use crate::domains::agent::runner::orchestrator::turn_accumulator::TurnAccumulatorMap;
 use crate::engine::{EngineHostHandle, InvocationId, PublishStreamEvent, TraceId, VisibilityScope};
-use crate::shared::events::TronEvent;
+use crate::shared::protocol::events::TronEvent;
 use serde_json::json;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;

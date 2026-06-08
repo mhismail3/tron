@@ -2,8 +2,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 
 use crate::domains::session::event_store::EventType;
-use crate::shared::events::{AssistantMessage, BaseEvent, CapabilityInvocationSummary, TronEvent};
-use crate::shared::messages::{Provider, TokenUsage};
+use crate::shared::protocol::events::{
+    AssistantMessage, BaseEvent, CapabilityInvocationSummary, TronEvent,
+};
+use crate::shared::protocol::messages::{Provider, TokenUsage};
 use serde_json::{Value, json};
 use tracing::{error, warn};
 
@@ -236,30 +238,31 @@ pub(super) fn add_assistant_message_to_context(
     context_manager: &mut ContextManager,
     stream_result: &StreamResult,
 ) -> bool {
-    let has_thinking = stream_result
-        .message
-        .content
-        .iter()
-        .any(|c| matches!(c, crate::shared::content::AssistantContent::Thinking { .. }));
+    let has_thinking = stream_result.message.content.iter().any(|c| {
+        matches!(
+            c,
+            crate::shared::protocol::content::AssistantContent::Thinking { .. }
+        )
+    });
     tracing::debug!(
         has_thinking,
         content_block_count = stream_result.message.content.len(),
         content_types = ?stream_result.message.content.iter().map(|c| match c {
-            crate::shared::content::AssistantContent::Text { .. } => "Text",
-            crate::shared::content::AssistantContent::Thinking { .. } => "Thinking",
-            crate::shared::content::AssistantContent::CapabilityInvocation { .. } => "CapabilityInvocation",
+            crate::shared::protocol::content::AssistantContent::Text { .. } => "Text",
+            crate::shared::protocol::content::AssistantContent::Thinking { .. } => "Thinking",
+            crate::shared::protocol::content::AssistantContent::CapabilityInvocation { .. } => "CapabilityInvocation",
         }).collect::<Vec<_>>(),
         "persistence: add_assistant_message_to_context"
     );
     let thinking_text = stream_result.message.content.iter().find_map(|c| {
-        if let crate::shared::content::AssistantContent::Thinking { thinking, .. } = c {
+        if let crate::shared::protocol::content::AssistantContent::Thinking { thinking, .. } = c {
             Some(thinking.clone())
         } else {
             None
         }
     });
-    let stop_reason_for_context: Option<crate::shared::messages::StopReason> =
-        match serde_json::from_value::<crate::shared::messages::StopReason>(
+    let stop_reason_for_context: Option<crate::shared::protocol::messages::StopReason> =
+        match serde_json::from_value::<crate::shared::protocol::messages::StopReason>(
             serde_json::Value::String(stream_result.stop_reason.clone()),
         ) {
             Ok(sr) => Some(sr),
@@ -275,7 +278,7 @@ pub(super) fn add_assistant_message_to_context(
             }
         };
 
-    context_manager.add_message(crate::shared::messages::Message::Assistant {
+    context_manager.add_message(crate::shared::protocol::messages::Message::Assistant {
         content: stream_result.message.content.clone(),
         usage: stream_result.token_usage.clone().map(Box::new),
         cost: None,
@@ -439,7 +442,7 @@ pub(super) async fn emit_turn_end(
 pub(super) fn emit_capability_invocation_batch(
     emitter: &Arc<EventEmitter>,
     session_id: &str,
-    capability_invocations: &[crate::shared::messages::CapabilityInvocationDraft],
+    capability_invocations: &[crate::shared::protocol::messages::CapabilityInvocationDraft],
     sequence_counter: Option<&AtomicI64>,
     trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
@@ -658,7 +661,7 @@ mod tests {
 
     fn stream_result_stub() -> StreamResult {
         StreamResult {
-            message: crate::shared::events::AssistantMessage {
+            message: crate::shared::protocol::events::AssistantMessage {
                 content: Vec::new(),
                 token_usage: None,
             },

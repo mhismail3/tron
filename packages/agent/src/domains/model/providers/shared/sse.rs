@@ -149,7 +149,7 @@ pub fn parse_sse_data<T: serde::de::DeserializeOwned>(data: &str, provider: &str
             warn!(
                 provider = provider,
                 error = %e,
-                data_preview = crate::shared::text::truncate_str(data, 100),
+                data_preview = crate::shared::foundation::text::truncate_str(data, 100),
                 "Failed to parse SSE data"
             );
             None

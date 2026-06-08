@@ -14,7 +14,7 @@ use crate::domains::agent::runner::context::types::{
     CompactionTriggerConfig, CompactionTriggerInput,
 };
 use crate::domains::agent::runner::errors::RuntimeError;
-use crate::shared::events::{BaseEvent, CompactionReason, TronEvent};
+use crate::shared::protocol::events::{BaseEvent, CompactionReason, TronEvent};
 use metrics::{counter, histogram};
 use tracing::{debug, warn};
 

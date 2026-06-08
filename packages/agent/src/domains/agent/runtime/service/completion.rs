@@ -198,9 +198,9 @@ fn emit_run_error_if_needed(
     let Some(ref error_message) = result.error else {
         return;
     };
-    let parsed = crate::shared::errors::parse::parse_error(error_message);
-    let _ = broadcast.emit(crate::shared::events::TronEvent::Error {
-        base: crate::shared::events::BaseEvent::now(session_id),
+    let parsed = crate::shared::foundation::errors::parse::parse_error(error_message);
+    let _ = broadcast.emit(crate::shared::protocol::events::TronEvent::Error {
+        base: crate::shared::protocol::events::BaseEvent::now(session_id),
         error: error_message.clone(),
         context: None,
         code: None,
@@ -230,8 +230,8 @@ async fn emit_session_update(
     .await
     {
         Ok(Some(update)) => {
-            let _ = broadcast.emit(crate::shared::events::TronEvent::SessionUpdated {
-                base: crate::shared::events::BaseEvent::now(session_id),
+            let _ = broadcast.emit(crate::shared::protocol::events::TronEvent::SessionUpdated {
+                base: crate::shared::protocol::events::BaseEvent::now(session_id),
                 title: update.session.title.clone(),
                 model: Some(update.session.latest_model.clone()),
                 event_count: Some(update.session.event_count),

@@ -5,7 +5,7 @@
 //! hit/write buckets for cache-aware providers, and unavailable pricing for any
 //! model not listed here.
 
-use crate::shared::messages::TokenUsage;
+use crate::shared::protocol::messages::TokenUsage;
 
 use super::types::{PricingRecord, PricingTier, TokenCostBreakdown};
 
@@ -27,7 +27,7 @@ pub fn calculate_pricing(model: &str, usage: &TokenUsage) -> PricingRecord {
     let Some(provider) = usage.provider_type else {
         return PricingRecord::unavailable(model, "missing_provider_for_pricing");
     };
-    if provider == crate::shared::messages::Provider::Unknown {
+    if provider == crate::shared::protocol::messages::Provider::Unknown {
         return PricingRecord::unavailable(model, "unknown_provider_for_pricing");
     }
 
@@ -42,8 +42,8 @@ pub fn calculate_pricing(model: &str, usage: &TokenUsage) -> PricingRecord {
     let cache_1hr = usage.cache_creation_1h_tokens.unwrap_or(0);
 
     let base_input = match provider {
-        crate::shared::messages::Provider::Anthropic
-        | crate::shared::messages::Provider::MiniMax => input,
+        crate::shared::protocol::messages::Provider::Anthropic
+        | crate::shared::protocol::messages::Provider::MiniMax => input,
         _ => input
             .saturating_sub(cache_read)
             .saturating_sub(cache_creation),
@@ -297,7 +297,7 @@ fn free_tier() -> PricingTier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::messages::Provider;
+    use crate::shared::protocol::messages::Provider;
 
     fn assert_float_eq(actual: f64, expected: f64) {
         assert!(

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicI64, Ordering};
 /// `RunRegistry` — exceeding this surfaces as `RuntimeError::ServerBusy`.
 pub const MAX_CONCURRENT_SESSIONS: usize = 50;
 
-use crate::shared::events::TronEvent;
+use crate::shared::protocol::events::TronEvent;
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, broadcast};

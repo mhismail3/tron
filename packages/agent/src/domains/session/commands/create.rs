@@ -10,11 +10,12 @@ impl SessionCommandService {
         request: CreateSessionRequest,
     ) -> Result<Value, CapabilityError> {
         let session_manager = deps.session_manager.clone();
-        let working_directory =
-            crate::shared::paths::normalize_working_directory(&request.working_directory)
-                .map_err(|message| CapabilityError::InvalidParams { message })?
-                .display()
-                .to_string();
+        let working_directory = crate::shared::foundation::paths::normalize_working_directory(
+            &request.working_directory,
+        )
+        .map_err(|message| CapabilityError::InvalidParams { message })?
+        .display()
+        .to_string();
         let model = request.model.clone();
         let title = request.title.clone();
         let stored_working_directory = working_directory.clone();

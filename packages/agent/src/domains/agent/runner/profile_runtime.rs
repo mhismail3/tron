@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 use walkdir::WalkDir;
 
 use crate::domains::settings::types::TronSettings;
-use crate::shared::profile::{AgentExecutionSpec, ResolvedProfile};
+use crate::shared::foundation::profile::{AgentExecutionSpec, ResolvedProfile};
 
 const PROFILE_WATCH_INTERVAL: Duration = Duration::from_secs(2);
 
@@ -173,7 +173,7 @@ impl ProfileRuntime {
 }
 
 fn profile_tree_hash(home: &Path) -> std::io::Result<String> {
-    let profiles_dir = home.join(crate::shared::paths::dirs::PROFILES);
+    let profiles_dir = home.join(crate::shared::foundation::paths::dirs::PROFILES);
     let mut files = Vec::new();
     if !profiles_dir.exists() {
         return Ok(String::new());
@@ -185,7 +185,7 @@ fn profile_tree_hash(home: &Path) -> std::io::Result<String> {
         }
         let path = entry.path();
         if path.file_name().and_then(|name| name.to_str())
-            == Some(crate::shared::paths::files::AUTH_JSON)
+            == Some(crate::shared::foundation::paths::files::AUTH_JSON)
         {
             continue;
         }
@@ -212,7 +212,7 @@ fn profile_tree_hash(home: &Path) -> std::io::Result<String> {
 }
 
 fn load_harness_spec(home: &Path) -> std::io::Result<ResolvedHarnessSpec> {
-    let profile = Arc::new(crate::shared::profile::resolve_active_profile_at(home)?);
+    let profile = Arc::new(crate::shared::foundation::profile::resolve_active_profile_at(home)?);
     let settings = effective_settings(profile.spec.settings())?;
     Ok(ResolvedHarnessSpec {
         home: home.to_path_buf(),
@@ -237,12 +237,12 @@ fn effective_settings(settings: &TronSettings) -> std::io::Result<TronSettings> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::profile::NORMAL_PROFILE;
+    use crate::shared::foundation::profile::NORMAL_PROFILE;
 
     fn seeded_runtime() -> (tempfile::TempDir, ProfileRuntime) {
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(".tron");
-        crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+        crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
         let runtime = ProfileRuntime::load(&home).unwrap();
         (dir, runtime)
     }
@@ -264,9 +264,9 @@ mod tests {
         let before = runtime.current();
         let profile_path = runtime
             .home()
-            .join(crate::shared::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::paths::dirs::PROFILES)
             .join(NORMAL_PROFILE)
-            .join(crate::shared::paths::files::PROFILE_TOML);
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML);
         std::fs::write(&profile_path, "{broken").unwrap();
 
         let error = runtime.reload_now("test").unwrap_err();
@@ -286,9 +286,9 @@ mod tests {
         crate::domains::settings::init_settings(runtime.current().settings.clone());
         let profile_path = runtime
             .home()
-            .join(crate::shared::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::paths::dirs::PROFILES)
             .join(NORMAL_PROFILE)
-            .join(crate::shared::paths::files::PROFILE_TOML);
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML);
         let mut profile = std::fs::read_to_string(&profile_path).unwrap();
         profile.push_str("\n[settings.server]\ndefaultModel = \"reload-test-model\"\n");
         std::fs::write(&profile_path, profile).unwrap();
@@ -312,7 +312,7 @@ mod tests {
         crate::domains::settings::reset_settings();
         let dir = tempfile::tempdir().unwrap();
         let home = dir.path().join(".tron");
-        crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
+        crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
         let runtime = Arc::new(ProfileRuntime::load(&home).unwrap());
         crate::domains::settings::init_settings(runtime.current().settings.clone());
         let cancel = CancellationToken::new();
@@ -321,9 +321,9 @@ mod tests {
             .spawn_watcher_with_interval(cancel.clone(), Duration::from_millis(20));
 
         let profile_path = home
-            .join(crate::shared::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::paths::dirs::PROFILES)
             .join(NORMAL_PROFILE)
-            .join(crate::shared::paths::files::PROFILE_TOML);
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML);
         let mut profile = std::fs::read_to_string(&profile_path).unwrap();
         profile.push_str("\n[settings.server]\ndefaultModel = \"watcher-test-model\"\n");
         std::fs::write(&profile_path, profile).unwrap();
@@ -354,9 +354,9 @@ mod tests {
         let (_dir, runtime) = seeded_runtime();
         let profile_path = runtime
             .home()
-            .join(crate::shared::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::paths::dirs::PROFILES)
             .join(NORMAL_PROFILE)
-            .join(crate::shared::paths::files::PROFILE_TOML);
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML);
         let mut profile = std::fs::read_to_string(&profile_path).unwrap();
         profile.push_str("\n[entrypoints.main]\nmodelPolicy = \"sessionDefault\"\n");
         std::fs::write(&profile_path, profile).unwrap();

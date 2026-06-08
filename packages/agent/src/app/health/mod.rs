@@ -1,5 +1,7 @@
 //! `/health` and `/health/deep` endpoints.
 
+pub mod metrics;
+
 use std::path::Path;
 use std::time::Instant;
 
@@ -74,18 +76,18 @@ pub fn deep_health_check(
         // 2. Settings
         check_settings(
             &tron_home
-                .join(crate::shared::paths::dirs::PROFILES)
-                .join(crate::shared::profile::USER_PROFILE)
-                .join(crate::shared::paths::files::PROFILE_TOML),
+                .join(crate::shared::foundation::paths::dirs::PROFILES)
+                .join(crate::shared::foundation::profile::USER_PROFILE)
+                .join(crate::shared::foundation::paths::files::PROFILE_TOML),
         ),
         // 3. Auth
         check_auth(
             &tron_home
-                .join(crate::shared::paths::dirs::PROFILES)
-                .join(crate::shared::paths::files::AUTH_JSON),
+                .join(crate::shared::foundation::paths::dirs::PROFILES)
+                .join(crate::shared::foundation::paths::files::AUTH_JSON),
         ),
         // 4. Binary
-        check_binary(&crate::shared::paths::tron_binary_path()),
+        check_binary(&crate::shared::foundation::paths::tron_binary_path()),
         // 5. Disk
         check_disk(tron_home),
     ];
@@ -209,7 +211,7 @@ fn check_binary(path: &Path) -> DeepHealthCheck {
 }
 
 fn check_disk(tron_home: &Path) -> DeepHealthCheck {
-    disk_check_from_result(crate::app::disk::available_megabytes(tron_home))
+    disk_check_from_result(crate::app::bootstrap::disk::available_megabytes(tron_home))
 }
 
 fn disk_check_from_result(result: std::io::Result<u64>) -> DeepHealthCheck {
@@ -393,13 +395,13 @@ mod tests {
             crate::domains::session::event_store::run_migrations(&conn).unwrap();
         }
         let dir = tempfile::tempdir().unwrap();
-        crate::shared::constitution::ensure_tron_home_at(dir.path()).unwrap();
+        crate::shared::foundation::constitution::ensure_tron_home_at(dir.path()).unwrap();
         let settings_dir = dir
             .path()
-            .join(crate::shared::paths::dirs::PROFILES)
-            .join(crate::shared::profile::USER_PROFILE);
+            .join(crate::shared::foundation::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::profile::USER_PROFILE);
         std::fs::write(
-            settings_dir.join(crate::shared::paths::files::PROFILE_TOML),
+            settings_dir.join(crate::shared::foundation::paths::files::PROFILE_TOML),
             "{broken",
         )
         .unwrap();
@@ -426,13 +428,13 @@ mod tests {
             crate::domains::session::event_store::run_migrations(&conn).unwrap();
         }
         let dir = tempfile::tempdir().unwrap();
-        crate::shared::constitution::ensure_tron_home_at(dir.path()).unwrap();
+        crate::shared::foundation::constitution::ensure_tron_home_at(dir.path()).unwrap();
         let settings_dir = dir
             .path()
-            .join(crate::shared::paths::dirs::PROFILES)
-            .join(crate::shared::profile::USER_PROFILE);
+            .join(crate::shared::foundation::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::profile::USER_PROFILE);
         std::fs::write(
-            settings_dir.join(crate::shared::paths::files::PROFILE_TOML),
+            settings_dir.join(crate::shared::foundation::paths::files::PROFILE_TOML),
             r#"
 version = "2"
 name = "user"

@@ -7,7 +7,7 @@
 //! Session-level aggregates ([`AccumulatedTokens`], [`ContextWindowState`],
 //! [`TokenState`]) are managed by the state module.
 
-use crate::shared::messages::Provider;
+use crate::shared::protocol::messages::Provider;
 use serde::{Deserialize, Serialize};
 
 /// Raw token values directly from the provider API response.

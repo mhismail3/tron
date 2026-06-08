@@ -4,9 +4,11 @@ use crate::domains::model::providers::models::types::Provider as ProviderKind;
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderStreamOptions, StreamEventStream,
 };
-use crate::shared::content::AssistantContent;
-use crate::shared::events::{AssistantMessage, StreamEvent, TronEvent};
-use crate::shared::messages::{CapabilityResultMessageContent, Context, Message, TokenUsage};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::events::{AssistantMessage, StreamEvent, TronEvent};
+use crate::shared::protocol::messages::{
+    CapabilityResultMessageContent, Context, Message, TokenUsage,
+};
 use async_trait::async_trait;
 use futures::stream;
 use parking_lot::Mutex;
@@ -27,7 +29,7 @@ impl Provider for MockProvider {
 
     async fn stream(
         &self,
-        _context: &crate::shared::messages::Context,
+        _context: &crate::shared::protocol::messages::Context,
         _options: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
         let events = vec![
@@ -61,7 +63,7 @@ impl Provider for TokenUsageProvider {
 
     async fn stream(
         &self,
-        _context: &crate::shared::messages::Context,
+        _context: &crate::shared::protocol::messages::Context,
         _options: &ProviderStreamOptions,
     ) -> Result<StreamEventStream, ProviderError> {
         let events = vec![
@@ -133,11 +135,12 @@ impl Provider for PrimitiveExecuteLoopProvider {
                     arguments_delta: serde_json::to_string(&arguments).expect("arguments json"),
                 }),
                 Ok(StreamEvent::CapabilityInvocationDraftEnd {
-                    capability_invocation: crate::shared::messages::CapabilityInvocationDraft::new(
-                        "tc-primitive-observe",
-                        "execute",
-                        arguments,
-                    ),
+                    capability_invocation:
+                        crate::shared::protocol::messages::CapabilityInvocationDraft::new(
+                            "tc-primitive-observe",
+                            "execute",
+                            arguments,
+                        ),
                 }),
                 Ok(StreamEvent::Done {
                     message: AssistantMessage {
@@ -164,10 +167,10 @@ impl Provider for PrimitiveExecuteLoopProvider {
                         blocks
                             .iter()
                             .filter_map(|block| match block {
-                                crate::shared::content::CapabilityResultContent::Text { text } => {
+                                crate::shared::protocol::content::CapabilityResultContent::Text { text } => {
                                     Some(text.as_str())
                                 }
-                                crate::shared::content::CapabilityResultContent::Image {
+                                crate::shared::protocol::content::CapabilityResultContent::Image {
                                     ..
                                 } => None,
                             })

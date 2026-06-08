@@ -43,7 +43,7 @@ pub(crate) async fn session_list_value(
     let include_archived = opt_bool(params, "includeArchived").unwrap_or(false);
     let working_directory = match opt_string(params, "workingDirectory") {
         Some(path) => Some(
-            crate::shared::paths::normalize_working_directory(&path)
+            crate::shared::foundation::paths::normalize_working_directory(&path)
                 .map_err(|message| CapabilityError::InvalidParams { message })?
                 .display()
                 .to_string(),

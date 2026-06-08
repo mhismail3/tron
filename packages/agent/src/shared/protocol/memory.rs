@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::shared::messages::{CapabilityInvocationDraft, Message};
+use crate::shared::protocol::messages::{CapabilityInvocationDraft, Message};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Session memory

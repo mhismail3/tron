@@ -16,22 +16,23 @@ use crate::domains::settings::types::TronSettings;
 
 /// Resolve the `~/.tron` directory.
 pub fn tron_home_dir() -> PathBuf {
-    crate::shared::paths::tron_home()
+    crate::shared::foundation::paths::tron_home()
 }
 
 /// Resolve the sparse profile override path (`~/.tron/profiles/user/profile.toml`).
 pub fn settings_path() -> PathBuf {
-    crate::shared::paths::user_profile_path()
+    crate::shared::foundation::paths::user_profile_path()
 }
 
 /// Resolve the managed default profile file.
 pub fn settings_defaults_path() -> PathBuf {
-    crate::shared::paths::default_profile_dir().join(crate::shared::paths::files::PROFILE_TOML)
+    crate::shared::foundation::paths::default_profile_dir()
+        .join(crate::shared::foundation::paths::files::PROFILE_TOML)
 }
 
 /// Resolve the built-in auth file (`~/.tron/profiles/auth.json`).
 pub fn auth_path() -> PathBuf {
-    crate::shared::paths::auth_path()
+    crate::shared::foundation::paths::auth_path()
 }
 
 /// Profile settings are seeded as part of the managed profile defaults.
@@ -74,16 +75,17 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
 /// Load active profile settings before sparse user overrides.
 pub fn load_settings_defaults_for(settings_path: &Path) -> Result<TronSettings> {
     let home = tron_home_for_user_profile_path(settings_path)
-        .unwrap_or_else(crate::shared::paths::tron_home);
-    let active = crate::shared::profile::active_profile_name_at(&home).ok_or_else(|| {
-        SettingsError::InvalidValue(format!(
-            "missing active profile pointer under {}",
-            home.join(crate::shared::paths::dirs::PROFILES)
-                .join(crate::shared::paths::files::ACTIVE_TOML)
-                .display()
-        ))
-    })?;
-    let resolved = crate::shared::profile::resolve_profile_base_at(&home, &active)
+        .unwrap_or_else(crate::shared::foundation::paths::tron_home);
+    let active =
+        crate::shared::foundation::profile::active_profile_name_at(&home).ok_or_else(|| {
+            SettingsError::InvalidValue(format!(
+                "missing active profile pointer under {}",
+                home.join(crate::shared::foundation::paths::dirs::PROFILES)
+                    .join(crate::shared::foundation::paths::files::ACTIVE_TOML)
+                    .display()
+            ))
+        })?;
+    let resolved = crate::shared::foundation::profile::resolve_profile_base_at(&home, &active)
         .map_err(|error| SettingsError::InvalidValue(error.to_string()))?;
     let mut defaults = resolved.spec.settings().clone();
     defaults.validate_strict()?;
@@ -111,15 +113,15 @@ pub fn read_sparse_settings_overlay(path: &Path) -> Result<Value> {
 
 fn tron_home_for_user_profile_path(path: &Path) -> Option<PathBuf> {
     let file = path.file_name()?.to_str()?;
-    if file != crate::shared::paths::files::PROFILE_TOML {
+    if file != crate::shared::foundation::paths::files::PROFILE_TOML {
         return None;
     }
     let user_dir = path.parent()?;
-    if user_dir.file_name()?.to_str()? != crate::shared::profile::USER_PROFILE {
+    if user_dir.file_name()?.to_str()? != crate::shared::foundation::profile::USER_PROFILE {
         return None;
     }
     let profiles_dir = user_dir.parent()?;
-    if profiles_dir.file_name()?.to_str()? != crate::shared::paths::dirs::PROFILES {
+    if profiles_dir.file_name()?.to_str()? != crate::shared::foundation::paths::dirs::PROFILES {
         return None;
     }
     profiles_dir.parent().map(Path::to_path_buf)
@@ -242,10 +244,10 @@ mod tests {
 
     fn temp_settings_path(dir: &tempfile::TempDir) -> PathBuf {
         let home = dir.path().join(".tron");
-        crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
-        home.join(crate::shared::paths::dirs::PROFILES)
-            .join(crate::shared::profile::USER_PROFILE)
-            .join(crate::shared::paths::files::PROFILE_TOML)
+        crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+        home.join(crate::shared::foundation::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::profile::USER_PROFILE)
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML)
     }
 
     fn write_sparse_settings(path: &Path, settings_toml: &str) {
@@ -388,7 +390,7 @@ authProfile = "default"
         std::fs::remove_file(&path).unwrap();
 
         let settings = load_settings_from_path(&path).unwrap();
-        let defaults = crate::shared::profile::bundled_default_execution_spec()
+        let defaults = crate::shared::foundation::profile::bundled_default_execution_spec()
             .settings()
             .clone();
         assert_eq!(settings.version, defaults.version);
@@ -415,7 +417,7 @@ authProfile = "default"
 
     #[test]
     fn bundled_profile_settings_match_rust_settings_schema() {
-        let profile = crate::shared::profile::bundled_default_execution_spec();
+        let profile = crate::shared::foundation::profile::bundled_default_execution_spec();
         let bundled_value = serde_json::to_value(profile.settings()).unwrap();
         let round_tripped: TronSettings = serde_json::from_value(bundled_value.clone()).unwrap();
 
@@ -436,15 +438,15 @@ authProfile = "default"
             .expect("profile path should be under .tron")
             .to_path_buf();
         std::fs::write(
-            home.join(crate::shared::paths::dirs::PROFILES)
-                .join(crate::shared::paths::files::ACTIVE_TOML),
+            home.join(crate::shared::foundation::paths::dirs::PROFILES)
+                .join(crate::shared::foundation::paths::files::ACTIVE_TOML),
             "active = \"managed\"\n",
         )
         .unwrap();
         let managed_profile = home
-            .join(crate::shared::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::paths::dirs::PROFILES)
             .join("managed")
-            .join(crate::shared::paths::files::PROFILE_TOML);
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML);
         std::fs::create_dir_all(managed_profile.parent().unwrap()).unwrap();
         std::fs::write(
             &managed_profile,
@@ -485,15 +487,15 @@ defaultProvider = "openai"
             .expect("profile path should be under .tron")
             .to_path_buf();
         std::fs::write(
-            home.join(crate::shared::paths::dirs::PROFILES)
-                .join(crate::shared::paths::files::ACTIVE_TOML),
+            home.join(crate::shared::foundation::paths::dirs::PROFILES)
+                .join(crate::shared::foundation::paths::files::ACTIVE_TOML),
             "active = \"broken\"\n",
         )
         .unwrap();
         let broken_profile = home
-            .join(crate::shared::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::paths::dirs::PROFILES)
             .join("broken")
-            .join(crate::shared::paths::files::PROFILE_TOML);
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML);
         std::fs::create_dir_all(broken_profile.parent().unwrap()).unwrap();
         std::fs::write(&broken_profile, "{broken").unwrap();
 
@@ -510,7 +512,7 @@ defaultProvider = "openai"
         write_sparse_settings(&path, "");
 
         let settings = load_settings_from_path(&path).unwrap();
-        let defaults = crate::shared::profile::bundled_default_execution_spec()
+        let defaults = crate::shared::foundation::profile::bundled_default_execution_spec()
             .settings()
             .clone();
         assert_eq!(settings.version, defaults.version);

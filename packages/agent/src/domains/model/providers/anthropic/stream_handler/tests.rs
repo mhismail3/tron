@@ -1,5 +1,5 @@
 use super::*;
-use crate::shared::messages::Provider;
+use crate::shared::protocol::messages::Provider;
 
 use crate::domains::model::providers::anthropic::types::{
     SseCacheCreation, SseError, SseMessage, SseMessageDelta, SseUsage, SseUsageDelta,
@@ -22,22 +22,22 @@ fn stream_state_default_is_anthropic() {
     let state = create_stream_state();
     assert_eq!(
         state.provider_type,
-        crate::shared::messages::Provider::Anthropic
+        crate::shared::protocol::messages::Provider::Anthropic
     );
 }
 
 #[test]
 fn stream_state_for_minimax() {
-    let state = create_stream_state_for(crate::shared::messages::Provider::MiniMax);
+    let state = create_stream_state_for(crate::shared::protocol::messages::Provider::MiniMax);
     assert_eq!(
         state.provider_type,
-        crate::shared::messages::Provider::MiniMax
+        crate::shared::protocol::messages::Provider::MiniMax
     );
 }
 
 #[test]
 fn done_event_uses_state_provider_type() {
-    let mut state = create_stream_state_for(crate::shared::messages::Provider::MiniMax);
+    let mut state = create_stream_state_for(crate::shared::protocol::messages::Provider::MiniMax);
     state.acc.input_tokens = 100;
     state.acc.output_tokens = 50;
     let event = build_done_event(&mut state);
@@ -46,7 +46,7 @@ fn done_event_uses_state_provider_type() {
             let usage = message.token_usage.as_ref().unwrap();
             assert_eq!(
                 usage.provider_type,
-                Some(crate::shared::messages::Provider::MiniMax)
+                Some(crate::shared::protocol::messages::Provider::MiniMax)
             );
         }
         _ => panic!("expected Done"),

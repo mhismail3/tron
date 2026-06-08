@@ -1,53 +1,20 @@
-//! # shared
+//! Cross-owner foundation, protocol, server, storage, and observability code.
 //!
-//! Foundation types, errors, branded IDs, and utilities for the Tron agent.
+//! | Module | Purpose |
+//! |--------|---------|
+//! | [`foundation`] | Constants, IDs, paths, profile specs, retry/text helpers, and shared errors |
+//! | [`protocol`] | Public DTOs for content, events, messages, memory, and model capability data |
+//! | [`server`] | Transport-neutral runtime context, validation, params, and capability errors |
+//! | [`storage`] | SQLite storage helpers used by engine, session, logs, and runtime surfaces |
+//! | [`observability`] | Tracing/log persistence transport and test capture helpers |
 //!
-//! This module provides the shared vocabulary that all other Tron modules depend on:
-//!
-//! - **Branded IDs**: [`ids::EventId`], [`ids::SessionId`], [`ids::WorkspaceId`] as newtypes
-//! - **Messages**: [`messages::Message`] enum with `User`, `Assistant`, `CapabilityResult` variants.
-//!   Wire-format coverage lives beside the implementation in `protocol/messages/tests.rs`.
-//! - **Content blocks**: [`content::UserContent`], [`content::AssistantContent`], etc.
-//! - **Capability results**: [`model_capabilities::CapabilityResult`] with content, details, error/stop flags
-//! - **Errors**: [`errors::TronError`] hierarchy via `thiserror`, capability error codes
-//! - **Events**: [`events::StreamEvent`] for LLM streaming, [`events::TronEvent`] for agent lifecycle
-//! - **Retry**: [`retry::RetryConfig`] and backoff calculation
-//! - **Tron Home**: [`constitution`] layout recovery and [`profile`] execution specs
-//! - **Memory**: [`memory::SessionMemory`]
-//!
-//! ## Module Position
-//!
-//! Shared module. Depended on by all other tron modules.
+//! Shared modules must be used by multiple owners. Single-owner helpers move
+//! back to their app, transport, engine, or domain owner.
 
 #![deny(unsafe_code)]
 
-#[path = "foundation/constants.rs"]
-pub mod constants;
-#[path = "foundation/constitution.rs"]
-pub mod constitution;
-#[path = "protocol/content.rs"]
-pub mod content;
-#[path = "protocol/document_extractor.rs"]
-pub mod document_extractor;
-pub mod errors;
-#[path = "protocol/events.rs"]
-pub mod events;
-#[path = "foundation/ids.rs"]
-pub mod ids;
-pub mod logging;
-#[path = "protocol/memory.rs"]
-pub mod memory;
-#[path = "protocol/messages.rs"]
-pub mod messages;
-#[path = "protocol/model_capabilities.rs"]
-pub mod model_capabilities;
-#[path = "foundation/paths.rs"]
-pub mod paths;
-#[path = "foundation/profile.rs"]
-pub mod profile;
-#[path = "foundation/retry.rs"]
-pub mod retry;
+pub mod foundation;
+pub mod observability;
+pub mod protocol;
 pub mod server;
 pub mod storage;
-#[path = "foundation/text.rs"]
-pub mod text;

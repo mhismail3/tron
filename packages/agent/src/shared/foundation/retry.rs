@@ -11,7 +11,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::shared::errors::parse::ParsedError;
+use crate::shared::foundation::errors::parse::ParsedError;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration

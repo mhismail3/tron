@@ -5,8 +5,8 @@
 
 use serde_json::Value;
 
-use crate::shared::content::AssistantContent;
-use crate::shared::messages::{Message, UserMessageContent};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::messages::{Message, UserMessageContent};
 
 use super::types::{ExtractedData, SummaryResult};
 
@@ -144,7 +144,7 @@ impl Summarizer for KeywordSummarizer {
 
 /// Truncate a string to a maximum length, appending "..." if truncated.
 fn truncate(s: &str, max_len: usize) -> String {
-    crate::shared::text::truncate_with_suffix(s, max_len, "...")
+    crate::shared::foundation::text::truncate_with_suffix(s, max_len, "...")
 }
 
 // =============================================================================
@@ -170,7 +170,7 @@ fn user_content_text(content: &UserMessageContent) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::content::UserContent;
+    use crate::shared::protocol::content::UserContent;
     use serde_json::json;
 
     #[test]

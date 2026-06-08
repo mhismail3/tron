@@ -1,4 +1,4 @@
-use crate::shared::events::TronEvent;
+use crate::shared::protocol::events::TronEvent;
 use serde_json::json;
 
 use super::capability_call;

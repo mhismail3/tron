@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use parking_lot::Mutex;
 
-use crate::shared::events::TronEvent;
+use crate::shared::protocol::events::TronEvent;
 use serde_json::Value;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -452,12 +452,15 @@ impl TurnAccumulatorMap {
                 ..
             } => {
                 let result_text = result.as_ref().map(|r| match &r.content {
-                    crate::shared::model_capabilities::CapabilityResultBody::Text(t) => t.clone(),
-                    crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
-                        blocks
-                            .iter()
-                            .filter_map(|b| {
-                                if let crate::shared::content::CapabilityResultContent::Text {
+                    crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(t) => {
+                        t.clone()
+                    }
+                    crate::shared::protocol::model_capabilities::CapabilityResultBody::Blocks(
+                        blocks,
+                    ) => blocks
+                        .iter()
+                        .filter_map(|b| {
+                            if let crate::shared::protocol::content::CapabilityResultContent::Text {
                                     text,
                                 } = b
                                 {
@@ -465,10 +468,9 @@ impl TurnAccumulatorMap {
                                 } else {
                                     None
                                 }
-                            })
-                            .collect::<Vec<_>>()
-                            .join("\n")
-                    }
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
                 });
                 self.handle_capability_completed(
                     session_id,

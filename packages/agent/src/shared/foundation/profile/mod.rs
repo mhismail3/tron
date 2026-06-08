@@ -162,7 +162,7 @@ impl AgentExecutionSpec {
 #[must_use]
 pub fn bundled_default_execution_spec() -> AgentExecutionSpec {
     let document: ProfileDocument = toml::from_str(include_str!(
-        "../../../defaults/profiles/default/profile.toml"
+        "../../../../defaults/profiles/default/profile.toml"
     ))
     .expect("bundled default profile.toml must be a valid ProfileDocument");
     AgentExecutionSpec::from_document_uncompiled(document)
@@ -356,14 +356,11 @@ fn apply_user_profile_overlay(home: &Path, active_name: &str, raw: &mut Value) -
     Ok(())
 }
 
-#[path = "profile/compilation.rs"]
 mod compilation;
-#[path = "profile/validation.rs"]
 mod validation;
 
 use compilation::{agent_execution_spec_hash, compile_agent_execution_spec};
 use validation::{profile_file_candidate_profiles, validate_profile};
 
 #[cfg(test)]
-#[path = "profile/tests.rs"]
 mod tests;

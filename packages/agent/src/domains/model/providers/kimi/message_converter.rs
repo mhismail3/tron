@@ -11,9 +11,11 @@ use serde_json::{Value, json};
 use crate::domains::model::providers::id_remapping::{
     IdFormat, build_invocation_id_mapping, remap_invocation_id,
 };
-use crate::shared::content::{AssistantContent, UserContent};
-use crate::shared::messages::{CapabilityResultMessageContent, Message, UserMessageContent};
-use crate::shared::model_capabilities::ModelCapability;
+use crate::shared::protocol::content::{AssistantContent, UserContent};
+use crate::shared::protocol::messages::{
+    CapabilityResultMessageContent, Message, UserMessageContent,
+};
+use crate::shared::protocol::model_capabilities::ModelCapability;
 
 /// A single message in `OpenAI` chat completions format.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -285,10 +287,10 @@ fn convert_capability_result(
         CapabilityResultMessageContent::Blocks(blocks) => blocks
             .iter()
             .filter_map(|b| match b {
-                crate::shared::content::CapabilityResultContent::Text { text } => {
+                crate::shared::protocol::content::CapabilityResultContent::Text { text } => {
                     Some(text.as_str())
                 }
-                crate::shared::content::CapabilityResultContent::Image { .. } => None,
+                crate::shared::protocol::content::CapabilityResultContent::Image { .. } => None,
             })
             .collect::<Vec<_>>()
             .join("\n"),
@@ -309,8 +311,8 @@ fn convert_capability_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::content::CapabilityResultContent;
-    use crate::shared::model_capabilities::CapabilityParameterSchema;
+    use crate::shared::protocol::content::CapabilityResultContent;
+    use crate::shared::protocol::model_capabilities::CapabilityParameterSchema;
     use serde_json::Map;
 
     #[test]

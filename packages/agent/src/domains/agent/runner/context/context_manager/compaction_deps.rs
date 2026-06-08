@@ -1,4 +1,4 @@
-use crate::shared::messages::Message;
+use crate::shared::protocol::messages::Message;
 
 use super::super::compaction_engine::CompactionDeps;
 use super::super::token_estimator;

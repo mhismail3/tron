@@ -14,9 +14,9 @@ use crate::domains::model::provider_protocol::{
     CapabilityCallContext, parse_capability_call_arguments,
 };
 use crate::domains::model::providers::stream_common::StreamAccumulator;
-use crate::shared::content::AssistantContent;
-use crate::shared::events::{AssistantMessage, StreamEvent};
-use crate::shared::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
+use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
 use serde_json::Map;
 
 use super::types::{GeminiPart, GeminiStreamChunk, HarmProbability, SafetyRating};

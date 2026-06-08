@@ -11,8 +11,8 @@ use crate::domains::agent::runner::orchestrator::event_persister::EventPersister
 use crate::domains::agent::runner::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::runner::types::{CapabilityInvocationExecutionResult, StreamResult};
 use crate::domains::session::event_store::EventType;
-use crate::shared::content::CapabilityResultContent;
-use crate::shared::messages::{CapabilityResultMessageContent, Message};
+use crate::shared::protocol::content::CapabilityResultContent;
+use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
@@ -320,7 +320,7 @@ async fn process_capability_results(
 }
 
 pub(super) fn build_execution_waves(
-    capability_invocations: &[crate::shared::messages::CapabilityInvocationDraft],
+    capability_invocations: &[crate::shared::protocol::messages::CapabilityInvocationDraft],
     primitive_surface: &ResolvedPrimitiveSurface,
 ) -> Vec<Vec<usize>> {
     let modes: Vec<_> = capability_invocations
@@ -363,8 +363,10 @@ pub(super) fn build_execution_waves(
 
 fn extract_result_text(exec_result: &CapabilityInvocationExecutionResult) -> String {
     match &exec_result.result.content {
-        crate::shared::model_capabilities::CapabilityResultBody::Text(text) => text.clone(),
-        crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => blocks
+        crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(text) => {
+            text.clone()
+        }
+        crate::shared::protocol::model_capabilities::CapabilityResultBody::Blocks(blocks) => blocks
             .iter()
             .filter_map(|block| match block {
                 CapabilityResultContent::Text { text } => Some(text.as_str()),
@@ -393,10 +395,10 @@ fn extract_result_content(
     exec_result: &CapabilityInvocationExecutionResult,
 ) -> CapabilityResultMessageContent {
     match &exec_result.result.content {
-        crate::shared::model_capabilities::CapabilityResultBody::Text(text) => {
+        crate::shared::protocol::model_capabilities::CapabilityResultBody::Text(text) => {
             CapabilityResultMessageContent::Text(text.clone())
         }
-        crate::shared::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
+        crate::shared::protocol::model_capabilities::CapabilityResultBody::Blocks(blocks) => {
             let has_images = blocks
                 .iter()
                 .any(|b| matches!(b, CapabilityResultContent::Image { .. }));

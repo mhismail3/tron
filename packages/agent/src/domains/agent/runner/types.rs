@@ -6,7 +6,7 @@ use crate::domains::agent::runner::context::types::CompactionConfig;
 use crate::domains::model::providers::{
     AnthropicEffortLevel, ProviderHealthTracker, ReasoningEffort,
 };
-use crate::shared::messages::TokenUsage;
+use crate::shared::protocol::messages::TokenUsage;
 use serde::{Deserialize, Serialize};
 
 use crate::domains::agent::runner::errors::StopReason;
@@ -99,7 +99,7 @@ impl ReasoningLevel {
 pub struct AgentConfig {
     /// LLM provider type override.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub provider_type: Option<crate::shared::messages::Provider>,
+    pub provider_type: Option<crate::shared::protocol::messages::Provider>,
     /// Model identifier.
     pub model: String,
     /// System prompt override.
@@ -134,7 +134,7 @@ pub struct AgentConfig {
     pub server_origin: Option<String>,
     /// Retry configuration for provider stream failures.
     #[serde(skip)]
-    pub retry: Option<crate::shared::retry::RetryConfig>,
+    pub retry: Option<crate::shared::foundation::retry::RetryConfig>,
     /// Shared provider health tracker for recording success/failure outcomes.
     #[serde(skip)]
     pub health_tracker: Option<Arc<ProviderHealthTracker>>,
@@ -198,7 +198,7 @@ pub struct RunContext {
     /// Override user message content (e.g., multimodal blocks with images).
     /// When set, `run()` uses this instead of creating a text-only message.
     #[serde(skip)]
-    pub user_content_override: Option<crate::shared::messages::UserMessageContent>,
+    pub user_content_override: Option<crate::shared::protocol::messages::UserMessageContent>,
     /// Volatile token estimates for context breakdown accounting.
     #[serde(default)]
     pub volatile_tokens: VolatileTokens,
@@ -305,7 +305,7 @@ impl Default for RunResult {
 #[derive(Clone, Debug)]
 pub struct CapabilityInvocationExecutionResult {
     /// Capability result.
-    pub result: crate::shared::model_capabilities::CapabilityResult,
+    pub result: crate::shared::protocol::model_capabilities::CapabilityResult,
     /// Execution duration in milliseconds.
     pub duration_ms: u64,
     /// Whether this capability requested a turn stop.
@@ -316,9 +316,9 @@ pub struct CapabilityInvocationExecutionResult {
 #[derive(Clone, Debug)]
 pub struct StreamResult {
     /// Full assistant message.
-    pub message: crate::shared::events::AssistantMessage,
+    pub message: crate::shared::protocol::events::AssistantMessage,
     /// Extracted capability invocations.
-    pub capability_invocations: Vec<crate::shared::messages::CapabilityInvocationDraft>,
+    pub capability_invocations: Vec<crate::shared::protocol::messages::CapabilityInvocationDraft>,
     /// Stop reason string from LLM.
     pub stop_reason: String,
     /// Token usage.

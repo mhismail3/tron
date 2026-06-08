@@ -4,7 +4,7 @@
 //!
 //! ## What this module owns
 //!
-//! - **`auth.json.bearerToken`** at [`crate::shared::paths::auth_path()`].
+//! - **`auth.json.bearerToken`** at [`crate::shared::foundation::paths::auth_path()`].
 //!   A single 32-byte URL-safe-base64 token that gates WebSocket upgrade
 //!   requests. Generated during first server startup; rotated via
 //!   `tron auth rotate` (CLI) or the
@@ -14,7 +14,7 @@
 //!   `auth.json` as `{}`; first server boot materializes that pristine
 //!   sentinel into the full auth schema plus `bearerToken`.
 //!
-//! - **`run/.onboarded`** sentinel at [`crate::shared::paths::onboarded_marker_path()`].
+//! - **`run/.onboarded`** sentinel at [`crate::shared::foundation::paths::onboarded_marker_path()`].
 //!   Empty marker file. Touched by the Mac wizard at the end of its
 //!   install flow OR on the first successful engine auth. The
 //!   `system::get_info` capability returns `paired: true` once it exists so iOS
@@ -67,12 +67,12 @@ const ENCODED_TOKEN_LEN: usize = 43;
 
 /// Default file path for the bearer token: `~/.tron/profiles/auth.json`.
 pub fn bearer_token_path() -> PathBuf {
-    crate::shared::paths::auth_path()
+    crate::shared::foundation::paths::auth_path()
 }
 
 /// Default file path for the first-run sentinel: `~/.tron/internal/run/.onboarded`.
 pub fn onboarded_marker_path() -> PathBuf {
-    crate::shared::paths::onboarded_marker_path()
+    crate::shared::foundation::paths::onboarded_marker_path()
 }
 
 /// Generate a fresh bearer token: 32 cryptographic-random bytes encoded

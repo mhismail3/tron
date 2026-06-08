@@ -10,7 +10,7 @@
 //! This module normalizes provider data into a uniform [`TokenRecord`]
 //! with correct context window size and per-turn deltas.
 
-use crate::shared::messages::Provider;
+use crate::shared::protocol::messages::Provider;
 
 use super::types::{
     CalculationMethod, ComputedTokens, PricingRecord, TokenMeta, TokenRecord, TokenSource,

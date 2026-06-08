@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crate::shared::messages::Message;
+use crate::shared::protocol::messages::Message;
 
 use super::compaction_engine::{CompactionDeps, CompactionEngine};
 use super::constants::{
@@ -42,7 +42,7 @@ pub struct ContextManager {
 impl ContextManager {
     pub fn new(mut config: ContextManagerConfig) -> Self {
         if config.working_directory.is_none() {
-            let home = crate::shared::paths::home_dir();
+            let home = crate::shared::foundation::paths::home_dir();
             config.working_directory = Some(format!("{home}/Workspace"));
         }
 
@@ -324,7 +324,7 @@ impl ContextManager {
             }
         } else {
             let body_budget = max_size.saturating_sub(100);
-            let prefix = crate::shared::text::truncate_str(content, body_budget);
+            let prefix = crate::shared::foundation::text::truncate_str(content, body_budget);
             ProcessedCapabilityResult {
                 invocation_id: invocation_id.to_owned(),
                 content: format!(
@@ -362,8 +362,8 @@ impl ContextManager {
     }
 
     #[must_use]
-    pub fn build_base_context(&self) -> crate::shared::messages::Context {
-        crate::shared::messages::Context {
+    pub fn build_base_context(&self) -> crate::shared::protocol::messages::Context {
+        crate::shared::protocol::messages::Context {
             system_prompt: Some(self.get_system_prompt().to_owned()),
             messages: Arc::default(),
             capabilities: None,

@@ -2,7 +2,7 @@
 
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
-use crate::shared::events::TronEvent;
+use crate::shared::protocol::events::TronEvent;
 use tokio::sync::broadcast;
 use tracing::trace;
 
@@ -90,7 +90,7 @@ impl Default for EventEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::events::{BaseEvent, agent_start_event};
+    use crate::shared::protocol::events::{BaseEvent, agent_start_event};
 
     #[test]
     fn emit_with_no_subscribers() {

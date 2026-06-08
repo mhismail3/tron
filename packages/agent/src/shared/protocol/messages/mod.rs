@@ -9,8 +9,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use crate::shared::content::{AssistantContent, CapabilityResultContent, UserContent};
-use crate::shared::model_capabilities::ModelCapability;
+use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent, UserContent};
+use crate::shared::protocol::model_capabilities::ModelCapability;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Capability invocation
@@ -470,5 +470,4 @@ pub fn is_provider_capability_invocation_block(block: &Value) -> bool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-#[path = "messages/tests.rs"]
 mod tests;

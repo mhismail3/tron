@@ -15,7 +15,7 @@ pub const PRODUCTION_DB_FILENAME: &str = crate::shared::storage::UNIFIED_DB_FILE
 /// Default database directory for a resolved Tron home directory.
 #[must_use]
 pub fn production_db_dir_from_tron_home(tron_home: &Path) -> PathBuf {
-    use crate::shared::paths::dirs;
+    use crate::shared::foundation::paths::dirs;
     tron_home.join(dirs::INTERNAL).join(dirs::DB)
 }
 
@@ -28,14 +28,17 @@ pub fn default_production_db_path_for_tron_home(tron_home: &Path) -> PathBuf {
 /// Default database path from the resolved Tron home.
 #[must_use]
 pub fn default_production_db_path() -> PathBuf {
-    default_production_db_path_for_tron_home(&crate::shared::paths::tron_home())
+    default_production_db_path_for_tron_home(&crate::shared::foundation::paths::tron_home())
 }
 
 /// Resolve and validate the database path using the resolved Tron home.
 ///
 /// Returns the canonical allowed path (`<tron-home>/internal/database/tron.sqlite`) when valid.
 pub fn resolve_production_db_path(cli_db_path: Option<PathBuf>) -> Result<PathBuf> {
-    resolve_production_db_path_for_tron_home(cli_db_path, &crate::shared::paths::tron_home())
+    resolve_production_db_path_for_tron_home(
+        cli_db_path,
+        &crate::shared::foundation::paths::tron_home(),
+    )
 }
 
 /// Resolve and validate the database path for a specific resolved Tron home.

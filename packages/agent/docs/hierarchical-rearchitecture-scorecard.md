@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Scorecard
 
-Current score: **13/100**
+Current score: **19/100**
 
 Status: **running**
 
@@ -42,7 +42,7 @@ Total weight: **100**
 |----|------|--------|--------|-------|----------|------------|
 | HRA-0 | Scorecard, evidence, and static-gate setup | 5 | passed_after_fix | architecture campaign | Required artifacts, README links, CI hook, and red hierarchy invariant target are present. | Red gates are expected until later rows move code. |
 | HRA-1 | Whole-repo inventory and target architecture | 8 | passed_after_fix | architecture campaign | Live tracked-file inventory, target move map, folder owner table, drift findings, and large-file budgets are recorded. | Pending move/split rows are implementation work for HRA-2 through HRA-14, not unclassified inventory. |
-| HRA-2 | Rust app, transport, shared, and platform roots | 6 | pending | Rust app/transport/shared owners | Not started. | Move root helper files and audit shared ownership. |
+| HRA-2 | Rust app, transport, shared, and platform roots | 6 | passed_after_fix | Rust app/transport/shared owners | Moved root binary helpers into app CLI/bootstrap, grouped app health/lifecycle/bootstrap, grouped transport HTTP/engine/runtime, collapsed shared into foundation/protocol/server/storage/observability, and updated README/static gates. | HRA-3 still owns flat engine root; HRA-15 still owns broad stale-path doc scans outside current-code docs. |
 | HRA-3 | Rust engine kernel and invocation hierarchy | 10 | pending | Rust engine owner | Not started. | Replace flat engine root with kernel/catalog/invocation/runtime boundaries. |
 | HRA-4 | Rust engine durability and authority hierarchy | 8 | pending | Rust engine owner | Not started. | Group grants, leases, compensation, ledger, state, streams, queue, and resources. |
 | HRA-5 | Rust domain vertical slices | 10 | pending | Rust domain owners | Not started. | Reorganize domains by behavior instead of copied boilerplate. |
@@ -118,6 +118,7 @@ checks:
 - `hierarchical_rearchitecture_scorecard_stays_formalized`
 - `tracked_files_have_rearchitecture_inventory_rows`
 - `rust_source_root_has_only_allowed_entry_files`
+- `rust_app_transport_shared_roots_are_owned`
 - `rust_engine_root_has_no_unowned_flat_modules`
 - `ios_sources_do_not_use_broad_views_network_database_buckets`
 - `ios_tests_mirror_source_boundaries`

@@ -12,7 +12,7 @@ use crate::domains::model::providers::compose_context_parts;
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::shared::messages::Context;
+use crate::shared::protocol::messages::Context;
 
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{ChatCompletionChunk, KimiStreamState, process_chunk};
@@ -186,7 +186,7 @@ impl KimiProvider {
                 .headers()
                 .get("retry-after")
                 .and_then(|v| v.to_str().ok())
-                .and_then(crate::shared::retry::parse_retry_after_header);
+                .and_then(crate::shared::foundation::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
             let err_info = crate::domains::model::providers::error_parsing::parse_api_error(
                 &body_text,
@@ -229,8 +229,8 @@ impl KimiProvider {
 
 #[async_trait]
 impl Provider for KimiProvider {
-    fn provider_type(&self) -> crate::shared::messages::Provider {
-        crate::shared::messages::Provider::Kimi
+    fn provider_type(&self) -> crate::shared::protocol::messages::Provider {
+        crate::shared::protocol::messages::Provider::Kimi
     }
 
     fn model(&self) -> &str {
@@ -293,7 +293,7 @@ mod tests {
         let provider = KimiProvider::new(test_config());
         assert_eq!(
             provider.provider_type(),
-            crate::shared::messages::Provider::Kimi
+            crate::shared::protocol::messages::Provider::Kimi
         );
     }
 
@@ -450,17 +450,20 @@ mod tests {
     fn request_body_with_tools() {
         let provider = KimiProvider::new(test_config());
         let ctx = Context {
-            capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
-                name: "execute".into(),
-                description: "Run commands".into(),
-                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::default(),
+            capabilities: Some(vec![
+                crate::shared::protocol::model_capabilities::ModelCapability {
+                    name: "execute".into(),
+                    description: "Run commands".into(),
+                    parameters:
+                        crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+                            schema_type: "object".into(),
+                            properties: None,
+                            required: None,
+                            description: None,
+                            extra: serde_json::Map::default(),
+                        },
                 },
-            }]),
+            ]),
             ..Context::default()
         };
         let options = ProviderStreamOptions::default();
@@ -477,17 +480,20 @@ mod tests {
         cfg.model = "moonshot-v1-8k".into();
         let provider = KimiProvider::new(cfg);
         let ctx = Context {
-            capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
-                name: "execute".into(),
-                description: "Run commands".into(),
-                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::default(),
+            capabilities: Some(vec![
+                crate::shared::protocol::model_capabilities::ModelCapability {
+                    name: "execute".into(),
+                    description: "Run commands".into(),
+                    parameters:
+                        crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+                            schema_type: "object".into(),
+                            properties: None,
+                            required: None,
+                            description: None,
+                            extra: serde_json::Map::default(),
+                        },
                 },
-            }]),
+            ]),
             ..Context::default()
         };
         let options = ProviderStreamOptions::default();

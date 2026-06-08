@@ -27,11 +27,11 @@ use tracing::{info, instrument};
 
 use metrics_exporter_prometheus::PrometheusHandle;
 
-use crate::app::config::ServerConfig;
+use crate::app::bootstrap::config::ServerConfig;
 use crate::app::health::{self, HealthResponse};
-use crate::app::shutdown::ShutdownCoordinator;
-use crate::transport::auth::{BearerTokenStore, verify_bearer_header};
-use crate::transport::engine_ws::{EngineClientRegistry, run_engine_ws_session};
+use crate::app::lifecycle::shutdown::ShutdownCoordinator;
+use crate::transport::engine::socket::{EngineClientRegistry, run_engine_ws_session};
+use crate::transport::http::auth::{BearerTokenStore, verify_bearer_header};
 use crate::transport::runtime::external_workers::{
     SharedExternalWorkerRuntime, run_external_worker_socket,
 };
@@ -320,7 +320,8 @@ mod tests {
     fn make_server_with_auth() -> (TronServer, tempfile::TempDir, String) {
         let dir = tempfile::tempdir().unwrap();
         let auth_path = dir.path().join("auth.json");
-        let token = crate::app::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
+        let token =
+            crate::app::lifecycle::onboarding::load_or_create_bearer_token(&auth_path).unwrap();
         let mut ctx = make_test_context();
         ctx.auth_path = auth_path;
         let server = TronServer::new(ServerConfig::default(), ctx, make_metrics_handle());
@@ -465,7 +466,8 @@ mod tests {
         let app = server.router();
         std::thread::sleep(std::time::Duration::from_millis(1100));
         let rotated =
-            crate::app::onboarding::rotate_bearer_token(&dir.path().join("auth.json")).unwrap();
+            crate::app::lifecycle::onboarding::rotate_bearer_token(&dir.path().join("auth.json"))
+                .unwrap();
 
         let old_req = ws_upgrade_request(Some(format!("Bearer {token}")));
         let old_resp = app.clone().oneshot(old_req).await.unwrap();

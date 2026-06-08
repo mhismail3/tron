@@ -20,7 +20,7 @@ use crate::domains::model::providers::anthropic::types::{
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::shared::messages::Context;
+use crate::shared::protocol::messages::Context;
 
 use super::types::{
     DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, MiniMaxAuth, MiniMaxConfig, get_minimax_model,
@@ -255,7 +255,7 @@ impl MiniMaxProvider {
                 .headers()
                 .get("retry-after")
                 .and_then(|v| v.to_str().ok())
-                .and_then(crate::shared::retry::parse_retry_after_header);
+                .and_then(crate::shared::foundation::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
             let err_info = crate::domains::model::providers::error_parsing::parse_api_error(
                 &body_text,
@@ -289,7 +289,7 @@ impl MiniMaxProvider {
             >(
                 response,
                 &SSE_OPTIONS,
-                create_stream_state_for(crate::shared::messages::Provider::MiniMax),
+                create_stream_state_for(crate::shared::protocol::messages::Provider::MiniMax),
                 process_sse_event,
             ),
         )
@@ -298,8 +298,8 @@ impl MiniMaxProvider {
 
 #[async_trait]
 impl Provider for MiniMaxProvider {
-    fn provider_type(&self) -> crate::shared::messages::Provider {
-        crate::shared::messages::Provider::MiniMax
+    fn provider_type(&self) -> crate::shared::protocol::messages::Provider {
+        crate::shared::protocol::messages::Provider::MiniMax
     }
 
     fn model(&self) -> &str {
@@ -369,7 +369,7 @@ mod tests {
         let provider = MiniMaxProvider::new(test_config());
         assert_eq!(
             provider.provider_type(),
-            crate::shared::messages::Provider::MiniMax
+            crate::shared::protocol::messages::Provider::MiniMax
         );
     }
 
@@ -453,17 +453,20 @@ mod tests {
     #[test]
     fn build_tools_marks_last_tool_cacheable() {
         let ctx = Context {
-            capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
-                name: "execute".into(),
-                description: "Run commands".into(),
-                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::default(),
+            capabilities: Some(vec![
+                crate::shared::protocol::model_capabilities::ModelCapability {
+                    name: "execute".into(),
+                    description: "Run commands".into(),
+                    parameters:
+                        crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+                            schema_type: "object".into(),
+                            properties: None,
+                            required: None,
+                            description: None,
+                            extra: serde_json::Map::default(),
+                        },
                 },
-            }]),
+            ]),
             ..Context::default()
         };
         let capabilities = MiniMaxProvider::build_tools(&ctx).unwrap();

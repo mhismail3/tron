@@ -13,8 +13,8 @@ use std::collections::HashMap;
 use crate::domains::model::providers::{
     IdFormat, build_invocation_id_mapping, compose_context_parts_grouped, remap_invocation_id,
 };
-use crate::shared::content::{AssistantContent, CapabilityResultContent, UserContent};
-use crate::shared::messages::{
+use crate::shared::protocol::content::{AssistantContent, CapabilityResultContent, UserContent};
+use crate::shared::protocol::messages::{
     CapabilityResultMessageContent, Context, Message, UserMessageContent,
 };
 use serde_json::{Value, json};
@@ -428,7 +428,7 @@ fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value>
 ///
 /// The last tool always gets a 1h cache control breakpoint (Breakpoint 1).
 fn convert_tools(
-    capabilities: &[crate::shared::model_capabilities::ModelCapability],
+    capabilities: &[crate::shared::protocol::model_capabilities::ModelCapability],
 ) -> Vec<AnthropicTool> {
     let mut result: Vec<AnthropicTool> = capabilities
         .iter()

@@ -13,7 +13,7 @@ use crate::domains::model::providers::kimi::types::{all_kimi_model_ids, get_kimi
 use crate::domains::model::providers::minimax::types::{all_minimax_model_ids, get_minimax_model};
 use crate::domains::model::providers::ollama::types::{all_ollama_model_ids, get_ollama_model};
 use crate::domains::model::providers::openai::types::{all_openai_model_ids, get_openai_model};
-use crate::shared::messages::Provider;
+use crate::shared::protocol::messages::Provider;
 
 /// Detect which provider serves a given model ID.
 ///

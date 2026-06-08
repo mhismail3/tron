@@ -1,4 +1,4 @@
-use crate::shared::events::TronEvent;
+use crate::shared::protocol::events::TronEvent;
 use crate::shared::server::events::ServerEventPayload;
 use serde::Serialize;
 use serde_json::{Value, json};

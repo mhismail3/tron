@@ -13,8 +13,8 @@ use serde_json::Map;
 use crate::domains::model::provider_protocol::{
     CapabilityCallContext, parse_capability_call_arguments,
 };
-use crate::shared::events::StreamEvent;
-use crate::shared::messages::CapabilityInvocationDraft;
+use crate::shared::protocol::events::StreamEvent;
+use crate::shared::protocol::messages::CapabilityInvocationDraft;
 
 /// In-progress capability invocation being accumulated from streaming deltas.
 #[derive(Clone, Debug)]

@@ -463,7 +463,7 @@ mod tests {
         );
         let repaired = fs::read_to_string(&default_profile).unwrap();
         assert!(!repaired.contains("[entrypoints.main]"));
-        crate::shared::profile::resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
+        crate::shared::foundation::profile::resolve_profile_at(&home, NORMAL_PROFILE).unwrap();
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Context snapshot builder for the primitive loop.
 
-use crate::shared::content::AssistantContent;
-use crate::shared::messages::Message;
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::messages::Message;
 
 use super::token_estimator::estimate_message_tokens;
 use super::types::{
@@ -86,8 +86,8 @@ fn build_message_info(msg: &Message, index: usize, tokens: u64) -> DetailedMessa
     match msg {
         Message::User { content, .. } => {
             let text = match content {
-                crate::shared::messages::UserMessageContent::Text(t) => t.clone(),
-                crate::shared::messages::UserMessageContent::Blocks(blocks) => blocks
+                crate::shared::protocol::messages::UserMessageContent::Text(t) => t.clone(),
+                crate::shared::protocol::messages::UserMessageContent::Blocks(blocks) => blocks
                     .iter()
                     .filter_map(|b| b.as_text())
                     .collect::<Vec<_>>()
@@ -150,14 +150,20 @@ fn build_message_info(msg: &Message, index: usize, tokens: u64) -> DetailedMessa
             is_error,
         } => {
             let text = match content {
-                crate::shared::messages::CapabilityResultMessageContent::Text(t) => t.clone(),
-                crate::shared::messages::CapabilityResultMessageContent::Blocks(blocks) => blocks
+                crate::shared::protocol::messages::CapabilityResultMessageContent::Text(t) => {
+                    t.clone()
+                }
+                crate::shared::protocol::messages::CapabilityResultMessageContent::Blocks(
+                    blocks,
+                ) => blocks
                     .iter()
                     .filter_map(|b| match b {
-                        crate::shared::content::CapabilityResultContent::Text { text } => {
-                            Some(text.as_str())
-                        }
-                        crate::shared::content::CapabilityResultContent::Image { .. } => None,
+                        crate::shared::protocol::content::CapabilityResultContent::Text {
+                            text,
+                        } => Some(text.as_str()),
+                        crate::shared::protocol::content::CapabilityResultContent::Image {
+                            ..
+                        } => None,
                     })
                     .collect::<Vec<_>>()
                     .join("\n"),
@@ -178,7 +184,7 @@ fn build_message_info(msg: &Message, index: usize, tokens: u64) -> DetailedMessa
 }
 
 fn summarize_content(text: &str, max_len: usize) -> String {
-    crate::shared::text::truncate_with_suffix(text, max_len, "...")
+    crate::shared::foundation::text::truncate_with_suffix(text, max_len, "...")
 }
 
 #[cfg(test)]

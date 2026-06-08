@@ -479,7 +479,7 @@ fn auth_file_lock_path(auth_path: &Path) -> std::path::PathBuf {
     if parent.file_name().and_then(|name| name.to_str()) == Some("profiles")
         && let Some(home) = parent.parent()
     {
-        return crate::shared::paths::auth_lock_path_for_home(home);
+        return crate::shared::foundation::paths::auth_lock_path_for_home(home);
     }
 
     if parent.file_name().and_then(|name| name.to_str()) == Some("vault")
@@ -487,7 +487,7 @@ fn auth_file_lock_path(auth_path: &Path) -> std::path::PathBuf {
         && workspace.file_name().and_then(|name| name.to_str()) == Some("workspace")
         && let Some(home) = workspace.parent()
     {
-        return crate::shared::paths::auth_lock_path_for_home(home);
+        return crate::shared::foundation::paths::auth_lock_path_for_home(home);
     }
 
     parent.join("run/auth.lock")

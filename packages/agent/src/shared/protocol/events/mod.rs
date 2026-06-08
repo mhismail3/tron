@@ -15,17 +15,12 @@
 //! `TronEvent` variant catalog stays together in `events/tron/catalog.rs` for
 //! serde tagging and match exhaustiveness.
 
-#[path = "events/capability.rs"]
 mod capability;
-#[path = "events/factory.rs"]
 mod factory;
-#[path = "events/stream.rs"]
 mod stream;
-#[path = "events/tron.rs"]
 mod tron;
 
 #[cfg(test)]
-#[path = "events/tests.rs"]
 mod tests;
 
 pub use capability::{CapabilityEventIdentity, CapabilityInvocationSummary};

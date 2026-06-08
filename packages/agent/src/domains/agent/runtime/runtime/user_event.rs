@@ -65,13 +65,13 @@ pub fn build_user_content_override(
     prompt: &str,
     model: &str,
     attachments: Option<&[Value]>,
-) -> Option<crate::shared::messages::UserMessageContent> {
+) -> Option<crate::shared::protocol::messages::UserMessageContent> {
     let has_attachments = attachments.is_some_and(|v| !v.is_empty());
     if !has_attachments {
         return None;
     }
 
-    let mut blocks = vec![crate::shared::content::UserContent::Text {
+    let mut blocks = vec![crate::shared::protocol::content::UserContent::Text {
         text: prompt.to_owned(),
     }];
 
@@ -86,14 +86,14 @@ pub fn build_user_content_override(
                     .and_then(|v| v.as_str())
                     .map(String::from);
                 if mime.starts_with("image/") {
-                    blocks.push(crate::shared::content::UserContent::Image {
+                    blocks.push(crate::shared::protocol::content::UserContent::Image {
                         data: data.to_owned(),
                         mime_type: mime.to_owned(),
                     });
                 } else {
                     let extracted_text =
-                        crate::shared::document_extractor::extract_text(data, mime);
-                    blocks.push(crate::shared::content::UserContent::Document {
+                        crate::shared::protocol::document_extractor::extract_text(data, mime);
+                    blocks.push(crate::shared::protocol::content::UserContent::Document {
                         data: data.to_owned(),
                         mime_type: mime.to_owned(),
                         file_name,
@@ -105,10 +105,16 @@ pub fn build_user_content_override(
     }
 
     if !crate::domains::model::providers::model_supports_images(model) {
-        blocks.retain(|block| !matches!(block, crate::shared::content::UserContent::Image { .. }));
+        blocks.retain(|block| {
+            !matches!(
+                block,
+                crate::shared::protocol::content::UserContent::Image { .. }
+            )
+        });
     }
 
-    (blocks.len() > 1).then_some(crate::shared::messages::UserMessageContent::Blocks(blocks))
+    (blocks.len() > 1)
+        .then_some(crate::shared::protocol::messages::UserMessageContent::Blocks(blocks))
 }
 
 pub async fn persist_user_message_event(
@@ -132,8 +138,8 @@ pub async fn persist_user_message_event(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::content::UserContent;
-    use crate::shared::messages::UserMessageContent;
+    use crate::shared::protocol::content::UserContent;
+    use crate::shared::protocol::messages::UserMessageContent;
 
     #[test]
     fn user_event_payload_projects_images_from_unified_attachments() {

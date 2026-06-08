@@ -31,7 +31,7 @@ fn working_directory_defaults_to_home_workspace_when_none() {
 fn message_store_updates_tokens_and_count() {
     let mut manager = manager();
     assert_eq!(manager.message_count(), 0);
-    manager.add_message(crate::shared::messages::Message::user("hello"));
+    manager.add_message(crate::shared::protocol::messages::Message::user("hello"));
     assert_eq!(manager.message_count(), 1);
     assert!(manager.get_messages_tokens() > 0);
     manager.clear_messages();
@@ -41,7 +41,7 @@ fn message_store_updates_tokens_and_count() {
 #[test]
 fn snapshot_breakdown_has_only_primitive_context_rows() {
     let mut manager = manager();
-    manager.add_message(crate::shared::messages::Message::user("hello"));
+    manager.add_message(crate::shared::protocol::messages::Message::user("hello"));
     let snapshot = manager.get_snapshot();
     assert_eq!(
         snapshot.breakdown.system_prompt,
@@ -73,7 +73,7 @@ fn api_context_tokens_override_estimates_until_messages_change() {
     let mut manager = manager();
     manager.set_api_context_tokens(1234);
     assert_eq!(manager.get_current_tokens(), 1234);
-    manager.add_message(crate::shared::messages::Message::user("new"));
+    manager.add_message(crate::shared::protocol::messages::Message::user("new"));
     assert_eq!(manager.get_current_tokens(), 1234);
     manager.set_messages(vec![]);
     assert_ne!(manager.get_current_tokens(), 1234);

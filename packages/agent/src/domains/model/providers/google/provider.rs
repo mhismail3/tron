@@ -26,7 +26,7 @@ use crate::domains::model::providers::compose_context_parts;
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::shared::messages::Context;
+use crate::shared::protocol::messages::Context;
 
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{create_stream_state, process_stream_chunk};
@@ -419,7 +419,7 @@ impl GoogleProvider {
                 .headers()
                 .get("retry-after")
                 .and_then(|v| v.to_str().ok())
-                .and_then(crate::shared::retry::parse_retry_after_header);
+                .and_then(crate::shared::foundation::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
             let err_info = crate::domains::model::providers::error_parsing::parse_api_error(
                 &body_text,
@@ -462,8 +462,8 @@ impl GoogleProvider {
 
 #[async_trait]
 impl Provider for GoogleProvider {
-    fn provider_type(&self) -> crate::shared::messages::Provider {
-        crate::shared::messages::Provider::Google
+    fn provider_type(&self) -> crate::shared::protocol::messages::Provider {
+        crate::shared::protocol::messages::Provider::Google
     }
 
     fn model(&self) -> &str {

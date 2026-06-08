@@ -15,9 +15,9 @@ use std::time::Instant;
 use serde_json::Map;
 
 use crate::engine::{InvocationId, TraceId};
-use crate::shared::content::AssistantContent;
-use crate::shared::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
-use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
+use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
 
 use crate::domains::agent::runner::agent::event_emitter::EventEmitter;
 use crate::domains::agent::runner::errors::RuntimeError;
@@ -197,7 +197,7 @@ impl StreamState {
                     invocation_id,
                     model_primitive_name: name.clone(),
                     capability_identity:
-                        crate::shared::events::CapabilityEventIdentity::with_model_primitive(name),
+                        crate::shared::protocol::events::CapabilityEventIdentity::with_model_primitive(name),
                 },
                 counter,
             );
@@ -207,7 +207,9 @@ impl StreamState {
                 invocation_id,
                 model_primitive_name: name.clone(),
                 capability_identity:
-                    crate::shared::events::CapabilityEventIdentity::with_model_primitive(name),
+                    crate::shared::protocol::events::CapabilityEventIdentity::with_model_primitive(
+                        name,
+                    ),
             });
         }
     }

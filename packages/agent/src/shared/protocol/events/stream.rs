@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::shared::messages::{CapabilityInvocationDraft, TokenUsage};
+use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
 
 /// Events emitted during LLM response streaming.
 ///
@@ -181,7 +181,7 @@ pub fn is_stream_event_type(type_str: &str) -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct AssistantMessage {
     /// Assistant content blocks.
-    pub content: Vec<crate::shared::content::AssistantContent>,
+    pub content: Vec<crate::shared::protocol::content::AssistantContent>,
     /// Token usage.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub token_usage: Option<TokenUsage>,

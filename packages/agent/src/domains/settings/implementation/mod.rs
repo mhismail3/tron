@@ -171,10 +171,10 @@ mod tests {
 
     fn temp_settings_path(dir: &tempfile::TempDir) -> std::path::PathBuf {
         let home = dir.path().join(".tron");
-        crate::shared::constitution::ensure_tron_home_at(&home).unwrap();
-        home.join(crate::shared::paths::dirs::PROFILES)
-            .join(crate::shared::profile::USER_PROFILE)
-            .join(crate::shared::paths::files::PROFILE_TOML)
+        crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+        home.join(crate::shared::foundation::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::profile::USER_PROFILE)
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML)
     }
 
     fn write_sparse_settings(path: &std::path::Path, settings_toml: &str) {

@@ -17,19 +17,13 @@ use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[path = "storage/archive.rs"]
 mod archive;
-#[path = "storage/maintenance.rs"]
 mod maintenance;
-#[path = "storage/payloads.rs"]
 mod payloads;
-#[path = "storage/schema.rs"]
 mod schema;
-#[path = "storage/stats.rs"]
 mod stats;
 
 #[cfg(test)]
-#[path = "storage/tests.rs"]
 mod tests;
 
 pub use archive::{

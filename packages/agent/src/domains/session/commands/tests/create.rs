@@ -3,7 +3,7 @@ use super::support::*;
 #[tokio::test]
 async fn create_normalizes_home_alias_working_directory() {
     let ctx = make_test_context();
-    let expected = crate::shared::paths::normalize_working_directory("~")
+    let expected = crate::shared::foundation::paths::normalize_working_directory("~")
         .unwrap()
         .display()
         .to_string();

@@ -19,7 +19,7 @@ use std::time::Instant;
 use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::model::providers::ProviderHealthTracker;
 use crate::domains::model::providers::provider::Provider;
-use crate::shared::events::{BaseEvent, TronEvent};
+use crate::shared::protocol::events::{BaseEvent, TronEvent};
 
 use metrics::{counter, histogram};
 use tracing::{debug, error, instrument, warn};
@@ -79,7 +79,7 @@ pub struct TurnParams<'a> {
     /// Previous turn's context window token count (for delta tracking).
     pub previous_context_baseline: u64,
     /// Optional retry configuration for provider stream retries.
-    pub retry_config: Option<&'a crate::shared::retry::RetryConfig>,
+    pub retry_config: Option<&'a crate::shared::foundation::retry::RetryConfig>,
     /// Optional provider health tracker for circuit-breaking.
     pub health_tracker: Option<&'a Arc<ProviderHealthTracker>>,
     /// Workspace ID for scoping capability context (e.g. memory recall).
@@ -420,11 +420,12 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     // see "response complete" for a message that is missing from the DB
     // on reconnect. Fail the turn with an actionable error instead.
     let has_thinking = {
-        let content_has_thinking = stream_result
-            .message
-            .content
-            .iter()
-            .any(|c| matches!(c, crate::shared::content::AssistantContent::Thinking { .. }));
+        let content_has_thinking = stream_result.message.content.iter().any(|c| {
+            matches!(
+                c,
+                crate::shared::protocol::content::AssistantContent::Thinking { .. }
+            )
+        });
         content_has_thinking
     };
 

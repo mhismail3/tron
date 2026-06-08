@@ -4,8 +4,8 @@ use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderStreamOptions, StreamEventStream,
 };
 use crate::domains::model::providers::{StreamFactory, StreamRetryConfig, with_provider_retry};
-use crate::shared::messages::Context;
-use crate::shared::retry::RetryConfig;
+use crate::shared::foundation::retry::RetryConfig;
+use crate::shared::protocol::messages::Context;
 use tokio_util::sync::CancellationToken;
 
 use crate::domains::agent::runner::types::{ReasoningLevel, RunContext};

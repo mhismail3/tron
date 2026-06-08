@@ -13,7 +13,7 @@ use crate::domains::session::event_store::EventStore;
 use crate::engine::EngineHostHandle;
 use metrics::{counter, histogram};
 
-use crate::app::shutdown::{ShutdownCoordinator, ShutdownPhase};
+use crate::app::lifecycle::shutdown::{ShutdownCoordinator, ShutdownPhase};
 use crate::shared::server::errors::CapabilityError;
 
 const DEFAULT_BLOCKING_CONCURRENCY: usize = 16;
@@ -211,7 +211,7 @@ pub struct ServerRuntimeContext {
     pub ws_port: Arc<AtomicU16>,
     /// Path to the first-run sentinel (`~/.tron/internal/run/.onboarded`). Stored on
     /// the context so tests can inject a temp path; production sets it to
-    /// [`crate::app::onboarding::onboarded_marker_path`]. Drives the `paired`
+    /// [`crate::app::lifecycle::onboarding::onboarded_marker_path`]. Drives the `paired`
     /// field returned by `system.getInfo`.
     pub onboarded_marker_path: PathBuf,
 }

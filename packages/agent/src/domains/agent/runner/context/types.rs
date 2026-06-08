@@ -5,8 +5,8 @@
 //! state. Behavior instructions learned by the agent live in agent-owned state,
 //! not in separate context planes.
 
-use crate::shared::messages::Message;
-use crate::shared::model_capabilities::ModelCapability;
+use crate::shared::protocol::messages::Message;
+use crate::shared::protocol::model_capabilities::ModelCapability;
 use serde::{Deserialize, Serialize};
 
 use super::constants::Thresholds;

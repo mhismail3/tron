@@ -3,8 +3,8 @@ use crate::domains::model::providers::openai::types::{
     ApiEndpoint, DEFAULT_BASE_URL, DEFAULT_PLATFORM_BASE_URL, MessageContent, OpenAIApiSettings,
     OpenAIAuth, ReasoningEffort, ResponsesInputItem,
 };
-use crate::shared::messages::Message;
-use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
+use crate::shared::protocol::messages::Message;
+use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
 fn test_tokens() -> crate::domains::auth::provider_credentials::OAuthTokens {
     crate::domains::auth::provider_credentials::OAuthTokens {
@@ -82,7 +82,7 @@ fn provider_type_is_openai() {
     let provider = OpenAIProvider::new(test_config());
     assert_eq!(
         provider.provider_type(),
-        crate::shared::messages::Provider::OpenAi
+        crate::shared::protocol::messages::Provider::OpenAi
     );
 }
 

@@ -1,8 +1,8 @@
 use super::super::types::OAUTH_SYSTEM_PROMPT_PREFIX;
 use super::*;
-use crate::shared::content::AssistantContent;
-use crate::shared::messages::{Context, Message, UserMessageContent};
-use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
+use crate::shared::protocol::content::AssistantContent;
+use crate::shared::protocol::messages::{Context, Message, UserMessageContent};
+use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 use serde_json::Map;
 
 fn simple_context() -> Context {
@@ -539,17 +539,23 @@ fn full_flow_multiple_capability_results_become_single_user_message() {
         },
         Message::CapabilityResult {
             invocation_id: "toolu_01a".into(),
-            content: crate::shared::messages::CapabilityResultMessageContent::Text("out1".into()),
+            content: crate::shared::protocol::messages::CapabilityResultMessageContent::Text(
+                "out1".into(),
+            ),
             is_error: None,
         },
         Message::CapabilityResult {
             invocation_id: "toolu_01b".into(),
-            content: crate::shared::messages::CapabilityResultMessageContent::Text("out2".into()),
+            content: crate::shared::protocol::messages::CapabilityResultMessageContent::Text(
+                "out2".into(),
+            ),
             is_error: None,
         },
         Message::CapabilityResult {
             invocation_id: "toolu_01c".into(),
-            content: crate::shared::messages::CapabilityResultMessageContent::Text("out3".into()),
+            content: crate::shared::protocol::messages::CapabilityResultMessageContent::Text(
+                "out3".into(),
+            ),
             is_error: None,
         },
     ];

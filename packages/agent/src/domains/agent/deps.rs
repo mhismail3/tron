@@ -15,7 +15,8 @@ pub(crate) struct Deps {
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) origin: String,
     pub(super) session_manager: Arc<SessionManager>,
-    pub(super) shutdown_coordinator: Option<Arc<crate::app::shutdown::ShutdownCoordinator>>,
+    pub(super) shutdown_coordinator:
+        Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
 }
 
 impl Deps {

@@ -77,7 +77,9 @@ fn stream_event_capability_invocation_delta() {
 #[test]
 fn stream_event_done() {
     let msg = AssistantMessage {
-        content: vec![crate::shared::content::AssistantContent::text("response")],
+        content: vec![crate::shared::protocol::content::AssistantContent::text(
+            "response",
+        )],
         token_usage: None,
     };
     let e = StreamEvent::Done {

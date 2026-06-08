@@ -1,6 +1,6 @@
 //! Shared command-side services for session capabilities.
 
-use crate::shared::events::{BaseEvent, TronEvent};
+use crate::shared::protocol::events::{BaseEvent, TronEvent};
 
 use crate::domains::session::Deps;
 

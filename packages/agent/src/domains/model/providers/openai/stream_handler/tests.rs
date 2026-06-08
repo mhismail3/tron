@@ -695,7 +695,7 @@ fn done_event_has_openai_provider_type() {
     if let Some(StreamEvent::Done { message, .. }) = done {
         assert_eq!(
             message.token_usage.as_ref().unwrap().provider_type,
-            Some(crate::shared::messages::Provider::OpenAi)
+            Some(crate::shared::protocol::messages::Provider::OpenAi)
         );
     }
 }

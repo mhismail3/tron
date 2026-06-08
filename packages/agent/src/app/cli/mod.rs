@@ -1,7 +1,8 @@
 //! CLI parsing and side-effect-limited subcommand dispatch for the `tron` binary.
 //!
-//! Server startup stays in `main_runtime.rs`; this module owns only the terminal
-//! surface that can short-circuit before database, logging, or network startup.
+//! Server startup stays in [`crate::app::bootstrap`]; this module owns only the
+//! terminal surface that can short-circuit before database, logging, or network
+//! startup.
 
 use std::path::PathBuf;
 
@@ -11,7 +12,7 @@ use clap::Parser;
 /// Tron agent — server and CLI capabilities.
 #[derive(Parser, Debug)]
 #[command(name = "tron", about = "Tron agent server and capability runtime")]
-pub(crate) struct Cli {
+pub struct Cli {
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
 
@@ -86,8 +87,8 @@ pub(crate) fn run_subcommand(cmd: &Command) -> Result<()> {
 }
 
 fn rotate_bearer_token_cli() -> Result<()> {
-    let path = tron::app::onboarding::bearer_token_path();
-    let token = tron::app::onboarding::rotate_bearer_token(&path)
+    let path = crate::app::lifecycle::onboarding::bearer_token_path();
+    let token = crate::app::lifecycle::onboarding::rotate_bearer_token(&path)
         .with_context(|| format!("Failed to rotate bearer token at {}", path.display()))?;
     eprintln!("Bearer token rotated. All paired iOS devices must re-pair with the new token.");
     println!("{token}");

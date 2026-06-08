@@ -43,7 +43,7 @@ fn provider_type_is_anthropic() {
     let provider = AnthropicProvider::new(api_key_config());
     assert_eq!(
         provider.provider_type(),
-        crate::shared::messages::Provider::Anthropic
+        crate::shared::protocol::messages::Provider::Anthropic
     );
 }
 
@@ -268,17 +268,20 @@ fn build_tools_none() {
 fn build_tools_api_key_has_cache() {
     let provider = AnthropicProvider::new(api_key_config());
     let ctx = Context {
-        capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
-            name: "execute".into(),
-            description: "Execute inspected capabilities".into(),
-            parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
-                schema_type: "object".into(),
-                properties: None,
-                required: None,
-                description: None,
-                extra: serde_json::Map::default(),
+        capabilities: Some(vec![
+            crate::shared::protocol::model_capabilities::ModelCapability {
+                name: "execute".into(),
+                description: "Execute inspected capabilities".into(),
+                parameters:
+                    crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+                        schema_type: "object".into(),
+                        properties: None,
+                        required: None,
+                        description: None,
+                        extra: serde_json::Map::default(),
+                    },
             },
-        }]),
+        ]),
         ..Context::default()
     };
     let capabilities = provider.build_tools(&ctx).unwrap();
@@ -301,17 +304,20 @@ fn build_tools_api_key_has_cache() {
 fn request_serializes_capabilities_as_provider_tools() {
     let provider = AnthropicProvider::new(api_key_config());
     let ctx = Context {
-        capabilities: Some(vec![crate::shared::model_capabilities::ModelCapability {
-            name: "execute".into(),
-            description: "Execute inspected capabilities".into(),
-            parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
-                schema_type: "object".into(),
-                properties: None,
-                required: None,
-                description: None,
-                extra: serde_json::Map::default(),
+        capabilities: Some(vec![
+            crate::shared::protocol::model_capabilities::ModelCapability {
+                name: "execute".into(),
+                description: "Execute inspected capabilities".into(),
+                parameters:
+                    crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+                        schema_type: "object".into(),
+                        properties: None,
+                        required: None,
+                        description: None,
+                        extra: serde_json::Map::default(),
+                    },
             },
-        }]),
+        ]),
         ..Context::default()
     };
     let request = provider.build_request(
@@ -334,27 +340,29 @@ fn build_tools_oauth_last_has_cache() {
     let provider = AnthropicProvider::new(oauth_config());
     let ctx = Context {
         capabilities: Some(vec![
-            crate::shared::model_capabilities::ModelCapability {
+            crate::shared::protocol::model_capabilities::ModelCapability {
                 name: "search".into(),
                 description: "Search capability catalog".into(),
-                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::default(),
-                },
+                parameters:
+                    crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+                        schema_type: "object".into(),
+                        properties: None,
+                        required: None,
+                        description: None,
+                        extra: serde_json::Map::default(),
+                    },
             },
-            crate::shared::model_capabilities::ModelCapability {
+            crate::shared::protocol::model_capabilities::ModelCapability {
                 name: "execute".into(),
                 description: "Execute inspected capabilities".into(),
-                parameters: crate::shared::model_capabilities::CapabilityParameterSchema {
-                    schema_type: "object".into(),
-                    properties: None,
-                    required: None,
-                    description: None,
-                    extra: serde_json::Map::default(),
-                },
+                parameters:
+                    crate::shared::protocol::model_capabilities::CapabilityParameterSchema {
+                        schema_type: "object".into(),
+                        properties: None,
+                        required: None,
+                        description: None,
+                        extra: serde_json::Map::default(),
+                    },
             },
         ]),
         ..Context::default()

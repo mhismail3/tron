@@ -1,7 +1,7 @@
 //! Shared client log ingestion logic used by the canonical capability function.
 
 use crate::domains::session::event_store::PooledConnection;
-use crate::shared::logging::LogLevel;
+use crate::shared::observability::LogLevel;
 use serde::{Deserialize, Serialize};
 
 use crate::shared::server::errors::CapabilityError;

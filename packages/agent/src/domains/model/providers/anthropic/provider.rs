@@ -13,7 +13,7 @@ use tracing::{debug, error, info, instrument};
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::shared::messages::Context;
+use crate::shared::protocol::messages::Context;
 
 use super::cache_pruning::{
     DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS, is_cache_cold, prune_tool_results_for_recache,
@@ -339,7 +339,7 @@ impl AnthropicProvider {
                 .headers()
                 .get("retry-after")
                 .and_then(|v| v.to_str().ok())
-                .and_then(crate::shared::retry::parse_retry_after_header);
+                .and_then(crate::shared::foundation::retry::parse_retry_after_header);
             let body_text = response.text().await.unwrap_or_default();
             let err_info = crate::domains::model::providers::error_parsing::parse_api_error(
                 &body_text,
@@ -388,8 +388,8 @@ fn now_ms() -> u64 {
 
 #[async_trait]
 impl Provider for AnthropicProvider {
-    fn provider_type(&self) -> crate::shared::messages::Provider {
-        crate::shared::messages::Provider::Anthropic
+    fn provider_type(&self) -> crate::shared::protocol::messages::Provider {
+        crate::shared::protocol::messages::Provider::Anthropic
     }
 
     fn model(&self) -> &str {

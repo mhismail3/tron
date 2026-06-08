@@ -1,7 +1,7 @@
 use super::*;
 use crate::domains::agent::runner::types::CapabilityInvocationExecutionResult;
-use crate::shared::content::CapabilityResultContent;
-use crate::shared::model_capabilities::{CapabilityResult, CapabilityResultBody};
+use crate::shared::protocol::content::CapabilityResultContent;
+use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 
 fn make_exec_result(content: CapabilityResultBody) -> CapabilityInvocationExecutionResult {
     CapabilityInvocationExecutionResult {

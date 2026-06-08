@@ -7,7 +7,7 @@ use crate::domains::agent::runner::context::context_manager::ContextManager;
 use crate::domains::agent::runner::context::types::ContextManagerConfig;
 use crate::domains::agent::runner::types::AgentConfig;
 use crate::domains::model::providers::provider::Provider;
-use crate::shared::messages::Message;
+use crate::shared::protocol::messages::Message;
 
 pub struct CreateAgentOpts {
     pub provider: Arc<dyn Provider>,
@@ -96,7 +96,7 @@ mod tests {
 
         async fn stream(
             &self,
-            _context: &crate::shared::messages::Context,
+            _context: &crate::shared::protocol::messages::Context,
             _options: &ProviderStreamOptions,
         ) -> Result<StreamEventStream, ProviderError> {
             Err(ProviderError::Other {

@@ -466,7 +466,7 @@ fn capability_result_after_provider_switch() {
 
 #[test]
 fn capability_result_with_blocks_content() {
-    use crate::shared::content::CapabilityResultContent;
+    use crate::shared::protocol::content::CapabilityResultContent;
     let messages = vec![
         Message::Assistant {
             content: vec![AssistantContent::CapabilityInvocation {

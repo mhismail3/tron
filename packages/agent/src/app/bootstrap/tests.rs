@@ -1,20 +1,21 @@
 use super::*;
-use clap::Parser;
-use std::path::PathBuf;
-use std::sync::Arc;
-use tron::app::config::ServerConfig;
-use tron::app::server::TronServer;
-use tron::domains::agent::runner::{Orchestrator, SessionManager};
-use tron::domains::model::providers::factory as provider_factory;
-use tron::domains::model::providers::provider::ProviderFactory;
-use tron::domains::session::event_store::{ConnectionConfig, EventStore};
-use tron::domains::settings::TronSettings;
-use tron::domains::settings::db_path_policy::{
+use crate::app::bootstrap::config::ServerConfig;
+use crate::app::bootstrap::server::TronServer;
+use crate::app::cli::{AuthAction, Command};
+use crate::domains::agent::runner::{Orchestrator, SessionManager};
+use crate::domains::model::providers::factory as provider_factory;
+use crate::domains::model::providers::provider::ProviderFactory;
+use crate::domains::session::event_store::{ConnectionConfig, EventStore};
+use crate::domains::settings::TronSettings;
+use crate::domains::settings::db_path_policy::{
     PRODUCTION_DB_FILENAME, default_production_db_path, production_db_dir_from_tron_home,
     validate_production_db_path_for_tron_home,
 };
-use tron::shared::server::context::ServerRuntimeContext;
-use tron::transport::runtime::streams::EngineStreamEventPump;
+use crate::shared::server::context::ServerRuntimeContext;
+use crate::transport::runtime::streams::EngineStreamEventPump;
+use clap::Parser;
+use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Small pool size for tests — prevents FD exhaustion when many tests
 /// run in parallel, each opening a file-backed `SQLite` pool.
@@ -27,20 +28,20 @@ fn test_db_config() -> ConnectionConfig {
 
 fn test_tron_home(dir: &tempfile::TempDir) -> std::path::PathBuf {
     let home = dir.path().join(".tron");
-    tron::shared::constitution::ensure_tron_home_at(&home).unwrap();
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
     home
 }
 
 fn test_settings_path(home: &std::path::Path) -> std::path::PathBuf {
-    home.join(tron::shared::paths::dirs::PROFILES)
-        .join(tron::shared::profile::USER_PROFILE)
-        .join(tron::shared::paths::files::PROFILE_TOML)
+    home.join(crate::shared::foundation::paths::dirs::PROFILES)
+        .join(crate::shared::foundation::profile::USER_PROFILE)
+        .join(crate::shared::foundation::paths::files::PROFILE_TOML)
 }
 
 fn test_profile_runtime(
     home: &std::path::Path,
-) -> Arc<tron::domains::agent::runner::ProfileRuntime> {
-    Arc::new(tron::domains::agent::runner::ProfileRuntime::load(home).unwrap())
+) -> Arc<crate::domains::agent::runner::ProfileRuntime> {
+    Arc::new(crate::domains::agent::runner::ProfileRuntime::load(home).unwrap())
 }
 
 #[test]
@@ -156,7 +157,7 @@ async fn init_engine_host_bootstraps_sqlite_host() {
     let host = handle.lock().await;
     assert!(
         host.catalog()
-            .function(&tron::engine::FunctionId::new("engine::discover").unwrap())
+            .function(&crate::engine::FunctionId::new("engine::discover").unwrap())
             .is_some()
     );
     assert!(event_db.exists());
@@ -187,7 +188,7 @@ async fn factory_unknown_model_returns_unsupported_model_error() {
     let result = factory.create_for_model("unknown-model").await;
     assert!(matches!(
         result,
-        Err(tron::domains::model::providers::provider::ProviderError::UnsupportedModel { .. })
+        Err(crate::domains::model::providers::provider::ProviderError::UnsupportedModel { .. })
     ));
 }
 
@@ -251,7 +252,7 @@ async fn openai_returns_none_without_auth() {
     // With no auth.json, OpenAI returns None
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("auth.json");
-    let result = tron::domains::auth::provider_credentials::openai::load_server_auth(&path)
+    let result = crate::domains::auth::provider_credentials::openai::load_server_auth(&path)
         .await
         .unwrap();
     assert!(result.is_none());
@@ -261,7 +262,7 @@ async fn openai_returns_none_without_auth() {
 async fn google_returns_none_without_auth() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("auth.json");
-    let result = tron::domains::auth::provider_credentials::google::load_server_auth(&path)
+    let result = crate::domains::auth::provider_credentials::google::load_server_auth(&path)
         .await
         .unwrap();
     assert!(result.is_none());
@@ -280,12 +281,12 @@ async fn create_anthropic_with_oauth_from_file() {
     let path = dir.path().join("auth.json");
 
     // Save fresh OAuth tokens
-    let tokens = tron::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
         access_token: "sk-ant-oat-test".to_string(),
         refresh_token: "ref".to_string(),
-        expires_at: tron::domains::auth::provider_credentials::now_ms() + 3_600_000,
+        expires_at: crate::domains::auth::provider_credentials::now_ms() + 3_600_000,
     };
-    tron::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
+    crate::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
         &path,
         "anthropic",
         "test",
@@ -294,9 +295,9 @@ async fn create_anthropic_with_oauth_from_file() {
     .unwrap();
 
     // load_server_auth should find the OAuth tokens
-    let config = tron::domains::auth::provider_credentials::anthropic::default_config();
+    let config = crate::domains::auth::provider_credentials::anthropic::default_config();
     let result =
-        tron::domains::auth::provider_credentials::anthropic::load_server_auth(&path, &config)
+        crate::domains::auth::provider_credentials::anthropic::load_server_auth(&path, &config)
             .await
             .unwrap();
     let auth = result.unwrap();
@@ -310,19 +311,19 @@ async fn create_anthropic_oauth_over_api_key() {
     let path = dir.path().join("auth.json");
 
     // Save both OAuth account and API key
-    tron::domains::auth::provider_credentials::storage::save_named_api_key(
+    crate::domains::auth::provider_credentials::storage::save_named_api_key(
         &path,
         "anthropic",
         "(default)",
         "sk-api-key",
     )
     .unwrap();
-    let tokens = tron::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
         access_token: "sk-ant-oat-primary".to_string(),
         refresh_token: "ref".to_string(),
-        expires_at: tron::domains::auth::provider_credentials::now_ms() + 3_600_000,
+        expires_at: crate::domains::auth::provider_credentials::now_ms() + 3_600_000,
     };
-    tron::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
+    crate::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
         &path,
         "anthropic",
         "test",
@@ -331,9 +332,9 @@ async fn create_anthropic_oauth_over_api_key() {
     .unwrap();
 
     // OAuth takes priority
-    let config = tron::domains::auth::provider_credentials::anthropic::default_config();
+    let config = crate::domains::auth::provider_credentials::anthropic::default_config();
     let result =
-        tron::domains::auth::provider_credentials::anthropic::load_server_auth(&path, &config)
+        crate::domains::auth::provider_credentials::anthropic::load_server_auth(&path, &config)
             .await
             .unwrap();
     let auth = result.unwrap();
@@ -346,12 +347,12 @@ async fn create_anthropic_uses_first_account() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("auth.json");
 
-    let work_tokens = tron::domains::auth::provider_credentials::OAuthTokens {
+    let work_tokens = crate::domains::auth::provider_credentials::OAuthTokens {
         access_token: "work-tok".to_string(),
         refresh_token: "ref1".to_string(),
-        expires_at: tron::domains::auth::provider_credentials::now_ms() + 3_600_000,
+        expires_at: crate::domains::auth::provider_credentials::now_ms() + 3_600_000,
     };
-    tron::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
+    crate::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
         &path,
         "anthropic",
         "work",
@@ -359,9 +360,9 @@ async fn create_anthropic_uses_first_account() {
     )
     .unwrap();
 
-    let config = tron::domains::auth::provider_credentials::anthropic::default_config();
+    let config = crate::domains::auth::provider_credentials::anthropic::default_config();
     let result =
-        tron::domains::auth::provider_credentials::anthropic::load_server_auth(&path, &config)
+        crate::domains::auth::provider_credentials::anthropic::load_server_auth(&path, &config)
             .await
             .unwrap();
     assert_eq!(result.unwrap().token(), "work-tok");
@@ -372,20 +373,20 @@ async fn create_openai_with_oauth_from_file() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("auth.json");
 
-    let tokens = tron::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
         access_token: "openai-oauth-tok".to_string(),
         refresh_token: "ref".to_string(),
-        expires_at: tron::domains::auth::provider_credentials::now_ms() + 3_600_000,
+        expires_at: crate::domains::auth::provider_credentials::now_ms() + 3_600_000,
     };
-    tron::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
+    crate::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
         &path,
-        tron::domains::auth::provider_credentials::openai::PROVIDER_KEY,
+        crate::domains::auth::provider_credentials::openai::PROVIDER_KEY,
         "test",
         &tokens,
     )
     .unwrap();
 
-    let result = tron::domains::auth::provider_credentials::openai::load_server_auth(&path)
+    let result = crate::domains::auth::provider_credentials::openai::load_server_auth(&path)
         .await
         .unwrap();
     let auth = result.unwrap();
@@ -399,26 +400,26 @@ async fn create_google_with_oauth_from_file() {
     let path = dir.path().join("auth.json");
 
     // Save OAuth tokens via account path
-    let tokens = tron::domains::auth::provider_credentials::OAuthTokens {
+    let tokens = crate::domains::auth::provider_credentials::OAuthTokens {
         access_token: "ya29.google-tok".to_string(),
         refresh_token: "ref".to_string(),
-        expires_at: tron::domains::auth::provider_credentials::now_ms() + 3_600_000,
+        expires_at: crate::domains::auth::provider_credentials::now_ms() + 3_600_000,
     };
-    tron::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
+    crate::domains::auth::provider_credentials::storage::save_account_oauth_tokens(
         &path, "google", "(test)", &tokens,
     )
     .unwrap();
 
     // Set client_id (required for OAuth)
     let mut gpa =
-        tron::domains::auth::provider_credentials::storage::get_google_provider_auth(&path)
+        crate::domains::auth::provider_credentials::storage::get_google_provider_auth(&path)
             .unwrap()
             .unwrap_or_default();
     gpa.client_id = Some("test-client-id".to_string());
-    tron::domains::auth::provider_credentials::storage::save_google_provider_auth(&path, &gpa)
+    crate::domains::auth::provider_credentials::storage::save_google_provider_auth(&path, &gpa)
         .unwrap();
 
-    let result = tron::domains::auth::provider_credentials::google::load_server_auth(&path)
+    let result = crate::domains::auth::provider_credentials::google::load_server_auth(&path)
         .await
         .unwrap();
     let auth = result.unwrap();
@@ -428,7 +429,7 @@ async fn create_google_with_oauth_from_file() {
 
 #[tokio::test]
 async fn server_auth_maps_to_anthropic_oauth_auth() {
-    let server_auth = tron::domains::auth::provider_credentials::ServerAuth::OAuth {
+    let server_auth = crate::domains::auth::provider_credentials::ServerAuth::OAuth {
         access_token: "tok".to_string(),
         refresh_token: "ref".to_string(),
         expires_at: 999,
@@ -439,7 +440,8 @@ async fn server_auth_maps_to_anthropic_oauth_auth() {
 
 #[tokio::test]
 async fn server_auth_maps_to_api_key_auth() {
-    let server_auth = tron::domains::auth::provider_credentials::ServerAuth::from_api_key("sk-123");
+    let server_auth =
+        crate::domains::auth::provider_credentials::ServerAuth::from_api_key("sk-123");
     assert!(!server_auth.is_oauth());
     assert_eq!(server_auth.token(), "sk-123");
 }
@@ -453,10 +455,10 @@ async fn server_boots_and_responds() {
 
     // Single DB for events + tasks
     let db_str = db_path.to_string_lossy();
-    let pool = tron::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
+    let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = tron::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
     }
     let event_store = Arc::new(EventStore::new(pool));
 
@@ -466,12 +468,12 @@ async fn server_boots_and_responds() {
         orchestrator: orchestrator.clone(),
         session_manager,
         event_store,
-        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
+        engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         profile_runtime: test_profile_runtime(&home),
         settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
-        health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(crate::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),
@@ -485,7 +487,8 @@ async fn server_boots_and_responds() {
         .build_recorder()
         .handle();
     let server = TronServer::new(config, runtime_context, metrics_handle);
-    tron::transport::setup::register_server_domains_for_context(server.runtime_context()).unwrap();
+    crate::transport::runtime::setup::register_server_domains_for_context(server.runtime_context())
+        .unwrap();
 
     let pump = EngineStreamEventPump::new(
         orchestrator.subscribe(),
@@ -514,9 +517,9 @@ fn server_creates_db_on_first_run() {
     assert!(!db_path.exists());
 
     let db_str = db_path.to_string_lossy();
-    let pool = tron::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
+    let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     let conn = pool.get().unwrap();
-    let _ = tron::domains::session::event_store::run_migrations(&conn).unwrap();
+    let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
 
     assert!(db_path.exists());
 }
@@ -526,9 +529,9 @@ fn server_runs_migrations() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("tron.sqlite");
     let db_str = db_path.to_string_lossy();
-    let pool = tron::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
+    let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     let conn = pool.get().unwrap();
-    let _ = tron::domains::session::event_store::run_migrations(&conn).unwrap();
+    let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
 
     // Verify tables exist
     let count: i64 = conn
@@ -634,10 +637,10 @@ async fn server_graceful_shutdown() {
     let dir = tempfile::tempdir().unwrap();
     let db_path = dir.path().join("events.db");
     let db_str = db_path.to_string_lossy();
-    let pool = tron::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
+    let pool = crate::domains::session::event_store::new_file(&db_str, &test_db_config()).unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = tron::domains::session::event_store::run_migrations(&conn).unwrap();
+        let _ = crate::domains::session::event_store::run_migrations(&conn).unwrap();
     }
     let event_store = Arc::new(EventStore::new(pool));
     let session_manager = Arc::new(SessionManager::new(event_store.clone()));
@@ -649,12 +652,12 @@ async fn server_graceful_shutdown() {
         orchestrator,
         session_manager,
         event_store,
-        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
+        engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
         profile_runtime: test_profile_runtime(&home),
         settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
-        health_tracker: Arc::new(tron::domains::model::providers::ProviderHealthTracker::new()),
+        health_tracker: Arc::new(crate::domains::model::providers::ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),
@@ -667,7 +670,8 @@ async fn server_graceful_shutdown() {
         .build_recorder()
         .handle();
     let server = TronServer::new(ServerConfig::default(), runtime_context, metrics_handle);
-    tron::transport::setup::register_server_domains_for_context(server.runtime_context()).unwrap();
+    crate::transport::runtime::setup::register_server_domains_for_context(server.runtime_context())
+        .unwrap();
     let (_, handle) = server.listen().await.unwrap();
 
     server.shutdown().shutdown();
@@ -733,7 +737,8 @@ fn run_subcommand_auth_rotate_writes_token_to_default_path() {
     // the wiring matches.
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("auth.json");
-    let token = tron::app::onboarding::rotate_bearer_token(&path).expect("rotate writes token");
+    let token =
+        crate::app::lifecycle::onboarding::rotate_bearer_token(&path).expect("rotate writes token");
     assert_eq!(
         token.len(),
         43,
@@ -742,7 +747,8 @@ fn run_subcommand_auth_rotate_writes_token_to_default_path() {
     assert!(path.exists(), "rotation must persist to disk");
 
     // Round-trip: load the same path and verify the token round-trips.
-    let read_back = tron::app::onboarding::load_or_create_bearer_token(&path).expect("load");
+    let read_back =
+        crate::app::lifecycle::onboarding::load_or_create_bearer_token(&path).expect("load");
     assert_eq!(read_back, token, "rotated token must round-trip on disk");
 }
 
@@ -755,13 +761,14 @@ fn startup_ensures_bearer_token_exists() {
 
     assert_eq!(token.len(), 43);
     assert!(path.exists(), "startup must persist auth.json for pairing");
-    let read_back = tron::app::onboarding::load_or_create_bearer_token(&path).expect("read");
+    let read_back =
+        crate::app::lifecycle::onboarding::load_or_create_bearer_token(&path).expect("read");
     assert_eq!(read_back, token);
 }
 
 #[test]
 fn ordinary_startup_delegates_to_constitution_seeders() {
-    let source = include_str!("main_runtime.rs");
+    let source = include_str!("mod.rs");
     assert!(source.contains("ensure_tron_home"));
     assert!(!source.contains("startup_system_subdirs"));
 }
@@ -770,18 +777,19 @@ fn ordinary_startup_delegates_to_constitution_seeders() {
 fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
     let dir = tempfile::tempdir().expect("tempdir");
     let home = dir.path().join(".tron");
-    tron::shared::constitution::ensure_tron_home_at(&home).expect("seed Constitution home");
+    crate::shared::foundation::constitution::ensure_tron_home_at(&home)
+        .expect("seed Constitution home");
 
     assert!(
-        home.join(tron::shared::paths::dirs::INTERNAL)
-            .join(tron::shared::paths::dirs::RUN)
+        home.join(crate::shared::foundation::paths::dirs::INTERNAL)
+            .join(crate::shared::foundation::paths::dirs::RUN)
             .exists(),
         "internal/run/ holds runtime locks that normal server startup may create"
     );
     assert!(
-        home.join(tron::shared::paths::dirs::PROFILES)
-            .join(tron::shared::profile::DEFAULT_PROFILE)
-            .join(tron::shared::paths::files::PROFILE_TOML)
+        home.join(crate::shared::foundation::paths::dirs::PROFILES)
+            .join(crate::shared::foundation::profile::DEFAULT_PROFILE)
+            .join(crate::shared::foundation::paths::files::PROFILE_TOML)
             .exists(),
         "default profile must be seeded for auditable profile-owned settings"
     );
@@ -789,7 +797,7 @@ fn constitution_startup_creates_internal_run_for_ephemeral_locks() {
 
 #[test]
 fn ordinary_startup_does_not_probe_tcc_permissions() {
-    let source = include_str!("main_runtime.rs");
+    let source = include_str!("mod.rs");
     let spawn_body = source
         .split("fn spawn_background_tasks")
         .nth(1)
@@ -808,9 +816,11 @@ fn ordinary_startup_does_not_probe_tcc_permissions() {
 fn run_subcommand_auth_rotate_invalidates_prior_token() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("auth.json");
-    let first = tron::app::onboarding::load_or_create_bearer_token(&path).expect("first");
-    let second = tron::app::onboarding::rotate_bearer_token(&path).expect("rotate");
-    let third = tron::app::onboarding::load_or_create_bearer_token(&path).expect("third");
+    let first =
+        crate::app::lifecycle::onboarding::load_or_create_bearer_token(&path).expect("first");
+    let second = crate::app::lifecycle::onboarding::rotate_bearer_token(&path).expect("rotate");
+    let third =
+        crate::app::lifecycle::onboarding::load_or_create_bearer_token(&path).expect("third");
     assert_ne!(
         first, second,
         "rotation must produce a new token (otherwise paired devices stay valid)"

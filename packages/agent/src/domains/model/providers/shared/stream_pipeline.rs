@@ -10,7 +10,7 @@ use tracing::{error, warn};
 
 use crate::domains::model::providers::provider::{ProviderResult, StreamEventStream};
 use crate::domains::model::providers::sse::{SseParserOptions, parse_sse_lines};
-use crate::shared::events::StreamEvent;
+use crate::shared::protocol::events::StreamEvent;
 
 /// Convert an HTTP response's SSE byte stream into a typed [`StreamEventStream`].
 ///

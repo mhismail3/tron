@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Evidence Manifest
 
-Current score: **13/100**
+Current score: **19/100**
 
 Status: **running**
 
@@ -14,7 +14,7 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 |----|--------|----------|--------------|------------|--------|
 | HRA-0 | passed_after_fix | Created the scorecard, evidence manifest, human inventory, generated TSV inventory, generated move map, Rust invariant target, README living-doc links, and `scripts/tron.d/quality.sh` CI hook. The invariant target intentionally fails against the current tree on loose Rust root files, flat engine root modules, broad iOS source buckets, non-mirrored iOS test buckets, and over-budget files without decomposition rows. | Red output captured below. | Red gates are expected until HRA-2 through HRA-13 move the tree and HRA-1 records final budgets. | `f14f7b60c` |
 | HRA-1 | passed_after_fix | Replaced HRA-0 placeholder TSVs with a live tracked-file target map; recorded counts, extension counts, package counts, loose root files, overfull folders, one-file folders, generic bucket folders, same-name file/folder pairs, over-budget files, docs/scripts old-path claims, and retained folder owners. No code files were moved in this row. | Focused HRA invariant rerun improved from 2 passed/5 failed to 3 passed/4 failed: formalization, inventory coverage, and large-file budget gates pass; root Rust, engine root, iOS source bucket, and iOS test mirror gates remain red for implementation rows. | Pending move/split implementation rows remain HRA-2 through HRA-14; docs closeout remains HRA-15. | `58be3f8df` |
-| HRA-2 | pending | Not started. | pending | Move Rust app/transport/shared/platform roots. | pending |
+| HRA-2 | passed_after_fix | Moved `main_cli.rs`, `main_runtime.rs`, and `main_tests.rs` under `app/cli` and `app/bootstrap`; moved app config/disk/server/health/metrics/onboarding/shutdown under bootstrap/health/lifecycle; moved transport auth/contracts/engine/engine_ws/setup under http/engine/runtime; collapsed shared root into foundation/protocol/server/storage/observability; removed old path modules instead of re-exporting them. | `cargo check --manifest-path packages/agent/Cargo.toml --bin tron` passed; `cargo test --manifest-path packages/agent/Cargo.toml --lib app::bootstrap -- --quiet` passed 80 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --quiet` passed 27 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --quiet` passed 16 tests; `cargo test --manifest-path packages/agent/Cargo.toml --test db_path_guard -- --quiet` passed 13 tests; HRA invariant target is expected partial red with Rust source-root and HRA-2 shape gates passing. | HRA-3/HRA-4 still own flat engine root; iOS source/test gates remain red for HRA-9 through HRA-13. | pending |
 | HRA-3 | pending | Not started. | pending | Move Rust engine kernel/catalog/invocation/runtime. | pending |
 | HRA-4 | pending | Not started. | pending | Move Rust engine authority/durability. | pending |
 | HRA-5 | pending | Not started. | pending | Move Rust domains to vertical slices. | pending |
@@ -103,3 +103,27 @@ test result: FAILED. 3 passed; 4 failed
 
 The remaining failures are not HRA-1 inventory defects. They are implementation
 gates for HRA-2, HRA-3/HRA-4, HRA-9/HRA-12, and HRA-13.
+
+## HRA-2 Rust Root Verification
+
+Commands:
+
+```bash
+cargo check --manifest-path packages/agent/Cargo.toml --bin tron
+cargo test --manifest-path packages/agent/Cargo.toml --lib app::bootstrap -- --quiet
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --quiet
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --quiet
+cargo test --manifest-path packages/agent/Cargo.toml --test db_path_guard -- --quiet
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture
+```
+
+Results:
+
+- `cargo check --bin tron`: passed.
+- `app::bootstrap` unit slice: 80 passed.
+- primitive engine teardown invariants: 27 passed.
+- primitive code cleanup invariants: 16 passed.
+- db path guard: 13 passed.
+- HRA invariant target: expected partial red; Rust source root and HRA-2
+  app/transport/shared shape gates pass, while engine and iOS gates remain red
+  for later phases.

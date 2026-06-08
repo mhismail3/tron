@@ -12,7 +12,7 @@ use crate::engine::{
     ActorContext, ActorId, ActorKind, AuthorityGrantId, EngineHostHandle, FunctionDefinition,
     FunctionHealth, FunctionId, FunctionQuery,
 };
-use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
+use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
 const PRIMITIVE_SURFACE_GRANT: &str = "agent-primitive-surface";
 

@@ -103,16 +103,15 @@ async fn message_delete_value(payload: &Value, deps: &Deps) -> Result<Value, Cap
             }
         })?;
 
-    let _ = deps
-        .orchestrator
-        .broadcast()
-        .emit(crate::shared::events::TronEvent::MessageDeleted {
-            base: crate::shared::events::BaseEvent::now(&session_id),
+    let _ = deps.orchestrator.broadcast().emit(
+        crate::shared::protocol::events::TronEvent::MessageDeleted {
+            base: crate::shared::protocol::events::BaseEvent::now(&session_id),
             target_event_id: event_id.clone(),
             target_type: deletion_event.event_type.clone(),
             target_turn: None,
             reason,
-        });
+        },
+    );
 
     Ok(json!({
         "success": true,

@@ -142,10 +142,10 @@ impl Default for RetrySettings {
         // the runtime retry executor consume. Changing a default here without
         // changing the constant (or vice versa) is a bug.
         Self {
-            max_retries: crate::shared::retry::DEFAULT_MAX_RETRIES,
-            base_delay_ms: crate::shared::retry::DEFAULT_BASE_DELAY_MS,
-            max_delay_ms: crate::shared::retry::DEFAULT_MAX_DELAY_MS,
-            jitter_factor: crate::shared::retry::DEFAULT_JITTER_FACTOR,
+            max_retries: crate::shared::foundation::retry::DEFAULT_MAX_RETRIES,
+            base_delay_ms: crate::shared::foundation::retry::DEFAULT_BASE_DELAY_MS,
+            max_delay_ms: crate::shared::foundation::retry::DEFAULT_MAX_DELAY_MS,
+            jitter_factor: crate::shared::foundation::retry::DEFAULT_JITTER_FACTOR,
         }
     }
 }
@@ -243,7 +243,10 @@ mod tests {
     #[test]
     fn retry_defaults() {
         let r = RetrySettings::default();
-        assert_eq!(r.max_retries, crate::shared::retry::DEFAULT_MAX_RETRIES);
+        assert_eq!(
+            r.max_retries,
+            crate::shared::foundation::retry::DEFAULT_MAX_RETRIES
+        );
         assert_eq!(r.max_retries, 3);
         assert_eq!(r.base_delay_ms, 1000);
         assert_eq!(r.max_delay_ms, 60_000);
@@ -257,7 +260,7 @@ mod tests {
         // differs from the actual runtime default — users would see retries
         // happen N times when the settings file said M, and vice versa.
         let settings_r = RetrySettings::default();
-        let runtime_r = crate::shared::retry::RetryConfig::default();
+        let runtime_r = crate::shared::foundation::retry::RetryConfig::default();
         assert_eq!(settings_r.max_retries, runtime_r.max_retries);
         assert_eq!(settings_r.base_delay_ms, runtime_r.base_delay_ms);
         assert_eq!(settings_r.max_delay_ms, runtime_r.max_delay_ms);

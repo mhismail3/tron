@@ -11,6 +11,9 @@
 //! list so trace/ledger evidence reflects the authority set, not construction
 //! order artifacts.
 
+pub mod contracts;
+pub mod socket;
+
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -23,7 +26,6 @@ use crate::engine::{
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::errors::CapabilityError;
-use crate::transport::contracts;
 
 /// Optional context supplied by a transport message.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

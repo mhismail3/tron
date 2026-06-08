@@ -12,13 +12,13 @@
 //! 3. Emits [`StreamEvent::Retry`] events before each retry wait
 //! 4. Respects cancellation via `CancellationToken`
 //!
-//! [`StreamEvent`]: crate::shared::events::StreamEvent
+//! [`StreamEvent`]: crate::shared::protocol::events::StreamEvent
 
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::shared::events::{RetryErrorInfo, StreamEvent};
-use crate::shared::retry::RetryConfig;
+use crate::shared::foundation::retry::RetryConfig;
+use crate::shared::protocol::events::{RetryErrorInfo, StreamEvent};
 use futures::Stream;
 use tokio_util::sync::CancellationToken;
 
@@ -120,7 +120,7 @@ pub fn with_provider_retry(
                         }
 
                     attempt += 1;
-                    let backoff_ms = crate::shared::retry::calculate_backoff_delay(
+                    let backoff_ms = crate::shared::foundation::retry::calculate_backoff_delay(
                         attempt,
                         config.retry.base_delay_ms,
                         config.retry.max_delay_ms,
@@ -173,7 +173,7 @@ pub fn with_provider_retry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::events::AssistantMessage;
+    use crate::shared::protocol::events::AssistantMessage;
     use futures::StreamExt;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};

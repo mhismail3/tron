@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use crate::shared::messages::Message;
+use crate::shared::protocol::messages::Message;
 
 use super::token_estimator::estimate_message_tokens;
 
@@ -157,8 +157,8 @@ impl Default for MessageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::shared::content::AssistantContent;
-    use crate::shared::messages::Message;
+    use crate::shared::protocol::content::AssistantContent;
+    use crate::shared::protocol::messages::Message;
     use std::sync::Arc;
 
     // -- Construction --

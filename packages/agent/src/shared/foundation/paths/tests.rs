@@ -8,7 +8,7 @@ fn home_dir_returns_env_var() {
 
 #[test]
 fn paths_source_has_no_hardcoded_user_directory() {
-    let src = include_str!("../paths.rs");
+    let src = include_str!("../mod.rs");
     let needle = format!("/Users/{}", "moose");
     assert!(
         !src.contains(&needle),
@@ -36,7 +36,7 @@ fn workspace_has_no_personal_info_literals() {
     ];
     let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
     let offenders: Vec<(&str, String)> = vec![
-        ("paths.rs", include_str!("../paths.rs").to_owned()),
+        ("paths/mod.rs", include_str!("../mod.rs").to_owned()),
         (
             "defaults/profiles/default/profile.toml",
             std::fs::read_to_string(manifest_dir.join("defaults/profiles/default/profile.toml"))

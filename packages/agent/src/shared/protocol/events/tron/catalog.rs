@@ -5,8 +5,8 @@ use serde_json::Value;
 
 use super::super::{CapabilityEventIdentity, CapabilityInvocationSummary};
 use super::{BaseEvent, CompactionReason};
-use crate::shared::messages::TokenUsage;
-use crate::shared::model_capabilities::CapabilityResult;
+use crate::shared::protocol::messages::TokenUsage;
+use crate::shared::protocol::model_capabilities::CapabilityResult;
 
 // ─────────────────────────────────────────────────────────────────────────────
 

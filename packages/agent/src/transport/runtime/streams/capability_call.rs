@@ -1,6 +1,6 @@
-use crate::shared::content::CapabilityResultContent;
-use crate::shared::events::{CapabilityEventIdentity, TronEvent};
-use crate::shared::model_capabilities::CapabilityResultBody;
+use crate::shared::protocol::content::CapabilityResultContent;
+use crate::shared::protocol::events::{CapabilityEventIdentity, TronEvent};
+use crate::shared::protocol::model_capabilities::CapabilityResultBody;
 use serde_json::json;
 
 use super::routed::{ProjectedEvent, session_scoped, set_opt};
