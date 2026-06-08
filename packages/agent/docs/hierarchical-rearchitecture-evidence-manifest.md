@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Evidence Manifest
 
-Current score: **5/100**
+Current score: **13/100**
 
 Status: **running**
 
@@ -13,7 +13,7 @@ Plan: `TRON_REARCHITECTURE_PLAN.md` from the operator Downloads directory.
 | ID | Status | Evidence | Verification | Open loops | Commit |
 |----|--------|----------|--------------|------------|--------|
 | HRA-0 | passed_after_fix | Created the scorecard, evidence manifest, human inventory, generated TSV inventory, generated move map, Rust invariant target, README living-doc links, and `scripts/tron.d/quality.sh` CI hook. The invariant target intentionally fails against the current tree on loose Rust root files, flat engine root modules, broad iOS source buckets, non-mirrored iOS test buckets, and over-budget files without decomposition rows. | Red output captured below. | Red gates are expected until HRA-2 through HRA-13 move the tree and HRA-1 records final budgets. | `f14f7b60c` |
-| HRA-1 | pending | Not started. | pending | Complete final per-file target classification and folder owner table. | pending |
+| HRA-1 | passed_after_fix | Replaced HRA-0 placeholder TSVs with a live tracked-file target map; recorded counts, extension counts, package counts, loose root files, overfull folders, one-file folders, generic bucket folders, same-name file/folder pairs, over-budget files, docs/scripts old-path claims, and retained folder owners. No code files were moved in this row. | Focused HRA invariant rerun improved from 2 passed/5 failed to 3 passed/4 failed: formalization, inventory coverage, and large-file budget gates pass; root Rust, engine root, iOS source bucket, and iOS test mirror gates remain red for implementation rows. | Pending move/split implementation rows remain HRA-2 through HRA-14; docs closeout remains HRA-15. | pending |
 | HRA-2 | pending | Not started. | pending | Move Rust app/transport/shared/platform roots. | pending |
 | HRA-3 | pending | Not started. | pending | Move Rust engine kernel/catalog/invocation/runtime. | pending |
 | HRA-4 | pending | Not started. | pending | Move Rust engine authority/durability. | pending |
@@ -75,3 +75,31 @@ Failure inventory:
   `Repositories`, `Services`, `Theme`, `Utilities`, `ViewModels`, and `Views`.
 - `large_files_have_decomposition_budget_rows`: 24 Rust/Swift files currently
   exceed HRA line budgets without explicit HRA-1 budget rows.
+
+## HRA-1 Inventory Verification
+
+Command:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture
+```
+
+Result: exit 101, expected partial red gate.
+
+Summary:
+
+```text
+running 7 tests
+test hierarchical_rearchitecture_scorecard_stays_formalized ... ok
+test tracked_files_have_rearchitecture_inventory_rows ... ok
+test large_files_have_decomposition_budget_rows ... ok
+test ios_sources_do_not_use_broad_views_network_database_buckets ... FAILED
+test ios_tests_mirror_source_boundaries ... FAILED
+test rust_engine_root_has_no_unowned_flat_modules ... FAILED
+test rust_source_root_has_only_allowed_entry_files ... FAILED
+
+test result: FAILED. 3 passed; 4 failed
+```
+
+The remaining failures are not HRA-1 inventory defects. They are implementation
+gates for HRA-2, HRA-3/HRA-4, HRA-9/HRA-12, and HRA-13.

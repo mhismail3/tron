@@ -163,7 +163,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Scorecard",
-        "Current score: **5/100**",
+        "Current score: **13/100**",
         "Status: **running**",
         "Total weight: **100**",
         "## Folder Justification Table",
@@ -198,7 +198,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Evidence Manifest",
-        "Current score: **5/100**",
+        "Current score: **13/100**",
         "Status: **running**",
         "| HRA-0 | passed_after_fix |",
         "## HRA-0 Red Static Gate",
@@ -211,11 +211,11 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
 
     for required in [
         "# Hierarchical Rearchitecture Inventory",
-        "Status: `running`",
+        "Status: `passed_after_fix`",
         "Machine-Readable Artifacts",
         "Allowed classifications",
         "Allowed statuses",
-        "HRA-0 Baseline Counts",
+        "HRA-1 Baseline Counts",
     ] {
         assert!(
             inventory.contains(required),

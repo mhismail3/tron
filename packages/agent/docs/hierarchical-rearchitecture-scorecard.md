@@ -1,6 +1,6 @@
 # Hierarchical Rearchitecture Scorecard
 
-Current score: **5/100**
+Current score: **13/100**
 
 Status: **running**
 
@@ -41,7 +41,7 @@ Total weight: **100**
 | ID | Area | Weight | Status | Owner | Evidence | Open loops |
 |----|------|--------|--------|-------|----------|------------|
 | HRA-0 | Scorecard, evidence, and static-gate setup | 5 | passed_after_fix | architecture campaign | Required artifacts, README links, CI hook, and red hierarchy invariant target are present. | Red gates are expected until later rows move code. |
-| HRA-1 | Whole-repo inventory and target architecture | 8 | pending | architecture campaign | Initial HRA-0 inventory is generated from the live tracked tree. | Classify each retained file and folder with final owner and target path. |
+| HRA-1 | Whole-repo inventory and target architecture | 8 | passed_after_fix | architecture campaign | Live tracked-file inventory, target move map, folder owner table, drift findings, and large-file budgets are recorded. | Pending move/split rows are implementation work for HRA-2 through HRA-14, not unclassified inventory. |
 | HRA-2 | Rust app, transport, shared, and platform roots | 6 | pending | Rust app/transport/shared owners | Not started. | Move root helper files and audit shared ownership. |
 | HRA-3 | Rust engine kernel and invocation hierarchy | 10 | pending | Rust engine owner | Not started. | Replace flat engine root with kernel/catalog/invocation/runtime boundaries. |
 | HRA-4 | Rust engine durability and authority hierarchy | 8 | pending | Rust engine owner | Not started. | Group grants, leases, compensation, ledger, state, streams, queue, and resources. |
@@ -85,6 +85,30 @@ temporary budget.
 
 | Path | Owner | Limit | Current LOC | Decomposition plan | Status |
 |------|-------|-------|-------------|--------------------|--------|
+| `packages/agent/src/domains/agent/runner/agent/stream_processor_tests.rs` | rust agent domain owner | 900 | 1182 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/domains/agent/runner/context/compaction_engine_tests.rs` | rust agent domain owner | 900 | 1038 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/domains/auth/provider_credentials/storage/tests.rs` | rust auth domain owner | 900 | 1383 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/domains/capability/operations/mod.rs` | rust compact domain owner | 900 | 927 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/domains/model/providers/anthropic/types.rs` | rust model domain owner | 900 | 941 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/domains/model/providers/kimi/stream_handler.rs` | rust model domain owner | 900 | 991 | HRA-5 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests.rs` | rust session domain owner | 900 | 1571 | HRA-6 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/engine/external.rs` | rust engine runtime owner | 900 | 906 | HRA-3 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/engine/grants.rs` | rust engine authority owner | 900 | 956 | HRA-4 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/engine/ledger.rs` | rust engine durability owner | 900 | 955 | HRA-4 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/engine/resources/store.rs` | rust engine durability owner | 900 | 972 | HRA-4 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/engine/tests/grant_authority.rs` | rust engine test owner | 900 | 929 | HRA-4 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/engine/tests/resource_kernel.rs` | rust engine test owner | 900 | 1196 | HRA-4 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/engine/tests/state_queue.rs` | rust engine test owner | 900 | 907 | HRA-4 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/src/engine/types.rs` | rust engine kernel owner | 900 | 1008 | HRA-3 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/tests/primitive_code_cleanup_invariants.rs` | rust integration/static test owner | 900 | 942 | HRA-7 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs` | rust integration/static test owner | 900 | 2242 | HRA-7 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Sources/Engine/Network/EngineConnection.swift` | ios engine transport owner | 700 | 958 | HRA-9 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Sources/Session/Messages/CapabilityInvocationDisplayModel.swift` | ios session timeline owner | 700 | 744 | HRA-10 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Sources/UI/Views/DynamicSurfaces/GeneratedRuntimeSurfaceView.swift` | ios runtime surface UI owner | 700 | 817 | HRA-11 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Sources/UI/Views/Settings/SettingsView.swift` | ios settings UI owner | 700 | 735 | HRA-11 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | ios engine test owner | 700 | 2140 | HRA-13 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | ios test infrastructure owner | 700 | 1531 | HRA-13 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
+| `packages/mac-app/Tests/Wizard/WizardStepTests.swift` | mac test owner | 700 | 717 | HRA-14 owns decomposition or movement to the target owner; temporary budget accepted only until that phase closes. | temporary_budget |
 
 ## Static Gates
 
