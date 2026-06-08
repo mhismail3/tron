@@ -880,21 +880,14 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 
 ```
 packages/mac-app/Sources/
-+-- TronMacApp.swift           App entry: branches on ~/.tron/internal/run/.onboarded sentinel
-+-- EnvironmentSetup.swift     Dev vs release bundle-ID wiring, log paths, shared state root
++-- App/                       App entry, environment setup, command-mode startup
++-- Server/                    LaunchAgent/SMAppService, health checks, paths, server control
 +-- Wizard/                    First-run flow
 |   +-- WizardState.swift      @Observable state machine + `WizardStep` enum
 |   +-- WizardView.swift       NavigationStack shell
 |   +-- Steps/                 Welcome, Tailscale, Install, Permissions, iOS Beta, Pairing, Done
 +-- MenuBar/                   NSStatusItem controller, status polling, copy actions, update submenu
-+-- Services/
-|   +-- Server/                Bearer-token reader, engine transport client, status poller
-|   +-- Onboarding/            SMAppService install planner, permission/Tailscale probes, existing-install detection
-|   +-- Pairing/               Tailscale live probe + auth.json bearer-token reader; QR + tron:// URL generation
-|   +-- Feedback/              GitHub issue composer with redacted log context
-|   +-- Observability/         DiagnosticsRedactor (shared pattern with iOS)
-|   +-- LaunchAgentManaging.swift
-|   +-- TronPaths.swift        ~/.tron/ path helpers (mirrors Rust `core::foundation::paths`)
++-- Support/                   Shared models, theme, onboarding probes, pairing, feedback, diagnostics
 +-- Resources/
     +-- Library/
         +-- LoginItems/Tron Server.app/Contents/MacOS/tron

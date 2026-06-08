@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-06-07 (primitive branch helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
+> Last verified: 2026-06-08 (PCC-7 source-root consolidation, primitive helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
 
 ## Overview
 
@@ -24,9 +24,14 @@ packages/mac-app/
 ├── TronMac.entitlements            # Hardened runtime entitlements
 ├── Configuration/                  # .xcconfig files (Debug/Release)
 ├── Sources/
-│   ├── TronMacApp.swift            # @main entry, AppDelegate, RootView
-│   ├── EnvironmentSetup.swift      # Sendable DI struct (live + test values)
 │   ├── Info.plist                  # Bundle metadata (starts regular; switches to accessory after onboarding)
+│   ├── App/
+│   │   ├── TronMacApp.swift        # @main entry, AppDelegate, RootView
+│   │   ├── EnvironmentSetup.swift  # Sendable DI struct (live + test values)
+│   │   ├── MacAppStartupMaintenance.swift
+│   │   ├── MacCommandLineMode.swift
+│   │   ├── MacCommandModeServerStarter.swift
+│   │   └── MacRuntimeVariant.swift # Debug vs installed-release path/ownership rules
 │   ├── MenuBar/
 │   │   ├── MenuBarActionHandler.swift # routes menu-item descriptors → side effects (subprocess, NSWorkspace, notifications)
 │   │   ├── MenuBarController.swift    # NSStatusItem lifecycle + poller task + custom header view
@@ -35,19 +40,20 @@ packages/mac-app/
 │   │   ├── Fonts/
 │   │   │   └── Exo2-Variable.ttf   # bundled Google Fonts sans face for wizard typography
 │   │   └── Constitution/           # copied from packages/agent/defaults/
-│   ├── Theme/
-│   │   ├── TronColors.swift        # emerald palette + shared gradients
-│   │   ├── TronFontLoader.swift    # CoreText registration for bundled fonts
-│   │   └── TronTypography.swift    # compact Mac wizard type tokens
-│   ├── Services/
+│   ├── Server/
 │   │   ├── LaunchAgentManaging.swift # protocol + SMAppService-backed LiveLaunchAgentManager
-│   │   ├── MacCommandLineMode.swift  # internal wrapper commands for SMAppService start/uninstall
-│   │   ├── MacRuntimeVariant.swift   # Debug vs installed-release path/ownership rules
-│   │   ├── Models.swift            # TailscaleStatus, PermissionStatus, ExistingInstallStatus…
 │   │   ├── TronPaths.swift         # Single source of truth for all on-disk paths
+│   │   ├── BearerTokenReader.swift # reads auth.json bearerToken; caches pairing Tailscale IP in profile.toml
+│   │   ├── ServerHealthAwaiter.swift
+│   │   ├── ServerPing.swift        # one-shot string-id system::ping over WS → ServerPingResult
+│   │   ├── ServerStatusPoller.swift
+│   │   ├── SingleInstanceLock.swift
+│   │   └── TronUninstaller.swift
+│   ├── Support/
+│   │   ├── Models.swift            # TailscaleStatus, PermissionStatus, ExistingInstallStatus…
+│   │   ├── VersionDisplay.swift
 │   │   ├── Feedback/
-│   │   │   ├── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
-│   │   │   └── MenuBarFeedbackAction.swift # menu-bar handler (NSWorkspace.open GitHub issue URL)
+│   │   │   └── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
 │   │   ├── Observability/
 │   │   │   └── DiagnosticsRedactor.swift   # strip paths, mask tokens, drop chat content
 │   │   ├── Onboarding/
@@ -58,17 +64,15 @@ packages/mac-app/
 │   │   ├── Pairing/
 │   │   │   ├── PairingURLBuilder.swift # builds `tron://pair?…` URL
 │   │   │   └── QRCodeGenerator.swift   # CoreImage CIQRCodeGenerator wrapper
-│   │   └── Server/
-│   │       ├── BearerTokenReader.swift     # reads auth.json bearerToken; caches pairing Tailscale IP in profile.toml
-│   │       ├── ServerHealthAwaiter.swift   # bounded /health polling after SMAppService start/load
-│   │       ├── ServerPing.swift            # one-shot string-id system::ping over WS → ServerPingResult; skips broadcast/event frames
-│   │       ├── ServerStatusPoller.swift    # 30s periodic poll for menu bar
-│   │       ├── SingleInstanceLock.swift    # fcntl(F_SETLK) advisory lock
+│   │   └── Theme/
+│   │       ├── TronColors.swift        # emerald palette + shared gradients
+│   │       ├── TronFontLoader.swift    # CoreText registration for bundled fonts
+│   │       └── TronTypography.swift    # compact Mac wizard type tokens
 │   └── Wizard/
 │       ├── WizardState.swift       # @Observable, step persistence, navigation
 │       ├── WizardView.swift        # NavigationStack + per-step dispatcher
 │       └── Steps/                  # One view per WizardStep case
-└── Tests/                          # Mirrors Sources layout
+└── Tests/                          # Behavior-oriented Mac wrapper tests
 ```
 
 ## Key Architectural Patterns

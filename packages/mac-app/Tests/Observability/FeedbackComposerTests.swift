@@ -14,9 +14,8 @@ struct FeedbackComposerTests {
     @Test("body includes environment, status, and redacted logs")
     func bodyRedactsLogs() {
         let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
-        let snapshot = ServerStatusSnapshot(state: .failed(reason: "timeout"))
         let body = composer.body(
-            snapshot: snapshot,
+            serverDescription: "failed (timeout)",
             logs: "Bearer 1234567890abcdef1234 failed from /Users/alice/project"
         )
 
@@ -31,8 +30,7 @@ struct FeedbackComposerTests {
     @Test("issue URL targets GitHub issues, not mail")
     func issueURL() throws {
         let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
-        let snapshot = ServerStatusSnapshot(state: .running(version: "0.1.0-beta.1", port: 9847))
-        let plan = try #require(composer.openPlan(snapshot: snapshot, logs: "hello"))
+        let plan = try #require(composer.openPlan(serverDescription: "running on port 9847, version v0.1 (Beta 1)", logs: "hello"))
 
         #expect(plan.url.scheme == "https")
         #expect(plan.url.host == "github.com")
@@ -45,8 +43,7 @@ struct FeedbackComposerTests {
     @Test("oversized body opens title-only issue and marks body for clipboard")
     func oversizedBodyUsesClipboardPlan() throws {
         let composer = FeedbackIssueComposer(appVersion: "0.1.0-beta.1", buildNumber: "1", osVersion: "macOS 15.0")
-        let snapshot = ServerStatusSnapshot(state: .running(version: "0.1.0-beta.1", port: 9847))
-        let plan = try #require(composer.openPlan(snapshot: snapshot, logs: String(repeating: "x", count: 20_000)))
+        let plan = try #require(composer.openPlan(serverDescription: "running on port 9847, version v0.1 (Beta 1)", logs: String(repeating: "x", count: 20_000)))
 
         #expect(plan.copiedFullBodyToClipboard)
         #expect(plan.url.absoluteString.count < FeedbackIssueComposer.maxPrefilledURLLength)

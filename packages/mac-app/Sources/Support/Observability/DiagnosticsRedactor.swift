@@ -1,7 +1,7 @@
 import Foundation
 
 /// Mac port of the iOS `DiagnosticsRedactor` (see
-/// `packages/ios-app/Sources/Services/Observability/DiagnosticsRedactor.swift`).
+/// `packages/ios-app/Sources/Support/Observability/DiagnosticsRedactor.swift`).
 ///
 /// Kept as a direct copy rather than a shared module because the iOS
 /// and Mac projects don't currently share a Swift package. If this

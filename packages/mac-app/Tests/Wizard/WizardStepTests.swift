@@ -620,7 +620,7 @@ struct WizardVisualLayoutTests {
         #expect(!source.contains("step != .permissions"))
 
         let app = try String(
-            contentsOf: packageRoot.appending(path: "Sources/TronMacApp.swift"),
+            contentsOf: packageRoot.appending(path: "Sources/App/TronMacApp.swift"),
             encoding: .utf8
         )
         #expect(!app.contains("window.isMovableByWindowBackground = true"))

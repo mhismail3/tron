@@ -22,7 +22,7 @@ struct FeedbackIssueComposer {
         "Mac menu bar feedback - \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))"
     }
 
-    func body(snapshot: ServerStatusSnapshot, logs: String) -> String {
+    func body(serverDescription: String, logs: String) -> String {
         let redactedLogs = redactor.redactMessage(logs).trimmingCharacters(in: .whitespacesAndNewlines)
         return """
         ### Summary
@@ -32,7 +32,7 @@ struct FeedbackIssueComposer {
 
         - App: \(VersionDisplay.label(for: appVersion)) (build \(buildNumber))
         - macOS: \(osVersion)
-        - Server: \(snapshot.feedbackDescription)
+        - Server: \(serverDescription)
 
         ### Recent logs
 
@@ -42,9 +42,9 @@ struct FeedbackIssueComposer {
         """
     }
 
-    func openPlan(snapshot: ServerStatusSnapshot, logs: String) -> FeedbackIssueOpenPlan? {
+    func openPlan(serverDescription: String, logs: String) -> FeedbackIssueOpenPlan? {
         let title = title()
-        let fullBody = body(snapshot: snapshot, logs: logs)
+        let fullBody = body(serverDescription: serverDescription, logs: logs)
         if let fullURL = Self.issueURL(title: title, body: fullBody),
            fullURL.absoluteString.count <= Self.maxPrefilledURLLength {
             return FeedbackIssueOpenPlan(url: fullURL, copiedFullBodyToClipboard: false)
@@ -68,24 +68,5 @@ struct FeedbackIssueComposer {
             URLQueryItem(name: "body", value: body),
         ]
         return components.url
-    }
-}
-
-private extension ServerStatusSnapshot {
-    var feedbackDescription: String {
-        switch state {
-        case .checking:
-            return "checking"
-        case .running(let version, let port):
-            return "running on port \(port), version \(version.map { VersionDisplay.label(for: $0) } ?? "?")"
-        case .busy(let action):
-            return action.rawValue.lowercased()
-        case .paused:
-            return "paused"
-        case .failed(let reason):
-            return "failed (\(reason))"
-        case .unauthorized:
-            return "token missing or rejected"
-        }
     }
 }

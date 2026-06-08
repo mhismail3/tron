@@ -4,7 +4,7 @@ Created: 2026-06-08
 
 Initial score: **0/100**
 
-Current score: **70/100**
+Current score: **78/100**
 
 Status: **active**
 
@@ -72,7 +72,7 @@ only until the owning scorecard row proves whether they remain a boundary.
 | `scripts` | retain | CLI boundary | Workspace and installed helper scripts. | Consolidate helpers during PCC-8. |
 | `packages/agent` | retain | Rust server package | Single Rust crate plus server docs/assets/tests. | Retain; remove stale examples/assets if unowned. |
 | `packages/ios-app` | retain | iOS package | SwiftUI mobile shell and generated Xcode project boundary. | Retain consolidated primitive shell source roots. |
-| `packages/mac-app` | retain | Mac package | SwiftUI menu-bar wrapper and generated Xcode project boundary. | Consolidate `Sources` during PCC-7. |
+| `packages/mac-app` | retain | Mac package | SwiftUI menu-bar wrapper and generated Xcode project boundary. | Retain consolidated primitive wrapper source roots. |
 | `packages/agent/src/app` | retain | Rust bootstrap | Server bootstrap, health, metrics, onboarding, shutdown. | Keep as top-level Rust root. |
 | `packages/agent/src/transport` | retain | Rust transport | `/engine` client protocol, worker socket, auth gate. | Keep as top-level Rust root. |
 | `packages/agent/src/engine` | collapse audit | Rust engine substrate | Live catalog, workers, queues, resources, traces, ledger, host. | Flatten unowned shards during PCC-4. |
@@ -86,11 +86,12 @@ only until the owning scorecard row proves whether they remain a boundary.
 | `packages/ios-app/Sources/Session` | retain | iOS session state | Chat/session view models, messages, activity summaries, parsing, token accounting. | Keep as the only session-state root. |
 | `packages/ios-app/Sources/Support` | retain | iOS support services | Dependency injection, diagnostics, pairing, storage, settings, concurrency, feedback, extensions, utilities. | Keep as non-UI support root. |
 | `packages/ios-app/Sources/UI` | retain | iOS UI shell | Theme and SwiftUI views for chat, settings, onboarding, generic runtime surfaces. | Keep as the only UI source root. |
+| `packages/mac-app/Sources/App` | retain | Mac app lifecycle | App entry, environment setup, command-mode startup, and runtime variant selection. | Keep. |
 | `packages/mac-app/Sources/Assets.xcassets` | asset | Mac assets | Xcode asset catalog boundary. | Keep. |
 | `packages/mac-app/Sources/MenuBar` | retain | Mac menu-bar shell | Menu model, controller, actions. | Keep as target root. |
 | `packages/mac-app/Sources/Resources` | asset | Mac resources | Bundled resources and helper metadata. | Keep. |
-| `packages/mac-app/Sources/Services` | collapse audit | Mac server/support services | Server lifecycle, paths, feedback, diagnostics. | Split into `Server` and `Support` during PCC-7. |
-| `packages/mac-app/Sources/Theme` | collapse audit | Mac styling | Styling helpers. | Fold into `Support` or `UI` owner if small. |
+| `packages/mac-app/Sources/Server` | retain | Mac server lifecycle | LaunchAgent, SMAppService, health polling, paths, token reads, and server control. | Keep. |
+| `packages/mac-app/Sources/Support` | retain | Mac support services | Shared models, onboarding probes, pairing, feedback composition, diagnostics, theme, and formatting helpers. | Keep. |
 | `packages/mac-app/Sources/Wizard` | retain | Mac install/pairing wizard | Wizard state and views. | Keep; collapse tiny step files if unowned. |
 
 ## Large File Budgets
@@ -138,6 +139,10 @@ planning gates:
   shards and one-file operation folders stay collapsed, SQLite docs describe
   only the fresh primitive schema, retired message queue payload DTOs stay
   absent, and v001 does not recreate old product tables.
+- Mac wrapper cleanup shape stays current: app lifecycle, server lifecycle, and
+  support services live under `Sources/App`, `Sources/Server`, and
+  `Sources/Support`; root Swift files plus old `Sources/Services` and
+  `Sources/Theme` roots stay absent.
 
 ## Operating Loop
 
@@ -160,7 +165,7 @@ planning gates:
 | PCC-4 | Engine and primitive surface cleanup | 10 | passed_after_fix | engine_architecture | Collapsed the unowned `engine/types/catalog.rs` shard into `engine/types.rs`, folded the resource-store event/id helper into `resources/store.rs`, deleted the uncalled `resources/store/trace_events.rs` query extension, collapsed `capability::execute` deps/handler boilerplate into its worker module, removed empty local source directories left by earlier cleanup, regenerated the file inventory, and added a static gate for the retained engine/capability shape. Engine concern tests prove the retained catalog, grant, resource, state, queue, stream, trigger, ledger, host, worker, and `capability::execute` substrates still run. | Session/event persistence cleanup remains PCC-5; final adversarial scans remain PCC-10. | PCC-4 engine substrate checkpoint |
 | PCC-5 | Session, trace, and persistence cleanup | 8 | passed_after_fix | storage | Collapsed session worker `deps`/`handlers` into `session/mod.rs`, collapsed the one-file `operations/` folder into `session/operations.rs`, rewrote stale SQLite/event-store docs that still described retired migration planes, deleted retired `message.queued`/`message.dequeued` payload DTOs, added parser rejection proof for those event strings, regenerated the file inventory, and added a cleanup invariant for the retained session persistence shape and old product schema absence. | Existing dense event repository tests remain intentionally over budget and listed; iOS queue/event client surfaces remain PCC-6. | PCC-5 session persistence checkpoint |
 | PCC-6 | iOS app consolidation | 12 | passed_after_fix | ios | Deleted the prompt-queue UI/event/settings/client plane, removed Rust prompt queue message metadata shims, consolidated iOS `Sources` to `App`, `Engine`, `Session`, `Support`, `UI`, `Resources`, and assets, moved shared App Group transfer types into `Support/Share`, regenerated XcodeGen, updated README/iOS docs/path guards, renamed stale synchronous prompt stream wording to `apply_invoked`, regenerated the file inventory, and proved the shell with focused source guards/settings/share/session tests plus a retained-source residue scan. | Full app-wide iOS suite remains a final PCC-10 candidate; no open PCC-6 cleanup loops. | PCC-6 iOS consolidation checkpoint |
-| PCC-7 | Mac app consolidation | 8 | pending | mac | `Sources` moves toward `App`, `Server`, `Wizard`, `MenuBar`, `Support`, and resources; project regenerated; targeted Mac tests pass. | macOS UI test breadth may stay source-level if no harness exists. | pending |
+| PCC-7 | Mac app consolidation | 8 | passed_after_fix | mac | Consolidated Mac `Sources` to `App`, `Server`, `Support`, `Wizard`, `MenuBar`, resources, and assets; moved app lifecycle, LaunchAgent/server, support/theme/pairing/feedback owners out of root `Services`/`Theme`; kept menu-bar feedback status formatting at the menu-bar boundary; regenerated XcodeGen; updated README/Mac docs/rules/tests/inventory; and added a static gate for the retained Mac primitive roots. | Final PCC-10 broad stale/fallback scan remains; no PCC-7-specific open loops. | PCC-7 Mac consolidation checkpoint |
 | PCC-8 | Scripts cleanup | 6 | pending | scripts | Dispatcher/helper/module split matches README, stale helpers/caches deleted, syntax checks and relevant status/dev health-gated checks pass. | Live service checks depend on local environment. | pending |
 | PCC-9 | Docs and test cleanup | 8 | pending | docs_or_test_harness | Stale docs deleted or rewritten, redundant tests consolidated, static gates cover deleted product surfaces and folder drift, progressive disclosure docs updated. | Historical scorecards may retain deleted terms as evidence. | pending |
 | PCC-10 | Final adversarial pass | 8 | pending | test_harness | Stale product/fallback/compat/dead-code scans, unused dependency checks, subagent review, broad verification, score math/status closeout, ledger, and final checkpoint commit. | None acceptable at closeout; successor scope must be explicit. | pending |
@@ -169,9 +174,8 @@ Total weight: **100**
 
 ## Next Test
 
-PCC-7 starts Mac app consolidation. Begin with source-root ownership and
-generated project audit:
+PCC-8 starts scripts cleanup. Begin with dispatcher/helper/module inventory:
 
 ```bash
-find packages/mac-app/Sources -maxdepth 3 -type f -print | sort
+find scripts -maxdepth 3 -type f -print | sort
 ```

@@ -65,7 +65,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Scorecard",
-        "Current score: **70/100**",
+        "Current score: **78/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Primitive And Plane Budget",
@@ -81,7 +81,8 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-4 | Engine and primitive surface cleanup | 10 | passed_after_fix |",
         "| PCC-5 | Session, trace, and persistence cleanup | 8 | passed_after_fix |",
         "| PCC-6 | iOS app consolidation | 12 | passed_after_fix |",
-        "PCC-7 starts Mac app consolidation.",
+        "| PCC-7 | Mac app consolidation | 8 | passed_after_fix |",
+        "PCC-8 starts scripts cleanup.",
         "primitive-code-cleanup-inventory.md",
         "primitive-code-cleanup-file-inventory.tsv",
     ] {
@@ -93,7 +94,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# Primitive Code Cleanup Evidence Manifest",
-        "Current score: **70/100**",
+        "Current score: **78/100**",
         "Status: **active**",
         "| PCC-0 | passed_after_fix |",
         "| PCC-1 | passed_after_fix |",
@@ -102,6 +103,7 @@ fn primitive_code_cleanup_scorecard_stays_formalized() {
         "| PCC-4 | passed_after_fix |",
         "| PCC-5 | passed_after_fix |",
         "| PCC-6 | passed_after_fix |",
+        "| PCC-7 | passed_after_fix |",
     ] {
         assert!(
             manifest.contains(required),
@@ -224,16 +226,49 @@ fn retained_top_level_source_directories_are_justified() {
         "packages/ios-app/Sources/Session",
         "packages/ios-app/Sources/Support",
         "packages/ios-app/Sources/UI",
+        "packages/mac-app/Sources/App",
         "packages/mac-app/Sources/Assets.xcassets",
         "packages/mac-app/Sources/MenuBar",
         "packages/mac-app/Sources/Resources",
-        "packages/mac-app/Sources/Services",
-        "packages/mac-app/Sources/Theme",
+        "packages/mac-app/Sources/Server",
+        "packages/mac-app/Sources/Support",
         "packages/mac-app/Sources/Wizard",
     ] {
         assert!(
             scorecard.contains(&format!("| `{path}` |")),
             "folder justification table missing retained directory `{path}`"
+        );
+    }
+}
+
+#[test]
+fn mac_app_sources_stay_consolidated_to_primitive_roots() {
+    for path in [
+        "packages/mac-app/Sources/App/TronMacApp.swift",
+        "packages/mac-app/Sources/App/EnvironmentSetup.swift",
+        "packages/mac-app/Sources/App/MacCommandLineMode.swift",
+        "packages/mac-app/Sources/Server/LaunchAgentManaging.swift",
+        "packages/mac-app/Sources/Server/ServerPing.swift",
+        "packages/mac-app/Sources/Server/TronPaths.swift",
+        "packages/mac-app/Sources/Support/Models.swift",
+        "packages/mac-app/Sources/Support/Theme/TronColors.swift",
+        "packages/mac-app/Sources/Support/Pairing/PairingURLBuilder.swift",
+    ] {
+        assert!(
+            repo_path(path).exists(),
+            "Mac primitive root missing retained file `{path}`"
+        );
+    }
+
+    for path in [
+        "packages/mac-app/Sources/TronMacApp.swift",
+        "packages/mac-app/Sources/EnvironmentSetup.swift",
+        "packages/mac-app/Sources/Services",
+        "packages/mac-app/Sources/Theme",
+    ] {
+        assert!(
+            !repo_path(path).exists(),
+            "Mac source root must not retain old grouping path `{path}`"
         );
     }
 }

@@ -1180,10 +1180,16 @@ packages/mac-app/Sources/Assets.xcassets/AppIcon.appiconset/icon_512x512@2x.png	
 packages/mac-app/Sources/Assets.xcassets/Contents.json	asset	mac assets	PCC-7	Asset/resource boundary
 packages/mac-app/Sources/Assets.xcassets/TronLogo.imageset/Contents.json	asset	mac assets	PCC-7	Asset/resource boundary
 packages/mac-app/Sources/Assets.xcassets/TronLogo.imageset/tron-logo.svg	asset	mac assets	PCC-7	Asset/resource boundary
-packages/mac-app/Sources/EnvironmentSetup.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/App/EnvironmentSetup.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/App/MacAppStartupMaintenance.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/App/MacCommandLineMode.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/App/MacCommandModeServerStarter.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/App/MacRuntimeVariant.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/App/TronMacApp.swift	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/Info.plist	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/MenuBar/MenuBarActionHandler.swift	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/MenuBar/MenuBarController.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/MenuBar/MenuBarFeedbackAction.swift	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/MenuBar/MenuBarItemBuilder.swift	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/MenuBar/MenuBarLogReader.swift	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/MenuBar/MenuBarLogsView.swift	retain	mac source	PCC-7	Mac retained source boundary
@@ -1195,37 +1201,31 @@ packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server Dev.app/Conten
 packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server Dev.app/Contents/Resources/AppIcon.icns	asset	mac assets	PCC-7	Asset/resource boundary
 packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Info.plist	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/Resources/Library/LoginItems/Tron Server.app/Contents/Resources/AppIcon.icns	asset	mac assets	PCC-7	Asset/resource boundary
-packages/mac-app/Sources/Services/Feedback/FeedbackComposer.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Feedback/MenuBarFeedbackAction.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/LaunchAgentManaging.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/MacAppStartupMaintenance.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/MacCommandLineMode.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/MacCommandModeServerStarter.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/MacRuntimeVariant.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Models.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Observability/DiagnosticsRedactor.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Onboarding/ExistingInstallDetector.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Onboarding/InstallPlanner.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Onboarding/MacPermissionProbe.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Onboarding/PermissionDeepLink.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Onboarding/TailscaleProbe.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Pairing/LocalComputerName.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Pairing/PairingURLBuilder.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Pairing/QRCodeGenerator.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Server/BearerTokenReader.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Server/DevServerStopper.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Server/ServerHealthAwaiter.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Server/ServerPing.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Server/ServerProcessProbe.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Server/ServerStatusPoller.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/Server/SingleInstanceLock.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/TronPaths.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/TronUninstaller.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Services/VersionDisplay.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Theme/TronColors.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Theme/TronFontLoader.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/Theme/TronTypography.swift	collapse	mac source	PCC-7	Mac Services/Theme roots still targeted for Server/Support/UI consolidation
-packages/mac-app/Sources/TronMacApp.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/BearerTokenReader.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/DevServerStopper.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/LaunchAgentManaging.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/ServerHealthAwaiter.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/ServerPing.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/ServerProcessProbe.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/ServerStatusPoller.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/SingleInstanceLock.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/TronPaths.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Server/TronUninstaller.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Feedback/FeedbackComposer.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Models.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Observability/DiagnosticsRedactor.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Onboarding/ExistingInstallDetector.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Onboarding/InstallPlanner.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Onboarding/MacPermissionProbe.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Onboarding/PermissionDeepLink.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Onboarding/TailscaleProbe.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Pairing/LocalComputerName.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Pairing/PairingURLBuilder.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Pairing/QRCodeGenerator.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Theme/TronColors.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Theme/TronFontLoader.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/Theme/TronTypography.swift	retain	mac source	PCC-7	Mac retained source boundary
+packages/mac-app/Sources/Support/VersionDisplay.swift	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/Wizard/Steps/DoneStep.swift	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/Wizard/Steps/IOSBetaStep.swift	retain	mac source	PCC-7	Mac retained source boundary
 packages/mac-app/Sources/Wizard/Steps/InstallStep.swift	retain	mac source	PCC-7	Mac retained source boundary

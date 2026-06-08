@@ -6,7 +6,7 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-08 during `PCC-5` session persistence cleanup.
+Last updated: 2026-06-08 during `PCC-7` Mac source-root consolidation.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
@@ -36,12 +36,12 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 686 | Current package/config/test/doc boundaries |
-| `collapse` | 531 | Cleanup rows PCC-6 through PCC-9 |
-| `asset` | 74 | iOS/Mac resources and benchmark baselines |
+| `retain` | 1185 | Current package/config/test/doc boundaries |
+| `collapse` | 28 | Cleanup rows PCC-8 through PCC-9 |
+| `asset` | 71 | iOS/Mac resources and benchmark baselines |
 | `delete` | 11 | PCC-9 delete candidates |
-| `generated` | 7 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1309** | Whole repo |
+| `generated` | 6 | XcodeGen, Cargo, and package-manager outputs |
+| **Total** | **1301** | Whole repo |
 
 ## Current Tracked Package Counts
 
@@ -51,8 +51,8 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `.codex` | 2 |
 | `.github` | 8 |
 | root files | 5 |
-| `packages/agent` | 505 |
-| `packages/ios-app` | 644 |
+| `packages/agent` | 503 |
+| `packages/ios-app` | 638 |
 | `packages/mac-app` | 115 |
 | `scripts` | 24 |
 
@@ -135,14 +135,14 @@ revise its classification with direct evidence.
 
 | Area | Inventory owner | Later row |
 |------|-----------------|-----------|
-| iOS source roots | `Core`, `Database`, `Models`, `Services`, `ViewModels`, `Views`, `Theme`, `Utilities`, `Extensions`, `Protocols` | PCC-6 |
-| Mac source roots | root Swift files, `Services`, `Theme` | PCC-7 |
+| iOS source roots | old `Core`, `Database`, `Models`, `Services`, `ViewModels`, `Views`, `Theme`, `Utilities`, `Extensions`, `Protocols` roots now collapsed to the retained primitive shell | PCC-6 passed |
+| Mac source roots | root Swift files, old `Services`, and old `Theme` now collapsed to `App`, `Server`, and `Support` | PCC-7 passed |
 | Scripts | dispatcher/module/helper split | PCC-8 |
 | Contributor rule docs and large tests | `.claude`, package rule docs, over-budget suites | PCC-9 |
 
 ## Open Loops
 
-- 531 files are still `collapse` until their owning cleanup rows run.
+- 28 files are still `collapse` until their owning cleanup rows run.
 - 11 files are `delete` candidates and intentionally remain in place until
   their owning rows prove deletion.
 - The target tree is canonical for future moves, but Xcode project files must

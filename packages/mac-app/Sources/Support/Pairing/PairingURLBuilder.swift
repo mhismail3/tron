@@ -2,7 +2,7 @@ import Foundation
 
 /// Builds and parses `tron://pair?host=...&port=...&token=...&label=...`
 /// URLs. Mirrors the iOS `PairingURLParser` in
-/// `packages/ios-app/Sources/Services/PairingURLParser.swift` so the
+/// `packages/ios-app/Sources/Support/Pairing/PairingURLParser.swift` so the
 /// QR codes the Mac wrapper emits round-trip cleanly through iOS.
 enum PairingURLBuilder {
     static let scheme = "tron"

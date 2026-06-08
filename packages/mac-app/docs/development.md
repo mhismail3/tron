@@ -1,6 +1,6 @@
 # Mac App Development
 
-> Last verified: 2026-06-07 (primitive helper bundle, health-gated recovery, isolated helper registration, and two-helper signing)
+> Last verified: 2026-06-08 (PCC-7 source-root consolidation, primitive helper bundle, health-gated recovery, isolated helper registration, and two-helper signing)
 
 ## Setup
 
@@ -142,7 +142,7 @@ Do not use this scheme for normal menu-bar UI iteration. The default `TronMac` D
 Tests/
 ├── MenuBar/              # MenuBarItemBuilderTests, ServerStatusPollerTests
 ├── Mocks/                # MockLaunchAgentManager, TestTempDir
-├── Services/             # InstallPlannerTests, TailscaleProbeTests, …
+├── Services/             # Server/support behavior tests retained until PCC-9 test cleanup
 └── Wizard/               # WizardStateTests, WizardStepTests, …
 ```
 
@@ -186,7 +186,7 @@ See [`.github/workflows/release-mac.yml`](../../../.github/workflows/release-mac
 
 ### Add a new wizard step
 
-1. Add a case to `WizardStep` enum in `Sources/Services/Models.swift`.
+1. Add a case to `WizardStep` enum in `Sources/Support/Models.swift`.
 2. Create a new view file under `Sources/Wizard/Steps/`.
 3. Add a case to the `switch state.step` dispatcher in `WizardView.swift`.
 4. Add tests to `Tests/Wizard/WizardStepTests.swift` — at minimum, verify the step renders and the back/next buttons behave correctly.
