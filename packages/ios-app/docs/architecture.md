@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-08 (PCC-6 iOS source consolidation).
+> Last verified: 2026-06-08 (HRA-9 Engine hierarchy).
 
 ## Overview
 
@@ -44,8 +44,8 @@ scorecards, evidence manifests, inventory docs, and static absence tests.
 ```
 Sources/
 +-- App/                  App entry point, app delegate, scene phases
-+-- Engine/               Engine protocol DTOs, transport, event plugins,
-|                         local event cache, repositories
++-- Engine/               Engine transport, protocol DTOs, live/stored
+|                         events, persistence, repositories
 +-- Session/              Chat/session view models, messages, parsing,
 |                         activity summaries, token accounting
 +-- Support/              Dependency injection, diagnostics, pairing,
@@ -82,10 +82,19 @@ true but no active paired server exists, the shell stays visible.
 
 ## Engine Client Boundary
 
-`EngineConnection` owns the WebSocket request/response transport. Domain client
-files are thin method wrappers over `/engine` frames; they must not encode
-product policy. Any fixed workflow-specific client removed in PET-8 must stay
-removed unless a later scorecard row proves it is boot infrastructure.
+`Engine/Transport/WebSocket` owns the WebSocket request/response transport.
+`EngineConnection` is split by transport concern: the root connection state,
+request tracking, receive/heartbeat loop, reconnect coordination, protocol
+frames, and transport types live in separate focused files. Typed domain client
+files live under `Engine/Transport/Clients` as thin method wrappers over
+`/engine` frames; they must not encode product policy. Any fixed
+workflow-specific client removed in PET-8 must stay removed unless a later
+scorecard row proves it is boot infrastructure.
+
+`Engine/Protocol` groups DTOs by server domain instead of one broad DTO bucket.
+`Engine/Persistence` owns the local SQLite cache, repositories, and sync cursor
+coordination. `Engine/Events` owns live event dispatch, payload decoding,
+plugin registration, and stored-event reconstruction helpers.
 
 Engine invocation context carries session/workspace ids and trace metadata when
 needed. The server owns validation, routing, execution, idempotency, and event
@@ -94,10 +103,11 @@ diagnostics only; it does not use them as an alternate truth store.
 
 ## Event Handling
 
-Live events use self-dispatching plugins registered in `EventRegistry`. Stored
-events use `UnifiedEventTransformer` for reconstruction. Unsupported or
-malformed events are diagnostics; they are not normalized through retired
-product names.
+Live events use self-dispatching plugins registered in
+`Engine/Events/Plugins/EventRegistry.swift`. Stored events use the
+`Engine/Events/Reconstruction` helpers and `UnifiedEventTransformer` for
+reconstruction into session UI state. Unsupported or malformed events are
+diagnostics; they are not normalized through retired product names.
 
 See `events.md` for the current plugin categories and reconstruction boundary.
 

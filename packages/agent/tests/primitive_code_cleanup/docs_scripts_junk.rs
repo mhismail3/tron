@@ -148,7 +148,7 @@ fn final_retired_product_residue_stays_deleted_from_runtime_surfaces() {
             ],
         ),
         (
-            "packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes.swift",
+            "packages/ios-app/Sources/Engine/Protocol/Core/EngineProtocolTypes.swift",
             &["CRON_", "IMPORT_", "cronNotFound", "importSessionNotFound"],
         ),
         (

@@ -8,21 +8,22 @@ Plan source: `/Users/<USER>/Downloads/TRON_REARCHITECTURE_PLAN.md`.
 
 ## Scope
 
-HRA-8 is the red-gate and map checkpoint for the iOS hierarchy campaign. It
-does not move Swift production files. It records the target path for every live
-Swift file under `packages/ios-app/Sources` and `packages/ios-app/Tests`, adds
-SourceGuard tests that fail on the current broad buckets, and confirms the
-XcodeGen target-membership model that later move phases must preserve.
+HRA-8 was the red-gate and map checkpoint for the iOS hierarchy campaign. HRA-9
+has since consumed the Engine rows. This artifact records the target path for
+every live Swift file under `packages/ios-app/Sources` and
+`packages/ios-app/Tests`, the SourceGuard tests that fail until the remaining
+source/test buckets move, and the XcodeGen target-membership model that later
+move phases must preserve.
 
 Machine-readable map:
 
 - `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`
 
-Coverage at HRA-8 creation:
+Coverage after HRA-9:
 
-- `packages/ios-app/Sources`: 355 Swift files
+- `packages/ios-app/Sources`: 358 Swift files
 - `packages/ios-app/Tests`: 192 Swift files
-- Total mapped Swift source/test files: 547
+- Total mapped Swift source/test files: 550
 
 ## Target Phase Ownership
 
@@ -60,7 +61,8 @@ extension target still compiles.
 
 ## Open Loops
 
-- HRA-9 must consume the map rows whose target phase is `HRA-9`.
+- HRA-9 consumed the map rows whose target phase is `HRA-9`; those rows now
+  live under the target Engine owners and are marked `passed_after_fix`.
 - HRA-10 must consume the map rows whose target phase is `HRA-10`.
 - HRA-11 must consume the map rows whose target phase is `HRA-11`.
 - HRA-12 must consume the map rows whose target phase is `HRA-12`.

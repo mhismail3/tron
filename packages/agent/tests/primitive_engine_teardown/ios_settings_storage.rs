@@ -30,11 +30,11 @@ fn prompt_media_uses_unified_attachment_primitive() {
     }
 
     let ios_files = [
-        "packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Agent.swift",
-        "packages/ios-app/Sources/Engine/Network/Clients/AgentClient.swift",
-        "packages/ios-app/Sources/Engine/Network/Clients/AgentClientProtocol.swift",
-        "packages/ios-app/Sources/Engine/Repositories/Defaults/Protocols/AgentRepository.swift",
-        "packages/ios-app/Sources/Engine/Repositories/Defaults/DefaultAgentRepository.swift",
+        "packages/ios-app/Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
+        "packages/ios-app/Sources/Engine/Transport/Clients/AgentClient.swift",
+        "packages/ios-app/Sources/Engine/Transport/Clients/AgentClientProtocol.swift",
+        "packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
+        "packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift",
         "packages/ios-app/Sources/Session/ViewModels/Chat/ChatViewModel+Messaging.swift",
         "packages/ios-app/Tests/Services/AgentClientTests.swift",
         "packages/ios-app/Tests/Repositories/DefaultAgentRepositoryTests.swift",

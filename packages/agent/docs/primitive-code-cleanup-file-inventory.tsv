@@ -626,130 +626,133 @@ packages/ios-app/Sources/Assets.xcassets/TronLogo.imageset/tron-logo@2x.png	asse
 packages/ios-app/Sources/Assets.xcassets/TronLogo.imageset/tron-logo@3x.png	asset	ios app	PCC-6/PCC-7/PCC-9	Tracked asset/generated boundary retained after HRA-2 path update
 packages/ios-app/Sources/Assets.xcassets/TronLogoVector.imageset/Contents.json	asset	ios app	PCC-6/PCC-7/PCC-9	Tracked asset/generated boundary retained after HRA-2 path update
 packages/ios-app/Sources/Assets.xcassets/TronLogoVector.imageset/tron-logo.svg	asset	ios app	PCC-6/PCC-7/PCC-9	Tracked asset/generated boundary retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/CachedSession.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/DatabaseActor.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/EventDatabase.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/EventTypes.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/Repositories/DraftRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/Repositories/EventRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/Repositories/SessionRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/Repositories/SyncRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/Repositories/ThinkingRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/SQLiteHelpers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/Schema/DatabaseSchema.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/SessionEvent+ExpandedContent.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Database/SessionEvent+Summary.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/EventStore/EventStoreManager+Operations.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/EventStore/EventStoreManager+RefreshCoordination.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/EventStore/EventStoreManager+SessionActivity.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/EventStore/EventStoreManager+Sync.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/EventStore/EventStoreManager.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/EventStore/SessionRefreshService.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/EventStore/SessionSynchronizer.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/AsyncEventStream.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Payloads/CapabilityInvocationPayloads.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Payloads/ConfigPayloads.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Payloads/ExtendedPayloads.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Payloads/MessagePayloads.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Payloads/SessionPayloads.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Payloads/StreamingPayloads.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/CapabilityInvocation/CapabilityInvocationCompletedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/CapabilityInvocation/CapabilityInvocationGeneratingPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/CapabilityInvocation/CapabilityInvocationOutputPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/CapabilityInvocation/CapabilityInvocationProgressPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/CapabilityInvocation/CapabilityInvocationStartedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/CapabilityInvocation/CapabilityLifecyclePlugins.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Display/DisplayFramePlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/EventPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/EventRegistry.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Lifecycle/AgentReadyPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Lifecycle/CompactionPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Lifecycle/CompactionStartedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Lifecycle/CompletePlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Lifecycle/ContextClearedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Lifecycle/ErrorPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Lifecycle/MessageDeletedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Lifecycle/TurnFailedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/ParsedEventV2.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Server/AuthUpdatedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Server/ServerRestartingPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Session/ConnectedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Session/SessionArchivedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Session/SessionCreatedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Session/SessionDeletedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Session/SessionProcessingChangedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Session/SessionUnarchivedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Session/SessionUpdatedPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Streaming/TextDeltaPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Streaming/ThinkingDeltaPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Streaming/TurnEndPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Plugins/Streaming/TurnStartPlugin.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/CapabilityArgumentExtractor.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/EventSorter.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/EventTransformable.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/Handlers/CapabilityInvocationHandlers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/Handlers/ConfigHandlers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/Handlers/ErrorHandlers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/Handlers/MessageHandlers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/Handlers/SystemEventHandlers.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/InterleavedContentProcessor.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Core/Transformer/Reconstruction/ReconstructedState.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Events/Types/EventTypeRegistry.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
+packages/ios-app/Sources/Engine/Events/Live/AsyncEventStream.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Live/EventTypeRegistry.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Payloads/CapabilityInvocationPayloads.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Payloads/ConfigPayloads.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Payloads/ExtendedPayloads.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Payloads/MessagePayloads.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Payloads/SessionPayloads.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Payloads/StreamingPayloads.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationCompletedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationGeneratingPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationOutputPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationProgressPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationStartedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityLifecyclePlugins.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Display/DisplayFramePlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/EventPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/EventRegistry.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/AgentReadyPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/CompactionPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/CompactionStartedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/CompletePlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/ContextClearedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/ErrorPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/MessageDeletedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/TurnFailedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/ParsedEventV2.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Server/AuthUpdatedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Server/ServerRestartingPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Session/ConnectedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionArchivedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionCreatedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionDeletedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionProcessingChangedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionUnarchivedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionUpdatedPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Streaming/TextDeltaPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Streaming/ThinkingDeltaPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Streaming/TurnEndPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Plugins/Streaming/TurnStartPlugin.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/CapabilityArgumentExtractor.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/EventSorter.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/EventTransformable.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/CapabilityInvocationHandlers.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/ConfigHandlers.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/ErrorHandlers.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/MessageHandlers.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers/SystemEventHandlers.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/InterleavedContentProcessor.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Events/Reconstruction/Reconstruction/ReconstructedState.swift	retain	iOS engine events	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
 packages/ios-app/Sources/Engine/Models/ModelFilteringService.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/AsyncClock.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/AgentClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/AgentClientProtocol.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/AuthClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/BlobClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/EngineDomainClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/EventSyncClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/MiscClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/ModelClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/SessionClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/SessionClientProtocol.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/Clients/SettingsClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/ConnectionErrorClassifier.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/ConnectionManager.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/ConnectionStateProvider.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/ConnectionToastPolicy.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/DeepLinkRouter.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/EngineClient.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/EngineConnection.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/EngineConnectionProtocolFrames.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/EngineConnectionTypes.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/EngineRetryPolicy.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/EngineStreamCursorStore.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/InteractionPolicy.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/InteractionPolicyEnvironment.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/NetworkDiagnosticsFormatter.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Network/ReconnectProbePolicy.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/AnyCodable.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/CapabilitySchemaForm.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Agent.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Auth.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Capability.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Catalog.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Events.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+GeneratedUI.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Interaction.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Model.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Reconstruct.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Session.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Settings.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes+System.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/DTOs/EngineProtocolTypes.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocol/ProtocolConstants.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocols/DatabaseTransport.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocols/EngineClientProtocol.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocols/EngineTransport.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocols/EventDatabaseProtocol.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Protocols/LoggingContext.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Repositories/Defaults/DefaultAgentRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Repositories/Defaults/DefaultModelRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Repositories/Defaults/DefaultSessionRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Repositories/Defaults/Protocols/AgentRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Repositories/Defaults/Protocols/ModelRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
-packages/ios-app/Sources/Engine/Repositories/Defaults/Protocols/NetworkSessionRepository.swift	retain	ios app	PCC-6/PCC-7/PCC-9	Current tracked file retained after HRA-2 path update
+packages/ios-app/Sources/Engine/Persistence/Repositories/DraftRepository.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Repositories/EventRepository.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Repositories/Protocols/DatabaseTransport.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Repositories/Protocols/EventDatabaseProtocol.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Repositories/SessionRepository.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Repositories/SyncRepository.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Repositories/ThinkingRepository.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/SQLite/CachedSession.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/SQLite/DatabaseActor.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/SQLite/EventDatabase.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/SQLite/EventTypes.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/SQLite/SQLiteHelpers.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/SQLite/Schema/DatabaseSchema.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/SQLite/SessionEvent+ExpandedContent.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/SQLite/SessionEvent+Summary.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Sync/EngineStreamCursorStore.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+Operations.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+RefreshCoordination.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+SessionActivity.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+Sync.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Sync/SessionRefreshService.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Persistence/Sync/SessionSynchronizer.swift	retain	iOS engine persistence	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Auth/EngineProtocolTypes+Auth.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Capability/CapabilitySchemaForm.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Capability/EngineProtocolTypes+Capability.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Catalog/EngineProtocolTypes+Catalog.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Core/AnyCodable.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Core/EngineProtocolTypes.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Core/ProtocolConstants.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Events/EngineProtocolTypes+Events.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/GeneratedUI/EngineProtocolTypes+GeneratedUI.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Interaction/EngineProtocolTypes+Interaction.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Model/EngineProtocolTypes+Model.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Reconstruct/EngineProtocolTypes+Reconstruct.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Session/EngineProtocolTypes+Session.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Protocol/System/EngineProtocolTypes+System.swift	retain	iOS engine protocol	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/AgentClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/AgentClientProtocol.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/AuthClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/BlobClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/EngineDomainClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/EventSyncClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/InteractionPolicy.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/InteractionPolicyEnvironment.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/MiscClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/ModelClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultModelRepository.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultSessionRepository.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/ModelRepository.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/NetworkSessionRepository.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/SessionClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/SessionClientProtocol.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Clients/SettingsClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/DeepLinks/DeepLinkRouter.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Retry/AsyncClock.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Retry/ConnectionErrorClassifier.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Retry/ConnectionManager.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Retry/ConnectionStateProvider.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Retry/ConnectionToastPolicy.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Retry/EngineRetryPolicy.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Retry/NetworkDiagnosticsFormatter.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/Retry/ReconnectProbePolicy.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineClient.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Receiving.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Reconnect.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Requests.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionProtocolFrames.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionTypes.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/Protocols/EngineClientProtocol.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/Protocols/EngineTransport.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
+packages/ios-app/Sources/Engine/Transport/WebSocket/Protocols/LoggingContext.swift	retain	iOS engine transport	PCC-6/HRA-9	Current tracked file retained after HRA-9 path update
 packages/ios-app/Sources/Info.plist	asset	ios app	PCC-6/PCC-7/PCC-9	Tracked asset/generated boundary retained after HRA-2 path update
 packages/ios-app/Sources/PrivacyInfo.xcprivacy	asset	ios app	PCC-6/PCC-7/PCC-9	Tracked asset/generated boundary retained after HRA-2 path update
 packages/ios-app/Sources/Resources/Fonts/AlanSans-Variable.ttf	asset	ios app	PCC-6/PCC-7/PCC-9	Tracked asset/generated boundary retained after HRA-2 path update

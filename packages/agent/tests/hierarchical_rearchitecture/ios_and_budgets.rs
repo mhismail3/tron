@@ -77,7 +77,7 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
     );
 
     let allowed_phases = HashSet::from(["HRA-9", "HRA-10", "HRA-11", "HRA-12", "HRA-13"]);
-    let allowed_classifications = HashSet::from(["move", "retain_in_place"]);
+    let allowed_classifications = HashSet::from(["move", "retain_in_place", "split"]);
     let banned_target_prefixes = [
         "packages/ios-app/Sources/UI/Views",
         "packages/ios-app/Sources/Engine/Network",
@@ -145,10 +145,17 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
             allowed_classifications.contains(*classification),
             "{IOS_MOVE_MAP_PATH} row has invalid classification `{classification}`: {line}"
         );
-        assert_eq!(
-            *status, "pending",
-            "{IOS_MOVE_MAP_PATH} rows remain pending until HRA-9 through HRA-13 move the files: {line}"
-        );
+        if *phase == "HRA-9" {
+            assert_eq!(
+                *status, "passed_after_fix",
+                "{IOS_MOVE_MAP_PATH} HRA-9 rows should be complete after the Engine hierarchy move: {line}"
+            );
+        } else {
+            assert_eq!(
+                *status, "pending",
+                "{IOS_MOVE_MAP_PATH} rows for future iOS hierarchy phases remain pending until their phase moves the files: {line}"
+            );
+        }
         assert!(
             !reason.is_empty(),
             "{IOS_MOVE_MAP_PATH} row must explain the target owner: {line}"
@@ -193,6 +200,76 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
     assert!(
         missing.is_empty() && extra.is_empty(),
         "{IOS_MOVE_MAP_PATH} must cover every live iOS source/test Swift file exactly once; missing: {missing:#?}; extra: {extra:#?}"
+    );
+}
+
+#[test]
+fn ios_engine_hra9_sources_use_target_boundaries() {
+    let required_roots = [
+        "packages/ios-app/Sources/Engine/Transport/WebSocket",
+        "packages/ios-app/Sources/Engine/Transport/Clients",
+        "packages/ios-app/Sources/Engine/Transport/Retry",
+        "packages/ios-app/Sources/Engine/Transport/DeepLinks",
+        "packages/ios-app/Sources/Engine/Protocol/Core",
+        "packages/ios-app/Sources/Engine/Protocol/Agent",
+        "packages/ios-app/Sources/Engine/Protocol/Session",
+        "packages/ios-app/Sources/Engine/Events/Live",
+        "packages/ios-app/Sources/Engine/Events/Payloads",
+        "packages/ios-app/Sources/Engine/Events/Plugins",
+        "packages/ios-app/Sources/Engine/Events/Reconstruction",
+        "packages/ios-app/Sources/Engine/Persistence/SQLite",
+        "packages/ios-app/Sources/Engine/Persistence/Repositories",
+        "packages/ios-app/Sources/Engine/Persistence/Sync",
+    ];
+    let banned_roots = [
+        "packages/ios-app/Sources/Engine/Network",
+        "packages/ios-app/Sources/Engine/Database",
+        "packages/ios-app/Sources/Engine/EventStore",
+        "packages/ios-app/Sources/Engine/Protocol/DTOs",
+        "packages/ios-app/Sources/Engine/Protocols",
+        "packages/ios-app/Sources/Engine/Repositories",
+        "packages/ios-app/Sources/Engine/Events/Core",
+        "packages/ios-app/Sources/Engine/Events/Types",
+    ];
+    let split_connection_files = [
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Requests.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Receiving.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Reconnect.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionProtocolFrames.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionTypes.swift",
+    ];
+
+    let missing_required: Vec<_> = required_roots
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_dir())
+        .collect();
+    let present_banned: Vec<_> = banned_roots
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+    let missing_connection_files: Vec<_> = split_connection_files
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_file())
+        .collect();
+    let oversized_connection_files: Vec<_> = split_connection_files
+        .iter()
+        .copied()
+        .filter_map(|path| {
+            let lines = source_line_count(&repo_path(path));
+            (lines > 700).then(|| format!("{path} has {lines} LOC"))
+        })
+        .collect();
+
+    assert!(
+        missing_required.is_empty()
+            && present_banned.is_empty()
+            && missing_connection_files.is_empty()
+            && oversized_connection_files.is_empty(),
+        "HRA-9 Engine hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_connection_files:#?}; oversized split files: {oversized_connection_files:#?}"
     );
 }
 

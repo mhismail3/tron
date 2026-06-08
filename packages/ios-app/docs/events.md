@@ -26,12 +26,12 @@ Current retained plugin groups:
 
 | Group | Directory | Purpose |
 |-------|-----------|---------|
-| Streaming | `Sources/Engine/Events/Core/Plugins/Streaming/` | Text, thinking, and turn lifecycle deltas. |
-| Capability invocation | `Sources/Engine/Events/Core/Plugins/CapabilityInvocation/` | Generic `capability.invocation.*` lifecycle evidence for chat. |
-| Lifecycle | `Sources/Engine/Events/Core/Plugins/Lifecycle/` | Agent readiness, completion, compaction, context clearing, message deletion, and turn failure labels that still reach the shell. |
-| Session | `Sources/Engine/Events/Core/Plugins/Session/` | Connection and session list/update/archive/delete state. |
-| Display | `Sources/Engine/Events/Core/Plugins/Display/` | Generic display frames for runtime surfaces. |
-| Server | `Sources/Engine/Events/Core/Plugins/Server/` | Server/auth/restart status messages. |
+| Streaming | `Sources/Engine/Events/Plugins/Streaming/` | Text, thinking, and turn lifecycle deltas. |
+| Capability invocation | `Sources/Engine/Events/Plugins/CapabilityInvocation/` | Generic `capability.invocation.*` lifecycle evidence for chat. |
+| Lifecycle | `Sources/Engine/Events/Plugins/Lifecycle/` | Agent readiness, completion, compaction, context clearing, message deletion, and turn failure labels that still reach the shell. |
+| Session | `Sources/Engine/Events/Plugins/Session/` | Connection and session list/update/archive/delete state. |
+| Display | `Sources/Engine/Events/Plugins/Display/` | Generic display frames for runtime surfaces. |
+| Server | `Sources/Engine/Events/Plugins/Server/` | Server/auth/restart status messages. |
 
 Deleted workflow-specific plugin roots, including prompt queue and hook
 suggestion plugins, must stay absent. Static tests keep their retired names out

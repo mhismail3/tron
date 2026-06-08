@@ -200,7 +200,7 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checkedFiles = [
-            iosRoot.appendingPathComponent("Sources/Engine/Database/EventDatabase.swift"),
+            iosRoot.appendingPathComponent("Sources/Engine/Persistence/SQLite/EventDatabase.swift"),
             iosRoot.appendingPathComponent("Sources/Support/DependencyInjection/DependencyContainer.swift"),
             iosRoot.appendingPathComponent("Sources/Support/Diagnostics/Services/DiagnosticsBundleBuilder.swift"),
         ]
@@ -556,14 +556,14 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checkedPaths = [
-            "Sources/Engine/Events/Core/Payloads/CapabilityInvocationPayloads.swift",
-            "Sources/Engine/Events/Core/Plugins/CapabilityInvocation",
-            "Sources/Engine/Database/SessionEvent+Summary.swift",
+            "Sources/Engine/Events/Payloads/CapabilityInvocationPayloads.swift",
+            "Sources/Engine/Events/Plugins/CapabilityInvocation",
+            "Sources/Engine/Persistence/SQLite/SessionEvent+Summary.swift",
             "Sources/Session/Activity/ActivityLine.swift",
             "Sources/Session/Activity/CapabilityActivityPresentation.swift",
             "Sources/Session/Activity/ServerActivityLine.swift",
-            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Agent.swift",
-            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Capability.swift",
+            "Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
+            "Sources/Engine/Protocol/Capability/EngineProtocolTypes+Capability.swift",
             "Sources/Session/Messages",
             "Sources/Session/ViewModels/Chat/ChatViewModel+Reconstruction.swift",
             "Sources/Session/ViewModels/Handlers/CapabilityInvocationCoordinator.swift",
@@ -621,7 +621,7 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checkedPaths = [
-            "Sources/Engine/Database",
+            "Sources/Engine/Persistence",
             "Sources/Support/Storage/DraftStore.swift",
             "Tests/Infrastructure",
             "Tests/Services/DraftStoreTests.swift",
@@ -1043,7 +1043,7 @@ struct SourceGuardTests {
             encoding: .utf8
         )
         let miscClient = try String(
-            contentsOf: iosRoot.appendingPathComponent("Sources/Engine/Network/Clients/MiscClient.swift"),
+            contentsOf: iosRoot.appendingPathComponent("Sources/Engine/Transport/Clients/MiscClient.swift"),
             encoding: .utf8
         )
         let dependencyContainer = try String(
@@ -1418,6 +1418,57 @@ struct SourceGuardTests {
         )
     }
 
+    @Test("iOS Engine uses HRA target hierarchy")
+    func testIOSEngineUsesHRATargetHierarchy() throws {
+        let iosRoot = iosAppRoot()
+        let requiredRoots = [
+            "Sources/Engine/Transport/WebSocket",
+            "Sources/Engine/Transport/Clients",
+            "Sources/Engine/Transport/Retry",
+            "Sources/Engine/Transport/DeepLinks",
+            "Sources/Engine/Protocol/Core",
+            "Sources/Engine/Protocol/Agent",
+            "Sources/Engine/Protocol/Session",
+            "Sources/Engine/Events/Live",
+            "Sources/Engine/Events/Payloads",
+            "Sources/Engine/Events/Plugins",
+            "Sources/Engine/Events/Reconstruction",
+            "Sources/Engine/Persistence/SQLite",
+            "Sources/Engine/Persistence/Repositories",
+            "Sources/Engine/Persistence/Sync",
+        ]
+        let bannedRoots = [
+            "Sources/Engine/Network",
+            "Sources/Engine/Database",
+            "Sources/Engine/EventStore",
+            "Sources/Engine/Protocol/DTOs",
+            "Sources/Engine/Protocols",
+            "Sources/Engine/Repositories",
+            "Sources/Engine/Events/Core",
+            "Sources/Engine/Events/Types",
+        ]
+        let connectionFiles = [
+            "Sources/Engine/Transport/WebSocket/EngineConnection.swift",
+            "Sources/Engine/Transport/WebSocket/EngineConnection+Requests.swift",
+            "Sources/Engine/Transport/WebSocket/EngineConnection+Receiving.swift",
+            "Sources/Engine/Transport/WebSocket/EngineConnection+Reconnect.swift",
+            "Sources/Engine/Transport/WebSocket/EngineConnectionProtocolFrames.swift",
+            "Sources/Engine/Transport/WebSocket/EngineConnectionTypes.swift",
+        ]
+
+        let missingRequired = requiredRoots
+            .filter { !directoryExists(iosRoot.appendingPathComponent($0)) }
+        let presentBanned = bannedRoots
+            .filter { directoryExists(iosRoot.appendingPathComponent($0)) }
+        let missingConnectionFiles = connectionFiles
+            .filter { !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent($0).path) }
+
+        #expect(
+            missingRequired.isEmpty && presentBanned.isEmpty && missingConnectionFiles.isEmpty,
+            "HRA-9 Engine hierarchy drift. Missing roots: \(missingRequired); old roots present: \(presentBanned); missing split files: \(missingConnectionFiles)"
+        )
+    }
+
     @Test("iOS tests mirror HRA source boundaries")
     func testIOSTestsMirrorHRASourceBoundaries() throws {
         let iosRoot = iosAppRoot()
@@ -1478,11 +1529,11 @@ struct SourceGuardTests {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
         let checkedFiles = [
-            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Agent.swift",
-            "Sources/Engine/Network/Clients/AgentClient.swift",
-            "Sources/Engine/Network/Clients/AgentClientProtocol.swift",
-            "Sources/Engine/Repositories/Defaults/Protocols/AgentRepository.swift",
-            "Sources/Engine/Repositories/Defaults/DefaultAgentRepository.swift",
+            "Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
+            "Sources/Engine/Transport/Clients/AgentClient.swift",
+            "Sources/Engine/Transport/Clients/AgentClientProtocol.swift",
+            "Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
+            "Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift",
             "Sources/Session/ViewModels/Chat/ChatViewModel+Messaging.swift",
             "Tests/Services/AgentClientTests.swift",
             "Tests/Repositories/DefaultAgentRepositoryTests.swift",
