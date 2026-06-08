@@ -1,8 +1,9 @@
 use super::*;
 use crate::domains::model::providers::openai::types::{
-    ApiEndpoint, DEFAULT_BASE_URL, DEFAULT_PLATFORM_BASE_URL, OpenAIApiSettings, OpenAIAuth,
-    ReasoningEffort,
+    ApiEndpoint, DEFAULT_BASE_URL, DEFAULT_PLATFORM_BASE_URL, MessageContent, OpenAIApiSettings,
+    OpenAIAuth, ReasoningEffort, ResponsesInputItem,
 };
+use crate::shared::messages::Message;
 use crate::shared::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 
 fn test_tokens() -> crate::domains::auth::provider_credentials::OAuthTokens {
@@ -663,6 +664,69 @@ fn build_request_serializes_capabilities_as_provider_tools() {
     assert_eq!(body["tools"][0]["name"], "echo");
 }
 
+#[test]
+fn build_request_compiles_primitive_context_into_instructions() {
+    let provider = OpenAIProvider::new(oauth_config("gpt-5.5"));
+    let context = Context {
+        system_prompt: Some("Agent soul".into()),
+        messages: std::sync::Arc::from([Message::user("Hello")]),
+        capabilities: Some(vec![test_tool()]),
+        working_directory: Some("/workspace".into()),
+        agent_state_context: Some("Remember the teardown scorecard.".into()),
+        server_origin: Some("localhost:9847".into()),
+    };
+
+    let request = provider.build_request(&context, &ProviderStreamOptions::default());
+    let instructions = request.instructions.expect("instructions are required");
+
+    assert!(instructions.contains("Agent soul"));
+    assert!(instructions.contains("Remember the teardown scorecard."));
+    assert!(instructions.contains("Server: localhost:9847"));
+    assert!(instructions.contains("Current working directory: /workspace"));
+    assert!(instructions.contains("Use ONLY this model-facing tool"));
+    assert!(instructions.contains("execute"));
+
+    assert_eq!(request.input.len(), 1);
+    match &request.input[0] {
+        ResponsesInputItem::Message { role, content, .. } => {
+            assert_eq!(role, "user");
+            assert_eq!(content.len(), 1);
+            assert!(matches!(
+                &content[0],
+                MessageContent::InputText { text } if text == "Hello"
+            ));
+        }
+        other => panic!("expected user message input, got {other:?}"),
+    }
+}
+
+#[test]
+fn build_request_merges_provider_instructions_with_context() {
+    let provider = OpenAIProvider::new(api_key_config("gpt-5"));
+    let context = Context {
+        system_prompt: Some("Agent soul".into()),
+        working_directory: Some("/workspace".into()),
+        ..Default::default()
+    };
+    let request = provider.build_request(
+        &context,
+        &ProviderStreamOptions {
+            provider_instructions: Some("Provider front matter".into()),
+            ..Default::default()
+        },
+    );
+    let instructions = request.instructions.expect("instructions are required");
+
+    let provider_index = instructions
+        .find("Provider front matter")
+        .expect("provider instructions included");
+    let soul_index = instructions
+        .find("Agent soul")
+        .expect("context instructions included");
+    assert!(provider_index < soul_index);
+    assert!(instructions.contains("Current working directory: /workspace"));
+}
+
 #[tokio::test]
 async fn stream_rejects_non_streaming_platform_model_before_request() {
     let provider = OpenAIProvider::new(api_key_config("gpt-5.5-pro"));
@@ -677,35 +741,6 @@ async fn stream_rejects_non_streaming_platform_model_before_request() {
         err.to_string().contains("streaming Responses provider"),
         "{err}"
     );
-}
-
-// ── is_first_turn ────────────────────────────────────────────────
-
-#[test]
-fn first_turn_empty_messages() {
-    assert!(OpenAIProvider::is_first_turn(&[]));
-}
-
-#[test]
-fn first_turn_only_user_messages() {
-    let messages = vec![Message::user("Hello")];
-    assert!(OpenAIProvider::is_first_turn(&messages));
-}
-
-#[test]
-fn not_first_turn_with_assistant() {
-    use crate::shared::content::AssistantContent;
-    let messages = vec![
-        Message::user("Hello"),
-        Message::Assistant {
-            content: vec![AssistantContent::text("Hi")],
-            usage: None,
-            cost: None,
-            stop_reason: None,
-            thinking: None,
-        },
-    ];
-    assert!(!OpenAIProvider::is_first_turn(&messages));
 }
 
 // ── parse_api_error (via shared crate::domains::model::providers::error_parsing) ─────────────

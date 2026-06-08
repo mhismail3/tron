@@ -102,16 +102,13 @@ pub fn normalize_schema_for_openai(schema: &serde_json::Value) -> serde_json::Va
     }
 }
 
-/// Generate a tool clarification message for the first turn.
+/// Generate provider instruction text for the single `execute` primitive.
 ///
 /// Since `OpenAI` Codex has its own built-in system instructions that reference
-/// capabilities we don't use (shell, `apply_patch`, etc.), we prepend this message to
-/// clarify the actual available capabilities.
+/// capabilities we don't use (shell, `apply_patch`, etc.), this text clarifies
+/// the actual available capability surface in the request instructions.
 #[must_use]
-pub fn generate_capability_clarification_message(
-    capabilities: &[ModelCapability],
-    working_directory: Option<&str>,
-) -> String {
+pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) -> String {
     let tool_descriptions: Vec<String> = capabilities
         .iter()
         .map(|t| {
@@ -134,14 +131,9 @@ pub fn generate_capability_clarification_message(
         })
         .collect();
 
-    let cwd_line = working_directory
-        .map(|d| format!("\nCurrent working directory: {d}"))
-        .unwrap_or_default();
-
     format!(
         "[TRON CONTEXT]\n\
         You are Tron, an AI coding assistant running in Tron's primitive loop.\n\
-        {cwd_line}\n\
         \n\
         ## Available Primitive\n\
         Use ONLY this model-facing tool:\n\
@@ -751,7 +743,7 @@ mod tests {
         assert!(result.is_empty());
     }
 
-    // ── generate_capability_clarification_message ─────────────────────────
+    // ── generate_capability_instruction_text ──────────────────────────────
 
     #[test]
     fn clarification_includes_model_primitive_names() {
@@ -760,7 +752,7 @@ mod tests {
             "Execute inspected capabilities",
             vec!["mode"],
         )];
-        let result = generate_capability_clarification_message(&capabilities, None);
+        let result = generate_capability_instruction_text(&capabilities);
 
         assert!(result.contains("execute"));
         assert!(result.contains("Execute inspected capabilities"));
@@ -768,23 +760,15 @@ mod tests {
     }
 
     #[test]
-    fn clarification_includes_working_directory() {
-        let capabilities = vec![];
-        let result =
-            generate_capability_clarification_message(&capabilities, Some("/home/user/project"));
-        assert!(result.contains("/home/user/project"));
-    }
-
-    #[test]
     fn clarification_includes_tron_identity() {
-        let result = generate_capability_clarification_message(&[], None);
+        let result = generate_capability_instruction_text(&[]);
         assert!(result.contains("TRON"));
         assert!(result.contains("AI coding assistant"));
     }
 
     #[test]
     fn clarification_includes_capability_execution_guidance() {
-        let result = generate_capability_clarification_message(&[], None);
+        let result = generate_capability_instruction_text(&[]);
         assert!(result.contains("Execute Operations"));
         assert!(result.contains("state_get"));
         assert!(result.contains("file_write"));
@@ -798,7 +782,7 @@ mod tests {
 
     #[test]
     fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
-        let result = generate_capability_clarification_message(&[], None);
+        let result = generate_capability_instruction_text(&[]);
 
         assert!(result.contains("Use ONLY this model-facing tool"));
         assert!(result.contains("Each `execute` call performs one direct host operation"));

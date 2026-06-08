@@ -13,10 +13,10 @@
 //!
 //! # Context Injection
 //!
-//! Primitive context parts (agent soul, agent-owned state, environment, and
-//! compact history) are injected as a `developer` message prepended to the
-//! input. On the first turn, a clarification message is also prepended when the
-//! provider needs extra guidance for the single `execute` primitive.
+//! Primitive context parts (agent soul, agent-owned state, environment, and the
+//! single `execute` primitive guidance) are compiled into the Responses
+//! `instructions` field. The `input` array carries only conversation and
+//! capability-result items.
 
 use async_trait::async_trait;
 use base64::Engine as _;
@@ -28,16 +28,16 @@ use crate::domains::model::providers::provider::ReasoningEffort;
 use crate::domains::model::providers::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
-use crate::shared::messages::{Context, Message};
+use crate::shared::messages::Context;
 
 use super::message_converter::{
-    convert_to_responses_input, convert_tools_v2, generate_capability_clarification_message,
+    convert_to_responses_input, convert_tools_v2, generate_capability_instruction_text,
 };
 use super::stream_handler::{create_stream_state, process_stream_event};
 use super::types::{
-    ApiEndpoint, MessageContent, OpenAIApiSettings, OpenAIAuth, OpenAIAuthPath, OpenAIConfig,
-    OpenAIModelProfile, ReasoningConfig, ResponseTextConfig, ResponsesInputItem, ResponsesRequest,
-    ResponsesSseEvent, get_openai_model_profile, openai_request_model_id,
+    ApiEndpoint, OpenAIApiSettings, OpenAIAuth, OpenAIAuthPath, OpenAIConfig, OpenAIModelProfile,
+    ReasoningConfig, ResponseTextConfig, ResponsesInputItem, ResponsesRequest, ResponsesSseEvent,
+    get_openai_model_profile, openai_request_model_id,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -396,62 +396,47 @@ impl OpenAIProvider {
         }
     }
 
-    /// Determine if this is the first turn (no assistant messages in history).
-    fn is_first_turn(messages: &[Message]) -> bool {
-        !messages
-            .iter()
-            .any(|m| matches!(m, Message::Assistant { .. }))
+    /// Build the Responses API input array from conversation history.
+    fn build_input(context: &Context) -> Vec<ResponsesInputItem> {
+        convert_to_responses_input(&context.messages)
     }
 
-    /// Build the Responses API input array from the context.
-    ///
-    /// Converts messages, prepends execute clarification on the first turn,
-    /// and injects primitive context parts as a developer message.
-    fn build_input(
+    /// Build the Responses API instructions from primitive context.
+    fn build_instructions(
         context: &Context,
-        include_capability_clarification: bool,
-    ) -> Vec<ResponsesInputItem> {
-        let mut input = convert_to_responses_input(&context.messages);
+        options: &ProviderStreamOptions,
+        include_capability_guidance: bool,
+    ) -> Option<String> {
+        let mut parts = Vec::new();
 
-        // Prepend execute clarification on first turn before any assistant messages.
-        if let Some(ref ctx_capabilities) = context.capabilities
-            && include_capability_clarification
-            && !ctx_capabilities.is_empty()
-            && Self::is_first_turn(&context.messages)
+        if let Some(provider_instructions) = options
+            .provider_instructions
+            .as_deref()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
         {
-            let clarification = generate_capability_clarification_message(
-                ctx_capabilities,
-                context.working_directory.as_deref(),
-            );
-            input.insert(
-                0,
-                ResponsesInputItem::Message {
-                    role: "user".into(),
-                    content: vec![MessageContent::InputText {
-                        text: clarification,
-                    }],
-                    id: None,
-                },
-            );
-            debug!("Prepended tool clarification message (first turn)");
+            parts.push(provider_instructions.to_owned());
         }
 
-        // Inject primitive context parts as a developer message.
-        let context_parts = compose_context_parts(context);
-        if !context_parts.is_empty() {
-            input.insert(
-                0,
-                ResponsesInputItem::Message {
-                    role: "developer".into(),
-                    content: vec![MessageContent::InputText {
-                        text: context_parts.join("\n\n"),
-                    }],
-                    id: None,
-                },
-            );
+        parts.extend(
+            compose_context_parts(context)
+                .into_iter()
+                .map(|text| text.trim().to_owned())
+                .filter(|text| !text.is_empty()),
+        );
+
+        if include_capability_guidance
+            && let Some(ref ctx_capabilities) = context.capabilities
+            && !ctx_capabilities.is_empty()
+        {
+            parts.push(generate_capability_instruction_text(ctx_capabilities));
         }
 
-        input
+        if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("\n\n"))
+        }
     }
 
     /// Resolve and clamp max output tokens for the active profile.
@@ -486,7 +471,7 @@ impl OpenAIProvider {
         let active_profile = self.active_profile();
         let supports_capabilities =
             active_profile.is_none_or(|profile| profile.supports_capabilities);
-        let input = Self::build_input(context, supports_capabilities);
+        let input = Self::build_input(context);
         let capabilities = context
             .capabilities
             .as_ref()
@@ -503,7 +488,7 @@ impl OpenAIProvider {
         ResponsesRequest {
             model: openai_request_model_id(&self.config.model),
             input,
-            instructions: options.provider_instructions.clone(),
+            instructions: Self::build_instructions(context, options, supports_capabilities),
             stream: true,
             store: false,
             temperature: options.temperature,
