@@ -390,15 +390,17 @@ Sources/Support/Foundation/SwiftUI/Binding+PasteAware.swift
 Sources/Session/Chat/State/OnboardingSetupSnapshot.swift
 Sources/Session/Chat/State/OnboardingState.swift
 
-Tests/Onboarding/
+Tests/UI/Onboarding/
   ├── OnboardingStateTests.swift
+  └── BindingPasteAwareTests.swift
+
+Tests/Support/Pairing/
   ├── PairingPersistorTests.swift
   ├── PairingProbeTests.swift
   ├── PairingValidationTests.swift
-  ├── PairingURLParserTests.swift
-  └── BindingPasteAwareTests.swift
+  └── PairingURLParserTests.swift
 
-Tests/Services/
+Tests/Support/Storage/
   ├── PairedServerStoreTests.swift
   └── PairedServerTokenStoreTests.swift
 ```

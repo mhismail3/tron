@@ -216,8 +216,8 @@ fn dynamic_runtime_surfaces_are_schema_rendering_not_target_authoring() {
         read_repo_file(
             "packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
         ),
-        read_repo_file("packages/ios-app/Tests/Models/EngineProtocol/GeneratedUIDTOTests.swift"),
-        read_repo_file("packages/ios-app/Tests/Views/GeneratedUIRendererTests.swift"),
+        read_repo_file("packages/ios-app/Tests/Engine/Protocol/GeneratedUIDTOTests.swift"),
+        read_repo_file("packages/ios-app/Tests/UI/RuntimeSurfaces/GeneratedUIRendererTests.swift"),
     ]
     .join("\n");
     assert_absent(

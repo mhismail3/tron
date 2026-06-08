@@ -9,23 +9,23 @@ Plan source: `/Users/<USER>/Downloads/TRON_REARCHITECTURE_PLAN.md`.
 ## Scope
 
 HRA-8 was the red-gate and map checkpoint for the iOS hierarchy campaign. HRA-9
-has since consumed the Engine rows, HRA-10 has consumed the Session rows, and
-HRA-11 has consumed the UI rows, and HRA-12 has consumed the App/Support rows.
-This artifact records the target path for every live Swift file under
-`packages/ios-app/Sources` and
-`packages/ios-app/Tests`, the SourceGuard tests that fail until the remaining
-source/test buckets move, and the XcodeGen target-membership model that later
-move phases must preserve.
+has since consumed the Engine rows, HRA-10 has consumed the Session rows,
+HRA-11 has consumed the UI rows, HRA-12 has consumed the App/Support rows, and
+HRA-13 has consumed the test rows. This artifact records the target path for
+every live Swift file under `packages/ios-app/Sources` and
+`packages/ios-app/Tests`, the SourceGuard checks that now enforce the completed
+iOS hierarchy, and the XcodeGen target-membership model that later maintenance
+must preserve.
 
 Machine-readable map:
 
 - `packages/agent/docs/hierarchical-rearchitecture-ios-move-map.tsv`
 
-Coverage after HRA-12:
+Coverage after HRA-13:
 
 - `packages/ios-app/Sources`: 361 Swift files
-- `packages/ios-app/Tests`: 192 Swift files
-- Total mapped Swift source/test files: 553
+- `packages/ios-app/Tests`: 205 Swift files
+- Total mapped Swift source/test files: 566
 
 ## Target Phase Ownership
 
@@ -39,8 +39,9 @@ Coverage after HRA-12:
 
 ## SourceGuard Red Gates
 
-`packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` now contains HRA
-hierarchy checks that intentionally fail until HRA-13 completes:
+`packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests.swift` and its
+same-suite extensions contain HRA hierarchy checks that enforce the completed
+iOS source/test hierarchy:
 
 - `testIOSTestsMirrorHRASourceBoundaries`
 
@@ -71,6 +72,6 @@ regeneration.
 - HRA-12 consumed the map rows whose target phase is `HRA-12`; those rows now
   live under app lifecycle, composition, diagnostics, foundation, pairing,
   share, feedback, and storage owners and are marked `passed_after_fix`.
-- HRA-13 must consume the map rows whose target phase is `HRA-13`, decompose
-  SourceGuard if it remains over budget, regenerate XcodeGen, and pass the
-  SourceGuard target.
+- HRA-13 consumed the map rows whose target phase is `HRA-13`; those rows now
+  live under mirrored Engine, Session, UI, Support, and Infrastructure test
+  owners and are marked `passed_after_fix`.

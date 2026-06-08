@@ -36,9 +36,9 @@ fn prompt_media_uses_unified_attachment_primitive() {
         "packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
         "packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift",
         "packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift",
-        "packages/ios-app/Tests/Services/AgentClientTests.swift",
-        "packages/ios-app/Tests/Repositories/DefaultAgentRepositoryTests.swift",
-        "packages/ios-app/Tests/Models/EngineProtocolTypesTests.swift",
+        "packages/ios-app/Tests/Engine/Transport/Clients/AgentClientTests.swift",
+        "packages/ios-app/Tests/Engine/Transport/Clients/Repositories/DefaultAgentRepositoryTests.swift",
+        "packages/ios-app/Tests/Engine/Protocol/EngineProtocolTypesTests.swift",
     ];
     for path in ios_files {
         let source = read_repo_file(path);

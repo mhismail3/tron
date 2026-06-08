@@ -159,10 +159,15 @@ fn ios_hra8_move_map_covers_every_source_and_test_swift_file() {
             allowed_classifications.contains(*classification),
             "{IOS_MOVE_MAP_PATH} row has invalid classification `{classification}`: {line}"
         );
-        if *phase == "HRA-9" || *phase == "HRA-10" || *phase == "HRA-11" || *phase == "HRA-12" {
+        if *phase == "HRA-9"
+            || *phase == "HRA-10"
+            || *phase == "HRA-11"
+            || *phase == "HRA-12"
+            || *phase == "HRA-13"
+        {
             assert_eq!(
                 *status, "passed_after_fix",
-                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10/HRA-11/HRA-12 rows should be complete after the Engine, Session, UI, and Support hierarchy moves: {line}"
+                "{IOS_MOVE_MAP_PATH} HRA-9/HRA-10/HRA-11/HRA-12/HRA-13 rows should be complete after the Engine, Session, UI, Support, and test hierarchy moves: {line}"
             );
         } else {
             assert_eq!(

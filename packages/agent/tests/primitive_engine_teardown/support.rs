@@ -49,7 +49,7 @@ pub(super) fn read_repo_source_trees(paths: &[&str]) -> String {
         if path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name == "SourceGuardTests.swift")
+            .is_some_and(|name| name.starts_with("SourceGuardTests"))
         {
             return;
         }
