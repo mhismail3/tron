@@ -29,7 +29,7 @@ scripts/      Bash entrypoints — `tron`, `install-hooks.sh`, `personal-info-gu
 The root `README.md` is the canonical reference. Several sections are
 mechanically derived from code; if you change a derived source, update the
 matching README section in the same commit. The exhaustive list lives in
-[`.claude/CLAUDE.md` "README maintenance"](.claude/CLAUDE.md).
+the `README maintenance` section of `AGENTS.md`.
 
 ## Development workflow
 

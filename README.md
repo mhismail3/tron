@@ -104,17 +104,17 @@ Current living entry points:
   source-audited deletion map for every current Rust domain, engine primitive
   worker, runner context plane, managed skill, doc, iOS source/view root, and
   settings surface.
-- `packages/agent/docs/primitive-code-cleanup-scorecard.md`: active whole-repo
+- `packages/agent/docs/primitive-code-cleanup-scorecard.md`: completed whole-repo
   primitive cleanup scorecard for folder ownership, file budgets, generated
   artifact hygiene, and final retained-surface proof.
 - `packages/agent/docs/primitive-code-cleanup-evidence-manifest.md`: companion
-  evidence manifest for the active primitive cleanup scorecard.
+  evidence manifest for the completed primitive cleanup scorecard.
 - `packages/agent/docs/primitive-code-cleanup-inventory.md`: PCC-1
   whole-repo tracked-file inventory, classification summary, and canonical
   cleanup target tree.
 - `packages/agent/docs/primitive-code-cleanup-file-inventory.tsv`:
   machine-readable per-file cleanup classification used by static gates.
-- `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: active
+- `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-evidence-manifest.md`:
@@ -143,7 +143,7 @@ Current living entry points:
 - `packages/agent/tests/primitive_code_cleanup_invariants.rs`: cleanup
   scorecard, folder-justification, file-budget, deleted-term, and tracked-junk
   gates.
-- `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: active
+- `packages/agent/tests/hierarchical_rearchitecture_invariants.rs`: completed
   hierarchy scorecard, inventory, path-shape, broad-bucket, mirrored-test, and
   large-file-budget gates.
 - `packages/agent/tests/post_hra_adversarial_hardening_invariants.rs`: active
@@ -152,7 +152,9 @@ Current living entry points:
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
-Deleted product campaign scorecards and guides are absent on this branch.
+Historical scorecard artifacts are retained as evidence only; live architecture
+guidance is owned by the current README, package docs, source module docs, and
+active AHA scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or

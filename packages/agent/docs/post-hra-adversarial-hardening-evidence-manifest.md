@@ -1,6 +1,6 @@
 # Post-HRA Adversarial Hardening Evidence Manifest
 
-Current score: **17/100**
+Current score: **27/100**
 
 Status: **active**
 
@@ -18,7 +18,7 @@ known audit findings are covered by executable proof.
 |----|--------|----------------|--------------|-----------|--------|
 | AHA-0 | passed_after_fix | Created the scorecard, evidence manifest, README links, and red static gates for the adversarial audit findings. | Red proof captured by `cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants -- --nocapture`; see AHA-0 red proof below. | The new target is intentionally red until AHA-1 through AHA-9 are implemented. | pending |
 | AHA-1 | passed_after_fix | Redacted historical `/Users/<USER>` equivalents in evidence, moved ordinary iOS fixtures to neutral `/tmp/tron-fixtures/...` paths, removed tracked personal feedback email/domain/handle literals, replaced repo/release fallbacks with generic placeholders, made iOS feedback recipient blank by default with local/CI override, and expanded `scripts/personal-info-guard.sh` to catch personal handle/domain split constructions. | `scripts/personal-info-guard.sh`, the AHA full-repo personal-info gate, the Cargo repository regression, release-notes self-test, XcodeGen drift check, and focused iOS `AppConstantsTests`/`SourceGuardTests` all passed. Direct grep for raw home paths, personal handle/domain literals, and split handle constructions outside allowlisted guard tests returned no hits. | Closed; AHA-2 still owns non-identity deleted-doc/template residue. | pending |
-| AHA-2 | pending | Not started. | Pending. | Deleted-doc/template residue remains intentionally red. | pending |
+| AHA-2 | passed_after_fix | Rewrote PR template and CONTRIBUTING references to `AGENTS.md`, removed stale skill-copy wording from AGENTS, marked PCC/HRA README scorecard links completed instead of active, replaced a deleted-doc absence claim with current evidence/source-of-truth wording, and redacted historical helper-tree strings from PCC/AHA docs. | `cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants live_docs_templates_and_scorecards_have_no_deleted_doc_residue -- --nocapture` -> exit 0. Direct scan for the deleted-doc/template residue needles returned no hits. | Closed; AHA-3 still owns workflow parity. | pending |
 | AHA-3 | pending | Not started. | Pending. | CI/static-gate parity remains intentionally red. | pending |
 | AHA-4 | pending | Not started. | Pending. | Xcode drift and Mac test execution parity remain intentionally red. | pending |
 | AHA-5 | pending | Not started. | Pending. | Rust module ownership aliases remain intentionally red. | pending |
@@ -135,3 +135,29 @@ handle/domain, and split-construction patterns was run with only the guard
 script and Rust path-regression test excluded.
 
 Result: no hits.
+
+## AHA-2 Verification
+
+Deleted-doc/template residue cleanup:
+
+- `.github/pull_request_template.md` now references `AGENTS.md`, source-local
+  module docs, and package docs rather than retired helper paths.
+- `CONTRIBUTING.md` now points contributors at `AGENTS.md` for README
+  maintenance.
+- `AGENTS.md` keeps the managed-skills teardown rule without stale sync wording.
+- README living docs mark PCC/HRA scorecards and gates as completed while AHA
+  remains active.
+- Historical PCC/AHA scorecard and evidence text no longer retain the deleted
+  helper-tree path names or uppercase retired guidance filename.
+
+Proof:
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants live_docs_templates_and_scorecards_have_no_deleted_doc_residue -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+Direct scan for the deleted-doc/template residue needles across GitHub
+templates, README, CONTRIBUTING, AGENTS, package docs, and scorecards returned
+no hits.

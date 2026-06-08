@@ -1,6 +1,6 @@
 # Post-HRA Adversarial Hardening Scorecard
 
-Current score: **17/100**
+Current score: **27/100**
 
 Status: **active**
 
@@ -40,7 +40,7 @@ Total weight: **100**
 |----|------|--------|--------|-------|----------|------------|
 | AHA-0 | Scorecard, evidence, and red-gate setup | 5 | passed_after_fix | architecture campaign | Created this scorecard, evidence manifest, README links, and intentionally red static gate target. | Later rows turn the red gates green. |
 | AHA-1 | Personal-info and source identity cleanup | 12 | passed_after_fix | source hygiene owner | Full-repo personal-info guard passes. Historical paths are redacted, iOS fixtures use neutral paths, feedback/release/repo identity uses blank or generic tracked defaults, and the guard bans personal handle/domain split constructions. | Closed; later phases may still edit docs/templates for non-identity residue. |
-| AHA-2 | Deleted-doc and template residue | 10 | pending | docs/templates owner | Deleted-doc/template residue gate currently fails by design. | Remove `.claude`, `CLAUDE`, deleted scorecard references, managed-skill sync, and stale active wording. |
+| AHA-2 | Deleted-doc and template residue | 10 | passed_after_fix | docs/templates owner | Live docs/templates/scorecards residue gate passes. PR template and contributor docs now point at `AGENTS.md`, stale active scorecard wording is completed/current, and historical helper-tree strings are redacted. | Closed; AHA-3 still owns workflow parity. |
 | AHA-3 | CI and static-gate parity | 12 | pending | CI owner | Workflow parity gate currently fails by design. | Ensure docs/templates/iOS/Mac changes run Rust-owned static gates and align Rust CI with `scripts/tron ci test`. |
 | AHA-4 | Xcode project drift and Mac test execution | 8 | pending | Apple CI owner | Xcode/Mac gate currently fails by design. | Enforce post-XcodeGen tracked project drift checks and run focused Mac wrapper tests in CI. |
 | AHA-5 | Rust module ownership cleanup | 10 | pending | Rust architecture owner | Rust module ownership gate currently fails by design. | Remove production `#[path]` aliases, provider shared aliases, settings loader aliases, and module inception. |
@@ -72,5 +72,5 @@ The Rust integration target
 ## Open Loops
 
 - AHA-0 is complete after the red target is committed.
-- AHA-1 is closed. AHA-2 through AHA-10 remain open and intentionally red until
+- AHA-1 and AHA-2 are closed. AHA-3 through AHA-10 remain open and intentionally red until
   their owners are implemented.

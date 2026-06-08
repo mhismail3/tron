@@ -134,7 +134,7 @@ During PCC-3, the retired capability-search asset bundle was deleted after
 source and lockfile audits proved no retained primitive used it. During PCC-9,
 the old `packages/agent/examples/local-packs/` examples were deleted after the
 stale-doc audit found they described retired worker-pack product surfaces rather
-than current primitive runtime behavior. During PCC-10, package-local `.claude`
+than current primitive runtime behavior. During PCC-10, package-local `retired helper tree`
 rule trees and the retired iOS git workflow DTO were deleted after adversarial
 review proved they were stale branch/product residue.
 
@@ -145,7 +145,7 @@ review proved they were stale branch/product residue.
 | iOS source roots | old `Core`, `Database`, `Models`, `Services`, `ViewModels`, `Views`, `Theme`, `Utilities`, `Extensions`, `Protocols` roots now collapsed to the retained primitive shell | PCC-6 passed |
 | Mac source roots | root Swift files, old `Services`, old `Observability`, old `Mocks`, and old `Theme` now collapsed to HRA-14 App, Server, MenuBar, Wizard, Support, and Infrastructure owners | PCC-7/HRA-14 passed |
 | Scripts | manual dispatcher, command modules, installed runtime helpers, release helpers, hooks, benchmarks, and device helpers retained; automatic deploy watcher deleted | PCC-8 passed |
-| Contributor rule docs and large tests | root/package `.claude` helper trees deleted; package docs and behavior-owned test suites audited | PCC-10 passed |
+| Contributor rule docs and large tests | root/package `retired helper tree` helper trees deleted; package docs and behavior-owned test suites audited | PCC-10 passed |
 
 ## Open Loops
 

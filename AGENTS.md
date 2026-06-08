@@ -41,7 +41,7 @@ No setting should exist only on the server or only in the iOS UI.
 ## Managed Skills
 
 The primitive branch does not ship repo-managed first-party skills under
-`packages/agent/skills/`. Do not reintroduce that directory, managed skill sync,
+`packages/agent/skills/`. Do not reintroduce that directory, skill-copy wiring,
 or built-in skill prompt context during the primitive teardown. Future skills
 belong to a successor self-adapting-agent scorecard and must be agent-authored
 state or generated runtime behavior, not bootstrap harness behavior.
