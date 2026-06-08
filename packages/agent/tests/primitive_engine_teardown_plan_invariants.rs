@@ -1035,11 +1035,17 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
         "TRON_TRACE_METADATA_KEY",
         "\"providerInvocationId\"",
         "\"modelId\"",
+        "\"provider\"",
+        "\"workingDirectory\"",
+        "workingDirectoryError",
         "\"authority\"",
         "\"requestHash\"",
         "\"resultHash\"",
         "\"content_hash\"",
         "\"model_id\"",
+        "RUNTIME_METADATA_PROVIDER_TYPE",
+        "trace_working_directory_metadata",
+        "normalize_working_directory",
         "git_vcs",
         "execute::log_recent",
     ] {
@@ -1080,6 +1086,8 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
     );
     for required in [
         "RUNTIME_METADATA_PROVIDER_INVOCATION_ID",
+        "RUNTIME_METADATA_PROVIDER_TYPE",
+        "RUNTIME_METADATA_WORKING_DIRECTORY",
         "RUNTIME_METADATA_MODEL_PRIMITIVE_NAME",
         "RUNTIME_METADATA_TURN",
         "RUNTIME_METADATA_RUN_ID",
@@ -1099,13 +1107,17 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
     let integration_test = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
     for required in [
         "execute_file_write_records_agent_trace_and_trace_list_exposes_it",
+        "execute_process_run_expands_home_alias_in_trace_working_directory",
         "execute_log_recent_exposes_bounded_session_trace_logs",
         "\"operation\": \"trace_list\"",
         "\"operation\": \"trace_get\"",
+        "\"operation\": \"process_run\"",
         "\"operation\": \"log_recent\"",
         "\"provider-call-write-1\"",
         "\"provider-call-get-1\"",
-        "\"openai/gpt-4o\"",
+        "\"provider-call-pwd-1\"",
+        "\"gpt-5.5\"",
+        "\"workingDirectory\"",
         "\"model_id\"",
         "\"content_hash\"",
     ] {
@@ -1116,7 +1128,13 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
     }
 
     let readme = read_repo_file("README.md");
-    for required in ["trace_list", "trace_get", "trace_records"] {
+    for required in [
+        "trace_list",
+        "trace_get",
+        "trace_records",
+        "provider type",
+        "canonical working directory",
+    ] {
         assert!(
             readme.contains(required),
             "README must document primitive traceability surface: {required}"

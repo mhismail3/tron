@@ -22,7 +22,7 @@ use crate::domains::session::event_store::{
 };
 use crate::engine::invocation::{
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-    RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
+    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
 };
 use crate::engine::{
     CausalContext, FunctionId, Invocation, invocation::RUNTIME_METADATA_WORKING_DIRECTORY,
@@ -477,9 +477,19 @@ fn started_trace_record(
         .as_ref()
         .map(|session| session.latest_model.clone())
         .unwrap_or_else(|| "unknown".to_owned());
-    let provider = model_provider(&model_id);
-    let working_directory = working_directory(invocation).ok();
+    let provider = invocation
+        .causal_context
+        .runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE);
+    let (working_directory, working_directory_metadata) =
+        trace_working_directory_metadata(invocation);
     let vcs = working_directory.as_ref().and_then(|path| git_vcs(path));
+    let mut trace_metadata = json!({
+        "request": invocation.payload,
+        "requestHash": hash_json(&invocation.payload),
+        "modelId": model_id,
+        "provider": provider,
+    });
+    merge_json_object(&mut trace_metadata, working_directory_metadata);
     let record_json = agent_trace_json(
         invocation,
         &id,
@@ -490,13 +500,7 @@ fn started_trace_record(
         None,
         vcs,
         Vec::new(),
-        json!({
-            "request": invocation.payload,
-            "requestHash": hash_json(&invocation.payload),
-            "modelId": model_id,
-            "provider": provider,
-            "workingDirectory": working_directory.as_ref().map(|path| path.display().to_string())
-        }),
+        trace_metadata,
     );
     Ok(AgentTraceRecord {
         id,
@@ -526,6 +530,32 @@ fn started_trace_record(
         duration_ms: None,
         record_json,
     })
+}
+
+fn trace_working_directory_metadata(invocation: &Invocation) -> (Option<PathBuf>, Value) {
+    match working_directory(invocation) {
+        Ok(path) => {
+            let metadata = json!({
+                "workingDirectory": path.display().to_string()
+            });
+            (Some(path), metadata)
+        }
+        Err(error) => {
+            let mut metadata = json!({
+                "workingDirectory": Value::Null,
+                "workingDirectoryError": error.to_string()
+            });
+            if let (Some(object), Some(raw)) = (
+                metadata.as_object_mut(),
+                invocation
+                    .causal_context
+                    .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY),
+            ) {
+                object.insert("workingDirectoryRaw".to_owned(), json!(raw));
+            }
+            (None, metadata)
+        }
+    }
 }
 
 fn complete_trace_record(
@@ -719,13 +749,6 @@ fn runtime_i64(invocation: &Invocation, key: &str) -> Option<i64> {
         .and_then(|value| value.parse::<i64>().ok())
 }
 
-fn model_provider(model_id: &str) -> String {
-    model_id
-        .split_once('/')
-        .map(|(provider, _)| provider.to_owned())
-        .unwrap_or_else(|| "unknown".to_owned())
-}
-
 fn git_vcs(working_directory: &Path) -> Option<Value> {
     let output = StdCommand::new("git")
         .args(["rev-parse", "HEAD"])
@@ -820,13 +843,17 @@ fn resolve_relative_path(invocation: &Invocation, raw: &str) -> Result<PathBuf, 
 }
 
 fn working_directory(invocation: &Invocation) -> Result<PathBuf, CapabilityError> {
-    invocation
+    let raw = invocation
         .causal_context
         .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
-        .canonicalize()
-        .map_err(|error| internal(format!("resolve working directory: {error}")))
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .display()
+                .to_string()
+        });
+    crate::shared::paths::normalize_working_directory(&raw).map_err(internal)
 }
 
 fn required_str<'a>(payload: &'a Value, field: &str) -> Result<&'a str, CapabilityError> {

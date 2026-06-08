@@ -80,6 +80,24 @@ fn tron_home_name_rejects_nested_paths() {
 }
 
 #[test]
+fn normalize_working_directory_expands_home_alias() {
+    let home = PathBuf::from(home_dir()).canonicalize().unwrap();
+    assert_eq!(normalize_working_directory("~").unwrap(), home);
+}
+
+#[test]
+fn normalize_working_directory_rejects_missing_paths() {
+    let missing = format!(
+        "{}/definitely-missing-working-directory-for-tron-test",
+        std::env::temp_dir().display()
+    );
+    assert!(
+        normalize_working_directory(&missing).is_err(),
+        "missing working directories must fail instead of becoming trace metadata"
+    );
+}
+
+#[test]
 fn primitive_top_level_dirs_stay_under_tron_home() {
     assert!(internal_dir().ends_with(format!(".tron/{}", dirs::INTERNAL)));
     assert!(profiles_dir().ends_with(format!(".tron/{}", dirs::PROFILES)));

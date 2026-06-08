@@ -12,9 +12,10 @@
 //! - workers own the functions and triggers they register;
 //! - mutating capabilities require idempotency metadata;
 //! - invocations carry actor, authority grant id, catalog revision, trace,
-//!   session, workspace, idempotency, and optional parent/trigger context into a
-//!   pluggable engine ledger; invocation prepare resolves that grant from the
-//!   engine-owned grant store before any handler runs;
+//!   session, workspace, idempotency, optional parent/trigger context, and
+//!   trusted runtime metadata such as working directory and provider provenance
+//!   into a pluggable engine ledger; invocation prepare resolves that grant from
+//!   the engine-owned grant store before any handler runs;
 //! - declared request/response schemas are enforced before/after handlers;
 //! - session capabilities can be explicitly promoted to workspace/system scope;
 //! - `EngineHost` exposes privileged `engine::*` transport functions for live

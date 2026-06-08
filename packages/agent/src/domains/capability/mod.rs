@@ -18,6 +18,9 @@
 //! Provider integrations must expose exactly this one tool. Additional behavior
 //! can only appear later as agent-owned state or generated helper substrate, not
 //! as checked-in target functions.
+//! Agent-launched executions persist trace provider ownership and canonical
+//! working directory from trusted `CausalContext` runtime metadata, not from
+//! model-id string parsing or shell aliases.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

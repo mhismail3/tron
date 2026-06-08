@@ -10,12 +10,17 @@ impl SessionCommandService {
         request: CreateSessionRequest,
     ) -> Result<Value, CapabilityError> {
         let session_manager = deps.session_manager.clone();
-        let working_directory = request.working_directory.clone();
+        let working_directory =
+            crate::shared::paths::normalize_working_directory(&request.working_directory)
+                .map_err(|message| CapabilityError::InvalidParams { message })?
+                .display()
+                .to_string();
         let model = request.model.clone();
         let title = request.title.clone();
+        let stored_working_directory = working_directory.clone();
         let session_id = run_blocking_task("session.create", move || {
             session_manager
-                .create_session(&model, &working_directory, title.as_deref())
+                .create_session(&model, &stored_working_directory, title.as_deref())
                 .map_err(|error| CapabilityError::Internal {
                     message: error.to_string(),
                 })
@@ -28,7 +33,7 @@ impl SessionCommandService {
             .emit(TronEvent::SessionCreated {
                 base: BaseEvent::now(&session_id),
                 model: request.model.clone(),
-                working_directory: request.working_directory.clone(),
+                working_directory: working_directory.clone(),
                 title: request.title.clone(),
             });
 
@@ -37,7 +42,7 @@ impl SessionCommandService {
         Ok(json!({
             "sessionId": session_id,
             "model": request.model,
-            "workingDirectory": request.working_directory,
+            "workingDirectory": working_directory,
             "createdAt": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             "isActive": true,
             "isArchived": false,

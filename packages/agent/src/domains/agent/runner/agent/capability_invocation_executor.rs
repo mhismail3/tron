@@ -14,7 +14,8 @@ use crate::domains::agent::runner::orchestrator::invocation_abort_registry::{
 use crate::domains::agent::runner::types::CapabilityInvocationExecutionResult;
 use crate::engine::invocation::{
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-    RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY,
+    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
+    RUNTIME_METADATA_WORKING_DIRECTORY,
 };
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
@@ -123,6 +124,7 @@ pub struct CapabilityInvocationExecutionContext<'a> {
     pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
     pub engine_host: Option<&'a EngineHostHandle>,
     pub run_id: Option<&'a str>,
+    pub provider_type: &'a str,
     pub trace_id: Option<&'a TraceId>,
     pub parent_invocation_id: Option<&'a InvocationId>,
 }
@@ -198,6 +200,7 @@ pub async fn execute_capability_invocation(
             ctx.workspace_id,
             ctx.turn,
             ctx.run_id,
+            ctx.provider_type,
             ctx.trace_id,
             ctx.parent_invocation_id,
             effective_args,
@@ -274,6 +277,7 @@ async fn execute_capability_primitive_via_engine(
     workspace_id: Option<&str>,
     turn: i64,
     run_id: Option<&str>,
+    provider_type: &str,
     inherited_trace_id: Option<&TraceId>,
     parent_invocation_id: Option<&InvocationId>,
     effective_args: Value,
@@ -308,6 +312,7 @@ async fn execute_capability_primitive_via_engine(
         RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
         invocation_id.to_owned(),
     )
+    .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, provider_type.to_owned())
     .with_runtime_metadata(
         RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
         model_primitive_name.to_owned(),

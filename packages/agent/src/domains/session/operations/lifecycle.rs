@@ -41,7 +41,15 @@ pub(crate) async fn session_list_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let include_archived = opt_bool(params, "includeArchived").unwrap_or(false);
-    let working_directory = opt_string(params, "workingDirectory");
+    let working_directory = match opt_string(params, "workingDirectory") {
+        Some(path) => Some(
+            crate::shared::paths::normalize_working_directory(&path)
+                .map_err(|message| CapabilityError::InvalidParams { message })?
+                .display()
+                .to_string(),
+        ),
+        None => None,
+    };
     let limit = params
         .and_then(|p| p.get("limit"))
         .and_then(Value::as_u64)

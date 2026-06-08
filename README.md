@@ -353,6 +353,10 @@ schema requires an `operation` field and accepts only operation-specific
 primitive fields such as `input`, `scope`, `namespace`, `key`, `value`, `path`,
 `content`, `command`, `traceId`, `traceRecordId`, `limit`, `timeoutMs`,
 `maxOutputBytes`, `idempotencyKey`, and `reason`.
+Agent-launched `execute` invocations carry provider type, provider call id,
+run/turn ids, canonical working directory, and trace parentage as trusted engine
+runtime metadata; trace records use those facts directly instead of inferring
+provider ownership from model id strings.
 
 Current primitive operations:
 

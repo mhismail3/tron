@@ -509,6 +509,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             invocation_abort_registry,
             engine_host,
             run_id: run_context.run_id.as_deref(),
+            provider_type: provider_name,
             trace_id: run_context.engine_trace_id.as_ref(),
             parent_invocation_id: run_context.parent_invocation_id.as_ref(),
         },

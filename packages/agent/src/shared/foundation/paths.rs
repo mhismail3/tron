@@ -119,6 +119,39 @@ pub fn tron_home() -> PathBuf {
     )
 }
 
+/// Resolve a user-supplied working directory into an existing canonical path.
+///
+/// The session/primitive runtime accepts `~` and `~/...` as the only
+/// shell-style expansion because those are the forms clients send for a user's
+/// home workspace. Everything else is resolved by the filesystem.
+pub fn normalize_working_directory(raw: &str) -> Result<PathBuf, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("working directory must not be empty".to_owned());
+    }
+    let expanded = expand_home_path(raw);
+    let canonical = expanded
+        .canonicalize()
+        .map_err(|error| format!("resolve working directory {raw:?}: {error}"))?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "working directory is not a directory: {}",
+            canonical.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn expand_home_path(raw: &str) -> PathBuf {
+    if raw == "~" {
+        return PathBuf::from(home_dir());
+    }
+    if let Some(rest) = raw.strip_prefix("~/") {
+        return PathBuf::from(home_dir()).join(rest);
+    }
+    PathBuf::from(raw)
+}
+
 fn resolve_tron_home(home: &str, data_dir: Option<&str>, home_name: Option<&str>) -> PathBuf {
     if let Some(data_dir) = data_dir.filter(|value| !value.is_empty()) {
         return PathBuf::from(data_dir);

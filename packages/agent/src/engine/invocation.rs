@@ -22,6 +22,8 @@ pub const RUNTIME_METADATA_WORKING_DIRECTORY: &str = "agent.workingDirectory";
 /// Runtime metadata key carrying the provider/model tool-call id that caused an
 /// engine invocation.
 pub const RUNTIME_METADATA_PROVIDER_INVOCATION_ID: &str = "agent.providerInvocationId";
+/// Runtime metadata key carrying the resolved model provider type.
+pub const RUNTIME_METADATA_PROVIDER_TYPE: &str = "agent.providerType";
 /// Runtime metadata key carrying the current agent run id.
 pub const RUNTIME_METADATA_RUN_ID: &str = "agent.runId";
 /// Runtime metadata key carrying the model-facing primitive name.

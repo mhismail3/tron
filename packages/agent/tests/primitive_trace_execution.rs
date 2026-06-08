@@ -11,10 +11,13 @@ use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tron::domains::agent::runner::{Orchestrator, ProfileRuntime, SessionManager};
 use tron::domains::model::providers::ProviderHealthTracker;
-use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
+use tron::domains::session::event_store::{
+    AgentTraceListOptions, ConnectionConfig, EventStore, new_file, run_migrations,
+};
 use tron::engine::invocation::{
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-    RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY,
+    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
+    RUNTIME_METADATA_WORKING_DIRECTORY,
 };
 use tron::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
@@ -86,6 +89,24 @@ fn causal_context(
     provider_invocation_id: &str,
     idempotency_key: &str,
 ) -> CausalContext {
+    causal_context_raw(
+        trace_id,
+        session_id,
+        workspace_id,
+        &working_directory.display().to_string(),
+        provider_invocation_id,
+        idempotency_key,
+    )
+}
+
+fn causal_context_raw(
+    trace_id: TraceId,
+    session_id: &str,
+    workspace_id: &str,
+    working_directory: &str,
+    provider_invocation_id: &str,
+    idempotency_key: &str,
+) -> CausalContext {
     CausalContext::new(
         ActorId::new(format!("agent:{session_id}")).unwrap(),
         ActorKind::Agent,
@@ -98,12 +119,13 @@ fn causal_context(
     .with_idempotency_key(idempotency_key.to_owned())
     .with_runtime_metadata(
         RUNTIME_METADATA_WORKING_DIRECTORY,
-        working_directory.display().to_string(),
+        working_directory.to_owned(),
     )
     .with_runtime_metadata(
         RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
         provider_invocation_id,
     )
+    .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
     .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
     .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, "run_trace_test")
     .with_runtime_metadata(RUNTIME_METADATA_TURN, "1")
@@ -134,7 +156,7 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
         .ctx
         .event_store
         .create_session(
-            "openai/gpt-4o",
+            "gpt-5.5",
             workspace.path().to_str().unwrap(),
             Some("trace proof"),
             Some("openai"),
@@ -234,10 +256,7 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
         write_record["metadata"]["dev.tron"]["authority"]["scopes"],
         json!(["capability.execute"])
     );
-    assert_eq!(
-        write_record["metadata"]["dev.tron"]["modelId"],
-        "openai/gpt-4o"
-    );
+    assert_eq!(write_record["metadata"]["dev.tron"]["modelId"], "gpt-5.5");
     assert_eq!(write_record["metadata"]["dev.tron"]["provider"], "openai");
     assert_eq!(write_record["files"][0]["path"], "notes/trace.txt");
     assert_eq!(
@@ -246,13 +265,71 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
     );
     assert_eq!(
         write_record["files"][0]["conversations"][0]["contributor"]["model_id"],
-        "openai/gpt-4o"
+        "gpt-5.5"
     );
     assert!(
         write_record["files"][0]["conversations"][0]["ranges"][0]["content_hash"]
             .as_str()
             .unwrap()
             .starts_with("sha256:")
+    );
+}
+
+#[tokio::test]
+async fn execute_process_run_expands_home_alias_in_trace_working_directory() {
+    let runtime = test_runtime();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session("gpt-5.5", "~", Some("home trace proof"), Some("openai"))
+        .unwrap();
+    let trace_id = TraceId::generate();
+    let expected_home = tron::shared::paths::normalize_working_directory("~")
+        .unwrap()
+        .display()
+        .to_string();
+
+    let run_value = invoke_execute(
+        &runtime.ctx,
+        json!({
+            "operation": "process_run",
+            "command": "pwd",
+            "timeoutMs": 5000,
+            "maxOutputBytes": 2000,
+            "reason": "prove working directory trace capture"
+        }),
+        causal_context_raw(
+            trace_id.clone(),
+            &created.session.id,
+            &created.session.workspace_id,
+            "~",
+            "provider-call-pwd-1",
+            "trace-pwd-1",
+        ),
+    )
+    .await;
+    let run_result: CapabilityResult = serde_json::from_value(run_value).unwrap();
+    let details = run_result.details.as_ref().unwrap();
+    assert_eq!(details["primitiveOperation"], "process_run");
+    assert_eq!(details["status"], "ok");
+    assert_eq!(details["stdout"].as_str().unwrap().trim(), expected_home);
+
+    let records = runtime
+        .ctx
+        .event_store
+        .list_trace_records(&AgentTraceListOptions {
+            session_id: Some(&created.session.id),
+            trace_id: Some(trace_id.as_str()),
+            limit: Some(10),
+        })
+        .unwrap();
+    let run_record = records
+        .iter()
+        .find(|record| record.operation == "process_run")
+        .expect("process_run trace record");
+    assert_eq!(
+        run_record.record_json["metadata"]["dev.tron"]["workingDirectory"],
+        expected_home
     );
 }
 

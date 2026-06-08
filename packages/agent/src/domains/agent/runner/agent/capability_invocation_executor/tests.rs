@@ -81,6 +81,7 @@ fn capability_exec_ctx<'a>(
         invocation_abort_registry: None,
         engine_host: None,
         run_id: Some("run-1"),
+        provider_type: "openai",
         trace_id: None,
         parent_invocation_id: None,
     }
@@ -348,6 +349,12 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
     assert_eq!(
         invocation.causal_context.parent_invocation_id,
         Some(parent_invocation_id)
+    );
+    assert_eq!(
+        invocation
+            .causal_context
+            .runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE),
+        Some("openai")
     );
     let expected_material = stable_capability_invocation_material(
         Some("run-1"),

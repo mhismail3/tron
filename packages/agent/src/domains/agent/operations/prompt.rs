@@ -104,7 +104,6 @@ pub(crate) async fn run_turn_value(
         json!({
             "runId": run_id,
             "model": session.latest_model,
-            "provider": "unknown",
         }),
     )
     .await;

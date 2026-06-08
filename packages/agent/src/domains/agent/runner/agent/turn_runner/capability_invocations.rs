@@ -31,6 +31,7 @@ pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
     pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
     pub run_id: Option<&'a str>,
+    pub provider_type: &'a str,
     pub trace_id: Option<&'a crate::engine::TraceId>,
     pub parent_invocation_id: Option<&'a crate::engine::InvocationId>,
 }
@@ -197,6 +198,7 @@ pub(super) async fn execute_capability_invocation_phase(
                         invocation_abort_registry: params.invocation_abort_registry,
                         engine_host: params.engine_host,
                         run_id: params.run_id,
+                        provider_type: params.provider_type,
                         trace_id: params.trace_id,
                         parent_invocation_id: params.parent_invocation_id,
                     };
