@@ -367,7 +367,7 @@ struct OnboardingStateTests {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""
         {
           "server": {
-            "defaultWorkspace": "/Users/example/project",
+            "defaultWorkspace": "/tmp/tron-fixtures/example/project",
             "defaultModel": "claude-opus-4-6"
           }
         }
@@ -400,7 +400,7 @@ struct OnboardingStateTests {
         snapshot.hydrate(serverId: "server-1", settings: settings, authState: auth)
 
         #expect(snapshot.serverId == "server-1")
-        #expect(snapshot.defaultWorkspace == "/Users/example/project")
+        #expect(snapshot.defaultWorkspace == "/tmp/tron-fixtures/example/project")
         #expect(snapshot.defaultModel == "claude-opus-4-6")
         #expect(snapshot.providerSummary(for: "anthropic")?.title == "API key saved")
         #expect(snapshot.providerSummary(for: "anthropic")?.detail == "work - sk-ant-...xyz")
@@ -438,7 +438,7 @@ struct OnboardingStateTests {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data("""
         {
           "server": {
-            "defaultWorkspace": "/Users/example/project",
+            "defaultWorkspace": "/tmp/tron-fixtures/example/project",
             "defaultModel": "claude-opus-4-6"
           }
         }
@@ -468,7 +468,7 @@ struct OnboardingStateTests {
         state.refreshSetupAuth(refreshedAuth)
 
         #expect(state.setupSnapshot.serverId == "server-1")
-        #expect(state.setupSnapshot.defaultWorkspace == "/Users/example/project")
+        #expect(state.setupSnapshot.defaultWorkspace == "/tmp/tron-fixtures/example/project")
         #expect(state.setupSnapshot.defaultModel == "claude-opus-4-6")
         #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.title == "Anthropic signed in")
         #expect(state.setupSnapshot.providerSummary(for: "anthropic")?.detail == "work")

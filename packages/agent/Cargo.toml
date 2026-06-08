@@ -5,7 +5,7 @@ version = "0.1.0-beta.7"
 edition = "2024"
 rust-version = "1.91"
 license = "MIT"
-repository = "https://github.com/mhismail3/tron"
+repository = "https://github.com/tron-owner/tron"
 
 [features]
 default = []

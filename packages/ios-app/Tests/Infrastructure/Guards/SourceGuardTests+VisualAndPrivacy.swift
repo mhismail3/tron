@@ -38,10 +38,9 @@ extension SourceGuardTests {
     @Test("No personal-info literals in iOS Sources or Tests")
     func testNoPersonalInfoLiterals() throws {
         let needles: [String] = [
-            "M" + "oh" + "sin",
-            "Is" + "ma" + "il",
-            "is" + "ma" + "il",
-            "mh" + "is" + "mail",
+            "/Users/",
+            "TRON_FEEDBACK_EMAIL = tron@",
+            "githubRepoOwner",
         ]
 
         let iosRoot = iosAppRoot()
@@ -64,6 +63,7 @@ extension SourceGuardTests {
                 guard url.pathExtension == "swift" else { continue }
                 // Skip this guard file itself — needle-construction is intentional.
                 if isSourceGuardFile(url) { continue }
+                if permitsHomePathRedactionNeedles(url) { continue }
 
                 let content = try String(contentsOf: url, encoding: .utf8)
                 for needle in needles {
@@ -74,6 +74,14 @@ extension SourceGuardTests {
                 }
             }
         }
+    }
+
+    private func permitsHomePathRedactionNeedles(_ url: URL) -> Bool {
+        let path = url.path
+        return path.hasSuffix("Sources/Support/Diagnostics/DiagnosticsRedactor.swift")
+            || path.hasSuffix("Sources/Support/Foundation/Formatting/String+Extensions.swift")
+            || path.hasSuffix("Tests/Support/Diagnostics/DiagnosticsRedactorTests.swift")
+            || path.hasSuffix("Tests/Support/Diagnostics/DiagnosticsBundleBuilderTests.swift")
     }
 
 

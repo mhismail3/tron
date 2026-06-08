@@ -97,7 +97,7 @@ final class PendingSessionDeepLinkTests: XCTestCase {
 @MainActor
 final class ResolveQuickSessionWorkspaceTests: XCTestCase {
 
-    private let defaultWorkspace = "/Users/default/workspace"
+    private let defaultWorkspace = "/tmp/tron-fixtures/default/workspace"
 
     private func makeSession(id: String, workingDirectory: String) -> CachedSession {
         CachedSession(

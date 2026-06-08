@@ -6,7 +6,7 @@ exactly what you need to make a green PR.
 ## TL;DR
 
 ```bash
-git clone https://github.com/mhismail3/tron.git
+git clone <repository-url>
 cd tron
 scripts/install-hooks.sh                                           # one-time
 cd packages/agent && cargo check && cargo test -- --quiet          # baseline
@@ -155,7 +155,9 @@ The repo's regression guards (`paths.rs:workspace_has_no_personal_info_literals`
 
 - Hardcoded usernames in source, comments, tests, or placeholder text
   (`/Users/<my-username>`, `<my-username>@…`, `e.g. <my-username>@…`).
-- Hardcoded GitHub handles other than the canonical `mhismail3`.
+- Hardcoded GitHub handles, personal domains, or maintainer-specific release
+  URLs. Use generic placeholders, local config, CI secrets, or runtime
+  configuration.
 - Encoded forms of the same (`-Users-<my-username>-…` from Claude-Code-style paths).
 
 User-specific values belong in `~/.tron/memory/MEMORY.md` (auto-loaded
@@ -171,14 +173,14 @@ explain why in the same commit.
 
 Two layers, both required:
 
-1. **Root `README.md`** — canonical reference. The
-   [README maintenance table](.claude/CLAUDE.md) lists which README section to
-   update for each kind of source change. The PR template repeats this.
+1. **Root `README.md`** — canonical reference. The README maintenance table in
+   `AGENTS.md` lists which README section to update for each kind of source
+   change. The PR template repeats this.
 2. **Progressive disclosure** — every Rust module has a `mod.rs` doc block
    with a submodule table and key invariants. Every meaningful change should
    leave the surrounding module's `mod.rs` slightly better documented than
-   you found it. iOS uses `packages/ios-app/.claude/rules/*.md` for the same
-   pattern.
+   you found it. iOS uses the architecture and development docs under
+   `packages/ios-app/docs/` for the same pattern.
 
 Drift is the enemy. If you renamed a method, removed a setting, or shifted
 responsibility between modules, audit the README + `mod.rs` files in the

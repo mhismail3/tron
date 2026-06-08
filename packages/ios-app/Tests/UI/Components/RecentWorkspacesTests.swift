@@ -45,19 +45,19 @@ struct RecentWorkspacesTests {
 
     @Test("returns single workspace")
     func singleSession() {
-        let sessions = [makeSession(id: "s1", workingDirectory: "/Users/dev/project-a")]
+        let sessions = [makeSession(id: "s1", workingDirectory: "/tmp/tron-fixtures/dev/project-a")]
         let result = CachedSession.recentWorkspaces(from: sessions)
         #expect(result.count == 1)
-        #expect(result[0].path == "/Users/dev/project-a")
+        #expect(result[0].path == "/tmp/tron-fixtures/dev/project-a")
         #expect(result[0].name == "project-a")
     }
 
     @Test("returns multiple unique workspaces in order")
     func multipleUnique() {
         let sessions = [
-            makeSession(id: "s1", workingDirectory: "/Users/dev/alpha"),
-            makeSession(id: "s2", workingDirectory: "/Users/dev/beta"),
-            makeSession(id: "s3", workingDirectory: "/Users/dev/gamma"),
+            makeSession(id: "s1", workingDirectory: "/tmp/tron-fixtures/dev/alpha"),
+            makeSession(id: "s2", workingDirectory: "/tmp/tron-fixtures/dev/beta"),
+            makeSession(id: "s3", workingDirectory: "/tmp/tron-fixtures/dev/gamma"),
         ]
         let result = CachedSession.recentWorkspaces(from: sessions)
         #expect(result.count == 3)
@@ -71,17 +71,17 @@ struct RecentWorkspacesTests {
     @Test("deduplicates sessions with same workingDirectory")
     func deduplication() {
         let sessions = [
-            makeSession(id: "s1", workingDirectory: "/Users/dev/project-a"),
-            makeSession(id: "s2", workingDirectory: "/Users/dev/project-b"),
-            makeSession(id: "s3", workingDirectory: "/Users/dev/project-a"),
-            makeSession(id: "s4", workingDirectory: "/Users/dev/project-b"),
-            makeSession(id: "s5", workingDirectory: "/Users/dev/project-c"),
+            makeSession(id: "s1", workingDirectory: "/tmp/tron-fixtures/dev/project-a"),
+            makeSession(id: "s2", workingDirectory: "/tmp/tron-fixtures/dev/project-b"),
+            makeSession(id: "s3", workingDirectory: "/tmp/tron-fixtures/dev/project-a"),
+            makeSession(id: "s4", workingDirectory: "/tmp/tron-fixtures/dev/project-b"),
+            makeSession(id: "s5", workingDirectory: "/tmp/tron-fixtures/dev/project-c"),
         ]
         let result = CachedSession.recentWorkspaces(from: sessions)
         #expect(result.count == 3)
-        #expect(result[0].path == "/Users/dev/project-a")
-        #expect(result[1].path == "/Users/dev/project-b")
-        #expect(result[2].path == "/Users/dev/project-c")
+        #expect(result[0].path == "/tmp/tron-fixtures/dev/project-a")
+        #expect(result[1].path == "/tmp/tron-fixtures/dev/project-b")
+        #expect(result[2].path == "/tmp/tron-fixtures/dev/project-c")
     }
 
     @Test("all sessions same workspace yields one pill")
@@ -102,12 +102,12 @@ struct RecentWorkspacesTests {
     func emptyWorkingDirectory() {
         let sessions = [
             makeSession(id: "s1", workingDirectory: ""),
-            makeSession(id: "s2", workingDirectory: "/Users/dev/real"),
+            makeSession(id: "s2", workingDirectory: "/tmp/tron-fixtures/dev/real"),
             makeSession(id: "s3", workingDirectory: ""),
         ]
         let result = CachedSession.recentWorkspaces(from: sessions)
         #expect(result.count == 1)
-        #expect(result[0].path == "/Users/dev/real")
+        #expect(result[0].path == "/tmp/tron-fixtures/dev/real")
     }
 
     @Test("all empty workingDirectories returns empty")
@@ -142,7 +142,7 @@ struct RecentWorkspacesTests {
     @Test("extracts last path component as name")
     func nameExtraction() {
         let sessions = [
-            makeSession(id: "s1", workingDirectory: "/Users/dev/deeply/nested/my-project"),
+            makeSession(id: "s1", workingDirectory: "/tmp/tron-fixtures/dev/deeply/nested/my-project"),
             makeSession(id: "s2", workingDirectory: "/tmp"),
         ]
         let result = CachedSession.recentWorkspaces(from: sessions)

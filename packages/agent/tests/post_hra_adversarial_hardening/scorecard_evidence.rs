@@ -8,11 +8,11 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
 
     for required in [
         "# Post-HRA Adversarial Hardening Scorecard",
-        "Current score: **5/100**",
+        "Current score: **17/100**",
         "Status: **active**",
         "Total weight: **100**",
         "AHA-0 | Scorecard, evidence, and red-gate setup | 5 | passed_after_fix",
-        "AHA-1 | Personal-info and source identity cleanup | 12 | pending",
+        "AHA-1 | Personal-info and source identity cleanup | 12 | passed_after_fix",
         "AHA-2 | Deleted-doc and template residue | 10 | pending",
         "AHA-3 | CI and static-gate parity | 12 | pending",
         "AHA-4 | Xcode project drift and Mac test execution | 8 | pending",
@@ -48,9 +48,10 @@ fn post_hra_adversarial_hardening_scorecard_stays_formalized() {
 
     for required in [
         "# Post-HRA Adversarial Hardening Evidence Manifest",
-        "Current score: **5/100**",
+        "Current score: **17/100**",
         "Status: **active**",
         "| AHA-0 | passed_after_fix |",
+        "| AHA-1 | passed_after_fix |",
         "| AHA-10 | pending |",
         "## AHA-0 Red Proof",
         "## Residual Risk Log",

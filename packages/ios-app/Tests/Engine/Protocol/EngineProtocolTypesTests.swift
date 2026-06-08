@@ -26,7 +26,7 @@ final class SessionTypesTests: XCTestCase {
             "cacheCreationTokens": 50,
             "cost": 0.05,
             "isActive": true,
-            "workingDirectory": "/Users/test/project",
+            "workingDirectory": "/tmp/tron-fixtures/test/project",
             "parentSessionId": null,
             "lastUserPrompt": "Hello",
             "lastAssistantResponse": "Hi there!"
@@ -474,7 +474,7 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
                 "direction": AnyCodable("request"),
                 "functionId": AnyCodable("session::list"),
                 "property": AnyCodable("workingDirectory"),
-                "payload": AnyCodable(["workingDirectory": "/Users/example/project"]),
+                "payload": AnyCodable(["workingDirectory": "/tmp/tron-fixtures/example/project"]),
             ]
         )
 
@@ -484,6 +484,6 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
         XCTAssertTrue(summary.contains("functionId=session::list"))
         XCTAssertTrue(summary.contains("property=workingDirectory"))
         XCTAssertTrue(summary.contains("payload=redacted"))
-        XCTAssertFalse(summary.contains("/Users/example/project"))
+        XCTAssertFalse(summary.contains("/tmp/tron-fixtures/example/project"))
     }
 }

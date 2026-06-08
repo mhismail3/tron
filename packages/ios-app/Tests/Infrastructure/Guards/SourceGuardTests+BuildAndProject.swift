@@ -3,27 +3,27 @@ import Foundation
 
 extension SourceGuardTests {
 
-    @Test("feedback recipient has tracked non-placeholder default")
+    @Test("feedback recipient has no tracked personal default")
     func testFeedbackRecipientConfigDefault() throws {
         let iosRoot = iosAppRoot()
         let baseConfig = try String(
             contentsOf: iosRoot.appendingPathComponent("Configuration/Base.xcconfig"),
             encoding: .utf8
         )
-        let expected = "tron@" + "mh" + "is" + "mail.com"
         let line = try #require(
             baseConfig
                 .split(separator: "\n")
                 .first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("TRON_FEEDBACK_EMAIL =") }
         )
         let value = line
-            .split(separator: "=", maxSplits: 1)
+            .split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             .last?
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        #expect(value == expected)
-        #expect(value?.isEmpty == false)
+        #expect(value == "")
         #expect(value?.contains("$(") == false)
+        #expect(baseConfig.contains("#include? \"Local.xcconfig\""))
+        #expect(baseConfig.contains("TRON_MAC_DOWNLOAD_URL = https:/$()/github.com/tron-owner/tron/releases"))
     }
 
 

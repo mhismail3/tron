@@ -194,7 +194,7 @@ struct NewSessionFlow: View {
         )
     }
 
-    /// Workspace path formatted for display (truncates /Users/<user>/ to ~/).
+    /// Workspace path formatted for display by abbreviating the home prefix.
     private var displayWorkspacePath: String {
         workingDirectory.abbreviatingHomeDirectory
     }

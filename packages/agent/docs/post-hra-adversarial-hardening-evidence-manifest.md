@@ -1,6 +1,6 @@
 # Post-HRA Adversarial Hardening Evidence Manifest
 
-Current score: **5/100**
+Current score: **17/100**
 
 Status: **active**
 
@@ -17,7 +17,7 @@ known audit findings are covered by executable proof.
 | ID | Status | Change summary | Verification | Residuals | Commit |
 |----|--------|----------------|--------------|-----------|--------|
 | AHA-0 | passed_after_fix | Created the scorecard, evidence manifest, README links, and red static gates for the adversarial audit findings. | Red proof captured by `cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants -- --nocapture`; see AHA-0 red proof below. | The new target is intentionally red until AHA-1 through AHA-9 are implemented. | pending |
-| AHA-1 | pending | Not started. | Pending. | Personal-info/source identity leaks remain intentionally red. | pending |
+| AHA-1 | passed_after_fix | Redacted historical `/Users/<USER>` equivalents in evidence, moved ordinary iOS fixtures to neutral `/tmp/tron-fixtures/...` paths, removed tracked personal feedback email/domain/handle literals, replaced repo/release fallbacks with generic placeholders, made iOS feedback recipient blank by default with local/CI override, and expanded `scripts/personal-info-guard.sh` to catch personal handle/domain split constructions. | `scripts/personal-info-guard.sh`, the AHA full-repo personal-info gate, the Cargo repository regression, release-notes self-test, XcodeGen drift check, and focused iOS `AppConstantsTests`/`SourceGuardTests` all passed. Direct grep for raw home paths, personal handle/domain literals, and split handle constructions outside allowlisted guard tests returned no hits. | Closed; AHA-2 still owns non-identity deleted-doc/template residue. | pending |
 | AHA-2 | pending | Not started. | Pending. | Deleted-doc/template residue remains intentionally red. | pending |
 | AHA-3 | pending | Not started. | Pending. | CI/static-gate parity remains intentionally red. | pending |
 | AHA-4 | pending | Not started. | Pending. | Xcode drift and Mac test execution parity remain intentionally red. | pending |
@@ -77,3 +77,61 @@ Red findings covered by executable gates:
 
 - The target is intentionally red after AHA-0. Each later phase must update this
   manifest with the green proof that closes its own red findings.
+
+## AHA-1 Verification
+
+Completed source-identity cleanup:
+
+- Historical evidence paths now use `/Users/<USER>` instead of raw developer
+  home paths.
+- iOS path fixtures now use `/tmp/tron-fixtures/...`.
+- `TRON_FEEDBACK_EMAIL` is blank in tracked `Base.xcconfig`; `Local.xcconfig`,
+  CI secrets, or release build settings can provide the recipient.
+- iOS Mac-download URLs and Mac feedback issue URLs use tracked generic
+  placeholders instead of maintainer handles.
+- `scripts/personal-info-guard.sh` now bans the personal GitHub handle, personal
+  feedback domain, and common split-string forms such as adjacent `"mh"`,
+  `"is"`, and `"mail"` fragments.
+
+Focused proof:
+
+```bash
+scripts/personal-info-guard.sh
+```
+
+Result: exit 0.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml --test post_hra_adversarial_hardening_invariants full_repo_personal_info_guard_passes -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+```bash
+cargo test --manifest-path packages/agent/Cargo.toml cargo_pkg_repository_has_no_personal_handle -- --nocapture
+```
+
+Result: exit 0, 1 passed.
+
+```bash
+scripts/tron-release-notes --test
+```
+
+Result: exit 0.
+
+```bash
+cd packages/ios-app && xcodegen generate
+git diff --exit-code packages/ios-app/TronMobile.xcodeproj
+xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/AppConstantsTests -only-testing:TronMobileTests/SourceGuardTests
+```
+
+Result: exit 0. The focused iOS batch ran 5 `AppConstantsTests` and 35
+`SourceGuardTests`; all passed. A first focused run failed on the xcconfig URL
+escape, empty feedback-setting parsing, and remaining neutral fixture paths;
+those findings were fixed before this green rerun.
+
+Direct grep for the guard's banned raw-home, encoded-home, personal
+handle/domain, and split-construction patterns was run with only the guard
+script and Rust path-regression test excluded.
+
+Result: no hits.

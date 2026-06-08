@@ -39,7 +39,7 @@ final class SessionActivityStreamTests: XCTestCase {
             "modelPrimitiveName": "execute",
             "operationName": "state_write",
             "capabilityArgs": {
-                "path": "/Users/moose/Downloads/projects/tron"
+                "path": "/tmp/tron-fixtures/tron"
             },
             "durationMs": 60600,
             "isError": true

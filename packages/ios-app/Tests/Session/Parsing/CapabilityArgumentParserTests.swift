@@ -64,14 +64,14 @@ struct CapabilityArgumentParserTests {
 
     @Test("Extracts file_path field")
     func testFilePathExtraction() {
-        let json = "{\"file_path\": \"/Users/test/example.swift\"}"
-        #expect(CapabilityArgumentParser.filePath(from: json) == "/Users/test/example.swift")
+        let json = "{\"file_path\": \"/tmp/tron-fixtures/test/example.swift\"}"
+        #expect(CapabilityArgumentParser.filePath(from: json) == "/tmp/tron-fixtures/test/example.swift")
     }
 
     @Test("Falls back to path field when file_path missing")
     func testFilePathFallbackToPath() {
-        let json = "{\"path\": \"/Users/test/dir\"}"
-        #expect(CapabilityArgumentParser.filePath(from: json) == "/Users/test/dir")
+        let json = "{\"path\": \"/tmp/tron-fixtures/test/dir\"}"
+        #expect(CapabilityArgumentParser.filePath(from: json) == "/tmp/tron-fixtures/test/dir")
     }
 
     @Test("Prefers file_path over path")
@@ -206,7 +206,7 @@ struct CapabilityArgumentParserTests {
 
     @Test("Shortens path to filename")
     func testShortenPath() {
-        #expect(CapabilityArgumentParser.shortenPath("/Users/test/project/file.swift") == "file.swift")
+        #expect(CapabilityArgumentParser.shortenPath("/tmp/tron-fixtures/test/project/file.swift") == "file.swift")
     }
 
     @Test("Handles empty path")
@@ -256,8 +256,8 @@ struct CapabilityArgumentParserTests {
 
     @Test("Parses filesystem read-file arguments")
     func testFilesystemReadFileArgs() {
-        let args = "{\"file_path\": \"/Users/test/Workspace/tron/packages/agent/src/index.ts\"}"
-        #expect(CapabilityArgumentParser.filePath(from: args) == "/Users/test/Workspace/tron/packages/agent/src/index.ts")
+        let args = "{\"file_path\": \"/tmp/tron-fixtures/test/Workspace/tron/packages/agent/src/index.ts\"}"
+        #expect(CapabilityArgumentParser.filePath(from: args) == "/tmp/tron-fixtures/test/Workspace/tron/packages/agent/src/index.ts")
         #expect(CapabilityArgumentParser.shortenPath(CapabilityArgumentParser.filePath(from: args)) == "index.ts")
     }
 
@@ -296,8 +296,8 @@ struct CapabilityArgumentParserTests {
 
     @Test("Parses filesystem edit-file arguments")
     func testFilesystemEditFileArgs() {
-        let args = "{\"file_path\": \"/Users/test/server.py\"}"
-        #expect(CapabilityArgumentParser.filePath(from: args) == "/Users/test/server.py")
+        let args = "{\"file_path\": \"/tmp/tron-fixtures/test/server.py\"}"
+        #expect(CapabilityArgumentParser.filePath(from: args) == "/tmp/tron-fixtures/test/server.py")
     }
 
     @Test("Parses arguments with description field")

@@ -15,7 +15,7 @@ Scorecard:
 |----------|--------|
 | Branch | `codex/primitive-engine-teardown` |
 | Worktree status | `git status --short` produced no output before setup edits. |
-| Plan source | `/Users/moose/Downloads/PLAN.md` |
+| Plan source | `/Users/<USER>/Downloads/PLAN.md` |
 | Cleanup skill | `scorecard-goal-runner` loaded for scorecard-driven execution. |
 | README/context | Root `README.md` describes the primitive branch and canonical build/test entry points. |
 | Ledger context | Prior Tron ledger lessons queried before implementation. |

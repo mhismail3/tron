@@ -26,6 +26,8 @@
 	<string>$(TRON_CANONICAL_VERSION)</string>
 	<key>TRONFeedbackEmail</key>
 	<string>$(TRON_FEEDBACK_EMAIL)</string>
+	<key>TRONMacDownloadURL</key>
+	<string>$(TRON_MAC_DOWNLOAD_URL)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>

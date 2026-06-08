@@ -234,7 +234,7 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
                 "details": {
                     "status": "ok",
                     "output": {
-                        "path": "/Users/moose/Downloads/projects/testspace/runtime/current",
+                        "path": "/tmp/tron-fixtures/testspace/runtime/current",
                         "entries": []
                     }
                 }

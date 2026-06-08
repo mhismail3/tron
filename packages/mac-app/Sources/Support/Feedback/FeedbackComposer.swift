@@ -9,7 +9,7 @@ struct FeedbackIssueOpenPlan: Equatable {
 /// Redacts log text before it enters the prefilled issue body.
 struct FeedbackIssueComposer {
     static let maxPrefilledURLLength = 7_000
-    private static let repoOwner = "mh" + "is" + "mail" + "3"
+    private static let repoOwner = "tron-owner"
     private static let repoName = "tron"
 
     let appVersion: String

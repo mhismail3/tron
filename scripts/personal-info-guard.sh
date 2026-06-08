@@ -6,7 +6,9 @@
 #
 #   /Users/moose           — raw filesystem path that won't exist for other users
 #   -Users-moose-          — Claude-Code-encoded form of the same path
-#   github.com/moose       — URL to a non-existent GitHub repo
+#   github.com/moose       — personal GitHub handle
+#   mhismail3              — personal GitHub handle, including split-string forms
+#   mhismail.com           — personal feedback domain
 #   e.g. moose@            — placeholder / example text leaking the username
 #
 # These differ from intentional uses of "moose":
@@ -14,6 +16,7 @@
 #     guard (`format!("/Users/{}", "moose")`) — that's the test, not a leak.
 #   - auth_tests.rs uses literals like "moose@macbook" as test fixtures.
 #   - ContentView.swift comments mention "Circuit moose logo" (internal name).
+#   - paths tests construct split personal-info needles as regression guards.
 #
 # Allowlist below covers those intentional cases. Everything else is a fail.
 #
@@ -32,16 +35,22 @@ cd "$ROOT"
 PATTERNS=(
     '/Users/moose|raw home path; should be /Users/<USER> or use paths.rs helpers'
     '\-Users\-moose\-|Claude-Code encoded developer path'
-    'github\.com/moose|wrong GitHub handle (real repo is mhismail3/tron)'
+    'github\.com/moose|personal GitHub handle'
+    'mhismail3|personal GitHub handle; use a generic placeholder or configured repository URL'
+    'mhismail\.com|personal domain; use configured feedback recipient'
     'e\.g\. moose@|placeholder text leaking developer username'
     '"moose@iphone"|hardcoded example matching developer device'
+    '"mh"[[:space:]]*\+[[:space:]]*"is"[[:space:]]*\+[[:space:]]*"mail"|split personal handle construction'
+    '"mh"[[:space:]]*,[[:space:]]*"is"[[:space:]]*,[[:space:]]*"mail"|split personal handle regression needle outside allowlisted tests'
+    '"tron@"[[:space:]]*\+[[:space:]]*"mh"|split personal feedback email construction'
 )
 
 # Files / directories that may legitimately contain "moose" (test fixtures,
 # regression-guard needle construction, internal nicknames). Each entry is
 # matched as a glob against the file path relative to repo root.
 ALLOWLIST_PATHS=(
-    'packages/agent/src/shared/foundation/paths.rs'
+    'packages/agent/src/shared/foundation/paths/mod.rs'
+    'packages/agent/src/shared/foundation/paths/tests.rs'
     'packages/agent/src/domains/auth/**'
     'packages/ios-app/Sources/UI/Chat/Shell/ContentView.swift'
     'scripts/personal-info-guard.sh'

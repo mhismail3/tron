@@ -26,10 +26,10 @@ final class SettingsStateTests: XCTestCase {
 
     func testDisplayQuickSessionWorkspaceCollapsesTilde() {
         let state = SettingsState()
-        state.quickSessionWorkspace = "/Users/testuser/Projects/myapp"
+        state.quickSessionWorkspace = "/tmp/tron-fixtures/testuser/Projects/myapp"
         let display = state.displayQuickSessionWorkspace
         XCTAssertTrue(display.hasPrefix("~/"))
-        XCTAssertFalse(display.contains("/Users/testuser/"))
+        XCTAssertFalse(display.contains("/tmp/tron-fixtures/testuser/"))
     }
 
     func testDisplayQuickSessionWorkspaceHandlesNonUserPath() {

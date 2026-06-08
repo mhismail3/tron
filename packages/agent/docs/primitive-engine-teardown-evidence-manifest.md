@@ -494,13 +494,13 @@ Evidence:
   failed with 6 issues on `skills_json` in `DraftRepository.swift`,
   `DatabaseSchema.swift`, `DraftRepositoryTests.swift`, and
   `EventDatabaseTests.swift`; result bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-07-47--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-07-47--0700.xcresult`.
 - `cd packages/ios-app && xcodegen generate` -> exit 0.
 - Green focused proof:
   `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/DraftRepositoryTests -only-testing:TronMobileTests/EventDatabaseTests/testSessionDraftsTableExists -only-testing:TronMobileTests/EventDatabaseTests/testSessionDraftsTable_basicCRUD -only-testing:TronMobileTests/EventDatabaseTests/testClearAll_includesSessionDrafts -only-testing:TronMobileTests/DraftStoreTests`
   -> exit 0, 37 XCTest tests and 21 SourceGuard Swift Testing tests passed;
   result bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-10-41--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-10-41--0700.xcresult`.
 - Stale-token scan:
   `rg -n "skills_json|spells_json|selectedSkills|SelectedSkill" packages/ios-app/Sources packages/ios-app/Tests -g '!SourceGuardTests.swift'`
   -> exit 1/no matches.
@@ -552,13 +552,13 @@ Evidence:
   `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests`
   -> exit 65. `SourceGuardTests.testPrimitiveShellHasNoUserInteractionPausePlane`
   failed with 119 stale prompt-plane matches before deletion; result bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-14-58--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-14-58--0700.xcresult`.
 - `cd packages/ios-app && xcodegen generate` -> exit 0.
 - Green focused iOS proof:
   `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/AgentClientTests -only-testing:TronMobileTests/UnifiedEventTransformerTests -only-testing:TronMobileTests/CapabilityLifecyclePluginTests -only-testing:TronMobileTests/CapabilityInvocationCoordinatorTests -only-testing:TronMobileTests/EventDispatchCoordinatorTests -only-testing:TronMobileTests/TurnLifecycleCoordinatorTests -only-testing:TronMobileTests/ChatViewModelEventRoutingTests -only-testing:TronMobileTests/MessageFinderTests -only-testing:TronMobileTests/ChatViewModelFindMessageTests -only-testing:TronMobileTests/ChatSheetTests -only-testing:TronMobileTests/SheetCoordinatorLifecycleTests -only-testing:TronMobileTests/IPadSheetPresentationTests -only-testing:TronMobileTests/MessagingCoordinatorTests`
   -> exit 0, 228 XCTest tests and 36 Swift Testing tests passed; result
   bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-31-18--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-31-18--0700.xcresult`.
 - `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
   -> exit 0.
 - `cargo check --manifest-path packages/agent/Cargo.toml --bin tron`
@@ -582,7 +582,7 @@ Evidence:
   `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/UnifiedEventTransformerTests -only-testing:TronMobileTests/MessagePayloadTests`
   -> exit 0, 64 XCTest tests and 22 SourceGuard Swift Testing tests passed;
   result bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-35-14--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-35-14--0700.xcresult`.
 - Follow-up stale-token scan for `answerCount`, `confirmationDecision`,
   `answered_questions`, `SubmitAnswers`, `agent::submit_answers`,
   `capability.pause`, `CapabilityPause`, `ask_user`, `interactionStatus`,
@@ -631,11 +631,11 @@ Evidence:
   -> exit 0, 22 SourceGuard Swift Testing tests passed; the
   `EngineProtocolTypesTests` selector intentionally selected no XCTest class
   because the file is split across concrete model test classes. Result bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-39-18--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-39-18--0700.xcresult`.
 - Correct focused model proof:
   `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SessionTypesTests -only-testing:TronMobileTests/TokenTypesTests -only-testing:TronMobileTests/EventTypesTests -only-testing:TronMobileTests/AttachmentTypesTests -only-testing:TronMobileTests/SystemTypesTests -only-testing:TronMobileTests/ModelTypesExtendedTests -only-testing:TronMobileTests/EngineProtocolBaseTypesTests`
   -> exit 0, 25 XCTest tests passed; result bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-40-52--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-40-52--0700.xcresult`.
 - `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants -- --nocapture`
   -> exit 0, 17 tests.
 
@@ -678,7 +678,7 @@ Evidence:
   `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/EventDispatchCoordinatorTests -only-testing:TronMobileTests/IPadSheetPresentationTests`
   -> exit 0, 25 XCTest tests and 23 SourceGuard Swift Testing tests passed;
   result bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-47-46--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_08-47-46--0700.xcresult`.
 - Stale-token scan:
   `rg -n "ProcessListSheet|ProcessState|ProcessEventHandler|ProcessSpawnedPlugin|ProcessCompletedPlugin|ProcessStatusUpdatePlugin|JobBackgroundedPlugin|ManageProcessResultViewer|showProcessSheet|clearProcessState|handleProcessSpawned|handleProcessCompleted|handleProcessStatusUpdate|handleJobBackgrounded|process\\.spawned|process\\.completed|process\\.status_update|job\\.backgrounded|case processes" packages/ios-app/Sources packages/ios-app/Tests packages/ios-app/project.yml -g '!SourceGuardTests.swift'`
   -> exit 1/no matches.
@@ -737,7 +737,7 @@ Evidence:
 - Focused iOS proof:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/AgentClientTests -only-testing:TronMobileTests/DefaultAgentRepositoryTests -only-testing:TronMobileTests/AttachmentTypesTests -only-testing:TronMobileTests/MessagingCoordinatorTests -only-testing:TronMobileTests/AttachmentTests -only-testing:TronMobileTests/InputBarStateTests -only-testing:TronMobileTests/InputBarContentAreaChipTests`
   -> exit 0, 75 XCTest tests plus 31 Swift Testing tests passed; result bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_09-02-50--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_09-02-50--0700.xcresult`.
 
 Residual risk: this closes the retained/successor iOS `Attachments` open loop
 and removes the legacy prompt image API. Later addenda close the fixed iOS tree
@@ -789,7 +789,7 @@ Evidence:
 - Focused iOS proof:
   `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/EventDatabaseTests -only-testing:TronMobileTests/EventStoreManagerTests -only-testing:TronMobileTests/SessionEventForkableTests -only-testing:TronMobileTests/SessionEventSummaryTests -only-testing:TronMobileTests/UnifiedEventTransformerReconstructionOrderTests -only-testing:TronMobileTests/SessionRepositoryTests -only-testing:TronMobileTests/SessionClientTests -only-testing:TronMobileTests/DefaultSessionRepositoryTests`
   -> exit 0, 117 XCTest tests plus 42 Swift Testing tests passed; result bundle
-  `/Users/moose/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_09-14-42--0700.xcresult`.
+  `/Users/<USER>/Library/Developer/Xcode/DerivedData/TronMobile-eqctauwqsqxkqyelqqpembdspvdk/Logs/Test/Test-Tron-2026.06.07_09-14-42--0700.xcresult`.
 
 Residual risk: this closes the fixed iOS SessionTree projection loop. Later
 addenda close the capability-support collapse, diagnostics/logging, dynamic
@@ -886,7 +886,7 @@ Evidence:
   `rg -n "server\\.update|SystemCheckForUpdatesResult|SystemUpdateStatusResult|checkForUpdates|getUpdateStatus|check_for_updates|get_update_status|UpdateChannel|UpdateFrequency|UpdateAction|updateEnabled|updateChannel|updateFrequency|updateAction|ServerUpdateSettingsItem|SettingsLabels\\.updates|updatesSection|updater-state|auto-update|self-update|server\\.update_available|release_fetcher|updater_state_path|platform::updater|pub mod updater|UpdateSettings|Check for updates" packages/agent/src packages/agent/tests packages/ios-app/Sources packages/ios-app/Tests packages/mac-app/Sources packages/mac-app/Tests scripts README.md packages/ios-app/docs packages/mac-app/docs -g '!target' -g '!DerivedData' -g '!SourceGuardTests.swift' -g '!primitive_engine_teardown_plan_invariants.rs'`
   -> exit 1/no matches.
 - Profile schema scan
-  `rg -n "\\[settings\\.server\\.update\\]|server\\.update" packages/agent/defaults /Users/moose/.tron/profiles -g '*.toml'`
+  `rg -n "\\[settings\\.server\\.update\\]|server\\.update" packages/agent/defaults /Users/<USER>/.tron/profiles -g '*.toml'`
   -> exit 1/no matches.
 
 Residual risk: this closes the product update-check loop. Later addenda close
@@ -960,7 +960,7 @@ Evidence:
 - Visual artifact emitted by the iOS settings layout run:
   `~/Library/Developer/CoreSimulator/Devices/7BDA4AF9-1C40-47E3-A925-0F88C191F263/data/Containers/Data/Application/97D46F17-177C-43C5-AFD0-CD53728F2ECB/Documents/tron-visual-artifacts/agent-settings-primitive-render.png`.
 - Residue scan:
-  `rg -n "payloadCapture|maxInlinePayloadBytes|PayloadCapture|observabilityPayloadCapture|observabilityMaxInlinePayloadBytes|Inline bytes|system::get_diagnostics|SystemDiagnosticsResult|getDiagnostics|system_diagnostics_value|ConnectionSettingsServerBackedSection|diagnosticsSection|LogStore|LogQueryOptions" packages/agent/src packages/agent/tests packages/agent/defaults packages/ios-app/Sources packages/ios-app/Tests README.md packages/ios-app/docs /Users/moose/.tron/profiles -g '!target' -g '!DerivedData' -g '!SourceGuardTests.swift' -g '!primitive_engine_teardown_plan_invariants.rs'`
+  `rg -n "payloadCapture|maxInlinePayloadBytes|PayloadCapture|observabilityPayloadCapture|observabilityMaxInlinePayloadBytes|Inline bytes|system::get_diagnostics|SystemDiagnosticsResult|getDiagnostics|system_diagnostics_value|ConnectionSettingsServerBackedSection|diagnosticsSection|LogStore|LogQueryOptions" packages/agent/src packages/agent/tests packages/agent/defaults packages/ios-app/Sources packages/ios-app/Tests README.md packages/ios-app/docs /Users/<USER>/.tron/profiles -g '!target' -g '!DerivedData' -g '!SourceGuardTests.swift' -g '!primitive_engine_teardown_plan_invariants.rs'`
   -> exit 1/no matches.
 - `git diff --check` -> exit 0.
 

@@ -18,7 +18,7 @@ final class CachedSessionTests: XCTestCase {
         XCTAssertEqual(sessionWithTitle.displayTitle, "My Project")
 
         // Session without title uses working directory
-        let sessionNoTitle = createTestSession(id: "s2", title: nil, workingDirectory: "/Users/test/project")
+        let sessionNoTitle = createTestSession(id: "s2", title: nil, workingDirectory: "/tmp/tron-fixtures/test/project")
         XCTAssertEqual(sessionNoTitle.displayTitle, "project")
     }
 
