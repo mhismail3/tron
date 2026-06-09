@@ -209,6 +209,40 @@ final class CapabilityInvocationCompletedPluginTests: XCTestCase {
         XCTAssertEqual(result?.displayResult, "Something went wrong")
     }
 
+    func testTransformPreservesCanonicalFailureEnvelope() throws {
+        let json = """
+        {
+            "type": "capability.invocation.completed",
+            "data": {
+                "invocationId": "capability-failure",
+                "modelPrimitiveName": "execute",
+                "isError": true,
+                "content": "Capability unavailable",
+                "duration": 12,
+                "details": {
+                    "failure": {
+                        "code": "CAPABILITY_PRIMITIVE_NOT_FOUND",
+                        "category": "capability",
+                        "message": "Primitive not found",
+                        "retryable": false,
+                        "recoverable": false,
+                        "origin": "capability",
+                        "invocationId": "capability-failure"
+                    }
+                }
+            }
+        }
+        """.data(using: .utf8)!
+
+        let event = try CapabilityInvocationCompletedPlugin.parse(from: json)
+        let result = try XCTUnwrap(CapabilityInvocationCompletedPlugin.transform(event) as? CapabilityInvocationCompletedPlugin.Result)
+
+        XCTAssertFalse(result.success)
+        XCTAssertEqual(result.failure?.code, "CAPABILITY_PRIMITIVE_NOT_FOUND")
+        XCTAssertEqual(result.failure?.category, "capability")
+        XCTAssertEqual(result.failure?.recoverable, false)
+    }
+
     func testParsesCanonicalServerEventPayloadFromCapabilityStore() throws {
         let json = """
         {

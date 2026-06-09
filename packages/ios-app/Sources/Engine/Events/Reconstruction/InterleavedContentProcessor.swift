@@ -199,7 +199,8 @@ enum InterleavedContentProcessor {
                 result: resultContent,
                 details: result?.details,
                 durationMs: result?.durationMs,
-                identity: identity
+                identity: identity,
+                errorClassification: result?.failure.map(CapabilityErrorClassification.init(failure:))
             )),
             timestamp: timestamp,
             tokenRecord: nil,

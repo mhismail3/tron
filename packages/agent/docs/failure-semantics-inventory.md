@@ -41,17 +41,18 @@ replay boundary.
 | `shared::server::errors::CapabilityError` | Converts to/from `FailureEnvelope` while preserving stable code and structured details. | Add final static guards that active transports use the envelope conversion before emitting errors. |
 | `shared::server::error_mapping` | Exhaustively maps every current `EngineError` variant; auth/session/event-store helpers still need explicit row-level mapping assertions. | Close FSC-3 with auth/session/event-store tests and uncovered-variant guards. |
 | `engine::kernel::EngineError` | Rich variants now map to stable public failure code/category/retryability/recoverability through `engine_error_to_failure`. | Keep new variants covered by the mapping matrix. |
-| `domains::model::providers::shared::ProviderError` | Produces canonical provider failures preserving provider, model, status, provider code, retry-after, retryable, recoverable, and cancellation. | iOS must consume the fields instead of reclassifying server-authored provider failures. |
+| `domains::model::providers::shared::ProviderError` | Produces canonical provider failures preserving provider, model, status, provider code, retry-after, retryable, recoverable, and cancellation. | Keep provider consumers on the canonical envelope. |
 | `domains::model::responder::ModelResponseError` | Carries a `FailureEnvelope` from provider/model boundary to agent runtime. | Remove or guard fallback conversions that lack provider/model context before closeout if still reachable. |
 | `domains::agent::loop::RuntimeError` | Converts through canonical failure envelopes before live event emission. | Durable event payloads need the same envelope under FSC-9. |
 | `TronEvent::TurnFailed` | Canonical builder populates code/category/retryable/recoverable/origin/details for active runtime paths. | Durable `turn.failed` payload enrichment remains FSC-9; optional fields remain for historical/imported rows until closeout policy is set. |
-| `TronEvent::Error` | Canonical builder populates code/category/retryable/recoverable/origin/details plus provider/model/status/error type when present. | iOS decoding/projection parity remains FSC-8. |
+| `TronEvent::Error` | Canonical builder populates code/category/retryable/recoverable/origin/details plus provider/model/status/error type when present. | iOS live and persisted projections now consume `details.failure`; add final source guard in FSC-10. |
 | `capability.invocation.completed` | Error completions include `isError=true` and `details.failure` with the full canonical envelope. | Replay/export needs to retain the same details under FSC-9. |
 | `/engine` WebSocket response errors | Error frames serialize the canonical failure envelope and retain outer trace id with sanitized public message. | Add source guard in FSC-10. |
 | Durable error payloads | `error.agent`, `error.capability`, `error.provider`, and `turn.failed` accept canonical fields; active interrupted `turn.failed` rows store `details.failure`. | Keep future durable failure writers on the canonical envelope. |
 | Replay manifest | Session event payloads remain raw durable truth; engine invocation errors export `error.failure` plus legacy diagnostic fields. | Keep new replay failure sections on canonical envelopes. |
-| iOS engine protocol errors | Decodes code/message/details and keeps unknown codes. | Decode canonical fields and avoid inventing a divergent taxonomy when server fields exist. |
-| iOS event projections and capability UI | Renders error code/details from event payloads and capability details. | Use server-provided canonical failure details for diagnostics and rendering. |
+| iOS canonical failure DTO | `CanonicalFailurePayload` decodes the server envelope from `/engine` errors and `details.failure`. | Keep as the only Swift representation of server-authored failure semantics. |
+| iOS engine protocol errors | Decode the full canonical envelope and expose `failure`; child engine invocation errors must carry `details.failure` or the client treats the response as invalid. | Add FSC-10 guard that `/engine` error decoding cannot regress to code/message-only. |
+| iOS event projections and capability UI | Live `error`/`agent.turn_failed`, persisted `error.*`/`turn.failed`, provider pills, session summaries, expanded content, and capability error rows prefer `details.failure`. | Add FSC-10 guard that current failure plugins do not reintroduce placeholder defaults or parallel classification. |
 
 ## Known Direct Construction Sites
 
@@ -68,13 +69,12 @@ replay boundary.
 
 ## Open Loops
 
-- FSC-1 remains open until the iOS and durable replay changes land and this
-  inventory is re-audited against source.
+- FSC-1 remains open until this inventory and the TSV are re-audited against
+  source and protected by a closeout guard.
 - FSC-3 still needs explicit auth/session/event-store mapping assertions and
   closeout guards for new enum variants.
-- FSC-8 must audit iOS `ErrorClassification` and connection retry classifiers
-  carefully. Transport/network reachability classifications may remain local
-  when no server response exists; server-authored failure classifications must
-  not be duplicated.
+- FSC-8 is closed for current server-authored iOS failure surfaces. Local
+  transport/network reachability classifications may remain local only when no
+  server failure envelope exists.
 - FSC-9 is closed for current durable/replay surfaces; future durable failure
   writers must preserve `details.failure` or equivalent canonical fields.

@@ -50,10 +50,11 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Campaign Scorecard",
         "Status: **active**",
-        "Current score: **62/100**",
+        "Current score: **70/100**",
         "| FSC-0 | Campaign harness | 6 | passed_after_fix |",
         "| FSC-2 | Canonical envelope | 12 | passed_after_fix |",
         "| FSC-7 | Provider retry semantics | 8 | passed_after_fix |",
+        "| FSC-8 | iOS parity | 8 | passed_after_fix |",
         "| FSC-9 | Observability and replay | 6 | passed_after_fix |",
         "| FSC-10 | Closeout gates | 10 | pending |",
         "`packages/agent/docs/failure-semantics-inventory.tsv`",
@@ -88,15 +89,17 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Evidence Manifest",
         "Status: **active**",
-        "Current score: **62/100**",
+        "Current score: **70/100**",
         "| FSC-0 | passed_after_fix |",
         "| FSC-2 | passed_after_fix |",
         "| FSC-7 | passed_after_fix |",
+        "| FSC-8 | passed_after_fix |",
         "| FSC-9 | passed_after_fix |",
         "| FSC-10 | pending |",
         "## FSC-0 Findings",
         "## Server Core Checkpoint Findings",
         "## Durable Replay Checkpoint Findings",
+        "## iOS Parity Checkpoint Findings",
         "## Verification Log",
     ] {
         assert!(
@@ -156,6 +159,7 @@ fn failure_semantics_inventory_tsv_covers_initial_surfaces() {
         "packages/agent/src/domains/agent/loop/turn_runner/mod.rs",
         "packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs",
         "packages/agent/src/transport/engine/socket/mod.rs",
+        "packages/ios-app/Sources/Engine/Protocol/Core/FailurePayload.swift",
         "packages/ios-app/Sources/Engine/Protocol/Core/EngineProtocolTypes.swift",
         "packages/ios-app/Sources/UI/Capabilities/Shared/ErrorClassification.swift",
     ] {
@@ -220,6 +224,69 @@ fn failure_semantics_server_core_uses_canonical_envelope() {
     assert!(
         socket.contains(".to_failure(FailureOrigin::Transport)"),
         "engine socket errors must serialize canonical failure envelopes"
+    );
+}
+
+#[test]
+fn failure_semantics_ios_uses_canonical_failure_payload() {
+    let failure_payload =
+        read_repo_file("packages/ios-app/Sources/Engine/Protocol/Core/FailurePayload.swift");
+    for required in [
+        "struct CanonicalFailurePayload",
+        "let retryable: Bool",
+        "let recoverable: Bool",
+        "static func fromDetails",
+        "details?.anyCodableDict(\"failure\")",
+    ] {
+        assert!(
+            failure_payload.contains(required),
+            "iOS canonical failure payload missing {required}"
+        );
+    }
+
+    let protocol_types =
+        read_repo_file("packages/ios-app/Sources/Engine/Protocol/Core/EngineProtocolTypes.swift");
+    assert!(
+        protocol_types.contains("init(failure: CanonicalFailurePayload)")
+            && protocol_types.contains("let category: String")
+            && protocol_types.contains("let origin: String"),
+        "iOS engine protocol errors must decode the canonical envelope"
+    );
+
+    let requests = read_repo_file(
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Requests.swift",
+    );
+    assert!(
+        requests.contains("guard let failure = error.failure")
+            && !requests.contains("\"ENGINE_ERROR\""),
+        "child engine errors must require details.failure instead of local fallback codes"
+    );
+
+    let error_plugin = read_repo_file(
+        "packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/ErrorPlugin.swift",
+    );
+    assert!(
+        error_plugin.contains("static let eventType = \"error\"")
+            && error_plugin
+                .contains("guard let failure = CanonicalFailurePayload.fromDetails(data.details)")
+            && !error_plugin.contains("failure?.code ?? data.code")
+            && !error_plugin.contains("failure?.message ??")
+            && !error_plugin.contains("\"UNKNOWN\"")
+            && !error_plugin.contains("\"Unknown error\""),
+        "live iOS error plugin must consume canonical failure data without placeholder defaults"
+    );
+
+    let turn_failed = read_repo_file(
+        "packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/TurnFailedPlugin.swift",
+    );
+    assert!(
+        turn_failed.contains("guard let turn = data.turn")
+            && turn_failed
+                .contains("let failure = CanonicalFailurePayload.fromDetails(data.details)")
+            && !turn_failed.contains("failure?.message ??")
+            && !turn_failed.contains("?? 0")
+            && !turn_failed.contains("?? false"),
+        "live iOS turn failure plugin must not invent turn or recoverability defaults"
     );
 }
 

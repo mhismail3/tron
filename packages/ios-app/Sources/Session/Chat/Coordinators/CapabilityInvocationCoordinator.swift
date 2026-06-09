@@ -140,6 +140,7 @@ final class CapabilityInvocationCoordinator {
             durationMs: pluginResult.duration,
             timestamp: pluginResult.timestamp ?? Date(),
             details: pluginResult.rawDetails,
+            failure: pluginResult.failure,
             identity: pluginResult.identity
         )
         context.enqueueCapabilityInvocationEnd(invocationCompletedData)

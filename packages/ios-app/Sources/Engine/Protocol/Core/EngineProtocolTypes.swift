@@ -166,6 +166,10 @@ struct EngineChildError: Decodable, Sendable {
     let kind: String?
     let message: String?
     let details: [String: AnyCodable]?
+
+    var failure: CanonicalFailurePayload? {
+        CanonicalFailurePayload.fromDetails(details)
+    }
 }
 
 /// Known engine error codes from the server.
@@ -198,8 +202,109 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
 /// Structured engine protocol error details.
 struct EngineProtocolError: Decodable, Error, LocalizedError, Sendable {
     let code: String
+    let category: String
     let message: String
+    let retryable: Bool
+    let recoverable: Bool
+    let origin: String
+    let provider: String?
+    let model: String?
+    let statusCode: Int?
+    let errorType: String?
+    let retryAfterMs: Int?
+    let suggestion: String?
     let details: [String: AnyCodable]?
+    let traceId: String?
+    let invocationId: String?
+    let parentInvocationId: String?
+    let sessionId: String?
+    let sourceEventId: String?
+
+    init(
+        code: String,
+        category: String,
+        message: String,
+        retryable: Bool,
+        recoverable: Bool,
+        origin: String,
+        provider: String? = nil,
+        model: String? = nil,
+        statusCode: Int? = nil,
+        errorType: String? = nil,
+        retryAfterMs: Int? = nil,
+        suggestion: String? = nil,
+        details: [String: AnyCodable]? = nil,
+        traceId: String? = nil,
+        invocationId: String? = nil,
+        parentInvocationId: String? = nil,
+        sessionId: String? = nil,
+        sourceEventId: String? = nil
+    ) {
+        self.code = code
+        self.category = category
+        self.message = message
+        self.retryable = retryable
+        self.recoverable = recoverable
+        self.origin = origin
+        self.provider = provider
+        self.model = model
+        self.statusCode = statusCode
+        self.errorType = errorType
+        self.retryAfterMs = retryAfterMs
+        self.suggestion = suggestion
+        self.details = details
+        self.traceId = traceId
+        self.invocationId = invocationId
+        self.parentInvocationId = parentInvocationId
+        self.sessionId = sessionId
+        self.sourceEventId = sourceEventId
+    }
+
+    init(failure: CanonicalFailurePayload) {
+        self.init(
+            code: failure.code,
+            category: failure.category,
+            message: failure.message,
+            retryable: failure.retryable,
+            recoverable: failure.recoverable,
+            origin: failure.origin,
+            provider: failure.provider,
+            model: failure.model,
+            statusCode: failure.statusCode,
+            errorType: failure.errorType,
+            retryAfterMs: failure.retryAfterMs,
+            suggestion: failure.suggestion,
+            details: failure.details,
+            traceId: failure.traceId,
+            invocationId: failure.invocationId,
+            parentInvocationId: failure.parentInvocationId,
+            sessionId: failure.sessionId,
+            sourceEventId: failure.sourceEventId
+        )
+    }
+
+    var failure: CanonicalFailurePayload {
+        CanonicalFailurePayload(
+            code: code,
+            category: category,
+            message: message,
+            retryable: retryable,
+            recoverable: recoverable,
+            origin: origin,
+            provider: provider,
+            model: model,
+            statusCode: statusCode,
+            errorType: errorType,
+            retryAfterMs: retryAfterMs,
+            suggestion: suggestion,
+            details: details,
+            traceId: traceId,
+            invocationId: invocationId,
+            parentInvocationId: parentInvocationId,
+            sessionId: sessionId,
+            sourceEventId: sourceEventId
+        )
+    }
 
     var errorDescription: String? { message }
 

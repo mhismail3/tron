@@ -75,6 +75,7 @@ extension ChatViewModel {
                 invocation.durationMs = data.durationMs
                 invocation.completedAt = data.timestamp
                 invocation.details = data.details
+                invocation.errorClassification = data.failure.map(CapabilityErrorClassification.init(failure:))
                 invocation.progressMessage = nil
                 invocation.progressPercent = nil
                 invocation.identity = data.identity

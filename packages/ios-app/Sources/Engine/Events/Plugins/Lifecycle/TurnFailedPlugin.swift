@@ -18,7 +18,10 @@ enum TurnFailedPlugin: EventPlugin {
             let error: String?
             let code: String?
             let category: String?
+            let retryable: Bool?
             let recoverable: Bool?
+            let origin: String?
+            let details: [String: AnyCodable]?
             let partialContent: String?
         }
     }
@@ -30,18 +33,34 @@ enum TurnFailedPlugin: EventPlugin {
         let error: String
         let code: String?
         let category: String?
+        let retryable: Bool?
         let recoverable: Bool
+        let origin: String?
+        let details: [String: AnyCodable]?
+        let failure: CanonicalFailurePayload?
+        let partialContent: String?
     }
 
     // MARK: - Protocol Implementation
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        Result(
-            turn: event.data?.turn ?? 0,
-            error: event.data?.error ?? "Unknown error",
-            code: event.data?.code,
-            category: event.data?.category,
-            recoverable: event.data?.recoverable ?? false
+        guard let data = event.data else { return nil }
+        guard let turn = data.turn,
+              let failure = CanonicalFailurePayload.fromDetails(data.details) else {
+            return nil
+        }
+
+        return Result(
+            turn: turn,
+            error: failure.message,
+            code: failure.code,
+            category: failure.category,
+            retryable: failure.retryable,
+            recoverable: failure.recoverable,
+            origin: failure.origin,
+            details: data.details,
+            failure: failure,
+            partialContent: data.partialContent
         )
     }
 }

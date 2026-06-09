@@ -70,7 +70,11 @@ enum ErrorEventProjection {
             retryable: parsed.retryable,
             statusCode: parsed.statusCode,
             errorType: parsed.errorType,
-            model: parsed.model
+            model: parsed.model,
+            recoverable: parsed.recoverable,
+            origin: parsed.origin,
+            retryAfterMs: parsed.retryAfterMs,
+            failure: parsed.failure
         )
         return ChatMessage(
             role: .system,
@@ -94,7 +98,8 @@ enum ErrorEventProjection {
             content: .systemEvent(.turnFailed(
                 error: parsed.error,
                 code: parsed.code,
-                recoverable: parsed.recoverable
+                recoverable: parsed.recoverable,
+                failure: parsed.failure
             )),
             timestamp: timestamp
         )

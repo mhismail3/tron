@@ -52,8 +52,13 @@ enum MessageContent: Equatable {
         .systemEvent(.catchingUp)
     }
     /// In-chat notification for turn failure
-    static func turnFailed(error: String, code: String?, recoverable: Bool) -> MessageContent {
-        .systemEvent(.turnFailed(error: error, code: code, recoverable: recoverable))
+    static func turnFailed(
+        error: String,
+        code: String?,
+        recoverable: Bool,
+        failure: CanonicalFailurePayload? = nil
+    ) -> MessageContent {
+        .systemEvent(.turnFailed(error: error, code: code, recoverable: recoverable, failure: failure))
     }
     /// In-chat notification for provider API errors
     static func providerError(_ data: ProviderErrorDetailData) -> MessageContent {

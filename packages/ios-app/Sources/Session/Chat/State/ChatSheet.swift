@@ -26,9 +26,41 @@ struct ProviderErrorDetailData: Equatable, Hashable {
     let message: String
     let suggestion: String?
     let retryable: Bool
+    let recoverable: Bool?
+    let origin: String?
+    let retryAfterMs: Int?
     let statusCode: Int?
     let errorType: String?
     let model: String?
+    let failure: CanonicalFailurePayload?
+
+    init(
+        provider: String,
+        category: String,
+        message: String,
+        suggestion: String?,
+        retryable: Bool,
+        statusCode: Int?,
+        errorType: String?,
+        model: String?,
+        recoverable: Bool? = nil,
+        origin: String? = nil,
+        retryAfterMs: Int? = nil,
+        failure: CanonicalFailurePayload? = nil
+    ) {
+        self.provider = provider
+        self.category = category
+        self.message = message
+        self.suggestion = suggestion
+        self.retryable = retryable
+        self.statusCode = statusCode
+        self.errorType = errorType
+        self.model = model
+        self.recoverable = recoverable
+        self.origin = origin
+        self.retryAfterMs = retryAfterMs
+        self.failure = failure
+    }
 }
 
 /// Identifiable enum representing all possible sheets in ChatView.

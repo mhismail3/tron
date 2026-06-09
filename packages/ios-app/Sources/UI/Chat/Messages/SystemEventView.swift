@@ -53,7 +53,7 @@ struct SystemEventView: View {
         case .catchingUp:
             CatchingUpNotificationView()
 
-        case .turnFailed(let error, let code, let recoverable):
+        case .turnFailed(let error, let code, let recoverable, _):
             // C7: when the server marked the failure recoverable, surface a
             // "Retry" button that re-issues the last user prompt. Handler
             // lives in `ChatView.handleBubbleTap` → `retryLastTurn`.

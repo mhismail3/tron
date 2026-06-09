@@ -72,6 +72,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
         let rawDetails: [String: AnyCodable]?
         let identity: CapabilityIdentity
         let timestamp: Date?
+        let failure: CanonicalFailurePayload?
 
         init(
             invocationId: String,
@@ -82,7 +83,8 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
             details: EventData.CapabilityResultDetails?,
             rawDetails: [String: AnyCodable]?,
             identity: CapabilityIdentity? = nil,
-            timestamp: Date? = nil
+            timestamp: Date? = nil,
+            failure: CanonicalFailurePayload? = nil
         ) {
             self.invocationId = invocationId
             self.modelPrimitiveName = modelPrimitiveName
@@ -93,6 +95,7 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
             self.rawDetails = rawDetails
             self.identity = identity ?? CapabilityIdentity()
             self.timestamp = timestamp
+            self.failure = failure
         }
 
         /// Display-friendly result text.
@@ -113,7 +116,8 @@ enum CapabilityInvocationCompletedPlugin: DispatchableEventPlugin {
             details: event.data.details,
             rawDetails: event.data.rawDetails,
             identity: event.data.identity,
-            timestamp: event.timestamp.flatMap(DateParser.parse)
+            timestamp: event.timestamp.flatMap(DateParser.parse),
+            failure: CanonicalFailurePayload.fromDetails(event.data.rawDetails)
         )
     }
 

@@ -44,7 +44,7 @@ protocol SessionIdentifiable: AnyObject {
 /// ```
 /// idle → processing          (turn start / send message)
 /// processing → idle          (agent.complete / agent.ready)
-/// any → idle                  (agent.error / disconnect)
+/// any → idle                  (live error / disconnect)
 /// ```
 ///
 /// `isCompacting` is orthogonal and tracked separately.

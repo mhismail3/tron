@@ -685,10 +685,13 @@ model-visible primitive name, invocation id, trace id, turn, operation
 arguments, result content, error state, and duration. iOS renders active work
 from those primitive fields and does not map deleted built-in names to
 capability identity.
-Live `turn.failed` and `error.*` runtime events are emitted through canonical
-server builders. New runtime emissions carry stable code/category,
+Live `agent.turn_failed` and `error` runtime events are emitted through
+canonical server builders. New runtime emissions carry stable code/category,
 retryability, recoverability, origin, and `details.failure`; provider-backed
 failures also preserve provider/model/status/error-type semantics when known.
+iOS decodes the same server-authored envelope through `CanonicalFailurePayload`
+and prefers `details.failure` in live plugins, persisted projections, provider
+error pills, session summaries, and capability error rows.
 
 ### Event Streaming
 

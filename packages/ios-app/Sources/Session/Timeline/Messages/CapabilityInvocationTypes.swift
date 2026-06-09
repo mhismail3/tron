@@ -168,6 +168,27 @@ struct CapabilityErrorClassification: Equatable, Sendable {
     var category: String?
     var message: String?
     var recoverable: Bool?
+
+    init(
+        code: String? = nil,
+        category: String? = nil,
+        message: String? = nil,
+        recoverable: Bool? = nil
+    ) {
+        self.code = code
+        self.category = category
+        self.message = message
+        self.recoverable = recoverable
+    }
+
+    init(failure: CanonicalFailurePayload) {
+        self.init(
+            code: failure.code,
+            category: failure.category,
+            message: failure.message,
+            recoverable: failure.recoverable
+        )
+    }
 }
 
 extension CapabilityIdentity {

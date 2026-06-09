@@ -35,6 +35,10 @@ final class EventPluginTests: XCTestCase {
         XCTAssertFalse(ErrorPlugin.eventType.isEmpty)
     }
 
+    func testErrorPluginUsesCurrentServerEventType() {
+        XCTAssertEqual(ErrorPlugin.eventType, "error")
+    }
+
     // MARK: - Registry Tests
 
     func testRegisterPlugin() {
@@ -74,6 +78,68 @@ final class EventPluginTests: XCTestCase {
         } else {
             XCTFail("Expected .plugin case")
         }
+    }
+
+    func testParseErrorEventPreservesCanonicalFailure() {
+        EventRegistry.shared.register(ErrorPlugin.self)
+
+        let json = """
+        {
+            "type": "error",
+            "sessionId": "session-123",
+            "timestamp": "2026-06-09T10:00:00Z",
+            "data": {
+                "error": "top-level",
+                "code": "TOP_LEVEL",
+                "details": {
+                    "failure": {
+                        "code": "PROVIDER_RATE_LIMITED",
+                        "category": "rate_limit",
+                        "message": "canonical",
+                        "retryable": true,
+                        "recoverable": true,
+                        "origin": "model_provider",
+                        "provider": "anthropic"
+                    }
+                }
+            }
+        }
+        """.data(using: .utf8)!
+
+        let parsed = EventRegistry.shared.parse(type: "error", data: json)
+
+        guard case .plugin(_, _, _, _, let transform) = parsed,
+              let result = transform() as? ErrorPlugin.Result else {
+            XCTFail("expected ErrorPlugin.Result")
+            return
+        }
+        XCTAssertEqual(result.code, "PROVIDER_RATE_LIMITED")
+        XCTAssertEqual(result.message, "canonical")
+        XCTAssertEqual(result.category, "rate_limit")
+        XCTAssertEqual(result.provider, "anthropic")
+        XCTAssertEqual(result.failure?.origin, "model_provider")
+    }
+
+    func testParseErrorEventWithoutCanonicalFailureDropsTransform() {
+        EventRegistry.shared.register(ErrorPlugin.self)
+
+        let json = """
+        {
+            "type": "error",
+            "data": {
+                "error": "top-level only",
+                "code": "TOP_LEVEL"
+            }
+        }
+        """.data(using: .utf8)!
+
+        let parsed = EventRegistry.shared.parse(type: "error", data: json)
+
+        guard case .plugin(_, _, _, _, let transform) = parsed else {
+            XCTFail("expected plugin parse")
+            return
+        }
+        XCTAssertNil(transform())
     }
 
     func testParseUnknownEventType() {

@@ -70,6 +70,8 @@ struct CapabilityInvocationCompletedPayload {
     let arguments: String?
     /// Capability-specific structured metadata.
     let details: [String: AnyCodable]?
+    /// Canonical server failure envelope when this completed result is an error.
+    let failure: CanonicalFailurePayload?
     let identity: CapabilityIdentity
 
     init?(from payload: [String: AnyCodable]) {
@@ -120,12 +122,8 @@ struct CapabilityInvocationCompletedPayload {
         }
 
         // Capability-specific details (new field persisted by Rust agent)
-        if let detailsValue = payload["details"],
-           let detailsDict = detailsValue.value as? [String: Any] {
-            self.details = detailsDict.mapValues { AnyCodable($0) }
-        } else {
-            self.details = nil
-        }
+        self.details = payload.anyCodableDict("details")
+        self.failure = CanonicalFailurePayload.fromDetails(self.details)
     }
 
 }
@@ -137,16 +135,25 @@ struct CapabilityInvocationCompletedPayload {
 struct AgentErrorPayload {
     let error: String
     let code: String?
+    let category: String?
+    let retryable: Bool?
     let recoverable: Bool
+    let origin: String?
+    let details: [String: AnyCodable]?
+    let failure: CanonicalFailurePayload?
 
     init?(from payload: [String: AnyCodable]) {
+        let details = payload.anyCodableDict("details")
+        let failure = CanonicalFailurePayload.fromDetails(details)
+
         // `recoverable` is non-optional on the server's `ErrorAgentPayload`.
         // Dropping the `?? false` default catches the case where a malformed
         // importer forgets to classify the error — we'd rather drop the
         // breadcrumb than silently mislabel it as unrecoverable.
-        guard let error = payload.string("error")
+        guard let error = failure?.message
+                ?? payload.string("error")
                 ?? payload.string("message"),
-              let recoverable = payload.bool("recoverable") else {
+              let recoverable = failure?.recoverable ?? payload.bool("recoverable") else {
             TronLogger.shared.warning(
                 "error.agent event missing required field(s) error/recoverable; dropping",
                 category: .events
@@ -155,8 +162,13 @@ struct AgentErrorPayload {
         }
 
         self.error = error
-        self.code = payload.string("code")
+        self.code = failure?.code ?? payload.string("code")
+        self.category = failure?.category ?? payload.string("category")
+        self.retryable = failure?.retryable ?? payload.bool("retryable")
         self.recoverable = recoverable
+        self.origin = failure?.origin ?? payload.string("origin")
+        self.details = details
+        self.failure = failure
     }
 }
 
@@ -167,18 +179,33 @@ struct CapabilityErrorPayload {
     let invocationId: String
     let error: String
     let code: String?
+    let category: String?
+    let retryable: Bool?
+    let recoverable: Bool?
+    let origin: String?
+    let details: [String: AnyCodable]?
+    let failure: CanonicalFailurePayload?
 
     init?(from payload: [String: AnyCodable]) {
+        let details = payload.anyCodableDict("details")
+        let failure = CanonicalFailurePayload.fromDetails(details)
+
         guard let modelPrimitiveName = payload.string("modelPrimitiveName"),
               let invocationId = payload.string("invocationId"),
-              let error = payload.string("error") else {
+              let error = failure?.message ?? payload.string("error") else {
             return nil
         }
 
         self.modelPrimitiveName = modelPrimitiveName
         self.invocationId = invocationId
         self.error = error
-        self.code = payload.string("code")
+        self.code = failure?.code ?? payload.string("code")
+        self.category = failure?.category ?? payload.string("category")
+        self.retryable = failure?.retryable ?? payload.bool("retryable")
+        self.recoverable = failure?.recoverable ?? payload.bool("recoverable")
+        self.origin = failure?.origin ?? payload.string("origin")
+        self.details = details
+        self.failure = failure
     }
 }
 
@@ -197,12 +224,20 @@ struct ProviderErrorPayload {
     let category: String
     let suggestion: String?
     let retryable: Bool
+    let recoverable: Bool?
+    let origin: String?
+    let details: [String: AnyCodable]?
     let retryAfter: Int?
+    let retryAfterMs: Int?
     let statusCode: Int?
     let errorType: String?
     let model: String?
+    let failure: CanonicalFailurePayload?
 
     init?(from payload: [String: AnyCodable]) {
+        let details = payload.anyCodableDict("details")
+        let failure = CanonicalFailurePayload.fromDetails(details)
+
         // `retryable` is non-optional on the server's `ErrorProviderPayload`.
         // Dropping the `?? false` default keeps a network-timeout event from
         // silently looking "non-retryable" to the UI just because the
@@ -218,16 +253,21 @@ struct ProviderErrorPayload {
             return nil
         }
 
-        self.provider = provider
-        self.error = error
-        self.code = payload.string("code")
-        self.category = category
-        self.suggestion = payload.string("suggestion")
-        self.retryable = retryable
+        self.provider = failure?.provider ?? provider
+        self.error = failure?.message ?? error
+        self.code = failure?.code ?? payload.string("code")
+        self.category = failure?.category ?? category
+        self.suggestion = failure?.suggestion ?? payload.string("suggestion")
+        self.retryable = failure?.retryable ?? retryable
+        self.recoverable = failure?.recoverable ?? payload.bool("recoverable")
+        self.origin = failure?.origin ?? payload.string("origin")
+        self.details = details
         self.retryAfter = payload.int("retryAfter")
-        self.statusCode = payload.int("statusCode")
-        self.errorType = payload.string("errorType")
-        self.model = payload.string("model")
+        self.retryAfterMs = failure?.retryAfterMs ?? payload.int("retryAfterMs")
+        self.statusCode = failure?.statusCode ?? payload.int("statusCode")
+        self.errorType = failure?.errorType ?? payload.string("errorType")
+        self.model = failure?.model ?? payload.string("model")
+        self.failure = failure
     }
 }
 
@@ -238,17 +278,26 @@ struct TurnFailedPayload {
     let error: String
     let code: String?
     let category: String?
+    let retryable: Bool?
     let recoverable: Bool
+    let origin: String?
+    let details: [String: AnyCodable]?
+    let failure: CanonicalFailurePayload?
+    let partialContent: String?
 
     init?(from payload: [String: AnyCodable]) {
+        let details = payload.anyCodableDict("details")
+        let failure = CanonicalFailurePayload.fromDetails(details)
+
         // `turn` and `recoverable` are both non-optional on the server's
         // `TurnFailedPayload`. The server emits `turn: 0` for failures that
         // happened before a turn was assigned — a decoded `0` is meaningful,
         // a missing field is not.
-        guard let error = payload.string("error")
+        guard let error = failure?.message
+                ?? payload.string("error")
                 ?? payload.string("message"),
               let turn = payload.int("turn"),
-              let recoverable = payload.bool("recoverable") else {
+              let recoverable = failure?.recoverable ?? payload.bool("recoverable") else {
             TronLogger.shared.warning(
                 "turn.failed event missing required field(s) error/turn/recoverable; dropping",
                 category: .events
@@ -258,8 +307,13 @@ struct TurnFailedPayload {
 
         self.turn = turn
         self.error = error
-        self.code = payload.string("code")
-        self.category = payload.string("category")
+        self.code = failure?.code ?? payload.string("code")
+        self.category = failure?.category ?? payload.string("category")
+        self.retryable = failure?.retryable ?? payload.bool("retryable")
         self.recoverable = recoverable
+        self.origin = failure?.origin ?? payload.string("origin")
+        self.details = details
+        self.failure = failure
+        self.partialContent = payload.string("partialContent")
     }
 }

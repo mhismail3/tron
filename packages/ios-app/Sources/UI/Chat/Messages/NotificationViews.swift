@@ -447,12 +447,24 @@ enum ErrorCategoryDisplay {
     static func label(for category: String, provider: String? = nil) -> String {
         let base: String
         switch category {
-        case "authentication": base = "Auth Error"
+        case "auth",
+             "authentication": base = "Auth Error"
         case "authorization": base = "Access Denied"
         case "rate_limit": base = "Rate Limited"
         case "network": base = "Network Error"
         case "server": base = "Server Error"
         case "invalid_request": base = "Invalid Request"
+        case "invalid_model": base = "Invalid Model"
+        case "not_found": base = "Not Found"
+        case "unavailable": base = "Unavailable"
+        case "conflict": base = "Conflict"
+        case "api": base = "API Error"
+        case "parse": base = "Parse Error"
+        case "cancelled": base = "Cancelled"
+        case "capability": base = "Capability Error"
+        case "engine": base = "Engine Error"
+        case "persistence": base = "Persistence Error"
+        case "internal": base = "Internal Error"
         case "quota": base = "Quota Exceeded"
         default: base = "Error"
         }
@@ -464,12 +476,24 @@ enum ErrorCategoryDisplay {
 
     static func icon(for category: String) -> String {
         switch category {
-        case "authentication": return "lock.fill"
+        case "auth",
+             "authentication": return "lock.fill"
         case "authorization": return "lock.shield.fill"
         case "rate_limit": return "clock.fill"
         case "network": return "wifi.slash"
         case "server": return "exclamationmark.icloud.fill"
         case "invalid_request": return "xmark.circle.fill"
+        case "invalid_model": return "cpu"
+        case "not_found": return "questionmark.folder.fill"
+        case "unavailable": return "exclamationmark.icloud.fill"
+        case "conflict": return "arrow.triangle.branch"
+        case "api": return "network"
+        case "parse": return "curlybraces"
+        case "cancelled": return "xmark.circle"
+        case "capability": return "wrench.and.screwdriver.fill"
+        case "engine": return "gearshape.2.fill"
+        case "persistence": return "externaldrive.fill"
+        case "internal": return "exclamationmark.octagon.fill"
         case "quota": return "creditcard.fill"
         default: return "exclamationmark.triangle.fill"
         }

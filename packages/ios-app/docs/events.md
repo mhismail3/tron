@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-09 (DRC-9 replay manifest/event parity).
+> Last verified: 2026-06-09 (FSC-8 canonical failure parity).
 
 The iOS app handles engine events through two paths:
 
@@ -48,8 +48,25 @@ non-chat audit evidence; it does not have a live plugin or render a chat
 message. `replay_manifest` is not an event at all: it is a pure-read
 capability/session result (`format: "tron.replay.v1"`), so no iOS persisted
 event case or live plugin is required for replay manifest exports.
-no iOS persisted event case or live plugin is required for replay manifest
-exports.
+
+## Failure Envelope Parity
+
+Server-authored failures use one canonical envelope. iOS represents it with
+`CanonicalFailurePayload` in `Sources/Engine/Protocol/Core/FailurePayload.swift`
+and reads it from `/engine` protocol errors and nested `details.failure`
+objects.
+
+The live `error` plugin and `agent.turn_failed` plugin do not synthesize
+placeholder codes, messages, turns, or recoverability. If the current server
+payload omits required failure fields, the plugin transform drops the malformed
+event. Persisted `error.*` and `turn.failed` projections, provider error pills,
+session summaries, expanded event content, and capability error rows prefer the
+server envelope whenever it is present.
+
+Local reachability and pairing failures may still be classified locally when no
+server response exists. Server-authored categories, retryability,
+recoverability, provider/model/status/error-type fields, and trace references
+must flow from the canonical envelope rather than a client taxonomy.
 
 ## Registration
 

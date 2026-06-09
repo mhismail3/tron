@@ -52,7 +52,7 @@ final class RetryTurnTests: XCTestCase {
         viewModel.messages = [
             ChatMessage(id: userId, role: .user, content: .text("real user prompt")),
             ChatMessage(role: .assistant, content: .text("assistant reply")),
-            ChatMessage(role: .system, content: .systemEvent(.turnFailed(error: "oops", code: nil, recoverable: true))),
+            ChatMessage(role: .system, content: .systemEvent(.turnFailed(error: "oops", code: nil, recoverable: true, failure: nil))),
         ]
 
         let found = viewModel.findLastUserTextMessage()

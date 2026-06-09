@@ -5,7 +5,7 @@ import Foundation
 /// Enriched events include provider, category, suggestion, and retryable fields
 /// for rendering as interactive notification pills.
 enum ErrorPlugin: DispatchableEventPlugin {
-    static let eventType = "agent.error"
+    static let eventType = "error"
 
     // MARK: - Event Data
 
@@ -23,6 +23,10 @@ enum ErrorPlugin: DispatchableEventPlugin {
             let category: String?
             let suggestion: String?
             let retryable: Bool?
+            let recoverable: Bool?
+            let origin: String?
+            let details: [String: AnyCodable]?
+            let retryAfterMs: Int?
             let statusCode: Int?
             let errorType: String?
             let model: String?
@@ -38,24 +42,39 @@ enum ErrorPlugin: DispatchableEventPlugin {
         let category: String?
         let suggestion: String?
         let retryable: Bool?
+        let recoverable: Bool?
+        let origin: String?
+        let details: [String: AnyCodable]?
+        let retryAfterMs: Int?
         let statusCode: Int?
         let errorType: String?
         let model: String?
+        let failure: CanonicalFailurePayload?
     }
 
     // MARK: - Protocol Implementation
 
     static func transform(_ event: EventData) -> (any EventResult)? {
-        Result(
-            code: event.data?.code ?? "UNKNOWN",
-            message: event.data?.message ?? event.data?.error ?? "Unknown error",
-            provider: event.data?.provider,
-            category: event.data?.category,
-            suggestion: event.data?.suggestion,
-            retryable: event.data?.retryable,
-            statusCode: event.data?.statusCode,
-            errorType: event.data?.errorType,
-            model: event.data?.model
+        guard let data = event.data else { return nil }
+        guard let failure = CanonicalFailurePayload.fromDetails(data.details) else {
+            return nil
+        }
+
+        return Result(
+            code: failure.code,
+            message: failure.message,
+            provider: failure.provider,
+            category: failure.category,
+            suggestion: failure.suggestion,
+            retryable: failure.retryable,
+            recoverable: failure.recoverable,
+            origin: failure.origin,
+            details: data.details,
+            retryAfterMs: failure.retryAfterMs,
+            statusCode: failure.statusCode,
+            errorType: failure.errorType,
+            model: failure.model,
+            failure: failure
         )
     }
 

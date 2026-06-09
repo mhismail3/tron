@@ -74,7 +74,7 @@ final class ThinkingState {
         return payload
     }
 
-    /// Clear current streaming state (called on agent.complete or agent.error)
+    /// Clear current streaming state (called on agent.complete or live error)
     func clearCurrentStreaming() {
         currentText = ""
         isStreaming = false

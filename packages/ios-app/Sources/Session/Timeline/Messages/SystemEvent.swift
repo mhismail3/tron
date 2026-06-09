@@ -23,7 +23,7 @@ enum SystemEvent: Equatable, Hashable {
     /// Catching up to in-progress session
     case catchingUp
     /// Turn failed with error
-    case turnFailed(error: String, code: String?, recoverable: Bool)
+    case turnFailed(error: String, code: String?, recoverable: Bool, failure: CanonicalFailurePayload?)
     /// Provider API error (auth, rate limit, network, etc.)
     case providerError(ProviderErrorDetailData)
 /// Tint color for the notification pill — single source of truth.
@@ -66,7 +66,7 @@ enum SystemEvent: Equatable, Hashable {
             return "Deleted \(typeLabel) from context"
         case .catchingUp:
             return "Loading latest messages..."
-        case .turnFailed(let error, _, _):
+        case .turnFailed(let error, _, _, _):
             return "Request failed: \(error)"
         case .providerError(let data):
             let label = ErrorCategoryDisplay.label(for: data.category, provider: data.provider)

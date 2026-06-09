@@ -363,6 +363,7 @@
 		990085E40D3C3E562E8EB91D /* DependencyContainerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83325E440C0C229BD4829C5B /* DependencyContainerTests.swift */; };
 		99012C7374F9937F528FCE4D /* ThinkingDetailState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5901F2D1AEB28780F158CC7F /* ThinkingDetailState.swift */; };
 		992386048D2960FD487115EA /* SessionRepositoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 71CE2B872820AC4B4E23A928 /* SessionRepositoryTests.swift */; };
+		9AC100A9CED61AB63B30C59E /* FailurePayload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 315DD167231DB3AACAEC6B2F /* FailurePayload.swift */; };
 		9B104B139E3D9206A3CE7B8E /* CapabilityActivityPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4A978C10786354D18183E373 /* CapabilityActivityPresentation.swift */; };
 		9B37A5C8BDFBA73309CF4839 /* MetricKitDiagnosticsStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A95E9D9DA888CF165B473C5 /* MetricKitDiagnosticsStoreTests.swift */; };
 		9B79C26721C35D1B7C1DBB65 /* CapabilityArgumentParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 772E3406C01AA51666E045B6 /* CapabilityArgumentParserTests.swift */; };
@@ -771,6 +772,7 @@
 		308AE74C459DCF58A5F09DB5 /* SettingsView+FooterSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SettingsView+FooterSupport.swift"; sourceTree = "<group>"; };
 		3094886289E991F68C03AC2C /* MessageIndexTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageIndexTests.swift; sourceTree = "<group>"; };
 		30B44093EFB99BE5FED23684 /* ShellToolbarContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellToolbarContent.swift; sourceTree = "<group>"; };
+		315DD167231DB3AACAEC6B2F /* FailurePayload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FailurePayload.swift; sourceTree = "<group>"; };
 		31A01A5B20AC5AE3195B3596 /* MarkdownBlockView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MarkdownBlockView.swift; sourceTree = "<group>"; };
 		31E02035B420659CDE436A75 /* DiagnosticsBundleTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticsBundleTypes.swift; sourceTree = "<group>"; };
 		31E133593E512E6259C0FDD6 /* EventPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventPlugin.swift; sourceTree = "<group>"; };
@@ -2227,6 +2229,7 @@
 			children = (
 				184D44E82A17169C08C0BE36 /* AnyCodable.swift */,
 				B7DFA4B85A636FC741BDE660 /* EngineProtocolTypes.swift */,
+				315DD167231DB3AACAEC6B2F /* FailurePayload.swift */,
 				CADABF914060CAB2D33187AC /* ProtocolConstants.swift */,
 			);
 			path = Core;
@@ -3531,6 +3534,7 @@
 				B55D3AD587779785586AD6DB /* EventTypeRegistry.swift in Sources */,
 				D81757AEA694C202E891CA0A /* EventTypes.swift in Sources */,
 				C7F48016EACE24486094DEE5 /* ExtendedPayloads.swift in Sources */,
+				9AC100A9CED61AB63B30C59E /* FailurePayload.swift in Sources */,
 				34F07CED3CC5CC8331739EBC /* FeedbackComposer.swift in Sources */,
 				F3C4852E088BDCC750F9F079 /* FeedbackMailView.swift in Sources */,
 				DBCB80FC89B061390014D6AD /* FileDisplayHelpers.swift in Sources */,

@@ -281,22 +281,28 @@ extension ChatViewModel {
         finalizeStreamingMessage()
     }
 
-    /// Handle enriched provider errors from the agent.error event.
+    /// Handle enriched provider errors from the live `error` event.
     /// Only terminal errors reach here (retries are silent).
     /// Resets all processing state and shows error notification pill.
     func handleProviderError(_ result: ErrorPlugin.Result) {
         resetToIdleState(errorPreview: result.message)
 
-        if let category = result.category, category != "unknown" {
+        if let provider = result.provider,
+           let category = result.category,
+           let retryable = result.retryable {
             let data = ProviderErrorDetailData(
-                provider: result.provider ?? "unknown",
+                provider: provider,
                 category: category,
                 message: result.message,
                 suggestion: result.suggestion,
-                retryable: result.retryable ?? false,
+                retryable: retryable,
                 statusCode: result.statusCode,
                 errorType: result.errorType,
-                model: result.model
+                model: result.model,
+                recoverable: result.recoverable,
+                origin: result.origin,
+                retryAfterMs: result.retryAfterMs,
+                failure: result.failure
             )
             appendToMessages(.providerError(data))
             logger.error("Provider error [\(category)]: \(result.message)", category: .events)

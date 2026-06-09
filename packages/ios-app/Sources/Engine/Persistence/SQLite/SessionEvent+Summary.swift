@@ -101,20 +101,32 @@ extension SessionEvent {
             return "\(turnLabel) ended"
 
         case .errorAgent:
-            let code = payload.string("code") ?? "ERROR"
-            let error = payload.string("error") ?? "Unknown error"
+            if let failure = CanonicalFailurePayload.fromDetails(payload.anyCodableDict("details")) {
+                return "\(failure.code): \(String(failure.message.prefix(30)))"
+            }
+            guard let code = payload.string("code"),
+                  let error = payload.string("error") else {
+                return "Malformed agent error event"
+            }
             return "\(code): \(String(error.prefix(30)))"
 
         case .errorProvider:
-            let provider = payload.string("provider") ?? "provider"
-            let retryable = payload.bool("retryable") ?? false
+            guard let provider = payload.string("provider"),
+                  let retryable = payload.bool("retryable") else {
+                return "Malformed provider error event"
+            }
             if retryable, let delay = payload.int("retryAfter") {
+                return "\(provider) • retry in \(delay)ms"
+            }
+            if retryable, let delay = payload.int("retryAfterMs") {
                 return "\(provider) • retry in \(delay)ms"
             }
             return "\(provider) error"
 
         case .errorCapability:
-            let modelPrimitiveName = payload.string("modelPrimitiveName") ?? "capability"
+            guard let modelPrimitiveName = payload.string("modelPrimitiveName") else {
+                return "Malformed capability error event"
+            }
             return "\(modelPrimitiveName) failed"
 
         case .configModelSwitch:

@@ -456,20 +456,29 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
 
     func testEngineErrorDecoding() throws {
         let json = """
-        {"code": "SESSION_NOT_FOUND", "message": "Session not found", "details": null}
+        {"code":"SESSION_NOT_FOUND","category":"not_found","message":"Session not found","retryable":false,"recoverable":true,"origin":"transport","details":null,"traceId":"trace-1"}
         """.data(using: .utf8)!
 
         let error = try JSONDecoder().decode(EngineProtocolError.self, from: json)
 
         XCTAssertEqual(error.code, "SESSION_NOT_FOUND")
+        XCTAssertEqual(error.category, "not_found")
         XCTAssertEqual(error.message, "Session not found")
+        XCTAssertFalse(error.retryable)
+        XCTAssertTrue(error.recoverable)
+        XCTAssertEqual(error.origin, "transport")
+        XCTAssertEqual(error.failure.traceId, "trace-1")
         XCTAssertEqual(error.errorDescription, "Session not found")
     }
 
     func testEngineErrorDiagnosticSummaryIncludesContractContextAndRedactsPayload() throws {
         let error = EngineProtocolError(
             code: "INVALID_PARAMS",
+            category: "invalid_request",
             message: "additional property is not allowed",
+            retryable: false,
+            recoverable: true,
+            origin: "transport",
             details: [
                 "direction": AnyCodable("request"),
                 "functionId": AnyCodable("session::list"),

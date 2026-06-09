@@ -60,6 +60,8 @@ final class UIUpdateQueue {
         let timestamp: Date
         /// Structured result details from server (capability-specific shape)
         let details: [String: AnyCodable]?
+        /// Canonical server failure envelope when the result failed.
+        let failure: CanonicalFailurePayload?
         let identity: CapabilityIdentity
 
         init(
@@ -69,6 +71,7 @@ final class UIUpdateQueue {
             durationMs: Int?,
             timestamp: Date = Date(),
             details: [String: AnyCodable]?,
+            failure: CanonicalFailurePayload? = nil,
             identity: CapabilityIdentity? = nil
         ) {
             self.invocationId = invocationId
@@ -77,6 +80,7 @@ final class UIUpdateQueue {
             self.durationMs = durationMs
             self.timestamp = timestamp
             self.details = details
+            self.failure = failure
             self.identity = identity ?? CapabilityIdentity()
         }
     }

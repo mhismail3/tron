@@ -111,29 +111,41 @@ extension SessionEvent {
 
         case .errorAgent, .errorProvider, .errorCapability:
             var lines: [String] = []
+            let failure = CanonicalFailurePayload.fromDetails(payload.anyCodableDict("details"))
 
             // Error message
-            if let error = payload["error"]?.value as? String {
+            if let error = failure?.message ?? payload.string("error") {
                 lines.append("Error: \(error)")
             }
 
             // Error code
-            if let code = payload["code"]?.value as? String {
+            if let code = failure?.code ?? payload.string("code") {
                 lines.append("Code: \(code)")
             }
 
+            if let category = failure?.category ?? payload.string("category") {
+                lines.append("Category: \(category)")
+            }
+
+            if let origin = failure?.origin ?? payload.string("origin") {
+                lines.append("Origin: \(origin)")
+            }
+
             // Recoverable
-            if let recoverable = payload["recoverable"]?.value as? Bool {
+            if let recoverable = failure?.recoverable ?? payload.bool("recoverable") {
                 lines.append("Recoverable: \(recoverable ? "Yes" : "No")")
             }
 
             // Retryable
-            if let retryable = payload["retryable"]?.value as? Bool {
+            if let retryable = failure?.retryable ?? payload.bool("retryable") {
                 lines.append("Retryable: \(retryable ? "Yes" : "No")")
             }
 
             // Retry after
             if let retryAfter = payload["retryAfter"]?.value as? Int {
+                lines.append("Retry after: \(retryAfter)ms")
+            }
+            if let retryAfter = failure?.retryAfterMs ?? payload.int("retryAfterMs") {
                 lines.append("Retry after: \(retryAfter)ms")
             }
 

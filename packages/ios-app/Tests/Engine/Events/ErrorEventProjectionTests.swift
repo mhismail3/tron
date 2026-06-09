@@ -47,6 +47,49 @@ final class ErrorEventProjectionTests: XCTestCase {
         }
     }
 
+    func test_provider_error_prefers_canonical_failure_envelope() {
+        let payload: [String: AnyCodable] = [
+            "provider": AnyCodable("anthropic"),
+            "error": AnyCodable("top-level message"),
+            "code": AnyCodable("TOP_LEVEL_CODE"),
+            "category": AnyCodable("api"),
+            "retryable": AnyCodable(false),
+            "details": AnyCodable([
+                "failure": [
+                    "code": "PROVIDER_RATE_LIMITED",
+                    "category": "rate_limit",
+                    "message": "canonical rate limit",
+                    "retryable": true,
+                    "recoverable": true,
+                    "origin": "model_provider",
+                    "provider": "anthropic",
+                    "model": "claude-sonnet-4",
+                    "statusCode": 429,
+                    "errorType": "rate_limit_error",
+                    "retryAfterMs": 1200,
+                    "suggestion": "Wait before retrying",
+                ] as [String: Any],
+            ] as [String: Any]),
+        ]
+
+        let msg = ErrorEventProjection.transformProviderError(payload, timestamp: timestamp())
+
+        guard case .systemEvent(.providerError(let data)) = msg?.content else {
+            XCTFail("expected provider error content")
+            return
+        }
+        XCTAssertEqual(data.category, "rate_limit")
+        XCTAssertEqual(data.message, "canonical rate limit")
+        XCTAssertTrue(data.retryable)
+        XCTAssertEqual(data.recoverable, true)
+        XCTAssertEqual(data.origin, "model_provider")
+        XCTAssertEqual(data.statusCode, 429)
+        XCTAssertEqual(data.errorType, "rate_limit_error")
+        XCTAssertEqual(data.model, "claude-sonnet-4")
+        XCTAssertEqual(data.retryAfterMs, 1200)
+        XCTAssertEqual(data.failure?.code, "PROVIDER_RATE_LIMITED")
+    }
+
     func test_provider_error_unknown_category_renders_pill_with_generic_icon() {
         // "unknown" is a real classification emitted by the import transformer
         // and any other layer that couldn't narrow further. It MUST flow
@@ -121,5 +164,40 @@ final class ErrorEventProjectionTests: XCTestCase {
                 continue
             }
         }
+    }
+
+    func test_turn_failed_preserves_canonical_failure() {
+        let payload: [String: AnyCodable] = [
+            "turn": AnyCodable(4),
+            "error": AnyCodable("top-level turn error"),
+            "code": AnyCodable("TOP_LEVEL_CODE"),
+            "category": AnyCodable("engine"),
+            "retryable": AnyCodable(true),
+            "recoverable": AnyCodable(true),
+            "origin": AnyCodable("agent_runtime"),
+            "details": AnyCodable([
+                "failure": [
+                    "code": "RUNTIME_CANCELLED",
+                    "category": "cancelled",
+                    "message": "canonical turn failure",
+                    "retryable": false,
+                    "recoverable": true,
+                    "origin": "agent_runtime",
+                    "traceId": "trace-1",
+                ] as [String: Any],
+            ] as [String: Any]),
+        ]
+
+        let msg = ErrorEventProjection.transformTurnFailed(payload, timestamp: timestamp())
+
+        guard case .systemEvent(.turnFailed(let error, let code, let recoverable, let failure)) = msg?.content else {
+            XCTFail("expected turn failed content")
+            return
+        }
+        XCTAssertEqual(error, "canonical turn failure")
+        XCTAssertEqual(code, "RUNTIME_CANCELLED")
+        XCTAssertTrue(recoverable)
+        XCTAssertEqual(failure?.category, "cancelled")
+        XCTAssertEqual(failure?.traceId, "trace-1")
     }
 }
