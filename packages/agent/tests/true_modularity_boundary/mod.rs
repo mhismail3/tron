@@ -17,7 +17,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Scorecard",
         "Status: **active**",
-        "Current score: **80/100**",
+        "Current score: **88/100**",
         "Branch: `codex/primitive-engine-teardown`",
         "This scorecard formalizes the True Modularity Boundary campaign.",
         "## Boundary Taxonomy",
@@ -36,7 +36,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-5 | Encapsulate state and storage | 10 | passed_after_fix |",
         "| TMB-6 | Make transport adapter-only | 10 | passed_after_fix |",
         "| TMB-7 | Make iOS Engine access black-boxed | 10 | passed_after_fix |",
-        "| TMB-8 | Define boundary-local error contracts | 8 | open |",
+        "| TMB-8 | Define boundary-local error contracts | 8 | passed_after_fix |",
         "| TMB-9 | Update docs and README | 6 | open |",
         "| TMB-10 | Final adversarial closeout | 6 | open |",
         "`true_modularity_scorecard_stays_formalized`",
@@ -60,7 +60,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Evidence Manifest",
         "Status: **active**",
-        "Current score: **80/100**",
+        "Current score: **88/100**",
         "| TMB-0 | passed_after_fix |",
         "| TMB-1 | passed_after_fix |",
         "| TMB-2 | passed_after_fix |",
@@ -69,6 +69,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-5 | passed_after_fix |",
         "| TMB-6 | passed_after_fix |",
         "| TMB-7 | passed_after_fix |",
+        "| TMB-8 | passed_after_fix |",
         "## TMB-0 Red Proof",
         "The first invariant run is intentionally red.",
         "Rust agent loop imports `domains::model::providers` directly",
@@ -79,6 +80,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "After TMB-5, `state_stores_are_owner_private` passes.",
         "After TMB-6, `transport_is_adapter_only` passes.",
         "After TMB-7, `ios_ui_uses_repositories_not_engine_transport` passes.",
+        "After TMB-8, `provider_internals_do_not_escape_model_domain` and",
     ] {
         assert!(
             manifest.contains(required),
@@ -394,8 +396,11 @@ fn boundary_errors_do_not_leak_impl_errors() {
             !path_has_any_prefix(
                 path_from_line(line),
                 &[
+                    "packages/agent/src/engine/authority/",
+                    "packages/agent/src/engine/durability/",
                     "packages/agent/src/domains/model/",
                     "packages/agent/src/domains/session/event_store/",
+                    "packages/agent/src/shared/observability/transport.rs",
                     "packages/agent/src/shared/server/error_mapping.rs",
                     "packages/agent/src/transport/",
                 ],

@@ -1,4 +1,5 @@
 use super::*;
+use crate::domains::auth::credentials::OpenAIAuthPath;
 use serde_json::json;
 
 fn assert_float_eq(actual: f64, expected: f64) {

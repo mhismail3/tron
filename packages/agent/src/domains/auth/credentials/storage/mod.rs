@@ -105,7 +105,8 @@ pub fn save_auth_storage(path: &Path, storage: &mut AuthStorage) -> Result<(), A
     })?;
     std::fs::create_dir_all(parent)?;
 
-    let json = serde_json::to_vec_pretty(storage)?;
+    let json = serde_json::to_vec_pretty(storage)
+        .map_err(|error| AuthError::json("encode auth storage", error))?;
     atomic_write_0600(parent, path, &json)
 }
 
@@ -153,12 +154,7 @@ pub fn try_get_google_provider_auth(path: &Path) -> Result<Option<GoogleProvider
     let Some(storage) = load_auth_storage(path)? else {
         return Ok(None);
     };
-    storage
-        .try_get_google_auth()
-        .map_err(|e| AuthError::MalformedProviderAuth {
-            provider: "google".into(),
-            details: e.to_string(),
-        })
+    storage.try_get_google_auth()
 }
 
 /// Get service auth from storage file.

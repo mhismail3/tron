@@ -5,12 +5,12 @@
 //! - [`TronError`]: Top-level enum covering all error domains
 //! - [`SessionError`]: Session lifecycle failures (create, resume, fork, run)
 //! - [`PersistenceError`]: Database/storage errors with table and operation context
-//! - [`ProviderError`]: LLM provider errors with status code and retry info
 //! - [`CapabilityExecutionError`]: Capability invocation failures with capability id and call ID
 //! - [`ErrorCollector`]: Accumulates errors from fire-and-forget operations
 //!
 //! The error parsing utilities in [`parse`] classify raw error strings into
-//! categories.
+//! categories. Provider-native failures stay under `domains::model` and cross
+//! the model boundary as canonical responder errors.
 
 pub mod parse;
 
@@ -40,10 +40,6 @@ pub enum TronError {
     /// Database / storage error.
     #[error("{0}")]
     Persistence(#[from] PersistenceError),
-
-    /// LLM provider error.
-    #[error("{0}")]
-    Provider(#[from] ProviderError),
 
     /// Capability invocation error.
     #[error("{0}")]
@@ -111,7 +107,6 @@ impl TronError {
     pub fn category(&self) -> ErrorCategory {
         match self {
             Self::Session(e) => e.category,
-            Self::Provider(e) => e.category,
             Self::Internal { category, .. } => *category,
             Self::Persistence(_) | Self::CapabilityInvocation(_) | Self::Capability(_) => {
                 ErrorCategory::Unknown
@@ -125,13 +120,6 @@ impl TronError {
         match self {
             Self::Session(e) => e.severity,
             Self::Persistence(e) => e.severity,
-            Self::Provider(e) => {
-                if e.retryable {
-                    ErrorSeverity::Transient
-                } else {
-                    ErrorSeverity::Error
-                }
-            }
             Self::CapabilityInvocation(e) => e.severity,
             Self::Capability(_) => ErrorSeverity::Error,
             Self::Internal { severity, .. } => *severity,
@@ -153,7 +141,6 @@ impl TronError {
         match self {
             Self::Session(e) => &e.code,
             Self::Persistence(e) => &e.code,
-            Self::Provider(e) => &e.code,
             Self::CapabilityInvocation(e) => &e.code,
             Self::Capability(e) => &e.code,
             Self::Internal { code, .. } => code,
@@ -341,124 +328,6 @@ impl PersistenceError {
     pub fn with_query(mut self, query: impl Into<String>) -> Self {
         self.query = Some(query.into());
         self
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ProviderError
-// ─────────────────────────────────────────────────────────────────────────────
-
-use crate::shared::protocol::messages::Provider;
-
-/// Rate limit information from a provider error.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RateLimitInfo {
-    /// Milliseconds to wait before retrying.
-    pub retry_after_ms: u64,
-    /// Provider-reported rate limit, if available.
-    pub limit: Option<u64>,
-}
-
-/// LLM provider error.
-#[derive(Debug, Error)]
-#[error("Provider {provider} error ({model}): {message}")]
-pub struct ProviderError {
-    /// Provider name.
-    pub provider: Provider,
-    /// Model being used.
-    pub model: String,
-    /// Human-readable message.
-    pub message: String,
-    /// Machine-readable error code.
-    pub code: String,
-    /// Error category.
-    pub category: ErrorCategory,
-    /// HTTP status code if applicable.
-    pub status_code: Option<u16>,
-    /// Whether this error is retryable.
-    pub retryable: bool,
-    /// Rate limit info if applicable.
-    pub rate_limit_info: Option<RateLimitInfo>,
-    /// Original cause.
-    #[source]
-    pub source: Option<Box<dyn std::error::Error + Send + Sync>>,
-}
-
-impl ProviderError {
-    /// Create a new provider error.
-    #[must_use]
-    pub fn new(provider: Provider, model: impl Into<String>, message: impl Into<String>) -> Self {
-        let provider_upper = provider.to_string().to_uppercase();
-        Self {
-            provider,
-            model: model.into(),
-            message: message.into(),
-            code: format!("PROVIDER_{provider_upper}_ERROR"),
-            category: ErrorCategory::Unknown,
-            status_code: None,
-            retryable: false,
-            rate_limit_info: None,
-            source: None,
-        }
-    }
-
-    /// Set the HTTP status code and infer category.
-    #[must_use]
-    pub fn with_status(mut self, status: u16) -> Self {
-        self.status_code = Some(status);
-        self.category = match status {
-            401 => ErrorCategory::Authentication,
-            403 => ErrorCategory::Authorization,
-            429 => ErrorCategory::RateLimit,
-            400 => ErrorCategory::InvalidRequest,
-            s if s >= 500 => ErrorCategory::Server,
-            _ => self.category,
-        };
-        self.retryable = matches!(
-            self.category,
-            ErrorCategory::RateLimit | ErrorCategory::Server
-        );
-        self
-    }
-
-    /// Set the retryable flag explicitly.
-    #[must_use]
-    pub fn with_retryable(mut self, retryable: bool) -> Self {
-        self.retryable = retryable;
-        self
-    }
-
-    /// Set the rate limit info.
-    #[must_use]
-    pub fn with_rate_limit(mut self, info: RateLimitInfo) -> Self {
-        self.rate_limit_info = Some(info);
-        self
-    }
-
-    /// Set the error cause.
-    #[must_use]
-    pub fn with_source(mut self, source: impl std::error::Error + Send + Sync + 'static) -> Self {
-        self.source = Some(Box::new(source));
-        self
-    }
-
-    /// Create from an error string, parsing it for category and retry info.
-    #[must_use]
-    pub fn from_error_string(
-        provider: Provider,
-        model: impl Into<String>,
-        error_str: &str,
-        status_code: Option<u16>,
-    ) -> Self {
-        let parsed = parse_error(error_str);
-        let mut err = Self::new(provider, model, parsed.message);
-        err.code = parsed.category.to_string().to_uppercase();
-        err.category = parsed.category;
-        err.retryable = parsed.is_retryable;
-        if let Some(status) = status_code {
-            err.status_code = Some(status);
-        }
-        err
     }
 }
 

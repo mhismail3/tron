@@ -6,6 +6,8 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use super::errors::AuthError;
+
 /// OAuth token set returned by provider token endpoints.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +57,31 @@ pub enum ActiveCredential {
         /// The API key label (e.g., "work").
         label: String,
     },
+}
+
+/// Which `OpenAI` authentication path is active.
+///
+/// Auth owns this decision because it is derived from the selected credential:
+/// a named ChatGPT OAuth account uses the Codex backend, while a named API key
+/// uses the direct OpenAI Platform API.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum OpenAIAuthPath {
+    /// Direct OpenAI Platform API key.
+    PlatformApiKey,
+    /// ChatGPT subscription OAuth token via the Codex backend.
+    ChatGptCodex,
+}
+
+impl OpenAIAuthPath {
+    /// Stable wire label for `model.list`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PlatformApiKey => "platform-api-key",
+            Self::ChatGptCodex => "chatgpt-codex",
+        }
+    }
 }
 
 /// Authentication for a single provider.
@@ -242,7 +269,7 @@ impl AuthStorage {
     /// block exists OR if it fails to deserialize.
     ///
     /// For strict error surfacing (e.g. retired `endpoint` field), prefer
-    /// [`Self::try_get_google_auth`], which returns the serde error.
+    /// [`Self::try_get_google_auth`], which returns an auth-boundary error.
     pub fn get_google_auth(&self) -> Option<GoogleProviderAuth> {
         self.providers
             .get("google")
@@ -253,10 +280,15 @@ impl AuthStorage {
     /// Used by `load_server_auth` so a malformed `google` block produces an
     /// actionable `AuthError::MalformedProviderAuth` with re-auth guidance,
     /// rather than silently resembling an unconfigured provider.
-    pub fn try_get_google_auth(&self) -> Result<Option<GoogleProviderAuth>, serde_json::Error> {
+    pub fn try_get_google_auth(&self) -> Result<Option<GoogleProviderAuth>, AuthError> {
         match self.providers.get("google") {
             None => Ok(None),
-            Some(v) => serde_json::from_value::<GoogleProviderAuth>(v.clone()).map(Some),
+            Some(v) => serde_json::from_value::<GoogleProviderAuth>(v.clone())
+                .map(Some)
+                .map_err(|error| AuthError::MalformedProviderAuth {
+                    provider: "google".to_string(),
+                    details: error.to_string(),
+                }),
         }
     }
 

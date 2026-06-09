@@ -8,9 +8,14 @@ pub enum SettingsError {
     /// Failed to read the settings file from disk.
     #[error("failed to read settings file: {0}")]
     Io(#[from] std::io::Error),
-    /// Failed to parse JSON in the settings file.
-    #[error("failed to parse settings JSON: {0}")]
-    Json(#[from] serde_json::Error),
+    /// JSON conversion failed inside the settings boundary.
+    #[error("settings JSON {operation} failed: {message}")]
+    Json {
+        /// Settings operation being performed.
+        operation: &'static str,
+        /// Sanitized conversion details.
+        message: String,
+    },
     /// A settings value was invalid (e.g., out of range).
     #[error("invalid settings value: {0}")]
     InvalidValue(String),
@@ -18,6 +23,16 @@ pub enum SettingsError {
 
 /// Result type for settings operations.
 pub type Result<T> = std::result::Result<T, SettingsError>;
+
+impl SettingsError {
+    /// Map a JSON implementation error into the settings boundary contract.
+    pub(crate) fn json(operation: &'static str, error: impl std::fmt::Display) -> Self {
+        Self::Json {
+            operation,
+            message: error.to_string(),
+        }
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
@@ -39,8 +54,8 @@ mod tests {
     #[test]
     fn json_error_display() {
         let json_err = serde_json::from_str::<serde_json::Value>("invalid").unwrap_err();
-        let err = SettingsError::Json(json_err);
-        assert!(err.to_string().contains("parse settings JSON"));
+        let err = SettingsError::json("decode settings", json_err);
+        assert!(err.to_string().contains("decode settings"));
     }
 
     #[test]
@@ -57,9 +72,11 @@ mod tests {
     }
 
     #[test]
-    fn json_error_from_conversion() {
+    fn json_error_variant_carries_operation() {
         let json_err = serde_json::from_str::<serde_json::Value>("{bad}").unwrap_err();
-        let err: SettingsError = json_err.into();
-        assert!(matches!(err, SettingsError::Json(_)));
+        let err = SettingsError::json("encode sparse settings", json_err);
+        assert!(
+            matches!(err, SettingsError::Json { operation, .. } if operation == "encode sparse settings")
+        );
     }
 }

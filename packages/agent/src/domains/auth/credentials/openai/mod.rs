@@ -8,10 +8,9 @@
 
 use super::errors::AuthError;
 use super::types::{
-    ActiveCredential, OAuthConfig, OAuthTokens, ProviderAuth, ServerAuth, calculate_expires_at,
-    now_ms,
+    ActiveCredential, OAuthConfig, OAuthTokens, OpenAIAuthPath, ProviderAuth, ServerAuth,
+    calculate_expires_at, now_ms,
 };
-use crate::domains::model::providers::openai::types::OpenAIAuthPath;
 
 /// `OpenAI` token endpoint URL.
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";

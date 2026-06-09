@@ -1,6 +1,8 @@
 //! OpenAI auth-path-aware model registry.
 
-use super::{ApiEndpoint, OpenAIAuthPath};
+use crate::domains::auth::credentials::OpenAIAuthPath;
+
+use super::{ApiEndpoint, api_endpoint_for_auth_path};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Model Registry
@@ -116,7 +118,7 @@ fn profile(
 ) -> OpenAIModelProfile {
     OpenAIModelProfile {
         auth_path,
-        api_endpoint: auth_path.endpoint(),
+        api_endpoint: api_endpoint_for_auth_path(auth_path),
         context_window,
         max_context_window,
         max_output,

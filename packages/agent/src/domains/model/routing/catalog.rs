@@ -11,6 +11,7 @@
 //!
 use serde_json::Value;
 
+use crate::domains::auth::credentials::OpenAIAuthPath;
 use crate::domains::model::Deps;
 use crate::domains::model::providers::anthropic::types::{
     all_claude_models_api_json, get_claude_model,
@@ -23,7 +24,7 @@ use crate::domains::model::providers::minimax::types::all_minimax_models_api_jso
 use crate::domains::model::providers::ollama::types::all_ollama_models_api_json_with_availability;
 use crate::domains::model::providers::openai::types::openai_model_available_for_auth_path;
 use crate::domains::model::providers::openai::types::{
-    OpenAIAuthPath, all_openai_models_api_json_for_auth_path, get_openai_model,
+    all_openai_models_api_json_for_auth_path, get_openai_model,
 };
 use crate::domains::model::routing::models::registry::strip_provider_prefix;
 use crate::shared::server::errors::{self, CapabilityError};

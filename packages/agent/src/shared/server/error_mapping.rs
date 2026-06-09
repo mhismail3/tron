@@ -170,7 +170,7 @@ pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
                 "Malformed auth file at '{path}': {details}. Fix the file or run `tron auth reset` to wipe and re-authenticate."
             ),
         },
-        A::Http(_) | A::Json(_) | A::Io(_) => CapabilityError::Internal {
+        A::Http(_) | A::Json { .. } | A::Io(_) => CapabilityError::Internal {
             message: e.to_string(),
         },
     }
@@ -289,7 +289,7 @@ mod tests {
     #[test]
     fn auth_json_is_internal() {
         let serde_err = serde_json::from_str::<String>("not json").unwrap_err();
-        let mapped = map_auth_error(A::Json(serde_err));
+        let mapped = map_auth_error(A::json("decode auth", serde_err));
         assert_eq!(mapped.code(), "INTERNAL_ERROR");
     }
 

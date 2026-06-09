@@ -57,15 +57,6 @@ fn tron_error_from_persistence() {
 }
 
 #[test]
-fn tron_error_from_provider() {
-    let provider_err =
-        ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "overloaded").with_status(529);
-    let err = TronError::from(provider_err);
-    assert!(err.to_string().contains("anthropic"));
-    assert!(err.is_retryable());
-}
-
-#[test]
 fn tron_error_from_capability_execution() {
     let capability_err = CapabilityExecutionError::new("execute", "call-1", "timeout");
     let err = TronError::from(capability_err);
@@ -159,80 +150,6 @@ fn persistence_operation_display() {
     assert_eq!(PersistenceOperation::Write.to_string(), "write");
     assert_eq!(PersistenceOperation::Delete.to_string(), "delete");
     assert_eq!(PersistenceOperation::Query.to_string(), "query");
-}
-
-// -- ProviderError --
-
-#[test]
-fn provider_error_basic() {
-    let err = ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "server error");
-    assert_eq!(err.provider, Provider::Anthropic);
-    assert_eq!(err.model, "claude-opus-4-6");
-    assert_eq!(err.code, "PROVIDER_ANTHROPIC_ERROR");
-    assert!(!err.retryable);
-}
-
-#[test]
-fn provider_error_with_401_status() {
-    let err =
-        ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "unauthorized").with_status(401);
-    assert_eq!(err.category, ErrorCategory::Authentication);
-    assert!(!err.retryable);
-}
-
-#[test]
-fn provider_error_with_429_status() {
-    let err = ProviderError::new(Provider::OpenAi, "gpt-4", "rate limited").with_status(429);
-    assert_eq!(err.category, ErrorCategory::RateLimit);
-    assert!(err.retryable);
-}
-
-#[test]
-fn provider_error_with_500_status() {
-    let err = ProviderError::new(Provider::Google, "gemini-2.0", "internal error").with_status(500);
-    assert_eq!(err.category, ErrorCategory::Server);
-    assert!(err.retryable);
-}
-
-#[test]
-fn provider_error_with_rate_limit_info() {
-    let err = ProviderError::new(Provider::Anthropic, "claude-opus-4-6", "rate limited")
-        .with_status(429)
-        .with_rate_limit(RateLimitInfo {
-            retry_after_ms: 5000,
-            limit: Some(100),
-        });
-    assert!(err.retryable);
-    let info = err.rate_limit_info.as_ref().unwrap();
-    assert_eq!(info.retry_after_ms, 5000);
-    assert_eq!(info.limit, Some(100));
-}
-
-#[test]
-fn provider_error_from_error_string() {
-    let err = ProviderError::from_error_string(
-        Provider::Anthropic,
-        "claude-opus-4-6",
-        "429 rate limit exceeded",
-        Some(429),
-    );
-    assert_eq!(err.category, ErrorCategory::RateLimit);
-    assert!(err.retryable);
-    assert_eq!(err.status_code, Some(429));
-}
-
-#[test]
-fn provider_error_explicit_retryable() {
-    let err = ProviderError::new(Provider::OpenAi, "gpt-4", "temporary").with_retryable(true);
-    assert!(err.retryable);
-}
-
-#[test]
-fn provider_name_display() {
-    assert_eq!(Provider::Anthropic.to_string(), "anthropic");
-    assert_eq!(Provider::OpenAi.to_string(), "openai");
-    assert_eq!(Provider::Google.to_string(), "google");
-    assert_eq!(Provider::Unknown.to_string(), "unknown");
 }
 
 // -- CapabilityExecutionError --
@@ -372,24 +289,9 @@ fn tron_error_severity_from_persistence() {
 }
 
 #[test]
-fn tron_error_severity_from_provider_retryable() {
-    let provider_err =
-        ProviderError::new(Provider::Anthropic, "model", "overloaded").with_retryable(true);
-    let err = TronError::from(provider_err);
-    assert_eq!(err.severity(), ErrorSeverity::Transient);
-}
-
-#[test]
 fn tron_error_severity_from_capability_execution() {
     let capability_err = CapabilityExecutionError::new("execute", "c1", "timeout")
         .with_severity(ErrorSeverity::Fatal);
     let err = TronError::from(capability_err);
     assert_eq!(err.severity(), ErrorSeverity::Fatal);
-}
-
-#[test]
-fn tron_error_category_from_provider_status() {
-    let provider_err = ProviderError::new(Provider::OpenAi, "gpt-4", "forbidden").with_status(403);
-    let err = TronError::from(provider_err);
-    assert_eq!(err.category(), ErrorCategory::Authorization);
 }

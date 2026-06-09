@@ -242,11 +242,11 @@ impl DefaultProviderFactory {
                         expires_at,
                     },
                 },
-                crate::domains::model::providers::openai::types::OpenAIAuthPath::ChatGptCodex,
+                crate::domains::auth::credentials::OpenAIAuthPath::ChatGptCodex,
             ),
             crate::domains::auth::credentials::ServerAuth::ApiKey { api_key } => (
                 crate::domains::model::providers::openai::types::OpenAIAuth::ApiKey { api_key },
-                crate::domains::model::providers::openai::types::OpenAIAuthPath::PlatformApiKey,
+                crate::domains::auth::credentials::OpenAIAuthPath::PlatformApiKey,
             ),
         };
         let request_model =

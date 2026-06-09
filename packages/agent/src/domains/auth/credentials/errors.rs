@@ -7,9 +7,14 @@ pub enum AuthError {
     #[error("HTTP error: {0}")]
     Http(#[from] reqwest::Error),
 
-    /// JSON serialization/deserialization failed.
-    #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    /// JSON serialization/deserialization failed inside the auth boundary.
+    #[error("auth JSON {operation} failed: {message}")]
+    Json {
+        /// Auth storage operation being performed.
+        operation: &'static str,
+        /// Sanitized parse or encode details.
+        message: String,
+    },
 
     /// File I/O error.
     #[error("I/O error: {0}")]
@@ -79,8 +84,16 @@ impl AuthError {
             | Self::NotConfigured(_)
             | Self::MalformedProviderAuth { .. }
             | Self::MalformedAuthFile { .. }
-            | Self::Json(_)
+            | Self::Json { .. }
             | Self::Io(_) => false,
+        }
+    }
+
+    /// Map a JSON implementation error into the auth boundary contract.
+    pub(crate) fn json(operation: &'static str, error: impl std::fmt::Display) -> Self {
+        Self::Json {
+            operation,
+            message: error.to_string(),
         }
     }
 }
@@ -212,7 +225,10 @@ mod tests {
 
     #[test]
     fn json_error_is_not_transient() {
-        let err = AuthError::Json(serde_json::from_str::<serde_json::Value>("{{").unwrap_err());
+        let err = AuthError::json(
+            "decode auth storage",
+            serde_json::from_str::<serde_json::Value>("{{").unwrap_err(),
+        );
         assert!(!err.is_transient());
     }
 

@@ -23,6 +23,7 @@ use base64::Engine as _;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue};
 use tracing::{debug, error, info, instrument};
 
+use crate::domains::auth::credentials::OpenAIAuthPath;
 use crate::domains::model::providers::shared::compose_context_parts;
 use crate::domains::model::providers::shared::provider::ReasoningEffort;
 use crate::domains::model::providers::shared::provider::{
@@ -35,9 +36,9 @@ use super::message_converter::{
 };
 use super::stream_handler::{create_stream_state, process_stream_event};
 use super::types::{
-    ApiEndpoint, OpenAIApiSettings, OpenAIAuth, OpenAIAuthPath, OpenAIConfig, OpenAIModelProfile,
-    ReasoningConfig, ResponseTextConfig, ResponsesInputItem, ResponsesRequest, ResponsesSseEvent,
-    get_openai_model_profile, openai_request_model_id,
+    ApiEndpoint, OpenAIApiSettings, OpenAIAuth, OpenAIConfig, OpenAIModelProfile, ReasoningConfig,
+    ResponseTextConfig, ResponsesInputItem, ResponsesRequest, ResponsesSseEvent,
+    api_endpoint_for_auth_path, get_openai_model_profile, openai_request_model_id,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -251,8 +252,10 @@ impl OpenAIProvider {
         crate::domains::auth::credentials::OAuthTokens,
     ) {
         let auth_path = OpenAIAuthPath::from(&config.auth);
-        let model_endpoint = get_openai_model_profile(&config.model, auth_path)
-            .map_or_else(|| auth_path.endpoint(), |(_, profile)| profile.api_endpoint);
+        let model_endpoint = get_openai_model_profile(&config.model, auth_path).map_or_else(
+            || api_endpoint_for_auth_path(auth_path),
+            |(_, profile)| profile.api_endpoint,
+        );
 
         let (api_endpoint, tokens) = match &config.auth {
             OpenAIAuth::OAuth { tokens } => (model_endpoint, tokens.clone()),

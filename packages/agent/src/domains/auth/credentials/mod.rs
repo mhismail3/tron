@@ -16,7 +16,8 @@
 //! auth loading:
 //! - [`anthropic`]: PKCE OAuth + API key (provider key: `"anthropic"`)
 //! - [`google`]: Cloud Code Assist OAuth + API key
-//! - [`openai`]: OAuth + API key (provider key: `"openai-codex"`)
+//! - [`openai`]: OAuth + API key (provider key: `"openai-codex"`);
+//!   auth-path inference yields [`OpenAIAuthPath`] for model catalog filtering.
 
 mod accounts;
 pub mod anthropic;
@@ -62,8 +63,8 @@ pub(crate) use storage::{
 pub use storage::{auth_file_path, load_auth_storage, save_auth_storage};
 pub use types::{
     AccountEntry, ActiveCredential, ApiKeyEntry, AuthStorage, GoogleAuth, GoogleProviderAuth,
-    OAuthConfig, OAuthTokenRefreshResponse, OAuthTokens, ProviderAuth, ServerAuth, ServiceAuth,
-    calculate_expires_at, now_ms, should_refresh,
+    OAuthConfig, OAuthTokenRefreshResponse, OAuthTokens, OpenAIAuthPath, ProviderAuth, ServerAuth,
+    ServiceAuth, calculate_expires_at, now_ms, should_refresh,
 };
 
 pub(crate) const DEFAULT_API_KEY_LABEL: &str = "Default";

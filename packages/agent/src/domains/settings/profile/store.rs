@@ -57,7 +57,8 @@ impl SettingsStore {
     /// Load effective settings as a JSON value.
     pub fn load_value(&self) -> Result<Value> {
         let settings = load_settings_from_path(&self.path)?;
-        serde_json::to_value(settings).map_err(SettingsError::from)
+        serde_json::to_value(settings)
+            .map_err(|error| SettingsError::json("encode effective settings", error))
     }
 
     /// Read the sparse settings file as JSON. Missing files return `{}`.
@@ -227,9 +228,11 @@ fn validate_sparse_settings(value: &Value, path: &Path) -> Result<()> {
     ensure_object(value)?;
     let defaults = serde_json::to_value(
         crate::domains::settings::profile::storage::loader::load_settings_defaults_for(path)?,
-    )?;
+    )
+    .map_err(|error| SettingsError::json("encode default settings", error))?;
     let effective = deep_merge(defaults, value.clone());
-    let validated: TronSettings = serde_json::from_value(effective)?;
+    let validated: TronSettings = serde_json::from_value(effective)
+        .map_err(|error| SettingsError::json("decode effective settings", error))?;
     validated.validate_strict()?;
     Ok(())
 }

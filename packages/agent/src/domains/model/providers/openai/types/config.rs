@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::domains::auth::credentials::OpenAIAuthPath;
+
 /// Default base URL for the `OpenAI` Codex API.
 pub const DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 
@@ -55,37 +57,12 @@ impl ApiEndpoint {
     }
 }
 
-/// Which `OpenAI` authentication path is active.
-///
-/// The same model slug can have different context windows, defaults, and
-/// availability depending on whether Tron uses a ChatGPT subscription token or
-/// a direct Platform API key.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum OpenAIAuthPath {
-    /// Direct OpenAI Platform API key.
-    PlatformApiKey,
-    /// ChatGPT subscription OAuth token via the Codex backend.
-    ChatGptCodex,
-}
-
-impl OpenAIAuthPath {
-    /// Stable wire label for `model.list`.
-    #[must_use]
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PlatformApiKey => "platform-api-key",
-            Self::ChatGptCodex => "chatgpt-codex",
-        }
-    }
-
-    /// Endpoint used by this auth path.
-    #[must_use]
-    pub fn endpoint(self) -> ApiEndpoint {
-        match self {
-            Self::PlatformApiKey => ApiEndpoint::Platform,
-            Self::ChatGptCodex => ApiEndpoint::Codex,
-        }
+/// Endpoint used by an auth-owned OpenAI credential path.
+#[must_use]
+pub(crate) fn api_endpoint_for_auth_path(auth_path: OpenAIAuthPath) -> ApiEndpoint {
+    match auth_path {
+        OpenAIAuthPath::PlatformApiKey => ApiEndpoint::Platform,
+        OpenAIAuthPath::ChatGptCodex => ApiEndpoint::Codex,
     }
 }
 

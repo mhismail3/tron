@@ -61,7 +61,11 @@ pub fn load_settings() -> Result<TronSettings> {
 pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
     let defaults = load_settings_defaults_for(path)?;
     let overlay = read_sparse_settings_overlay(path)?;
-    let merged = deep_merge(serde_json::to_value(defaults)?, overlay);
+    let merged = deep_merge(
+        serde_json::to_value(defaults)
+            .map_err(|error| SettingsError::json("encode default settings", error))?,
+        overlay,
+    );
     let mut settings: TronSettings = serde_json::from_value(merged).map_err(|error| {
         SettingsError::InvalidValue(format!("failed to load settings: {error}"))
     })?;
