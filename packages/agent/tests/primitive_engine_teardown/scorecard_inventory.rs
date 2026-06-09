@@ -217,6 +217,7 @@ fn primitive_engine_teardown_inventory_stays_exhaustive() {
         "Capabilities",
         "Chat",
         "Components",
+        "DynamicSurfaces",
         "EngineApproval",
         "InputBar",
         "MessageBubble",
@@ -245,4 +246,15 @@ fn primitive_engine_teardown_inventory_stays_exhaustive() {
         readme.contains("packages/agent/docs/primitive-engine-teardown-inventory.md"),
         "README living-doc map must link the PET-1 primitive teardown inventory"
     );
+
+    for stale_phrase in [
+        "still need final retain/delete proof",
+        "must still audit",
+        "PET-11 may close only after",
+    ] {
+        assert!(
+            !inventory.contains(stale_phrase),
+            "completed primitive teardown inventory must not retain active open-loop wording: {stale_phrase}"
+        );
+    }
 }

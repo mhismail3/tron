@@ -66,8 +66,8 @@ hello/response/discover/inspect/promote/catalog-list/worker-list catalog
 revision fields; retained revisions are now cursor truth or execution evidence.
 The iOS hook/suggestion checkpoint deleted the prompt-suggestion hook event
 plane, pull-up panel state/views, and third `postProcessing` lifecycle state.
-Remaining PET-11 successor rows below still need final retain/delete proof
-before closeout.
+PET-11 final closeout resolved the successor rows below with retained-surface
+proof before the branch was marked complete.
 
 | Domain | Class | Teardown decision |
 |--------|-------|-------------------|
@@ -244,10 +244,10 @@ runtime output. These package roots are the retained top-level source map.
 | `AgentControl` | delete | Fixed product control surface. |
 | `Attachments` | retain | PET-11 proved this is bare prompt-input infrastructure for images, PDFs, and documents. The legacy image-only prompt DTO/request path is deleted; all media flows through unified attachments. |
 | `AuditDetails` | successor | Delete fixed audit/worker-pack views. Reuse only generic dynamic-surface rendering if it is decoupled from product targets. |
-| `Capabilities` | successor | Retained files must be generic invocation/runtime evidence for the one `execute` primitive. PET-11's interim checkpoint deleted catalog/status/search/inspect/recipe/program/audit/policy DTOs and product-specific result summaries; remaining capability identity/event/display fields still need final retain/delete proof. |
+| `Capabilities` | retain | Generic invocation/runtime evidence and result presentation for the one `execute` primitive. PET-11 deleted catalog/status/search/inspect/recipe/program/audit/policy DTOs and product-specific result summaries; retained capability invocation, event, and display files are closed as generic execute evidence UI, not a product capability catalog. |
 | `Chat` | retain | Primary prompt and assistant output shell. |
 | `Components` | retain | Shared generic UI components only. |
-| `DynamicSurfaces` | retain | Generic runtime surface rendering for agent-authored UI state. PET-11 must verify no fixed product target leaks through this retained renderer. |
+| `DynamicSurfaces` | retain | Generic runtime surface rendering for agent-authored UI state. PET-11 proved no fixed product target leaks through this retained renderer. |
 | `EngineApproval` | delete | Product approval prompts; infrastructure blocked state can render as plain message. |
 | `InputBar` | retain | Keep prompt composer and attachment entry points. Skills, prompt-library, voice/audio, pull-up prompt suggestions, post-processing state, and fixed action product buttons are deleted. |
 | `MessageBubble` | retain | Keep message rendering and generic runtime output. Delete capability/product-specific cards. |
@@ -299,15 +299,15 @@ server settings shape and iOS controls together.
 5. PET-9/PET-10: rewrite docs/assets, add absence gates, and remove dead source until focused Rust/iOS proof is warning-free.
 6. PET-11: run closeout proof and re-audit all retained/successor rows for leftover removable code.
 
-## Open Loops After PET-10
+## PET-11 Closeout Notes
 
 - PET-11 proved retained iOS `Attachments` are prompt-input infrastructure and
   deleted the legacy image-only prompt DTO/request path. PET-11 also deleted
   the fixed iOS `SessionTree` projection; session fork lineage remains only as
-  generic session/event truth. PET-11 must still audit retained iOS
-  `Capabilities` source from first principles. The hard-coded
-  `UserInteraction` prompt/answer plane and fixed process plane were
-  deleted during PET-11.
+  generic session/event truth. PET-11 closed retained iOS `Capabilities` as
+  generic execute invocation/result presentation, not a product capability
+  catalog. The hard-coded `UserInteraction` prompt/answer plane and fixed
+  process plane were deleted during PET-11.
 - PET-11 decided that `session_drafts.skills_json` was stale product DTO
   residue and deleted it from fresh iOS draft storage. PET-11 also deleted
   `EngineProtocolTypes+Repo.swift` and `EngineProtocolTypes+Task.swift` after
@@ -318,6 +318,6 @@ server settings shape and iOS controls together.
   diagnostics/logging to retained-log storage plus `execute.log_recent`.
   PET-11 also flattened dynamic-surface rendering to schema-versioned runtime
   resources and deleted server-owned target authoring/catalog/refresh policy.
-- PET-11 may close only after a fresh end-to-end loop proof and after no
-  retained/successor row can be deleted without breaking
-  boot/provider/session/execute/state/trace/client-shell primitives.
+- Fresh end-to-end loop proof and retained-surface scans completed in PET-11;
+  retained rows now cover only boot/provider/session/execute/state/trace and
+  client-shell primitives.
