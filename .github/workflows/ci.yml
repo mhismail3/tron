@@ -135,6 +135,7 @@ jobs:
         run: |
           cargo test --test db_path_guard -- --quiet
           cargo test --test primitive_engine_teardown_plan_invariants -- --quiet
+          cargo test --test determinism_replayability_invariants -- --quiet
           cargo test --test primitive_code_cleanup_invariants -- --quiet
           cargo test --test hierarchical_rearchitecture_invariants -- --quiet
           cargo test --test post_hra_adversarial_hardening_invariants -- --quiet

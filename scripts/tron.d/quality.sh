@@ -30,6 +30,7 @@ run_tests() {
     local closeout_test_targets=(
         db_path_guard
         primitive_engine_teardown_plan_invariants
+        determinism_replayability_invariants
         primitive_code_cleanup_invariants
         hierarchical_rearchitecture_invariants
         post_hra_adversarial_hardening_invariants

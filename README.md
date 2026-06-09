@@ -104,6 +104,17 @@ Current living entry points:
   source-audited deletion map for every current Rust domain, engine primitive
   worker, runner context plane, managed skill, doc, iOS source/view root, and
   settings surface.
+- `packages/agent/docs/determinism-replayability-scorecard.md`: active
+  Determinism Replayability Campaign scorecard for proving offline audit and
+  reconstruction replay from durable session, provider, trace, ledger, stream,
+  queue, and hash records.
+- `packages/agent/docs/determinism-replayability-evidence-manifest.md`:
+  companion evidence manifest for DRC row checkpoints, verification logs, and
+  residual replay risks.
+- `packages/agent/docs/determinism-replayability-inventory.md`: DRC replay
+  source, entropy, API, hash, and proof inventory.
+- `packages/agent/docs/determinism-replayability-inventory.tsv`:
+  machine-readable replay-critical source inventory used by DRC static gates.
 - `packages/agent/docs/primitive-code-cleanup-scorecard.md`: completed whole-repo
   primitive cleanup scorecard for folder ownership, file budgets, generated
   artifact hygiene, and final retained-surface proof.
@@ -170,6 +181,10 @@ Current living entry points:
 - `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
   absence, traceability, schema, registration, and documentation gates for the
   primitive branch.
+- `packages/agent/tests/determinism_replayability_invariants.rs`: active DRC
+  gates for scorecard state, replay source inventory, entropy scan coverage,
+  provider request audit wiring, replay manifest hashing, stable ordering, and
+  closeout.
 - `packages/agent/tests/primitive_code_cleanup_invariants.rs`: cleanup
   scorecard, folder-justification, file-budget, deleted-term, and tracked-junk
   gates.
