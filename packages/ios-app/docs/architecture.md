@@ -174,6 +174,7 @@ hashing, and host classification live in `DiagnosticsBundleTypes.swift`.
 Diagnostics support consumes `DiagnosticsEngineEndpoint` and
 `ClientLogIngestionEndpoint`; `Support/Composition` is the only support-layer
 owner that adapts those endpoints to concrete `EngineClient` instances.
+`DependencyProviding` intentionally does not expose the concrete engine client.
 
 `ProdDebug` backs the `Tron Fast` scheme: it keeps production bundle identity
 and entitlements while using debug build settings for fast local iteration.

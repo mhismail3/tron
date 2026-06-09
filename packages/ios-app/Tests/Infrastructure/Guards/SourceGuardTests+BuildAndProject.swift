@@ -51,6 +51,10 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
             encoding: .utf8
         )
+        let dependencyProviding = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyProviding.swift"),
+            encoding: .utf8
+        )
         let app = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/App/Lifecycle/TronMobileApp.swift"),
             encoding: .utf8
@@ -86,6 +90,8 @@ extension SourceGuardTests {
         #expect(ingestionService.contains("isSuccessfulIngestionPlumbing"))
         #expect(dependencyContainer.contains("clientLogIngestionService.start()"))
         #expect(dependencyContainer.contains("clientLogIngestionService.updateEndpoint(Self.makeClientLogIngestionEndpoint(client: newClient))"))
+        #expect(dependencyContainer.contains("private(set) var engineClient: EngineClient"))
+        #expect(!dependencyProviding.contains("var engineClient: EngineClient { get }"))
         #expect(app.contains("container.clientLogIngestionService.handleConnectionChange"))
         #expect(app.contains("container.clientLogIngestionService.handleScenePhaseChange"))
         #expect(logsClient.contains("func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult"))
@@ -104,6 +110,34 @@ extension SourceGuardTests {
         #expect(rootReadme.contains("Settings also exposes the Logs sheet in every iOS build configuration"))
         #expect(rootReadme.contains("automatically ingests deduplicated client logs"))
         #expect(rootReadme.contains("self-feeding diagnostics loops"))
+    }
+
+
+    @Test("DependencyProviding stays concrete-engine-client free")
+    func testDependencyProvidingDoesNotExposeEngineClient() throws {
+        let iosRoot = iosAppRoot()
+        let protocolSource = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyProviding.swift"),
+            encoding: .utf8
+        )
+        #expect(!protocolSource.contains("var engineClient: EngineClient { get }"))
+        #expect(protocolSource.contains("var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint { get }"))
+        #expect(protocolSource.contains("var chatSessionServices: ChatSessionServices { get }"))
+
+        var leaks: [String] = []
+        for root in ["Sources/UI", "Sources/Session"] {
+            let rootURL = iosRoot.appendingPathComponent(root)
+            for url in try swiftFiles(in: rootURL) {
+                let source = try String(contentsOf: url, encoding: .utf8)
+                guard source.contains("dependencies.engineClient") else { continue }
+                let relative = url.path.replacingOccurrences(of: iosRoot.path + "/", with: "")
+                leaks.append(relative)
+            }
+        }
+        #expect(
+            leaks.isEmpty,
+            "UI and Session must use repository/session service dependencies, not dependencies.engineClient: \(leaks.joined(separator: ", "))"
+        )
     }
 
 

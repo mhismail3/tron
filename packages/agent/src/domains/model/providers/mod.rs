@@ -45,7 +45,8 @@
 //!
 //! Depends on: model contracts, provider-protocol conversion helpers, active
 //! settings, and provider auth state.
-//! Depended on by: the agent loop, runtime bootstrap, and model routing.
+//! Depended on by: `domains::model::responder`, model routing/catalog code,
+//! and app bootstrap only as the composition/root startup path.
 //!
 //! ## Invariants
 //!

@@ -81,6 +81,14 @@ fn docs_guards_and_inventories_are_current() {
             "inventory summary count for `{classification}` must match TSV count {count}"
         );
     }
+
+    let owner_counts = inventory_owner_counts(&tsv);
+    for (owner, count) in owner_counts {
+        assert!(
+            inventory.contains(&format!("| `{owner}` | {count} |")),
+            "inventory owner count for `{owner}` must match TSV count {count}"
+        );
+    }
 }
 
 fn inventory_class_counts(tsv: &str) -> std::collections::BTreeMap<String, usize> {
@@ -89,6 +97,17 @@ fn inventory_class_counts(tsv: &str) -> std::collections::BTreeMap<String, usize
         let columns: Vec<_> = line.split('\t').collect();
         if columns.len() == 5 {
             *counts.entry(columns[1].to_owned()).or_default() += 1;
+        }
+    }
+    counts
+}
+
+fn inventory_owner_counts(tsv: &str) -> std::collections::BTreeMap<String, usize> {
+    let mut counts = std::collections::BTreeMap::<String, usize>::new();
+    for line in tsv.lines().skip(1) {
+        let columns: Vec<_> = line.split('\t').collect();
+        if columns.len() == 5 {
+            *counts.entry(columns[2].to_owned()).or_default() += 1;
         }
     }
     counts

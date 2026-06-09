@@ -6,9 +6,6 @@ import Foundation
 /// All services that need to be injected should be accessed through this protocol.
 @MainActor
 protocol DependencyProviding: AnyObject {
-    /// engine client for server communication
-    var engineClient: EngineClient { get }
-
     /// Local SQLite event database
     var eventDatabase: EventDatabase { get }
 
