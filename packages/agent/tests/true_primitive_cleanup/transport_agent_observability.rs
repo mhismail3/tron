@@ -5,7 +5,7 @@ fn transport_agent_observability_roots_are_split_and_explicit() {
     for (path, limit) in [
         ("packages/agent/src/transport/engine/socket/mod.rs", 750),
         (
-            "packages/agent/src/domains/agent/loop/turn_runner/persistence.rs",
+            "packages/agent/src/domains/agent/loop/turn_runner/persistence/mod.rs",
             750,
         ),
         ("packages/agent/src/shared/observability/transport.rs", 750),
@@ -38,7 +38,7 @@ fn transport_agent_observability_roots_are_split_and_explicit() {
     );
 
     for path in [
-        "packages/agent/src/domains/agent/loop/turn_runner/persistence.rs",
+        "packages/agent/src/domains/agent/loop/turn_runner/persistence/mod.rs",
         "packages/agent/src/shared/observability/transport.rs",
     ] {
         let contents = read_repo_file(path);

@@ -8,7 +8,7 @@ fn docs_guards_and_inventories_are_current() {
     let readme = read_repo_file("README.md");
 
     for required in [
-        "Current score: **95/100**",
+        "Current score: **100/100**",
         "| TPC-10 | Docs, guards, inventories | 5 | passed_after_fix |",
         "Residual Term Review Policy",
         "Manual deploy wording is retained only for `tron manual-deploy`",

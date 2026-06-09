@@ -1,6 +1,7 @@
 mod docs_guards_inventories;
 mod engine_durability;
 mod external_workers;
+mod final_closeout;
 mod inventory;
 mod invocation_primitives;
 mod ios_engine_protocol;

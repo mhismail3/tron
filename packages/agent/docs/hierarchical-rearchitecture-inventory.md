@@ -2,7 +2,7 @@
 
 Status: `completed`
 
-Generated from the live checkout after HRA-16, then refreshed during AHA-6, AHA-8, and AHA-9 to keep the current ownership TSVs aligned with the post-HRA cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test current ownership map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs.
+Generated from the live checkout after HRA-16, then refreshed during AHA-6, AHA-8, AHA-9, and TPC-11 to keep the current ownership TSVs aligned with post-HRA cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test current ownership map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs. TPC-11 refreshed the maps after True Primitive Cleanup split additional Rust/iOS owners and converted same-name Rust file/folder pairs to folder-owned modules.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -37,12 +37,12 @@ current_path	target_path	owner	phase	classification	status	reason
 | Metric | Count |
 | --- | --- |
 | Tracked files after AHA-9 staged additions | 1390 |
-| Files under `packages/agent/src` | 524 |
-| Files under `packages/agent/tests` | 33 |
-| Files under `packages/ios-app/Sources` | 416 |
-| Files under `packages/ios-app/Tests` | 208 |
-| Files under `packages/mac-app/Sources` | 74 |
-| Files under `packages/mac-app/Tests` | 36 |
+| Files under `packages/agent/src` | 558 |
+| Files under `packages/agent/tests` | 53 |
+| Files under `packages/ios-app/Sources` | 425 |
+| Files under `packages/ios-app/Tests` | 209 |
+| Files under `packages/mac-app/Sources` | 76 |
+| Files under `packages/mac-app/Tests` | 38 |
 
 ## Extension Counts
 
@@ -109,7 +109,7 @@ current_path	target_path	owner	phase	classification	status	reason
 
 The current Rust source root has only `packages/agent/src/lib.rs` and `packages/agent/src/main.rs`. Domain startup helpers live under `packages/agent/src/domains/registration`; non-session domains and the session event-store no longer have avoidable same-name file/folder module pairs. HRA-7 mirrors engine tests under `engine/tests/{authority,catalog,durability,invocation,kernel,runtime}` and splits root static integration targets into folder-backed modules while preserving their integration target names.
 
-HRA-8 added a 547-row iOS source/test Swift current ownership map. HRA-9 updated that map to 550 live Swift rows after the `EngineConnection` split and marked the Engine rows `passed_after_fix`. HRA-10 updated the map to 551 live Swift rows after the Session display-model split and marked the Session rows `passed_after_fix`. HRA-11 updated the map to 553 live Swift rows after the UI support splits, HRA-12 kept the same 553-row coverage while marking the App/Support rows `passed_after_fix`, and HRA-13 updated the map to 566 live Swift rows after the SourceGuard and reconstruction test splits. HRA-16 kept 566 live Swift rows while replacing the generic reconstruction `Handlers` bucket with `ChatMessageProjection` and moving `EngineConnectionReconnectTests` into the WebSocket test mirror. AHA-8 refreshed the current map to 571 live Swift rows after the concrete engine client split and SourceGuard budget checks. AHA-9 renamed the live identity maps to current ownership maps and added a completed-score inventory gate. All iOS source/test map rows are now `passed_after_fix`; the map has no old-path rows, points no live file at old broad-bucket targets, and is guarded by `ios_hra8_ownership_map_covers_every_source_and_test_swift_file`. HRA-14 updates the global HRA TSV inventory to include 74 Mac source files and 36 Mac test files under the target owner roots.
+HRA-8 added a 547-row iOS source/test Swift current ownership map. HRA-9 updated that map to 550 live Swift rows after the `EngineConnection` split and marked the Engine rows `passed_after_fix`. HRA-10 updated the map to 551 live Swift rows after the Session display-model split and marked the Session rows `passed_after_fix`. HRA-11 updated the map to 553 live Swift rows after the UI support splits, HRA-12 kept the same 553-row coverage while marking the App/Support rows `passed_after_fix`, and HRA-13 updated the map to 566 live Swift rows after the SourceGuard and reconstruction test splits. HRA-16 kept 566 live Swift rows while replacing the generic reconstruction `Handlers` bucket with `ChatMessageProjection` and moving `EngineConnectionReconnectTests` into the WebSocket test mirror. AHA-8 refreshed the current map to 571 live Swift rows after the concrete engine client split and SourceGuard budget checks. AHA-9 renamed the live identity maps to current ownership maps and added a completed-score inventory gate. TPC-11 refreshed the current map to 581 live Swift rows after the TPC iOS split files landed. All iOS source/test map rows are now `passed_after_fix`; the map has no old-path rows, points no live file at old broad-bucket targets, and is guarded by `ios_hra8_ownership_map_covers_every_source_and_test_swift_file`. HRA-14 and TPC-11 update the global HRA TSV inventory to include 76 Mac source files and 38 Mac test files under the target owner roots.
 
 ## Directories Over 12 Source Files
 

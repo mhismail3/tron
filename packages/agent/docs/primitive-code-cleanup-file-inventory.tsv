@@ -114,7 +114,7 @@ packages/agent/src/domains/agent/loop/tron_agent/tests.rs	retain	rust agent	PCC-
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/agent/loop/turn_runner/persistence.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/agent/loop/turn_runner/persistence/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/provider.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/result.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -158,7 +158,7 @@ packages/agent/src/domains/auth/credentials/storage/tests/credentials.rs	retain	
 packages/agent/src/domains/auth/credentials/storage/tests/extra_fields.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/auth/credentials/storage/tests/google.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/auth/credentials/storage/tests/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/auth/credentials/types.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/auth/credentials/types/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/auth/deps.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/auth/handlers.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/auth/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -199,7 +199,7 @@ packages/agent/src/domains/model/providers/anthropic/types/catalog.rs	retain	rus
 packages/agent/src/domains/model/providers/anthropic/types/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/anthropic/types/stream.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/anthropic/types/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/factory.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/model/providers/factory/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/google/message_converter.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/google/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/google/provider/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -221,12 +221,12 @@ packages/agent/src/domains/model/providers/ollama/message_converter/mod.rs	retai
 packages/agent/src/domains/model/providers/ollama/message_converter/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/ollama/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/ollama/provider.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/ollama/stream_handler.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/model/providers/ollama/stream_handler/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/ollama/types.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/openai/message_converter.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/model/providers/openai/message_converter/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/openai/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/openai/provider/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/openai/provider/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/model/providers/openai/provider/tests/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/openai/stream_handler/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/openai/stream_handler/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/openai/types/config.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -406,7 +406,7 @@ packages/agent/src/engine/durability/resources/ui_surface.rs	retain	rust agent	P
 packages/agent/src/engine/durability/resources/validation.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/resources/versions.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/state.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/engine/durability/streams.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/engine/durability/streams/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/invocation/host/catalog_handle.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/invocation/host/handle.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/invocation/host/invocation_handle.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1401,3 +1401,66 @@ packages/mac-app/Sources/Server/LaunchAgent/LiveLaunchAgentManager.swift	retain	
 packages/mac-app/Sources/Support/Foundation/Subprocess.swift	retain	mac app	PAC-4/PAC-6	Current Mac subprocess helper retained and inventoried during PAC-6 coverage cleanup.
 packages/mac-app/Tests/Infrastructure/Guards/MacSourceGuardTests.swift	retain	mac tests	PAC-5/PAC-6	Current Mac source guard retained and inventoried during PAC-6 coverage cleanup.
 packages/mac-app/Tests/Server/LaunchAgent/LiveLaunchAgentManagerTests.swift	retain	mac tests	PAC-4/PAC-6	Current Mac launch-agent tests retained and inventoried during PAC-6 coverage cleanup.
+packages/agent/docs/true-primitive-cleanup-evidence-manifest.md	retain	tpc docs	TPC-11	Current True Primitive Cleanup evidence artifact retained after final closeout.
+packages/agent/docs/true-primitive-cleanup-retention-inventory.md	retain	tpc docs	TPC-11	Current True Primitive Cleanup retention inventory retained after final closeout.
+packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv	retain	tpc docs	TPC-11	Current True Primitive Cleanup retention inventory data retained after final closeout.
+packages/agent/docs/true-primitive-cleanup-scorecard.md	retain	tpc docs	TPC-11	Current True Primitive Cleanup scorecard retained after final closeout.
+packages/agent/src/app/bootstrap/tests/cli.rs	retain	tpc rust test	TPC-11	Current TPC bootstrap test split retained after final closeout.
+packages/agent/src/app/bootstrap/tests/database.rs	retain	tpc rust test	TPC-11	Current TPC bootstrap test split retained after final closeout.
+packages/agent/src/app/bootstrap/tests/provider_auth.rs	retain	tpc rust test	TPC-11	Current TPC bootstrap test split retained after final closeout.
+packages/agent/src/app/bootstrap/tests/server_runtime.rs	retain	tpc rust test	TPC-11	Current TPC bootstrap test split retained after final closeout.
+packages/agent/src/app/bootstrap/tests/source_guards.rs	retain	tpc rust test	TPC-11	Current TPC bootstrap test split retained after final closeout.
+packages/agent/src/domains/agent/loop/turn_runner/persistence/tests.rs	retain	tpc rust test	TPC-11	Current TPC persistence test split retained after final closeout.
+packages/agent/src/domains/auth/credentials/types/tests.rs	retain	tpc rust test	TPC-11	Current TPC auth credential test split retained after final closeout.
+packages/agent/src/domains/model/providers/factory/tests.rs	retain	tpc rust test	TPC-11	Current TPC provider factory test split retained after final closeout.
+packages/agent/src/domains/model/providers/google/types/models.rs	retain	tpc rust source	TPC-11	Current TPC provider model catalog split retained after final closeout.
+packages/agent/src/domains/model/providers/ollama/stream_handler/tests.rs	retain	tpc rust test	TPC-11	Current TPC Ollama stream test split retained after final closeout.
+packages/agent/src/domains/model/providers/openai/message_converter/tests.rs	retain	tpc rust test	TPC-11	Current TPC OpenAI message converter test split retained after final closeout.
+packages/agent/src/domains/model/providers/openai/provider/tests/request.rs	retain	tpc rust test	TPC-11	Current TPC OpenAI provider request test split retained after final closeout.
+packages/agent/src/engine/catalog/registry/authorization.rs	retain	tpc rust source	TPC-11	Current TPC engine catalog registry split retained after final closeout.
+packages/agent/src/engine/catalog/registry/cleanup.rs	retain	tpc rust source	TPC-11	Current TPC engine catalog registry split retained after final closeout.
+packages/agent/src/engine/catalog/registry/idempotency.rs	retain	tpc rust source	TPC-11	Current TPC engine catalog registry split retained after final closeout.
+packages/agent/src/engine/catalog/registry/registration.rs	retain	tpc rust source	TPC-11	Current TPC engine catalog registry split retained after final closeout.
+packages/agent/src/engine/catalog/registry/search.rs	retain	tpc rust source	TPC-11	Current TPC engine catalog registry split retained after final closeout.
+packages/agent/src/engine/durability/ledger/sqlite_store.rs	retain	tpc rust source	TPC-11	Current TPC durability ledger split retained after final closeout.
+packages/agent/src/engine/durability/queue/memory.rs	retain	tpc rust source	TPC-11	Current TPC durability queue split retained after final closeout.
+packages/agent/src/engine/durability/queue/sqlite_store.rs	retain	tpc rust source	TPC-11	Current TPC durability queue split retained after final closeout.
+packages/agent/src/engine/durability/streams/memory.rs	retain	tpc rust source	TPC-11	Current TPC durability stream split retained after final closeout.
+packages/agent/src/engine/durability/streams/sqlite_store.rs	retain	tpc rust source	TPC-11	Current TPC durability stream split retained after final closeout.
+packages/agent/src/engine/invocation/host/bootstrap.rs	retain	tpc rust source	TPC-11	Current TPC invocation host split retained after final closeout.
+packages/agent/src/engine/invocation/host/meta_invocation.rs	retain	tpc rust source	TPC-11	Current TPC invocation host split retained after final closeout.
+packages/agent/src/engine/primitives/stores.rs	retain	tpc rust source	TPC-11	Current TPC primitive store split retained after final closeout.
+packages/agent/src/engine/primitives/workers.rs	retain	tpc rust source	TPC-11	Current TPC primitive worker split retained after final closeout.
+packages/agent/src/engine/runtime/external_workers/lifecycle.rs	retain	tpc rust source	TPC-11	Current TPC external worker runtime split retained after final closeout.
+packages/agent/src/engine/runtime/external_workers/registration.rs	retain	tpc rust source	TPC-11	Current TPC external worker runtime split retained after final closeout.
+packages/agent/src/engine/runtime/external_workers/validation.rs	retain	tpc rust source	TPC-11	Current TPC external worker runtime split retained after final closeout.
+packages/agent/src/engine/tests/runtime/external_worker_helpers.rs	retain	tpc rust test	TPC-11	Current TPC external worker test split retained after final closeout.
+packages/agent/src/engine/tests/runtime/external_worker_protocol.rs	retain	tpc rust test	TPC-11	Current TPC external worker test split retained after final closeout.
+packages/agent/src/engine/tests/runtime/trigger_helpers.rs	retain	tpc rust test	TPC-11	Current TPC trigger helper split retained after final closeout.
+packages/agent/src/shared/observability/transport/tests.rs	retain	tpc rust test	TPC-11	Current TPC observability transport test split retained after final closeout.
+packages/agent/src/transport/engine/socket/subscriptions.rs	retain	tpc rust source	TPC-11	Current TPC engine socket subscription split retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/docs_guards_inventories.rs	retain	tpc rust test	TPC-11	Current TPC docs/guards/inventory gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/engine_durability.rs	retain	tpc rust test	TPC-11	Current TPC engine durability gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/external_workers.rs	retain	tpc rust test	TPC-11	Current TPC external worker gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/final_closeout.rs	retain	tpc rust test	TPC-11	Current TPC final closeout gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/inventory.rs	retain	tpc rust test	TPC-11	Current TPC inventory gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/invocation_primitives.rs	retain	tpc rust test	TPC-11	Current TPC invocation/primitive gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/ios_engine_protocol.rs	retain	tpc rust test	TPC-11	Current TPC iOS engine/protocol gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/ios_ui_state.rs	retain	tpc rust test	TPC-11	Current TPC iOS UI/state gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/mod.rs	retain	tpc rust test	TPC-11	Current TPC invariant module retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/provider_auth_model.rs	retain	tpc rust test	TPC-11	Current TPC provider/auth/model gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/scorecard.rs	retain	tpc rust test	TPC-11	Current TPC scorecard gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/script_runtime_helpers.rs	retain	tpc rust test	TPC-11	Current TPC script/runtime helper gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/support.rs	retain	tpc rust test	TPC-11	Current TPC test support retained after final closeout.
+packages/agent/tests/true_primitive_cleanup/transport_agent_observability.rs	retain	tpc rust test	TPC-11	Current TPC transport/observability gate retained after final closeout.
+packages/agent/tests/true_primitive_cleanup_invariants.rs	retain	tpc rust test	TPC-11	Current TPC invariant target retained after final closeout.
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+RuntimeCallbacks.swift	retain	tpc ios source	TPC-11	Current TPC iOS chat view-model split retained after final closeout.
+packages/ios-app/Sources/Support/Diagnostics/DiagnosticsBundleTypes.swift	retain	tpc ios source	TPC-11	Current TPC diagnostics type split retained after final closeout.
+packages/ios-app/Sources/UI/Chat/Shell/ChatView+MessageList.swift	retain	tpc ios source	TPC-11	Current TPC chat view split retained after final closeout.
+packages/ios-app/Sources/UI/Onboarding/Steps/SetupStepComponents.swift	retain	tpc ios source	TPC-11	Current TPC onboarding component split retained after final closeout.
+packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+RenderingHelpers.swift	retain	tpc ios source	TPC-11	Current TPC generated runtime helper split retained after final closeout.
+packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet+Sections.swift	retain	tpc ios source	TPC-11	Current TPC model picker section split retained after final closeout.
+packages/ios-app/Sources/UI/Settings/Shell/SettingsServerSupport.swift	retain	tpc ios source	TPC-11	Current TPC settings server support split retained after final closeout.
+packages/ios-app/Sources/UI/Settings/Shell/SettingsView+MainSection.swift	retain	tpc ios source	TPC-11	Current TPC settings main section split retained after final closeout.
+packages/ios-app/Sources/UI/Theme/TronThemeTokens.swift	retain	tpc ios source	TPC-11	Current TPC theme token split retained after final closeout.
+packages/ios-app/Tests/Session/Chat/Messaging/StreamingManagerTypewriterTests.swift	retain	tpc ios test	TPC-11	Current TPC streaming manager test split retained after final closeout.

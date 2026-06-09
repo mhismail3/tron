@@ -3,22 +3,28 @@ use super::support::*;
 #[test]
 fn provider_auth_model_roots_are_split_and_provider_native() {
     for (path, limit) in [
-        ("packages/agent/src/domains/model/providers/factory.rs", 750),
         (
-            "packages/agent/src/domains/model/providers/openai/message_converter.rs",
+            "packages/agent/src/domains/model/providers/factory/mod.rs",
             750,
         ),
         (
-            "packages/agent/src/domains/model/providers/openai/provider/tests.rs",
+            "packages/agent/src/domains/model/providers/openai/message_converter/mod.rs",
+            750,
+        ),
+        (
+            "packages/agent/src/domains/model/providers/openai/provider/tests/mod.rs",
             800,
         ),
-        ("packages/agent/src/domains/auth/credentials/types.rs", 750),
+        (
+            "packages/agent/src/domains/auth/credentials/types/mod.rs",
+            750,
+        ),
         (
             "packages/agent/src/domains/model/providers/google/types/mod.rs",
             750,
         ),
         (
-            "packages/agent/src/domains/model/providers/ollama/stream_handler.rs",
+            "packages/agent/src/domains/model/providers/ollama/stream_handler/mod.rs",
             750,
         ),
     ] {

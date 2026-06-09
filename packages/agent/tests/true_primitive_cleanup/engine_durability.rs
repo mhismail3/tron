@@ -10,7 +10,7 @@ fn engine_catalog_and_durability_roots_are_split_and_explicit() {
         ),
         ("packages/agent/src/engine/durability/ledger/mod.rs", 750),
         ("packages/agent/src/engine/durability/queue/mod.rs", 750),
-        ("packages/agent/src/engine/durability/streams.rs", 750),
+        ("packages/agent/src/engine/durability/streams/mod.rs", 750),
     ] {
         let lines = line_count(&repo_path(path));
         assert!(

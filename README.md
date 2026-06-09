@@ -737,7 +737,7 @@ The schema is defined in `packages/agent/src/domains/settings/profile/types/`. A
 
 **Storage:** `~/.tron/profiles/auth.json` (mode 600)
 
-The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/domains/auth/credentials/types.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
+The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/domains/auth/credentials/types/mod.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
 
 Fresh Mac installs seed `auth.json` as the exact empty JSON object `{}`. That sentinel is valid only as pristine install state: first server boot materializes it through the normal atomic `0o600` auth writer into `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten.
 

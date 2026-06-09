@@ -12,6 +12,8 @@
 # Xcode
 *.xcuserstate
 project.xcworkspace/
+!packages/ios-app/TronMobile.xcodeproj/project.xcworkspace/
+!packages/ios-app/TronMobile.xcodeproj/project.xcworkspace/contents.xcworkspacedata
 xcuserdata/
 DerivedData/
 packages/ios-app/.build/

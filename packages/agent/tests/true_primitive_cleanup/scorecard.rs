@@ -9,8 +9,8 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# True Primitive Cleanup Scorecard",
-        "Current score: **95/100**",
-        "Status: **in_progress**",
+        "Current score: **100/100**",
+        "Status: **complete**",
         "Branch: `codex/primitive-engine-teardown`",
         "Hard Targets",
         "Initial Red Findings",
@@ -26,7 +26,7 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
         "| TPC-8 | iOS UI state flattening | 8 | passed_after_fix |",
         "| TPC-9 | Mac/scripts/runtime helpers | 7 | passed_after_fix |",
         "| TPC-10 | Docs, guards, inventories | 5 | passed_after_fix |",
-        "| TPC-11 | Final closeout | 5 | pending |",
+        "| TPC-11 | Final closeout | 5 | passed_after_fix |",
         "Total weight: **100**",
     ] {
         assert!(
@@ -37,8 +37,8 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# True Primitive Cleanup Evidence Manifest",
-        "Current score: **95/100**",
-        "Status: **in_progress**",
+        "Current score: **100/100**",
+        "Status: **complete**",
         "| TPC-0 | passed_after_fix |",
         "| TPC-1 | passed_after_fix |",
         "| TPC-2 | passed_after_fix |",
@@ -50,7 +50,7 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
         "| TPC-8 | passed_after_fix |",
         "| TPC-9 | passed_after_fix |",
         "| TPC-10 | passed_after_fix |",
-        "| TPC-11 | pending |",
+        "| TPC-11 | passed_after_fix |",
         "Red Baseline Commands",
     ] {
         assert!(
