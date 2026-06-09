@@ -1,0 +1,930 @@
+path	language	class	owner	dependency_direction
+packages/agent/src/app/bootstrap/config.rs	rust	composition-root	rust:app-bootstrap	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/agent/src/app/bootstrap/disk.rs	rust	composition-root	rust:app-bootstrap	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/agent/src/app/bootstrap/mod.rs	rust	composition-root	rust:app-bootstrap	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/agent/src/app/bootstrap/server.rs	rust	composition-root	rust:app-bootstrap	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/agent/src/app/bootstrap/tests.rs	rust	test-support	rust:app-bootstrap	test-only helper; production code must not depend on it
+packages/agent/src/app/bootstrap/tests/cli.rs	rust	test-support	rust:app-bootstrap	test-only helper; production code must not depend on it
+packages/agent/src/app/bootstrap/tests/database.rs	rust	test-support	rust:app-bootstrap	test-only helper; production code must not depend on it
+packages/agent/src/app/bootstrap/tests/provider_auth.rs	rust	test-support	rust:app-bootstrap	test-only helper; production code must not depend on it
+packages/agent/src/app/bootstrap/tests/server_runtime.rs	rust	test-support	rust:app-bootstrap	test-only helper; production code must not depend on it
+packages/agent/src/app/bootstrap/tests/source_guards.rs	rust	test-support	rust:app-bootstrap	test-only helper; production code must not depend on it
+packages/agent/src/app/cli/mod.rs	rust	facade	rust:app	callers may depend on this narrow owner-approved surface only
+packages/agent/src/app/health/metrics.rs	rust	implementation	rust:app	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/app/health/mod.rs	rust	facade	rust:app	callers may depend on this narrow owner-approved surface only
+packages/agent/src/app/lifecycle/mod.rs	rust	facade	rust:app	callers may depend on this narrow owner-approved surface only
+packages/agent/src/app/lifecycle/onboarding/mod.rs	rust	facade	rust:app	callers may depend on this narrow owner-approved surface only
+packages/agent/src/app/lifecycle/shutdown.rs	rust	implementation	rust:app	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/app/mod.rs	rust	facade	rust:app	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/context/compaction_engine/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/context/compaction_engine/tests/estimation_orphans.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/context/compaction_engine/tests/mod.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/context/compaction_engine/tests/preview_execute.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/context/compaction_engine/tests/split_point.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/context/compaction_trigger.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/context/constants.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/context/context_manager/compaction_deps.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/context/context_manager/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/context/context_manager/snapshot_deps.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/context/context_manager/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/context/context_snapshot_builder.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/context/message_store.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/context/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/context/soul.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/context/summarizer.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/context/token_estimator.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/context/types.rs	rust	contract	rust:domain-agent	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/agent/contract.rs	rust	contract	rust:domain-agent	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/agent/deps.rs	rust	contract	rust:domain-agent	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/agent/handlers.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/capability_invocation_executor/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/compaction_handler/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/compaction_handler/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/errors.rs	rust	contract	rust:domain-agent	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/agent/loop/event_emitter.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/orchestrator/agent_factory.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/orchestrator/agent_runner.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/orchestrator/capability_invocation_tracker.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/orchestrator/core/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/orchestrator/core/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/orchestrator/event_persister.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/orchestrator/invocation_abort_registry.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/orchestrator/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/orchestrator/recovery.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/orchestrator/session_context.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/orchestrator/session_manager/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/orchestrator/session_reconstructor.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/orchestrator/streaming_journal.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/orchestrator/turn_accumulator/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/orchestrator/turn_accumulator/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/pipeline/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/pipeline/persistence.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/primitive_surface.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/profile_runtime.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/stream_processor/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/stream_processor/tests/drain.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/stream_processor/tests/mod.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/stream_processor/tests/stream_state.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/stream_state.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/tron_agent/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/tron_agent/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/turn_runner/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/turn_runner/persistence/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/turn_runner/persistence/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/turn_runner/provider.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/turn_runner/result.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/turn_runner/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
+packages/agent/src/domains/agent/loop/turn_runner/turn_context.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/types.rs	rust	contract	rust:domain-agent	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/agent/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/prompt/commands.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/prompt/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/prompt/prompt.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/prompt/service.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/cleanup.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/runtime/runtime/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/runtime/runtime/session_update.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/runtime/user_event.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/service/agent_build.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/service/completion.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/service/context.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/service/deps.rs	rust	contract	rust:domain-agent	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/agent/runtime/service/events.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/service/execute.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/service/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/runtime/service/plan.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/service/request.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/runtime/service/spawn.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/stream.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/worker.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/contract.rs	rust	contract	rust:domain-auth	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/auth/credentials/accounts.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/credentials/anthropic.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/credentials/errors.rs	rust	contract	rust:domain-auth	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/auth/credentials/google.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/credentials/mod.rs	rust	facade	rust:domain-auth	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/auth/credentials/openai/mod.rs	rust	facade	rust:domain-auth	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/auth/credentials/openai/tests.rs	rust	test-support	rust:domain-auth	test-only helper; production code must not depend on it
+packages/agent/src/domains/auth/credentials/pkce.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/credentials/provider_state.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/credentials/refresh.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/credentials/storage/mod.rs	rust	facade	rust:domain-auth	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/auth/credentials/storage/tests/credentials.rs	rust	test-support	rust:domain-auth	test-only helper; production code must not depend on it
+packages/agent/src/domains/auth/credentials/storage/tests/extra_fields.rs	rust	test-support	rust:domain-auth	test-only helper; production code must not depend on it
+packages/agent/src/domains/auth/credentials/storage/tests/google.rs	rust	test-support	rust:domain-auth	test-only helper; production code must not depend on it
+packages/agent/src/domains/auth/credentials/storage/tests/mod.rs	rust	test-support	rust:domain-auth	test-only helper; production code must not depend on it
+packages/agent/src/domains/auth/credentials/types/mod.rs	rust	contract	rust:domain-auth	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/auth/credentials/types/tests.rs	rust	test-support	rust:domain-auth	test-only helper; production code must not depend on it
+packages/agent/src/domains/auth/deps.rs	rust	contract	rust:domain-auth	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/auth/handlers.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/mod.rs	rust	facade	rust:domain-auth	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/auth/oauth/flows.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/oauth/mod.rs	rust	facade	rust:domain-auth	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/auth/oauth/operations.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/auth/stream.rs	rust	implementation	rust:domain-auth	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/blob/mod.rs	rust	facade	rust:domain-blob	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/capability/contract.rs	rust	contract	rust:domain-capability	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/capability/mod.rs	rust	facade	rust:domain-capability	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/capability/operations/filesystem.rs	rust	implementation	rust:domain-capability	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/capability/operations/logs.rs	rust	implementation	rust:domain-capability	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/capability/operations/mod.rs	rust	facade	rust:domain-capability	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/capability/operations/process.rs	rust	implementation	rust:domain-capability	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/capability/operations/state.rs	rust	implementation	rust:domain-capability	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/capability/operations/trace.rs	rust	implementation	rust:domain-capability	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/logs/client_logs.rs	rust	implementation	rust:domain-logs	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/logs/mod.rs	rust	facade	rust:domain-logs	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/message/mod.rs	rust	facade	rust:domain-message	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/mod.rs	rust	facade	rust:domains	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/model/contract.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/deps.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/handlers.rs	rust	implementation	rust:domain-model	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/model/mod.rs	rust	facade	rust:domain-model	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/model/protocol/capability_parsing.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/protocol/id_remapping.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/protocol/mod.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/anthropic/cache_pruning.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/anthropic/message_converter/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/anthropic/message_converter/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/anthropic/message_sanitizer.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/anthropic/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/anthropic/provider/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/anthropic/provider/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/anthropic/stream_handler/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/anthropic/stream_handler/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/anthropic/types/catalog.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/anthropic/types/mod.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/anthropic/types/stream.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/anthropic/types/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/factory/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/factory/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/google/message_converter.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/google/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/google/provider/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/google/provider/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/google/stream_handler.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/google/types/mod.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/google/types/models.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/google/types/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/kimi/message_converter.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/kimi/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/kimi/provider.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/kimi/stream_handler/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/kimi/stream_handler/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/kimi/types.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/minimax/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/minimax/provider.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/minimax/types.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/ollama/message_converter/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/ollama/message_converter/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/ollama/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/ollama/provider.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/ollama/stream_handler/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/ollama/stream_handler/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/ollama/types.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/message_converter/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/openai/message_converter/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/openai/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/openai/provider/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/openai/provider/tests/mod.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/openai/provider/tests/request.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/openai/stream_handler/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/openai/stream_handler/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/openai/types/config.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/types/mod.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/types/models/catalog/frontier.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/types/models/catalog/mod.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/types/models/catalog/retired.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/types/models/catalog/specialized.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/types/models/catalog/standard.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/types/models/mod.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/types/responses.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/openai/types/tests.rs	rust	test-support	rust:domain-model	test-only helper; production code must not depend on it
+packages/agent/src/domains/model/providers/shared/context_composition.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/shared/error_parsing.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/shared/health.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/shared/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/shared/provider.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/providers/shared/retry.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/shared/sse.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/shared/stream_common.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/tokens/errors.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/tokens/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/tokens/normalization.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/tokens/pricing.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/tokens/types.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/routing/catalog.rs	rust	implementation	rust:domain-model	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/model/routing/mod.rs	rust	facade	rust:domain-model	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/model/routing/models/mod.rs	rust	facade	rust:domain-model	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/model/routing/models/model_ids.rs	rust	implementation	rust:domain-model	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/model/routing/models/registry.rs	rust	implementation	rust:domain-model	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/model/routing/models/types.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/routing/operations.rs	rust	implementation	rust:domain-model	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/model/routing/presets.rs	rust	implementation	rust:domain-model	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/registration/bindings.rs	rust	implementation	rust:domain-registration	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/registration/catalog.rs	rust	implementation	rust:domain-registration	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/registration/contract.rs	rust	contract	rust:domain-registration	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/registration/mod.rs	rust	facade	rust:domain-registration	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/registration/worker.rs	rust	implementation	rust:domain-registration	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/contract.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/envelope/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/event_store/errors.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/factory/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/event_store/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/event_store/reconstruction/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/event_store/reconstruction/tests/basic_capability.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/reconstruction/tests/mod.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/reconstruction/tests/multimodal_performance.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/redaction.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/event_store/sqlite/connection.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/contention.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/migrations/mod.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/migrations/tests/mod.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/migrations/tests/primitive.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/mod.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/process_lock.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/blob.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/crud.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/extractors.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/mod.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/session_queries.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/append_order_counters.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/mod.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/pagination_filters.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/payload_blob_resolution.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/tests/reconstruction_state.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/tree_queries.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/event/type_queries.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/mod.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/session/mod.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/session/projections.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/session/tests/core.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/repositories/session/tests/mod.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/repositories/session/tests/projections.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/sqlite/repositories/trace.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/repositories/workspace.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/sqlite/row_types.rs	rust	adapter	rust:domain-session	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/session/event_store/store/event_store/auxiliary.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/event_store/store/event_store/event_log.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/event_store/store/event_store/locking.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/event_store/store/event_store/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/event_store/store/event_store/session_lifecycle.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/event_store/store/event_store/state.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/event_store/store/event_store/tests/activity_summary.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/store/event_store/tests/append_counters.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/store/event_store/tests/auto_sequence.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/store/event_store/tests/mod.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/store/event_store/tests/queries_state.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/store/event_store/tests/session_creation.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/store/event_store/tests/tree_sessions.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/event_store/store/event_store/trace_log.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/event_store/store/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/event_store/trace.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/event_store/types/base.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/generated.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/macros.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/mod.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/capability_invocation.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/compact.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/context.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/error.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/message.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/message_ops.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/metadata.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/mod.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/session.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/streaming.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/token_usage.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/payloads/turn.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/state.rs	rust	contract	rust:domain-session	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/session/event_store/types/tests.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/lifecycle/archive.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/lifecycle/create.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/lifecycle/delete.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/lifecycle/fork.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/lifecycle/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/lifecycle/operations.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/lifecycle/tests/archive_delete.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/lifecycle/tests/archive_older_than.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/lifecycle/tests/create.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/lifecycle/tests/mod.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/lifecycle/tests/support.rs	rust	test-support	rust:domain-session	test-only helper; production code must not depend on it
+packages/agent/src/domains/session/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/query/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/query/operations.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/reconstruction/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/session/reconstruction/operations.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/settings/contract.rs	rust	contract	rust:domain-settings	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/settings/deps.rs	rust	contract	rust:domain-settings	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/settings/handlers.rs	rust	implementation	rust:domain-settings	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/settings/mod.rs	rust	facade	rust:domain-settings	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/settings/profile/db_path_policy.rs	rust	implementation	rust:domain-settings	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/settings/profile/errors.rs	rust	contract	rust:domain-settings	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/settings/profile/mod.rs	rust	facade	rust:domain-settings	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/settings/profile/operations.rs	rust	implementation	rust:domain-settings	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/settings/profile/storage/loader.rs	rust	implementation	rust:domain-settings	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/settings/profile/storage/mod.rs	rust	facade	rust:domain-settings	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/settings/profile/store.rs	rust	implementation	rust:domain-settings	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/settings/profile/types/api.rs	rust	contract	rust:domain-settings	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/settings/profile/types/context.rs	rust	contract	rust:domain-settings	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/settings/profile/types/mod.rs	rust	contract	rust:domain-settings	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/settings/profile/types/server.rs	rust	contract	rust:domain-settings	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/settings/profile/types/ui.rs	rust	contract	rust:domain-settings	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/system/mod.rs	rust	facade	rust:domain-system	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/authority/compensation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/authority/grants/authorization.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/authority/grants/derivation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/authority/grants/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/authority/grants/model.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/authority/grants/sqlite_codec.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/authority/leases.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/authority/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/catalog/capabilities.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/catalog/discovery.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/catalog/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/catalog/registry/authorization.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/catalog/registry/catalog_changes.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/catalog/registry/cleanup.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/catalog/registry/idempotency.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/catalog/registry/invocation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/catalog/registry/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/catalog/registry/output_contract.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/catalog/registry/registration.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/catalog/registry/search.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/ledger/memory.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/ledger/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/durability/ledger/outcome.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/ledger/sqlite_codec.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/ledger/sqlite_store.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/durability/queue/memory.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/queue/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/durability/queue/runtime.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/queue/sqlite_codec.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/queue/sqlite_store.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/resources/definitions.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/resources/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/durability/resources/store/memory.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/resources/store/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/durability/resources/store/sqlite_codec.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/resources/store/tests.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/durability/resources/types.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/durability/resources/ui_surface.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/resources/validation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/resources/versions.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/state.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/streams/memory.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/streams/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/durability/streams/sqlite_store.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/bootstrap.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/catalog_handle.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/handle.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/invocation_handle.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/invocation_support.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/meta.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/meta_invocation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/invocation/host/runtime_host.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/substrate_handle.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/invocation/model.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/kernel/errors.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/kernel/ids.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/kernel/mod.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/kernel/policy.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/kernel/schema.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/kernel/types/catalog.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/kernel/types/function.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/kernel/types/mod.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/kernel/types/trigger.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/kernel/types/worker.rs	rust	contract	rust:engine	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/primitives/catalog.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/grant.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/primitives/queue.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/resource/artifact.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/resource/common.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/resource/input.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/resource/materialized_file.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/resource/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/primitives/resource/registrations.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/resource/schemas.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/runtime.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/state.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/storage.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/stores.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/stream.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/trigger.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/ui/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/primitives/ui/schemas.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/ui/validation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/worker.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/workers.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/external_workers/lifecycle.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/external_workers/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/runtime/external_workers/proxy.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/external_workers/registration.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/external_workers/validation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/runtime/triggers.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/worker_protocol.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/tests/authority/grant_derivation.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/authority/helpers.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/authority/invocation_authorization.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/authority/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/authority/worker_grants.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/catalog/catalog_discovery.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/catalog/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/ledger_idempotency.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/materialized_files.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/queue_inspection_persistence.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/queue_lifecycle.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/resource_contracts.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/resource_output_contracts.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/resource_wrappers.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/state_primitives.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/durability/streams.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/fixtures/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/invocation/host_invocation.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/invocation/idempotency.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/invocation/meta_primitives.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/invocation/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/kernel/ids_types.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/kernel/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/runtime/external_worker.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/runtime/external_worker_helpers.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/runtime/external_worker_protocol.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/runtime/external_worker_soak.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/runtime/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/runtime/restart_chaos.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/runtime/trigger_helpers.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/runtime/triggers.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/lib.rs	rust	implementation	unknown	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/main.rs	rust	composition-root	unknown	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/agent/src/platform/device_broker.rs	rust	implementation	rust:platform	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/platform/mod.rs	rust	facade	rust:platform	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/foundation/constants.rs	rust	implementation	rust:shared-foundation	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/foundation/constitution.rs	rust	implementation	rust:shared-foundation	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/foundation/errors/mod.rs	rust	facade	rust:shared-foundation	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/foundation/errors/parse.rs	rust	implementation	rust:shared-foundation	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/foundation/errors/tests.rs	rust	test-support	rust:shared-foundation	test-only helper; production code must not depend on it
+packages/agent/src/shared/foundation/ids.rs	rust	contract	rust:shared-foundation	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/shared/foundation/mod.rs	rust	facade	rust:shared-foundation	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/foundation/paths/mod.rs	rust	facade	rust:shared-foundation	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/foundation/paths/tests.rs	rust	test-support	rust:shared-foundation	test-only helper; production code must not depend on it
+packages/agent/src/shared/foundation/profile/compilation.rs	rust	implementation	rust:shared-foundation	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/foundation/profile/mod.rs	rust	facade	rust:shared-foundation	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/foundation/profile/tests.rs	rust	test-support	rust:shared-foundation	test-only helper; production code must not depend on it
+packages/agent/src/shared/foundation/profile/validation.rs	rust	implementation	rust:shared-foundation	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/foundation/retry.rs	rust	implementation	rust:shared-foundation	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/foundation/text.rs	rust	implementation	rust:shared-foundation	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/mod.rs	rust	facade	rust:shared	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/observability/mod.rs	rust	facade	rust:shared-observability	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/observability/test_utils.rs	rust	implementation	rust:shared-observability	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/observability/transport.rs	rust	implementation	rust:shared-observability	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/observability/transport/tests.rs	rust	test-support	rust:shared-observability	test-only helper; production code must not depend on it
+packages/agent/src/shared/observability/types.rs	rust	contract	rust:shared-observability	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/shared/protocol/content.rs	rust	implementation	rust:shared-protocol	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/protocol/document_extractor.rs	rust	implementation	rust:shared-protocol	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/protocol/events/capability.rs	rust	implementation	rust:shared-protocol	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/protocol/events/factory.rs	rust	implementation	rust:shared-protocol	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/protocol/events/mod.rs	rust	facade	rust:shared-protocol	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/protocol/events/stream.rs	rust	implementation	rust:shared-protocol	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/protocol/events/tests/base_sequence.rs	rust	test-support	rust:shared-protocol	test-only helper; production code must not depend on it
+packages/agent/src/shared/protocol/events/tests/mod.rs	rust	test-support	rust:shared-protocol	test-only helper; production code must not depend on it
+packages/agent/src/shared/protocol/events/tests/session_process.rs	rust	test-support	rust:shared-protocol	test-only helper; production code must not depend on it
+packages/agent/src/shared/protocol/events/tests/stream.rs	rust	test-support	rust:shared-protocol	test-only helper; production code must not depend on it
+packages/agent/src/shared/protocol/events/tests/tron_catalog.rs	rust	test-support	rust:shared-protocol	test-only helper; production code must not depend on it
+packages/agent/src/shared/protocol/events/tests/tron_core.rs	rust	test-support	rust:shared-protocol	test-only helper; production code must not depend on it
+packages/agent/src/shared/protocol/events/tron/catalog.rs	rust	implementation	rust:shared-protocol	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/protocol/events/tron/mod.rs	rust	facade	rust:shared-protocol	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/protocol/memory.rs	rust	implementation	rust:shared-protocol	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/protocol/messages/mod.rs	rust	facade	rust:shared-protocol	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/protocol/messages/tests.rs	rust	test-support	rust:shared-protocol	test-only helper; production code must not depend on it
+packages/agent/src/shared/protocol/mod.rs	rust	facade	rust:shared-protocol	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/protocol/model_capabilities.rs	rust	implementation	rust:shared-protocol	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/server/context.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/server/error_mapping.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/server/errors.rs	rust	contract	rust:shared-server	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/shared/server/events.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/server/mod.rs	rust	facade	rust:shared-server	callers may depend on this narrow owner-approved surface only
+packages/agent/src/shared/server/params.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/server/protocol.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/server/test_support.rs	rust	test-support	rust:shared-server	test-only helper; production code must not depend on it
+packages/agent/src/shared/server/validation.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/storage/archive.rs	rust	adapter	rust:shared-storage	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/shared/storage/maintenance.rs	rust	adapter	rust:shared-storage	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/shared/storage/mod.rs	rust	adapter	rust:shared-storage	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/shared/storage/payloads.rs	rust	adapter	rust:shared-storage	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/shared/storage/schema.rs	rust	adapter	rust:shared-storage	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/shared/storage/stats.rs	rust	adapter	rust:shared-storage	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/shared/storage/tests.rs	rust	test-support	rust:shared-storage	test-only helper; production code must not depend on it
+packages/agent/src/transport/engine/contracts.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/engine/mod.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/engine/socket/mod.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/engine/socket/outbound.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/engine/socket/stream_projection.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/engine/socket/subscriptions.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/engine/socket/tests.rs	rust	test-support	rust:transport	test-only helper; production code must not depend on it
+packages/agent/src/transport/engine/socket/wire.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/http/auth.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/http/mod.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/mod.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/external_workers.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/mod.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/queue_drainer.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/setup.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/capability_call.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/message.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/mod.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/routed.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/session/agent.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/session/lifecycle.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/session/mod.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/streaming.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/tests.rs	rust	test-support	rust:transport	test-only helper; production code must not depend on it
+packages/agent/src/transport/runtime/streams/tron.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/streams/turn.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/transport/runtime/worker_heartbeat.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/App/Lifecycle/AppDelegate.swift	swift	composition-root	ios:app	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/App/Lifecycle/TronMobileApp.swift	swift	composition-root	ios:app	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/Engine/Events/Live/AsyncEventStream.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Live/EventTypeRegistry.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Payloads/CapabilityInvocationPayloads.swift	swift	generated-wire-dto	ios:engine-events	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Events/Payloads/ConfigPayloads.swift	swift	generated-wire-dto	ios:engine-events	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Events/Payloads/ExtendedPayloads.swift	swift	generated-wire-dto	ios:engine-events	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Events/Payloads/MessagePayloads.swift	swift	generated-wire-dto	ios:engine-events	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Events/Payloads/SessionPayloads.swift	swift	generated-wire-dto	ios:engine-events	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Events/Payloads/StreamingPayloads.swift	swift	generated-wire-dto	ios:engine-events	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationCompletedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationGeneratingPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationOutputPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationProgressPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityInvocationStartedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/CapabilityInvocation/CapabilityLifecyclePlugins.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Display/DisplayFramePlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/EventPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/EventRegistry.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/AgentReadyPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/CompactionPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/CompactionStartedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/CompletePlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/ContextClearedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/ErrorPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/MessageDeletedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/TurnFailedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/ParsedEventV2.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Server/AuthUpdatedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Server/ServerRestartingPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Session/ConnectedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionArchivedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionCreatedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionDeletedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionProcessingChangedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionUnarchivedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Session/SessionUpdatedPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Streaming/TextDeltaPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Streaming/ThinkingDeltaPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Streaming/TurnEndPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Plugins/Streaming/TurnStartPlugin.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/CapabilityArgumentExtractor.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/CapabilityInvocationEventProjection.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/ConfigEventProjection.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/ErrorEventProjection.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/MessageEventProjection.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/SystemEventProjection.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/EventSorter.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/EventTransformable.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/InterleavedContentProcessor.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Events/Reconstruction/Reconstruction/ReconstructedState.swift	swift	implementation	ios:engine-events	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Models/ModelFilteringService.swift	swift	contract	ios:engine-models	may be shared across the owning boundary without concrete implementation imports
+packages/ios-app/Sources/Engine/Persistence/Repositories/DraftRepository.swift	swift	contract	ios:engine-persistence	may be shared across the owning boundary without concrete implementation imports
+packages/ios-app/Sources/Engine/Persistence/Repositories/EventRepository.swift	swift	contract	ios:engine-persistence	may be shared across the owning boundary without concrete implementation imports
+packages/ios-app/Sources/Engine/Persistence/Repositories/Protocols/DatabaseTransport.swift	swift	implementation	ios:engine-persistence	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Persistence/Repositories/Protocols/EventDatabaseProtocol.swift	swift	contract	ios:engine-persistence	may be shared across the owning boundary without concrete implementation imports
+packages/ios-app/Sources/Engine/Persistence/Repositories/SessionRepository.swift	swift	contract	ios:engine-persistence	may be shared across the owning boundary without concrete implementation imports
+packages/ios-app/Sources/Engine/Persistence/Repositories/SyncRepository.swift	swift	contract	ios:engine-persistence	may be shared across the owning boundary without concrete implementation imports
+packages/ios-app/Sources/Engine/Persistence/Repositories/ThinkingRepository.swift	swift	contract	ios:engine-persistence	may be shared across the owning boundary without concrete implementation imports
+packages/ios-app/Sources/Engine/Persistence/SQLite/CachedSession.swift	swift	adapter	ios:engine-persistence	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Persistence/SQLite/DatabaseActor.swift	swift	adapter	ios:engine-persistence	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Persistence/SQLite/EventDatabase.swift	swift	adapter	ios:engine-persistence	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Persistence/SQLite/EventTypes.swift	swift	adapter	ios:engine-persistence	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Persistence/SQLite/SQLiteHelpers.swift	swift	adapter	ios:engine-persistence	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Persistence/SQLite/Schema/DatabaseSchema.swift	swift	adapter	ios:engine-persistence	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Persistence/SQLite/SessionEvent+ExpandedContent.swift	swift	adapter	ios:engine-persistence	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Persistence/SQLite/SessionEvent+Summary.swift	swift	adapter	ios:engine-persistence	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Persistence/Sync/EngineStreamCursorStore.swift	swift	implementation	ios:engine-persistence	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+Operations.swift	swift	implementation	ios:engine-persistence	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+RefreshCoordination.swift	swift	implementation	ios:engine-persistence	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+SessionActivity.swift	swift	implementation	ios:engine-persistence	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+Sync.swift	swift	implementation	ios:engine-persistence	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager.swift	swift	implementation	ios:engine-persistence	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Persistence/Sync/SessionRefreshService.swift	swift	contract	ios:engine-persistence	may be shared across the owning boundary without concrete implementation imports
+packages/ios-app/Sources/Engine/Persistence/Sync/SessionSynchronizer.swift	swift	implementation	ios:engine-persistence	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Auth/EngineProtocolTypes+Auth.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Capability/CapabilitySchemaForm.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Capability/EngineProtocolTypes+Capability.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Catalog/EngineProtocolTypes+Catalog.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Core/AnyCodable.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Core/EngineProtocolTypes.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Core/ProtocolConstants.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Events/EngineProtocolTypes+Events.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/GeneratedUI/EngineProtocolTypes+GeneratedUI.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Interaction/EngineProtocolTypes+Interaction.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Model/EngineProtocolTypes+Model.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Reconstruct/EngineProtocolTypes+Reconstruct.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Session/EngineProtocolTypes+Session.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/Settings/EngineProtocolTypes+Settings.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Protocol/System/EngineProtocolTypes+System.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol shaped DTOs; callers should translate before domain/UI logic
+packages/ios-app/Sources/Engine/Transport/Clients/AgentClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/AgentClientProtocol.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/AuthClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/BlobClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/EngineDomainClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/EventSyncClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/InteractionPolicy.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/InteractionPolicyEnvironment.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/LogsClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/MessageClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/ModelClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultModelRepository.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultSessionRepository.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/ModelRepository.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/NetworkSessionRepository.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/SessionClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/SessionClientProtocol.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/SettingsClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Clients/SystemClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/DeepLinks/DeepLinkRouter.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Retry/AsyncClock.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Retry/ConnectionErrorClassifier.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Retry/ConnectionManager.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Retry/ConnectionStateProvider.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Retry/ConnectionToastPolicy.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Retry/EngineRetryPolicy.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Retry/NetworkDiagnosticsFormatter.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/Retry/ReconnectProbePolicy.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Receiving.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Reconnect.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Requests.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionProtocolFrames.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionTypes.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/Protocols/EngineClientProtocol.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/Protocols/EngineTransport.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Engine/Transport/WebSocket/Protocols/LoggingContext.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/Session/Attachments/Attachment.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Attachments/AttachmentCapability.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/CapabilityInvocationContext.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/CapabilityInvocationCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/CompactionCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/ConnectionCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/ContentViewCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/EventDispatchContext.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/EventDispatchCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/MessagingCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/SheetCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/TurnLifecycleContext.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/TurnLifecycleCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Coordinators/UIUpdateQueue.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Messaging/DraftMetadata.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Messaging/StreamingManager.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Navigation/AnimationCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Navigation/MessageFinder.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Navigation/MessageIndex.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/Navigation/ScrollStateCoordinator.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/ChatSheet.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/ContextTrackingState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/DisplayStreamState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/InputBarState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/ModelPickerState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/OnboardingSetupSnapshot.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/OnboardingState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/SettingsState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/SheetReadOnlyPolicy.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/StreamingRecoverySnapshot.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/ThinkingDetailState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/State/ThinkingState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+CapabilityInvocationContext.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Connection.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+DeepLinks.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+DisplayStream.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+EventDispatchContext.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Events.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Pagination.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Reconstruction.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+RuntimeCallbacks.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+TurnLifecycleContext.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Parsing/CapabilityArgumentParser.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Activity/ActivityLine.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Activity/CapabilityActivityPresentation.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Activity/ServerActivityLine.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Activity/SessionActivityEvent.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Activity/SessionActivityStreamManager.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Activity/ThinkingBlock.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationActionRows.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel+PresentationHelpers.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationProgressModel.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationTypes.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityPresentation.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/ChatMessage.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/ImageContent.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/MessageBubbleTapAction.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/MessageContent.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/MessageExtensions.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/MessageRole.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Messages/SystemEvent.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Reconstruction/UnifiedEventTransformer.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Tokens/TokenRecord.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/Timeline/Tokens/TokenStateManager.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Composition/AppInitializer.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/Support/Composition/DependencyContainer.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/Support/Composition/DependencyEnvironment.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/Support/Composition/DependencyProviding.swift	swift	composition-root	ios:composition	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/ios-app/Sources/Support/Diagnostics/ClientLogIngestionService.swift	swift	contract	ios:diagnostics	may be shared across the owning boundary without concrete implementation imports
+packages/ios-app/Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift	swift	implementation	ios:diagnostics	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Diagnostics/DiagnosticsBundleTypes.swift	swift	implementation	ios:diagnostics	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Diagnostics/DiagnosticsRedactor.swift	swift	implementation	ios:diagnostics	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Diagnostics/ErrorHandler.swift	swift	implementation	ios:diagnostics	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Diagnostics/MetricKitDiagnosticsStore.swift	swift	implementation	ios:diagnostics	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Diagnostics/TronLogger.swift	swift	implementation	ios:diagnostics	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Feedback/FeedbackComposer.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/AppConstants.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Concurrency/AsyncSemaphore.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Formatting/Date+Extensions.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Formatting/DurationFormatter.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Formatting/ModelNameFormatter.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Formatting/String+Extensions.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Formatting/TaskFormatting.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Formatting/TokenFormatter.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Formatting/VersionDisplay.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Media/ImageProcessor.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Parsing/ContentLineParser.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Parsing/DateParser.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/SwiftUI/Binding+PasteAware.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/SwiftUI/KeyboardObserver.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/SwiftUI/ToastCenter.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/SwiftUI/View+Accessibility.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/SwiftUI/View+Extensions.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Foundation/Validation/FolderNameValidator.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Pairing/Onboarding/PairingPersistor.swift	swift	implementation	ios:pairing	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Pairing/Onboarding/PairingProbe.swift	swift	implementation	ios:pairing	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Pairing/Onboarding/PairingStepValidator.swift	swift	implementation	ios:pairing	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Pairing/PairedServerStore.swift	swift	implementation	ios:pairing	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Pairing/PairingURLParser.swift	swift	implementation	ios:pairing	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Share/SharedContent.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Storage/DraftStore.swift	swift	implementation	ios:storage	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Storage/InputHistoryStore.swift	swift	implementation	ios:storage	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Storage/KeychainItem.swift	swift	implementation	ios:storage	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Support/Storage/PairedServerTokenStore.swift	swift	implementation	ios:storage	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/CapabilityInvocationDetailComponents.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/CapabilityInvocationViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/CapabilityResultRenderers.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityClassifiedErrorSection.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityCodeBlock.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityCopyButton.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityDetailSection.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityDetailSheetContainer.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityDurationBadge.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityEmptyState.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityErrorView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityFileInfoSection.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityInfoPill.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityResultNote.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityRunningSpinner.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityStatusBadge.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/CapabilityStatusRow.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/DiffFormatting.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/ErrorClassification.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/FileDisplayHelpers.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/FileInfoProperties.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Shared/FileOperationError.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Capabilities/Thinking/ThinkingDetailSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/ActionButtons.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/AttachmentBubble.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/CameraCaptureSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/ContentAreaView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/ContextStatusPill.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/DocumentPicker.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/InputBar.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/InputTextField.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Composer/WrappingHStackLayout.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/DecodedImageView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/ImagesContentView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/Indicators/NeuralSparkIndicator.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/Indicators/OrbitingParticleIndicator.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/Indicators/PhaseWaveIndicator.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/MarkdownBlockParser.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/MarkdownBlockView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/MessageBubble.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/MessageMetadataBadge.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/NotificationViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/StreamingContentView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/SystemEventView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/TextContentView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Messages/ThinkingContentView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Sheets/NewSessionFlow.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Sheets/NewSessionFlowComponents.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Sheets/NewSessionFlowTypes.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Sheets/TurnGrouping.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Sheets/WorkspaceSelector.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ChatSheetContent.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ChatSheetModifier.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ChatView+Helpers.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ChatView+MessageList.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ChatView+Toolbar.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ContentView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/InteractivePopGestureEnabler.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/SessionSidebar.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ShellToolbarActions.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ShellToolbarContent.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Chat/Shell/ThinkingIndicator.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/CachedSession+Display.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/CardEntranceModifier.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/ConnectionStatusPill.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/FlowLayout.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/LineNumberedContentView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/SessionTitleIcons.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/SheetComponents.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/ToastBanner.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/TronSearchBar.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/TronSegmentedControl.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/TypewriterAnimationState.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Components/TypewriterText.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingFlowView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingShell.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Onboarding/Pairing/QRCodeScannerSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Onboarding/Steps/PairingStep.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Onboarding/Steps/SetupStepComponents.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Onboarding/Steps/SetupSteps.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/RuntimeSurfaces/Display/GenerativeWebView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/RuntimeSurfaces/Display/StreamSheetView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+RenderingHelpers.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet+Sections.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/AgentSettingsPage.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/AppearanceSettingsPage.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ContextSettingsPage.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/GoogleCloudRows.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ModelProviderSection.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderApiKeyAlert.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderAuthActionResult.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderCredentialRow.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderCredentialRowItem.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderInfo.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderServiceCard.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ModelProviders/ProviderStatusHelpers.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Pages/ProvidersSettingsPage.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthLoginSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthLoopbackServer.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Providers/OAuth/OAuthWebView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/FeedbackMailView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsCaption.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsCard.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsCycleToggle.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsInfoCard.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsPageContainer.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsRow.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsRowDivider.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsSectionHeader.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsServerSupport.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsView+FooterSupport.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsView+MainSection.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/SettingsView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Settings/Shell/TronStepper.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/System/CompactionDetailSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/System/InitializationErrorView.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/System/LogViewer.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/System/ProviderErrorDetailSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/AppearanceSettings.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/FontFamily.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/FontSettings.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/ThinkingIndicatorStyle.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/TronColors.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/TronFontLoader.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/TronIcons.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/TronSpacing.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/TronThemeTokens.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/Theme/TronTypography.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract

@@ -17,7 +17,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Scorecard",
         "Status: **active**",
-        "Current score: **5/100**",
+        "Current score: **13/100**",
         "Branch: `codex/primitive-engine-teardown`",
         "This scorecard formalizes the True Modularity Boundary campaign.",
         "## Boundary Taxonomy",
@@ -29,7 +29,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "`test-support`",
         "`generated-wire-dto`",
         "| TMB-0 | Create the campaign harness | 5 | passed_after_fix |",
-        "| TMB-1 | Define boundary taxonomy and inventory | 8 | open |",
+        "| TMB-1 | Define boundary taxonomy and inventory | 8 | passed_after_fix |",
         "| TMB-2 | Build the model response black box | 15 | open |",
         "| TMB-3 | Narrow engine facade ownership | 12 | open |",
         "| TMB-4 | Harden domain worker boundaries | 10 | open |",
@@ -60,8 +60,9 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Evidence Manifest",
         "Status: **active**",
-        "Current score: **5/100**",
+        "Current score: **13/100**",
         "| TMB-0 | passed_after_fix |",
+        "| TMB-1 | passed_after_fix |",
         "## TMB-0 Red Proof",
         "The first invariant run is intentionally red.",
         "Rust agent loop imports `domains::model::providers` directly",
@@ -76,6 +77,8 @@ fn true_modularity_scorecard_stays_formalized() {
     assert!(
         readme.contains("packages/agent/docs/true-modularity-boundary-scorecard.md")
             && readme.contains("packages/agent/docs/true-modularity-boundary-evidence-manifest.md")
+            && readme.contains("packages/agent/docs/true-modularity-boundary-inventory.md")
+            && readme.contains("packages/agent/docs/true-modularity-boundary-inventory.tsv")
             && readme.contains("packages/agent/tests/true_modularity_boundary_invariants.rs"),
         "README living-doc map must link the active TMB scorecard, evidence manifest, and invariant target"
     );

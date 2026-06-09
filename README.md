@@ -130,6 +130,12 @@ Current living entry points:
   narrow APIs, and guarded dependency direction.
 - `packages/agent/docs/true-modularity-boundary-evidence-manifest.md`:
   companion evidence manifest for the active True Modularity Boundary campaign.
+- `packages/agent/docs/true-modularity-boundary-inventory.md`: active TMB
+  boundary taxonomy, dependency-direction rules, and composition-root exception
+  list.
+- `packages/agent/docs/true-modularity-boundary-inventory.tsv`:
+  machine-readable Rust/Swift source ownership inventory used by TMB static
+  gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -186,7 +192,8 @@ Current living entry points:
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, the
-completed AHA scorecard, and the active TPC scorecard.
+completed AHA scorecard, the active TPC scorecard, and the active TMB
+scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
