@@ -1,4 +1,5 @@
 mod closeout;
+mod docs_parity;
 mod entropy_scanning;
 mod offline_roundtrip;
 mod provider_audit_wiring;

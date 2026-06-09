@@ -2,7 +2,7 @@
 
 Created: 2026-06-09
 
-Current score: **90/100**
+Current score: **94/100**
 
 Status: **active**
 
@@ -29,7 +29,7 @@ and
 | DRC-6 | passed_after_fix | Section and overall replay hashes use sorted-key canonical JSON; replay rows use stable non-timestamp-only order and focused tests cover byte stability. |
 | DRC-7 | passed_after_fix | Idempotency entries, queue rows, stream rows, trace records, and invocation records now expose replay refs and request/result/payload/outcome hashes in the canonical manifest. |
 | DRC-8 | passed_after_fix | `roundtrip_manifest` rebuilds replay evidence from a manifest value, recomputes canonical hashes, and validates cross-record refs without side-effect handles. |
-| DRC-9 | pending | Progressive docs, README, protocol docs, and iOS decode updates will be closed after event/API changes land. |
+| DRC-9 | passed_after_fix | README, protocol docs, session progressive docs, iOS event docs, and iOS architecture docs describe replay manifest parity; no new iOS event decoder is needed because replay manifests are capability results. |
 | DRC-10 | pending | Final closeout awaits all rows and full verification. |
 
 ## DRC-0 Evidence
@@ -311,6 +311,39 @@ Proof:
 
 Open rows after DRC-8: DRC-9 and DRC-10.
 
+## DRC-9 Evidence
+
+Files added:
+
+- `packages/agent/tests/determinism_replayability/docs_parity.rs`
+
+Files updated:
+
+- `README.md`
+- `packages/agent/src/domains/session/mod.rs`
+- `packages/agent/src/shared/protocol/mod.rs`
+- `packages/agent/src/shared/protocol/model_audit.rs`
+- `packages/ios-app/docs/architecture.md`
+- `packages/ios-app/docs/events.md`
+- `packages/agent/tests/determinism_replayability/mod.rs`
+- `packages/agent/tests/determinism_replayability/scorecard_inventory.rs`
+
+Proof:
+
+- README now documents `engineIdempotencyEntries`, idempotency request/outcome
+  hashes, invocation `resultHash`, stream/queue `payloadHash`, and the replay
+  manifest's no-side-effect capability-result status.
+- Session progressive docs identify replay idempotency refs and the offline
+  roundtrip harness.
+- Protocol docs state that `model.provider_request` DTOs feed canonical replay
+  manifest provider-audit sections.
+- iOS docs state that `model.provider_request` is metadata-only persisted audit
+  evidence and `replay_manifest` is not a live or persisted iOS event.
+- `drc_docs_and_protocol_parity_are_current` guards README, protocol, session,
+  and iOS docs against drift.
+
+Open rows after DRC-9: DRC-10.
+
 ## Verification Log
 
 | Time | Command | Exit | Notes |
@@ -362,6 +395,13 @@ Open rows after DRC-8: DRC-9 and DRC-10.
 | 2026-06-09 | `cargo fmt --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-7/8 Rust formatting verified. |
 | 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-7/8 changes. |
 | 2026-06-09 | `git diff --check` | 0 | DRC-7/8 checkpoint diff has no whitespace errors. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-9 docs parity guard caught README replay manifest/event wording split across Markdown lines. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-9 docs parity guard caught iOS replay manifest/event wording split across Markdown lines. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-9 docs parity guard caught missing exact protocol provenance marker in `model_audit.rs`. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-9 invariant target passed: 17 passed, 0 failed. |
+| 2026-06-09 | `cargo fmt --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-9 Rust formatting verified. |
+| 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-9 docs/protocol changes. |
+| 2026-06-09 | `git diff --check` | 0 | DRC-9 checkpoint diff has no whitespace errors. |
 
 ## Residual Risk Log
 

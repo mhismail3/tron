@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-09 (TMB-10 diagnostics endpoint boundary closeout).
+> Last verified: 2026-06-09 (DRC-9 replay manifest/event parity).
 
 ## Overview
 
@@ -124,6 +124,10 @@ Engine invocation context carries session/workspace ids and trace metadata when
 needed. The server owns validation, routing, execution, idempotency, and event
 publication. iOS records delivered stream cursors for acknowledgement and
 diagnostics only; it does not use them as an alternate truth store.
+Replay exports remain server-owned: `session::replay_manifest` and the
+`execute` `replay_manifest` operation return canonical JSON capability results,
+not live or persisted iOS events. The only replay-specific persisted event iOS
+decodes is the metadata-only `model.provider_request` audit event.
 
 ## Event Handling
 

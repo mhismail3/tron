@@ -1,4 +1,10 @@
 //! Provider request audit DTOs persisted before model streaming starts.
+//!
+//! `model.provider_request` rows are the provider-audit section source for
+//! canonical replay manifests. The DTO is protocol-owned because the turn loop
+//! persists it before the provider stream opens and replay later reads it from
+//! durable session events without importing provider internals.
+//! Provenance marker: provider-audit section source for canonical replay manifests.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

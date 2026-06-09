@@ -4,7 +4,7 @@ Created: 2026-06-09
 
 Initial score: **0/100**
 
-Current score: **90/100**
+Current score: **94/100**
 
 Status: **active**
 
@@ -65,7 +65,7 @@ re-execution.
 | DRC-6 | Byte-stable replay hashes and stable ordering | 10 | passed_after_fix | storage | Added sorted-key canonical JSON hashing for every replay section plus overall `replayHash`; replay reads use sequence order, cursor ASC, timestamp ASC + id ASC, idempotency stable key order, rowid append order + invocation id, and queue ASC + created_at ASC + receipt_id ASC. | No open loops after DRC-7/DRC-8. | DRC-5/6 replay manifest checkpoint |
 | DRC-7 | Replay references across idempotency, queue, stream, and trace records | 8 | passed_after_fix | engine | Added session-scoped idempotency replay reads, `engineIdempotencyEntries`, request/outcome/result/payload hashes, and roundtrip cross-record validation for provider audit refs, trace request/result hashes, queue attempt refs, stream parent refs, invocation idempotency refs, and idempotency invocation refs. | No open loops after DRC-7/DRC-8. | DRC-7/8 replay references and roundtrip checkpoint |
 | DRC-8 | Offline replay roundtrip harness | 8 | passed_after_fix | test_harness | Added `roundtrip_manifest`, a pure manifest-to-report verifier that recomputes section hashes and `replayHash`, rebuilds durable section counts, validates cross-record references, and holds no handles capable of provider, tool, queue, stream, file, process, or resource side effects. | No open loops after DRC-7/DRC-8. | DRC-7/8 replay references and roundtrip checkpoint |
-| DRC-9 | Progressive docs, README, protocol docs, and iOS decode parity | 4 | pending | docs_or_scorecard | Docs and iOS event decoding are updated for any transport-visible or persisted event surface change. | Awaiting event/protocol updates. | pending |
+| DRC-9 | Progressive docs, README, protocol docs, and iOS decode parity | 4 | passed_after_fix | docs_or_scorecard | Updated README replay descriptions, session/protocol docs, iOS event/architecture docs, and DRC invariants. Confirmed replay manifest is a capability result, not a new persisted/live iOS event, while `model.provider_request` remains the metadata-only decoded audit event. | No open loops after DRC-9. | DRC-9 docs parity checkpoint |
 | DRC-10 | Final adversarial closeout | 6 | pending | test_harness | Score reaches 100/100, active docs contain no stale open-loop wording, focused/full verification is clean, and final checkpoint is committed. | Awaiting all implementation rows. | pending |
 
 Total weight: **100**

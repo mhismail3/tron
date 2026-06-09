@@ -19,3 +19,4 @@ DRC-1-017	proof	invariant_target	packages/agent/tests/determinism_replayability_
 DRC-1-018	entropy	timestamp_only_ordering	packages/agent/src/	guarded by entropy_scanning.rs	UI/diagnostic ORDER BY timestamp paths are allowed; replay paths use stable tie-breakers	DRC-6 passed
 DRC-1-019	proof	offline_roundtrip	packages/agent/src/domains/session/replay/roundtrip.rs	implemented	Recompute replay hashes and validate cross-record refs without side effects	DRC-8 passed
 DRC-1-020	source	engine_idempotency_entries	packages/agent/src/engine/durability/ledger/	stable key order	Include session-scoped or session-invocation-referenced entries with request/outcome hashes	DRC-7 passed
+DRC-1-021	proof	docs_protocol_ios_parity	packages/agent/tests/determinism_replayability/docs_parity.rs	implemented	Guard README/protocol/session/iOS docs for replay manifest parity	DRC-9 passed

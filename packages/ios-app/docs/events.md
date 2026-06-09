@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-09 (TMB-7 iOS engine-access boundary).
+> Last verified: 2026-06-09 (DRC-9 replay manifest/event parity).
 
 The iOS app handles engine events through two paths:
 
@@ -41,6 +41,15 @@ Current retained plugin groups:
 Deleted workflow-specific plugin roots, including prompt queue and hook
 suggestion plugins, must stay absent. Static tests keep their retired names out
 of ordinary source and docs.
+
+`model.provider_request` is a persisted metadata-only session event used by the
+server replay manifest. It is decoded in the stored event enum and summarized as
+non-chat audit evidence; it does not have a live plugin or render a chat
+message. `replay_manifest` is not an event at all: it is a pure-read
+capability/session result (`format: "tron.replay.v1"`), so no iOS persisted
+event case or live plugin is required for replay manifest exports.
+no iOS persisted event case or live plugin is required for replay manifest
+exports.
 
 ## Registration
 

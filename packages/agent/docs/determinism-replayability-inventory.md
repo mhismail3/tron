@@ -2,7 +2,7 @@
 
 Created: 2026-06-09
 
-Status: DRC-8 `passed_after_fix`; DRC-9 and DRC-10 remain open
+Status: DRC-9 `passed_after_fix`; DRC-10 remains open
 
 Machine-readable inventory:
 [`determinism-replayability-inventory.tsv`](determinism-replayability-inventory.tsv)
@@ -50,7 +50,7 @@ Machine-readable inventory:
 | `execute` operation `replay_manifest` | implemented read-only current-session operation | Delegates to the same session replay builder and does not create a trace record. |
 | `engineIdempotencyEntries` | implemented manifest section | Carries request/outcome hashes and first/latest invocation refs for idempotency replay proof. |
 | `roundtrip_manifest` | implemented offline harness | Recomputes section and replay hashes, rebuilds counts, and validates cross-record references without side-effect handles. |
-| iOS persisted event decoding | `model.provider_request` decodes as non-rendering metadata | DRC-9 completes protocol/docs parity after replay manifest/API changes land. |
+| iOS persisted event decoding | `model.provider_request` decodes as non-rendering metadata | DRC-9 passed; replay manifests are capability results, not persisted/live iOS events. |
 
 ## Proof Surfaces
 
@@ -62,6 +62,7 @@ Machine-readable inventory:
 | Replay ordering test | Proves no timestamp-only replay order | DRC-6 passed |
 | Cross-record reference test | Proves trace/queue/stream/invocation/idempotency refs explain a turn | DRC-7 passed |
 | Offline roundtrip test | Rebuilds from durable records without side effects | DRC-8 passed |
+| Docs/protocol/iOS parity test | Guards README, protocol docs, session progressive docs, and iOS replay/event parity docs | DRC-9 passed |
 | Final closeout test | Enforces 100/100 and no stale active open-loop wording | DRC-10 |
 
 ## DRC-2/DRC-3 Closure Notes

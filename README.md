@@ -183,7 +183,8 @@ Current living entry points:
   primitive branch.
 - `packages/agent/tests/determinism_replayability_invariants.rs`: active DRC
   gates for scorecard state, replay source inventory, entropy scan coverage,
-  provider request audit wiring, replay manifest hashing, stable ordering, and
+  provider request audit wiring, replay manifest hashing, stable ordering,
+  cross-record replay references, offline roundtrip proof, docs parity, and
   closeout.
 - `packages/agent/tests/primitive_code_cleanup_invariants.rs`: cleanup
   scorecard, folder-justification, file-budget, deleted-term, and tracked-junk
@@ -499,7 +500,7 @@ Current primitive operations:
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
-| `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest without provider/tool/process/file/resource side effects. |
+| `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 
 Startup registration currently keeps only loop infrastructure domains: `system`,
 `capability`, `blob`, `message`, `settings`, `auth`, `agent`, `logs`, `session`,
@@ -607,7 +608,11 @@ agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
 `log_recent`, and `replay_manifest`; trace operations read durable
 `trace_records` emitted around effectful `execute` calls, while `log_recent`
 reads bounded retained logs and `replay_manifest` reads the canonical replay
-snapshot through the same single tool.
+snapshot through the same single tool. The replay snapshot includes resolved
+session events, provider request audits, trace records, engine idempotency
+entries, engine invocations, engine stream rows, and engine queue rows. It adds
+stable section hashes plus request/result/outcome/payload hashes where the
+underlying durable rows carry replay-critical payloads or results.
 Each trace record carries the causal trace id, invocation id, provider tool-call
 id, session/workspace, turn, model id/provider, authority envelope, VCS revision
 when available, result/error hashes, and file attribution with content hashes.
@@ -691,10 +696,15 @@ returns resolved wire `events` for the same reason: clients inspect lineage
 without maintaining a second tree-only event shape.
 `session::replay_manifest` is a separate pure-read audit export. It returns
 `format: "tron.replay.v1"` with resolved session events, provider request audit
-events, trace records, engine invocation rows, stream rows, queue rows, section
-hashes, and an overall `replayHash`. It is for offline audit/reconstruction and
-does not call providers, run tools, write files, spawn processes, drain queues,
-publish streams, or mutate resources.
+events, trace records, `engineIdempotencyEntries`, engine invocation rows,
+stream rows, queue rows, section hashes, and an overall `replayHash`.
+Idempotency entries carry payload-fingerprint request hashes, outcome hashes,
+and first/latest invocation refs; invocation, stream, and queue projections add
+`resultHash` or `payloadHash` where applicable. It is for offline
+audit/reconstruction and does not call providers, run tools, write files, spawn
+processes, drain queues, publish streams, or mutate resources.
+The replay manifest is a capability result, not a persisted event type, so iOS
+does not need a separate replay event decoder.
 
 Agent authority is declared before the loop starts through the causal authority
 envelope and the one model-visible `execute` primitive. The engine does not
@@ -905,7 +915,10 @@ model-visible evidence read path is `capability::execute` with `trace_list`,
 effect runs and update that same record with status, duration, result/error
 hashes, authority, provider/model metadata, VCS revision when available, and
 file attribution/content hashes after completion. The `replay_manifest`
-operation is read-only and does not insert a trace record.
+operation is read-only and does not insert a trace record; it reads session
+events, provider audits, trace records, idempotency entries, invocation ledger
+rows, stream rows, and queue rows through owner APIs and returns canonical
+section hashes plus the overall `replayHash`.
 
 ### Tables
 

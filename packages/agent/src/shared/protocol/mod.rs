@@ -7,7 +7,7 @@
 //! | [`events`] | Runtime event payloads and stream event DTOs |
 //! | [`memory`] | Session memory DTOs |
 //! | [`messages`] | Chat message DTOs |
-//! | [`model_audit`] | Provider request audit DTOs for replay |
+//! | [`model_audit`] | Provider request audit DTOs consumed by replay manifests |
 //! | [`model_capabilities`] | Model-facing capability result DTOs |
 
 pub mod content;
