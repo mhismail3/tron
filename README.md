@@ -147,6 +147,18 @@ Current living entry points:
 - `packages/agent/docs/true-modularity-boundary-inventory.tsv`:
   machine-readable Rust/Swift source ownership inventory used by TMB static
   gates.
+- `packages/agent/docs/failure-semantics-scorecard.md`: active Failure
+  Semantics Campaign scorecard for enforcing one canonical error envelope
+  across provider/model errors, runtime turn failures, capability results,
+  transport responses, durable events, replay, and iOS projections.
+- `packages/agent/docs/failure-semantics-evidence-manifest.md`: companion
+  evidence manifest for FSC row checkpoints, verification logs, and residual
+  failure-contract risks.
+- `packages/agent/docs/failure-semantics-inventory.md`: active FSC inventory of
+  server, engine, provider, runtime, transport, durable replay, and iOS failure
+  surfaces.
+- `packages/agent/docs/failure-semantics-inventory.tsv`: machine-readable FSC
+  failure-surface inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -203,13 +215,16 @@ Current living entry points:
 - `packages/agent/tests/true_modularity_boundary_invariants.rs`: active TMB
   scorecard, boundary inventory, responder, facade, domain, storage, transport,
   iOS engine-access, boundary-error, and final closeout gates.
+- `packages/agent/tests/failure_semantics_invariants.rs`: active FSC scorecard,
+  inventory, failure-surface, canonical-envelope, event-emission, transport,
+  provider, iOS parity, replay, and closeout gates.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, the
 completed AHA scorecard, the active TPC scorecard, and the active TMB
-scorecard.
+scorecard, and the active FSC scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
