@@ -1481,3 +1481,27 @@ packages/agent/tests/true_modularity_boundary_invariants.rs	retain	tmb rust test
 packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultEngineAccessRepositories.swift	retain	tmb ios source	TMB-10	iOS engine access repository adapter retained after final modularity closeout.
 packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/EngineAccessRepositories.swift	retain	tmb ios source	TMB-10	iOS engine access repository contract retained after final modularity closeout.
 packages/ios-app/Tests/Session/Chat/ChatViewModelTestServices.swift	retain	tmb ios test	TMB-10	iOS chat test-service composition retained after final modularity closeout.
+packages/agent/docs/determinism-replayability-evidence-manifest.md	retain	drc docs	DRC-10	Current DRC evidence manifest retained after final replayability closeout.
+packages/agent/docs/determinism-replayability-inventory.md	retain	drc docs	DRC-10	Current DRC inventory retained after final replayability closeout.
+packages/agent/docs/determinism-replayability-inventory.tsv	retain	drc docs	DRC-10	Current DRC machine-readable inventory retained after final replayability closeout.
+packages/agent/docs/determinism-replayability-scorecard.md	retain	drc docs	DRC-10	Current DRC scorecard retained after final replayability closeout.
+packages/agent/src/domains/capability/operations/replay.rs	retain	drc rust source	DRC-10	Replay manifest execute operation retained after final replayability closeout.
+packages/agent/src/domains/session/event_store/identity.rs	retain	drc rust source	DRC-10	Deterministic session/event identity seam retained after final replayability closeout.
+packages/agent/src/domains/session/event_store/types/payloads/model.rs	retain	drc rust source	DRC-10	Model provider request event payload retained after final replayability closeout.
+packages/agent/src/domains/session/replay/mod.rs	retain	drc rust source	DRC-10	Canonical replay manifest builder retained after final replayability closeout.
+packages/agent/src/domains/session/replay/roundtrip.rs	retain	drc rust test	DRC-10	Offline replay roundtrip verifier retained after final replayability closeout.
+packages/agent/src/domains/session/replay/tests.rs	retain	drc rust test	DRC-10	Replay manifest unit tests retained after final replayability closeout.
+packages/agent/src/engine/durability/replay.rs	retain	drc rust source	DRC-10	Engine replay snapshot DTOs retained after final replayability closeout.
+packages/agent/src/shared/protocol/model_audit.rs	retain	drc rust source	DRC-10	Provider request audit protocol DTO retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/closeout.rs	retain	drc rust test	DRC-10	DRC closeout invariant retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/docs_parity.rs	retain	drc rust test	DRC-10	DRC docs parity invariant retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/entropy_scanning.rs	retain	drc rust test	DRC-10	DRC entropy scanning invariant retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/mod.rs	retain	drc rust test	DRC-10	DRC invariant module retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/offline_roundtrip.rs	retain	drc rust test	DRC-10	DRC offline roundtrip invariant retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/provider_audit_wiring.rs	retain	drc rust test	DRC-10	DRC provider audit wiring invariant retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/replay_manifest_hashing.rs	retain	drc rust test	DRC-10	DRC replay manifest hashing invariant retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/replay_ordering.rs	retain	drc rust test	DRC-10	DRC replay ordering invariant retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/replay_references.rs	retain	drc rust test	DRC-10	DRC replay references invariant retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/scorecard_inventory.rs	retain	drc rust test	DRC-10	DRC scorecard and inventory invariant retained after final replayability closeout.
+packages/agent/tests/determinism_replayability/support.rs	retain	drc rust test	DRC-10	DRC test support retained after final replayability closeout.
+packages/agent/tests/determinism_replayability_invariants.rs	retain	drc rust test	DRC-10	DRC invariant target retained after final replayability closeout.

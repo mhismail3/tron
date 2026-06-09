@@ -2,9 +2,9 @@
 
 Created: 2026-06-09
 
-Current score: **94/100**
+Current score: **100/100**
 
-Status: **active**
+Status: **complete**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -30,7 +30,7 @@ and
 | DRC-7 | passed_after_fix | Idempotency entries, queue rows, stream rows, trace records, and invocation records now expose replay refs and request/result/payload/outcome hashes in the canonical manifest. |
 | DRC-8 | passed_after_fix | `roundtrip_manifest` rebuilds replay evidence from a manifest value, recomputes canonical hashes, and validates cross-record refs without side-effect handles. |
 | DRC-9 | passed_after_fix | README, protocol docs, session progressive docs, iOS event docs, and iOS architecture docs describe replay manifest parity; no new iOS event decoder is needed because replay manifests are capability results. |
-| DRC-10 | pending | Final closeout awaits all rows and full verification. |
+| DRC-10 | passed_after_fix | Final closeout records 100/100 status, closes active DRC inventory and scorecard loops, guards stale closeout wording, and runs the focused plus full verification set. |
 
 ## DRC-0 Evidence
 
@@ -52,7 +52,7 @@ Files updated:
 Focused command:
 
 ```bash
-cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture
+cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture
 ```
 
 Recorded result: pass after tightening the inventory wording for replay order
@@ -66,7 +66,7 @@ and DRC-10.
 Inventory command:
 
 ```bash
-rg -n "session\\.export|replay|manifest|EventStore|append|sequence|provider_request|ModelResponder|respond|stream|Utc::now|SystemTime::now|Instant::now|Uuid::now_v7|rand::|random\\(|ORDER BY timestamp" /Users/moose/Downloads/projects/tron/packages/agent/src /Users/moose/Downloads/projects/tron/packages/agent/tests /Users/moose/Downloads/projects/tron/README.md
+rg -n "session\\.export|replay|manifest|EventStore|append|sequence|provider_request|ModelResponder|respond|stream|Utc::now|SystemTime::now|Instant::now|Uuid::now_v7|rand::|random\\(|ORDER BY timestamp" /Users/<USER>/Downloads/projects/tron/packages/agent/src /Users/<USER>/Downloads/projects/tron/packages/agent/tests /Users/<USER>/Downloads/projects/tron/README.md
 ```
 
 Inventory result: replay-critical storage surfaces and entropy/order sources
@@ -344,64 +344,113 @@ Proof:
 
 Open rows after DRC-9: DRC-10.
 
+Historical open-row lines above preserve point-in-time evidence for earlier DRC
+checkpoints. The active scorecard and inventory now record no open loops.
+
+## DRC-10 Evidence
+
+Files updated:
+
+- `packages/agent/docs/determinism-replayability-scorecard.md`
+- `packages/agent/docs/determinism-replayability-evidence-manifest.md`
+- `packages/agent/docs/determinism-replayability-inventory.md`
+- `packages/agent/docs/determinism-replayability-inventory.tsv`
+- `packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv`
+- `packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv`
+- `packages/agent/docs/primitive-code-cleanup-file-inventory.tsv`
+- `packages/agent/docs/true-modularity-boundary-inventory.tsv`
+- `packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv`
+- `packages/agent/tests/determinism_replayability/closeout.rs`
+- `packages/agent/tests/determinism_replayability/scorecard_inventory.rs`
+- `packages/agent/tests/determinism_replayability/replay_references.rs`
+
+Proof:
+
+- DRC score is `100/100`; every DRC row is `passed_after_fix`.
+- Active scorecard and inventory docs contain no stale unresolved closeout
+  phrases.
+- `drc_closeout_is_complete` guards final score, row status, evidence status,
+  inventory status, final TSV proof, and unresolved wording.
+- Full CI red proof caught missing cleanup-inventory classifications for the
+  new DRC docs/source/test files; the final checkpoint classifies every tracked
+  DRC file in `primitive-code-cleanup-file-inventory.tsv`.
+- Full CI then caught the same missing DRC coverage in the hierarchical
+  rearchitecture inventories; the final checkpoint adds matching HRA file and
+  ownership rows.
+- Closeout inventory audit also added DRC rows to the TPC retention inventory
+  and TMB boundary inventory before the final full-suite rerun.
+- Full CI then caught raw user home paths copied from the external plan into
+  DRC docs and assertions; committed DRC artifacts now use `/Users/<USER>`.
+- Final verification command results are recorded in the verification log.
+- No open loops remain.
+
 ## Verification Log
 
 | Time | Command | Exit | Notes |
 |------|---------|-----:|-------|
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | Initial DRC-0/1 run caught missing exact `cursor ASC` replay-order contract text in the inventory. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-0/1 invariant target passed: 9 passed, 0 failed. |
-| 2026-06-09 | `cargo fmt --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 1 | Rustfmt found formatter drift in the new invariant test files; fixed with `cargo fmt`. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | Post-format DRC-0/1 invariant target passed: 9 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | Initial DRC-0/1 run caught missing exact `cursor ASC` replay-order contract text in the inventory. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-0/1 invariant target passed: 9 passed, 0 failed. |
+| 2026-06-09 | `cargo fmt --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 1 | Rustfmt found formatter drift in the new invariant test files; fixed with `cargo fmt`. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | Post-format DRC-0/1 invariant target passed: 9 passed, 0 failed. |
 | 2026-06-09 | `git diff --check` | 0 | DRC-0/1 checkpoint diff has no whitespace errors. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-2 guard caught missing allow-list owners for OAuth flow timing and an agent-runner test UUID. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-2/3 invariant target passed: 11 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml with_identity --lib -- --nocapture` | 101 | DRC-3 constructor tests exposed non-deterministic `last_activity_at` updates after root event persistence. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml with_identity --lib -- --nocapture` | 0 | Deterministic identity tests passed: 4 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml invocation_record_from_result_at_pins_timestamp --lib -- --nocapture` | 0 | Invocation-record timestamp seam passed: 1 passed, 0 failed. |
-| 2026-06-09 | `cargo fmt --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | DRC-2/3 Rust formatting applied cleanly. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-2 guard caught missing allow-list owners for OAuth flow timing and an agent-runner test UUID. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-2/3 invariant target passed: 11 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml with_identity --lib -- --nocapture` | 101 | DRC-3 constructor tests exposed non-deterministic `last_activity_at` updates after root event persistence. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml with_identity --lib -- --nocapture` | 0 | Deterministic identity tests passed: 4 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml invocation_record_from_result_at_pins_timestamp --lib -- --nocapture` | 0 | Invocation-record timestamp seam passed: 1 passed, 0 failed. |
+| 2026-06-09 | `cargo fmt --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | DRC-2/3 Rust formatting applied cleanly. |
 | 2026-06-09 | `git diff --check` | 0 | DRC-2/3 checkpoint diff has no whitespace errors. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml domains::session::event_store:: --lib -- --nocapture` | 0 | Session event-store slice passed after explicit activity timestamp changes: 403 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC invariant target caught stale DRC-0/1 score/status expectations after DRC-2/3 docs were updated. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | Final DRC-2/3 invariant target passed: 11 passed, 0 failed. |
-| 2026-06-09 | `cargo fmt --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-2/3 formatted state verified. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml domains::session::event_store:: --lib -- --nocapture` | 0 | Session event-store slice passed after explicit activity timestamp changes: 403 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC invariant target caught stale DRC-0/1 score/status expectations after DRC-2/3 docs were updated. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | Final DRC-2/3 invariant target passed: 11 passed, 0 failed. |
+| 2026-06-09 | `cargo fmt --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-2/3 formatted state verified. |
 | 2026-06-09 | `git diff --check` | 0 | Final DRC-2/3 checkpoint diff has no whitespace errors. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml provider_backed_request_audit_uses_stream_options_and_exact_payload --lib -- --nocapture` | 101 | DRC-4 compile caught a stale unused `Value` import after changing provider audit return type. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml provider_backed_request_audit_uses_stream_options_and_exact_payload --lib -- --nocapture` | 0 | Model responder audit test passed: 1 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml provider_request_audit_persist_failure_prevents_model_response --lib -- --nocapture` | 0 | Pre-stream audit persistence failure test passed: 1 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml typed_payload_model_provider_request --lib -- --nocapture` | 0 | Typed payload test for `model.provider_request` passed: 1 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml provider_request_audit --lib -- --nocapture` | 0 | Agent-runner DRC-4 tests passed: 2 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-4 invariant run caught test-only `AtomicUsize`/`Ordering` imports at module scope. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-4 invariant target passed: 11 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml domains::session::event_store::types:: --lib -- --nocapture` | 0 | Event type/payload tests passed after adding `model.provider_request`: 69 passed, 0 failed. |
-| 2026-06-09 | `cargo fmt --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-4 Rust formatting verified. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml provider_backed_request_audit_uses_stream_options_and_exact_payload --lib -- --nocapture` | 101 | DRC-4 compile caught a stale unused `Value` import after changing provider audit return type. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml provider_backed_request_audit_uses_stream_options_and_exact_payload --lib -- --nocapture` | 0 | Model responder audit test passed: 1 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml provider_request_audit_persist_failure_prevents_model_response --lib -- --nocapture` | 0 | Pre-stream audit persistence failure test passed: 1 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml typed_payload_model_provider_request --lib -- --nocapture` | 0 | Typed payload test for `model.provider_request` passed: 1 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml provider_request_audit --lib -- --nocapture` | 0 | Agent-runner DRC-4 tests passed: 2 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-4 invariant run caught test-only `AtomicUsize`/`Ordering` imports at module scope. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-4 invariant target passed: 11 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml domains::session::event_store::types:: --lib -- --nocapture` | 0 | Event type/payload tests passed after adding `model.provider_request`: 69 passed, 0 failed. |
+| 2026-06-09 | `cargo fmt --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-4 Rust formatting verified. |
 | 2026-06-09 | `xcodegen generate` | 0 | iOS project regenerated after event registry changes. |
 | 2026-06-09 | `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests` | 65 | iOS build caught missing `modelProviderRequest` summary switch case. |
 | 2026-06-09 | `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests` | 0 | SourceGuard passed after adding non-chat provider request summary: 39 passed, 0 failed. |
 | 2026-06-09 | `git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj` | 0 | `xcodegen generate` left the project file unchanged. |
-| 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-4 changes. |
+| 2026-06-09 | `cargo check --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-4 changes. |
 | 2026-06-09 | `git diff --check` | 0 | DRC-4 checkpoint diff has no whitespace errors. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 101 | Initial DRC-5/6 replay test compile caught missing trait methods on test ledger fixtures and an invalid synthetic authority grant. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 0 | Replay builder/hash test passed: 12 filtered replay-related tests passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml execute_replay_manifest_is_read_only_and_does_not_create_trace_record --test primitive_trace_execution -- --nocapture` | 0 | Execute replay manifest read-only test passed: 1 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-5/6 invariant target passed: 13 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml clarification_includes_capability_execution_guidance --lib -- --nocapture` | 0 | Provider primer guidance test passed after adding `replay_manifest` and its trace exception. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml execute_schema_exposes_primitive_operations_not_catalog_targets --lib -- --nocapture` | 0 | Capability schema test passed after adding `replay_manifest` to the provider-visible operation description. |
-| 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-5/6 changes. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 101 | DRC-7/8 compile caught an unused `ReplayRoundtripReport` re-export. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 0 | DRC-7/8 replay slice passed: 12 filtered replay-related tests passed, including manifest idempotency/hash assertions and offline roundtrip. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-7/8 invariant target passed: 16 passed, 0 failed. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture && cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | Post-`cfg(test)` roundtrip harness verification passed both compile paths. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml engine::tests::durability::ledger_idempotency --lib -- --nocapture` | 0 | Engine ledger idempotency module passed: 11 passed, including shared in-memory/SQLite storage contract for session idempotency listing. |
-| 2026-06-09 | `cargo fmt --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-7/8 Rust formatting verified. |
-| 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-7/8 changes. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 101 | Initial DRC-5/6 replay test compile caught missing trait methods on test ledger fixtures and an invalid synthetic authority grant. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 0 | Replay builder/hash test passed: 12 filtered replay-related tests passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml execute_replay_manifest_is_read_only_and_does_not_create_trace_record --test primitive_trace_execution -- --nocapture` | 0 | Execute replay manifest read-only test passed: 1 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-5/6 invariant target passed: 13 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml clarification_includes_capability_execution_guidance --lib -- --nocapture` | 0 | Provider primer guidance test passed after adding `replay_manifest` and its trace exception. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml execute_schema_exposes_primitive_operations_not_catalog_targets --lib -- --nocapture` | 0 | Capability schema test passed after adding `replay_manifest` to the provider-visible operation description. |
+| 2026-06-09 | `cargo check --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-5/6 changes. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 101 | DRC-7/8 compile caught an unused `ReplayRoundtripReport` re-export. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 0 | DRC-7/8 replay slice passed: 12 filtered replay-related tests passed, including manifest idempotency/hash assertions and offline roundtrip. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-7/8 invariant target passed: 16 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture && cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | Post-`cfg(test)` roundtrip harness verification passed both compile paths. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml engine::tests::durability::ledger_idempotency --lib -- --nocapture` | 0 | Engine ledger idempotency module passed: 11 passed, including shared in-memory/SQLite storage contract for session idempotency listing. |
+| 2026-06-09 | `cargo fmt --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-7/8 Rust formatting verified. |
+| 2026-06-09 | `cargo check --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-7/8 changes. |
 | 2026-06-09 | `git diff --check` | 0 | DRC-7/8 checkpoint diff has no whitespace errors. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-9 docs parity guard caught README replay manifest/event wording split across Markdown lines. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-9 docs parity guard caught iOS replay manifest/event wording split across Markdown lines. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-9 docs parity guard caught missing exact protocol provenance marker in `model_audit.rs`. |
-| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-9 invariant target passed: 17 passed, 0 failed. |
-| 2026-06-09 | `cargo fmt --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-9 Rust formatting verified. |
-| 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-9 docs/protocol changes. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-9 docs parity guard caught README replay manifest/event wording split across Markdown lines. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-9 docs parity guard caught iOS replay manifest/event wording split across Markdown lines. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 101 | DRC-9 docs parity guard caught missing exact protocol provenance marker in `model_audit.rs`. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-9 invariant target passed: 17 passed, 0 failed. |
+| 2026-06-09 | `cargo fmt --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-9 Rust formatting verified. |
+| 2026-06-09 | `cargo check --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-9 docs/protocol changes. |
 | 2026-06-09 | `git diff --check` | 0 | DRC-9 checkpoint diff has no whitespace errors. |
+| 2026-06-09 | `cargo test --manifest-path /Users/<USER>/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-10 focused closeout target passed: 17 passed, 0 failed. |
+| 2026-06-09 | `/Users/<USER>/Downloads/projects/tron/scripts/tron ci fmt check clippy test` | 1 | Initial DRC-10 full CI caught missing `primitive-code-cleanup-file-inventory.tsv` classifications for DRC files; fixed by adding retained DRC closeout rows. |
+| 2026-06-09 | `/Users/<USER>/Downloads/projects/tron/scripts/tron ci fmt check clippy test` | 1 | Second DRC-10 full CI caught missing HRA file and ownership inventory rows for DRC files; fixed by adding retained DRC closeout rows. |
+| 2026-06-09 | `/Users/<USER>/Downloads/projects/tron/scripts/tron ci fmt check clippy test` | 1 | Third DRC-10 full CI caught raw home paths in DRC docs/tests through the personal-info guard; fixed by normalizing committed paths to `/Users/<USER>`. |
+| 2026-06-09 | `/Users/<USER>/Downloads/projects/tron/scripts/tron ci fmt check clippy test` | 0 | Full DRC-10 final verification passed on the final edited tree. |
+| 2026-06-09 | `/Users/<USER>/Downloads/projects/tron/scripts/personal-info-guard.sh` | 0 | Full personal-info guard passed. |
+| 2026-06-09 | `git diff --check` | 0 | Final DRC-10 diff has no whitespace errors. |
+| 2026-06-09 | `git ls-files -ci --exclude-standard` | 0 | Ignored tracked-file audit returned no output. |
+| 2026-06-09 | `git status --short` | 0 | Post-checkpoint clean worktree proof returned no output. |
 
 ## Residual Risk Log
 

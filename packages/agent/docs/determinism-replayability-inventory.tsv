@@ -15,8 +15,9 @@ DRC-1-013	entropy	rand_random	packages/agent/src/	guarded by entropy_scanning.rs
 DRC-1-014	hash	canonical_json	packages/agent/src/domains/session/replay/	implemented	Sorted-object canonical JSON for section and overall hashes	DRC-5/DRC-6 passed
 DRC-1-015	api	session_replay_manifest	packages/agent/src/domains/session/replay/	implemented	Pure-read tron.replay.v1 capability	DRC-5 passed
 DRC-1-016	api	execute_replay_manifest	packages/agent/src/domains/capability/operations/replay.rs	implemented	Delegate to session replay builder for current session without trace mutation	DRC-5/DRC-6 passed; DRC-8 consumes
-DRC-1-017	proof	invariant_target	packages/agent/tests/determinism_replayability_invariants.rs	new target	Focused static and behavioral DRC gates	DRC-0/DRC-10
+DRC-1-017	proof	invariant_target	packages/agent/tests/determinism_replayability_invariants.rs	new target	Focused static and behavioral DRC gates	DRC-10 passed
 DRC-1-018	entropy	timestamp_only_ordering	packages/agent/src/	guarded by entropy_scanning.rs	UI/diagnostic ORDER BY timestamp paths are allowed; replay paths use stable tie-breakers	DRC-6 passed
 DRC-1-019	proof	offline_roundtrip	packages/agent/src/domains/session/replay/roundtrip.rs	implemented	Recompute replay hashes and validate cross-record refs without side effects	DRC-8 passed
 DRC-1-020	source	engine_idempotency_entries	packages/agent/src/engine/durability/ledger/	stable key order	Include session-scoped or session-invocation-referenced entries with request/outcome hashes	DRC-7 passed
 DRC-1-021	proof	docs_protocol_ios_parity	packages/agent/tests/determinism_replayability/docs_parity.rs	implemented	Guard README/protocol/session/iOS docs for replay manifest parity	DRC-9 passed
+DRC-1-022	proof	final_closeout	packages/agent/tests/determinism_replayability/closeout.rs	implemented	Enforce 100/100, complete active DRC docs, final TSV proof, and no stale unresolved closeout wording	DRC-10 passed

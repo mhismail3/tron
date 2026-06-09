@@ -2,7 +2,7 @@
 
 Created: 2026-06-09
 
-Status: DRC-9 `passed_after_fix`; DRC-10 remains open
+Status: DRC-10 `passed_after_fix`; replay v1 campaign complete
 
 Machine-readable inventory:
 [`determinism-replayability-inventory.tsv`](determinism-replayability-inventory.tsv)
@@ -56,14 +56,14 @@ Machine-readable inventory:
 
 | Proof | Purpose | Gap owner |
 |-------|---------|-----------|
-| `determinism_replayability_invariants` | Static and focused behavioral DRC target | DRC-0 through DRC-10 |
+| `determinism_replayability_invariants` | Static and focused behavioral DRC target | DRC-10 passed |
 | Provider-audit test | Proves audit persists before stream open | DRC-4 passed |
 | Replay manifest hash test | Proves canonical JSON/hash stability | DRC-5/DRC-6 passed |
 | Replay ordering test | Proves no timestamp-only replay order | DRC-6 passed |
 | Cross-record reference test | Proves trace/queue/stream/invocation/idempotency refs explain a turn | DRC-7 passed |
 | Offline roundtrip test | Rebuilds from durable records without side effects | DRC-8 passed |
 | Docs/protocol/iOS parity test | Guards README, protocol docs, session progressive docs, and iOS replay/event parity docs | DRC-9 passed |
-| Final closeout test | Enforces 100/100 and no stale active open-loop wording | DRC-10 |
+| Final closeout test | Enforces 100/100 and no stale active open-loop wording | DRC-10 passed |
 
 ## DRC-2/DRC-3 Closure Notes
 
@@ -76,8 +76,8 @@ Machine-readable inventory:
   SQLite boundary.
 - `InvocationRecord::from_result_at` is the deterministic engine invocation
   timestamp seam.
-- Replay builders added in DRC-5/DRC-6 must not add new raw clock/UUID/RNG
-  calls and must not use timestamp-only ordering.
+- Replay builders are guarded against new raw clock/UUID/RNG calls and
+  timestamp-only ordering.
 
 ## DRC-4 Closure Notes
 
@@ -120,3 +120,10 @@ Machine-readable inventory:
 - No replay path calls providers, executes tools, writes files, spawns
   processes, mutates queues/streams/resources, or performs side-effect
   re-execution.
+
+## DRC-10 Closure Notes
+
+- The scorecard and evidence manifest record `100/100` and `complete` status.
+- The active scorecard and inventory have no unresolved closeout wording.
+- `drc_closeout_is_complete` guards the final state and final TSV proof row.
+- No open loops remain.

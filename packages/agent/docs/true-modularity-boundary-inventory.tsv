@@ -930,3 +930,11 @@ packages/ios-app/Sources/UI/Theme/TronIcons.swift	swift	implementation	ios:ui	ow
 packages/ios-app/Sources/UI/Theme/TronSpacing.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Theme/TronThemeTokens.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Theme/TronTypography.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/capability/operations/replay.rs	rust	implementation	agent:capability	owner-private; callers enter through capability operation registry
+packages/agent/src/domains/session/event_store/identity.rs	rust	implementation	agent:session-event-store	owner-private deterministic identity seam
+packages/agent/src/domains/session/event_store/types/payloads/model.rs	rust	contract	agent:session-events	typed session event payload contract
+packages/agent/src/domains/session/replay/mod.rs	rust	facade	agent:session-replay	session replay manifest facade
+packages/agent/src/domains/session/replay/roundtrip.rs	rust	implementation	agent:session-replay	test-only offline replay verifier
+packages/agent/src/domains/session/replay/tests.rs	rust	implementation	agent:session-replay	test-only replay manifest tests
+packages/agent/src/engine/durability/replay.rs	rust	contract	agent:engine-durability	engine replay snapshot DTO contract
+packages/agent/src/shared/protocol/model_audit.rs	rust	contract	agent:shared-protocol	provider request audit DTO contract
