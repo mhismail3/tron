@@ -49,8 +49,8 @@
 //!
 //! ## Invariants
 //!
-//! - Shared provider infrastructure stays under [`shared`]; this root does not
-//!   re-export shared helpers as compatibility aliases.
+//! - Shared provider infrastructure stays under [`shared`]; this root exposes
+//!   only the canonical provider protocol helpers used by provider modules.
 //! - Provider-native wire formats are converted before they reach canonical
 //!   capability history.
 //! - Malformed provider capability arguments fail closed at the stream boundary.

@@ -140,6 +140,7 @@ packages/agent/src/domains/auth/credentials/storage/tests/extra_fields.rs	test	t
 packages/agent/src/domains/auth/credentials/storage/tests/google.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/auth/credentials/storage/tests/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/auth/credentials/types.rs	support	auth	TPC-5	credential and OAuth support needed by provider loop
+packages/agent/src/domains/auth/credentials/types/tests.rs	test	test_harness	TPC-5	concern-owned verification split from provider/auth cleanup
 packages/agent/src/domains/auth/deps.rs	support	auth	TPC-5	credential and OAuth support needed by provider loop
 packages/agent/src/domains/auth/handlers.rs	support	auth	TPC-5	credential and OAuth support needed by provider loop
 packages/agent/src/domains/auth/mod.rs	support	auth	TPC-5	credential and OAuth support needed by provider loop
@@ -181,12 +182,14 @@ packages/agent/src/domains/model/providers/anthropic/types/mod.rs	implementation
 packages/agent/src/domains/model/providers/anthropic/types/stream.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/anthropic/types/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/model/providers/factory.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
+packages/agent/src/domains/model/providers/factory/tests.rs	test	test_harness	TPC-5	concern-owned verification split from provider/auth cleanup
 packages/agent/src/domains/model/providers/google/message_converter.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/google/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/google/provider/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/google/provider/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/model/providers/google/stream_handler.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/google/types/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
+packages/agent/src/domains/model/providers/google/types/models.rs	implementation	model_provider	TPC-5	provider model registry implementation owned outside broad type DTOs
 packages/agent/src/domains/model/providers/google/types/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/model/providers/kimi/message_converter.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/kimi/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
@@ -203,11 +206,14 @@ packages/agent/src/domains/model/providers/ollama/message_converter/tests.rs	tes
 packages/agent/src/domains/model/providers/ollama/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/ollama/provider.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/ollama/stream_handler.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
+packages/agent/src/domains/model/providers/ollama/stream_handler/tests.rs	test	test_harness	TPC-5	concern-owned verification split from provider/auth cleanup
 packages/agent/src/domains/model/providers/ollama/types.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/openai/message_converter.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
+packages/agent/src/domains/model/providers/openai/message_converter/tests.rs	test	test_harness	TPC-5	concern-owned verification split from provider/auth cleanup
 packages/agent/src/domains/model/providers/openai/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/openai/provider/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/openai/provider/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/src/domains/model/providers/openai/provider/tests/request.rs	test	test_harness	TPC-5	concern-owned request shaping verification split from broad provider tests
 packages/agent/src/domains/model/providers/openai/stream_handler/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/openai/stream_handler/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/model/providers/openai/types/config.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
@@ -434,8 +440,8 @@ packages/agent/src/engine/primitives/resource/registrations.rs	primitive	engine	
 packages/agent/src/engine/primitives/resource/schemas.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/runtime.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/state.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
-packages/agent/src/engine/primitives/stores.rs	primitive	engine	TPC-3	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/storage.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/primitives/stores.rs	primitive	engine	TPC-3	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/stream.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/trigger.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/ui/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
@@ -609,9 +615,10 @@ packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	test	test_harn
 packages/agent/tests/primitive_trace_execution.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/engine_durability.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/external_workers.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
-packages/agent/tests/true_primitive_cleanup/invocation_primitives.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/inventory.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/tests/true_primitive_cleanup/invocation_primitives.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/tests/true_primitive_cleanup/provider_auth_model.rs	test	test_harness	TPC-5	static gate coverage for provider/auth/model cleanup row
 packages/agent/tests/true_primitive_cleanup/scorecard.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/support.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup_invariants.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage

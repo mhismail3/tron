@@ -181,7 +181,7 @@ async fn refresh_tokens(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Global reasoning hierarchy from lowest to highest.
-/// "max" is a Tron-internal alias that maps to the highest available level.
+/// "max" is a Tron-internal sentinel that maps to the highest available level.
 const REASONING_HIERARCHY: &[&str] = &["none", "minimal", "low", "medium", "high", "xhigh", "max"];
 
 fn reasoning_rank(effort: &str) -> usize {

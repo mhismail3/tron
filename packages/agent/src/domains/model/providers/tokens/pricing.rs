@@ -393,14 +393,14 @@ mod tests {
     }
 
     #[test]
-    fn pricing_gpt_52_and_retired_alias() {
+    fn pricing_gpt_52_and_retired_codex_id() {
         let tier = get_pricing_tier("gpt-5.2").unwrap();
         assert_float_eq(tier.input_per_million, 1.75);
         assert_float_eq(tier.output_per_million, 14.0);
 
-        let alias_tier = get_pricing_tier("gpt-5.2-codex").unwrap();
-        assert_float_eq(alias_tier.input_per_million, 1.75);
-        assert_float_eq(alias_tier.output_per_million, 14.0);
+        let codex_tier = get_pricing_tier("gpt-5.2-codex").unwrap();
+        assert_float_eq(codex_tier.input_per_million, 1.75);
+        assert_float_eq(codex_tier.output_per_million, 14.0);
     }
 
     #[test]

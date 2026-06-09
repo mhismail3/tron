@@ -9,7 +9,7 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# True Primitive Cleanup Scorecard",
-        "Current score: **45/100**",
+        "Current score: **55/100**",
         "Status: **in_progress**",
         "Branch: `codex/primitive-engine-teardown`",
         "Hard Targets",
@@ -20,6 +20,7 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
         "| TPC-2 | Engine catalog/durability teardown | 12 | passed_after_fix |",
         "| TPC-3 | Invocation host and primitive stores | 10 | passed_after_fix |",
         "| TPC-4 | External worker proof or deletion | 10 | passed_after_fix |",
+        "| TPC-5 | Provider/auth/model cleanup | 10 | passed_after_fix |",
         "| TPC-11 | Final closeout | 5 | pending |",
         "Total weight: **100**",
     ] {
@@ -31,13 +32,14 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# True Primitive Cleanup Evidence Manifest",
-        "Current score: **45/100**",
+        "Current score: **55/100**",
         "Status: **in_progress**",
         "| TPC-0 | passed_after_fix |",
         "| TPC-1 | passed_after_fix |",
         "| TPC-2 | passed_after_fix |",
         "| TPC-3 | passed_after_fix |",
         "| TPC-4 | passed_after_fix |",
+        "| TPC-5 | passed_after_fix |",
         "| TPC-11 | pending |",
         "Red Baseline Commands",
     ] {
