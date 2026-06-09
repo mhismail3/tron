@@ -111,7 +111,7 @@ tighten gates only after first recording the failing proof they close.
 
 | ID | Area | Weight | Status | Owner | Evidence | Open loops | Checkpoint |
 |----|------|-------:|--------|-------|----------|------------|------------|
-| TPC-0 | Scorecard setup | 5 | passed_after_fix | docs/static gates | Added this scorecard, evidence manifest, README living-doc links, setup invariant target, hard-target statement, and current red LOC baseline. | TPC-1 owns complete tracked source inventory; TPC-2 through TPC-8 own all over-budget source/test files. | TPC-0 setup checkpoint |
+| TPC-0 | Scorecard setup | 5 | passed_after_fix | docs/static gates | Added this scorecard, evidence manifest, README living-doc links, setup invariant target, hard-target statement, and current red LOC baseline. Checkpoint commit: `498abfb24`. | TPC-1 owns complete tracked source inventory; TPC-2 through TPC-8 own all over-budget source/test files. | TPC-0 setup checkpoint |
 | TPC-1 | Retention inventory | 8 | pending | architecture | Classify every tracked Rust/iOS/Mac/scripts root as primitive, implementation, support, test, docs, or delete. | No unclassified tracked source may remain. | pending |
 | TPC-2 | Engine catalog/durability teardown | 12 | pending | engine/storage | Split or simplify catalog, ledger, queue, streams, and catalog invocation roots; remove duplicate live state where SQLite/ledger is authoritative. | Current Rust over-budget files remain. | pending |
 | TPC-3 | Invocation host and primitive stores | 10 | pending | engine primitives | Reduce invocation host, primitive registration, trigger tests, and primitive store roots into narrow modules; delete convenience re-export sprawl. | Current Rust over-budget files remain. | pending |
