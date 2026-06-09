@@ -4,6 +4,12 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::shared::server::errors::{INTERNAL_ERROR, SESSION_BUSY, SESSION_NOT_FOUND};
+use crate::shared::server::failure::{
+    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED, RUNTIME_CAPABILITY_ERROR,
+    RUNTIME_CONTEXT_ERROR, RUNTIME_MAX_TURNS, RUNTIME_PERSISTENCE_ERROR, RUNTIME_SERVER_BUSY,
+};
+
 /// Errors that can occur during agent runtime execution.
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
@@ -62,7 +68,7 @@ impl RuntimeError {
     /// Whether the error is recoverable (user can retry).
     pub fn is_recoverable(&self) -> bool {
         match self {
-            Self::ModelResponse(e) => e.is_retryable(),
+            Self::ModelResponse(e) => e.failure().recoverable,
             Self::Cancelled
             | Self::MaxTurns(_)
             | Self::SessionBusy(_)
@@ -78,7 +84,7 @@ impl RuntimeError {
     /// Error category string for event emission.
     pub fn category(&self) -> &str {
         match self {
-            Self::ModelResponse(_) => "provider",
+            Self::ModelResponse(error) => error.category(),
             Self::ModelCapability { .. } => "capability",
             Self::Context(_) => "context",
             Self::Cancelled => "cancelled",
@@ -88,6 +94,95 @@ impl RuntimeError {
             Self::ServerBusy { .. } => "server_busy",
             Self::Persistence(_) => "persistence",
             Self::Internal(_) => "internal",
+        }
+    }
+
+    /// Convert this runtime error to the canonical failure envelope.
+    pub fn to_failure(&self) -> FailureEnvelope {
+        match self {
+            Self::ModelResponse(error) => error.failure().clone(),
+            Self::ModelCapability {
+                model_primitive_name,
+                message,
+            } => FailureEnvelope::new(
+                RUNTIME_CAPABILITY_ERROR,
+                FailureCategory::Capability,
+                message.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            )
+            .with_details(Some(serde_json::json!({
+                "modelPrimitiveName": model_primitive_name,
+            }))),
+            Self::Context(message) => FailureEnvelope::new(
+                RUNTIME_CONTEXT_ERROR,
+                FailureCategory::InvalidRequest,
+                message.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            ),
+            Self::Cancelled => FailureEnvelope::new(
+                RUNTIME_CANCELLED,
+                FailureCategory::Cancelled,
+                "Operation cancelled",
+                false,
+                true,
+                FailureOrigin::AgentRuntime,
+            ),
+            Self::MaxTurns(max_turns) => FailureEnvelope::new(
+                RUNTIME_MAX_TURNS,
+                FailureCategory::Conflict,
+                format!("Max turns ({max_turns}) exceeded"),
+                false,
+                true,
+                FailureOrigin::AgentRuntime,
+            )
+            .with_details(Some(serde_json::json!({ "maxTurns": max_turns }))),
+            Self::SessionNotFound(session_id) => FailureEnvelope::new(
+                SESSION_NOT_FOUND,
+                FailureCategory::NotFound,
+                format!("Session not found: {session_id}"),
+                false,
+                true,
+                FailureOrigin::AgentRuntime,
+            )
+            .with_session_id(Some(session_id.clone())),
+            Self::SessionBusy(session_id) => FailureEnvelope::new(
+                SESSION_BUSY,
+                FailureCategory::Conflict,
+                format!("Session busy: {session_id}"),
+                true,
+                true,
+                FailureOrigin::AgentRuntime,
+            )
+            .with_session_id(Some(session_id.clone())),
+            Self::ServerBusy { current, max } => FailureEnvelope::new(
+                RUNTIME_SERVER_BUSY,
+                FailureCategory::RateLimit,
+                format!("Server busy: {current}/{max} concurrent runs"),
+                true,
+                true,
+                FailureOrigin::AgentRuntime,
+            )
+            .with_details(Some(serde_json::json!({ "current": current, "max": max }))),
+            Self::Persistence(message) => FailureEnvelope::new(
+                RUNTIME_PERSISTENCE_ERROR,
+                FailureCategory::Persistence,
+                message.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            ),
+            Self::Internal(_) => FailureEnvelope::new(
+                INTERNAL_ERROR,
+                FailureCategory::Internal,
+                "Internal error",
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            ),
         }
     }
 }
@@ -203,6 +298,30 @@ mod tests {
         assert_eq!(err.to_string(), "Server busy: 50/50 concurrent runs");
         assert_eq!(err.category(), "server_busy");
         assert!(err.is_recoverable());
+    }
+
+    #[test]
+    fn runtime_error_to_failure_has_stable_code_and_category() {
+        let failure = RuntimeError::ServerBusy {
+            current: 50,
+            max: 50,
+        }
+        .to_failure();
+
+        assert_eq!(failure.code, RUNTIME_SERVER_BUSY);
+        assert_eq!(failure.category, FailureCategory::RateLimit);
+        assert!(failure.retryable);
+        assert!(failure.recoverable);
+        assert_eq!(failure.details.unwrap()["max"], 50);
+    }
+
+    #[test]
+    fn runtime_internal_failure_is_sanitized() {
+        let failure = RuntimeError::Internal("disk path /tmp/secret failed".into()).to_failure();
+
+        assert_eq!(failure.code, INTERNAL_ERROR);
+        assert_eq!(failure.category, FailureCategory::Internal);
+        assert_eq!(failure.message, "Internal error");
     }
 
     #[test]

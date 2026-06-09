@@ -147,7 +147,13 @@ tron_events! {
         code: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         category: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        retryable: Option<bool>,
         recoverable: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        origin: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        details: Option<Value>,
         #[serde(rename = "partialContent", skip_serializing_if = "Option::is_none")]
         partial_content: Option<String>,
     } => "agent.turn_failed",
@@ -342,6 +348,12 @@ tron_events! {
         suggestion: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         retryable: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        recoverable: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        origin: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        details: Option<Value>,
         #[serde(skip_serializing_if = "Option::is_none")]
         status_code: Option<u16>,
         #[serde(skip_serializing_if = "Option::is_none")]

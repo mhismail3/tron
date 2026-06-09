@@ -25,7 +25,8 @@ mod tests;
 
 pub use capability::{CapabilityEventIdentity, CapabilityInvocationSummary};
 pub use factory::{
-    agent_end_event, agent_ready_event, agent_start_event, session_processing_changed_event,
+    agent_end_event, agent_ready_event, agent_start_event, error_event,
+    session_processing_changed_event, turn_failed_event,
 };
 pub use stream::{AssistantMessage, RetryErrorInfo, StreamEvent, is_stream_event_type};
 #[cfg(test)]

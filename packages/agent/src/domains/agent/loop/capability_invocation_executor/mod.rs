@@ -20,6 +20,13 @@ use crate::engine::{
 };
 use crate::shared::protocol::events::{BaseEvent, CapabilityEventIdentity, TronEvent};
 use crate::shared::protocol::messages::CapabilityInvocationDraft;
+use crate::shared::protocol::model_capabilities::{CapabilityResult, failure_result};
+use crate::shared::server::error_mapping::engine_error_to_failure;
+use crate::shared::server::failure::{
+    CAPABILITY_ENGINE_HOST_UNAVAILABLE, CAPABILITY_ENGINE_RESULT_MISSING,
+    CAPABILITY_PRIMITIVE_NOT_FOUND, CAPABILITY_RESULT_INVALID, FailureCategory, FailureEnvelope,
+    FailureOrigin, RUNTIME_CANCELLED,
+};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
@@ -73,7 +80,7 @@ fn primitive_capability_identity(
 fn capability_identity_from_result(
     model_primitive_name: &str,
     base_identity: &CapabilityEventIdentity,
-    result: &crate::shared::protocol::model_capabilities::CapabilityResult,
+    result: &CapabilityResult,
 ) -> CapabilityEventIdentity {
     let Some(details) = result.details.as_ref() else {
         return base_identity.clone();
@@ -111,6 +118,62 @@ fn capability_identity_from_result(
     }
 }
 
+fn capability_failure_details(
+    failure: &mut FailureEnvelope,
+    model_primitive_name: &str,
+    provider_invocation_id: &str,
+    session_id: &str,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
+    extra: Option<Value>,
+) {
+    let mut details = match failure.details.take() {
+        Some(Value::Object(object)) => object,
+        Some(value) => {
+            let mut object = serde_json::Map::new();
+            let _ = object.insert("details".to_owned(), value);
+            object
+        }
+        None => serde_json::Map::new(),
+    };
+    let _ = details.insert(
+        "modelPrimitiveName".to_owned(),
+        Value::String(model_primitive_name.to_owned()),
+    );
+    let _ = details.insert(
+        "providerInvocationId".to_owned(),
+        Value::String(provider_invocation_id.to_owned()),
+    );
+    if let Some(Value::Object(extra)) = extra {
+        details.extend(extra);
+    }
+    failure.details = Some(Value::Object(details));
+    failure.references.session_id = Some(session_id.to_owned());
+    failure.references.trace_id = trace_id.map(|id| id.as_str().to_owned());
+    failure.references.parent_invocation_id = parent_invocation_id.map(|id| id.as_str().to_owned());
+}
+
+fn capability_failure_result(
+    mut failure: FailureEnvelope,
+    model_primitive_name: &str,
+    provider_invocation_id: &str,
+    session_id: &str,
+    trace_id: Option<&TraceId>,
+    parent_invocation_id: Option<&InvocationId>,
+    extra: Option<Value>,
+) -> CapabilityResult {
+    capability_failure_details(
+        &mut failure,
+        model_primitive_name,
+        provider_invocation_id,
+        session_id,
+        trace_id,
+        parent_invocation_id,
+        extra,
+    );
+    failure_result(&failure)
+}
+
 pub struct CapabilityInvocationExecutionContext<'a> {
     pub primitive_surface: &'a ResolvedPrimitiveSurface,
     pub emitter: &'a Arc<EventEmitter>,
@@ -144,10 +207,24 @@ pub async fn execute_capability_invocation(
         .get(&model_primitive_name)
     else {
         error!(model_primitive_name, "capability primitive not found");
+        let failure = FailureEnvelope::new(
+            CAPABILITY_PRIMITIVE_NOT_FOUND,
+            FailureCategory::NotFound,
+            format!("Capability primitive not found: {model_primitive_name}"),
+            false,
+            true,
+            FailureOrigin::Capability,
+        );
         return CapabilityInvocationExecutionResult {
-            result: crate::shared::protocol::model_capabilities::error_result(format!(
-                "Capability primitive not found: {model_primitive_name}"
-            )),
+            result: capability_failure_result(
+                failure,
+                &model_primitive_name,
+                &invocation_id,
+                session_id,
+                ctx.trace_id,
+                ctx.parent_invocation_id,
+                None,
+            ),
             duration_ms: duration_ceil_ms(start.elapsed()),
             stops_turn: false,
         };
@@ -185,7 +262,23 @@ pub async fn execute_capability_invocation(
     };
 
     let capability_result = if per_invocation_cancel.is_cancelled() {
-        crate::shared::protocol::model_capabilities::error_result("Operation cancelled")
+        let failure = FailureEnvelope::new(
+            RUNTIME_CANCELLED,
+            FailureCategory::Cancelled,
+            "Operation cancelled",
+            false,
+            true,
+            FailureOrigin::Capability,
+        );
+        capability_failure_result(
+            failure,
+            &model_primitive_name,
+            &invocation_id,
+            session_id,
+            ctx.trace_id,
+            ctx.parent_invocation_id,
+            None,
+        )
     } else if let Some(engine_host) = ctx.engine_host {
         execute_capability_primitive_via_engine(
             engine_host,
@@ -204,10 +297,26 @@ pub async fn execute_capability_invocation(
         )
         .await
     } else {
-        return CapabilityInvocationExecutionResult {
-            result: crate::shared::protocol::model_capabilities::error_result(format!(
+        let failure = FailureEnvelope::new(
+            CAPABILITY_ENGINE_HOST_UNAVAILABLE,
+            FailureCategory::Unavailable,
+            format!(
                 "Engine host is required to execute capability primitive '{model_primitive_name}'"
-            )),
+            ),
+            false,
+            false,
+            FailureOrigin::Capability,
+        );
+        return CapabilityInvocationExecutionResult {
+            result: capability_failure_result(
+                failure,
+                &model_primitive_name,
+                &invocation_id,
+                session_id,
+                ctx.trace_id,
+                ctx.parent_invocation_id,
+                None,
+            ),
             duration_ms: duration_ceil_ms(start.elapsed()),
             stops_turn,
         };
@@ -292,13 +401,29 @@ async fn execute_capability_primitive_via_engine(
     let actor_id = match ActorId::new(format!("agent:{session_id}")) {
         Ok(id) => id,
         Err(error) => {
-            return crate::shared::protocol::model_capabilities::error_result(error.to_string());
+            return capability_failure_result(
+                engine_error_to_failure(&error),
+                model_primitive_name,
+                invocation_id,
+                session_id,
+                inherited_trace_id,
+                parent_invocation_id,
+                None,
+            );
         }
     };
     let grant_id = match AuthorityGrantId::new("agent-capability-runtime") {
         Ok(id) => id,
         Err(error) => {
-            return crate::shared::protocol::model_capabilities::error_result(error.to_string());
+            return capability_failure_result(
+                engine_error_to_failure(&error),
+                model_primitive_name,
+                invocation_id,
+                session_id,
+                inherited_trace_id,
+                parent_invocation_id,
+                None,
+            );
         }
     };
     let trace_id = inherited_trace_id
@@ -339,21 +464,75 @@ async fn execute_capability_primitive_via_engine(
     let function_id = target.function_id.clone();
     let invocation = Invocation::new_sync(function_id.clone(), effective_args, causal_context);
     let result = engine_host.invoke(invocation).await;
+    let result_trace_id = Some(result.trace_id.clone());
+    let result_invocation_id = Some(result.invocation_id.clone());
 
     if let Some(error) = result.error {
-        return crate::shared::protocol::model_capabilities::error_result(format!(
-            "Engine capability invocation failed for {function_id}: {error}"
-        ));
+        let mut failure = engine_error_to_failure(&error);
+        failure.references.trace_id = result_trace_id.as_ref().map(|id| id.as_str().to_owned());
+        failure.references.invocation_id = result_invocation_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        return capability_failure_result(
+            failure,
+            model_primitive_name,
+            invocation_id,
+            session_id,
+            result_trace_id.as_ref(),
+            parent_invocation_id,
+            Some(json!({ "functionId": function_id.to_string() })),
+        );
     }
     let Some(value) = result.value else {
-        return crate::shared::protocol::model_capabilities::error_result(format!(
-            "Engine capability invocation returned no result for {function_id}"
-        ));
+        let mut failure = FailureEnvelope::new(
+            CAPABILITY_ENGINE_RESULT_MISSING,
+            FailureCategory::Capability,
+            format!("Engine capability invocation returned no result for {function_id}"),
+            false,
+            false,
+            FailureOrigin::Capability,
+        );
+        failure.references.trace_id = result_trace_id.as_ref().map(|id| id.as_str().to_owned());
+        failure.references.invocation_id = result_invocation_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        return capability_failure_result(
+            failure,
+            model_primitive_name,
+            invocation_id,
+            session_id,
+            result_trace_id.as_ref(),
+            parent_invocation_id,
+            Some(json!({ "functionId": function_id.to_string() })),
+        );
     };
     serde_json::from_value(value).unwrap_or_else(|error| {
-        crate::shared::protocol::model_capabilities::error_result(format!(
-            "Engine capability invocation returned invalid capability result for {function_id}: {error}"
-        ))
+        let mut failure = FailureEnvelope::new(
+            CAPABILITY_RESULT_INVALID,
+            FailureCategory::Parse,
+            format!(
+                "Engine capability invocation returned invalid capability result for {function_id}"
+            ),
+            false,
+            false,
+            FailureOrigin::Capability,
+        );
+        failure.references.trace_id = result_trace_id.as_ref().map(|id| id.as_str().to_owned());
+        failure.references.invocation_id = result_invocation_id
+            .as_ref()
+            .map(|id| id.as_str().to_owned());
+        capability_failure_result(
+            failure,
+            model_primitive_name,
+            invocation_id,
+            session_id,
+            result_trace_id.as_ref(),
+            parent_invocation_id,
+            Some(json!({
+                "functionId": function_id.to_string(),
+                "serdeError": error.to_string(),
+            })),
+        )
     })
 }
 

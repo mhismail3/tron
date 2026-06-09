@@ -22,9 +22,8 @@ use tokio_util::sync::CancellationToken;
 use crate::engine::{StreamActorScope, StreamCursor};
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::errors::{CapabilityError, INVALID_PARAMS};
-use crate::shared::server::validation::{
-    MAX_JSON_DEPTH, sanitize_error_message, validate_json_depth,
-};
+use crate::shared::server::failure::FailureOrigin;
+use crate::shared::server::validation::{MAX_JSON_DEPTH, validate_json_depth};
 use crate::transport::engine::{
     EngineTransportBuildRequest, EngineTransportContext, build_engine_transport_request,
     dispatch_engine_transport_request,
@@ -458,16 +457,14 @@ impl EngineWsSession {
         error: CapabilityError,
         trace_id: Option<String>,
     ) -> bool {
-        let sanitized_msg = sanitize_error_message(&error);
+        let failure = error
+            .to_failure(FailureOrigin::Transport)
+            .with_trace_id(trace_id.clone());
         self.send_value(json!({
             "type": "response",
             "id": id,
             "ok": false,
-            "error": {
-                "code": error.code(),
-                "message": sanitized_msg,
-                "details": error.details(),
-            },
+            "error": failure.to_value(),
             "traceId": trace_id,
         }))
     }

@@ -9,6 +9,7 @@ pub mod context;
 pub(crate) mod error_mapping;
 pub(crate) mod errors;
 pub(crate) mod events;
+pub(crate) mod failure;
 pub(crate) mod params;
 pub(crate) mod protocol;
 #[cfg(test)]

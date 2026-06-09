@@ -590,6 +590,12 @@ catalog edit: it requires a non-empty `idempotencyKey`, workspace/system
 authority, and workspace context for workspace promotion. Owner mismatch,
 idempotency, and invalid visibility promotion failures return typed public
 error codes with structured details.
+Failed `/engine` responses expose the same canonical failure envelope used by
+runtime events: stable `code`, `category`, sanitized `message`, `retryable`,
+`recoverable`, `origin`, optional provider/model/status/error-type/retry-after
+fields, safe `details`, and trace/session/invocation references when available.
+The outer response keeps `traceId` for correlation; clients should prefer the
+server envelope over local error-taxonomy inference whenever it is present.
 
 `/engine/workers` is the local-first worker protocol. A worker performs a
 versioned hello with `WorkerIdentity`, auth policy, registration mode, visibility
@@ -672,12 +678,17 @@ while SQLite repositories stay under `event_store/sqlite/repositories`.
 `capability.invocation.completed` are immutable primitive lifecycle labels for
 model-requested `execute` calls. `completed` uses the canonical
 `content`/`isError`/`duration` payload shape for both live and reconstructed
-sessions.
+sessions. Failed capability completions preserve model-visible text and include
+`details.failure`, the server-authored canonical failure envelope.
 Active runtime/UI identity is primitive-execution native: payloads carry the
 model-visible primitive name, invocation id, trace id, turn, operation
 arguments, result content, error state, and duration. iOS renders active work
 from those primitive fields and does not map deleted built-in names to
 capability identity.
+Live `turn.failed` and `error.*` runtime events are emitted through canonical
+server builders. New runtime emissions carry stable code/category,
+retryability, recoverability, origin, and `details.failure`; provider-backed
+failures also preserve provider/model/status/error-type semantics when known.
 
 ### Event Streaming
 

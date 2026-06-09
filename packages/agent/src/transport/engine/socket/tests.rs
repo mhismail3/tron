@@ -221,6 +221,26 @@ async fn topic_poll_requires_explicit_cursor() {
         value.pointer("/error/message").and_then(Value::as_str),
         Some("topic poll requires an explicit cursor; omit cursor only for live subscribe")
     );
+    assert_eq!(
+        value.pointer("/error/code").and_then(Value::as_str),
+        Some("INVALID_PARAMS")
+    );
+    assert_eq!(
+        value.pointer("/error/category").and_then(Value::as_str),
+        Some("invalid_request")
+    );
+    assert_eq!(
+        value.pointer("/error/origin").and_then(Value::as_str),
+        Some("transport")
+    );
+    assert_eq!(
+        value.pointer("/error/retryable").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value.pointer("/error/recoverable").and_then(Value::as_bool),
+        Some(true)
+    );
 }
 
 #[tokio::test]

@@ -40,7 +40,10 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             error,
             code,
             category,
+            retryable,
             recoverable,
+            origin,
+            details,
             partial_content,
             ..
         } => {
@@ -51,6 +54,9 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             });
             set_opt(&mut data, "code", code);
             set_opt(&mut data, "category", category);
+            set_opt(&mut data, "retryable", retryable);
+            set_opt(&mut data, "origin", origin);
+            set_opt(&mut data, "details", details);
             set_opt(&mut data, "partialContent", partial_content);
             Some(session_scoped(event, "agent.turn_failed", Some(data)))
         }

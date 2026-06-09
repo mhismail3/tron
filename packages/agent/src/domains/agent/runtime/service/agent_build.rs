@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tracing::warn;
 
 use crate::domains::agent::context::soul::AGENT_SOUL;
+use crate::shared::protocol::events::{BaseEvent, error_event};
 
 use super::{AgentConfig, AgentFactory, CreateAgentOpts};
 
@@ -34,19 +35,11 @@ pub(super) async fn build_prompt_agent(
                 error = %error,
                 "failed to create provider for model"
             );
-            let _ = broadcast.emit(crate::shared::protocol::events::TronEvent::Error {
-                base: crate::shared::protocol::events::BaseEvent::now(session_id),
-                error: error.to_string(),
-                context: None,
-                code: None,
-                provider: None,
-                category: Some(error.category().to_owned()),
-                suggestion: None,
-                retryable: Some(error.is_retryable()),
-                status_code: None,
-                error_type: Some(error.category().to_owned()),
-                model: Some(model.to_owned()),
-            });
+            let mut failure = error.failure().clone();
+            if failure.model.is_none() {
+                failure.model = Some(model.to_owned());
+            }
+            let _ = broadcast.emit(error_event(BaseEvent::now(session_id), &failure, None));
             return Err(());
         }
     };

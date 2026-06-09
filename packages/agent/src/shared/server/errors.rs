@@ -3,6 +3,8 @@
 //! Domain code uses these typed errors without knowing which transport will
 //! serialize them. Transport conversion lives at the client protocol boundary.
 
+use crate::shared::server::failure::{FailureCategory, FailureEnvelope, FailureOrigin};
+
 // ── Error code constants ────────────────────────────────────────────
 
 /// Invalid or missing parameters.
@@ -124,6 +126,88 @@ impl CapabilityError {
             _ => None,
         }
     }
+
+    /// Convert this capability error to the canonical failure envelope.
+    pub fn to_failure(&self, origin: FailureOrigin) -> FailureEnvelope {
+        let message = self.public_message();
+        let code = self.code().to_owned();
+        let category = category_for_capability_code(&code);
+        let (retryable, recoverable) = retry_recover_for_category(category, &code);
+        FailureEnvelope::new(code, category, message, retryable, recoverable, origin)
+            .with_details(self.details())
+    }
+
+    /// Build a capability error that preserves a canonical failure envelope in
+    /// structured details for capability and engine result paths.
+    pub fn from_failure(failure: FailureEnvelope) -> Self {
+        let code = failure.code.clone();
+        let message = failure.message.clone();
+        let details = Some(failure.details_with_failure());
+        if failure.details.is_some()
+            || failure.provider.is_some()
+            || failure.model.is_some()
+            || failure.status_code.is_some()
+            || failure.error_type.is_some()
+            || failure.retry_after_ms.is_some()
+            || failure.suggestion.is_some()
+            || failure.references != Default::default()
+        {
+            return Self::Custom {
+                code,
+                message,
+                details,
+            };
+        }
+        match code.as_str() {
+            INVALID_PARAMS => Self::InvalidParams { message },
+            INTERNAL_ERROR => Self::Internal { message },
+            NOT_AVAILABLE => Self::NotAvailable { message },
+            NOT_FOUND | SESSION_NOT_FOUND | EVENT_NOT_FOUND | WORKSPACE_NOT_FOUND
+            | BLOB_NOT_FOUND | AUTH_NOT_CONFIGURED => Self::NotFound { code, message },
+            _ => Self::Custom {
+                code,
+                message,
+                details,
+            },
+        }
+    }
+
+    fn public_message(&self) -> String {
+        match self {
+            Self::InvalidParams { message }
+            | Self::NotFound { message, .. }
+            | Self::NotAvailable { message }
+            | Self::Custom { message, .. } => message.clone(),
+            Self::Internal { .. } => "Internal error".to_string(),
+        }
+    }
+}
+
+fn category_for_capability_code(code: &str) -> FailureCategory {
+    match code {
+        INVALID_PARAMS | CLIENT_VERSION_UNSUPPORTED | INVALID_VISIBILITY_PROMOTION => {
+            FailureCategory::InvalidRequest
+        }
+        SESSION_NOT_FOUND | EVENT_NOT_FOUND | WORKSPACE_NOT_FOUND | BLOB_NOT_FOUND | NOT_FOUND
+        | AUTH_NOT_CONFIGURED => FailureCategory::NotFound,
+        NOT_AVAILABLE => FailureCategory::Unavailable,
+        SESSION_BUSY | IDEMPOTENCY_CONFLICT | ENGINE_OWNER_MISMATCH => FailureCategory::Conflict,
+        AUTH_TOKEN_EXPIRED | AUTH_OAUTH_ERROR => FailureCategory::Auth,
+        INTERNAL_ERROR => FailureCategory::Internal,
+        _ => FailureCategory::Unknown,
+    }
+}
+
+fn retry_recover_for_category(category: FailureCategory, code: &str) -> (bool, bool) {
+    match (category, code) {
+        (FailureCategory::Conflict, SESSION_BUSY) => (true, true),
+        (FailureCategory::Conflict, IDEMPOTENCY_CONFLICT | ENGINE_OWNER_MISMATCH) => (false, true),
+        (FailureCategory::Unavailable, _) => (true, true),
+        (FailureCategory::NotFound, _) | (FailureCategory::InvalidRequest, _) => (false, true),
+        (FailureCategory::Auth, _) => (false, true),
+        (FailureCategory::Internal, _) => (false, false),
+        _ => (false, false),
+    }
 }
 
 /// Serialize a value to JSON, mapping errors to [`CapabilityError::Internal`].
@@ -221,5 +305,60 @@ mod tests {
         assert_eq!(err.code(), NOT_AVAILABLE);
         assert_eq!(err.to_string(), "nope");
         assert!(err.details().is_none());
+    }
+
+    #[test]
+    fn capability_error_to_failure_preserves_code_and_details() {
+        let err = CapabilityError::Custom {
+            code: SESSION_BUSY.into(),
+            message: "Session is busy".into(),
+            details: Some(serde_json::json!({"sessionId": "s1"})),
+        };
+
+        let failure = err.to_failure(FailureOrigin::Transport);
+
+        assert_eq!(failure.code, SESSION_BUSY);
+        assert_eq!(failure.category, FailureCategory::Conflict);
+        assert_eq!(failure.message, "Session is busy");
+        assert!(failure.retryable);
+        assert!(failure.recoverable);
+        assert_eq!(failure.origin, FailureOrigin::Transport);
+        assert_eq!(failure.details.unwrap()["sessionId"], "s1");
+    }
+
+    #[test]
+    fn capability_internal_failure_uses_sanitized_public_message() {
+        let err = CapabilityError::Internal {
+            message: "disk path /tmp/secret failed".into(),
+        };
+
+        let failure = err.to_failure(FailureOrigin::Server);
+
+        assert_eq!(failure.code, INTERNAL_ERROR);
+        assert_eq!(failure.category, FailureCategory::Internal);
+        assert_eq!(failure.message, "Internal error");
+        assert!(!failure.retryable);
+        assert!(!failure.recoverable);
+    }
+
+    #[test]
+    fn capability_error_from_failure_embeds_envelope_details() {
+        let failure = FailureEnvelope::new(
+            IDEMPOTENCY_CONFLICT,
+            FailureCategory::Conflict,
+            "conflict",
+            false,
+            true,
+            FailureOrigin::Engine,
+        )
+        .with_details(Some(serde_json::json!({"key": "abc"})));
+
+        let err = CapabilityError::from_failure(failure);
+
+        assert_eq!(err.code(), IDEMPOTENCY_CONFLICT);
+        let details = err.details().expect("failure details");
+        assert_eq!(details["key"], "abc");
+        assert_eq!(details["failure"]["code"], IDEMPOTENCY_CONFLICT);
+        assert_eq!(details["failure"]["category"], "conflict");
     }
 }

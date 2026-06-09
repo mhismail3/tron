@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **6/100**
+Current score: **56/100**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -41,35 +41,28 @@ projections.
 | Row | Requirement | Points | Status | Owner | Evidence | Open loops | Checkpoint |
 |---|---|---:|---|---|---|---|---|
 | FSC-0 | Campaign harness | 6 | passed_after_fix | docs/static gates | Scorecard, inventory, TSV, evidence manifest, invariant target, and README links exist. | Implementation rows remain pending. | FSC-0 campaign harness checkpoint |
-| FSC-1 | Failure inventory | 8 | pending | docs/static gates | Initial source-audited inventory exists. | Verify every active failure surface while implementing later rows and update inventory with final mapping owners. | pending |
-| FSC-2 | Canonical envelope | 12 | pending | server error contract | Not started. | Add one canonical server-side failure envelope, vocabulary, builder API, sanitization boundary, and trace/reference support. | pending |
-| FSC-3 | Error mapping matrix | 12 | pending | server/model/engine | Not started. | Exhaustively map `EngineError`, `CapabilityError`, `ProviderError`, auth/session/event-store errors, and runtime errors with tests. | pending |
-| FSC-4 | Runtime event emission | 12 | pending | agent runtime | Not started. | Replace direct production `TurnFailed` and live `Error` construction with canonical builders. | pending |
-| FSC-5 | Capability and engine results | 10 | pending | engine/capability | Not started. | Preserve structured failure details through capability invocation results, engine invocation failures, idempotency, owner mismatch, policy, schema, and replay. | pending |
-| FSC-6 | Transport contract | 8 | pending | transport | Not started. | Preserve stable code/category/details and trace IDs in `/engine` error frames with sanitized messages. | pending |
-| FSC-7 | Provider retry semantics | 8 | pending | model provider boundary | Not started. | Preserve retryability, recoverability, status, retry-after, provider code, cancellation, provider, model, and category through model responder/runtime. | pending |
+| FSC-1 | Failure inventory | 8 | in_progress | docs/static gates | Inventory now names the canonical envelope owners and completed Rust source mappings. | Close iOS and durable replay rows, then re-audit the TSV against source before closeout. | server core checkpoint |
+| FSC-2 | Canonical envelope | 12 | passed_after_fix | server error contract | `shared::server::failure::FailureEnvelope` owns code/category/message/retryable/recoverable/origin/provider/model/status/error type/retry-after/suggestion/details/references and `details_with_failure`. | None for server-side envelope; iOS/durable consumers remain FSC-8/FSC-9. | server core checkpoint |
+| FSC-3 | Error mapping matrix | 12 | in_progress | server/model/engine | `EngineError`, `CapabilityError`, `ProviderError`, `ModelResponseError`, and `RuntimeError` now map to canonical failures with focused tests. | Add explicit auth/session/event-store mapping assertions and final static enum/source coverage. | server core checkpoint |
+| FSC-4 | Runtime event emission | 12 | passed_after_fix | agent runtime | Production live `TurnFailed` and `Error` emissions route through `turn_failed_event` / `error_event`; projections only match events. | Durable payload enrichment remains FSC-9. | server core checkpoint |
+| FSC-5 | Capability and engine results | 10 | passed_after_fix | engine/capability | Capability executor failures use `failure_result`; engine invocation failures preserve canonical failure details through `capability.invocation.completed`. | Durable capability replay/export enrichment remains FSC-9. | server core checkpoint |
+| FSC-6 | Transport contract | 8 | passed_after_fix | transport | `/engine` socket errors serialize the canonical failure envelope with sanitized message, trace id, category, retryability, recoverability, origin, and details. | Add final static guard for transport error frame fields in FSC-10. | server core checkpoint |
+| FSC-7 | Provider retry semantics | 8 | passed_after_fix | model provider boundary | Provider errors now preserve retryability, recoverability, status, retry-after, provider code, cancellation, provider, model, and category through responder/runtime failure envelopes. | iOS consumption remains FSC-8. | server core checkpoint |
 | FSC-8 | iOS parity | 8 | pending | iOS client | Not started. | Decode canonical fields and remove divergent client classifications where server data exists. | pending |
 | FSC-9 | Observability and replay | 6 | pending | event store/replay/audit | Not started. | Store enough structured failure data for durable events, request audit, engine errors, and replay manifests. | pending |
 | FSC-10 | Closeout gates | 10 | pending | static gates/verification | Not started. | Add guards against stale open loops, ad hoc failure construction, missing codes/categories, category drift, and uncovered variants. | pending |
 
 ## Current Findings
 
-- `TronEvent::TurnFailed` currently permits missing `code` and `category`, and
-  active runtime paths still emit it directly from `turn_runner`.
-- Live `TronEvent::Error` has structured fields but still permits missing
-  canonical semantics and is constructed directly by runtime/service helpers.
-- `ModelResponseError` currently carries message, category, retryable, and
-  cancellation only; provider status, provider code, retry-after, provider,
-  model, and public code are not preserved at that boundary.
-- `ProviderError` has useful native semantics but exposes categories as free
-  strings and does not produce the canonical server envelope.
-- Capability invocation failures can collapse `EngineError` into model-visible
-  text via `error_result` without structured failure details.
-- `/engine` WebSocket responses include `code`, sanitized `message`, `details`,
-  and `traceId`, but do not yet carry canonical category, retryability,
-  recoverability, origin, or safe details consistently.
-- Durable error payloads and iOS projections already have partial structured
-  support, but they do not yet consume one canonical failure contract.
+- The server-side canonical envelope and core Rust source mappings are in
+  place for live runtime events, model/provider failures, engine transport
+  errors, and model-facing capability results.
+- `FSC-3` remains open because auth/session/event-store mapping assertions and
+  final static enum/source guards are not complete.
+- Durable event payloads and replay exports still need explicit canonical
+  failure preservation for new rows.
+- iOS decoding/projection still needs to consume server-provided canonical
+  fields and remove divergent classifications where server data exists.
 
 ## Verification Target
 

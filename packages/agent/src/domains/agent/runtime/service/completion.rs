@@ -11,6 +11,10 @@ use super::{
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
 };
+use crate::shared::protocol::events::{BaseEvent, error_event};
+use crate::shared::server::failure::{
+    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED, RUNTIME_RUN_ERROR,
+};
 
 pub(super) struct PromptRunCompletion<'a> {
     pub(super) result: crate::domains::agent::r#loop::types::RunResult,
@@ -171,9 +175,11 @@ async fn persist_interrupted_if_needed(
             serde_json::json!({
                 "turn": result.turns_executed,
                 "error": "Interrupted by user",
-                "code": "INTERRUPTED",
-                "category": "interruption",
+                "code": RUNTIME_CANCELLED,
+                "category": FailureCategory::Cancelled.as_str(),
+                "retryable": false,
                 "recoverable": true,
+                "origin": FailureOrigin::AgentRuntime.as_str(),
                 "partialContent": null,
             }),
         )
@@ -198,20 +204,17 @@ fn emit_run_error_if_needed(
     let Some(ref error_message) = result.error else {
         return;
     };
-    let parsed = crate::shared::foundation::errors::parse::parse_error(error_message);
-    let _ = broadcast.emit(crate::shared::protocol::events::TronEvent::Error {
-        base: crate::shared::protocol::events::BaseEvent::now(session_id),
-        error: error_message.clone(),
-        context: None,
-        code: None,
-        provider: Some(provider_type.to_owned()),
-        category: Some(parsed.category.to_string()),
-        suggestion: parsed.suggestion,
-        retryable: Some(parsed.is_retryable),
-        status_code: None,
-        error_type: Some(parsed.category.to_string()),
-        model: Some(model_for_error.to_owned()),
-    });
+    let failure = FailureEnvelope::new(
+        RUNTIME_RUN_ERROR,
+        FailureCategory::Unknown,
+        error_message.clone(),
+        false,
+        false,
+        FailureOrigin::AgentRuntime,
+    )
+    .with_provider_model(provider_type, model_for_error)
+    .with_details(Some(serde_json::json!({ "source": "run_result" })));
+    let _ = broadcast.emit(error_event(BaseEvent::now(session_id), &failure, None));
 }
 
 async fn emit_session_update(

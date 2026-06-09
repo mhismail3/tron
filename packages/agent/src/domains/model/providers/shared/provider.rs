@@ -11,6 +11,11 @@ use std::sync::Arc;
 
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
+use crate::shared::server::failure::{
+    FailureCategory, FailureEnvelope, FailureOrigin, PROVIDER_API_ERROR, PROVIDER_AUTH_ERROR,
+    PROVIDER_CANCELLED, PROVIDER_HTTP_ERROR, PROVIDER_JSON_ERROR, PROVIDER_OTHER_ERROR,
+    PROVIDER_RATE_LIMITED, PROVIDER_SSE_PARSE_ERROR, PROVIDER_UNSUPPORTED_MODEL,
+};
 use async_trait::async_trait;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -219,6 +224,120 @@ impl ProviderError {
             Self::Other { .. } => "unknown",
         }
     }
+
+    /// Stable public failure code for this provider error.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::Http(_) => PROVIDER_HTTP_ERROR,
+            Self::Json(_) => PROVIDER_JSON_ERROR,
+            Self::SseParse { .. } => PROVIDER_SSE_PARSE_ERROR,
+            Self::Auth { .. } => PROVIDER_AUTH_ERROR,
+            Self::UnsupportedModel { .. } => PROVIDER_UNSUPPORTED_MODEL,
+            Self::RateLimited { .. } => PROVIDER_RATE_LIMITED,
+            Self::Api { .. } => PROVIDER_API_ERROR,
+            Self::Cancelled => PROVIDER_CANCELLED,
+            Self::Other { .. } => PROVIDER_OTHER_ERROR,
+        }
+    }
+
+    /// HTTP/provider status code, when available.
+    pub fn status_code(&self) -> Option<u16> {
+        match self {
+            Self::Http(error) => error.status().map(|status| status.as_u16()),
+            Self::Api { status, .. } => Some(*status),
+            _ => None,
+        }
+    }
+
+    /// Provider-specific error code, when available.
+    pub fn provider_code(&self) -> Option<String> {
+        match self {
+            Self::Api { code, .. } => code.clone(),
+            _ => None,
+        }
+    }
+
+    /// Convert this provider failure into the canonical server failure envelope.
+    pub fn to_failure(&self, provider: &str, model: &str) -> FailureEnvelope {
+        let (category, message, recoverable, details) = match self {
+            Self::Http(error) => (
+                FailureCategory::Network,
+                match error.status() {
+                    Some(status) => format!("Provider HTTP request failed with status {status}"),
+                    None => "Provider HTTP request failed".to_owned(),
+                },
+                self.is_retryable(),
+                Some(json!({
+                    "isTimeout": error.is_timeout(),
+                    "isConnect": error.is_connect(),
+                    "statusCode": error.status().map(|status| status.as_u16()),
+                })),
+            ),
+            Self::Json(_) => (
+                FailureCategory::Parse,
+                "Provider JSON processing failed".to_owned(),
+                false,
+                None,
+            ),
+            Self::SseParse { message } => (
+                FailureCategory::Parse,
+                "Provider stream parse failed".to_owned(),
+                false,
+                Some(json!({ "message": message })),
+            ),
+            Self::Auth { message } => (FailureCategory::Auth, message.clone(), true, None),
+            Self::UnsupportedModel { model } => (
+                FailureCategory::InvalidModel,
+                format!("Unsupported model: {model}"),
+                true,
+                Some(json!({ "model": model })),
+            ),
+            Self::RateLimited {
+                retry_after_ms,
+                message,
+            } => (
+                FailureCategory::RateLimit,
+                message.clone(),
+                true,
+                Some(json!({ "retryAfterMs": retry_after_ms })),
+            ),
+            Self::Api {
+                status,
+                message,
+                code,
+                retryable,
+            } => (
+                FailureCategory::Api,
+                message.clone(),
+                *retryable || matches!(*status, 400 | 401 | 403 | 404 | 409 | 429),
+                Some(json!({
+                    "statusCode": status,
+                    "providerCode": code,
+                })),
+            ),
+            Self::Cancelled => (
+                FailureCategory::Cancelled,
+                "Provider request cancelled".to_owned(),
+                true,
+                None,
+            ),
+            Self::Other { message } => (FailureCategory::Unknown, message.clone(), false, None),
+        };
+
+        FailureEnvelope::new(
+            self.code(),
+            category,
+            message,
+            self.is_retryable(),
+            recoverable,
+            FailureOrigin::ModelProvider,
+        )
+        .with_provider_model(provider, model)
+        .with_status_code(self.status_code())
+        .with_error_type(self.provider_code())
+        .with_retry_after_ms(self.retry_after_ms())
+        .with_details(details)
+    }
 }
 
 /// Core LLM provider trait.
@@ -387,6 +506,43 @@ mod tests {
         };
         assert!(err.is_retryable());
         assert_eq!(err.category(), "api");
+    }
+
+    #[test]
+    fn provider_error_to_failure_preserves_rate_limit_semantics() {
+        let err = ProviderError::RateLimited {
+            retry_after_ms: 1500,
+            message: "slow down".to_owned(),
+        };
+
+        let failure = err.to_failure("openai", "gpt-5.5");
+
+        assert_eq!(failure.code, PROVIDER_RATE_LIMITED);
+        assert_eq!(failure.category, FailureCategory::RateLimit);
+        assert_eq!(failure.provider.as_deref(), Some("openai"));
+        assert_eq!(failure.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(failure.retry_after_ms, Some(1500));
+        assert!(failure.retryable);
+        assert!(failure.recoverable);
+    }
+
+    #[test]
+    fn provider_error_to_failure_preserves_api_status_and_code() {
+        let err = ProviderError::Api {
+            status: 401,
+            message: "unauthorized".to_owned(),
+            code: Some("invalid_api_key".to_owned()),
+            retryable: false,
+        };
+
+        let failure = err.to_failure("anthropic", "claude-opus-4-6");
+
+        assert_eq!(failure.code, PROVIDER_API_ERROR);
+        assert_eq!(failure.category, FailureCategory::Api);
+        assert_eq!(failure.status_code, Some(401));
+        assert_eq!(failure.error_type.as_deref(), Some("invalid_api_key"));
+        assert!(!failure.retryable);
+        assert!(failure.recoverable);
     }
 
     #[test]

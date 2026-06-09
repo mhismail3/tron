@@ -23,6 +23,9 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             category,
             suggestion,
             retryable,
+            recoverable,
+            origin,
+            details,
             status_code,
             error_type,
             model,
@@ -35,6 +38,9 @@ pub(super) fn convert(event: &TronEvent) -> Option<ProjectedEvent> {
             set_opt(&mut data, "category", category);
             set_opt(&mut data, "suggestion", suggestion);
             set_opt(&mut data, "retryable", retryable);
+            set_opt(&mut data, "recoverable", recoverable);
+            set_opt(&mut data, "origin", origin);
+            set_opt(&mut data, "details", details);
             set_opt(&mut data, "statusCode", status_code);
             set_opt(&mut data, "errorType", error_type);
             set_opt(&mut data, "model", model);

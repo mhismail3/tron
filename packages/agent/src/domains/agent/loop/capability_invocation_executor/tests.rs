@@ -9,7 +9,11 @@ use crate::engine::{
     WorkerDefinition, WorkerId, WorkerKind,
 };
 use crate::shared::protocol::content::CapabilityResultContent;
-use crate::shared::protocol::model_capabilities::CapabilityResultBody;
+use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
+use crate::shared::server::failure::{
+    CAPABILITY_ENGINE_HOST_UNAVAILABLE, CAPABILITY_PRIMITIVE_NOT_FOUND, ENGINE_HANDLER_FAILED,
+    RUNTIME_CANCELLED,
+};
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::{BTreeMap, HashSet};
@@ -87,6 +91,16 @@ fn capability_exec_ctx<'a>(
     }
 }
 
+fn assert_failure_code(result: &CapabilityResult, expected_code: &str) {
+    let details = result
+        .details
+        .as_ref()
+        .expect("canonical capability failure details");
+    assert_eq!(details["failure"]["code"], expected_code);
+    assert_eq!(details["modelPrimitiveName"], "execute");
+    assert_eq!(details["providerInvocationId"], "tc1");
+}
+
 #[tokio::test]
 async fn unknown_model_primitive_fails_before_execution() {
     let surface = empty_surface();
@@ -96,6 +110,16 @@ async fn unknown_model_primitive_fails_before_execution() {
     let call = CapabilityInvocationDraft::new("tc1", "Missing", Default::default());
     let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
     assert!(result.result.is_error.unwrap_or(false));
+    let details = result
+        .result
+        .details
+        .as_ref()
+        .expect("canonical capability failure details");
+    assert_eq!(details["failure"]["code"], CAPABILITY_PRIMITIVE_NOT_FOUND);
+    assert_eq!(details["failure"]["category"], "not_found");
+    assert_eq!(details["failure"]["origin"], "capability");
+    assert_eq!(details["modelPrimitiveName"], "Missing");
+    assert_eq!(details["providerInvocationId"], "tc1");
 }
 
 #[tokio::test]
@@ -107,7 +131,27 @@ async fn catalog_target_requires_engine_host_for_execution() {
     let call = CapabilityInvocationDraft::new("tc1", "execute", Default::default());
     let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
     assert!(result.result.is_error.unwrap_or(false));
+    assert_failure_code(&result.result, CAPABILITY_ENGINE_HOST_UNAVAILABLE);
     assert!(result.stops_turn);
+}
+
+#[tokio::test]
+async fn cancelled_model_primitive_returns_canonical_failure() {
+    let surface = surface_with_echo();
+    let emitter = Arc::new(EventEmitter::new());
+    let cancel = CancellationToken::new();
+    cancel.cancel();
+    let ctx = capability_exec_ctx(&surface, &emitter, &cancel);
+    let call = CapabilityInvocationDraft::new("tc1", "execute", Default::default());
+
+    let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
+
+    assert!(result.result.is_error.unwrap_or(false));
+    assert_failure_code(&result.result, RUNTIME_CANCELLED);
+    assert_eq!(
+        result.result.details.as_ref().unwrap()["failure"]["category"],
+        "cancelled"
+    );
 }
 
 #[tokio::test]
@@ -202,6 +246,86 @@ impl crate::engine::InProcessFunctionHandler for StopTurnCapabilityHandler {
         )
         .map_err(|error| crate::engine::EngineError::HandlerFailed(error.to_string()))
     }
+}
+
+#[derive(Clone)]
+struct FailingCapabilityHandler;
+
+#[async_trait]
+impl crate::engine::InProcessFunctionHandler for FailingCapabilityHandler {
+    async fn invoke(&self, _invocation: Invocation) -> crate::engine::Result<Value> {
+        Err(crate::engine::EngineError::HandlerFailed(
+            "simulated failure".to_owned(),
+        ))
+    }
+}
+
+#[tokio::test]
+async fn engine_handler_failure_returns_canonical_capability_result() {
+    let engine_host = EngineHostHandle::new_in_memory().expect("engine host");
+    engine_host
+        .register_worker(
+            WorkerDefinition::new(
+                WorkerId::new("capability").expect("worker id"),
+                WorkerKind::InProcess,
+                ActorId::new("capability-owner").expect("actor id"),
+                AuthorityGrantId::new("capability-grant").expect("grant id"),
+            )
+            .with_namespace_claim("capability"),
+            false,
+        )
+        .await
+        .expect("register worker");
+
+    let function_id = FunctionId::new("capability::fail").expect("function id");
+    let function = FunctionDefinition::new(
+        function_id.clone(),
+        WorkerId::new("capability").expect("worker id"),
+        "Fail capability invocation".to_owned(),
+        VisibilityScope::System,
+        EffectClass::PureRead,
+    )
+    .with_risk(RiskLevel::Low)
+    .with_required_authority(AuthorityRequirement::scope("capability.execute"));
+    engine_host
+        .register_function(
+            function.clone(),
+            Some(Arc::new(FailingCapabilityHandler)),
+            false,
+        )
+        .await
+        .expect("register function");
+
+    let mut targets_by_name = BTreeMap::new();
+    let _ = targets_by_name.insert(
+        "execute".to_owned(),
+        PrimitiveExecutionTarget {
+            model_capability_id: "execute".to_owned(),
+            function_id,
+            function,
+            stops_turn: false,
+            execution_mode: ExecutionMode::Parallel,
+        },
+    );
+    let surface = ResolvedPrimitiveSurface {
+        capabilities: Vec::new(),
+        targets_by_name,
+        turn_stopping_capabilities: HashSet::new(),
+    };
+    let emitter = Arc::new(EventEmitter::new());
+    let cancel = CancellationToken::new();
+    let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
+    ctx.engine_host = Some(&engine_host);
+    let call = CapabilityInvocationDraft::new("tc1", "execute", Default::default());
+
+    let result = execute_capability_invocation(&call, "s1", "/tmp", &ctx).await;
+
+    assert!(result.result.is_error.unwrap_or(false));
+    assert_failure_code(&result.result, ENGINE_HANDLER_FAILED);
+    let details = result.result.details.as_ref().unwrap();
+    assert_eq!(details["failure"]["category"], "capability");
+    assert_eq!(details["failure"]["origin"], "capability");
+    assert_eq!(details["functionId"], "capability::fail");
 }
 
 #[tokio::test]

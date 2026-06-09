@@ -29,6 +29,10 @@ use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::{ModelProviderRequestAudit, ProviderAuditPayload};
+use crate::shared::server::failure::{
+    FailureCategory, FailureEnvelope, FailureOrigin, MODEL_AUTH_ERROR,
+    MODEL_PROVIDER_REQUEST_AUDIT_FAILED, MODEL_RESPONSE_ERROR,
+};
 
 /// Boxed stream returned by the model responder boundary.
 pub type ModelResponseStream =
@@ -116,8 +120,7 @@ impl ModelReasoningLevel {
 #[error("{message}")]
 pub struct ModelResponseError {
     message: String,
-    category: String,
-    retryable: bool,
+    failure: FailureEnvelope,
     cancelled: bool,
 }
 
@@ -125,55 +128,95 @@ impl ModelResponseError {
     /// Create a non-retryable model response error for tests and canonical
     /// model-boundary failures that are not tied to a provider-native category.
     pub fn other(message: impl Into<String>) -> Self {
-        Self::new(message, "unknown", false, false)
+        let message = message.into();
+        Self::from_failure(
+            FailureEnvelope::new(
+                MODEL_RESPONSE_ERROR,
+                FailureCategory::Unknown,
+                message,
+                false,
+                false,
+                FailureOrigin::ModelResponder,
+            ),
+            false,
+        )
     }
 
     /// Create a non-retryable auth error at the model boundary.
     pub fn auth(message: impl Into<String>) -> Self {
-        Self::new(message, "auth", false, false)
+        let message = message.into();
+        Self::from_failure(
+            FailureEnvelope::new(
+                MODEL_AUTH_ERROR,
+                FailureCategory::Auth,
+                message,
+                false,
+                true,
+                FailureOrigin::ModelResponder,
+            ),
+            false,
+        )
     }
 
     /// Create a non-retryable provider-request audit error.
     pub fn audit(message: impl Into<String>) -> Self {
-        Self::new(message, "audit", false, false)
+        let message = message.into();
+        Self::from_failure(
+            FailureEnvelope::new(
+                MODEL_PROVIDER_REQUEST_AUDIT_FAILED,
+                FailureCategory::Internal,
+                message,
+                false,
+                false,
+                FailureOrigin::ModelResponder,
+            ),
+            false,
+        )
     }
 
-    fn new(
-        message: impl Into<String>,
-        category: impl Into<String>,
-        retryable: bool,
-        cancelled: bool,
-    ) -> Self {
+    fn from_failure(failure: FailureEnvelope, cancelled: bool) -> Self {
         Self {
-            message: message.into(),
-            category: category.into(),
-            retryable,
+            message: failure.message.clone(),
+            failure,
             cancelled,
         }
     }
 
+    fn from_provider_error(error: ProviderError, info: &ModelResponderInfo) -> Self {
+        let cancelled = matches!(error, ProviderError::Cancelled);
+        let failure = error.to_failure(info.provider_name, &info.model);
+        Self::from_failure(failure, cancelled)
+    }
+
     /// Error category string for event emission.
     pub fn category(&self) -> &str {
-        &self.category
+        self.failure.category.as_str()
     }
 
     /// Whether this error is retryable.
     pub fn is_retryable(&self) -> bool {
-        self.retryable
+        self.failure.retryable
     }
 
     /// Whether the request was cancelled.
     pub fn is_cancelled(&self) -> bool {
         self.cancelled
     }
+
+    /// Canonical failure envelope for this model response error.
+    pub fn failure(&self) -> &FailureEnvelope {
+        &self.failure
+    }
 }
 
 impl From<ProviderError> for ModelResponseError {
     fn from(error: ProviderError) -> Self {
-        let category = error.category().to_owned();
-        let retryable = error.is_retryable();
+        let category = error.category();
         let cancelled = matches!(error, ProviderError::Cancelled);
-        Self::new(error.to_string(), category, retryable, cancelled)
+        let failure = error.to_failure("unknown", "unknown").with_details(Some(
+            serde_json::json!({ "modelResponderFallback": true, "category": category }),
+        ));
+        Self::from_failure(failure, cancelled)
     }
 }
 
@@ -326,7 +369,17 @@ impl ModelResponderFactory for DefaultModelResponderFactory {
             .providers
             .create_for_model(model)
             .await
-            .map_err(ModelResponseError::from)?;
+            .map_err(|error| {
+                ModelResponseError::from_provider_error(
+                    error,
+                    &ModelResponderInfo {
+                        provider_type: crate::shared::protocol::messages::Provider::Unknown,
+                        provider_name: "unknown",
+                        model: model.to_owned(),
+                        context_window: 0,
+                    },
+                )
+            })?;
         Ok(Arc::new(ProviderBackedModelResponder {
             provider,
             health: self.health.clone(),
@@ -361,7 +414,7 @@ impl ModelResponder for ProviderBackedModelResponder {
         let provider_request = self
             .provider
             .audit_payload(&request.context, &stream_options)
-            .map_err(ModelResponseError::from)?;
+            .map_err(|error| ModelResponseError::from_provider_error(error, &info))?;
         build_request_audit(info, request, stream_options, provider_request)
     }
 
@@ -398,7 +451,7 @@ impl ModelResponder for ProviderBackedModelResponder {
                     error = %error,
                     "provider stream error"
                 );
-                return Err(ModelResponseError::from(error));
+                return Err(ModelResponseError::from_provider_error(error, &info));
             }
         };
 
@@ -406,6 +459,7 @@ impl ModelResponder for ProviderBackedModelResponder {
             stream: wrap_provider_stream(
                 stream,
                 info.provider_name,
+                info.model.clone(),
                 self.health.clone(),
                 request_start,
             ),
@@ -491,6 +545,7 @@ async fn open_provider_stream(
 fn wrap_provider_stream(
     stream: StreamEventStream,
     provider_name: &'static str,
+    model: String,
     health: Arc<ModelResponderHealth>,
     request_start: Instant,
 ) -> ModelResponseStream {
@@ -512,7 +567,13 @@ fn wrap_provider_stream(
                     health.record_failure(provider_name);
                     histogram!("provider_request_duration_seconds", "provider" => provider_name)
                         .record(request_start.elapsed().as_secs_f64());
-                    yield Err(ModelResponseError::from(error));
+                    let info = ModelResponderInfo {
+                        provider_type: crate::shared::protocol::messages::Provider::Unknown,
+                        provider_name,
+                        model: model.clone(),
+                        context_window: 0,
+                    };
+                    yield Err(ModelResponseError::from_provider_error(error, &info));
                     return;
                 }
             }
@@ -683,6 +744,56 @@ mod tests {
             ModelReasoningLevel::Max.as_openai_reasoning(),
             ReasoningEffort::Max
         );
+    }
+
+    #[test]
+    fn model_response_error_preserves_provider_failure_envelope() {
+        let info = ModelResponderInfo {
+            provider_type: crate::shared::protocol::messages::Provider::OpenAi,
+            provider_name: "openai",
+            model: "gpt-5.5".to_owned(),
+            context_window: 128_000,
+        };
+        let error = ModelResponseError::from_provider_error(
+            ProviderError::Api {
+                status: 429,
+                message: "rate limit".to_owned(),
+                code: Some("rate_limit_exceeded".to_owned()),
+                retryable: true,
+            },
+            &info,
+        );
+
+        let failure = error.failure();
+
+        assert_eq!(
+            failure.code,
+            crate::shared::server::failure::PROVIDER_API_ERROR
+        );
+        assert_eq!(failure.category, FailureCategory::Api);
+        assert_eq!(failure.provider.as_deref(), Some("openai"));
+        assert_eq!(failure.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(failure.status_code, Some(429));
+        assert_eq!(failure.error_type.as_deref(), Some("rate_limit_exceeded"));
+        assert!(failure.retryable);
+        assert!(failure.recoverable);
+        assert_eq!(error.category(), "api");
+        assert!(error.is_retryable());
+    }
+
+    #[test]
+    fn model_response_error_auth_has_recoverable_canonical_failure() {
+        let error = ModelResponseError::auth("sign in again");
+
+        let failure = error.failure();
+
+        assert_eq!(
+            failure.code,
+            crate::shared::server::failure::MODEL_AUTH_ERROR
+        );
+        assert_eq!(failure.category, FailureCategory::Auth);
+        assert!(!failure.retryable);
+        assert!(failure.recoverable);
     }
 
     #[test]

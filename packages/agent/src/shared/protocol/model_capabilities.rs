@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::shared::protocol::content::CapabilityResultContent;
+use crate::shared::server::failure::FailureEnvelope;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ModelCapability schema
@@ -106,10 +107,17 @@ pub fn text_result(text: impl Into<String>, is_error: bool) -> CapabilityResult 
     }
 }
 
-/// Create an error result.
+/// Create a canonical failure result.
 #[must_use]
-pub fn error_result(message: impl Into<String>) -> CapabilityResult {
-    text_result(message, true)
+pub fn failure_result(failure: &FailureEnvelope) -> CapabilityResult {
+    CapabilityResult {
+        content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(
+            failure.message.clone(),
+        )]),
+        details: Some(failure.details_with_failure()),
+        is_error: Some(true),
+        stop_turn: None,
+    }
 }
 
 /// Create an image result with optional caption.
@@ -180,9 +188,21 @@ mod tests {
     }
 
     #[test]
-    fn error_result_has_is_error() {
-        let r = error_result("something went wrong");
+    fn failure_result_has_canonical_details() {
+        let failure = FailureEnvelope::new(
+            "RUNTIME_CAPABILITY_ERROR",
+            crate::shared::server::failure::FailureCategory::Capability,
+            "something went wrong",
+            false,
+            false,
+            crate::shared::server::failure::FailureOrigin::Capability,
+        );
+        let r = failure_result(&failure);
         assert_eq!(r.is_error, Some(true));
+        assert_eq!(
+            r.details.as_ref().unwrap()["failure"]["code"],
+            "RUNTIME_CAPABILITY_ERROR"
+        );
     }
 
     #[test]

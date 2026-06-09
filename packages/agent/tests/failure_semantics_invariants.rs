@@ -50,8 +50,10 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Campaign Scorecard",
         "Status: **active**",
-        "Current score: **6/100**",
+        "Current score: **56/100**",
         "| FSC-0 | Campaign harness | 6 | passed_after_fix |",
+        "| FSC-2 | Canonical envelope | 12 | passed_after_fix |",
+        "| FSC-7 | Provider retry semantics | 8 | passed_after_fix |",
         "| FSC-10 | Closeout gates | 10 | pending |",
         "`packages/agent/docs/failure-semantics-inventory.tsv`",
         "`packages/agent/tests/failure_semantics_invariants.rs`",
@@ -65,7 +67,9 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Inventory",
         "Status: **active**",
+        "## Canonical Vocabulary",
         "## Surface Inventory",
+        "`shared::server::failure::FailureEnvelope`",
         "`shared::server::errors::CapabilityError`",
         "`engine::kernel::EngineError`",
         "`domains::model::providers::shared::ProviderError`",
@@ -83,10 +87,13 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Evidence Manifest",
         "Status: **active**",
-        "Current score: **6/100**",
+        "Current score: **56/100**",
         "| FSC-0 | passed_after_fix |",
+        "| FSC-2 | passed_after_fix |",
+        "| FSC-7 | passed_after_fix |",
         "| FSC-10 | pending |",
         "## FSC-0 Findings",
+        "## Server Core Checkpoint Findings",
         "## Verification Log",
     ] {
         assert!(
@@ -138,6 +145,7 @@ fn failure_semantics_inventory_tsv_covers_initial_surfaces() {
 
     for required in [
         "packages/agent/src/shared/server/errors.rs",
+        "packages/agent/src/shared/server/failure.rs",
         "packages/agent/src/shared/server/error_mapping.rs",
         "packages/agent/src/engine/kernel/errors.rs",
         "packages/agent/src/domains/model/providers/shared/provider.rs",
@@ -153,6 +161,63 @@ fn failure_semantics_inventory_tsv_covers_initial_surfaces() {
             "FSC inventory missing initial surface path: {required}"
         );
     }
+}
+
+#[test]
+fn failure_semantics_server_core_uses_canonical_envelope() {
+    let failure = read_repo_file("packages/agent/src/shared/server/failure.rs");
+    for required in [
+        "pub struct FailureEnvelope",
+        "pub enum FailureCategory",
+        "pub enum FailureOrigin",
+        "pub fn details_with_failure",
+        "PROVIDER_RATE_LIMITED",
+        "CAPABILITY_PRIMITIVE_NOT_FOUND",
+    ] {
+        assert!(
+            failure.contains(required),
+            "canonical failure contract missing {required}"
+        );
+    }
+
+    let model_capabilities =
+        read_repo_file("packages/agent/src/shared/protocol/model_capabilities.rs");
+    assert!(
+        model_capabilities.contains("pub fn failure_result"),
+        "capability results must expose the canonical failure-result helper"
+    );
+    assert!(
+        !model_capabilities.contains("error_result"),
+        "text-only capability error_result helper must not return"
+    );
+
+    let event_factory = read_repo_file("packages/agent/src/shared/protocol/events/factory.rs");
+    assert!(
+        event_factory.matches("details_with_failure").count() >= 2,
+        "turn-failed and error event builders must embed the canonical envelope"
+    );
+
+    for path in [
+        "packages/agent/src/domains/agent/loop/turn_runner/mod.rs",
+        "packages/agent/src/domains/agent/runtime/service/agent_build.rs",
+        "packages/agent/src/domains/agent/runtime/service/completion.rs",
+    ] {
+        let source = read_repo_file(path);
+        assert!(
+            !source.contains("TronEvent::TurnFailed"),
+            "runtime production path must use turn_failed_event builder: {path}"
+        );
+        assert!(
+            !source.contains("TronEvent::Error"),
+            "runtime production path must use error_event builder: {path}"
+        );
+    }
+
+    let socket = read_repo_file("packages/agent/src/transport/engine/socket/mod.rs");
+    assert!(
+        socket.contains(".to_failure(FailureOrigin::Transport)"),
+        "engine socket errors must serialize canonical failure envelopes"
+    );
 }
 
 #[test]

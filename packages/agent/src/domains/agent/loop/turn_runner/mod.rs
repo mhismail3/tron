@@ -17,7 +17,11 @@ use std::time::Instant;
 
 use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::model::responder::{ModelResponder, ModelResponseRequest};
-use crate::shared::protocol::events::{BaseEvent, TronEvent};
+use crate::shared::protocol::events::{BaseEvent, turn_failed_event};
+use crate::shared::server::failure::{
+    ASSISTANT_PERSIST_FAILED, ENGINE_TOOL_SURFACE_FAILED, FailureCategory, FailureEnvelope,
+    FailureOrigin, JOURNAL_CREATE_FAILED, MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED,
+};
 
 use metrics::{counter, histogram};
 use tracing::{debug, error, instrument, warn};
@@ -51,6 +55,28 @@ fn run_base(session_id: &str, run_context: &RunContext) -> BaseEvent {
             .as_ref()
             .map(|id| id.as_str().to_owned()),
     )
+}
+
+fn emit_turn_failure(
+    emitter: &Arc<EventEmitter>,
+    session_id: &str,
+    turn: u32,
+    run_context: &RunContext,
+    sequence_counter: Option<&AtomicI64>,
+    failure: &FailureEnvelope,
+    partial_content: Option<String>,
+) {
+    let event = turn_failed_event(
+        run_base(session_id, run_context),
+        turn,
+        failure,
+        partial_content,
+    );
+    if let Some(counter) = sequence_counter {
+        let _ = emitter.emit_sequenced(event, counter);
+    } else {
+        let _ = emitter.emit(event);
+    }
 }
 
 /// Parameters for a single turn of the agent loop.
@@ -161,15 +187,23 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 let error_msg =
                     format!("failed to resolve live engine capability surface: {error}");
                 error!(session_id, turn, error = %error_msg);
-                let _ = emitter.emit(TronEvent::TurnFailed {
-                    base: run_base(session_id, run_context),
+                let failure = FailureEnvelope::new(
+                    ENGINE_TOOL_SURFACE_FAILED,
+                    FailureCategory::Engine,
+                    error_msg.clone(),
+                    true,
+                    true,
+                    FailureOrigin::Engine,
+                );
+                emit_turn_failure(
+                    emitter,
+                    session_id,
                     turn,
-                    error: error_msg.clone(),
-                    code: Some("ENGINE_TOOL_SURFACE_FAILED".into()),
-                    category: Some("engine".into()),
-                    recoverable: true,
-                    partial_content: None,
-                });
+                    run_context,
+                    sequence_counter,
+                    &failure,
+                    None,
+                );
                 return TurnResult {
                     success: false,
                     error: Some(error_msg),
@@ -200,37 +234,23 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         Ok(audit) => audit,
         Err(error) => {
             let error_msg = error.to_string();
-            let category = error.category().to_owned();
+            let failure = error.failure().clone();
+            let category = failure.category.as_str().to_owned();
             warn!(
                 model = %responder.model(),
                 status = %category,
                 error = %error,
                 "model provider request audit error"
             );
-            if let Some(counter) = sequence_counter {
-                let _ = emitter.emit_sequenced(
-                    TronEvent::TurnFailed {
-                        base: run_base(session_id, run_context),
-                        turn,
-                        error: error_msg.clone(),
-                        code: Some("MODEL_PROVIDER_REQUEST_AUDIT_FAILED".into()),
-                        category: Some(category),
-                        recoverable: false,
-                        partial_content: None,
-                    },
-                    counter,
-                );
-            } else {
-                let _ = emitter.emit(TronEvent::TurnFailed {
-                    base: run_base(session_id, run_context),
-                    turn,
-                    error: error_msg.clone(),
-                    code: Some("MODEL_PROVIDER_REQUEST_AUDIT_FAILED".into()),
-                    category: Some(category),
-                    recoverable: false,
-                    partial_content: None,
-                });
-            }
+            emit_turn_failure(
+                emitter,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
             return TurnResult {
                 success: false,
                 error: Some(error_msg),
@@ -249,30 +269,23 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     {
         let error_msg = format!("failed to persist model provider request audit: {error}");
         error!(session_id, turn, error = %error_msg);
-        if let Some(counter) = sequence_counter {
-            let _ = emitter.emit_sequenced(
-                TronEvent::TurnFailed {
-                    base: run_base(session_id, run_context),
-                    turn,
-                    error: error_msg.clone(),
-                    code: Some("MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED".into()),
-                    category: Some("persistence".into()),
-                    recoverable: false,
-                    partial_content: None,
-                },
-                counter,
-            );
-        } else {
-            let _ = emitter.emit(TronEvent::TurnFailed {
-                base: run_base(session_id, run_context),
-                turn,
-                error: error_msg.clone(),
-                code: Some("MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED".into()),
-                category: Some("persistence".into()),
-                recoverable: false,
-                partial_content: None,
-            });
-        }
+        let failure = FailureEnvelope::new(
+            MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED,
+            FailureCategory::Persistence,
+            error_msg.clone(),
+            false,
+            false,
+            FailureOrigin::AgentRuntime,
+        );
+        emit_turn_failure(
+            emitter,
+            session_id,
+            turn,
+            run_context,
+            sequence_counter,
+            &failure,
+            None,
+        );
         return TurnResult {
             success: false,
             error: Some(error_msg),
@@ -285,8 +298,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         Ok(response) => response,
         Err(error) => {
             let error_msg = error.to_string();
-            let category = error.category().to_owned();
-            let recoverable = error.is_retryable();
+            let failure = error.failure().clone();
+            let category = failure.category.as_str().to_owned();
             warn!(
                 model = %responder.model(),
                 status = %category,
@@ -294,30 +307,15 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 "model response error"
             );
 
-            if let Some(counter) = sequence_counter {
-                let _ = emitter.emit_sequenced(
-                    TronEvent::TurnFailed {
-                        base: run_base(session_id, run_context),
-                        turn,
-                        error: error_msg.clone(),
-                        code: None,
-                        category: Some(category),
-                        recoverable,
-                        partial_content: None,
-                    },
-                    counter,
-                );
-            } else {
-                let _ = emitter.emit(TronEvent::TurnFailed {
-                    base: run_base(session_id, run_context),
-                    turn,
-                    error: error_msg.clone(),
-                    code: None,
-                    category: Some(category),
-                    recoverable,
-                    partial_content: None,
-                });
-            }
+            emit_turn_failure(
+                emitter,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
 
             return TurnResult {
                 success: false,
@@ -349,15 +347,23 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                  Check that ~/.tron/internal/database/journals/ is writable."
             );
             error!(session_id, turn, error = %error_msg);
-            let _ = emitter.emit(TronEvent::TurnFailed {
-                base: run_base(session_id, run_context),
+            let failure = FailureEnvelope::new(
+                JOURNAL_CREATE_FAILED,
+                FailureCategory::Persistence,
+                error_msg.clone(),
+                false,
+                false,
+                FailureOrigin::AgentRuntime,
+            );
+            emit_turn_failure(
+                emitter,
+                session_id,
                 turn,
-                error: error_msg.clone(),
-                code: Some("JOURNAL_CREATE_FAILED".into()),
-                category: Some("persistence".into()),
-                recoverable: false,
-                partial_content: None,
-            });
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
             return TurnResult {
                 success: false,
                 error: Some(error_msg),
@@ -385,30 +391,16 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         Err(e) => {
             let error_msg = e.to_string();
             error!(session_id, turn, error = %error_msg, "stream failed");
-            if let Some(counter) = sequence_counter {
-                let _ = emitter.emit_sequenced(
-                    TronEvent::TurnFailed {
-                        base: run_base(session_id, run_context),
-                        turn,
-                        error: error_msg.clone(),
-                        code: None,
-                        category: Some(e.category().to_owned()),
-                        recoverable: e.is_recoverable(),
-                        partial_content: None,
-                    },
-                    counter,
-                );
-            } else {
-                let _ = emitter.emit(TronEvent::TurnFailed {
-                    base: run_base(session_id, run_context),
-                    turn,
-                    error: error_msg.clone(),
-                    code: None,
-                    category: Some(e.category().to_owned()),
-                    recoverable: e.is_recoverable(),
-                    partial_content: None,
-                });
-            }
+            let failure = e.to_failure();
+            emit_turn_failure(
+                emitter,
+                session_id,
+                turn,
+                run_context,
+                sequence_counter,
+                &failure,
+                None,
+            );
             return TurnResult {
                 success: false,
                 error: Some(error_msg),
@@ -514,15 +506,23 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     {
         let error_msg = format!("failed to persist assistant message: {error}");
         error!(session_id, turn, error = %error_msg);
-        let _ = emitter.emit(TronEvent::TurnFailed {
-            base: run_base(session_id, run_context),
+        let failure = FailureEnvelope::new(
+            ASSISTANT_PERSIST_FAILED,
+            FailureCategory::Persistence,
+            error_msg.clone(),
+            false,
+            false,
+            FailureOrigin::AgentRuntime,
+        );
+        emit_turn_failure(
+            emitter,
+            session_id,
             turn,
-            error: error_msg.clone(),
-            code: Some("ASSISTANT_PERSIST_FAILED".into()),
-            category: Some("persistence".into()),
-            recoverable: false,
-            partial_content: None,
-        });
+            run_context,
+            sequence_counter,
+            &failure,
+            None,
+        );
         return TurnResult {
             success: false,
             error: Some(error_msg),

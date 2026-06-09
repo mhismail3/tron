@@ -70,7 +70,10 @@ fn tron_event_turn_failed() {
         error: "rate limit".into(),
         code: Some("PRATE".into()),
         category: Some("rate_limit".into()),
+        retryable: Some(true),
         recoverable: true,
+        origin: Some("model_provider".into()),
+        details: None,
         partial_content: None,
     };
     assert_eq!(e.event_type(), "agent.turn_failed");
