@@ -5,3 +5,4 @@ mod invocation_primitives;
 mod provider_auth_model;
 mod scorecard;
 mod support;
+mod transport_agent_observability;

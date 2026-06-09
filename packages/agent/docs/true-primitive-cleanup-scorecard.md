@@ -4,7 +4,7 @@ Created: 2026-06-09
 
 Initial score: **0/100**
 
-Current score: **55/100**
+Current score: **65/100**
 
 Status: **in_progress**
 
@@ -106,6 +106,7 @@ gates:
 - `invocation_host_and_primitive_store_roots_are_narrow`
 - `external_worker_runtime_is_loopback_split_and_proven`
 - `provider_auth_model_roots_are_split_and_provider_native`
+- `transport_agent_observability_roots_are_split_and_explicit`
 - `tpc_source_files_are_classified_or_in_pending_inventory_setup`
 - `tpc_hard_budget_scan_still_has_recorded_open_findings`
 
@@ -117,12 +118,12 @@ tighten gates only after first recording the failing proof they close.
 | ID | Area | Weight | Status | Owner | Evidence | Open loops | Checkpoint |
 |----|------|-------:|--------|-------|----------|------------|------------|
 | TPC-0 | Scorecard setup | 5 | passed_after_fix | docs/static gates | Added this scorecard, evidence manifest, README living-doc links, setup invariant target, hard-target statement, and current red LOC baseline. Checkpoint commit: `498abfb24`. | TPC-1 owns complete tracked source inventory; TPC-2 through TPC-8 own all over-budget source/test files. | TPC-0 setup checkpoint |
-| TPC-1 | Retention inventory | 8 | passed_after_fix | architecture | Added the retention inventory and TSV, then regenerated it after TPC-2 through TPC-5. Current coverage is 1,389 tracked and newly introduced source/docs/script paths in TPC scope: 105 `primitive`, 470 `implementation`, 378 `support`, 404 `test`, 32 `docs`, and 0 `delete`. Checkpoint commit: `92521b511`. | No unclassified tracked source remains; later rows must regenerate the TSV after splits/deletions. | TPC-1 inventory checkpoint |
+| TPC-1 | Retention inventory | 8 | passed_after_fix | architecture | Added the retention inventory and TSV, then regenerated it after TPC-2 through TPC-6. Current coverage is 1,393 tracked and newly introduced source/docs/script paths in TPC scope: 105 `primitive`, 470 `implementation`, 379 `support`, 407 `test`, 32 `docs`, and 0 `delete`. Checkpoint commit: `92521b511`. | No unclassified tracked source remains; later rows must regenerate the TSV after splits/deletions. | TPC-1 inventory checkpoint |
 | TPC-2 | Engine catalog/durability teardown | 12 | passed_after_fix | engine/storage | Split catalog registration, authorization, cleanup, search, and idempotency from the live registry; split ledger SQLite storage from ledger contracts; split queue memory/SQLite stores; split stream memory/SQLite stores; removed default no-op durable-worker/function methods from `EngineLedgerStore` and made in-memory/test ledgers implement them explicitly. Checkpoint commit: `739612887`. | No TPC-2 LOC or no-op default blocker remains. Later rows own unrelated over-budget Rust files. | TPC-2 engine/durability checkpoint |
 | TPC-3 | Invocation host and primitive stores | 10 | passed_after_fix | engine primitives | Split `EngineHost` construction/bootstrap and meta invocation into `host/bootstrap.rs` and `host/meta_invocation.rs`; split primitive store backends and worker/function registration into `primitives/stores.rs` and `primitives/workers.rs`; moved trigger runtime test helpers into `runtime/trigger_helpers.rs`; added a TPC gate proving the original host, primitive, and trigger roots are under budget and no longer contain weak-host store wiring in the primitive root. Checkpoint commit: `c7d16e4b9`. | No TPC-3 LOC blocker remains. Later rows own unrelated runtime/provider/iOS/script over-budget files and residue scans. | TPC-3 invocation/primitives checkpoint |
 | TPC-4 | External worker proof or deletion | 10 | passed_after_fix | runtime | Retained loopback-only external workers with explicit proof: split lifecycle/heartbeat/disconnect and durable health marking into `external_workers/lifecycle.rs`, registration/proxy/stream publication into `external_workers/registration.rs`, and scoped-token/capability validation into `external_workers/validation.rs`; split protocol roundtrip and invoker helpers out of the over-budget behavior test. Checkpoint commit: `6860022df`. | No TPC-4 LOC blocker remains. Later rows own unrelated provider/auth/model, agent loop, iOS, scripts, and final residue scans. | TPC-4 external-worker checkpoint |
 | TPC-5 | Provider/auth/model cleanup | 10 | passed_after_fix | provider/auth/model | Split provider factory tests, OpenAI message-converter tests, auth credential type tests, Ollama stream-handler tests, and OpenAI request-shaping tests into concern-owned child modules; moved the Gemini model registry to `google/types/models.rs`; removed stale compatibility-alias wording from provider root docs; and added a static gate proving TPC-5 files are under budget and provider alias references stay inside the OpenAI model catalog/type-helper boundary. Checkpoint commit: `449616f2e`. | No TPC-5 LOC blocker remains. Provider aliases are intentionally retained only in the OpenAI model registry/catalog tests; broader fallback and residue scans remain TPC-6 through TPC-10. | TPC-5 provider/auth/model checkpoint |
-| TPC-6 | Agent loop/config/context flattening | 10 | pending | agent runtime | Split execution input config from runtime dependencies, remove redundant context/persistence state, and reject legacy parsing paths. | Current socket/observability/persistence files are over budget. | pending |
+| TPC-6 | Agent loop/config/context flattening | 10 | passed_after_fix | agent runtime | Split `/engine` WebSocket subscription state, polling, ack, and push cursor advancement into `transport/engine/socket/subscriptions.rs`; moved turn-runner persistence tests to `persistence/tests.rs`; moved SQLite observability transport tests to `transport/tests.rs`; renamed the no-persister persistence test away from no-op wording; and added a static gate proving the three TPC-6 roots are under budget with subscription ownership out of the socket dispatcher. Checkpoint commit: pending hash-record. | No TPC-6 LOC blocker remains. Live Rust hard-budget scan now has only `app/bootstrap/tests.rs`, owned by TPC-9; Swift hard-budget files remain TPC-7/TPC-8. | TPC-6 transport/agent/observability checkpoint |
 | TPC-7 | iOS engine/protocol cleanup | 10 | pending | iOS engine shell | Remove temporary-cache fallback behavior, trim unused protocol DTO roots, and keep domain-owned engine surfaces. | Current generated-runtime, diagnostics, and setup files are over budget. | pending |
 | TPC-8 | iOS UI state flattening | 8 | pending | iOS UI/session | Split `SettingsView`, `ChatView`, and `ChatViewModel`; make coordinators own routing/state instead of large shell views. | Current iOS shell files and two tests are over budget. | pending |
 | TPC-9 | Mac/scripts/runtime helpers | 7 | pending | scripts/Mac/runtime | Audit deploy/service/Mac lifecycle helpers; delete or rename non-primitive commands and split broad helper files that remain. | `tron deploy` must be proven manual-only or removed. | pending |
@@ -144,6 +145,6 @@ Every row records:
 
 ## Open Loops
 
-- Hard LOC targets outside completed TPC-2/TPC-3/TPC-4/TPC-5 areas are not yet met.
-- Broad fallback/compatibility/no-op wording requires source-level triage.
+- Hard LOC targets outside completed TPC-2/TPC-3/TPC-4/TPC-5/TPC-6 areas are not yet met.
+- Broad fallback/compatibility/no-op wording still requires iOS/script/docs triage.
 - The manual `tron deploy` surface needs TPC-9 proof or deletion.

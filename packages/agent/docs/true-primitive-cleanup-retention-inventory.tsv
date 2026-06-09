@@ -96,6 +96,7 @@ packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/turn_runner/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/turn_runner/persistence.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
+packages/agent/src/domains/agent/loop/turn_runner/persistence/tests.rs	test	test_harness	TPC-6	concern-owned persistence verification split from agent loop cleanup
 packages/agent/src/domains/agent/loop/turn_runner/provider.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/turn_runner/result.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/turn_runner/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -513,6 +514,7 @@ packages/agent/src/shared/mod.rs	support	shared_foundation	TPC-6	shared protocol
 packages/agent/src/shared/observability/mod.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
 packages/agent/src/shared/observability/test_utils.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
 packages/agent/src/shared/observability/transport.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
+packages/agent/src/shared/observability/transport/tests.rs	test	test_harness	TPC-6	concern-owned observability transport verification split from shared support cleanup
 packages/agent/src/shared/observability/types.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
 packages/agent/src/shared/protocol/content.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
 packages/agent/src/shared/protocol/document_extractor.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
@@ -554,6 +556,7 @@ packages/agent/src/transport/engine/mod.rs	support	transport	TPC-6	HTTP, WebSock
 packages/agent/src/transport/engine/socket/mod.rs	support	transport	TPC-6	HTTP, WebSocket, runtime stream, or auth transport support
 packages/agent/src/transport/engine/socket/outbound.rs	support	transport	TPC-6	HTTP, WebSocket, runtime stream, or auth transport support
 packages/agent/src/transport/engine/socket/stream_projection.rs	support	transport	TPC-6	HTTP, WebSocket, runtime stream, or auth transport support
+packages/agent/src/transport/engine/socket/subscriptions.rs	support	transport	TPC-6	WebSocket stream subscription, cursor, ack, and push transport support
 packages/agent/src/transport/engine/socket/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/transport/engine/socket/wire.rs	support	transport	TPC-6	HTTP, WebSocket, runtime stream, or auth transport support
 packages/agent/src/transport/http/auth.rs	support	transport	TPC-6	HTTP, WebSocket, runtime stream, or auth transport support
@@ -621,6 +624,7 @@ packages/agent/tests/true_primitive_cleanup/mod.rs	test	test_harness	TPC-10	conc
 packages/agent/tests/true_primitive_cleanup/provider_auth_model.rs	test	test_harness	TPC-5	static gate coverage for provider/auth/model cleanup row
 packages/agent/tests/true_primitive_cleanup/scorecard.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/support.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/tests/true_primitive_cleanup/transport_agent_observability.rs	test	test_harness	TPC-6	static gate coverage for transport, agent persistence, and observability cleanup
 packages/agent/tests/true_primitive_cleanup_invariants.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Sources/App/Lifecycle/AppDelegate.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
 packages/ios-app/Sources/App/Lifecycle/TronMobileApp.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure

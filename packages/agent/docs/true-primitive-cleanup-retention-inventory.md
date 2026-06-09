@@ -43,8 +43,8 @@ The TSV covers tracked and newly introduced files under:
 |----------------|------:|
 | primitive | 105 |
 | implementation | 470 |
-| support | 378 |
-| test | 404 |
+| support | 379 |
+| test | 407 |
 | docs | 32 |
 | delete | 0 |
 
@@ -72,8 +72,8 @@ The TSV covers tracked and newly introduced files under:
 | `session_storage` | 63 |
 | `settings` | 16 |
 | `shared_foundation` | 44 |
-| `test_harness` | 404 |
-| `transport` | 24 |
+| `test_harness` | 407 |
+| `transport` | 25 |
 
 ## Delete Candidates
 
@@ -82,7 +82,7 @@ may delete or split files, then regenerate this inventory.
 
 ## Open Loops
 
-- Hard LOC targets remain open and are owned by TPC-6 through TPC-9.
+- Hard LOC targets remain open and are owned by TPC-7 through TPC-9.
 - Fallback, compatibility, no-op, and provider-alias residue scans remain open
-  and are owned by TPC-6 through TPC-10.
+  and are owned by TPC-7 through TPC-10.
 - The manual deployment helper surface remains open and is owned by TPC-9.
