@@ -9,7 +9,7 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# True Primitive Cleanup Scorecard",
-        "Current score: **83/100**",
+        "Current score: **90/100**",
         "Status: **in_progress**",
         "Branch: `codex/primitive-engine-teardown`",
         "Hard Targets",
@@ -24,6 +24,7 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
         "| TPC-6 | Agent loop/config/context flattening | 10 | passed_after_fix |",
         "| TPC-7 | iOS engine/protocol cleanup | 10 | passed_after_fix |",
         "| TPC-8 | iOS UI state flattening | 8 | passed_after_fix |",
+        "| TPC-9 | Mac/scripts/runtime helpers | 7 | passed_after_fix |",
         "| TPC-11 | Final closeout | 5 | pending |",
         "Total weight: **100**",
     ] {
@@ -35,7 +36,7 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# True Primitive Cleanup Evidence Manifest",
-        "Current score: **83/100**",
+        "Current score: **90/100**",
         "Status: **in_progress**",
         "| TPC-0 | passed_after_fix |",
         "| TPC-1 | passed_after_fix |",
@@ -46,6 +47,7 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
         "| TPC-6 | passed_after_fix |",
         "| TPC-7 | passed_after_fix |",
         "| TPC-8 | passed_after_fix |",
+        "| TPC-9 | passed_after_fix |",
         "| TPC-11 | pending |",
         "Red Baseline Commands",
     ] {
@@ -233,6 +235,7 @@ fn tpc_source_files_are_classified_or_in_pending_inventory_setup() {
 
     let tracked_sources: Vec<_> = git_ls_files()
         .into_iter()
+        .filter(|path| repo_path(path).exists())
         .filter(|path| {
             path.starts_with("packages/agent/src/")
                 || path.starts_with("packages/agent/tests/")
@@ -261,11 +264,12 @@ fn tpc_source_files_are_classified_or_in_pending_inventory_setup() {
 }
 
 #[test]
-fn tpc_hard_budget_scan_still_has_recorded_open_findings() {
-    let scorecard = read_repo_file("packages/agent/docs/true-primitive-cleanup-scorecard.md");
-
+fn tpc_hard_budget_scan_has_no_open_findings() {
     let mut current_findings = Vec::new();
     for path in git_ls_files() {
+        if !repo_path(&path).exists() {
+            continue;
+        }
         let Some(extension) = std::path::Path::new(&path)
             .extension()
             .and_then(|extension| extension.to_str())
@@ -289,13 +293,7 @@ fn tpc_hard_budget_scan_still_has_recorded_open_findings() {
     }
 
     assert!(
-        !current_findings.is_empty(),
-        "TPC-0 should still have open LOC findings; later rows tighten this to zero"
+        current_findings.is_empty(),
+        "TPC hard-budget scan has current over-budget files: {current_findings:?}"
     );
-    for (path, lines, limit) in current_findings {
-        assert!(
-            scorecard.contains(&format!("| {lines} | {limit} | `{path}` |")),
-            "current over-budget file is not recorded in TPC baseline: {path}"
-        );
-    }
 }

@@ -334,14 +334,14 @@ struct WizardStateTests {
         let (defaults, cleanup) = Self.isolatedDefaults()
         defer { cleanup() }
         let state = WizardState(defaults: defaults)
-        // At welcome, goBack is a no-op — direction must NOT flip.
-        // (default is .forward; if a no-op flipped it, the next real
+        // At welcome, goBack leaves state unchanged; direction must NOT flip.
+        // (default is .forward; if an unchanged transition flipped it, the next real
         // advance would animate as backward.)
         state.goBack()
         #expect(state.step == .welcome)
         #expect(state.slideDirection == .forward)
 
-        // At done, advance is a no-op — direction must NOT flip.
+        // At done, advance leaves state unchanged; direction must NOT flip.
         for _ in 0..<10 { state.advance() }
         #expect(state.step == .done)
         state.goBack() // direction → backward

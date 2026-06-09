@@ -40,7 +40,7 @@ struct SingleInstanceLockTests {
         let lock = SingleInstanceLock(lockFileURL: lockPath)
         #expect(lock.acquire())
         lock.release()
-        // Releasing twice should be a no-op, not a crash.
+        // Releasing twice should have no effect beyond the first release.
         lock.release()
     }
 

@@ -198,7 +198,7 @@ tron/
 |   +-- ios-app/            SwiftUI iOS application
 |   +-- mac-app/            SwiftUI Mac menu-bar wrapper (Tron.app) — install wizard + server lifecycle
 +-- scripts/
-|   +-- tron                CLI dispatcher for build, deploy, service management
+|   +-- tron                CLI dispatcher for build, manual deploy, service management
 |   +-- tron.d/             Workspace CLI command-family modules
 |   +-- tron-version        Version print/check/sync helper used by CI + releases
 |   +-- tron-release-notes  Deterministic tagged-release changelog generator
@@ -397,12 +397,12 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
 | `tron setup` | First-time project setup |
 
-### Deployment (workspace only)
+### Manual Deployment (workspace only)
 
 | Command | Description |
 |---------|-------------|
 | `tron preflight` | Pre-deploy infrastructure check |
-| `tron deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive). No automatic deploy watcher is retained. |
+| `tron manual-deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive). No automatic deploy watcher is retained and no `tron deploy` alias is retained. |
 | `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 | `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
 
@@ -1067,14 +1067,14 @@ The install step validates the active signed helper (`Tron Server.app` for produ
 ### Deploy Pipeline
 
 ```bash
-tron deploy          # Full pipeline with confirmations
-tron deploy --force  # Skip uncommitted-changes / test-failure prompts
-tron deploy --ci     # Non-interactive: any failure aborts
+tron manual-deploy          # Full pipeline with confirmations
+tron manual-deploy --force  # Skip uncommitted-changes / test-failure prompts
+tron manual-deploy --ci     # Non-interactive: any failure aborts
 ```
 
-`tron deploy` is a contributor-only script path and is not the production Mac distribution mechanism. Production releases are the notarized DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG.
+`tron manual-deploy` is a contributor-only script path and is not the production Mac distribution mechanism. Production releases are the notarized DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG. The old `tron deploy` spelling is intentionally not retained as an alias.
 
-The deploy process (`scripts/tron.d/deploy.sh::cmd_deploy`) is retained for local contributor workflows:
+The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`) is retained for local contributor workflows:
 
 1. Aborts if a dev server is bound to the prod port.
 2. Warns on uncommitted changes (errors out under `--ci`).

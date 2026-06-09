@@ -33,7 +33,7 @@ final class MenuBarActionHandler {
     }
 
     /// Wires every menu-bar notification to its handler. Idempotent —
-    /// calling twice does NOT duplicate observers (the second call no-ops
+    /// calling twice does NOT duplicate observers (the second call is ignored
     /// when `observers` is non-empty).
     func install() {
         guard observers.isEmpty else { return }

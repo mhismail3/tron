@@ -15,7 +15,7 @@
 #   status              Show service status
 #
 # Contributor service:
-#   deploy          Build, test, deploy (--force to skip confirmations)
+#   manual-deploy   Build, test, swap contributor service binary, and restart
 #   install         Contributor launchd setup (not used by the Mac app)
 #   rollback        Restore previous binary (--yes to skip confirmation)
 #   uninstall       Remove service and reset Mac onboarding (optionally reset settings/auth)
@@ -94,9 +94,9 @@ cmd_help() {
     echo "  version         Print/check/sync centralized release version mirrors"
     echo "  setup           First-time project setup"
     echo ""
-    echo -e "${BOLD}Deployment (workspace only):${NC}"
+    echo -e "${BOLD}Manual Deployment (workspace only):${NC}"
     echo "  preflight       Pre-deploy infrastructure check"
-    echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
+    echo "  manual-deploy   Build, test, swap contributor service binary, restart (--force, --ci)"
     echo "  install         Initial setup (launchd + CLI)"
     echo "  uninstall       Remove service and reset Mac onboarding (add --reset-settings and/or --reset-credentials)"
     echo ""
@@ -134,7 +134,7 @@ case "$1" in
     bench)     shift; cmd_bench "$@" ;;
     version)   shift; "$SCRIPT_DIR/tron-version" "$@" ;;
     preflight) cmd_preflight ;;
-    deploy)    shift; cmd_deploy "$@" ;;
+    manual-deploy) shift; cmd_manual_deploy "$@" ;;
     install)   shift; cmd_install "$@" ;;
     rollback)  shift; cmd_rollback "$@" ;;
     setup)     shift; cmd_setup "$@" ;;

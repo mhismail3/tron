@@ -35,7 +35,7 @@ ensure_prod_binary() {
         return 0
     fi
 
-    print_error "No valid contributor service binary found. Run: tron deploy"
+    print_error "No valid contributor service binary found. Run: tron manual-deploy"
     return 1
 }
 

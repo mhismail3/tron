@@ -30,6 +30,11 @@ packages/agent/src/app/bootstrap/disk.rs	support	app_bootstrap	TPC-9	server boot
 packages/agent/src/app/bootstrap/mod.rs	support	app_bootstrap	TPC-9	server bootstrap, CLI, health, lifecycle, or shutdown support
 packages/agent/src/app/bootstrap/server.rs	support	app_bootstrap	TPC-9	server bootstrap, CLI, health, lifecycle, or shutdown support
 packages/agent/src/app/bootstrap/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/src/app/bootstrap/tests/cli.rs	test	test_harness	TPC-9	bootstrap CLI and auth-rotate verification split from the broad bootstrap test root
+packages/agent/src/app/bootstrap/tests/database.rs	test	test_harness	TPC-9	bootstrap database policy and engine-host storage verification split from the broad bootstrap test root
+packages/agent/src/app/bootstrap/tests/provider_auth.rs	test	test_harness	TPC-9	provider auth loading verification split from the broad bootstrap test root
+packages/agent/src/app/bootstrap/tests/server_runtime.rs	test	test_harness	TPC-9	server runtime startup and shutdown verification split from the broad bootstrap test root
+packages/agent/src/app/bootstrap/tests/source_guards.rs	test	test_harness	TPC-9	bootstrap source-guard verification split from the broad bootstrap test root
 packages/agent/src/app/cli/mod.rs	support	app_bootstrap	TPC-9	server bootstrap, CLI, health, lifecycle, or shutdown support
 packages/agent/src/app/health/metrics.rs	support	app_bootstrap	TPC-9	server bootstrap, CLI, health, lifecycle, or shutdown support
 packages/agent/src/app/health/mod.rs	support	app_bootstrap	TPC-9	server bootstrap, CLI, health, lifecycle, or shutdown support
@@ -624,6 +629,7 @@ packages/agent/tests/true_primitive_cleanup/ios_engine_protocol.rs	test	test_har
 packages/agent/tests/true_primitive_cleanup/ios_ui_state.rs	test	test_harness	TPC-8	static gate coverage for iOS UI/session state split cleanup
 packages/agent/tests/true_primitive_cleanup/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/provider_auth_model.rs	test	test_harness	TPC-5	static gate coverage for provider/auth/model cleanup row
+packages/agent/tests/true_primitive_cleanup/script_runtime_helpers.rs	test	test_harness	TPC-9	static gate coverage for script, Mac helper, and bootstrap cleanup row
 packages/agent/tests/true_primitive_cleanup/scorecard.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/support.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/transport_agent_observability.rs	test	test_harness	TPC-6	static gate coverage for transport, agent persistence, and observability cleanup
@@ -1400,7 +1406,7 @@ scripts/tron-lib.d/service.sh	support	scripts	TPC-9	manual contributor, runtime,
 scripts/tron-lib.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron-release-notes	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron-version	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
-scripts/tron.d/deploy.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
+scripts/tron.d/manual-deploy.sh	support	scripts	TPC-9	explicit manual contributor deploy helper script
 scripts/tron.d/dev.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron.d/quality.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron.d/workspace.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script

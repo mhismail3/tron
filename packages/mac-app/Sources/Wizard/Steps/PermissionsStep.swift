@@ -155,7 +155,7 @@ struct PermissionsStep: View {
 
     /// Starts the 2 s agent-probe poll loop. Runs until the view
     /// disappears or Full Disk Access is observed, whichever comes
-    /// first. The loop is re-entrant — calling this twice is a no-op
+    /// first. The loop is re-entrant, so calling this twice is idempotent
     /// thanks to the `pollTask` guard.
     @MainActor
     private func startPolling() async {

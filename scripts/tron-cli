@@ -21,7 +21,7 @@ LIB_DIR="$(cd -P "$(dirname "$_SOURCE")" && pwd)"
 # Source shared library (always lives alongside this script)
 source "$LIB_DIR/tron-lib.sh"
 
-# Workspace path (recorded by tron install/deploy)
+# Workspace path (recorded by tron install/manual-deploy)
 _WORKSPACE_PATH=""
 if [ -f "$CONTRIBUTOR_DIR/workspace-path" ]; then
     _WORKSPACE_PATH=$(cat "$CONTRIBUTOR_DIR/workspace-path")
@@ -60,7 +60,7 @@ cmd_help() {
     if [ -n "$_WORKSPACE_PATH" ] && [ -d "$_WORKSPACE_PATH" ]; then
         echo -e "${BOLD}Development (via workspace):${NC}"
         echo "  dev             Start server (-b build, -t test, -d background)"
-        echo "  deploy          Build, test, deploy (--force, --ci for non-interactive)"
+        echo "  manual-deploy   Build, test, swap contributor service binary, restart"
         echo "  ci              Run CI checks (fmt, check, clippy, test, doc)"
         echo "  bench           Performance benchmarks (run, bless, compare)"
         echo "  version         Print/check/sync centralized release version mirrors"
@@ -92,7 +92,7 @@ case "$1" in
     rollback)        shift; cmd_rollback "$@" ;;
     login)           shift; cmd_login "$@" ;;
     # Dev (delegate to workspace)
-    dev|deploy|ci|bench|version|preflight|setup|install)
+    dev|manual-deploy|ci|bench|version|preflight|setup|install)
         delegate_to_workspace "$@" ;;
     *)
         print_error "Unknown command: $1"

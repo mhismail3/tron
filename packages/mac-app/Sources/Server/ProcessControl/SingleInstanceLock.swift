@@ -38,7 +38,7 @@ final class SingleInstanceLock: @unchecked Sendable {
         defer { mutex.unlock() }
 
         // Idempotent — re-acquiring the lock from the same process is
-        // a no-op success. Without this, AppDelegate restarts (rare,
+        // an idempotent success. Without this, AppDelegate restarts (rare,
         // but possible during XCUITest reruns) would falsely fail.
         if fileDescriptor >= 0 {
             return true

@@ -1,5 +1,5 @@
 #!/bin/bash
-# deploy.sh - sourced by tron; do not execute directly.
+# manual-deploy.sh - sourced by tron; do not execute directly.
 
 # INVARIANT (L3, trusted-local): the plist is written to
 # `$HOME/Library/LaunchAgents/` with the default user umask. macOS
@@ -158,7 +158,7 @@ cmd_preflight() {
     echo ""
 }
 
-cmd_deploy() {
+cmd_manual_deploy() {
     local force=false
     local ci_mode=false
 
@@ -184,7 +184,7 @@ cmd_deploy() {
         fi
     fi
 
-    print_header "Deploying to Production"
+    print_header "Manual Contributor Deploy"
     echo "  Workspace: $PROJECT_DIR"
     echo ""
 
@@ -341,7 +341,7 @@ SENTINEL
     fi
 
     echo ""
-    echo -e "${GREEN}Deploy successful!${NC}"
+    echo -e "${GREEN}Manual deploy successful!${NC}"
     echo "  Commit: ${new_commit:0:7}"
     [ "$previous_commit" != "unknown" ] && echo "  Previous: ${previous_commit:0:7}"
     echo ""

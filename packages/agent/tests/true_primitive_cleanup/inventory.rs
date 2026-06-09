@@ -86,6 +86,7 @@ fn tracked_source_inventory_is_formalized() {
 fn tracked_tpc_source_paths() -> Vec<String> {
     git_ls_files()
         .into_iter()
+        .filter(|path| repo_path(path).exists())
         .filter(|path| {
             path == "README.md"
                 || path == "AGENTS.md"
