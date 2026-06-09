@@ -14,6 +14,7 @@ use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
+use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
 use super::cache_pruning::{
     DEFAULT_RECENT_TURNS, DEFAULT_TTL_MS, is_cache_cold, prune_tool_results_for_recache,
@@ -400,7 +401,7 @@ impl Provider for AnthropicProvider {
         &self,
         context: &Context,
         options: &ProviderStreamOptions,
-    ) -> ProviderResult<serde_json::Value> {
+    ) -> ProviderResult<ProviderAuditPayload> {
         let sanitized = sanitize_messages(context.messages.to_vec());
         let mut messages = convert_messages(&sanitized);
         if self.last_api_call_ms > 0 && is_cache_cold(self.last_api_call_ms, DEFAULT_TTL_MS) {
@@ -408,6 +409,7 @@ impl Provider for AnthropicProvider {
         }
         Self::apply_cache_to_last_user_message(&mut messages);
         serde_json::to_value(self.build_request(context, options, messages))
+            .map(ProviderAuditPayload::exact_provider_envelope)
             .map_err(ProviderError::Json)
     }
 

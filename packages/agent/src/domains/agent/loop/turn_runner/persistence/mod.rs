@@ -10,11 +10,13 @@ use serde_json::{Value, json};
 use tracing::{error, warn};
 
 use crate::domains::agent::context::context_manager::ContextManager;
+use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
 use crate::domains::agent::r#loop::pipeline::persistence;
 use crate::domains::agent::r#loop::types::StreamResult;
 use crate::engine::{InvocationId, TraceId};
+use crate::shared::protocol::model_audit::ModelProviderRequestAudit;
 
 fn base_event(
     session_id: &str,
@@ -136,6 +138,37 @@ pub(super) fn build_interrupted_message_payload(
         );
     }
     Some(payload)
+}
+
+/// Persist the provider request audit before the model stream is opened.
+///
+/// INVARIANT: callers must complete this write before invoking
+/// `ModelResponder::respond`. If the write fails, the provider stream must not
+/// be opened because replay would be missing the exact request that produced
+/// the response.
+pub(super) async fn persist_model_provider_request_audit(
+    persister: Option<&EventPersister>,
+    session_id: &str,
+    audit: &ModelProviderRequestAudit,
+    sequence_counter: Option<&AtomicI64>,
+) -> Result<(), RuntimeError> {
+    let Some(persister) = persister else {
+        return Ok(());
+    };
+    let payload = serde_json::to_value(audit).map_err(|error| {
+        RuntimeError::Persistence(format!(
+            "failed to serialize model provider request: {error}"
+        ))
+    })?;
+    persister
+        .append_with_runtime_sequence(
+            session_id,
+            EventType::ModelProviderRequest,
+            payload,
+            sequence_counter,
+        )
+        .await?;
+    Ok(())
 }
 
 pub(super) async fn persist_interrupted_message(

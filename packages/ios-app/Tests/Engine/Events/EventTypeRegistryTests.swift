@@ -42,6 +42,14 @@ final class EventTypeRegistryTests: XCTestCase {
         XCTAssertTrue(t.isMetadataOnly)
     }
 
+    func testModelProviderRequestClassification() {
+        let t = PersistedEventType.modelProviderRequest
+        XCTAssertFalse(t.rendersAsChatMessage)
+        XCTAssertFalse(t.affectsSessionState)
+        XCTAssertFalse(t.isStreamingEvent)
+        XCTAssertTrue(t.isMetadataOnly)
+    }
+
     func testCapabilityInvocationClassification() {
         let t = PersistedEventType.capabilityInvocationStarted
         XCTAssertTrue(t.rendersAsChatMessage)
@@ -122,6 +130,8 @@ final class EventTypeRegistryTests: XCTestCase {
         // Spot-check critical entries
         XCTAssertEqual(snapshot["message.user"]?["rendersAsChatMessage"] as? Bool, true)
         XCTAssertEqual(snapshot["message.user"]?["affectsSessionState"] as? Bool, true)
+        XCTAssertEqual(snapshot["model.provider_request"]?["isMetadataOnly"] as? Bool, true)
+        XCTAssertEqual(snapshot["model.provider_request"]?["rendersAsChatMessage"] as? Bool, false)
         XCTAssertEqual(snapshot["stream.text_delta"]?["isStreamingEvent"] as? Bool, true)
         XCTAssertEqual(snapshot["stream.text_delta"]?["rendersAsChatMessage"] as? Bool, false)
         XCTAssertEqual(snapshot["file.read"]?["isMetadataOnly"] as? Bool, true)

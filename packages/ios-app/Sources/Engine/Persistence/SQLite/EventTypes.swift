@@ -81,6 +81,8 @@ enum SessionEventType: String, Codable, Sendable {
     case messageAssistant = "message.assistant"
     case messageSystem = "message.system"
 
+    case modelProviderRequest = "model.provider_request"
+
     case capabilityInvocationStarted = "capability.invocation.started"
     case capabilityInvocationCompleted = "capability.invocation.completed"
 

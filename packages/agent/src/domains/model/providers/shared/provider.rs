@@ -10,10 +10,11 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use crate::shared::protocol::events::StreamEvent;
+use crate::shared::protocol::model_audit::ProviderAuditPayload;
 use async_trait::async_trait;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typed effort / reasoning enums
@@ -251,14 +252,13 @@ pub trait Provider: Send + Sync {
         &self,
         context: &crate::shared::protocol::messages::Context,
         options: &ProviderStreamOptions,
-    ) -> ProviderResult<Value> {
-        Ok(json!({
+    ) -> ProviderResult<ProviderAuditPayload> {
+        Ok(ProviderAuditPayload::provider_independent_snapshot(json!({
             "provider": self.provider_type().as_str(),
             "model": self.model(),
-            "exactProviderEnvelope": false,
             "context": context,
             "options": options,
-        }))
+        })))
     }
 
     /// Stream a response from the LLM.

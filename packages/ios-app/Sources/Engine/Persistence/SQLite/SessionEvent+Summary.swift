@@ -138,6 +138,11 @@ extension SessionEvent {
         case .messageDeleted:
             return "Message deleted"
 
+        case .modelProviderRequest:
+            let provider = payload.string("providerName") ?? payload.string("providerType") ?? "provider"
+            let model = payload.string("model")?.shortModelName ?? "model"
+            return "\(provider) request • \(model)"
+
         case .configPromptUpdate:
             return "Prompt updated"
 

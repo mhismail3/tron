@@ -25,6 +25,7 @@ use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
+use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{create_stream_state, process_stream_chunk};
@@ -472,9 +473,11 @@ impl Provider for GoogleProvider {
         &self,
         context: &Context,
         options: &ProviderStreamOptions,
-    ) -> ProviderResult<serde_json::Value> {
+    ) -> ProviderResult<ProviderAuditPayload> {
         let gen_config = self.build_generation_config(options);
-        Ok(self.build_request_body(context, &gen_config))
+        Ok(ProviderAuditPayload::exact_provider_envelope(
+            self.build_request_body(context, &gen_config),
+        ))
     }
 
     #[instrument(skip_all, fields(provider = "google", model = %self.config.model))]

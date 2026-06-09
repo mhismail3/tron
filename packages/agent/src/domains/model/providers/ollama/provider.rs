@@ -28,6 +28,7 @@ use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
+use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
 use super::message_converter::{convert_messages, convert_tools};
 use super::stream_handler::{OllamaChatChunk, OllamaStreamState, process_chunk};
@@ -265,8 +266,10 @@ impl Provider for OllamaProvider {
         &self,
         context: &Context,
         options: &ProviderStreamOptions,
-    ) -> ProviderResult<serde_json::Value> {
-        Ok(self.build_request_body(context, options))
+    ) -> ProviderResult<ProviderAuditPayload> {
+        Ok(ProviderAuditPayload::exact_provider_envelope(
+            self.build_request_body(context, options),
+        ))
     }
 
     #[instrument(skip_all, fields(provider = "ollama", model = %self.config.model))]

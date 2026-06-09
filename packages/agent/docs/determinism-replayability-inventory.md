@@ -2,7 +2,7 @@
 
 Created: 2026-06-09
 
-Status: DRC-3 `passed_after_fix`; DRC-4 through DRC-10 remain open
+Status: DRC-4 `passed_after_fix`; DRC-5 through DRC-10 remain open
 
 Machine-readable inventory:
 [`determinism-replayability-inventory.tsv`](determinism-replayability-inventory.tsv)
@@ -20,7 +20,7 @@ Machine-readable inventory:
 | Source | Durable owner | Current order | Replay contract | Gap owner |
 |--------|---------------|---------------|-----------------|-----------|
 | Session events | `events` table through `EventStore` | `session_id`, `sequence ASC` for session exports | Include every event for the requested session, including provider request audit events, in sequence order / sequence ASC. | DRC-5/DRC-6 |
-| Provider request audit | planned `model.provider_request` event | session sequence | Persist provider/model/request audit before provider stream open. | DRC-4 |
+| Provider request audit | `model.provider_request` event | session sequence | Persist provider/model/request audit before provider stream open; include it in replay manifest/hashes. | DRC-4 passed; DRC-5/DRC-6 include |
 | Trace records | `trace_records` table through `EventStore` | current list is newest-first by timestamp | Replay list uses ascending stable order: timestamp ASC + id ASC. | DRC-5/DRC-6 |
 | Engine invocations | `engine_invocations` table through engine ledger | ledger append order | Include session-scoped invocation records in append order plus invocation IDs. | DRC-5/DRC-7 |
 | Engine streams | `engine_stream_events` table | cursor ascending for poll/list-by-trace | Include session-scoped stream rows by cursor ASC. | DRC-5/DRC-6 |
@@ -47,14 +47,14 @@ Machine-readable inventory:
 | `session::export` | returns `format: "tron.session.v1"` with session row and session events only | Keep as session backup/export; do not overload it into replay. |
 | `session::replay_manifest` | not implemented | Add pure-read `format: "tron.replay.v1"` manifest capability. |
 | `execute` operation `replay_manifest` | not implemented | Delegate to the same session replay builder for the current session. |
-| iOS persisted event decoding | skips unknown event types with a warning | Add non-rendering decode entry if `model.provider_request` reaches persisted event history. |
+| iOS persisted event decoding | `model.provider_request` decodes as non-rendering metadata | DRC-9 completes protocol/docs parity after replay manifest/API changes land. |
 
 ## Proof Surfaces
 
 | Proof | Purpose | Gap owner |
 |-------|---------|-----------|
 | `determinism_replayability_invariants` | Static and focused behavioral DRC target | DRC-0 through DRC-10 |
-| Provider-audit test | Proves audit persists before stream open | DRC-4 |
+| Provider-audit test | Proves audit persists before stream open | DRC-4 passed |
 | Replay manifest hash test | Proves canonical JSON/hash stability | DRC-5/DRC-6 |
 | Replay ordering test | Proves no timestamp-only replay order | DRC-6 |
 | Cross-record reference test | Proves trace/queue/stream/invocation refs explain a turn | DRC-7 |
@@ -74,3 +74,14 @@ Machine-readable inventory:
   timestamp seam.
 - Replay builders added in DRC-5/DRC-6 must not add new raw clock/UUID/RNG
   calls and must not use timestamp-only ordering.
+
+## DRC-4 Closure Notes
+
+- `model.provider_request` is now a typed session event.
+- The shared `ModelProviderRequestAudit` payload records format, provider,
+  model, context window, session id, reasoning level, provider-visible message
+  and capability counts, stream options, and provider request body.
+- Provider-backed responders mark exact provider envelopes explicitly; custom
+  responders receive a provider-independent snapshot through the trait default.
+- `execute_turn` persists the audit before `responder.respond(model_request)`;
+  persistence failure returns a turn error without opening the model stream.

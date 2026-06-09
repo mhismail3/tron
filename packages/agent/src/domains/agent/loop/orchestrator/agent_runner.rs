@@ -114,17 +114,32 @@ mod tests {
     use crate::shared::protocol::messages::TokenUsage;
     use async_trait::async_trait;
     use futures::stream;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::domains::agent::r#loop::tron_agent::AgentDeps;
     use crate::domains::agent::r#loop::types::AgentConfig;
 
     struct StreamBackedResponder {
         events: Vec<Result<StreamEvent, ModelResponseError>>,
+        respond_calls: Option<Arc<AtomicUsize>>,
     }
 
     impl StreamBackedResponder {
         fn new(events: Vec<Result<StreamEvent, ModelResponseError>>) -> Self {
-            Self { events }
+            Self {
+                events,
+                respond_calls: None,
+            }
+        }
+
+        fn new_counted(
+            events: Vec<Result<StreamEvent, ModelResponseError>>,
+            respond_calls: Arc<AtomicUsize>,
+        ) -> Self {
+            Self {
+                events,
+                respond_calls: Some(respond_calls),
+            }
         }
     }
 
@@ -143,6 +158,9 @@ mod tests {
             &self,
             _request: ModelResponseRequest,
         ) -> Result<ModelResponse, ModelResponseError> {
+            if let Some(calls) = &self.respond_calls {
+                calls.fetch_add(1, Ordering::SeqCst);
+            }
             let events = self.events.clone();
             let s = stream::iter(events);
             Ok(ModelResponse {
@@ -201,6 +219,13 @@ mod tests {
         responder: Arc<dyn ModelResponder>,
     ) -> (TronAgent, JournalCleanup) {
         let session_id = unique_test_session_id();
+        make_agent_with_responder_for_session(responder, session_id)
+    }
+
+    fn make_agent_with_responder_for_session(
+        responder: Arc<dyn ModelResponder>,
+        session_id: String,
+    ) -> (TronAgent, JournalCleanup) {
         let cleanup = JournalCleanup::new(&session_id);
         let agent = TronAgent::new(
             AgentConfig::default(),
@@ -325,6 +350,123 @@ mod tests {
             }
         }
         assert!(saw_ready, "agent_ready must be emitted even after error");
+    }
+
+    #[tokio::test]
+    async fn provider_request_audit_persist_failure_prevents_model_response() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("audit"), None)
+            .unwrap();
+        let respond_calls = Arc::new(AtomicUsize::new(0));
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(StreamBackedResponder::new_counted(
+                default_events(),
+                Arc::clone(&respond_calls),
+            )),
+            session.session.id.clone(),
+        );
+
+        let persister = Arc::new(EventPersister::new(Arc::clone(&store)));
+        persister.worker_handle.abort();
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        agent.set_persister(Some(persister));
+
+        let result = run_agent(
+            &mut agent,
+            "Do not open stream",
+            run_context(),
+            &Arc::new(EventEmitter::new()),
+            None,
+        )
+        .await;
+
+        assert_eq!(result.stop_reason, StopReason::Error);
+        assert_eq!(
+            respond_calls.load(Ordering::SeqCst),
+            0,
+            "model responder must not be called after provider-audit persistence fails"
+        );
+        let event_types: Vec<_> = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap()
+            .into_iter()
+            .map(|event| event.event_type)
+            .collect();
+        assert!(
+            !event_types
+                .iter()
+                .any(|event_type| event_type == "model.provider_request"),
+            "failed audit persist must not leave a partial provider request event"
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_request_audit_persists_before_assistant_message() {
+        use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
+        use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
+        use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+        use crate::domains::session::event_store::{EventStore, ListEventsOptions};
+
+        let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();
+        {
+            let conn = pool.get().unwrap();
+            run_migrations(&conn).unwrap();
+        }
+        let store = Arc::new(EventStore::new(pool));
+        let session = store
+            .create_session("mock", "/tmp", Some("audit"), None)
+            .unwrap();
+        let respond_calls = Arc::new(AtomicUsize::new(0));
+        let (mut agent, _journal) = make_agent_with_responder_for_session(
+            Arc::new(StreamBackedResponder::new_counted(
+                default_events(),
+                Arc::clone(&respond_calls),
+            )),
+            session.session.id.clone(),
+        );
+        let persister = Arc::new(EventPersister::new(Arc::clone(&store)));
+        agent.set_persister(Some(Arc::clone(&persister)));
+
+        let result = run_agent(
+            &mut agent,
+            "Persist audit",
+            run_context(),
+            &Arc::new(EventEmitter::new()),
+            None,
+        )
+        .await;
+        persister.flush().await.unwrap();
+
+        assert_eq!(result.stop_reason, StopReason::EndTurn);
+        assert_eq!(respond_calls.load(Ordering::SeqCst), 1);
+        let rows = store
+            .get_events_by_session(&session.session.id, &ListEventsOptions::default())
+            .unwrap();
+        let audit_sequence = rows
+            .iter()
+            .find(|event| event.event_type == "model.provider_request")
+            .map(|event| event.sequence)
+            .expect("provider request audit event must be persisted");
+        let assistant_sequence = rows
+            .iter()
+            .find(|event| event.event_type == "message.assistant")
+            .map(|event| event.sequence)
+            .expect("assistant message event must be persisted");
+        assert!(
+            audit_sequence < assistant_sequence,
+            "provider request audit sequence {audit_sequence} must precede assistant message sequence {assistant_sequence}"
+        );
     }
 
     #[tokio::test]

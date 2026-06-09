@@ -30,6 +30,7 @@ use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
+use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
 use super::message_converter::{
     convert_to_responses_input, convert_tools_v2, generate_capability_instruction_text,
@@ -614,8 +615,10 @@ impl Provider for OpenAIProvider {
         &self,
         context: &Context,
         options: &ProviderStreamOptions,
-    ) -> ProviderResult<serde_json::Value> {
-        serde_json::to_value(self.build_request(context, options)).map_err(ProviderError::Json)
+    ) -> ProviderResult<ProviderAuditPayload> {
+        serde_json::to_value(self.build_request(context, options))
+            .map(ProviderAuditPayload::exact_provider_envelope)
+            .map_err(ProviderError::Json)
     }
 
     #[instrument(skip_all, fields(provider = "openai", model = %self.config.model))]

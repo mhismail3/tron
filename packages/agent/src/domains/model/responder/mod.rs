@@ -2,9 +2,10 @@
 //!
 //! This module is the only non-provider surface that creates model responders,
 //! opens model streams, applies provider retry policy, maps provider errors, and
-//! records provider health. Agent loop code depends on this boundary instead of
-//! provider factories, provider traits, stream options, retry wrappers, or
-//! provider-native errors.
+//! records provider health. It also builds provider request audit payloads from
+//! the same stream options used to open the provider stream. Agent loop code
+//! depends on this boundary instead of provider factories, provider traits,
+//! stream options, retry wrappers, or provider-native errors.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -27,6 +28,7 @@ use crate::domains::model::providers::shared::{
 use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::Context;
+use crate::shared::protocol::model_audit::{ModelProviderRequestAudit, ProviderAuditPayload};
 
 /// Boxed stream returned by the model responder boundary.
 pub type ModelResponseStream =
@@ -61,6 +63,19 @@ impl ModelReasoningLevel {
             "x_high" => Some(Self::XHigh),
             "max" => Some(Self::Max),
             _ => Option::None,
+        }
+    }
+
+    /// Canonical spelling used in request and audit payloads.
+    #[must_use]
+    pub fn as_canonical_str(&self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::XHigh => "x_high",
+            Self::Max => "max",
         }
     }
 
@@ -116,6 +131,11 @@ impl ModelResponseError {
     /// Create a non-retryable auth error at the model boundary.
     pub fn auth(message: impl Into<String>) -> Self {
         Self::new(message, "auth", false, false)
+    }
+
+    /// Create a non-retryable provider-request audit error.
+    pub fn audit(message: impl Into<String>) -> Self {
+        Self::new(message, "audit", false, false)
     }
 
     fn new(
@@ -236,6 +256,26 @@ pub trait ModelResponder: Send + Sync {
         self.info().model
     }
 
+    /// Build the durable provider-request audit payload for one model request.
+    ///
+    /// The default is a provider-independent snapshot for test responders and
+    /// custom responders that are not backed by a provider implementation.
+    fn request_audit(
+        &self,
+        request: &ModelResponseRequest,
+    ) -> Result<ModelProviderRequestAudit, ModelResponseError> {
+        let info = self.info();
+        let stream_options =
+            build_stream_options(request.reasoning_level.as_ref(), &request.session_id);
+        let provider_request =
+            ProviderAuditPayload::provider_independent_snapshot(serde_json::json!({
+                "provider": info.provider_type.as_str(),
+                "model": &info.model,
+                "context": &request.context,
+            }));
+        build_request_audit(info, request, stream_options, provider_request)
+    }
+
     /// Open one model response stream.
     async fn respond(
         &self,
@@ -311,6 +351,20 @@ impl ModelResponder for ProviderBackedModelResponder {
         }
     }
 
+    fn request_audit(
+        &self,
+        request: &ModelResponseRequest,
+    ) -> Result<ModelProviderRequestAudit, ModelResponseError> {
+        let info = self.info();
+        let stream_options =
+            build_stream_options(request.reasoning_level.as_ref(), &request.session_id);
+        let provider_request = self
+            .provider
+            .audit_payload(&request.context, &stream_options)
+            .map_err(ModelResponseError::from)?;
+        build_request_audit(info, request, stream_options, provider_request)
+    }
+
     async fn respond(
         &self,
         request: ModelResponseRequest,
@@ -373,6 +427,37 @@ fn build_stream_options(
         prompt_cache_key: Some(format!("tron-session-{session_id}")),
         ..Default::default()
     }
+}
+
+fn build_request_audit(
+    info: ModelResponderInfo,
+    request: &ModelResponseRequest,
+    stream_options: ProviderStreamOptions,
+    provider_request: ProviderAuditPayload,
+) -> Result<ModelProviderRequestAudit, ModelResponseError> {
+    let stream_options = serde_json::to_value(stream_options).map_err(|error| {
+        ModelResponseError::audit(format!(
+            "failed to serialize provider stream options: {error}"
+        ))
+    })?;
+    let reasoning_level = request
+        .reasoning_level
+        .as_ref()
+        .map(ModelReasoningLevel::as_canonical_str)
+        .map(str::to_owned);
+    let capability_count = request.context.capabilities.as_ref().map_or(0, Vec::len);
+    Ok(ModelProviderRequestAudit::new(
+        info.provider_type,
+        info.provider_name,
+        info.model,
+        info.context_window,
+        request.session_id.clone(),
+        reasoning_level,
+        request.context.messages.len(),
+        capability_count,
+        stream_options,
+        provider_request,
+    ))
 }
 
 async fn open_provider_stream(
@@ -443,6 +528,46 @@ fn wrap_provider_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::shared::protocol::messages::{Message, UserMessageContent};
+    use crate::shared::protocol::model_audit::ProviderAuditPayloadKind;
+    use futures::stream;
+
+    struct AuditProvider;
+
+    #[async_trait]
+    impl Provider for AuditProvider {
+        fn provider_type(&self) -> crate::shared::protocol::messages::Provider {
+            crate::shared::protocol::messages::Provider::OpenAi
+        }
+
+        fn model(&self) -> &str {
+            "gpt-5.5-codex"
+        }
+
+        fn audit_payload(
+            &self,
+            _context: &Context,
+            options: &ProviderStreamOptions,
+        ) -> crate::domains::model::providers::shared::provider::ProviderResult<ProviderAuditPayload>
+        {
+            Ok(ProviderAuditPayload::exact_provider_envelope(
+                serde_json::json!({
+                    "model": self.model(),
+                    "reasoningEffort": options.reasoning_effort.as_ref().map(ToString::to_string),
+                    "promptCacheKey": options.prompt_cache_key.clone(),
+                }),
+            ))
+        }
+
+        async fn stream(
+            &self,
+            _context: &Context,
+            _options: &ProviderStreamOptions,
+        ) -> crate::domains::model::providers::shared::provider::ProviderResult<StreamEventStream>
+        {
+            Ok(Box::pin(stream::empty()))
+        }
+    }
 
     #[test]
     fn reasoning_level_serializes_as_snake_case() {
@@ -557,6 +682,58 @@ mod tests {
         assert_eq!(
             ModelReasoningLevel::Max.as_openai_reasoning(),
             ReasoningEffort::Max
+        );
+    }
+
+    #[test]
+    fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
+        let responder = ProviderBackedModelResponder {
+            provider: Arc::new(AuditProvider),
+            health: Arc::new(ModelResponderHealth::new()),
+        };
+        let request = ModelResponseRequest {
+            context: Context {
+                messages: vec![Message::User {
+                    content: UserMessageContent::Text("hello".to_owned()),
+                    timestamp: None,
+                }]
+                .into(),
+                ..Context::default()
+            },
+            session_id: "sess-1".to_owned(),
+            reasoning_level: Some(ModelReasoningLevel::XHigh),
+            cancel: CancellationToken::new(),
+            retry_config: None,
+        };
+
+        let audit = responder.request_audit(&request).unwrap();
+
+        assert_eq!(audit.format, "tron.model_provider_request.v1");
+        assert_eq!(
+            audit.provider_type,
+            crate::shared::protocol::messages::Provider::OpenAi
+        );
+        assert_eq!(audit.provider_name, "openai");
+        assert_eq!(audit.model, "gpt-5.5-codex");
+        assert_eq!(audit.session_id, "sess-1");
+        assert_eq!(audit.reasoning_level.as_deref(), Some("x_high"));
+        assert_eq!(audit.message_count, 1);
+        assert_eq!(audit.capability_count, 0);
+        assert_eq!(
+            audit.stream_options["promptCacheKey"],
+            serde_json::json!("tron-session-sess-1")
+        );
+        assert_eq!(
+            audit.stream_options["reasoningEffort"],
+            serde_json::json!("xhigh")
+        );
+        assert_eq!(
+            audit.provider_request.kind,
+            ProviderAuditPayloadKind::ExactProviderEnvelope
+        );
+        assert_eq!(
+            audit.provider_request.body["promptCacheKey"],
+            serde_json::json!("tron-session-sess-1")
         );
     }
 }

@@ -11,6 +11,7 @@ pub mod error;
 pub mod message;
 pub mod message_ops;
 pub mod metadata;
+pub mod model;
 pub mod session;
 pub mod streaming;
 pub mod token_usage;

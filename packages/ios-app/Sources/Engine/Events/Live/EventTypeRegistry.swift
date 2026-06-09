@@ -21,6 +21,9 @@ enum PersistedEventType: String, CaseIterable {
     case messageAssistant = "message.assistant"
     case messageSystem = "message.system"
 
+    // Model audit
+    case modelProviderRequest = "model.provider_request"
+
     // Capability execution
     case capabilityInvocationStarted = "capability.invocation.started"
     case capabilityInvocationCompleted = "capability.invocation.completed"
@@ -83,6 +86,8 @@ enum PersistedEventType: String, CaseIterable {
         case .messageUser:             return .init(true,    true,    false,   false,  "User message")
         case .messageAssistant:        return .init(true,    true,    false,   false,  "Assistant message")
         case .messageSystem:           return .init(true,    true,    false,   false,  "System message")
+        // Model audit
+        case .modelProviderRequest:    return .init(false,   false,   false,   true,   "Provider request audit")
         // Capability execution
         case .capabilityInvocationStarted: return .init(true, true, false, false, "Capability invocation")
         case .capabilityInvocationCompleted: return .init(true, true, false, false, "Capability result")

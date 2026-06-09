@@ -165,6 +165,52 @@ mod session_event_tests {
     }
 
     #[test]
+    fn typed_payload_model_provider_request() {
+        let event = make_event(
+            EventType::ModelProviderRequest,
+            json!({
+                "format": "tron.model_provider_request.v1",
+                "providerType": "openai",
+                "providerName": "openai",
+                "model": "gpt-5.5-codex",
+                "contextWindow": 272000,
+                "sessionId": "sess-1",
+                "reasoningLevel": "x_high",
+                "messageCount": 1,
+                "capabilityCount": 0,
+                "streamOptions": {
+                    "promptCacheKey": "tron-session-sess-1",
+                    "reasoningEffort": "xhigh"
+                },
+                "providerRequest": {
+                    "kind": "exact_provider_envelope",
+                    "body": {
+                        "model": "gpt-5.5-codex"
+                    }
+                }
+            }),
+        );
+        let payload = event.typed_payload().unwrap();
+        match payload {
+            SessionEventPayload::ModelProviderRequest(p) => {
+                assert_eq!(p.format, "tron.model_provider_request.v1");
+                assert_eq!(
+                    p.provider_type,
+                    crate::shared::protocol::messages::Provider::OpenAi
+                );
+                assert_eq!(p.reasoning_level.as_deref(), Some("x_high"));
+                assert_eq!(p.message_count, 1);
+                assert_eq!(p.stream_options["reasoningEffort"], json!("xhigh"));
+                assert_eq!(
+                    p.provider_request.kind,
+                    crate::shared::protocol::model_audit::ProviderAuditPayloadKind::ExactProviderEnvelope
+                );
+            }
+            other => panic!("expected ModelProviderRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn typed_payload_capability_invocation_started() {
         let event = make_event(
             EventType::CapabilityInvocationStarted,

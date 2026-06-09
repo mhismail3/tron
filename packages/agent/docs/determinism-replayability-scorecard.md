@@ -4,7 +4,7 @@ Created: 2026-06-09
 
 Initial score: **0/100**
 
-Current score: **38/100**
+Current score: **50/100**
 
 Status: **active**
 
@@ -60,7 +60,7 @@ re-execution.
 | DRC-1 | Replay-critical source inventory | 8 | passed_after_fix | storage | Inventoried session events, provider request audits, trace records, engine invocation ledger rows, stream rows, queue items/attempts, resources, timestamps, IDs, provider envelopes, and replay hash/order owners. | DRC-2 through DRC-8 implement and prove the inventory contracts. | DRC-0/1 formalization checkpoint |
 | DRC-2 | Entropy centralization and allow-list | 12 | passed_after_fix | storage | `replay_critical_entropy_is_allow_listed` scans Rust source for raw UTC/system/instant clocks, UUIDv7, RNG, and `ORDER BY timestamp`, failing outside explicit owner paths. | DRC-5/DRC-6 must keep replay builders outside entropy allow-list paths and use stable ordering. | DRC-2/3 entropy and identity checkpoint |
 | DRC-3 | Deterministic constructors and injection seams | 12 | passed_after_fix | storage | Added explicit event/session/workspace/fork identities, `append_with_identity`, `create_session_with_identity`, `fork_with_identity`, and `InvocationRecord::from_result_at` with DB-boundary tests. | Queue/stream replay listing and manifest import/roundtrip use these seams in DRC-5 through DRC-8. | DRC-2/3 entropy and identity checkpoint |
-| DRC-4 | Provider request audit before model streaming | 12 | pending | model_loop | A `model.provider_request` session event is written before the provider stream opens through the model responder boundary. | Awaiting event type, responder audit value, and turn-runner persistence proof. | pending |
+| DRC-4 | Provider request audit before model streaming | 12 | passed_after_fix | model_loop | Added typed `model.provider_request` session event, responder-boundary request audit DTO, provider exact-envelope audit payloads, and turn-runner persistence before `respond`. | DRC-5/DRC-6 must include provider audits in the replay manifest and canonical hashes. | DRC-4 provider audit checkpoint |
 | DRC-5 | Canonical `tron.replay.v1` manifest export | 14 | pending | session | `session::replay_manifest` returns session events, provider audits, traces, invocations, streams, and queue rows from one read-only builder. | Awaiting builder, contract, and operation. | pending |
 | DRC-6 | Byte-stable replay hashes and stable ordering | 10 | pending | storage | Each replay section and the overall manifest use canonical JSON hashes and stable non-timestamp-only order. | Awaiting canonical serializer and hash/order tests. | pending |
 | DRC-7 | Replay references across idempotency, queue, stream, and trace records | 8 | pending | engine | Durable records contain enough request/result hashes and replay refs to explain a turn. | Awaiting cross-record proof. | pending |
@@ -77,7 +77,8 @@ Total weight: **100**
 - Engine invocation ledgers, stream rows, queue rows, resource rows, leases,
   compensation rows, and trace records exist in the unified SQLite file.
 - `session.export` is session-only and not a replay manifest.
-- Provider request audit is not yet persisted as a turn-scoped session event.
+- Provider request audit is persisted as a turn-scoped `model.provider_request`
+  session event before the model responder opens the provider stream.
 - Trace listing and several UI-oriented event/queue queries use newest-first or
   timestamp-oriented order; replay needs separate stable listing methods.
 - Replay-critical session/event/invocation constructors now have explicit

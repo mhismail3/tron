@@ -21,6 +21,7 @@ use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
 use crate::shared::protocol::messages::Context;
+use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
 use super::types::{
     DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, MiniMaxAuth, MiniMaxConfig, get_minimax_model,
@@ -310,12 +311,13 @@ impl Provider for MiniMaxProvider {
         &self,
         context: &Context,
         options: &ProviderStreamOptions,
-    ) -> ProviderResult<serde_json::Value> {
+    ) -> ProviderResult<ProviderAuditPayload> {
         let sanitized = sanitize_messages(context.messages.to_vec());
         let mut messages = convert_messages(&sanitized);
         Self::strip_images(&mut messages);
         Self::apply_cache_to_last_user_message(&mut messages);
         serde_json::to_value(self.build_request(context, options, messages))
+            .map(ProviderAuditPayload::exact_provider_envelope)
             .map_err(ProviderError::Json)
     }
 

@@ -23,6 +23,8 @@ define_events! {
         MessageAssistant => "message.assistant" => payloads::message::AssistantMessagePayload,
         /// System-injected message.
         MessageSystem => "message.system" => payloads::message::SystemMessagePayload,
+        /// Provider request audit persisted before model streaming starts.
+        ModelProviderRequest => "model.provider_request" => payloads::model::ModelProviderRequestPayload,
         /// Message deleted (soft delete).
         MessageDeleted => "message.deleted" => payloads::message_ops::MessageDeletedPayload,
         /// Capability invocation started.
@@ -80,13 +82,14 @@ define_events! {
 mod tests {
     use super::*;
 
-    const EXPECTED: [(EventType, &str); 23] = [
+    const EXPECTED: [(EventType, &str); 24] = [
         (EventType::SessionStart, "session.start"),
         (EventType::SessionEnd, "session.end"),
         (EventType::SessionFork, "session.fork"),
         (EventType::MessageUser, "message.user"),
         (EventType::MessageAssistant, "message.assistant"),
         (EventType::MessageSystem, "message.system"),
+        (EventType::ModelProviderRequest, "model.provider_request"),
         (EventType::MessageDeleted, "message.deleted"),
         (
             EventType::CapabilityInvocationStarted,
@@ -117,7 +120,7 @@ mod tests {
 
     #[test]
     fn all_event_types_constant_has_correct_count() {
-        assert_eq!(ALL_EVENT_TYPES.len(), 23);
+        assert_eq!(ALL_EVENT_TYPES.len(), 24);
     }
 
     #[test]

@@ -27,7 +27,7 @@ use self::persistence::{
     add_assistant_message_to_context, build_completed_assistant_payload,
     build_interrupted_message_payload, build_token_record_json, emit_response_complete,
     emit_turn_end, emit_turn_start, persist_completed_assistant_message,
-    persist_interrupted_message,
+    persist_interrupted_message, persist_model_provider_request_audit,
 };
 use self::result::determine_turn_stop_reason;
 use self::turn_context::{build_turn_context, resolve_provider_primitive_surface};
@@ -186,19 +186,102 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         primitive_surface.capabilities.clone(),
     );
 
-    // 4. Stream from the model responder. Provider selection, provider-native
-    // options, retry wrapping, and provider error mapping stay inside
-    // `domains::model`.
-    let response = match responder
-        .respond(ModelResponseRequest {
-            context,
-            session_id: session_id.to_owned(),
-            reasoning_level: run_context.reasoning_level.clone(),
-            cancel: cancel.clone(),
-            retry_config: retry_config.cloned(),
-        })
-        .await
+    // 4. Build and durably persist the provider request audit before the model
+    // stream opens. Provider selection, provider-native options, retry
+    // wrapping, and provider error mapping stay inside `domains::model`.
+    let model_request = ModelResponseRequest {
+        context,
+        session_id: session_id.to_owned(),
+        reasoning_level: run_context.reasoning_level.clone(),
+        cancel: cancel.clone(),
+        retry_config: retry_config.cloned(),
+    };
+    let model_request_audit = match responder.request_audit(&model_request) {
+        Ok(audit) => audit,
+        Err(error) => {
+            let error_msg = error.to_string();
+            let category = error.category().to_owned();
+            warn!(
+                model = %responder.model(),
+                status = %category,
+                error = %error,
+                "model provider request audit error"
+            );
+            if let Some(counter) = sequence_counter {
+                let _ = emitter.emit_sequenced(
+                    TronEvent::TurnFailed {
+                        base: run_base(session_id, run_context),
+                        turn,
+                        error: error_msg.clone(),
+                        code: Some("MODEL_PROVIDER_REQUEST_AUDIT_FAILED".into()),
+                        category: Some(category),
+                        recoverable: false,
+                        partial_content: None,
+                    },
+                    counter,
+                );
+            } else {
+                let _ = emitter.emit(TronEvent::TurnFailed {
+                    base: run_base(session_id, run_context),
+                    turn,
+                    error: error_msg.clone(),
+                    code: Some("MODEL_PROVIDER_REQUEST_AUDIT_FAILED".into()),
+                    category: Some(category),
+                    recoverable: false,
+                    partial_content: None,
+                });
+            }
+            return TurnResult {
+                success: false,
+                error: Some(error_msg),
+                stop_reason: Some(StopReason::Error),
+                ..Default::default()
+            };
+        }
+    };
+    if let Err(error) = persist_model_provider_request_audit(
+        persister,
+        session_id,
+        &model_request_audit,
+        sequence_counter,
+    )
+    .await
     {
+        let error_msg = format!("failed to persist model provider request audit: {error}");
+        error!(session_id, turn, error = %error_msg);
+        if let Some(counter) = sequence_counter {
+            let _ = emitter.emit_sequenced(
+                TronEvent::TurnFailed {
+                    base: run_base(session_id, run_context),
+                    turn,
+                    error: error_msg.clone(),
+                    code: Some("MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED".into()),
+                    category: Some("persistence".into()),
+                    recoverable: false,
+                    partial_content: None,
+                },
+                counter,
+            );
+        } else {
+            let _ = emitter.emit(TronEvent::TurnFailed {
+                base: run_base(session_id, run_context),
+                turn,
+                error: error_msg.clone(),
+                code: Some("MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED".into()),
+                category: Some("persistence".into()),
+                recoverable: false,
+                partial_content: None,
+            });
+        }
+        return TurnResult {
+            success: false,
+            error: Some(error_msg),
+            stop_reason: Some(StopReason::Error),
+            ..Default::default()
+        };
+    }
+
+    let response = match responder.respond(model_request).await {
         Ok(response) => response,
         Err(error) => {
             let error_msg = error.to_string();

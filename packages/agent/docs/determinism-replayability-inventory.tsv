@@ -1,6 +1,6 @@
 id	class	source	path	current_order	replay_contract	gap_owner
 DRC-1-001	source	session_events	packages/agent/src/domains/session/event_store/	session_id + sequence ASC	Include requested session events by sequence ASC	DRC-5/DRC-6
-DRC-1-002	source	provider_request_audit	packages/agent/src/domains/model/responder/	session sequence	Persist model.provider_request before provider stream open	DRC-4
+DRC-1-002	source	provider_request_audit	packages/agent/src/domains/model/responder/	session sequence	Persist model.provider_request before provider stream open; include in replay manifest	DRC-4 passed; DRC-5/DRC-6 include
 DRC-1-003	source	trace_records	packages/agent/src/domains/session/event_store/sqlite/repositories/trace.rs	timestamp DESC today	Replay order timestamp ASC + id ASC	DRC-5/DRC-6
 DRC-1-004	source	engine_invocations	packages/agent/src/engine/durability/ledger/	rowid append order	Include session-scoped invocation records in append order	DRC-5/DRC-7
 DRC-1-005	source	engine_stream_events	packages/agent/src/engine/durability/streams/	cursor ASC	Include session-scoped stream rows by cursor ASC	DRC-5/DRC-6

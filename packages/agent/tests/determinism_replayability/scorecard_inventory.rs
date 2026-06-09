@@ -8,7 +8,7 @@ fn drc_scorecard_and_evidence_are_formalized() {
 
     for required in [
         "# Determinism Replayability Scorecard",
-        "Current score: **38/100**",
+        "Current score: **50/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Replay v1 is audit and reconstruction replay",
@@ -18,7 +18,7 @@ fn drc_scorecard_and_evidence_are_formalized() {
         "| DRC-1 | Replay-critical source inventory | 8 | passed_after_fix |",
         "| DRC-2 | Entropy centralization and allow-list | 12 | passed_after_fix |",
         "| DRC-3 | Deterministic constructors and injection seams | 12 | passed_after_fix |",
-        "| DRC-4 | Provider request audit before model streaming | 12 | pending |",
+        "| DRC-4 | Provider request audit before model streaming | 12 | passed_after_fix |",
         "| DRC-5 | Canonical `tron.replay.v1` manifest export | 14 | pending |",
         "| DRC-6 | Byte-stable replay hashes and stable ordering | 10 | pending |",
         "| DRC-7 | Replay references across idempotency, queue, stream, and trace records | 8 | pending |",
@@ -36,17 +36,19 @@ fn drc_scorecard_and_evidence_are_formalized() {
 
     for required in [
         "# Determinism Replayability Evidence Manifest",
-        "Current score: **38/100**",
+        "Current score: **50/100**",
         "Status: **active**",
         "| DRC-0 | passed_after_fix |",
         "| DRC-1 | passed_after_fix |",
         "| DRC-2 | passed_after_fix |",
         "| DRC-3 | passed_after_fix |",
+        "| DRC-4 | passed_after_fix |",
         "| DRC-10 | pending |",
         "## DRC-0 Evidence",
         "## DRC-1 Evidence",
         "## DRC-2 Evidence",
         "## DRC-3 Evidence",
+        "## DRC-4 Evidence",
         "## Verification Log",
         "## Residual Risk Log",
     ] {
@@ -94,7 +96,7 @@ fn drc_inventory_covers_all_replay_critical_sources() {
 
     for required in [
         "# Determinism Replayability Inventory",
-        "Status: DRC-3 `passed_after_fix`; DRC-4 through DRC-10 remain open",
+        "Status: DRC-4 `passed_after_fix`; DRC-5 through DRC-10 remain open",
         "Session events",
         "Provider request audit",
         "Trace records",
