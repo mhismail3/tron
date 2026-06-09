@@ -2,7 +2,7 @@
 
 Created: 2026-06-09
 
-Current score: **74/100**
+Current score: **90/100**
 
 Status: **active**
 
@@ -27,8 +27,8 @@ and
 | DRC-4 | passed_after_fix | `model.provider_request` event, responder-boundary audit payload, provider exact-envelope marking, and pre-stream turn-runner persistence are implemented and tested. |
 | DRC-5 | passed_after_fix | `tron.replay.v1` manifest builder, `session::replay_manifest`, and read-only `execute` operation `replay_manifest` are implemented and tested. |
 | DRC-6 | passed_after_fix | Section and overall replay hashes use sorted-key canonical JSON; replay rows use stable non-timestamp-only order and focused tests cover byte stability. |
-| DRC-7 | pending | Cross-record replay reference proof not yet implemented. |
-| DRC-8 | pending | Offline roundtrip harness not yet implemented. |
+| DRC-7 | passed_after_fix | Idempotency entries, queue rows, stream rows, trace records, and invocation records now expose replay refs and request/result/payload/outcome hashes in the canonical manifest. |
+| DRC-8 | passed_after_fix | `roundtrip_manifest` rebuilds replay evidence from a manifest value, recomputes canonical hashes, and validates cross-record refs without side-effect handles. |
 | DRC-9 | pending | Progressive docs, README, protocol docs, and iOS decode updates will be closed after event/API changes land. |
 | DRC-10 | pending | Final closeout awaits all rows and full verification. |
 
@@ -237,6 +237,80 @@ Proof:
 
 Open rows after DRC-6: DRC-7, DRC-8, DRC-9, and DRC-10.
 
+## DRC-7 Evidence
+
+Files added:
+
+- `packages/agent/tests/determinism_replayability/replay_references.rs`
+
+Files updated:
+
+- `packages/agent/src/domains/session/replay/mod.rs`
+- `packages/agent/src/domains/session/replay/tests.rs`
+- `packages/agent/src/engine/catalog/registry/mod.rs`
+- `packages/agent/src/engine/durability/ledger/mod.rs`
+- `packages/agent/src/engine/durability/ledger/memory.rs`
+- `packages/agent/src/engine/durability/ledger/sqlite_store.rs`
+- `packages/agent/src/engine/durability/replay.rs`
+- `packages/agent/src/engine/invocation/host/substrate_handle.rs`
+- `packages/agent/src/engine/tests/fixtures/mod.rs`
+
+Proof:
+
+- `EngineLedgerStore::list_idempotency_by_session` and
+  `LiveCatalog::ledger_idempotency_by_session` expose idempotency entries
+  through the engine owner boundary, not through session-domain SQLite queries.
+- SQLite replay idempotency ordering uses stable durable keys:
+  `function_id ASC, scope_kind ASC, scope_value ASC, idempotency_key ASC`.
+- `EngineReplaySnapshot` includes idempotency entries alongside invocation,
+  stream, and queue rows.
+- The canonical replay manifest now includes `engineIdempotencyEntries` with
+  `payloadFingerprint`, `requestHash`, `outcomeHash`, first/latest invocation
+  refs, replay behavior, status, and outcome.
+- Manifest projections add `resultHash` to engine invocations and `payloadHash`
+  to stream and queue rows. Trace records already persist request/result hashes
+  in Agent Trace metadata written by `execute`.
+- `replay_manifest_is_byte_stable_and_covers_durable_sections` now proves
+  idempotency entries are present, request hashes match payload fingerprints,
+  completed idempotency outcomes have hashes, invocation results have hashes,
+  and stream/queue payloads have hashes.
+- `replay_manifest_carries_cross_record_hashes_and_refs` statically guards the
+  cross-record implementation markers.
+
+Open rows after DRC-7: DRC-9 and DRC-10.
+
+## DRC-8 Evidence
+
+Files added:
+
+- `packages/agent/src/domains/session/replay/roundtrip.rs`
+- `packages/agent/tests/determinism_replayability/offline_roundtrip.rs`
+
+Files updated:
+
+- `packages/agent/src/domains/session/replay/mod.rs`
+- `packages/agent/src/domains/session/replay/tests.rs`
+
+Proof:
+
+- `roundtrip_manifest` accepts only a manifest `serde_json::Value`; it has no
+  event-store, engine, model, tool, file, process, queue, stream, or resource
+  handles.
+- The harness recomputes every section hash, recomputes the manifest hash after
+  removing `replayHash`, rebuilds durable section counts, and validates
+  provider audit event refs, trace request/result hashes, idempotency
+  request/outcome hashes, invocation result/idempotency refs, queue attempt
+  invocation refs, and stream parent invocation refs.
+- Hash or reference mismatches return errors. There is no compatibility branch,
+  fallback parser, alternate replay format, or side-effect re-execution path.
+- `replay_manifest_is_byte_stable_and_covers_durable_sections` runs the offline
+  roundtrip against a generated manifest and asserts empty hash/reference
+  mismatch lists.
+- `offline_roundtrip_harness_is_wired_without_side_effect_handles` statically
+  guards the harness markers.
+
+Open rows after DRC-8: DRC-9 and DRC-10.
+
 ## Verification Log
 
 | Time | Command | Exit | Notes |
@@ -280,10 +354,18 @@ Open rows after DRC-6: DRC-7, DRC-8, DRC-9, and DRC-10.
 | 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml clarification_includes_capability_execution_guidance --lib -- --nocapture` | 0 | Provider primer guidance test passed after adding `replay_manifest` and its trace exception. |
 | 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml execute_schema_exposes_primitive_operations_not_catalog_targets --lib -- --nocapture` | 0 | Capability schema test passed after adding `replay_manifest` to the provider-visible operation description. |
 | 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-5/6 changes. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 101 | DRC-7/8 compile caught an unused `ReplayRoundtripReport` re-export. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 0 | DRC-7/8 replay slice passed: 12 filtered replay-related tests passed, including manifest idempotency/hash assertions and offline roundtrip. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-7/8 invariant target passed: 16 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture && cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | Post-`cfg(test)` roundtrip harness verification passed both compile paths. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml engine::tests::durability::ledger_idempotency --lib -- --nocapture` | 0 | Engine ledger idempotency module passed: 11 passed, including shared in-memory/SQLite storage contract for session idempotency listing. |
+| 2026-06-09 | `cargo fmt --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --check` | 0 | DRC-7/8 Rust formatting verified. |
+| 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-7/8 changes. |
+| 2026-06-09 | `git diff --check` | 0 | DRC-7/8 checkpoint diff has no whitespace errors. |
 
 ## Residual Risk Log
 
 | Risk | Owner Row | State |
 |------|-----------|-------|
-| Replay manifest direct resource export is intentionally deferred until cross-record proof shows whether invocation/trace refs are sufficient. | DRC-7 | Open. |
-| Offline replay harness does not yet exist. | DRC-8 | Open. |
+| Direct resource table export is intentionally excluded from replay v1 because invocation rows, trace rows, queue attempts, leases, compensation refs, and produced resource refs carry the replay-causal resource references required to explain a turn. | DRC-7 | Closed. |
+| Offline replay harness exists and rejects hash/reference mismatches without holding side-effect handles. | DRC-8 | Closed. |

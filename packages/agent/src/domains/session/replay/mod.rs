@@ -1,9 +1,11 @@
 //! Canonical replay manifest builder for session-owned replay exports.
 //!
 //! Replay v1 is an audit/reconstruction snapshot. It reads durable session and
-//! engine records, resolves stored JSON payload references, computes
-//! byte-stable hashes with sorted object keys, and never invokes providers,
-//! tools, queues, streams, files, processes, or resource mutations.
+//! engine records, including idempotency entries, resolves stored JSON payload
+//! references, computes byte-stable hashes with sorted object keys, and never
+//! invokes providers, tools, queues, streams, files, processes, or resource
+//! mutations. The sibling roundtrip harness accepts only a manifest value and
+//! recomputes hashes/cross-record references offline.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -17,12 +19,19 @@ use crate::domains::session::event_store::{
     AgentTraceRecord, EventRow, EventStore, ListEventsOptions, SessionRow,
 };
 use crate::engine::EngineHostHandle;
+use crate::engine::durability::ledger::{
+    IdempotencyEntry, IdempotencyStatus, StoredInvocationOutcome,
+};
 use crate::engine::durability::queue::EngineQueueItem;
 use crate::engine::durability::replay::EngineReplaySnapshot;
 use crate::engine::durability::streams::EngineStreamEvent;
 use crate::engine::invocation::model::InvocationRecord;
+use crate::engine::kernel::types::ReplayBehavior;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, CapabilityError};
+
+#[cfg(test)]
+mod roundtrip;
 
 /// Canonical replay manifest wire format.
 pub(crate) const REPLAY_MANIFEST_FORMAT: &str = "tron.replay.v1";
@@ -125,18 +134,35 @@ fn build_manifest_value(
     session_snapshot: SessionReplaySnapshot,
     engine_snapshot: EngineReplaySnapshot,
 ) -> Result<Value, CapabilityError> {
+    let engine_invocations = engine_snapshot
+        .invocations
+        .iter()
+        .map(ReplayInvocationRecord::from_record)
+        .collect::<Result<Vec<_>, _>>()?;
+    let engine_idempotency_entries = engine_snapshot
+        .idempotency_entries
+        .iter()
+        .map(ReplayIdempotencyEntry::from_entry)
+        .collect::<Result<Vec<_>, _>>()?;
+    let engine_streams = engine_snapshot
+        .streams
+        .into_iter()
+        .map(ReplayStreamEvent::from_event)
+        .collect::<Result<Vec<_>, _>>()?;
+    let engine_queue_items = engine_snapshot
+        .queue_items
+        .into_iter()
+        .map(ReplayQueueItem::from_item)
+        .collect::<Result<Vec<_>, _>>()?;
     let sections = ReplaySections {
         session: session_snapshot.session,
         session_events: session_snapshot.events,
         provider_audits: session_snapshot.provider_audits,
         trace_records: session_snapshot.trace_records,
-        engine_invocations: engine_snapshot
-            .invocations
-            .iter()
-            .map(ReplayInvocationRecord::from_record)
-            .collect(),
-        engine_streams: engine_snapshot.streams,
-        engine_queue_items: engine_snapshot.queue_items,
+        engine_idempotency_entries,
+        engine_invocations,
+        engine_streams,
+        engine_queue_items,
     };
     let section_hashes = ReplaySectionHashes::from_sections(&sections)?;
     let manifest_without_hash = ReplayManifestWithoutHash {
@@ -182,9 +208,10 @@ struct ReplaySections {
     session_events: Vec<ReplaySessionEvent>,
     provider_audits: Vec<ReplayProviderAudit>,
     trace_records: Vec<AgentTraceRecord>,
+    engine_idempotency_entries: Vec<ReplayIdempotencyEntry>,
     engine_invocations: Vec<ReplayInvocationRecord>,
-    engine_streams: Vec<EngineStreamEvent>,
-    engine_queue_items: Vec<EngineQueueItem>,
+    engine_streams: Vec<ReplayStreamEvent>,
+    engine_queue_items: Vec<ReplayQueueItem>,
 }
 
 #[derive(Debug, Serialize)]
@@ -194,6 +221,7 @@ struct ReplaySectionHashes {
     session_events: String,
     provider_audits: String,
     trace_records: String,
+    engine_idempotency_entries: String,
     engine_invocations: String,
     engine_streams: String,
     engine_queue_items: String,
@@ -206,6 +234,7 @@ impl ReplaySectionHashes {
             session_events: canonical_hash(&sections.session_events)?,
             provider_audits: canonical_hash(&sections.provider_audits)?,
             trace_records: canonical_hash(&sections.trace_records)?,
+            engine_idempotency_entries: canonical_hash(&sections.engine_idempotency_entries)?,
             engine_invocations: canonical_hash(&sections.engine_invocations)?,
             engine_streams: canonical_hash(&sections.engine_streams)?,
             engine_queue_items: canonical_hash(&sections.engine_queue_items)?,
@@ -296,6 +325,46 @@ impl ReplayProviderAudit {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ReplayIdempotencyEntry {
+    function_id: String,
+    scope: ReplayIdempotencyScope,
+    key: String,
+    payload_fingerprint: String,
+    request_hash: String,
+    function_revision: u64,
+    replay_behavior: String,
+    status: String,
+    first_invocation_id: String,
+    latest_invocation_id: String,
+    outcome: Option<StoredInvocationOutcome>,
+    outcome_hash: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
+impl ReplayIdempotencyEntry {
+    fn from_entry(entry: &IdempotencyEntry) -> Result<Self, CapabilityError> {
+        Ok(Self {
+            function_id: entry.key.function_id.to_string(),
+            scope: ReplayIdempotencyScope::from_scope(&entry.key.scope),
+            key: entry.key.key.clone(),
+            payload_fingerprint: entry.payload_fingerprint.clone(),
+            request_hash: entry.payload_fingerprint.clone(),
+            function_revision: entry.function_revision.0,
+            replay_behavior: replay_behavior_name(&entry.replay_behavior).to_owned(),
+            status: idempotency_status_name(entry.status).to_owned(),
+            first_invocation_id: entry.first_invocation_id.to_string(),
+            latest_invocation_id: entry.latest_invocation_id.to_string(),
+            outcome: entry.outcome.clone(),
+            outcome_hash: entry.outcome.as_ref().map(canonical_hash).transpose()?,
+            created_at: entry.created_at.to_rfc3339(),
+            updated_at: entry.updated_at.to_rfc3339(),
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ReplayInvocationRecord {
     invocation_id: String,
     function_id: String,
@@ -321,12 +390,15 @@ struct ReplayInvocationRecord {
     succeeded: bool,
     result_value: Option<Value>,
     error: Option<Value>,
+    result_hash: Option<String>,
     timestamp: String,
 }
 
 impl ReplayInvocationRecord {
-    fn from_record(record: &InvocationRecord) -> Self {
-        Self {
+    fn from_record(record: &InvocationRecord) -> Result<Self, CapabilityError> {
+        let error = record.error.as_ref().map(engine_error_value);
+        let result_hash = invocation_result_hash(record.result_value.as_ref(), error.as_ref())?;
+        Ok(Self {
             invocation_id: record.invocation_id.to_string(),
             function_id: record.function_id.to_string(),
             worker_id: record.worker_id.to_string(),
@@ -356,9 +428,43 @@ impl ReplayInvocationRecord {
             replayed_from: record.replayed_from.as_ref().map(ToString::to_string),
             succeeded: record.succeeded,
             result_value: record.result_value.clone(),
-            error: record.error.as_ref().map(engine_error_value),
+            error,
+            result_hash,
             timestamp: record.timestamp.to_rfc3339(),
-        }
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayStreamEvent {
+    #[serde(flatten)]
+    event: EngineStreamEvent,
+    payload_hash: String,
+}
+
+impl ReplayStreamEvent {
+    fn from_event(event: EngineStreamEvent) -> Result<Self, CapabilityError> {
+        let payload_hash = canonical_hash(&event.payload)?;
+        Ok(Self {
+            event,
+            payload_hash,
+        })
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReplayQueueItem {
+    #[serde(flatten)]
+    item: EngineQueueItem,
+    payload_hash: String,
+}
+
+impl ReplayQueueItem {
+    fn from_item(item: EngineQueueItem) -> Result<Self, CapabilityError> {
+        let payload_hash = canonical_hash(&item.payload)?;
+        Ok(Self { item, payload_hash })
     }
 }
 
@@ -375,6 +481,34 @@ impl ReplayIdempotencyScope {
             kind: scope.kind.clone(),
             value: scope.value.clone(),
         }
+    }
+}
+
+fn idempotency_status_name(status: IdempotencyStatus) -> &'static str {
+    match status {
+        IdempotencyStatus::InProgress => "in_progress",
+        IdempotencyStatus::Completed => "completed",
+        IdempotencyStatus::Unknown => "unknown",
+    }
+}
+
+fn replay_behavior_name(behavior: &ReplayBehavior) -> &'static str {
+    match behavior {
+        ReplayBehavior::ReturnPrevious => "return_previous",
+        ReplayBehavior::NoOp => "no_op",
+        ReplayBehavior::Reject => "reject",
+        ReplayBehavior::Compensate => "compensate",
+    }
+}
+
+fn invocation_result_hash(
+    result_value: Option<&Value>,
+    error: Option<&Value>,
+) -> Result<Option<String>, CapabilityError> {
+    match (result_value, error) {
+        (Some(value), None) => canonical_hash(value).map(Some),
+        (_, Some(error)) => canonical_hash(error).map(Some),
+        (None, None) => Ok(None),
     }
 }
 

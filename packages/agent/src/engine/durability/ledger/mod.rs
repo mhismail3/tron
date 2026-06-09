@@ -5,8 +5,8 @@
 //! changes, and the current durable external-worker catalog definitions needed
 //! to fail closed across process restarts without pretending disconnected
 //! sockets still have executable handlers. Session replay reads invocation rows
-//! through this ledger boundary so replay does not query SQLite internals from
-//! domain code.
+//! and idempotency entries through this ledger boundary so replay does not query
+//! SQLite internals from domain code.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
@@ -143,6 +143,9 @@ pub trait EngineLedgerStore: Send {
 
     /// List invocation records for one session in durable write order.
     fn list_invocations_by_session(&self, session_id: &str) -> Result<Vec<InvocationRecord>>;
+
+    /// List idempotency entries that explain invocations for one session.
+    fn list_idempotency_by_session(&self, session_id: &str) -> Result<Vec<IdempotencyEntry>>;
 
     /// Reserve an idempotency key before handler execution.
     fn reserve_idempotency(

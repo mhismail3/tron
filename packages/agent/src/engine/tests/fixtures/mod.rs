@@ -15,8 +15,9 @@ pub(in crate::engine::tests) use crate::engine::catalog::discovery::{
 };
 pub(in crate::engine::tests) use crate::engine::catalog::registry::LiveCatalog;
 pub(in crate::engine::tests) use crate::engine::durability::ledger::{
-    EngineLedgerStore, IdempotencyKey, IdempotencyReservation, IdempotencyReservationOutcome,
-    IdempotencyStatus, InMemoryEngineLedgerStore, SqliteEngineLedgerStore, StoredInvocationOutcome,
+    EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
+    IdempotencyReservationOutcome, IdempotencyStatus, InMemoryEngineLedgerStore,
+    SqliteEngineLedgerStore, StoredInvocationOutcome,
 };
 pub(in crate::engine::tests) use crate::engine::durability::queue;
 pub(in crate::engine::tests) use crate::engine::durability::streams::SqliteEngineStreamStore;
@@ -296,6 +297,10 @@ impl EngineLedgerStore for ReserveFailingLedger {
         Ok(Vec::new())
     }
 
+    fn list_idempotency_by_session(&self, _session_id: &str) -> Result<Vec<IdempotencyEntry>> {
+        Ok(Vec::new())
+    }
+
     fn reserve_idempotency(
         &mut self,
         _reservation: IdempotencyReservation,
@@ -383,6 +388,10 @@ impl EngineLedgerStore for CatalogChangeFailingLedger {
         &self,
         _session_id: &str,
     ) -> Result<Vec<crate::engine::invocation::model::InvocationRecord>> {
+        Ok(Vec::new())
+    }
+
+    fn list_idempotency_by_session(&self, _session_id: &str) -> Result<Vec<IdempotencyEntry>> {
         Ok(Vec::new())
     }
 
@@ -523,4 +532,13 @@ pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLed
     };
     assert_eq!(existing.status, IdempotencyStatus::Completed);
     assert_eq!(existing.outcome.unwrap().value, Some(json!({"ok": true})));
+    let session_idempotency = store.list_idempotency_by_session("session-a").unwrap();
+    assert_eq!(session_idempotency.len(), 1);
+    assert_eq!(session_idempotency[0].payload_fingerprint, "fingerprint-a");
+    assert!(
+        store
+            .list_idempotency_by_session("session-other")
+            .unwrap()
+            .is_empty()
+    );
 }

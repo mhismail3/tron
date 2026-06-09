@@ -8,7 +8,7 @@ fn drc_scorecard_and_evidence_are_formalized() {
 
     for required in [
         "# Determinism Replayability Scorecard",
-        "Current score: **74/100**",
+        "Current score: **90/100**",
         "Status: **active**",
         "Branch: `codex/primitive-engine-teardown`",
         "Replay v1 is audit and reconstruction replay",
@@ -21,8 +21,8 @@ fn drc_scorecard_and_evidence_are_formalized() {
         "| DRC-4 | Provider request audit before model streaming | 12 | passed_after_fix |",
         "| DRC-5 | Canonical `tron.replay.v1` manifest export | 14 | passed_after_fix |",
         "| DRC-6 | Byte-stable replay hashes and stable ordering | 10 | passed_after_fix |",
-        "| DRC-7 | Replay references across idempotency, queue, stream, and trace records | 8 | pending |",
-        "| DRC-8 | Offline replay roundtrip harness | 8 | pending |",
+        "| DRC-7 | Replay references across idempotency, queue, stream, and trace records | 8 | passed_after_fix |",
+        "| DRC-8 | Offline replay roundtrip harness | 8 | passed_after_fix |",
         "| DRC-9 | Progressive docs, README, protocol docs, and iOS decode parity | 4 | pending |",
         "| DRC-10 | Final adversarial closeout | 6 | pending |",
         "Total weight: **100**",
@@ -36,7 +36,7 @@ fn drc_scorecard_and_evidence_are_formalized() {
 
     for required in [
         "# Determinism Replayability Evidence Manifest",
-        "Current score: **74/100**",
+        "Current score: **90/100**",
         "Status: **active**",
         "| DRC-0 | passed_after_fix |",
         "| DRC-1 | passed_after_fix |",
@@ -45,6 +45,8 @@ fn drc_scorecard_and_evidence_are_formalized() {
         "| DRC-4 | passed_after_fix |",
         "| DRC-5 | passed_after_fix |",
         "| DRC-6 | passed_after_fix |",
+        "| DRC-7 | passed_after_fix |",
+        "| DRC-8 | passed_after_fix |",
         "| DRC-10 | pending |",
         "## DRC-0 Evidence",
         "## DRC-1 Evidence",
@@ -53,6 +55,8 @@ fn drc_scorecard_and_evidence_are_formalized() {
         "## DRC-4 Evidence",
         "## DRC-5 Evidence",
         "## DRC-6 Evidence",
+        "## DRC-7 Evidence",
+        "## DRC-8 Evidence",
         "## Verification Log",
         "## Residual Risk Log",
     ] {
@@ -100,7 +104,7 @@ fn drc_inventory_covers_all_replay_critical_sources() {
 
     for required in [
         "# Determinism Replayability Inventory",
-        "Status: DRC-6 `passed_after_fix`; DRC-7 through DRC-10 remain open",
+        "Status: DRC-8 `passed_after_fix`; DRC-9 and DRC-10 remain open",
         "Session events",
         "Provider request audit",
         "Trace records",
@@ -117,6 +121,8 @@ fn drc_inventory_covers_all_replay_critical_sources() {
         "`ORDER BY timestamp`",
         "`session::replay_manifest`",
         "`execute` operation `replay_manifest`",
+        "`engineIdempotencyEntries`",
+        "`roundtrip_manifest`",
     ] {
         assert!(
             inventory.contains(required),
@@ -136,6 +142,7 @@ fn drc_inventory_covers_all_replay_critical_sources() {
         "DRC-1-014\thash\tcanonical_json",
         "DRC-1-015\tapi\tsession_replay_manifest",
         "DRC-1-017\tproof\tinvariant_target",
+        "DRC-1-019\tproof\toffline_roundtrip",
     ] {
         assert!(
             inventory_tsv.contains(required),

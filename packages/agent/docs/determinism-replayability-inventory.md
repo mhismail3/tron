@@ -2,7 +2,7 @@
 
 Created: 2026-06-09
 
-Status: DRC-6 `passed_after_fix`; DRC-7 through DRC-10 remain open
+Status: DRC-8 `passed_after_fix`; DRC-9 and DRC-10 remain open
 
 Machine-readable inventory:
 [`determinism-replayability-inventory.tsv`](determinism-replayability-inventory.tsv)
@@ -22,11 +22,12 @@ Machine-readable inventory:
 | Session events | `events` table through `EventStore` | `session_id`, `sequence ASC` for session exports | Include every event for the requested session, including provider request audit events, in sequence order / sequence ASC. | DRC-5/DRC-6 passed |
 | Provider request audit | `model.provider_request` event | session sequence | Persist provider/model/request audit before provider stream open; include it in replay manifest/hashes. | DRC-4/DRC-5/DRC-6 passed |
 | Trace records | `trace_records` table through `EventStore` | current list is newest-first by timestamp | Replay list uses ascending stable order: timestamp ASC + id ASC. | DRC-5/DRC-6 passed |
-| Engine invocations | `engine_invocations` table through engine ledger | ledger append order | Include session-scoped invocation records in append order plus invocation IDs. | DRC-5/DRC-6 passed; DRC-7 refs |
+| Engine invocations | `engine_invocations` table through engine ledger | ledger append order | Include session-scoped invocation records in append order plus invocation IDs and result hashes. | DRC-7 passed |
+| Engine idempotency entries | `engine_idempotency_entries` table through engine ledger | stable key order | Include entries that are session-scoped or referenced by first/latest session invocation; carry payload fingerprint request hash, outcome hash, first/latest invocation refs, replay behavior, and status. | DRC-7 passed |
 | Engine streams | `engine_stream_events` table | cursor ascending for poll/list-by-trace | Include session-scoped stream rows by cursor ASC. | DRC-5/DRC-6 passed |
-| Queue items and attempts | `engine_queue_items` table | current list is queue-scoped by creation time | Replay list uses stable durable key order: queue ASC + created_at ASC + receipt_id ASC, and includes attempt records. | DRC-5/DRC-6 passed; DRC-7 refs |
-| Resources | engine resource tables | resource/version/link order varies by API | Replay v1 records resource refs and hashes carried by invocation/trace rows; direct resource export is explicit only if DRC-7 proves it is needed. | DRC-7 |
-| Logs | `logs` table | newest-first UI query | Replay v1 excludes log text unless trace records reference it; logs remain diagnostics, not replay causality. | DRC-7 |
+| Queue items and attempts | `engine_queue_items` table | current list is queue-scoped by creation time | Replay list uses stable durable key order: queue ASC + created_at ASC + receipt_id ASC, includes attempt records, and adds payload hashes. | DRC-7 passed |
+| Resources | engine resource tables | resource/version/link order varies by API | Replay v1 records resource refs and hashes carried by invocation, trace, queue attempt, lease, compensation, and produced-resource rows; direct resource table export is not part of replay v1. | DRC-7 passed |
+| Logs | `logs` table | newest-first UI query | Replay v1 excludes log text unless trace records reference it; logs remain diagnostics, not replay causality. | DRC-7 passed |
 | Storage payload blobs | `storage_payloads`/`blobs` | referenced by owner IDs | Replay resolves stored JSON payload refs before hashing manifest sections. | DRC-5/DRC-6 passed |
 
 ## Entropy Sources
@@ -47,6 +48,8 @@ Machine-readable inventory:
 | `session::export` | returns `format: "tron.session.v1"` with session row and session events only | Keep as session backup/export; do not overload it into replay. |
 | `session::replay_manifest` | implemented pure read | Returns canonical `format: "tron.replay.v1"` manifest with section hashes and overall `replayHash`. |
 | `execute` operation `replay_manifest` | implemented read-only current-session operation | Delegates to the same session replay builder and does not create a trace record. |
+| `engineIdempotencyEntries` | implemented manifest section | Carries request/outcome hashes and first/latest invocation refs for idempotency replay proof. |
+| `roundtrip_manifest` | implemented offline harness | Recomputes section and replay hashes, rebuilds counts, and validates cross-record references without side-effect handles. |
 | iOS persisted event decoding | `model.provider_request` decodes as non-rendering metadata | DRC-9 completes protocol/docs parity after replay manifest/API changes land. |
 
 ## Proof Surfaces
@@ -57,8 +60,8 @@ Machine-readable inventory:
 | Provider-audit test | Proves audit persists before stream open | DRC-4 passed |
 | Replay manifest hash test | Proves canonical JSON/hash stability | DRC-5/DRC-6 passed |
 | Replay ordering test | Proves no timestamp-only replay order | DRC-6 passed |
-| Cross-record reference test | Proves trace/queue/stream/invocation refs explain a turn | DRC-7 |
-| Offline roundtrip test | Rebuilds from durable records without side effects | DRC-8 |
+| Cross-record reference test | Proves trace/queue/stream/invocation/idempotency refs explain a turn | DRC-7 passed |
+| Offline roundtrip test | Rebuilds from durable records without side effects | DRC-8 passed |
 | Final closeout test | Enforces 100/100 and no stale active open-loop wording | DRC-10 |
 
 ## DRC-2/DRC-3 Closure Notes
@@ -97,6 +100,22 @@ Machine-readable inventory:
   current session and bypasses execute trace creation so it does not mutate the
   manifest it exports.
 - Engine-owned replay rows are read through narrow owner APIs:
-  `ledger_invocations_by_session`, stream `list_by_session`, queue
-  `list_by_session`, and `EngineHostHandle::replay_snapshot`.
+  `ledger_invocations_by_session`, `ledger_idempotency_by_session`, stream
+  `list_by_session`, queue `list_by_session`, and
+  `EngineHostHandle::replay_snapshot`.
   Session-owned trace replay rows use `timestamp ASC + id ASC`.
+
+## DRC-7/DRC-8 Closure Notes
+
+- The manifest includes `engineIdempotencyEntries` plus `requestHash`,
+  `outcomeHash`, first/latest invocation refs, replay behavior, status, and
+  stable scope keys.
+- Engine invocation projections include `resultHash`; stream and queue
+  projections include `payloadHash`; trace records keep Agent Trace
+  `requestHash` and `resultHash` metadata.
+- `roundtrip_manifest` rebuilds counts, recomputes all canonical hashes, and
+  validates provider-audit, trace, idempotency, invocation, queue, and stream
+  cross-record references from a manifest value only.
+- No replay path calls providers, executes tools, writes files, spawns
+  processes, mutates queues/streams/resources, or performs side-effect
+  re-execution.

@@ -1,7 +1,9 @@
 mod closeout;
 mod entropy_scanning;
+mod offline_roundtrip;
 mod provider_audit_wiring;
 mod replay_manifest_hashing;
 mod replay_ordering;
+mod replay_references;
 mod scorecard_inventory;
 mod support;

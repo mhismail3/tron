@@ -198,6 +198,57 @@ impl SqliteEngineLedgerStore {
                 .map_err(|err| sqlite_err("inv.timestamp", err))?,
         })
     }
+
+    fn idempotency_entry_from_row(&self, row: &rusqlite::Row<'_>) -> Result<IdempotencyEntry> {
+        raw_idempotency_entry(RawIdempotencyRow {
+            function_id: row
+                .get(0)
+                .map_err(|err| sqlite_err("idempotency.function_id", err))?,
+            scope_kind: row
+                .get(1)
+                .map_err(|err| sqlite_err("idempotency.scope_kind", err))?,
+            scope_value: row
+                .get(2)
+                .map_err(|err| sqlite_err("idempotency.scope_value", err))?,
+            idempotency_key: row
+                .get(3)
+                .map_err(|err| sqlite_err("idempotency.key", err))?,
+            payload_fingerprint: row
+                .get(4)
+                .map_err(|err| sqlite_err("idempotency.payload_fingerprint", err))?,
+            function_revision: row
+                .get(5)
+                .map_err(|err| sqlite_err("idempotency.function_revision", err))?,
+            replay_behavior_json: row
+                .get(6)
+                .map_err(|err| sqlite_err("idempotency.replay_behavior", err))?,
+            status_json: row
+                .get(7)
+                .map_err(|err| sqlite_err("idempotency.status", err))?,
+            first_invocation_id: row
+                .get(8)
+                .map_err(|err| sqlite_err("idempotency.first_invocation_id", err))?,
+            latest_invocation_id: row
+                .get(9)
+                .map_err(|err| sqlite_err("idempotency.latest_invocation_id", err))?,
+            outcome_value_json: resolve_optional_stored_json_string(
+                &self.conn,
+                row.get(10)
+                    .map_err(|err| sqlite_err("idempotency.outcome_value", err))?,
+            )?,
+            outcome_error_json: resolve_optional_stored_json_string(
+                &self.conn,
+                row.get(11)
+                    .map_err(|err| sqlite_err("idempotency.outcome_error", err))?,
+            )?,
+            created_at: row
+                .get(12)
+                .map_err(|err| sqlite_err("idempotency.created_at", err))?,
+            updated_at: row
+                .get(13)
+                .map_err(|err| sqlite_err("idempotency.updated_at", err))?,
+        })
+    }
 }
 
 impl EngineLedgerStore for SqliteEngineLedgerStore {
@@ -604,6 +655,41 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             records.push(self.invocation_record_from_row(row)?);
         }
         Ok(records)
+    }
+
+    fn list_idempotency_by_session(&self, session_id: &str) -> Result<Vec<IdempotencyEntry>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT function_id, scope_kind, scope_value, idempotency_key,
+                        payload_fingerprint, function_revision, replay_behavior_json,
+                        status_json, first_invocation_id, latest_invocation_id,
+                        outcome_value_json, outcome_error_json, created_at, updated_at
+                 FROM engine_idempotency_entries AS entry
+                 WHERE (entry.scope_kind = 'session' AND entry.scope_value = ?1)
+                    OR EXISTS (
+                        SELECT 1
+                        FROM engine_invocations AS invocation
+                        WHERE invocation.session_id = ?1
+                          AND invocation.invocation_id IN (
+                              entry.first_invocation_id,
+                              entry.latest_invocation_id
+                          )
+                    )
+                 ORDER BY function_id ASC, scope_kind ASC, scope_value ASC, idempotency_key ASC",
+            )
+            .map_err(|err| sqlite_err("list_idempotency_by_session.prepare", err))?;
+        let mut rows = stmt
+            .query(params![session_id])
+            .map_err(|err| sqlite_err("list_idempotency_by_session.query", err))?;
+        let mut entries = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| sqlite_err("list_idempotency_by_session.next", err))?
+        {
+            entries.push(self.idempotency_entry_from_row(row)?);
+        }
+        Ok(entries)
     }
 
     fn reserve_idempotency(

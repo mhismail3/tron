@@ -8,10 +8,11 @@ impl EngineHostHandle {
         &self,
         session_id: &str,
     ) -> Result<crate::engine::durability::replay::EngineReplaySnapshot> {
-        let (invocations, streams, queue) = {
+        let (invocations, idempotency_entries, streams, queue) = {
             let host = self.inner.lock().await;
             (
                 host.catalog.ledger_invocations_by_session(session_id)?,
+                host.catalog.ledger_idempotency_by_session(session_id)?,
                 host.primitives.streams.clone(),
                 host.primitives.queue.clone(),
             )
@@ -28,6 +29,7 @@ impl EngineHostHandle {
 
         Ok(crate::engine::durability::replay::EngineReplaySnapshot {
             invocations,
+            idempotency_entries,
             streams: stream_events,
             queue_items,
         })

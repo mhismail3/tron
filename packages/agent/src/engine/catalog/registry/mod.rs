@@ -4,7 +4,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
 use crate::engine::authority::grants::{EngineGrantStoreBackend, InMemoryEngineGrantStore};
-use crate::engine::durability::ledger::{EngineLedgerStore, InMemoryEngineLedgerStore};
+use crate::engine::durability::ledger::{
+    EngineLedgerStore, IdempotencyEntry, InMemoryEngineLedgerStore,
+};
 use crate::engine::invocation::model::{InProcessFunctionHandler, InvocationRecord};
 use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::{FunctionId, TriggerId, TriggerTypeId, WorkerId};
@@ -130,6 +132,11 @@ impl LiveCatalog {
     /// Durable invocation records for one session in append order.
     pub fn ledger_invocations_by_session(&self, session_id: &str) -> Result<Vec<InvocationRecord>> {
         self.ledger.list_invocations_by_session(session_id)
+    }
+
+    /// Durable idempotency entries that explain one session.
+    pub fn ledger_idempotency_by_session(&self, session_id: &str) -> Result<Vec<IdempotencyEntry>> {
+        self.ledger.list_idempotency_by_session(session_id)
     }
 }
 

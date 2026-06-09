@@ -117,6 +117,19 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
                 record_json: json!({
                     "version": AGENT_TRACE_VERSION,
                     "id": id,
+                    "metadata": {
+                        "dev.tron": {
+                            "traceId": "trace-shared",
+                            "invocationId": format!("inv-{id}"),
+                            "sessionId": session_id.clone(),
+                            "operation": "observe",
+                            "status": "ok",
+                            "request": {"traceRecord": id},
+                            "requestHash": format!("request-hash-{id}"),
+                            "result": {"traceRecord": id, "ok": true},
+                            "resultHash": format!("result-hash-{id}"),
+                        }
+                    }
                 }),
             })
             .expect("trace record");
@@ -208,6 +221,7 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
     let streams = first["sections"]["engineStreams"].as_array().unwrap();
     assert_eq!(streams.len(), 1);
     assert_eq!(streams[0]["payload"], json!({"stream": 1}));
+    assert_eq!(streams[0]["payloadHash"].as_str().unwrap().len(), 64);
 
     let queue_items = first["sections"]["engineQueueItems"].as_array().unwrap();
     let queue_names = queue_items
@@ -215,14 +229,42 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         .map(|item| item["queue"].as_str().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(queue_names, ["alpha", "beta"]);
+    for item in queue_items {
+        assert_eq!(item["payloadHash"].as_str().unwrap().len(), 64);
+    }
 
+    let idempotency_entries = first["sections"]["engineIdempotencyEntries"]
+        .as_array()
+        .unwrap();
+    assert_eq!(idempotency_entries.len(), 1);
     assert_eq!(
-        first["sections"]["engineInvocations"]
-            .as_array()
+        idempotency_entries[0]["requestHash"],
+        idempotency_entries[0]["payloadFingerprint"]
+    );
+    assert_eq!(
+        idempotency_entries[0]["outcomeHash"]
+            .as_str()
             .unwrap()
             .len(),
-        1
+        64
     );
+
+    let invocations = first["sections"]["engineInvocations"].as_array().unwrap();
+    assert_eq!(invocations.len(), 1);
+    assert_eq!(invocations[0]["resultHash"].as_str().unwrap().len(), 64);
+
+    let roundtrip = roundtrip::roundtrip_manifest(&first).expect("offline roundtrip");
+    assert_eq!(roundtrip.replay_hash, roundtrip.recomputed_replay_hash);
+    assert!(roundtrip.section_hash_mismatches.is_empty());
+    assert!(
+        roundtrip
+            .cross_record_references
+            .cross_record_reference_errors
+            .is_empty()
+    );
+    assert_eq!(roundtrip.counts.engine_idempotency_entries, 1);
+    assert_eq!(roundtrip.counts.engine_invocations, 1);
+    assert_eq!(roundtrip.counts.engine_queue_items, 2);
 }
 
 async fn enqueue_for_session(

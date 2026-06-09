@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::Utc;
 
@@ -104,6 +104,25 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
             .invocations
             .iter()
             .filter(|record| record.session_id.as_deref() == Some(session_id))
+            .cloned()
+            .collect())
+    }
+
+    fn list_idempotency_by_session(&self, session_id: &str) -> Result<Vec<IdempotencyEntry>> {
+        let session_invocations = self
+            .invocations
+            .iter()
+            .filter(|record| record.session_id.as_deref() == Some(session_id))
+            .map(|record| record.invocation_id.clone())
+            .collect::<BTreeSet<_>>();
+        Ok(self
+            .idempotency
+            .values()
+            .filter(|entry| {
+                (entry.key.scope.kind == "session" && entry.key.scope.value == session_id)
+                    || session_invocations.contains(&entry.first_invocation_id)
+                    || session_invocations.contains(&entry.latest_invocation_id)
+            })
             .cloned()
             .collect())
     }
