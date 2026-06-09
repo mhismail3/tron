@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-09 (TMB-7 iOS engine-access boundary).
+> Last verified: 2026-06-09 (TMB-9 boundary docs audit).
 
 ## Overview
 

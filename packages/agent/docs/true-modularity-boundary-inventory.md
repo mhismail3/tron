@@ -2,6 +2,7 @@
 
 Status: **active**
 Scorecard row: `TMB-1`
+Last verified: 2026-06-09 (TMB-9 docs/inventory audit)
 Machine-readable inventory: `packages/agent/docs/true-modularity-boundary-inventory.tsv`
 
 This inventory classifies every tracked Rust and Swift source file in the active boundary scope. The TSV is the source of truth for static coverage; this Markdown file records the dependency rules and composition-root exceptions used by the campaign.

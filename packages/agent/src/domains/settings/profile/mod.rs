@@ -57,6 +57,8 @@
 //! - Server settings are authoritative and sparse user overrides stay in
 //!   `profiles/user/profile.toml`.
 //! - Malformed settings fail fast instead of being silently repaired.
+//! - JSON encode/decode implementation errors are mapped to [`SettingsError`]
+//!   at the settings boundary before callers receive them.
 //! - The global settings cache swaps atomically so readers hold consistent
 //!   snapshots.
 //!

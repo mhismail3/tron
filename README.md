@@ -274,14 +274,15 @@ main.rs           Thin binary entry point
 | `app` | CLI, startup/bootstrap, health, metrics, onboarding, and shutdown | `Cli`, `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
-| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness | `registration::register_domain_workers_for_context()`, `capability::worker_module()`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
+| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness | `DomainRegistrationContext`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor integrations | paired-device broker |
 | `shared` | Foundation vocabulary, protocol DTOs, server context/errors, observability, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
 The domain package is intentionally vertical. A domain root is only docs,
-exports, and worker registration. Shared worker registration types live in
-`domains::registration::worker`; the startup aggregator in
-`domains::registration` iterates each domain's `worker_module(...)`.
+exports, and crate-private worker registration. Shared worker registration
+types live in `domains::registration::worker`; transport setup enters the
+crate-private startup aggregator in `domains::registration`, which iterates
+each domain's `worker_module(...)`.
 `contract.rs` owns canonical function ids, schemas, authority, risk, and stream
 topics; each domain then keeps executable bodies under behavior owners rather
 than a shared boilerplate shape. Examples: `domains/agent/prompt`,
@@ -758,6 +759,8 @@ The schema is defined in `packages/agent/src/domains/settings/profile/types/`. A
 The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection. OAuth tokens auto-refresh before expiry. The schema is defined in `packages/agent/src/domains/auth/credentials/types/mod.rs` (`AuthStorage` → per-provider `accounts` + `apiKeys` + `activeCredential`).
 
 Fresh Mac installs seed `auth.json` as the exact empty JSON object `{}`. That sentinel is valid only as pristine install state: first server boot materializes it through the normal atomic `0o600` auth writer into `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten.
+
+OpenAI credential selection is owned by auth credentials through `OpenAIAuthPath`: ChatGPT OAuth accounts route model metadata and requests to the Codex backend, while OpenAI API keys route to Platform metadata and `/v1/responses`.
 
 ### Providers
 

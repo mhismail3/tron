@@ -1,7 +1,7 @@
 # True Modularity Boundary Scorecard
 
 Status: **active**
-Current score: **88/100**
+Current score: **94/100**
 Branch: `codex/primitive-engine-teardown`
 
 This scorecard formalizes the True Modularity Boundary campaign. The campaign
@@ -41,7 +41,7 @@ concrete implementations only when listed in the inventory.
 | TMB-6 | Make transport adapter-only | 10 | passed_after_fix | Replaced the transport stream pump's direct turn-accumulator dependency with the shared `TronEventObserver` contract, keeping runtime event fanout adapter-only while the agent domain owns accumulator state. |
 | TMB-7 | Make iOS Engine access black-boxed | 10 | passed_after_fix | Added protocol-typed connection, live-event, settings, auth, and message repository boundaries; routed SwiftUI/session through `ChatSessionServices` and repositories; translated settings/auth wire DTOs into snapshots and mutations inside engine-owned repository adapters; and tightened the guard against concrete engine transport and settings/auth DTO leakage. |
 | TMB-8 | Define boundary-local error contracts | 8 | passed_after_fix | Removed the unused shared provider error contract, moved OpenAI auth-path ownership into auth credentials, mapped auth/settings JSON failures to boundary-local error variants, and tightened implementation-error allow-lists to owner-local SQL/transport/error-mapping modules. |
-| TMB-9 | Update docs and README | 6 | open | Final docs and inventory updates are pending later phases. |
+| TMB-9 | Update docs and README | 6 | passed_after_fix | Audited and updated README domain/auth boundary wording, settings module invariants, iOS architecture verification, and TMB inventory verification so docs reflect the final guarded architecture. |
 | TMB-10 | Final adversarial closeout | 6 | open | Final static scans, focused tests, full CI, personal-info guard, Xcode project drift check, ignored-file check, whitespace check, and clean status are pending. |
 
 Total weight: **100**

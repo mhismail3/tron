@@ -17,7 +17,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Scorecard",
         "Status: **active**",
-        "Current score: **88/100**",
+        "Current score: **94/100**",
         "Branch: `codex/primitive-engine-teardown`",
         "This scorecard formalizes the True Modularity Boundary campaign.",
         "## Boundary Taxonomy",
@@ -37,7 +37,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-6 | Make transport adapter-only | 10 | passed_after_fix |",
         "| TMB-7 | Make iOS Engine access black-boxed | 10 | passed_after_fix |",
         "| TMB-8 | Define boundary-local error contracts | 8 | passed_after_fix |",
-        "| TMB-9 | Update docs and README | 6 | open |",
+        "| TMB-9 | Update docs and README | 6 | passed_after_fix |",
         "| TMB-10 | Final adversarial closeout | 6 | open |",
         "`true_modularity_scorecard_stays_formalized`",
         "`boundary_inventory_covers_tracked_sources`",
@@ -60,7 +60,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Evidence Manifest",
         "Status: **active**",
-        "Current score: **88/100**",
+        "Current score: **94/100**",
         "| TMB-0 | passed_after_fix |",
         "| TMB-1 | passed_after_fix |",
         "| TMB-2 | passed_after_fix |",
@@ -70,6 +70,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-6 | passed_after_fix |",
         "| TMB-7 | passed_after_fix |",
         "| TMB-8 | passed_after_fix |",
+        "| TMB-9 | passed_after_fix |",
         "## TMB-0 Red Proof",
         "The first invariant run is intentionally red.",
         "Rust agent loop imports `domains::model::providers` directly",
@@ -81,6 +82,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "After TMB-6, `transport_is_adapter_only` passes.",
         "After TMB-7, `ios_ui_uses_repositories_not_engine_transport` passes.",
         "After TMB-8, `provider_internals_do_not_escape_model_domain` and",
+        "After TMB-9, README, affected Rust module docs, iOS architecture docs, and",
     ] {
         assert!(
             manifest.contains(required),
