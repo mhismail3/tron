@@ -36,6 +36,10 @@
 //! - the catalog is live, revisioned, and discoverable;
 //! - workers own the functions and triggers they register;
 //! - mutating capabilities require idempotency metadata;
+//! - engine submodules are crate-private implementation. Code outside
+//!   `engine/` must use the narrow facade re-exports in this module instead of
+//!   importing catalog, durability, invocation, kernel, primitive, or runtime
+//!   internals directly;
 //! - invocations carry actor, authority grant id, catalog revision, trace,
 //!   session, workspace, idempotency, optional parent/trigger context, and
 //!   trusted runtime metadata such as working directory and provider provenance
@@ -117,13 +121,13 @@
 
 #![deny(unsafe_code)]
 
-pub mod authority;
-pub mod catalog;
-pub mod durability;
-pub mod invocation;
-pub mod kernel;
-pub mod primitives;
-pub mod runtime;
+pub(crate) mod authority;
+pub(crate) mod catalog;
+pub(crate) mod durability;
+pub(crate) mod invocation;
+pub(crate) mod kernel;
+pub(crate) mod primitives;
+pub(crate) mod runtime;
 
 pub use authority::compensation::{
     EngineCompensationRecord, EngineCompensationStatus, InMemoryEngineCompensationStore,
@@ -168,12 +172,16 @@ pub use invocation::host::{
 };
 pub use invocation::model::{
     CausalContext, InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
+    RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TRIGGER_DEPTH,
+    RUNTIME_METADATA_TRIGGER_PATH, RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY,
 };
 pub use kernel::errors::{EngineError, Result};
 pub use kernel::ids::{
     ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, TriggerTypeId,
     WorkerId,
 };
+pub use kernel::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 pub use kernel::types::{
     AuthorityRequirement, CatalogChange, CatalogChangeClass, CatalogChangeKind, CatalogRevision,
     CatalogSubjectKind, CompensationContract, CompensationKind, DeliveryMode,
@@ -183,7 +191,9 @@ pub use kernel::types::{
     TriggerDefinition, TriggerRevision, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
     WorkerKind, WorkerLifecycleState, WorkerRevision,
 };
-pub use runtime::external_workers::{EngineExternalWorkerRuntime, ExternalWorkerConnection};
+pub use runtime::external_workers::{
+    EngineExternalWorkerRuntime, ExternalWorkerConnection, ExternalWorkerInvoker,
+};
 pub use runtime::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 pub use runtime::worker_protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy,

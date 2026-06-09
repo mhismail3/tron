@@ -5,8 +5,7 @@ use std::path::{Component, Path, PathBuf};
 use serde_json::json;
 
 use super::{internal, ok_result, required_str};
-use crate::engine::Invocation;
-use crate::engine::invocation::model::RUNTIME_METADATA_WORKING_DIRECTORY;
+use crate::engine::{Invocation, RUNTIME_METADATA_WORKING_DIRECTORY};
 use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
 

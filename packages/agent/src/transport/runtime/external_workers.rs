@@ -155,7 +155,7 @@ struct SocketWorkerInvoker {
 }
 
 #[async_trait]
-impl crate::engine::runtime::external_workers::ExternalWorkerInvoker for SocketWorkerInvoker {
+impl crate::engine::ExternalWorkerInvoker for SocketWorkerInvoker {
     async fn invoke(&self, invoke: WorkerInvoke) -> crate::engine::Result<WorkerInvocationResult> {
         let invocation_id = invoke.invocation_id.to_string();
         let (tx, rx) = oneshot::channel();

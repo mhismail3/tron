@@ -12,14 +12,11 @@ use crate::domains::agent::r#loop::primitive_surface::{
     PrimitiveExecutionTarget, ResolvedPrimitiveSurface,
 };
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
-use crate::engine::invocation::model::{
-    RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
-    RUNTIME_METADATA_WORKING_DIRECTORY,
-};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
-    InvocationId, TraceId,
+    InvocationId, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
+    RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
 };
 use crate::shared::protocol::events::{BaseEvent, CapabilityEventIdentity, TronEvent};
 use crate::shared::protocol::messages::CapabilityInvocationDraft;

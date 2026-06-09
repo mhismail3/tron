@@ -15,9 +15,8 @@ use crate::domains::session::event_store::trace::TRON_TRACE_METADATA_KEY;
 use crate::domains::session::event_store::{
     AGENT_TRACE_VERSION, AgentTraceListOptions, AgentTraceRecord,
 };
-use crate::engine::Invocation;
-use crate::engine::invocation::model::{
-    RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+use crate::engine::{
+    Invocation, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
     RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
     RUNTIME_METADATA_WORKING_DIRECTORY,
 };
