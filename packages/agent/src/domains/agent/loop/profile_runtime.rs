@@ -330,12 +330,7 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(2), async {
             loop {
-                if runtime.current().settings.server.default_model == "watcher-test-model"
-                    && crate::domains::settings::get_settings()
-                        .server
-                        .default_model
-                        == "watcher-test-model"
-                {
+                if runtime.current().settings.server.default_model == "watcher-test-model" {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(20)).await;

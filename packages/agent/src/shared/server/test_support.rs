@@ -190,7 +190,7 @@ mod tests {
     fn make_test_context_seeds_global_settings_from_isolated_profile() {
         let _guard = crate::domains::settings::test_settings_lock()
             .lock()
-            .expect("settings test lock");
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
         crate::domains::settings::reset_settings();
 
         let ctx = make_test_context();
