@@ -125,6 +125,11 @@ Current living entry points:
   in scope as primitive, implementation, support, test, docs, or delete.
 - `packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv`:
   machine-readable TPC retention inventory used by static gates.
+- `packages/agent/docs/true-modularity-boundary-scorecard.md`: active
+  scorecard for proving Rust and iOS boundaries are black-boxed by ownership,
+  narrow APIs, and guarded dependency direction.
+- `packages/agent/docs/true-modularity-boundary-evidence-manifest.md`:
+  companion evidence manifest for the active True Modularity Boundary campaign.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -173,6 +178,9 @@ Current living entry points:
   ownership, Rust docs/budgets, CI parity, provenance, privacy, and residue.
 - `packages/agent/tests/true_primitive_cleanup_invariants.rs`: active TPC
   scorecard, evidence, initial red-finding, and tracked-source setup gates.
+- `packages/agent/tests/true_modularity_boundary_invariants.rs`: active TMB
+  scorecard, boundary inventory, responder, facade, domain, storage, transport,
+  iOS engine-access, boundary-error, and final closeout gates.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
