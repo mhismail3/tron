@@ -74,8 +74,8 @@ trace/root invocation ids, theme color, and presentation hints. Reconstruction
 must not recover retired contract, implementation, worker, risk, or binding
 metadata from old payloads.
 
-Unsupported event payloads should remain visible as diagnostics or no-op
-transport facts. They should not be converted into fixed panels,
+Unsupported event payloads should remain visible as diagnostics or
+transport-only facts. They should not be converted into fixed panels,
 repository, assistant-management, skill, curated prompt, or media workflow
 models.
 

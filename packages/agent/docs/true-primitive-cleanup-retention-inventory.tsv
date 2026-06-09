@@ -628,6 +628,7 @@ packages/agent/tests/true_primitive_cleanup/invocation_primitives.rs	test	test_h
 packages/agent/tests/true_primitive_cleanup/ios_engine_protocol.rs	test	test_harness	TPC-7	static gate coverage for iOS engine, protocol, and Swift split cleanup
 packages/agent/tests/true_primitive_cleanup/ios_ui_state.rs	test	test_harness	TPC-8	static gate coverage for iOS UI/session state split cleanup
 packages/agent/tests/true_primitive_cleanup/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/tests/true_primitive_cleanup/docs_guards_inventories.rs	test	test_harness	TPC-10	static gate coverage for final docs, guards, inventory, and active reference cleanup
 packages/agent/tests/true_primitive_cleanup/provider_auth_model.rs	test	test_harness	TPC-5	static gate coverage for provider/auth/model cleanup row
 packages/agent/tests/true_primitive_cleanup/script_runtime_helpers.rs	test	test_harness	TPC-9	static gate coverage for script, Mac helper, and bootstrap cleanup row
 packages/agent/tests/true_primitive_cleanup/scorecard.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage

@@ -1386,7 +1386,7 @@ scripts/tron-lib.d/service.sh	retain	script	PCC-10/AHA-9	Current tracked file re
 scripts/tron-lib.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron-release-notes	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron-version	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-scripts/tron.d/deploy.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+scripts/tron.d/manual-deploy.sh	retain	script	TPC-10	Current tracked manual deploy helper retained after TPC-9 command rename.
 scripts/tron.d/dev.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron.d/quality.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 scripts/tron.d/workspace.sh	retain	script	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.

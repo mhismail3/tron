@@ -44,7 +44,7 @@ The TSV covers tracked and newly introduced files under:
 | primitive | 105 |
 | implementation | 478 |
 | support | 380 |
-| test | 416 |
+| test | 417 |
 | docs | 32 |
 | delete | 0 |
 
@@ -72,7 +72,7 @@ The TSV covers tracked and newly introduced files under:
 | `session_storage` | 63 |
 | `settings` | 16 |
 | `shared_foundation` | 44 |
-| `test_harness` | 416 |
+| `test_harness` | 417 |
 | `transport` | 25 |
 
 ## Delete Candidates
@@ -84,7 +84,6 @@ may delete or split files, then regenerate this inventory.
 
 - Hard LOC targets are closed for tracked Rust, Swift, and script source/test
   files; final verification remains owned by TPC-11.
-- Broad fallback, compatibility, no-op, and provider-alias residue scans remain
-  open and are owned by TPC-10.
+- Broad residue scans and active-doc stale path checks are closed by TPC-10.
 - The retained contributor deployment helper is explicitly `manual-deploy`; the
   ordinary `deploy` command spelling is not retained.

@@ -1,3 +1,4 @@
+mod docs_guards_inventories;
 mod engine_durability;
 mod external_workers;
 mod inventory;

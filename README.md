@@ -116,7 +116,7 @@ Current living entry points:
   machine-readable per-file cleanup classification used by static gates.
 - `packages/agent/docs/true-primitive-cleanup-scorecard.md`: active
   scorecard for the final strict primitive cleanup pass over oversized roots,
-  fallback residue, dead state, provider/model ownership, iOS shell flattening,
+  residue review, dead state, provider/model ownership, iOS shell flattening,
   Mac/scripts helper scope, and closeout evidence.
 - `packages/agent/docs/true-primitive-cleanup-evidence-manifest.md`: companion
   evidence manifest for the active True Primitive Cleanup scorecard.
@@ -402,7 +402,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | Command | Description |
 |---------|-------------|
 | `tron preflight` | Pre-deploy infrastructure check |
-| `tron manual-deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive). No automatic deploy watcher is retained and no `tron deploy` alias is retained. |
+| `tron manual-deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive). No automatic deploy watcher or shorter deploy alias is retained. |
 | `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 | `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
 
@@ -606,7 +606,7 @@ while SQLite repositories stay under `event_store/sqlite/repositories`.
 | `message` | `message.user`, `message.assistant`, `message.system`, `message.deleted` |
 | `capability` | `capability.invocation.started`, `capability.invocation.progress`, `capability.invocation.completed` |
 | `stream` | `stream.text_delta`, `stream.thinking_delta`, `stream.turn_start`, `stream.turn_end` |
-| `compact` | `compact.boundary`, `compact.summary_staging`; live `agent.compaction_started` / `agent.compaction` stream events show pre-turn compaction progress and terminal no-op/failure state |
+| `compact` | `compact.boundary`, `compact.summary_staging`; live `agent.compaction_started` / `agent.compaction` stream events show pre-turn compaction progress and terminal idle/failure state |
 | `context` | `context.cleared` |
 | `metadata` | `metadata.update`, `metadata.tag` |
 | `error` | `error.agent`, `error.capability`, `error.provider` |
@@ -1064,7 +1064,7 @@ The install step validates the active signed helper (`Tron Server.app` for produ
 
 ## Deployment
 
-### Deploy Pipeline
+### Manual Contributor Deploy
 
 ```bash
 tron manual-deploy          # Full pipeline with confirmations
@@ -1072,7 +1072,7 @@ tron manual-deploy --force  # Skip uncommitted-changes / test-failure prompts
 tron manual-deploy --ci     # Non-interactive: any failure aborts
 ```
 
-`tron manual-deploy` is a contributor-only script path and is not the production Mac distribution mechanism. Production releases are the notarized DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG. The old `tron deploy` spelling is intentionally not retained as an alias.
+`tron manual-deploy` is a contributor-only script path and is not the production Mac distribution mechanism. Production releases are the notarized DMG pipeline below; end users replace `/Applications/Tron.app` from that DMG. The command has no shorter deploy alias.
 
 The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`) is retained for local contributor workflows:
 
