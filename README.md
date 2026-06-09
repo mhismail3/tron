@@ -114,6 +114,12 @@ Current living entry points:
   cleanup target tree.
 - `packages/agent/docs/primitive-code-cleanup-file-inventory.tsv`:
   machine-readable per-file cleanup classification used by static gates.
+- `packages/agent/docs/true-primitive-cleanup-scorecard.md`: active
+  scorecard for the final strict primitive cleanup pass over oversized roots,
+  fallback residue, dead state, provider/model ownership, iOS shell flattening,
+  Mac/scripts helper scope, and closeout evidence.
+- `packages/agent/docs/true-primitive-cleanup-evidence-manifest.md`: companion
+  evidence manifest for the active True Primitive Cleanup scorecard.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -160,6 +166,8 @@ Current living entry points:
 - `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs`: completed
   post-AHA closeout gates for Mac project policy, docs/runtime parity, Mac/iOS
   ownership, Rust docs/budgets, CI parity, provenance, privacy, and residue.
+- `packages/agent/tests/true_primitive_cleanup_invariants.rs`: active TPC
+  scorecard, evidence, initial red-finding, and tracked-source setup gates.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
