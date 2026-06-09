@@ -31,3 +31,12 @@ pub use stream::{AssistantMessage, RetryErrorInfo, StreamEvent, is_stream_event_
 #[cfg(test)]
 pub(crate) use tron::VARIANT_COUNT;
 pub use tron::{BaseEvent, CompactionReason, TronEvent};
+
+/// Observer contract for components that maintain state from [`TronEvent`]s.
+///
+/// Transport adapters can fan out runtime events through this contract without
+/// importing the domain implementation that owns the state.
+pub trait TronEventObserver: Send + Sync {
+    /// Observe one runtime event.
+    fn observe_tron_event(&self, event: &TronEvent);
+}

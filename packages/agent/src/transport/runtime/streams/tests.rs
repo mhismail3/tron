@@ -1,6 +1,17 @@
 use super::*;
 use crate::engine::{EngineHostHandle, StreamActorScope, StreamCursor, VisibilityScope};
-use crate::shared::protocol::events::{BaseEvent, TronEvent, agent_start_event};
+use crate::shared::protocol::events::{BaseEvent, TronEvent, TronEventObserver, agent_start_event};
+
+#[derive(Default)]
+struct NoopEventObserver;
+
+impl TronEventObserver for NoopEventObserver {
+    fn observe_tron_event(&self, _event: &TronEvent) {}
+}
+
+fn noop_observer() -> Arc<dyn TronEventObserver> {
+    Arc::new(NoopEventObserver)
+}
 
 #[test]
 fn tron_events_project_to_neutral_server_payloads() {
@@ -78,12 +89,7 @@ async fn pump_publishes_runtime_events_to_engine_streams_once() {
     .await
     .unwrap();
     let cancel = CancellationToken::new();
-    let pump = EngineStreamEventPump::new(
-        rx,
-        host.clone(),
-        cancel.clone(),
-        Arc::new(TurnAccumulatorMap::new()),
-    );
+    let pump = EngineStreamEventPump::new(rx, host.clone(), cancel.clone(), noop_observer());
     let handle = tokio::spawn(pump.run());
 
     tx.send(agent_start_event("s1")).unwrap();
@@ -115,12 +121,7 @@ async fn pump_persists_runtime_event_trace_context() {
     .await
     .unwrap();
     let cancel = CancellationToken::new();
-    let pump = EngineStreamEventPump::new(
-        rx,
-        host.clone(),
-        cancel.clone(),
-        Arc::new(TurnAccumulatorMap::new()),
-    );
+    let pump = EngineStreamEventPump::new(rx, host.clone(), cancel.clone(), noop_observer());
     let handle = tokio::spawn(pump.run());
 
     tx.send(TronEvent::MessageUpdate {
@@ -164,12 +165,7 @@ async fn stream_scope_prevents_cross_session_delivery() {
     .await
     .unwrap();
     let cancel = CancellationToken::new();
-    let pump = EngineStreamEventPump::new(
-        rx,
-        host.clone(),
-        cancel.clone(),
-        Arc::new(TurnAccumulatorMap::new()),
-    );
+    let pump = EngineStreamEventPump::new(rx, host.clone(), cancel.clone(), noop_observer());
     let handle = tokio::spawn(pump.run());
 
     tx.send(agent_start_event("s2")).unwrap();

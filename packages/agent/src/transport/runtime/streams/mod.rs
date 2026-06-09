@@ -14,9 +14,8 @@
 
 use std::sync::Arc;
 
-use crate::domains::agent::r#loop::orchestrator::turn_accumulator::TurnAccumulatorMap;
 use crate::engine::{EngineHostHandle, InvocationId, PublishStreamEvent, TraceId, VisibilityScope};
-use crate::shared::protocol::events::TronEvent;
+use crate::shared::protocol::events::{TronEvent, TronEventObserver};
 use serde_json::json;
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
@@ -36,7 +35,7 @@ mod turn;
 pub struct EngineStreamEventPump {
     rx: broadcast::Receiver<TronEvent>,
     cancel: CancellationToken,
-    accumulators: Arc<TurnAccumulatorMap>,
+    event_observer: Arc<dyn TronEventObserver>,
     engine_streams: EngineHostHandle,
 }
 
@@ -46,12 +45,12 @@ impl EngineStreamEventPump {
         rx: broadcast::Receiver<TronEvent>,
         engine_streams: EngineHostHandle,
         cancel: CancellationToken,
-        accumulators: Arc<TurnAccumulatorMap>,
+        event_observer: Arc<dyn TronEventObserver>,
     ) -> Self {
         Self {
             rx,
             cancel,
-            accumulators,
+            event_observer,
             engine_streams,
         }
     }
@@ -98,7 +97,7 @@ impl EngineStreamEventPump {
     }
 
     async fn project_tron_event(&self, event: &TronEvent) {
-        self.accumulators.update_from_event(event);
+        self.event_observer.observe_tron_event(event);
 
         let event_type = event.event_type();
         tracing::debug!(event_type, "projecting event to engine stream");

@@ -19,7 +19,7 @@ use std::collections::HashMap;
 
 use parking_lot::Mutex;
 
-use crate::shared::protocol::events::TronEvent;
+use crate::shared::protocol::events::{TronEvent, TronEventObserver};
 use serde_json::Value;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -488,6 +488,12 @@ impl TurnAccumulatorMap {
             }
             _ => {} // Irrelevant events are no-ops
         }
+    }
+}
+
+impl TronEventObserver for TurnAccumulatorMap {
+    fn observe_tron_event(&self, event: &TronEvent) {
+        self.update_from_event(event);
     }
 }
 

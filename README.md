@@ -679,7 +679,10 @@ authority grant id, scopes, provider/model metadata, request/result hashes, and
 file/VCS attribution so the agent can inspect why an action did or did not run.
 
 The `EngineStreamEventPump` routes retained neutral engine/session stream
-records to subscribed clients.
+records to subscribed clients. Runtime state observers consume the same
+`TronEvent` stream through the shared `TronEventObserver` contract, so transport
+code can fan out events without importing the domain implementation that owns
+that state.
 
 ---
 
