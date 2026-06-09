@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **56/100**
+Current score: **62/100**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -49,7 +49,7 @@ projections.
 | FSC-6 | Transport contract | 8 | passed_after_fix | transport | `/engine` socket errors serialize the canonical failure envelope with sanitized message, trace id, category, retryability, recoverability, origin, and details. | Add final static guard for transport error frame fields in FSC-10. | server core checkpoint |
 | FSC-7 | Provider retry semantics | 8 | passed_after_fix | model provider boundary | Provider errors now preserve retryability, recoverability, status, retry-after, provider code, cancellation, provider, model, and category through responder/runtime failure envelopes. | iOS consumption remains FSC-8. | server core checkpoint |
 | FSC-8 | iOS parity | 8 | pending | iOS client | Not started. | Decode canonical fields and remove divergent client classifications where server data exists. | pending |
-| FSC-9 | Observability and replay | 6 | pending | event store/replay/audit | Not started. | Store enough structured failure data for durable events, request audit, engine errors, and replay manifests. | pending |
+| FSC-9 | Observability and replay | 6 | passed_after_fix | event store/replay/audit | Durable error payloads accept canonical fields, interrupted durable `turn.failed` writes `details.failure`, and replay engine invocation errors export canonical failure envelopes plus legacy diagnostic details. | None for current durable/replay surfaces; iOS consumption remains FSC-8. | durable replay checkpoint |
 | FSC-10 | Closeout gates | 10 | pending | static gates/verification | Not started. | Add guards against stale open loops, ad hoc failure construction, missing codes/categories, category drift, and uncovered variants. | pending |
 
 ## Current Findings
@@ -59,8 +59,9 @@ projections.
   errors, and model-facing capability results.
 - `FSC-3` remains open because auth/session/event-store mapping assertions and
   final static enum/source guards are not complete.
-- Durable event payloads and replay exports still need explicit canonical
-  failure preservation for new rows.
+- Durable event payloads and replay exports now preserve canonical failure
+  details for the active interrupted turn-failure writer and engine invocation
+  replay errors.
 - iOS decoding/projection still needs to consume server-provided canonical
   fields and remove divergent classifications where server data exists.
 

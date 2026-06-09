@@ -28,6 +28,7 @@ use crate::engine::durability::streams::EngineStreamEvent;
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::types::ReplayBehavior;
 use crate::shared::server::context::run_blocking_task;
+use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::errors::{self, CapabilityError};
 
 #[cfg(test)]
@@ -513,6 +514,12 @@ fn invocation_result_hash(
 }
 
 fn engine_error_value(error: &crate::engine::EngineError) -> Value {
+    engine_error_to_failure(error)
+        .with_details(Some(engine_error_legacy_details(error)))
+        .details_with_failure()
+}
+
+fn engine_error_legacy_details(error: &crate::engine::EngineError) -> Value {
     match error {
         crate::engine::EngineError::InvalidId { kind, value } => {
             json!({"kind": "invalid_id", "idKind": kind, "value": value})

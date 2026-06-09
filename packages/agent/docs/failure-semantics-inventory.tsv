@@ -4,7 +4,7 @@ packages/agent/src/shared/server/errors.rs	Rust	capability_error_contract	shared
 packages/agent/src/shared/server/error_mapping.rs	Rust	error_mapping_matrix	shared_server	engine_mapping_complete_auth_session_event_tests_pending	FSC-3,FSC-5,FSC-6
 packages/agent/src/shared/server/validation.rs	Rust	sanitization_boundary	shared_server	used_before_public_transport_failure_message	FSC-2,FSC-6
 packages/agent/src/engine/kernel/errors.rs	Rust	engine_error_source	engine	mapped_by_engine_error_to_failure	FSC-3,FSC-5,FSC-9
-packages/agent/src/engine/durability/ledger/outcome.rs	Rust	stored_engine_error	engine_durability	stored_kind_message_only	FSC-5,FSC-9
+packages/agent/src/engine/durability/ledger/outcome.rs	Rust	stored_engine_error	engine_durability	replay_projection_exports_canonical_failure_envelope	FSC-5,FSC-9
 packages/agent/src/domains/model/providers/shared/provider.rs	Rust	provider_error_source	model_provider	produces_canonical_provider_failure_envelope	FSC-3,FSC-7
 packages/agent/src/domains/model/responder/mod.rs	Rust	model_response_boundary	model	carries_failure_envelope_from_provider_to_runtime	FSC-3,FSC-7
 packages/agent/src/domains/agent/loop/errors.rs	Rust	runtime_error_source	agent_runtime	produces_canonical_runtime_failure_envelope	FSC-3,FSC-4
@@ -14,14 +14,14 @@ packages/agent/src/domains/agent/loop/stream_state.rs	Rust	stream_event_error_ma
 packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs	Rust	capability_invocation_errors	agent_runtime	uses_failure_result_with_details_failure	FSC-5
 packages/agent/src/shared/protocol/model_capabilities.rs	Rust	capability_result_contract	shared_protocol	failure_result_embeds_canonical_envelope	FSC-5,FSC-8
 packages/agent/src/shared/protocol/events/tron/catalog.rs	Rust	live_tron_error_events	shared_protocol	canonical_fields_present_but_optional_for_historical_rows	FSC-4,FSC-8
-packages/agent/src/domains/session/event_store/types/payloads/error.rs	Rust	durable_error_payloads	event_store	partial_structured_fields	FSC-4,FSC-9
-packages/agent/src/domains/session/event_store/types/payloads/turn.rs	Rust	durable_turn_failed_payload	event_store	code_category_optional	FSC-4,FSC-9
+packages/agent/src/domains/session/event_store/types/payloads/error.rs	Rust	durable_error_payloads	event_store	accepts_canonical_failure_fields_and_details_failure	FSC-4,FSC-9
+packages/agent/src/domains/session/event_store/types/payloads/turn.rs	Rust	durable_turn_failed_payload	event_store	accepts_retryable_origin_details_failure	FSC-4,FSC-9
 packages/agent/src/domains/session/event_store/types/payloads/capability_invocation.rs	Rust	durable_capability_payload	event_store	no_failure_envelope_field	FSC-5,FSC-9
 packages/agent/src/transport/runtime/streams/turn.rs	Rust	runtime_turn_projection	transport_runtime	projects_optional_code_category	FSC-4,FSC-9
 packages/agent/src/transport/runtime/streams/capability_call.rs	Rust	runtime_capability_projection	transport_runtime	projects_details_only_if_result_has_them	FSC-5,FSC-9
 packages/agent/src/transport/engine/socket/mod.rs	Rust	engine_websocket_errors	transport_engine	serializes_canonical_failure_envelope	FSC-6
 packages/agent/src/transport/engine/socket/wire.rs	Rust	engine_protocol_validation	transport_engine	protocol_errors_are_capability_custom_only	FSC-2,FSC-6
-packages/agent/src/domains/session/replay/mod.rs	Rust	replay_manifest	session_replay	no_explicit_failure_envelope_export	FSC-9
+packages/agent/src/domains/session/replay/mod.rs	Rust	replay_manifest	session_replay	engine_invocation_errors_export_error_failure	FSC-9
 packages/ios-app/Sources/Engine/Protocol/Core/EngineProtocolTypes.swift	Swift	engine_protocol_error_decode	ios_engine_protocol	decodes_code_message_details_only	FSC-8
 packages/ios-app/Sources/Engine/Events/Payloads/CapabilityInvocationPayloads.swift	Swift	capability_payload_decode	ios_events	no_canonical_failure_decode	FSC-8
 packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection/ErrorEventProjection.swift	Swift	error_projection	ios_events	local_projection_partial_fields	FSC-8

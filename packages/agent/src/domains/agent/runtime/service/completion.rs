@@ -168,18 +168,28 @@ async fn persist_interrupted_if_needed(
     if !result.interrupted {
         return;
     }
+    let failure = FailureEnvelope::new(
+        RUNTIME_CANCELLED,
+        FailureCategory::Cancelled,
+        "Interrupted by user",
+        false,
+        true,
+        FailureOrigin::AgentRuntime,
+    )
+    .with_session_id(Some(session_id.to_owned()));
     if let Err(error) = persister
         .append(
             session_id,
             crate::domains::session::event_store::EventType::TurnFailed,
             serde_json::json!({
                 "turn": result.turns_executed,
-                "error": "Interrupted by user",
-                "code": RUNTIME_CANCELLED,
-                "category": FailureCategory::Cancelled.as_str(),
-                "retryable": false,
-                "recoverable": true,
-                "origin": FailureOrigin::AgentRuntime.as_str(),
+                "error": failure.message.clone(),
+                "code": failure.code.clone(),
+                "category": failure.category.as_str(),
+                "retryable": failure.retryable,
+                "recoverable": failure.recoverable,
+                "origin": failure.origin.as_str(),
+                "details": failure.details_with_failure(),
                 "partialContent": null,
             }),
         )

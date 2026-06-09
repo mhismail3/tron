@@ -192,6 +192,26 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
         .await;
     assert_eq!(result.error, None, "state invocation failed: {result:?}");
 
+    let failed_result = harness
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("missing::run").unwrap(),
+            json!({}),
+            CausalContext::new(
+                actor_id("actor-replay"),
+                ActorKind::System,
+                grant_id("grant"),
+                trace_id("missing-trace"),
+            )
+            .with_session_id(session_id.clone())
+            .with_workspace_id(workspace_id.clone()),
+        ))
+        .await;
+    assert!(
+        failed_result.error.is_some(),
+        "missing function should produce an engine failure"
+    );
+
     let deps = ReplayDeps::new(harness.event_store.clone(), harness.engine_host.clone());
     let first = replay_manifest_value(deps.clone(), session_id.clone())
         .await
@@ -250,8 +270,26 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
     );
 
     let invocations = first["sections"]["engineInvocations"].as_array().unwrap();
-    assert_eq!(invocations.len(), 1);
-    assert_eq!(invocations[0]["resultHash"].as_str().unwrap().len(), 64);
+    assert_eq!(invocations.len(), 2);
+    for invocation in invocations {
+        assert_eq!(invocation["resultHash"].as_str().unwrap().len(), 64);
+    }
+    let failed_invocation = invocations
+        .iter()
+        .find(|invocation| invocation["functionId"] == "missing::run")
+        .expect("failed invocation should be exported");
+    assert_eq!(
+        failed_invocation["error"]["failure"]["code"],
+        "ENGINE_STORED_INVOCATION_ERROR"
+    );
+    assert_eq!(
+        failed_invocation["error"]["failure"]["category"],
+        "capability"
+    );
+    assert_eq!(
+        failed_invocation["error"]["kind"],
+        "stored_invocation_error"
+    );
 
     let roundtrip = roundtrip::roundtrip_manifest(&first).expect("offline roundtrip");
     assert_eq!(roundtrip.replay_hash, roundtrip.recomputed_replay_hash);
@@ -263,7 +301,7 @@ async fn replay_manifest_is_byte_stable_and_covers_durable_sections() {
             .is_empty()
     );
     assert_eq!(roundtrip.counts.engine_idempotency_entries, 1);
-    assert_eq!(roundtrip.counts.engine_invocations, 1);
+    assert_eq!(roundtrip.counts.engine_invocations, 2);
     assert_eq!(roundtrip.counts.engine_queue_items, 2);
 }
 

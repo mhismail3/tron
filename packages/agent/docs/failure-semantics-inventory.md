@@ -48,8 +48,8 @@ replay boundary.
 | `TronEvent::Error` | Canonical builder populates code/category/retryable/recoverable/origin/details plus provider/model/status/error type when present. | iOS decoding/projection parity remains FSC-8. |
 | `capability.invocation.completed` | Error completions include `isError=true` and `details.failure` with the full canonical envelope. | Replay/export needs to retain the same details under FSC-9. |
 | `/engine` WebSocket response errors | Error frames serialize the canonical failure envelope and retain outer trace id with sanitized public message. | Add source guard in FSC-10. |
-| Durable error payloads | `error.agent`, `error.capability`, `error.provider`, and `turn.failed` have partial structured fields. | Persist canonical failure envelope or canonical fields with required code/category. |
-| Replay manifest | Includes event and engine records but failure envelope is not yet explicit. | Replay/audit exports retain structured failure details for postmortem and deterministic inspection. |
+| Durable error payloads | `error.agent`, `error.capability`, `error.provider`, and `turn.failed` accept canonical fields; active interrupted `turn.failed` rows store `details.failure`. | Keep future durable failure writers on the canonical envelope. |
+| Replay manifest | Session event payloads remain raw durable truth; engine invocation errors export `error.failure` plus legacy diagnostic fields. | Keep new replay failure sections on canonical envelopes. |
 | iOS engine protocol errors | Decodes code/message/details and keeps unknown codes. | Decode canonical fields and avoid inventing a divergent taxonomy when server fields exist. |
 | iOS event projections and capability UI | Renders error code/details from event payloads and capability details. | Use server-provided canonical failure details for diagnostics and rendering. |
 
@@ -76,5 +76,5 @@ replay boundary.
   carefully. Transport/network reachability classifications may remain local
   when no server response exists; server-authored failure classifications must
   not be duplicated.
-- FSC-9 must ensure durable event rows and replay manifests preserve
-  `details.failure` or equivalent canonical fields for new failures.
+- FSC-9 is closed for current durable/replay surfaces; future durable failure
+  writers must preserve `details.failure` or equivalent canonical fields.

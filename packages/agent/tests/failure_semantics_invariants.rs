@@ -50,10 +50,11 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Campaign Scorecard",
         "Status: **active**",
-        "Current score: **56/100**",
+        "Current score: **62/100**",
         "| FSC-0 | Campaign harness | 6 | passed_after_fix |",
         "| FSC-2 | Canonical envelope | 12 | passed_after_fix |",
         "| FSC-7 | Provider retry semantics | 8 | passed_after_fix |",
+        "| FSC-9 | Observability and replay | 6 | passed_after_fix |",
         "| FSC-10 | Closeout gates | 10 | pending |",
         "`packages/agent/docs/failure-semantics-inventory.tsv`",
         "`packages/agent/tests/failure_semantics_invariants.rs`",
@@ -87,13 +88,15 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Evidence Manifest",
         "Status: **active**",
-        "Current score: **56/100**",
+        "Current score: **62/100**",
         "| FSC-0 | passed_after_fix |",
         "| FSC-2 | passed_after_fix |",
         "| FSC-7 | passed_after_fix |",
+        "| FSC-9 | passed_after_fix |",
         "| FSC-10 | pending |",
         "## FSC-0 Findings",
         "## Server Core Checkpoint Findings",
+        "## Durable Replay Checkpoint Findings",
         "## Verification Log",
     ] {
         assert!(
@@ -217,6 +220,48 @@ fn failure_semantics_server_core_uses_canonical_envelope() {
     assert!(
         socket.contains(".to_failure(FailureOrigin::Transport)"),
         "engine socket errors must serialize canonical failure envelopes"
+    );
+}
+
+#[test]
+fn failure_semantics_durable_replay_preserves_failure_envelopes() {
+    let turn_payload =
+        read_repo_file("packages/agent/src/domains/session/event_store/types/payloads/turn.rs");
+    for required in [
+        "pub retryable: Option<bool>",
+        "pub origin: Option<String>",
+        "pub details: Option<Value>",
+    ] {
+        assert!(
+            turn_payload.contains(required),
+            "durable turn.failed payload missing {required}"
+        );
+    }
+
+    let error_payload =
+        read_repo_file("packages/agent/src/domains/session/event_store/types/payloads/error.rs");
+    for required in [
+        "pub details: Option<Value>",
+        "pub retry_after_ms: Option<u64>",
+    ] {
+        assert!(
+            error_payload.contains(required),
+            "durable error payloads missing {required}"
+        );
+    }
+
+    let completion =
+        read_repo_file("packages/agent/src/domains/agent/runtime/service/completion.rs");
+    assert!(
+        completion.contains("failure.details_with_failure()"),
+        "interrupted durable turn.failed writer must persist details.failure"
+    );
+
+    let replay = read_repo_file("packages/agent/src/domains/session/replay/mod.rs");
+    assert!(
+        replay.contains("engine_error_to_failure(error)")
+            && replay.contains(".details_with_failure()"),
+        "replay engine invocation errors must export canonical failure envelopes"
     );
 }
 

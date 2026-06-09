@@ -726,7 +726,9 @@ events, trace records, `engineIdempotencyEntries`, engine invocation rows,
 stream rows, queue rows, section hashes, and an overall `replayHash`.
 Idempotency entries carry payload-fingerprint request hashes, outcome hashes,
 and first/latest invocation refs; invocation, stream, and queue projections add
-`resultHash` or `payloadHash` where applicable. It is for offline
+`resultHash` or `payloadHash` where applicable. Failed engine invocation rows
+include `error.failure`, the canonical failure envelope, while retaining
+replay-local diagnostic fields for postmortem inspection. It is for offline
 audit/reconstruction and does not call providers, run tools, write files, spawn
 processes, drain queues, publish streams, or mutate resources.
 The replay manifest is a capability result, not a persisted event type, so iOS

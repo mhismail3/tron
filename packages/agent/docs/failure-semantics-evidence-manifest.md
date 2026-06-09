@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **56/100**
+Current score: **62/100**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -22,7 +22,7 @@ the Failure Semantics Campaign.
 | FSC-6 | passed_after_fix | Extended `/engine` WebSocket error frames to serialize canonical failure envelopes with sanitized messages and trace ids. | `cargo test --manifest-path packages/agent/Cargo.toml transport::engine::socket --lib` | Add final static transport guard in FSC-10. | server core checkpoint |
 | FSC-7 | passed_after_fix | Preserved provider retryability, recoverability, status, retry-after, provider code, provider/model identity, cancellation, and category through responder/runtime envelopes. | `cargo test --manifest-path packages/agent/Cargo.toml domains::model --lib` | iOS consumption remains FSC-8. | server core checkpoint |
 | FSC-8 | pending | Not started. | pending | Update iOS decode/projection parity. | pending |
-| FSC-9 | pending | Not started. | pending | Preserve failures in durable replay/observability outputs. | pending |
+| FSC-9 | passed_after_fix | Added canonical optional fields to durable error/turn-failed payloads, wrote interrupted durable `turn.failed` rows from `FailureEnvelope`, and exported replay engine invocation errors as `error.failure` plus retained legacy diagnostics. | `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::types::payloads --lib`; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::replay --lib` | iOS consumption remains FSC-8. | durable replay checkpoint |
 | FSC-10 | pending | Not started. | pending | Add final static guards and full verification evidence. | pending |
 
 ## FSC-0 Findings
@@ -50,9 +50,21 @@ the Failure Semantics Campaign.
   `ModelResponseError` and `RuntimeError` instead of being reparsed from strings.
 - `/engine` error frames now serialize the canonical envelope under `error`
   while retaining the outer trace id.
-- Remaining open loops are auth/session/event-store mapping tests, durable
-  failure payload/replay preservation, iOS decoding/projection parity, and final
-  closeout static gates.
+- Remaining open loops are auth/session/event-store mapping tests, iOS
+  decoding/projection parity, inventory closeout, and final static gates.
+
+## Durable Replay Checkpoint Findings
+
+- Durable `turn.failed` payloads now have optional `retryable`, `origin`, and
+  `details` fields; the active interrupted-run writer stores the canonical
+  envelope under `details.failure`.
+- Durable `error.*` payloads accept canonical fields so future persisted error
+  rows do not require a parallel schema.
+- Replay engine invocation failures now export `error.failure` with the
+  canonical envelope while preserving replay-local diagnostic fields such as
+  `kind` and `storedKind`.
+- The replay manifest test now covers both successful and failed engine
+  invocation rows and verifies byte-stable hashes after the new failure object.
 
 ## Verification Log
 
@@ -67,11 +79,13 @@ cargo test --manifest-path packages/agent/Cargo.toml shared::protocol::events --
 cargo test --manifest-path packages/agent/Cargo.toml domains::model --lib
 cargo test --manifest-path packages/agent/Cargo.toml domains::agent::loop::errors --lib
 cargo test --manifest-path packages/agent/Cargo.toml capability_invocation_executor::tests --lib
+cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::types::payloads --lib
+cargo test --manifest-path packages/agent/Cargo.toml domains::session::replay --lib
 ```
 
 ## Residual Risk
 
-The server-side core is materially improved but not a campaign closeout.
-Durable replay/observability and iOS parity still decide whether clients and
-postmortem tools can rely on the same envelope everywhere. FSC-10 must add
-static guards that make direct ad hoc failure emission regressions fail loudly.
+The server and durable/replay surfaces are materially improved but not a
+campaign closeout. iOS parity still decides whether clients rely on the same
+envelope everywhere. FSC-10 must add static guards that make direct ad hoc
+failure emission regressions fail loudly.

@@ -1,6 +1,7 @@
 //! Error event payloads: agent, capability, provider.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 /// Payload for `error.agent` events.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -11,8 +12,20 @@ pub struct ErrorAgentPayload {
     /// Error code.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+    /// Error category.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Whether retrying the same request may succeed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
     /// Whether the user can recover.
     pub recoverable: bool,
+    /// Layer that classified the failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// Structured failure details. New rows include `details.failure`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }
 
 /// Payload for `error.capability` events.
@@ -30,6 +43,21 @@ pub struct ErrorCapabilityPayload {
     /// Error code.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
+    /// Error category.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// Whether retrying the same request may succeed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retryable: Option<bool>,
+    /// Whether the user can recover.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recoverable: Option<bool>,
+    /// Layer that classified the failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// Structured failure details. New rows include `details.failure`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
 }
 
 /// Payload for `error.provider` events.
@@ -56,9 +84,31 @@ pub struct ErrorProviderPayload {
     pub suggestion: Option<String>,
     /// Whether the error is retryable.
     pub retryable: bool,
+    /// Whether the user can recover.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recoverable: Option<bool>,
+    /// Layer that classified the failure.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
+    /// Structured failure details. New rows include `details.failure`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub details: Option<Value>,
+    /// Provider HTTP status or equivalent status code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_code: Option<u16>,
+    /// Provider-specific error type/code.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_type: Option<String>,
+    /// Model id when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Seconds to wait before retrying.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub retry_after: Option<i64>,
+    /// Milliseconds to wait before retrying when the canonical envelope has a
+    /// precise value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub retry_after_ms: Option<u64>,
 }
 
 #[cfg(test)]
@@ -103,9 +153,31 @@ mod tests {
             "error": "rate limited",
             "category": "rate_limit",
             "retryable": true,
+            "recoverable": true,
+            "origin": "model_provider",
+            "statusCode": 429,
+            "errorType": "rate_limit_exceeded",
+            "model": "claude",
+            "retryAfterMs": 1200,
+            "details": {
+                "failure": {
+                    "code": "PROVIDER_RATE_LIMITED",
+                    "category": "rate_limit"
+                }
+            },
         });
         let parsed: ErrorProviderPayload = serde_json::from_value(raw).unwrap();
         assert_eq!(parsed.category, "rate_limit");
+        assert_eq!(parsed.recoverable, Some(true));
+        assert_eq!(parsed.origin.as_deref(), Some("model_provider"));
+        assert_eq!(parsed.status_code, Some(429));
+        assert_eq!(parsed.error_type.as_deref(), Some("rate_limit_exceeded"));
+        assert_eq!(parsed.model.as_deref(), Some("claude"));
+        assert_eq!(parsed.retry_after_ms, Some(1200));
+        assert_eq!(
+            parsed.details.unwrap()["failure"]["code"],
+            "PROVIDER_RATE_LIMITED"
+        );
     }
 
     #[test]
