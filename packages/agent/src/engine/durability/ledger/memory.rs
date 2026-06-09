@@ -8,8 +8,10 @@ use crate::engine::durability::ledger::{
 };
 use crate::engine::invocation::model::InvocationRecord;
 use crate::engine::kernel::errors::Result;
-use crate::engine::kernel::ids::InvocationId;
-use crate::engine::kernel::types::{CatalogChange, CatalogRevision};
+use crate::engine::kernel::ids::{FunctionId, InvocationId, WorkerId};
+use crate::engine::kernel::types::{
+    CatalogChange, CatalogRevision, FunctionDefinition, WorkerDefinition,
+};
 
 /// In-memory ledger store used by `LiveCatalog::new`.
 #[derive(Default)]
@@ -17,6 +19,8 @@ pub struct InMemoryEngineLedgerStore {
     catalog_changes: Vec<CatalogChange>,
     invocations: Vec<InvocationRecord>,
     idempotency: BTreeMap<IdempotencyKey, IdempotencyEntry>,
+    durable_workers: BTreeMap<WorkerId, WorkerDefinition>,
+    durable_functions: BTreeMap<FunctionId, FunctionDefinition>,
 }
 
 impl InMemoryEngineLedgerStore {
@@ -49,6 +53,41 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
             .take(limit)
             .cloned()
             .collect())
+    }
+
+    fn upsert_durable_worker_definition(&mut self, definition: &WorkerDefinition) -> Result<()> {
+        self.durable_workers
+            .insert(definition.id.clone(), definition.clone());
+        Ok(())
+    }
+
+    fn remove_durable_worker_definition(&mut self, worker_id: &WorkerId) -> Result<()> {
+        self.durable_workers.remove(worker_id);
+        self.durable_functions
+            .retain(|_, function| &function.owner_worker != worker_id);
+        Ok(())
+    }
+
+    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>> {
+        Ok(self.durable_workers.values().cloned().collect())
+    }
+
+    fn upsert_durable_function_definition(
+        &mut self,
+        definition: &FunctionDefinition,
+    ) -> Result<()> {
+        self.durable_functions
+            .insert(definition.id.clone(), definition.clone());
+        Ok(())
+    }
+
+    fn remove_durable_function_definition(&mut self, function_id: &FunctionId) -> Result<()> {
+        self.durable_functions.remove(function_id);
+        Ok(())
+    }
+
+    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>> {
+        Ok(self.durable_functions.values().cloned().collect())
     }
 
     fn append_invocation(&mut self, record: &InvocationRecord) -> Result<()> {

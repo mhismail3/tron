@@ -41,10 +41,10 @@ The TSV covers tracked and newly introduced files under:
 
 | Classification | Count |
 |----------------|------:|
-| primitive | 88 |
+| primitive | 98 |
 | implementation | 469 |
 | support | 378 |
-| test | 392 |
+| test | 393 |
 | docs | 32 |
 | delete | 0 |
 
@@ -58,7 +58,7 @@ The TSV covers tracked and newly introduced files under:
 | `capability_execute` | 8 |
 | `docs/static gates` | 32 |
 | `domain_worker` | 6 |
-| `engine` | 80 |
+| `engine` | 90 |
 | `ios` | 94 |
 | `ios_engine` | 129 |
 | `ios_session` | 66 |
@@ -72,17 +72,17 @@ The TSV covers tracked and newly introduced files under:
 | `session_storage` | 63 |
 | `settings` | 16 |
 | `shared_foundation` | 44 |
-| `test_harness` | 392 |
+| `test_harness` | 393 |
 | `transport` | 24 |
 
 ## Delete Candidates
 
-No file is classified as `delete` in the initial TPC-1 inventory. Later TPC rows
-may delete or split files, then regenerate this inventory in TPC-10.
+No file is classified as `delete` in the current TPC inventory. Later TPC rows
+may delete or split files, then regenerate this inventory.
 
 ## Open Loops
 
-- Hard LOC targets remain open and are owned by TPC-2 through TPC-8.
+- Hard LOC targets remain open and are owned by TPC-3 through TPC-8.
 - Fallback, compatibility, no-op, and provider-alias residue scans remain open
   and are owned by TPC-4 through TPC-10.
 - The manual deployment helper surface remains open and is owned by TPC-9.

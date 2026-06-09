@@ -250,6 +250,33 @@ impl EngineLedgerStore for ReserveFailingLedger {
         Ok(Vec::new())
     }
 
+    fn upsert_durable_worker_definition(&mut self, _definition: &WorkerDefinition) -> Result<()> {
+        Ok(())
+    }
+
+    fn remove_durable_worker_definition(&mut self, _worker_id: &WorkerId) -> Result<()> {
+        Ok(())
+    }
+
+    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>> {
+        Ok(Vec::new())
+    }
+
+    fn upsert_durable_function_definition(
+        &mut self,
+        _definition: &FunctionDefinition,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn remove_durable_function_definition(&mut self, _function_id: &FunctionId) -> Result<()> {
+        Ok(())
+    }
+
+    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>> {
+        Ok(Vec::new())
+    }
+
     fn append_invocation(
         &mut self,
         _record: &crate::engine::invocation::model::InvocationRecord,
@@ -303,6 +330,33 @@ impl EngineLedgerStore for CatalogChangeFailingLedger {
         _revision: CatalogRevision,
         _limit: usize,
     ) -> Result<Vec<crate::engine::kernel::types::CatalogChange>> {
+        Ok(Vec::new())
+    }
+
+    fn upsert_durable_worker_definition(&mut self, _definition: &WorkerDefinition) -> Result<()> {
+        Ok(())
+    }
+
+    fn remove_durable_worker_definition(&mut self, _worker_id: &WorkerId) -> Result<()> {
+        Ok(())
+    }
+
+    fn list_durable_worker_definitions(&self) -> Result<Vec<WorkerDefinition>> {
+        Ok(Vec::new())
+    }
+
+    fn upsert_durable_function_definition(
+        &mut self,
+        _definition: &FunctionDefinition,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    fn remove_durable_function_definition(&mut self, _function_id: &FunctionId) -> Result<()> {
+        Ok(())
+    }
+
+    fn list_durable_function_definitions(&self) -> Result<Vec<FunctionDefinition>> {
         Ok(Vec::new())
     }
 
