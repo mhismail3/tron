@@ -29,6 +29,12 @@ The active composition roots are:
 
 Any other concrete cross-boundary wiring must be promoted into one of these roots or recorded here before it is allowed.
 
+Domain worker registration is owner-local rather than a general composition
+root: `packages/agent/src/domains/registration/mod.rs` is the only production
+code that may enumerate retained domain worker modules, and it is entered
+through `packages/agent/src/transport/runtime/setup.rs`. Individual
+`worker_module` constructors and the registration entrypoint stay crate-private.
+
 ## Classification Summary
 
 | Class | Files |

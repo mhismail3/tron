@@ -29,10 +29,12 @@
 //! worker -> contract operation key -> handlers.rs -> domain owner -> narrow
 //! deps/service -> engine ledger/streams/queues/grants/leases`.
 //!
-//! Startup calls `registration::catalog` and `registration::worker` to bind the
-//! retained domain contracts into the engine catalog. Individual domains expose
-//! their public behavior through `contract.rs` definitions and handler tables,
-//! not through transport-specific functions.
+//! Startup enters the domain tree through
+//! `transport::runtime::setup::register_server_domains_for_context`. That
+//! facade delegates to the crate-private registration owner, which is the only
+//! non-test code allowed to wire concrete domain worker modules. Individual
+//! domains expose their public behavior through `contract.rs` definitions and
+//! handler tables, not through transport-specific functions.
 //!
 //! ## Invariants
 //!

@@ -17,7 +17,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Scorecard",
         "Status: **active**",
-        "Current score: **40/100**",
+        "Current score: **50/100**",
         "Branch: `codex/primitive-engine-teardown`",
         "This scorecard formalizes the True Modularity Boundary campaign.",
         "## Boundary Taxonomy",
@@ -32,7 +32,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-1 | Define boundary taxonomy and inventory | 8 | passed_after_fix |",
         "| TMB-2 | Build the model response black box | 15 | passed_after_fix |",
         "| TMB-3 | Narrow engine facade ownership | 12 | passed_after_fix |",
-        "| TMB-4 | Harden domain worker boundaries | 10 | open |",
+        "| TMB-4 | Harden domain worker boundaries | 10 | passed_after_fix |",
         "| TMB-5 | Encapsulate state and storage | 10 | open |",
         "| TMB-6 | Make transport adapter-only | 10 | open |",
         "| TMB-7 | Make iOS Engine access black-boxed | 10 | open |",
@@ -60,17 +60,19 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Evidence Manifest",
         "Status: **active**",
-        "Current score: **40/100**",
+        "Current score: **50/100**",
         "| TMB-0 | passed_after_fix |",
         "| TMB-1 | passed_after_fix |",
         "| TMB-2 | passed_after_fix |",
         "| TMB-3 | passed_after_fix |",
+        "| TMB-4 | passed_after_fix |",
         "## TMB-0 Red Proof",
         "The first invariant run is intentionally red.",
         "Rust agent loop imports `domains::model::providers` directly",
         "Provider factory and provider health types cross into server and agent",
         "After TMB-2, `agent_loop_uses_model_responder_boundary` passes.",
         "After TMB-3, `engine_facade_is_the_only_cross_module_engine_api` passes.",
+        "After TMB-4, `domain_workers_expose_contracts_not_services` passes.",
     ] {
         assert!(
             manifest.contains(required),
@@ -224,7 +226,7 @@ fn domain_workers_expose_contracts_not_services() {
         "packages/agent/src/domains/",
         "packages/agent/src/app/bootstrap/",
     ];
-    let leaks = rust_source_lines("packages/agent/src")
+    let service_leaks = rust_source_lines("packages/agent/src")
         .into_iter()
         .filter(|line| !path_has_any_prefix(path_from_line(line), &allowed_prefixes))
         .filter(|line| {
@@ -236,9 +238,41 @@ fn domain_workers_expose_contracts_not_services() {
         .collect::<Vec<_>>();
 
     assert!(
-        leaks.is_empty(),
+        service_leaks.is_empty(),
         "runtime/transport/app code must use domain contracts or composition roots, not domain services:\n{}",
-        leaks.join("\n")
+        service_leaks.join("\n")
+    );
+
+    let public_worker_constructors = rust_source_lines("packages/agent/src/domains")
+        .into_iter()
+        .filter(|line| {
+            line.contains("pub fn worker_module")
+                || line.contains("pub fn worker_modules")
+                || line.contains("pub fn domain_worker_module")
+                || line.contains("pub fn register_domain_workers_for_context")
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        public_worker_constructors.is_empty(),
+        "domain worker registration and worker-module constructors must stay crate-private:\n{}",
+        public_worker_constructors.join("\n")
+    );
+
+    let registration_call_leaks = rust_source_lines("packages/agent/src")
+        .into_iter()
+        .filter(|line| line.contains("register_domain_workers_for_context("))
+        .filter(|line| {
+            let path = path_from_line(line);
+            path != "packages/agent/src/domains/registration/mod.rs"
+                && path != "packages/agent/src/transport/runtime/setup.rs"
+        })
+        .collect::<Vec<_>>();
+
+    assert!(
+        registration_call_leaks.is_empty(),
+        "domain worker registration must be centralized behind transport runtime setup:\n{}",
+        registration_call_leaks.join("\n")
     );
 }
 

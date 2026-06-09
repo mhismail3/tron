@@ -7,6 +7,9 @@
 //!
 //! `capability` owns the only model-facing tool, `capability::execute`, and
 //! that tool performs direct primitive operations rather than catalog routing.
+//! The registration entrypoint is crate-private: transport setup is the
+//! server-facing facade, while this module owns the concrete domain-worker
+//! wiring.
 //!
 //! # INVARIANT: canonical capabilities are the executable surface
 //!
@@ -31,7 +34,7 @@ use crate::domains::{
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
-pub fn register_domain_workers_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
+pub(crate) fn register_domain_workers_for_context(ctx: &ServerRuntimeContext) -> EngineResult<()> {
     register_domain_workers(ctx)
 }
 

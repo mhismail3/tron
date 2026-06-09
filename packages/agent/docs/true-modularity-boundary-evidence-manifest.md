@@ -1,7 +1,7 @@
 # True Modularity Boundary Evidence Manifest
 
 Status: **active**
-Current score: **40/100**
+Current score: **50/100**
 Branch: `codex/primitive-engine-teardown`
 
 This manifest records evidence for the True Modularity Boundary campaign. Each
@@ -16,7 +16,7 @@ verification commands before the checkpoint commit.
 | TMB-1 | passed_after_fix | Added the Markdown inventory and machine-readable TSV with 929 tracked Rust/Swift source rows, seven boundary classes, owner labels, dependency-direction rules, and the allowed composition-root list. | `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants boundary_inventory_covers_tracked_sources -- --nocapture` passes. Full target remains red on later implementation phases. | TMB-2 through TMB-10 remain open. | `b24e417e8` |
 | TMB-2 | passed_after_fix | Added `domains::model::responder` as the model-output black-box API, replaced agent/runtime provider dependencies with `ModelResponderFactory`, made provider implementations crate-private, removed broad provider re-exports, deleted `turn_runner/provider.rs`, removed noncanonical reasoning parser spellings, and moved canonical token accounting to `domains::model::tokens`. | `cargo check --manifest-path packages/agent/Cargo.toml`; `cargo test --manifest-path packages/agent/Cargo.toml --lib model -- --nocapture`; `cargo test --manifest-path packages/agent/Cargo.toml --lib turn_runner -- --nocapture`; `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants agent_loop_uses_model_responder_boundary -- --nocapture` all pass. Full TMB target remains red by design: 11 tests run, 4 passed, 7 failed (`provider_internals_do_not_escape_model_domain`, `engine_facade_is_the_only_cross_module_engine_api`, `state_stores_are_owner_private`, `transport_is_adapter_only`, `ios_ui_uses_repositories_not_engine_transport`, `boundary_errors_do_not_leak_impl_errors`, `final_modularity_closeout_is_complete`). | TMB-3 through TMB-10 remain open. Model-provider dead-code warnings remain visible and are carried into later cleanup; no `allow` attributes were added. | `99d076cb9` |
 | TMB-3 | passed_after_fix | Narrowed engine facade ownership by making engine submodules crate-private, re-exporting required runtime metadata constants and `ExternalWorkerInvoker` through `engine/mod.rs`, and replacing non-engine imports of `engine::invocation`, `engine::kernel`, and `engine::runtime` internals with facade imports. | `cargo check --manifest-path packages/agent/Cargo.toml` and `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants engine_facade_is_the_only_cross_module_engine_api -- --nocapture` pass. Full target remains red by design: 11 tests run, 5 passed, 6 failed (`provider_internals_do_not_escape_model_domain`, `state_stores_are_owner_private`, `transport_is_adapter_only`, `ios_ui_uses_repositories_not_engine_transport`, `boundary_errors_do_not_leak_impl_errors`, `final_modularity_closeout_is_complete`). | TMB-4 through TMB-10 remain open. Model-provider dead-code warnings remain visible and are carried into later cleanup; no `allow` attributes were added. | checkpoint commit |
-| TMB-4 | open | Domain worker boundary hardening is not complete yet. | Pending. | Domain service/internal imports still need cleanup. | pending |
+| TMB-4 | passed_after_fix | Hardened domain worker boundaries by making `domains::registration::register_domain_workers_for_context` crate-private behind `transport::runtime::setup::register_server_domains_for_context` and extending the invariant to reject public worker-module constructors, non-central registration callers, and runtime/transport/app imports of domain handlers, services, deps, or operations. | `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants domain_workers_expose_contracts_not_services -- --nocapture` passes. Full target remains red by design: 11 tests run, 5 passed, 6 failed (`provider_internals_do_not_escape_model_domain`, `state_stores_are_owner_private`, `transport_is_adapter_only`, `ios_ui_uses_repositories_not_engine_transport`, `boundary_errors_do_not_leak_impl_errors`, `final_modularity_closeout_is_complete`). | TMB-5 through TMB-10 remain open. The full pass count did not increase because the TMB-4 guard was already green before this checkpoint; the completed work strengthened it and narrowed visibility. Model-provider dead-code warnings remain visible and are carried into later cleanup; no `allow` attributes were added. | checkpoint commit |
 | TMB-5 | open | State and storage encapsulation is not complete yet. | Pending. | Direct backend/store/SQL imports still need cleanup. | pending |
 | TMB-6 | open | Transport adapter-only cleanup is not complete yet. | Pending. | Transport/domain dependency direction still needs static enforcement. | pending |
 | TMB-7 | open | iOS Engine access black-boxing is not complete yet. | Pending. | SwiftUI/session dependency cleanup remains open. | pending |
@@ -58,6 +58,10 @@ Observed leak categories at harness creation:
   Engine implementation modules are crate-private and non-engine callers use
   facade re-exports for runtime metadata constants and external worker
   invocation.
+- After TMB-4, `domain_workers_expose_contracts_not_services` passes. Domain
+  worker registration is crate-private behind transport runtime setup, worker
+  module constructors are not public, and runtime/transport/app code cannot
+  import domain handler, service, deps, or operation internals.
 
 The red run is evidence for TMB-0 only. Later checkpoints must remove these
 active leak descriptions once the corresponding implementation phase is closed.
