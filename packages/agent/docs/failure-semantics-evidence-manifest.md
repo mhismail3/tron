@@ -13,7 +13,7 @@ the Failure Semantics Campaign.
 
 | Row | Status | Change | Verification | Open loops | Commit |
 |---|---|---|---|---|---|
-| FSC-0 | passed_after_fix | Added the campaign scorecard, inventory, TSV, evidence manifest, invariant target, and README living-doc links. | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | FSC-1 through FSC-10 remain open implementation rows. | `2347ea899` |
+| FSC-0 | passed_after_fix | Added the campaign scorecard, inventory, TSV, evidence manifest, invariant target, and README living-doc links. | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | FSC-1 through FSC-10 remain open implementation rows. | `e9b180fa1` |
 | FSC-1 | pending | Not started. | pending | Complete and verify the failure inventory while implementing the source mappings. | pending |
 | FSC-2 | pending | Not started. | pending | Add canonical server failure envelope and builders. | pending |
 | FSC-3 | pending | Not started. | pending | Add exhaustive mapping tests. | pending |
