@@ -4,7 +4,7 @@ Created: 2026-06-09
 
 Initial score: **0/100**
 
-Current score: **14/100**
+Current score: **38/100**
 
 Status: **active**
 
@@ -58,8 +58,8 @@ re-execution.
 |----|------|-------:|--------|-------|-------------------|-----------|------------|
 | DRC-0 | Scorecard, evidence, inventory, invariant target, README, and CI wiring | 6 | passed_after_fix | docs_or_scorecard | Added DRC scorecard, evidence manifest, replay-critical inventory docs/TSV, invariant target scaffolding, README living-doc links, and local/GitHub closeout target wiring. | DRC-2 through DRC-10 own behavioral proof and final closeout. | DRC-0/1 formalization checkpoint |
 | DRC-1 | Replay-critical source inventory | 8 | passed_after_fix | storage | Inventoried session events, provider request audits, trace records, engine invocation ledger rows, stream rows, queue items/attempts, resources, timestamps, IDs, provider envelopes, and replay hash/order owners. | DRC-2 through DRC-8 implement and prove the inventory contracts. | DRC-0/1 formalization checkpoint |
-| DRC-2 | Entropy centralization and allow-list | 12 | pending | storage | Static guard rejects replay-critical raw time, UUID, RNG, and timestamp-only ordering outside approved owners. | Awaiting code guard and allow-list proof. | pending |
-| DRC-3 | Deterministic constructors and injection seams | 12 | pending | storage | Replay-critical IDs/timestamps can be injected in tests and import/roundtrip paths without replacing production wall-clock behavior. | Awaiting constructors and tests. | pending |
+| DRC-2 | Entropy centralization and allow-list | 12 | passed_after_fix | storage | `replay_critical_entropy_is_allow_listed` scans Rust source for raw UTC/system/instant clocks, UUIDv7, RNG, and `ORDER BY timestamp`, failing outside explicit owner paths. | DRC-5/DRC-6 must keep replay builders outside entropy allow-list paths and use stable ordering. | DRC-2/3 entropy and identity checkpoint |
+| DRC-3 | Deterministic constructors and injection seams | 12 | passed_after_fix | storage | Added explicit event/session/workspace/fork identities, `append_with_identity`, `create_session_with_identity`, `fork_with_identity`, and `InvocationRecord::from_result_at` with DB-boundary tests. | Queue/stream replay listing and manifest import/roundtrip use these seams in DRC-5 through DRC-8. | DRC-2/3 entropy and identity checkpoint |
 | DRC-4 | Provider request audit before model streaming | 12 | pending | model_loop | A `model.provider_request` session event is written before the provider stream opens through the model responder boundary. | Awaiting event type, responder audit value, and turn-runner persistence proof. | pending |
 | DRC-5 | Canonical `tron.replay.v1` manifest export | 14 | pending | session | `session::replay_manifest` returns session events, provider audits, traces, invocations, streams, and queue rows from one read-only builder. | Awaiting builder, contract, and operation. | pending |
 | DRC-6 | Byte-stable replay hashes and stable ordering | 10 | pending | storage | Each replay section and the overall manifest use canonical JSON hashes and stable non-timestamp-only order. | Awaiting canonical serializer and hash/order tests. | pending |
@@ -80,9 +80,12 @@ Total weight: **100**
 - Provider request audit is not yet persisted as a turn-scoped session event.
 - Trace listing and several UI-oriented event/queue queries use newest-first or
   timestamp-oriented order; replay needs separate stable listing methods.
-- Entropy is scattered across event factories, session creation, engine
-  invocation records, queue/stream stores, provider cache helpers, health
-  checks, OAuth, storage maintenance, and tests. DRC-2 owns the allow-list.
+- Replay-critical session/event/invocation constructors now have explicit
+  identity/timestamp seams while production paths still use UUIDv7 and
+  wall-clock timestamps.
+- Raw time, UUIDv7, RNG, and timestamp-only ordering are guarded by a DRC source
+  scan with explicit owner-path allow-list entries for non-replay runtime,
+  security, maintenance, and diagnostic cases.
 
 ## Verification Commands
 
@@ -101,4 +104,3 @@ git diff --check
 git ls-files -ci --exclude-standard
 git status --short
 ```
-

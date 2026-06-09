@@ -1,4 +1,7 @@
 use super::*;
+use crate::domains::session::event_store::{
+    EventIdentity, SessionCreationIdentity, SessionIdentity, WorkspaceIdentity,
+};
 
 // ── Session creation ──────────────────────────────────────────────
 
@@ -22,6 +25,47 @@ fn create_session_basic() {
         result.session.root_event_id.as_deref(),
         Some(result.root_event.id.as_str())
     );
+}
+
+#[test]
+fn create_session_with_identity_persists_explicit_replay_fields() {
+    let store = setup();
+    let result = store
+        .create_session_with_identity(
+            "claude-opus-4-6",
+            "/tmp/project",
+            Some("Test"),
+            Some("anthropic"),
+            SessionCreationIdentity::new(
+                WorkspaceIdentity::new("ws_replay_fixed", "2026-06-09T12:00:00Z"),
+                SessionIdentity::new("sess_replay_fixed", "2026-06-09T12:00:01Z"),
+                EventIdentity::new("evt_replay_root", "2026-06-09T12:00:02Z"),
+            ),
+        )
+        .unwrap();
+
+    assert_eq!(result.session.id, "sess_replay_fixed");
+    assert_eq!(result.session.workspace_id, "ws_replay_fixed");
+    assert_eq!(result.session.created_at, "2026-06-09T12:00:01Z");
+    assert_eq!(result.session.last_activity_at, "2026-06-09T12:00:02Z");
+    assert_eq!(result.root_event.id, "evt_replay_root");
+    assert_eq!(result.root_event.timestamp, "2026-06-09T12:00:02Z");
+    assert_eq!(
+        result.session.head_event_id.as_deref(),
+        Some("evt_replay_root")
+    );
+    assert_eq!(
+        result.session.root_event_id.as_deref(),
+        Some("evt_replay_root")
+    );
+
+    let workspace = store
+        .get_workspace_by_path("/tmp/project")
+        .unwrap()
+        .expect("workspace should exist");
+    assert_eq!(workspace.id, "ws_replay_fixed");
+    assert_eq!(workspace.created_at, "2026-06-09T12:00:00Z");
+    assert_eq!(workspace.last_activity_at, "2026-06-09T12:00:00Z");
 }
 
 #[test]

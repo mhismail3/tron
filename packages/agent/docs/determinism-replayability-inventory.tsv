@@ -7,13 +7,13 @@ DRC-1-005	source	engine_stream_events	packages/agent/src/engine/durability/strea
 DRC-1-006	source	engine_queue_items	packages/agent/src/engine/durability/queue/	created_at ASC today	Replay order queue ASC + created_at ASC + receipt_id ASC	DRC-5/DRC-7
 DRC-1-007	source	engine_resources	packages/agent/src/engine/durability/resources/	resource API order	Include resource refs/hashes from replay-critical records	DRC-7
 DRC-1-008	source	payload_blobs	packages/agent/src/shared/storage/payloads.rs	owner/ref dependent	Resolve JSON payload refs before canonical hashing	DRC-5/DRC-6
-DRC-1-009	entropy	utc_now	packages/agent/src/	explicit scan needed	Allow-list or injection seam for replay-critical constructors	DRC-2/DRC-3
-DRC-1-010	entropy	system_time_now	packages/agent/src/domains/model/providers/	explicit scan needed	Allow only non-replay provider/runtime timing	DRC-2
-DRC-1-011	entropy	instant_now	packages/agent/src/	explicit scan needed	Allow durations/health only outside replay hashes	DRC-2
-DRC-1-012	entropy	uuid_now_v7	packages/agent/src/	explicit scan needed	Deterministic constructors for replay-critical tests/import paths	DRC-2/DRC-3
-DRC-1-013	entropy	rand_random	packages/agent/src/	explicit scan needed	Allow security tokens and contention jitter only	DRC-2
+DRC-1-009	entropy	utc_now	packages/agent/src/	guarded by entropy_scanning.rs	Allow-list approved owners; replay-critical constructors use explicit identities	DRC-2/DRC-3 passed
+DRC-1-010	entropy	system_time_now	packages/agent/src/domains/model/providers/	guarded by entropy_scanning.rs	Allow only non-replay provider/runtime timing	DRC-2 passed
+DRC-1-011	entropy	instant_now	packages/agent/src/	guarded by entropy_scanning.rs	Allow durations/health only outside replay hashes	DRC-2 passed
+DRC-1-012	entropy	uuid_now_v7	packages/agent/src/	guarded by entropy_scanning.rs	Deterministic constructors for replay-critical tests/import paths	DRC-2/DRC-3 passed
+DRC-1-013	entropy	rand_random	packages/agent/src/	guarded by entropy_scanning.rs	Allow security tokens and contention jitter only	DRC-2 passed
 DRC-1-014	hash	canonical_json	packages/agent/src/domains/session/	not implemented	Sorted-object canonical JSON for section and overall hashes	DRC-5/DRC-6
 DRC-1-015	api	session_replay_manifest	packages/agent/src/domains/session/	not implemented	Pure-read tron.replay.v1 capability	DRC-5
 DRC-1-016	api	execute_replay_manifest	packages/agent/src/domains/capability/operations/	not implemented	Delegate to session replay builder for current session	DRC-5/DRC-8
 DRC-1-017	proof	invariant_target	packages/agent/tests/determinism_replayability_invariants.rs	new target	Focused static and behavioral DRC gates	DRC-0/DRC-10
-
+DRC-1-018	entropy	timestamp_only_ordering	packages/agent/src/	guarded by entropy_scanning.rs	UI/diagnostic ORDER BY timestamp paths are allowed; replay paths must use stable tie-breakers	DRC-2 passed; DRC-6 proof pending

@@ -9,6 +9,7 @@
 //! - **Event store**: High-level API for session creation, event append, ancestor walk, fork
 //! - **`SQLite` backend**: `rusqlite` facade with repository pattern
 //! - **Event factory**: Scoped event creation with auto-generated IDs and timestamps
+//! - **Replay identities**: Explicit IDs/timestamps for deterministic replay/import tests
 //! - **Event chain builder**: Automates `parent_id` threading across sequential events
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
 //!   history, preserving separate client display text and model-facing capability result text
@@ -20,6 +21,7 @@
 //! |--------|----------------|
 //! | `envelope` | Broadcast envelope creation and event type cataloging. |
 //! | `factory` | Event ID creation and chain append helpers. |
+//! | `identity` | Explicit event/session/workspace identities for replay-critical constructors. |
 //! | `reconstruction` | Provider-context reconstruction from persisted event history. |
 //! | `sqlite` | Connection, migration, repository, lock, and row-type boundary. |
 //! | `store` | High-level transactional `EventStore` facade. |
@@ -45,6 +47,8 @@
 //!   ownership behind `#[path]` aliases.
 //! - SQLite row shape and migrations stay under the SQLite owner.
 //! - Reconstruction is deterministic over persisted event order.
+//! - Replay/import paths use explicit identities instead of ambient time or
+//!   UUID generation when durable IDs/timestamps must be stable.
 //!
 //! ## Test Ownership
 //!
@@ -57,6 +61,7 @@
 pub mod envelope;
 pub mod errors;
 pub mod factory;
+pub mod identity;
 pub mod reconstruction;
 pub mod redaction;
 pub mod sqlite;
@@ -69,6 +74,9 @@ pub use envelope::{
 };
 pub use errors::{EventStoreError, Result};
 pub use factory::{EventChainBuilder, EventFactory};
+pub use identity::{
+    EventIdentity, SessionCreationIdentity, SessionForkIdentity, SessionIdentity, WorkspaceIdentity,
+};
 pub use reconstruction::{
     COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX, ReconstructionResult, reconstruct_from_events,
 };

@@ -9,8 +9,8 @@
 //! track the current head manually.
 
 use serde_json::Value;
-use uuid::Uuid;
 
+use crate::domains::session::event_store::identity::EventIdentity;
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::base::SessionEvent;
 
@@ -44,17 +44,31 @@ impl EventFactory {
 
     /// Generate a new event ID.
     pub fn generate_event_id() -> String {
-        format!("evt_{}", Uuid::now_v7())
+        EventIdentity::generate_current().id
     }
 
     /// Create a `session.start` event (root of a new session).
     pub fn create_session_start(&self, model: &str, working_directory: &str) -> SessionEvent {
+        self.create_session_start_with_identity(
+            model,
+            working_directory,
+            EventIdentity::generate_current(),
+        )
+    }
+
+    /// Create a `session.start` event with an explicit ID and timestamp.
+    pub fn create_session_start_with_identity(
+        &self,
+        model: &str,
+        working_directory: &str,
+        identity: EventIdentity,
+    ) -> SessionEvent {
         SessionEvent {
-            id: Self::generate_event_id(),
+            id: identity.id,
             parent_id: None,
             session_id: self.session_id.clone(),
             workspace_id: self.workspace_id.clone(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: identity.timestamp,
             event_type: EventType::SessionStart,
             sequence: 0,
             checksum: None,
@@ -72,12 +86,28 @@ impl EventFactory {
         source_session_id: &str,
         source_event_id: &str,
     ) -> SessionEvent {
+        self.create_session_fork_with_identity(
+            parent_id,
+            source_session_id,
+            source_event_id,
+            EventIdentity::generate_current(),
+        )
+    }
+
+    /// Create a `session.fork` event with an explicit ID and timestamp.
+    pub fn create_session_fork_with_identity(
+        &self,
+        parent_id: &str,
+        source_session_id: &str,
+        source_event_id: &str,
+        identity: EventIdentity,
+    ) -> SessionEvent {
         SessionEvent {
-            id: Self::generate_event_id(),
+            id: identity.id,
             parent_id: Some(parent_id.to_string()),
             session_id: self.session_id.clone(),
             workspace_id: self.workspace_id.clone(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: identity.timestamp,
             event_type: EventType::SessionFork,
             sequence: 0,
             checksum: None,
@@ -96,12 +126,30 @@ impl EventFactory {
         sequence: i64,
         payload: Value,
     ) -> SessionEvent {
+        self.create_event_with_identity(
+            event_type,
+            parent_id,
+            sequence,
+            payload,
+            EventIdentity::generate_current(),
+        )
+    }
+
+    /// Create a generic event with an explicit ID and timestamp.
+    pub fn create_event_with_identity(
+        &self,
+        event_type: EventType,
+        parent_id: Option<&str>,
+        sequence: i64,
+        payload: Value,
+        identity: EventIdentity,
+    ) -> SessionEvent {
         SessionEvent {
-            id: Self::generate_event_id(),
+            id: identity.id,
             parent_id: parent_id.map(String::from),
             session_id: self.session_id.clone(),
             workspace_id: self.workspace_id.clone(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: identity.timestamp,
             event_type,
             sequence,
             checksum: None,
@@ -242,6 +290,25 @@ mod tests {
         assert_eq!(event.event_type, EventType::MessageUser);
         assert_eq!(event.sequence, 5);
         assert_eq!(event.payload["content"], "Hello");
+    }
+
+    #[test]
+    fn create_event_with_identity_pins_replay_fields() {
+        let factory = EventFactory::new("sess_1", "ws_1");
+        let event = factory.create_event_with_identity(
+            EventType::ContextCleared,
+            Some("evt_parent"),
+            7,
+            serde_json::json!({"reason": "test"}),
+            EventIdentity::new("evt_fixed", "2026-06-09T12:00:00Z"),
+        );
+
+        assert_eq!(event.id, "evt_fixed");
+        assert_eq!(event.timestamp, "2026-06-09T12:00:00Z");
+        assert_eq!(event.session_id, "sess_1");
+        assert_eq!(event.workspace_id, "ws_1");
+        assert_eq!(event.parent_id.as_deref(), Some("evt_parent"));
+        assert_eq!(event.sequence, 7);
     }
 
     #[test]

@@ -2,7 +2,7 @@
 
 Created: 2026-06-09
 
-Status: DRC-1 `passed_after_fix`
+Status: DRC-3 `passed_after_fix`; DRC-4 through DRC-10 remain open
 
 Machine-readable inventory:
 [`determinism-replayability-inventory.tsv`](determinism-replayability-inventory.tsv)
@@ -33,10 +33,10 @@ Machine-readable inventory:
 
 | Pattern | Current owner examples | Replay stance | Gap owner |
 |---------|------------------------|---------------|-----------|
-| `chrono::Utc::now` / `Utc::now` | session events, session rows, engine ledger, queues, streams, traces, storage maintenance, settings, tests | Replay-critical constructors get injection seams or an explicit allow-list; non-replay maintenance timestamps remain allowed. | DRC-2/DRC-3 |
+| `chrono::Utc::now` / `Utc::now` | event/store identity owner, session rows, engine ledger, queues, streams, traces, storage maintenance, settings, tests | Static guard allow-lists approved owners; replay-critical event/session constructors now accept explicit IDs/timestamps. | DRC-2/DRC-3 passed; DRC-5/DRC-6 guard replay builders |
 | `std::time::SystemTime::now` | provider cache pruning, Gemini/Ollama stream helpers | Allowed only for provider/runtime non-replay jitter or diagnostics unless audit fields depend on it. | DRC-2 |
 | `std::time::Instant::now` | health, bootstrap, shutdown, provider duration, turn timing, capability duration | Allowed for durations and health timing; replay hashes use persisted values, not live instants. | DRC-2 |
-| `Uuid::now_v7` | event IDs, sessions/workspaces, engine IDs, streams, payload refs, OAuth flow IDs | Replay-critical IDs get deterministic constructors for tests/import paths; security/platform IDs stay allowed. | DRC-2/DRC-3 |
+| `Uuid::now_v7` | `event_store::identity`, engine ID helpers, streams, payload refs, OAuth flow IDs | Replay-critical event/session/workspace/fork IDs get deterministic constructors; security/platform IDs stay allowed by path. | DRC-2/DRC-3 passed; DRC-5/DRC-8 consume seams |
 | `rand::random` / `rand::rng` | OAuth PKCE, onboarding bearer tokens, SQLite contention jitter | Allowed for security tokens and contention jitter; rejected from replay builders. | DRC-2 |
 | `ORDER BY timestamp` | trace lists, workspace/global event lists, queue trace list | UI/diagnostic latest views may keep timestamp order; replay paths use deterministic tie-breakers. | DRC-2/DRC-6 |
 
@@ -60,3 +60,17 @@ Machine-readable inventory:
 | Cross-record reference test | Proves trace/queue/stream/invocation refs explain a turn | DRC-7 |
 | Offline roundtrip test | Rebuilds from durable records without side effects | DRC-8 |
 | Final closeout test | Enforces 100/100 and no stale active open-loop wording | DRC-10 |
+
+## DRC-2/DRC-3 Closure Notes
+
+- `packages/agent/tests/determinism_replayability/entropy_scanning.rs` is now
+  the source-level allow-list for raw replay-critical entropy.
+- `packages/agent/src/domains/session/event_store/identity.rs` owns explicit
+  event/session/workspace/fork identities for deterministic replay/import tests.
+- `EventStore::append_with_identity`, `EventStore::create_session_with_identity`,
+  and `EventStore::fork_with_identity` persist explicit IDs/timestamps at the
+  SQLite boundary.
+- `InvocationRecord::from_result_at` is the deterministic engine invocation
+  timestamp seam.
+- Replay builders added in DRC-5/DRC-6 must not add new raw clock/UUID/RNG
+  calls and must not use timestamp-only ordering.

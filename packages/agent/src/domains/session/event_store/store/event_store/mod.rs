@@ -57,7 +57,7 @@ pub struct AppendOptions<'a> {
     /// `SELECT MAX(sequence) + 1` — safe under the session write lock
     /// (serializes within-process) and the C3 `AgentDbLock` flock
     /// (serializes across-process). See the `INVARIANT:` block in
-    /// `append_event_in_tx` for the full correctness argument.
+    /// `append_event_in_tx_with_identity` for the full correctness argument.
     pub sequence: Option<i64>,
 }
 

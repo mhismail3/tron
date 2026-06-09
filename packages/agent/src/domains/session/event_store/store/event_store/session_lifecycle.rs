@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
-use uuid::Uuid;
-
 use crate::domains::session::event_store::SessionRow;
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
+use crate::domains::session::event_store::identity::{
+    SessionCreationIdentity, SessionForkIdentity,
+};
 use crate::domains::session::event_store::sqlite::repositories::event::EventRepo;
 use crate::domains::session::event_store::sqlite::repositories::session::{
     ActivitySummaryLine, CreateSessionOptions, IncrementCounters, ListSessionsOptions,
@@ -30,8 +31,21 @@ pub(super) fn create_session_in_tx(
     tx: &rusqlite::Transaction<'_>,
     opts: &CreateSessionInTxOptions<'_>,
 ) -> Result<CreateSessionResult> {
-    let ws = WorkspaceRepo::get_or_create(tx, opts.workspace_path, None)?;
-    let session = SessionRepo::create(
+    create_session_in_tx_with_identity(tx, opts, SessionCreationIdentity::generate_current())
+}
+
+pub(super) fn create_session_in_tx_with_identity(
+    tx: &rusqlite::Transaction<'_>,
+    opts: &CreateSessionInTxOptions<'_>,
+    identity: SessionCreationIdentity,
+) -> Result<CreateSessionResult> {
+    let ws = WorkspaceRepo::get_or_create_with_identity(
+        tx,
+        opts.workspace_path,
+        None,
+        &identity.workspace,
+    )?;
+    let session = SessionRepo::create_with_identity(
         tx,
         &CreateSessionOptions {
             workspace_id: &ws.id,
@@ -42,6 +56,7 @@ pub(super) fn create_session_in_tx(
             parent_session_id: None,
             fork_from_event_id: None,
         },
+        &identity.session,
     )?;
 
     let provider = opts.provider.unwrap_or_else(|| {
@@ -65,19 +80,19 @@ pub(super) fn create_session_in_tx(
             )
     });
 
-    let event_id = format!("evt_{}", Uuid::now_v7());
-    let now = chrono::Utc::now().to_rfc3339();
+    let root_event_id = identity.root_event.id.clone();
+    let root_event_timestamp = identity.root_event.timestamp.clone();
     let payload = serde_json::json!({
         "workingDirectory": opts.workspace_path,
         "model": opts.model,
         "provider": provider,
     });
     let event = SessionEvent {
-        id: event_id,
+        id: root_event_id,
         session_id: session.id.clone(),
         parent_id: None,
         workspace_id: ws.id.clone(),
-        timestamp: now,
+        timestamp: root_event_timestamp.clone(),
         event_type: EventType::SessionStart,
         sequence: 0,
         checksum: None,
@@ -86,14 +101,15 @@ pub(super) fn create_session_in_tx(
     EventRepo::insert(tx, &event)?;
 
     let _ = SessionRepo::update_root(tx, &session.id, &event.id)?;
-    let _ = SessionRepo::update_head(tx, &session.id, &event.id)?;
-    let _ = SessionRepo::increment_counters(
+    let _ = SessionRepo::update_head_at(tx, &session.id, &event.id, &root_event_timestamp)?;
+    let _ = SessionRepo::increment_counters_at(
         tx,
         &session.id,
         &IncrementCounters {
             event_count: Some(1),
             ..Default::default()
         },
+        &root_event_timestamp,
     )?;
 
     let updated_session = SessionRepo::get_by_id(tx, &session.id)?
@@ -141,6 +157,40 @@ impl EventStore {
         })
     }
 
+    /// Create a new session with explicit durable identities.
+    ///
+    /// Replay/import tests use this to pin workspace, session, and root event
+    /// IDs/timestamps. Production callers should use [`Self::create_session`].
+    #[tracing::instrument(skip(self, identity), fields(model, workspace_path))]
+    pub fn create_session_with_identity(
+        &self,
+        model: &str,
+        workspace_path: &str,
+        title: Option<&str>,
+        provider: Option<&str>,
+        identity: SessionCreationIdentity,
+    ) -> Result<CreateSessionResult> {
+        self.with_global_write_lock(|| {
+            let mut conn = self.conn()?;
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+
+            let result = create_session_in_tx_with_identity(
+                &tx,
+                &CreateSessionInTxOptions {
+                    model,
+                    workspace_path,
+                    title,
+                    provider,
+                },
+                identity.clone(),
+            )?;
+
+            tx.commit()?;
+            tracing::debug!(session_id = %result.session.id, "session created with explicit identity");
+            Ok(result)
+        })
+    }
+
     /// Fork a session from a specific event.
     ///
     /// Creates a new session whose root `session.fork` event has its `parent_id`
@@ -148,6 +198,17 @@ impl EventStore {
     /// fork event traverse back through the shared history.
     #[tracing::instrument(skip(self, opts), fields(from_event_id))]
     pub fn fork(&self, from_event_id: &str, opts: &ForkOptions<'_>) -> Result<ForkResult> {
+        self.fork_with_identity(from_event_id, opts, SessionForkIdentity::generate_current())
+    }
+
+    /// Fork a session with explicit durable identities.
+    #[tracing::instrument(skip(self, opts, identity), fields(from_event_id))]
+    pub fn fork_with_identity(
+        &self,
+        from_event_id: &str,
+        opts: &ForkOptions<'_>,
+        identity: SessionForkIdentity,
+    ) -> Result<ForkResult> {
         self.with_global_write_lock(|| {
             let mut conn = self.conn()?;
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
@@ -158,7 +219,7 @@ impl EventStore {
                 .ok_or_else(|| EventStoreError::SessionNotFound(source_event.session_id.clone()))?;
 
             let model = opts.model.unwrap_or(&source_session.latest_model);
-            let session = SessionRepo::create(
+            let session = SessionRepo::create_with_identity(
                 &tx,
                 &CreateSessionOptions {
                     workspace_id: &source_session.workspace_id,
@@ -169,21 +230,22 @@ impl EventStore {
                     parent_session_id: Some(&source_session.id),
                     fork_from_event_id: Some(from_event_id),
                 },
+                &identity.session,
             )?;
 
-            let event_id = format!("evt_{}", Uuid::now_v7());
-            let now = chrono::Utc::now().to_rfc3339();
+            let fork_event_id = identity.fork_event.id.clone();
+            let fork_event_timestamp = identity.fork_event.timestamp.clone();
             let payload = serde_json::json!({
                 "sourceSessionId": source_session.id,
                 "sourceEventId": from_event_id,
             });
 
             let fork_event = SessionEvent {
-                id: event_id,
+                id: fork_event_id,
                 session_id: session.id.clone(),
                 parent_id: Some(from_event_id.to_string()),
                 workspace_id: source_session.workspace_id.clone(),
-                timestamp: now,
+                timestamp: fork_event_timestamp.clone(),
                 event_type: EventType::SessionFork,
                 sequence: 0,
                 checksum: None,
@@ -192,14 +254,20 @@ impl EventStore {
             EventRepo::insert(&tx, &fork_event)?;
 
             let _ = SessionRepo::update_root(&tx, &session.id, &fork_event.id)?;
-            let _ = SessionRepo::update_head(&tx, &session.id, &fork_event.id)?;
-            let _ = SessionRepo::increment_counters(
+            let _ = SessionRepo::update_head_at(
+                &tx,
+                &session.id,
+                &fork_event.id,
+                &fork_event_timestamp,
+            )?;
+            let _ = SessionRepo::increment_counters_at(
                 &tx,
                 &session.id,
                 &IncrementCounters {
                     event_count: Some(1),
                     ..Default::default()
                 },
+                &fork_event_timestamp,
             )?;
 
             tx.commit()?;

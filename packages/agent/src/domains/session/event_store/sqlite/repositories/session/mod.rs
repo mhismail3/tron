@@ -7,10 +7,10 @@
 //! on session lifecycle, listing, counters, and head/root mutation.
 
 use rusqlite::{Connection, OptionalExtension, params};
-use uuid::Uuid;
 
 use crate::domains::session::event_store::SessionRow;
 use crate::domains::session::event_store::errors::Result;
+use crate::domains::session::event_store::identity::SessionIdentity;
 
 mod projections;
 #[cfg(test)]
@@ -82,8 +82,17 @@ pub struct SessionRepo;
 impl SessionRepo {
     /// Create a new session.
     pub fn create(conn: &Connection, opts: &CreateSessionOptions<'_>) -> Result<SessionRow> {
-        let id = format!("sess_{}", Uuid::now_v7());
-        let now = chrono::Utc::now().to_rfc3339();
+        Self::create_with_identity(conn, opts, &SessionIdentity::generate_current())
+    }
+
+    /// Create a new session with an explicit ID and timestamp.
+    pub fn create_with_identity(
+        conn: &Connection,
+        opts: &CreateSessionOptions<'_>,
+        identity: &SessionIdentity,
+    ) -> Result<SessionRow> {
+        let id = identity.id.clone();
+        let now = identity.created_at.clone();
         let tags_json = opts.tags.map_or_else(
             || "[]".to_string(),
             |t| serde_json::to_string(t).unwrap_or_else(|_| "[]".to_string()),
@@ -188,9 +197,19 @@ impl SessionRepo {
     /// Update head event ID and last activity.
     pub fn update_head(conn: &Connection, session_id: &str, head_event_id: &str) -> Result<bool> {
         let now = chrono::Utc::now().to_rfc3339();
+        Self::update_head_at(conn, session_id, head_event_id, &now)
+    }
+
+    /// Update head event ID with an explicit last-activity timestamp.
+    pub fn update_head_at(
+        conn: &Connection,
+        session_id: &str,
+        head_event_id: &str,
+        last_activity_at: &str,
+    ) -> Result<bool> {
         let changed = conn.execute(
             "UPDATE sessions SET head_event_id = ?1, last_activity_at = ?2 WHERE id = ?3",
-            params![head_event_id, now, session_id],
+            params![head_event_id, last_activity_at, session_id],
         )?;
         Ok(changed > 0)
     }
@@ -249,6 +268,17 @@ impl SessionRepo {
         session_id: &str,
         counters: &IncrementCounters,
     ) -> Result<bool> {
+        let now = chrono::Utc::now().to_rfc3339();
+        Self::increment_counters_at(conn, session_id, counters, &now)
+    }
+
+    /// Increment denormalized counters atomically with an explicit activity timestamp.
+    pub fn increment_counters_at(
+        conn: &Connection,
+        session_id: &str,
+        counters: &IncrementCounters,
+        last_activity_at: &str,
+    ) -> Result<bool> {
         let mut updates = Vec::new();
 
         if let Some(v) = counters.event_count {
@@ -287,11 +317,10 @@ impl SessionRepo {
             return Ok(false);
         }
 
-        let now = chrono::Utc::now().to_rfc3339();
-        updates.push(format!("last_activity_at = '{now}'"));
+        updates.push("last_activity_at = ?2".to_string());
 
         let sql = format!("UPDATE sessions SET {} WHERE id = ?1", updates.join(", "));
-        let changed = conn.execute(&sql, params![session_id])?;
+        let changed = conn.execute(&sql, params![session_id, last_activity_at])?;
         Ok(changed > 0)
     }
 

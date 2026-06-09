@@ -2,9 +2,9 @@ use std::collections::HashMap;
 
 use rusqlite::OptionalExtension;
 use serde_json::Value;
-use uuid::Uuid;
 
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
+use crate::domains::session::event_store::identity::EventIdentity;
 use crate::domains::session::event_store::sqlite::repositories::event::{
     EventRepo, ListEventsOptions,
 };
@@ -28,20 +28,22 @@ fn resolve_payload_for_row(conn: &rusqlite::Connection, row: &EventRow) -> Resul
     })
 }
 
-/// Append a single event inside an existing transaction.
+/// Append a single event with an explicit durable identity.
 ///
-/// This is the core write primitive used by [`EventStore::append`], which wraps
-/// it in per-session locking, a transaction, and commit.
+/// This is the core write primitive used by [`EventStore::append`] and
+/// [`EventStore::append_with_identity`], which wrap it in per-session locking,
+/// a transaction, and commit.
 ///
 /// The caller is responsible for:
 /// - acquiring any required locks before opening the transaction,
 /// - committing or rolling back the transaction,
 /// - keeping `session.head_event_id` fresh if performing a loop of appends
 ///   (set it to the returned event's id after each call).
-pub(super) fn append_event_in_tx(
+pub(super) fn append_event_in_tx_with_identity(
     tx: &rusqlite::Transaction<'_>,
     session: &SessionRow,
     opts: &AppendOptions<'_>,
+    identity: EventIdentity,
 ) -> Result<SessionEvent> {
     let parent_id = match opts.parent_id {
         Some(pid) => Some(pid.to_string()),
@@ -79,16 +81,14 @@ pub(super) fn append_event_in_tx(
         }
     };
 
-    let event_id = format!("evt_{}", Uuid::now_v7());
-    let now = chrono::Utc::now().to_rfc3339();
     let payload = redact_json_strings(&opts.payload);
 
     let event = SessionEvent {
-        id: event_id,
+        id: identity.id,
         session_id: opts.session_id.to_string(),
         parent_id,
         workspace_id: session.workspace_id.clone(),
-        timestamp: now,
+        timestamp: identity.timestamp,
         event_type: opts.event_type,
         sequence,
         checksum: None,
@@ -163,17 +163,41 @@ impl EventStore {
         self.with_session_write_lock(opts.session_id, || self.append_inner(opts))
     }
 
+    /// Append an event with an explicit ID and timestamp.
+    ///
+    /// Replay/import paths use this to avoid ambient entropy in durable event
+    /// rows. Production callers should use [`Self::append`].
+    #[tracing::instrument(skip(self, opts, identity), fields(session_id = opts.session_id, event_type = %opts.event_type))]
+    pub fn append_with_identity(
+        &self,
+        opts: &AppendOptions<'_>,
+        identity: EventIdentity,
+    ) -> Result<EventRow> {
+        self.with_session_write_lock(opts.session_id, || {
+            self.append_inner_with_identity(opts, identity.clone())
+        })
+    }
+
     /// Inner append without acquiring the write lock.
     /// Called by `append` (which holds the lock) and by `delete_message`
     /// (which acquires the lock once at its own level).
     fn append_inner(&self, opts: &AppendOptions<'_>) -> Result<EventRow> {
+        self.append_inner_with_identity(opts, EventIdentity::generate_current())
+    }
+
+    /// Inner append with an explicit durable identity, without acquiring the write lock.
+    fn append_inner_with_identity(
+        &self,
+        opts: &AppendOptions<'_>,
+        identity: EventIdentity,
+    ) -> Result<EventRow> {
         let mut conn = self.conn()?;
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
 
         let session = SessionRepo::get_by_id(&tx, opts.session_id)?
             .ok_or_else(|| EventStoreError::SessionNotFound(opts.session_id.to_string()))?;
 
-        let event = append_event_in_tx(&tx, &session, opts)?;
+        let event = append_event_in_tx_with_identity(&tx, &session, opts, identity)?;
         tx.commit()?;
 
         EventRepo::get_by_id(&conn, &event.id)?.ok_or(EventStoreError::EventNotFound(event.id))

@@ -4,9 +4,9 @@
 //! and workspace paths are unique (two sessions in the same directory share one workspace).
 
 use rusqlite::{Connection, OptionalExtension, params};
-use uuid::Uuid;
 
 use crate::domains::session::event_store::errors::Result;
+use crate::domains::session::event_store::identity::WorkspaceIdentity;
 use crate::domains::session::event_store::sqlite::row_types::WorkspaceRow;
 
 /// Options for creating a new workspace.
@@ -23,8 +23,17 @@ pub struct WorkspaceRepo;
 impl WorkspaceRepo {
     /// Create a new workspace.
     pub fn create(conn: &Connection, opts: &CreateWorkspaceOptions<'_>) -> Result<WorkspaceRow> {
-        let id = format!("ws_{}", Uuid::now_v7());
-        let now = chrono::Utc::now().to_rfc3339();
+        Self::create_with_identity(conn, opts, &WorkspaceIdentity::generate_current())
+    }
+
+    /// Create a new workspace with an explicit ID and timestamp.
+    pub fn create_with_identity(
+        conn: &Connection,
+        opts: &CreateWorkspaceOptions<'_>,
+        identity: &WorkspaceIdentity,
+    ) -> Result<WorkspaceRow> {
+        let id = identity.id.clone();
+        let now = identity.created_at.clone();
         let _ = conn.execute(
             "INSERT INTO workspaces (id, path, name, created_at, last_activity_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -92,10 +101,20 @@ impl WorkspaceRepo {
         path: &str,
         name: Option<&str>,
     ) -> Result<WorkspaceRow> {
+        Self::get_or_create_with_identity(conn, path, name, &WorkspaceIdentity::generate_current())
+    }
+
+    /// Get existing workspace by path, or create a new one with an explicit identity.
+    pub fn get_or_create_with_identity(
+        conn: &Connection,
+        path: &str,
+        name: Option<&str>,
+        identity: &WorkspaceIdentity,
+    ) -> Result<WorkspaceRow> {
         if let Some(ws) = Self::get_by_path(conn, path)? {
             return Ok(ws);
         }
-        Self::create(conn, &CreateWorkspaceOptions { path, name })
+        Self::create_with_identity(conn, &CreateWorkspaceOptions { path, name }, identity)
     }
 
     /// List all workspaces ordered by last activity (most recent first).

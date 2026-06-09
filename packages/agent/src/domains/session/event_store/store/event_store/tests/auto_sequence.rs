@@ -1,4 +1,5 @@
 use super::*;
+use crate::domains::session::event_store::EventIdentity;
 
 // ── M11: auto-sequence allocation invariant ───────────────────────
 
@@ -7,7 +8,7 @@ use super::*;
 /// `UNIQUE(session_id, sequence)` failures.
 ///
 /// This is the full correctness claim documented at
-/// `append_event_in_tx` — serialized by the per-session write lock and
+/// `append_event_in_tx_with_identity` — serialized by the per-session write lock and
 /// SQLite's UNIQUE constraint as a backstop.
 #[test]
 fn concurrent_auto_sequence_appends_are_strictly_monotonic() {
@@ -96,6 +97,32 @@ fn auto_sequence_resumes_from_pre_assigned_max() {
         })
         .unwrap();
     assert_eq!(auto.sequence, 43);
+}
+
+#[test]
+fn append_with_identity_persists_explicit_event_entropy() {
+    let store = setup();
+    let cr = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
+        .unwrap();
+
+    let event = store
+        .append_with_identity(
+            &AppendOptions {
+                session_id: &cr.session.id,
+                event_type: EventType::MessageUser,
+                payload: serde_json::json!({"kind": "deterministic"}),
+                parent_id: None,
+                sequence: None,
+            },
+            EventIdentity::new("evt_replay_fixed", "2026-06-09T12:00:00Z"),
+        )
+        .unwrap();
+
+    assert_eq!(event.id, "evt_replay_fixed");
+    assert_eq!(event.timestamp, "2026-06-09T12:00:00Z");
+    assert_eq!(event.sequence, 1);
+    assert_eq!(event.parent_id.as_deref(), Some(cr.root_event.id.as_str()));
 }
 
 /// Auto-allocated sequences on different sessions are independent —

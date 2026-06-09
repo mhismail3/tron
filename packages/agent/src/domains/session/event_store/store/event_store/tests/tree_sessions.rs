@@ -1,4 +1,5 @@
 use super::*;
+use crate::domains::session::event_store::{EventIdentity, SessionForkIdentity, SessionIdentity};
 
 // ── Fork ──────────────────────────────────────────────────────────
 
@@ -37,6 +38,43 @@ fn fork_basic() {
         Some(user_msg.id.as_str())
     );
     assert_eq!(fork.session.event_count, 1);
+}
+
+#[test]
+fn fork_with_identity_persists_explicit_replay_fields() {
+    let store = setup();
+    let cr = store
+        .create_session("claude-opus-4-6", "/tmp/project", None, None)
+        .unwrap();
+
+    let fork = store
+        .fork_with_identity(
+            &cr.root_event.id,
+            &ForkOptions::default(),
+            SessionForkIdentity::new(
+                SessionIdentity::new("sess_replay_fork", "2026-06-09T13:00:00Z"),
+                EventIdentity::new("evt_replay_fork", "2026-06-09T13:00:01Z"),
+            ),
+        )
+        .unwrap();
+
+    assert_eq!(fork.session.id, "sess_replay_fork");
+    assert_eq!(fork.session.created_at, "2026-06-09T13:00:00Z");
+    assert_eq!(fork.session.last_activity_at, "2026-06-09T13:00:01Z");
+    assert_eq!(fork.fork_event.id, "evt_replay_fork");
+    assert_eq!(fork.fork_event.timestamp, "2026-06-09T13:00:01Z");
+    assert_eq!(
+        fork.session.root_event_id.as_deref(),
+        Some("evt_replay_fork")
+    );
+    assert_eq!(
+        fork.session.head_event_id.as_deref(),
+        Some("evt_replay_fork")
+    );
+    assert_eq!(
+        fork.fork_event.parent_id.as_deref(),
+        Some(cr.root_event.id.as_str())
+    );
 }
 
 #[test]

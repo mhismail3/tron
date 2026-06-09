@@ -373,6 +373,17 @@ impl InvocationRecord {
         result: &InvocationResult,
         idempotency_scope: Option<IdempotencyScope>,
     ) -> Self {
+        Self::from_result_at(invocation, result, idempotency_scope, Utc::now())
+    }
+
+    /// Create a record from the invocation and result with an explicit timestamp.
+    #[must_use]
+    pub fn from_result_at(
+        invocation: &Invocation,
+        result: &InvocationResult,
+        idempotency_scope: Option<IdempotencyScope>,
+        timestamp: DateTime<Utc>,
+    ) -> Self {
         Self {
             invocation_id: invocation.id.clone(),
             function_id: invocation.function_id.clone(),
@@ -398,7 +409,7 @@ impl InvocationRecord {
             succeeded: result.error.is_none(),
             result_value: result.value.clone(),
             error: result.error.clone(),
-            timestamp: Utc::now(),
+            timestamp,
         }
     }
 
@@ -422,6 +433,46 @@ fn produced_resource_refs_from_result(value: &Option<Value>) -> Vec<Value> {
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invocation_record_from_result_at_pins_timestamp() {
+        let trace_id = TraceId::new("trace-fixed").unwrap();
+        let causal_context = CausalContext::new(
+            ActorId::new("actor-fixed").unwrap(),
+            ActorKind::Agent,
+            AuthorityGrantId::new("grant-fixed").unwrap(),
+            trace_id,
+        )
+        .with_session_id("sess-fixed")
+        .with_workspace_id("ws-fixed");
+        let invocation = Invocation {
+            id: InvocationId::new("inv-fixed").unwrap(),
+            function_id: FunctionId::new("demo::echo").unwrap(),
+            delivery_mode: DeliveryMode::Sync,
+            payload: serde_json::json!({"input": "hello"}),
+            causal_context,
+        };
+        let result = InvocationResult::success(
+            &invocation,
+            WorkerId::new("worker-fixed").unwrap(),
+            FunctionRevision(7),
+            CatalogRevision(9),
+            serde_json::json!({"ok": true}),
+        );
+        let timestamp = "2026-06-09T14:00:00Z".parse::<DateTime<Utc>>().unwrap();
+
+        let record = InvocationRecord::from_result_at(&invocation, &result, None, timestamp);
+
+        assert_eq!(record.invocation_id.as_str(), "inv-fixed");
+        assert_eq!(record.session_id.as_deref(), Some("sess-fixed"));
+        assert_eq!(record.workspace_id.as_deref(), Some("ws-fixed"));
+        assert_eq!(record.timestamp, timestamp);
+    }
 }
 
 /// Async handler for an in-process function.
