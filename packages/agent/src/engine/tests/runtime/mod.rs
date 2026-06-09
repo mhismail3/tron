@@ -7,6 +7,8 @@
 pub(in crate::engine::tests) use super::fixtures::*;
 
 mod external_worker;
+mod external_worker_helpers;
+mod external_worker_protocol;
 mod external_worker_soak;
 mod restart_chaos;
 mod trigger_helpers;

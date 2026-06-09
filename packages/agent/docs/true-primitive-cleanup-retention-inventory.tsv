@@ -443,8 +443,11 @@ packages/agent/src/engine/primitives/ui/schemas.rs	primitive	engine	TPC-2	primit
 packages/agent/src/engine/primitives/ui/validation.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/worker.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/workers.rs	primitive	engine	TPC-3	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/runtime/external_workers/lifecycle.rs	primitive	engine	TPC-4	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/external_workers/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/external_workers/proxy.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/runtime/external_workers/registration.rs	primitive	engine	TPC-4	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/runtime/external_workers/validation.rs	primitive	engine	TPC-4	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/triggers.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/worker_protocol.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
@@ -474,6 +477,8 @@ packages/agent/src/engine/tests/kernel/ids_types.rs	test	test_harness	TPC-10	con
 packages/agent/src/engine/tests/kernel/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/external_worker.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/src/engine/tests/runtime/external_worker_helpers.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/src/engine/tests/runtime/external_worker_protocol.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/external_worker_soak.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/restart_chaos.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -603,6 +608,7 @@ packages/agent/tests/primitive_engine_teardown/support.rs	test	test_harness	TPC-
 packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/primitive_trace_execution.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/engine_durability.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/tests/true_primitive_cleanup/external_workers.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/invocation_primitives.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/inventory.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
