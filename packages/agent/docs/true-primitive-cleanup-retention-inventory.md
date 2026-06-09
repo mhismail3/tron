@@ -41,10 +41,10 @@ The TSV covers tracked and newly introduced files under:
 
 | Classification | Count |
 |----------------|------:|
-| primitive | 98 |
+| primitive | 102 |
 | implementation | 469 |
 | support | 378 |
-| test | 393 |
+| test | 395 |
 | docs | 32 |
 | delete | 0 |
 
@@ -58,7 +58,7 @@ The TSV covers tracked and newly introduced files under:
 | `capability_execute` | 8 |
 | `docs/static gates` | 32 |
 | `domain_worker` | 6 |
-| `engine` | 90 |
+| `engine` | 94 |
 | `ios` | 94 |
 | `ios_engine` | 129 |
 | `ios_session` | 66 |
@@ -72,7 +72,7 @@ The TSV covers tracked and newly introduced files under:
 | `session_storage` | 63 |
 | `settings` | 16 |
 | `shared_foundation` | 44 |
-| `test_harness` | 393 |
+| `test_harness` | 395 |
 | `transport` | 24 |
 
 ## Delete Candidates

@@ -398,11 +398,13 @@ packages/agent/src/engine/durability/state.rs	primitive	engine	TPC-2	primitive e
 packages/agent/src/engine/durability/streams.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/streams/memory.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/streams/sqlite_store.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/invocation/host/bootstrap.rs	primitive	engine	TPC-3	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/invocation/host/catalog_handle.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/invocation/host/handle.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/invocation/host/invocation_handle.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/invocation/host/invocation_support.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/invocation/host/meta.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/invocation/host/meta_invocation.rs	primitive	engine	TPC-3	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/invocation/host/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/invocation/host/runtime_host.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/invocation/host/substrate_handle.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
@@ -432,6 +434,7 @@ packages/agent/src/engine/primitives/resource/registrations.rs	primitive	engine	
 packages/agent/src/engine/primitives/resource/schemas.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/runtime.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/state.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/primitives/stores.rs	primitive	engine	TPC-3	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/storage.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/stream.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/trigger.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
@@ -439,6 +442,7 @@ packages/agent/src/engine/primitives/ui/mod.rs	primitive	engine	TPC-2	primitive 
 packages/agent/src/engine/primitives/ui/schemas.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/ui/validation.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/primitives/worker.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/primitives/workers.rs	primitive	engine	TPC-3	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/external_workers/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/external_workers/proxy.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
@@ -473,6 +477,7 @@ packages/agent/src/engine/tests/runtime/external_worker.rs	test	test_harness	TPC
 packages/agent/src/engine/tests/runtime/external_worker_soak.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/restart_chaos.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/src/engine/tests/runtime/trigger_helpers.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/triggers.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/lib.rs	support	rust_crate	TPC-10	Rust crate root or support module
 packages/agent/src/main.rs	support	rust_crate	TPC-10	Rust crate root or support module
@@ -598,6 +603,7 @@ packages/agent/tests/primitive_engine_teardown/support.rs	test	test_harness	TPC-
 packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/primitive_trace_execution.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/engine_durability.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/tests/true_primitive_cleanup/invocation_primitives.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/inventory.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/scorecard.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage

@@ -4,7 +4,7 @@ Created: 2026-06-09
 
 Initial score: **0/100**
 
-Current score: **25/100**
+Current score: **35/100**
 
 Status: **in_progress**
 
@@ -102,12 +102,10 @@ gates:
 - `true_primitive_cleanup_scorecard_stays_formalized`
 - `initial_red_findings_are_recorded_until_resolved`
 - `tracked_source_inventory_is_formalized`
-- `hard_loc_budgets_have_no_remaining_source_exceptions`
-- `fallback_compatibility_and_noop_wording_is_absent_from_live_source`
-- `provider_aliases_stay_inside_provider_catalog_boundaries`
-- `durable_workers_do_not_use_default_noop_methods`
-- `temporary_ios_database_cache_fallback_is_absent`
-- `scripts_surface_has_no_unproven_automatic_or_production_shortcuts`
+- `engine_catalog_and_durability_roots_are_split_and_explicit`
+- `invocation_host_and_primitive_store_roots_are_narrow`
+- `tpc_source_files_are_classified_or_in_pending_inventory_setup`
+- `tpc_hard_budget_scan_still_has_recorded_open_findings`
 
 TPC-0 installs the target and records the red baseline. Later rows may add or
 tighten gates only after first recording the failing proof they close.
@@ -117,9 +115,9 @@ tighten gates only after first recording the failing proof they close.
 | ID | Area | Weight | Status | Owner | Evidence | Open loops | Checkpoint |
 |----|------|-------:|--------|-------|----------|------------|------------|
 | TPC-0 | Scorecard setup | 5 | passed_after_fix | docs/static gates | Added this scorecard, evidence manifest, README living-doc links, setup invariant target, hard-target statement, and current red LOC baseline. Checkpoint commit: `498abfb24`. | TPC-1 owns complete tracked source inventory; TPC-2 through TPC-8 own all over-budget source/test files. | TPC-0 setup checkpoint |
-| TPC-1 | Retention inventory | 8 | passed_after_fix | architecture | Added the retention inventory and TSV, then regenerated it after TPC-2. Current coverage is 1,370 tracked and newly introduced source/docs/script paths in TPC scope: 98 `primitive`, 469 `implementation`, 378 `support`, 393 `test`, 32 `docs`, and 0 `delete`. Checkpoint commit: `92521b511`. | No unclassified tracked source remains; later rows must regenerate the TSV after splits/deletions. | TPC-1 inventory checkpoint |
+| TPC-1 | Retention inventory | 8 | passed_after_fix | architecture | Added the retention inventory and TSV, then regenerated it after TPC-2 and TPC-3. Current coverage is 1,376 tracked and newly introduced source/docs/script paths in TPC scope: 102 `primitive`, 469 `implementation`, 378 `support`, 395 `test`, 32 `docs`, and 0 `delete`. Checkpoint commit: `92521b511`. | No unclassified tracked source remains; later rows must regenerate the TSV after splits/deletions. | TPC-1 inventory checkpoint |
 | TPC-2 | Engine catalog/durability teardown | 12 | passed_after_fix | engine/storage | Split catalog registration, authorization, cleanup, search, and idempotency from the live registry; split ledger SQLite storage from ledger contracts; split queue memory/SQLite stores; split stream memory/SQLite stores; removed default no-op durable-worker/function methods from `EngineLedgerStore` and made in-memory/test ledgers implement them explicitly. Checkpoint commit: `739612887`. | No TPC-2 LOC or no-op default blocker remains. Later rows own unrelated over-budget Rust files. | TPC-2 engine/durability checkpoint |
-| TPC-3 | Invocation host and primitive stores | 10 | pending | engine primitives | Reduce invocation host, primitive registration, trigger tests, and primitive store roots into narrow modules; delete convenience re-export sprawl. | Current Rust over-budget files remain. | pending |
+| TPC-3 | Invocation host and primitive stores | 10 | passed_after_fix | engine primitives | Split `EngineHost` construction/bootstrap and meta invocation into `host/bootstrap.rs` and `host/meta_invocation.rs`; split primitive store backends and worker/function registration into `primitives/stores.rs` and `primitives/workers.rs`; moved trigger runtime test helpers into `runtime/trigger_helpers.rs`; added a TPC gate proving the original host, primitive, and trigger roots are under budget and no longer contain weak-host store wiring in the primitive root. | No TPC-3 LOC blocker remains. Later rows own unrelated runtime/provider/iOS/script over-budget files and residue scans. | TPC-3 invocation/primitives checkpoint |
 | TPC-4 | External worker proof or deletion | 10 | pending | runtime | Delete-by-default durable external worker paths unless retained by tests and primitive-substrate docs. | Current external worker source/test files are over budget. | pending |
 | TPC-5 | Provider/auth/model cleanup | 10 | pending | provider/auth/model | Break up provider factory logic by provider, isolate aliases to provider catalogs, and keep auth/model state single-owner. | Current provider/auth files are over budget. | pending |
 | TPC-6 | Agent loop/config/context flattening | 10 | pending | agent runtime | Split execution input config from runtime dependencies, remove redundant context/persistence state, and reject legacy parsing paths. | Current socket/observability/persistence files are over budget. | pending |
@@ -144,6 +142,6 @@ Every row records:
 
 ## Open Loops
 
-- Hard LOC targets outside TPC-2 are not yet met.
+- Hard LOC targets outside completed TPC-2/TPC-3 areas are not yet met.
 - Broad fallback/compatibility/no-op wording requires source-level triage.
 - The manual `tron deploy` surface needs TPC-9 proof or deletion.
