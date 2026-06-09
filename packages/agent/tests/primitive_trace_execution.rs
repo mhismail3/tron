@@ -148,6 +148,61 @@ async fn invoke_execute(
 }
 
 #[tokio::test]
+async fn execute_replay_manifest_is_read_only_and_does_not_create_trace_record() {
+    let runtime = test_runtime();
+    let workspace = tempfile::tempdir().unwrap();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "gpt-5.5",
+            workspace.path().to_str().unwrap(),
+            Some("replay manifest"),
+            Some("openai"),
+        )
+        .unwrap();
+
+    let value = invoke_execute(
+        &runtime.ctx,
+        json!({"operation": "replay_manifest"}),
+        causal_context(
+            TraceId::generate(),
+            &created.session.id,
+            &created.session.workspace_id,
+            workspace.path(),
+            "provider-call-replay-1",
+            "trace-replay-1",
+        ),
+    )
+    .await;
+    let result: CapabilityResult = serde_json::from_value(value).unwrap();
+    let details = result.details.as_ref().unwrap();
+    assert_eq!(details["primitiveOperation"], "replay_manifest");
+    assert_eq!(details["manifest"]["format"], "tron.replay.v1");
+    assert_eq!(
+        details["manifest"]["sections"]["traceRecords"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+
+    let traces = runtime
+        .ctx
+        .event_store
+        .list_trace_records(&AgentTraceListOptions {
+            session_id: Some(&created.session.id),
+            trace_id: None,
+            limit: Some(10),
+        })
+        .unwrap();
+    assert!(
+        traces.is_empty(),
+        "replay_manifest must not mutate trace records"
+    );
+}
+
+#[tokio::test]
 async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
     let runtime = test_runtime();
     let workspace = tempfile::tempdir().unwrap();

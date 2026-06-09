@@ -115,6 +115,16 @@ impl StreamStoreBackend {
             Self::Sqlite(store) => store.poll(subscription_id, after, limit, actor),
         }
     }
+
+    pub(in crate::engine) fn list_by_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<crate::engine::durability::streams::EngineStreamEvent>> {
+        match self {
+            Self::InMemory(store) => store.list_by_session(session_id),
+            Self::Sqlite(store) => store.list_by_session(session_id),
+        }
+    }
 }
 
 pub(in crate::engine) enum StateStoreBackend {
@@ -301,6 +311,16 @@ impl QueueStoreBackend {
         match self {
             Self::InMemory(store) => store.list(queue, limit),
             Self::Sqlite(store) => store.list(queue, limit),
+        }
+    }
+
+    pub(in crate::engine) fn list_by_session(
+        &self,
+        session_id: &str,
+    ) -> Result<Vec<EngineQueueItem>> {
+        match self {
+            Self::InMemory(store) => store.list_by_session(session_id),
+            Self::Sqlite(store) => store.list_by_session(session_id),
         }
     }
 }

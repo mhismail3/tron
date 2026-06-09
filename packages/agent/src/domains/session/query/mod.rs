@@ -1,4 +1,4 @@
-//! Shared query-side services for session capabilities.
+//! Shared query-side services for session read capabilities.
 
 use serde_json::{Value, json};
 
@@ -12,7 +12,8 @@ mod operations;
 
 pub(crate) use operations::{
     session_export_value, session_get_head_value, session_get_history_value,
-    session_get_state_value, session_list_value, session_resume_value,
+    session_get_state_value, session_list_value, session_replay_manifest_value,
+    session_resume_value,
 };
 
 impl SessionQueryService {
@@ -233,6 +234,21 @@ impl SessionQueryService {
                 "eventCount": event_count,
             }))
         })
+        .await
+    }
+
+    /// Canonical deterministic replay manifest for audit/reconstruction.
+    pub(crate) async fn replay_manifest(
+        deps: &Deps,
+        session_id: String,
+    ) -> Result<Value, CapabilityError> {
+        crate::domains::session::replay::replay_manifest_value(
+            crate::domains::session::replay::ReplayDeps::new(
+                deps.event_store.clone(),
+                deps.engine_host.clone(),
+            ),
+            session_id,
+        )
         .await
     }
 

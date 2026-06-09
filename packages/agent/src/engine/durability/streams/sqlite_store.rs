@@ -336,6 +336,32 @@ CREATE INDEX IF NOT EXISTS idx_engine_stream_events_trace
         Ok(events)
     }
 
+    /// List stream records scoped to one session for replay.
+    pub fn list_by_session(&self, session_id: &str) -> Result<Vec<EngineStreamEvent>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT cursor, topic, payload_json, visibility, session_id, workspace_id,
+                        producer, trace_id, parent_invocation_id, created_at
+                 FROM engine_stream_events
+                 WHERE session_id = ?1
+                 ORDER BY cursor ASC",
+            )
+            .map_err(|err| sqlite_err("stream.list_by_session.prepare", err.to_string()))?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                row_to_stream_event(&self.conn, row)
+            })
+            .map_err(|err| sqlite_err("stream.list_by_session.query", err.to_string()))?;
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(
+                row.map_err(|err| sqlite_err("stream.list_by_session.row", err.to_string()))?,
+            );
+        }
+        Ok(events)
+    }
+
     fn subscription(&self, subscription_id: &str) -> Result<EngineStreamSubscription> {
         self.conn
             .query_row(

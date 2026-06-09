@@ -16,3 +16,22 @@ fn inventory_requires_non_timestamp_only_replay_ordering() {
         );
     }
 }
+
+#[test]
+fn replay_ordering_methods_use_stable_tie_breakers() {
+    let source = read_source_tree_text();
+    for required in [
+        "list_trace_records_for_replay",
+        "ORDER BY timestamp ASC, id ASC",
+        "ORDER BY cursor ASC",
+        "ORDER BY rowid ASC, invocation_id ASC",
+        "ORDER BY queue ASC, created_at ASC, receipt_id ASC",
+        "ledger_invocations_by_session",
+        "replay_snapshot",
+    ] {
+        assert!(
+            source.contains(required),
+            "DRC replay ordering implementation missing required source marker: {required}"
+        );
+    }
+}

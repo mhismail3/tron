@@ -217,4 +217,16 @@ impl InMemoryEngineStreamStore {
         events.truncate(limit.min(500));
         Ok(events)
     }
+
+    /// List stream records scoped to one session for replay.
+    pub fn list_by_session(&self, session_id: &str) -> Result<Vec<EngineStreamEvent>> {
+        let mut events = self
+            .events
+            .iter()
+            .filter(|event| event.session_id.as_deref() == Some(session_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        events.sort_by_key(|event| event.cursor);
+        Ok(events)
+    }
 }

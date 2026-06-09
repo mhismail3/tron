@@ -3,6 +3,36 @@
 use super::*;
 
 impl EngineHostHandle {
+    /// Read durable engine rows for one session without invoking any functions.
+    pub(crate) async fn replay_snapshot(
+        &self,
+        session_id: &str,
+    ) -> Result<crate::engine::durability::replay::EngineReplaySnapshot> {
+        let (invocations, streams, queue) = {
+            let host = self.inner.lock().await;
+            (
+                host.catalog.ledger_invocations_by_session(session_id)?,
+                host.primitives.streams.clone(),
+                host.primitives.queue.clone(),
+            )
+        };
+
+        let stream_events = streams
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("stream store lock poisoned".to_owned()))?
+            .list_by_session(session_id)?;
+        let queue_items = queue
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("queue store lock poisoned".to_owned()))?
+            .list_by_session(session_id)?;
+
+        Ok(crate::engine::durability::replay::EngineReplaySnapshot {
+            invocations,
+            streams: stream_events,
+            queue_items,
+        })
+    }
+
     /// Acquire a high-risk resource lease and publish a lease lifecycle stream
     /// event. This is a primitive API for domain functions that mutate shared
     /// resources and need fail-closed exclusion.

@@ -258,4 +258,21 @@ impl InMemoryEngineQueueStore {
         items.truncate(limit.min(500));
         Ok(items)
     }
+
+    /// List queue items scoped to one session for replay.
+    pub fn list_by_session(&self, session_id: &str) -> Result<Vec<EngineQueueItem>> {
+        let mut items = self
+            .items
+            .values()
+            .filter(|item| item.session_id.as_deref() == Some(session_id))
+            .cloned()
+            .collect::<Vec<_>>();
+        items.sort_by(|left, right| {
+            left.queue
+                .cmp(&right.queue)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.receipt_id.cmp(&right.receipt_id))
+        });
+        Ok(items)
+    }
 }

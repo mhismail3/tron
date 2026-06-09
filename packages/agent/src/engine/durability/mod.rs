@@ -6,6 +6,7 @@
 //! |--------|----------------|
 //! | `ledger` | Invocation, idempotency, catalog-change, and worker restart truth. |
 //! | `queue` | Durable at-least-once invocation handoff and retry lifecycle. |
+//! | `replay` | Read-only session replay snapshot DTOs for engine-owned rows. |
 //! | `resources` | Typed resource, version, link, event, and UI-surface substrate. |
 //! | `state` | Scoped primitive key-value state with compare-and-set revisioning. |
 //! | `streams` | Durable stream events, cursors, and subscriptions. |
@@ -36,6 +37,7 @@
 
 pub mod ledger;
 pub mod queue;
+pub(crate) mod replay;
 pub mod resources;
 pub mod state;
 pub mod streams;

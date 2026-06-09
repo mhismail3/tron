@@ -135,6 +135,69 @@ impl SqliteEngineLedgerStore {
         .map(raw_idempotency_entry)
         .transpose()
     }
+
+    fn invocation_record_from_row(&self, row: &rusqlite::Row<'_>) -> Result<InvocationRecord> {
+        raw_invocation_record(RawInvocationRow {
+            invocation_id: row.get(0).map_err(|err| sqlite_err("inv.id", err))?,
+            function_id: row.get(1).map_err(|err| sqlite_err("inv.function", err))?,
+            worker_id: row.get(2).map_err(|err| sqlite_err("inv.worker", err))?,
+            function_revision: row
+                .get(3)
+                .map_err(|err| sqlite_err("inv.function_revision", err))?,
+            catalog_revision: row
+                .get(4)
+                .map_err(|err| sqlite_err("inv.catalog_revision", err))?,
+            actor_id: row.get(5).map_err(|err| sqlite_err("inv.actor", err))?,
+            actor_kind_json: row
+                .get(6)
+                .map_err(|err| sqlite_err("inv.actor_kind", err))?,
+            authority_grant_id: row.get(7).map_err(|err| sqlite_err("inv.grant", err))?,
+            authority_scopes_json: row.get(8).map_err(|err| sqlite_err("inv.scopes", err))?,
+            trace_id: row.get(9).map_err(|err| sqlite_err("inv.trace", err))?,
+            parent_invocation_id: row.get(10).map_err(|err| sqlite_err("inv.parent", err))?,
+            trigger_id: row.get(11).map_err(|err| sqlite_err("inv.trigger", err))?,
+            session_id: row.get(12).map_err(|err| sqlite_err("inv.session", err))?,
+            workspace_id: row
+                .get(13)
+                .map_err(|err| sqlite_err("inv.workspace", err))?,
+            delivery_mode_json: row.get(14).map_err(|err| sqlite_err("inv.delivery", err))?,
+            idempotency_scope_kind: row
+                .get(15)
+                .map_err(|err| sqlite_err("inv.scope_kind", err))?,
+            idempotency_scope_value: row
+                .get(16)
+                .map_err(|err| sqlite_err("inv.scope_value", err))?,
+            resource_lease_ids_json: row
+                .get(17)
+                .map_err(|err| sqlite_err("inv.resource_leases", err))?,
+            compensation_status: row
+                .get(18)
+                .map_err(|err| sqlite_err("inv.compensation_status", err))?,
+            produced_resource_refs_json: row
+                .get(19)
+                .map_err(|err| sqlite_err("inv.produced_resource_refs", err))?,
+            idempotency_key: row
+                .get(20)
+                .map_err(|err| sqlite_err("inv.idempotency_key", err))?,
+            replayed_from: row
+                .get(21)
+                .map_err(|err| sqlite_err("inv.replayed_from", err))?,
+            succeeded: row
+                .get(22)
+                .map_err(|err| sqlite_err("inv.succeeded", err))?,
+            result_json: resolve_optional_stored_json_string(
+                &self.conn,
+                row.get(23).map_err(|err| sqlite_err("inv.result", err))?,
+            )?,
+            error_json: resolve_optional_stored_json_string(
+                &self.conn,
+                row.get(24).map_err(|err| sqlite_err("inv.error", err))?,
+            )?,
+            timestamp: row
+                .get(25)
+                .map_err(|err| sqlite_err("inv.timestamp", err))?,
+        })
+    }
 }
 
 impl EngineLedgerStore for SqliteEngineLedgerStore {
@@ -509,66 +572,36 @@ impl EngineLedgerStore for SqliteEngineLedgerStore {
             .next()
             .map_err(|err| sqlite_err("list_invocations.next", err))?
         {
-            records.push(raw_invocation_record(RawInvocationRow {
-                invocation_id: row.get(0).map_err(|err| sqlite_err("inv.id", err))?,
-                function_id: row.get(1).map_err(|err| sqlite_err("inv.function", err))?,
-                worker_id: row.get(2).map_err(|err| sqlite_err("inv.worker", err))?,
-                function_revision: row
-                    .get(3)
-                    .map_err(|err| sqlite_err("inv.function_revision", err))?,
-                catalog_revision: row
-                    .get(4)
-                    .map_err(|err| sqlite_err("inv.catalog_revision", err))?,
-                actor_id: row.get(5).map_err(|err| sqlite_err("inv.actor", err))?,
-                actor_kind_json: row
-                    .get(6)
-                    .map_err(|err| sqlite_err("inv.actor_kind", err))?,
-                authority_grant_id: row.get(7).map_err(|err| sqlite_err("inv.grant", err))?,
-                authority_scopes_json: row.get(8).map_err(|err| sqlite_err("inv.scopes", err))?,
-                trace_id: row.get(9).map_err(|err| sqlite_err("inv.trace", err))?,
-                parent_invocation_id: row.get(10).map_err(|err| sqlite_err("inv.parent", err))?,
-                trigger_id: row.get(11).map_err(|err| sqlite_err("inv.trigger", err))?,
-                session_id: row.get(12).map_err(|err| sqlite_err("inv.session", err))?,
-                workspace_id: row
-                    .get(13)
-                    .map_err(|err| sqlite_err("inv.workspace", err))?,
-                delivery_mode_json: row.get(14).map_err(|err| sqlite_err("inv.delivery", err))?,
-                idempotency_scope_kind: row
-                    .get(15)
-                    .map_err(|err| sqlite_err("inv.scope_kind", err))?,
-                idempotency_scope_value: row
-                    .get(16)
-                    .map_err(|err| sqlite_err("inv.scope_value", err))?,
-                resource_lease_ids_json: row
-                    .get(17)
-                    .map_err(|err| sqlite_err("inv.resource_leases", err))?,
-                compensation_status: row
-                    .get(18)
-                    .map_err(|err| sqlite_err("inv.compensation_status", err))?,
-                produced_resource_refs_json: row
-                    .get(19)
-                    .map_err(|err| sqlite_err("inv.produced_resource_refs", err))?,
-                idempotency_key: row
-                    .get(20)
-                    .map_err(|err| sqlite_err("inv.idempotency_key", err))?,
-                replayed_from: row
-                    .get(21)
-                    .map_err(|err| sqlite_err("inv.replayed_from", err))?,
-                succeeded: row
-                    .get(22)
-                    .map_err(|err| sqlite_err("inv.succeeded", err))?,
-                result_json: resolve_optional_stored_json_string(
-                    &self.conn,
-                    row.get(23).map_err(|err| sqlite_err("inv.result", err))?,
-                )?,
-                error_json: resolve_optional_stored_json_string(
-                    &self.conn,
-                    row.get(24).map_err(|err| sqlite_err("inv.error", err))?,
-                )?,
-                timestamp: row
-                    .get(25)
-                    .map_err(|err| sqlite_err("inv.timestamp", err))?,
-            })?);
+            records.push(self.invocation_record_from_row(row)?);
+        }
+        Ok(records)
+    }
+
+    fn list_invocations_by_session(&self, session_id: &str) -> Result<Vec<InvocationRecord>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT invocation_id, function_id, worker_id, function_revision,
+                        catalog_revision, actor_id, actor_kind_json, authority_grant_id,
+                        authority_scopes_json, trace_id, parent_invocation_id, trigger_id,
+                        session_id, workspace_id, delivery_mode_json, idempotency_scope_kind,
+                        idempotency_scope_value, resource_lease_ids_json, compensation_status,
+                        produced_resource_refs_json, idempotency_key, replayed_from, succeeded,
+                        result_json, error_json, timestamp
+                 FROM engine_invocations
+                 WHERE session_id = ?1
+                 ORDER BY rowid ASC, invocation_id ASC",
+            )
+            .map_err(|err| sqlite_err("list_invocations_by_session.prepare", err))?;
+        let mut rows = stmt
+            .query(params![session_id])
+            .map_err(|err| sqlite_err("list_invocations_by_session.query", err))?;
+        let mut records = Vec::new();
+        while let Some(row) = rows
+            .next()
+            .map_err(|err| sqlite_err("list_invocations_by_session.next", err))?
+        {
+            records.push(self.invocation_record_from_row(row)?);
         }
         Ok(records)
     }

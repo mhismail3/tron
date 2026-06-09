@@ -2,7 +2,7 @@
 
 Created: 2026-06-09
 
-Status: DRC-4 `passed_after_fix`; DRC-5 through DRC-10 remain open
+Status: DRC-6 `passed_after_fix`; DRC-7 through DRC-10 remain open
 
 Machine-readable inventory:
 [`determinism-replayability-inventory.tsv`](determinism-replayability-inventory.tsv)
@@ -19,15 +19,15 @@ Machine-readable inventory:
 
 | Source | Durable owner | Current order | Replay contract | Gap owner |
 |--------|---------------|---------------|-----------------|-----------|
-| Session events | `events` table through `EventStore` | `session_id`, `sequence ASC` for session exports | Include every event for the requested session, including provider request audit events, in sequence order / sequence ASC. | DRC-5/DRC-6 |
-| Provider request audit | `model.provider_request` event | session sequence | Persist provider/model/request audit before provider stream open; include it in replay manifest/hashes. | DRC-4 passed; DRC-5/DRC-6 include |
-| Trace records | `trace_records` table through `EventStore` | current list is newest-first by timestamp | Replay list uses ascending stable order: timestamp ASC + id ASC. | DRC-5/DRC-6 |
-| Engine invocations | `engine_invocations` table through engine ledger | ledger append order | Include session-scoped invocation records in append order plus invocation IDs. | DRC-5/DRC-7 |
-| Engine streams | `engine_stream_events` table | cursor ascending for poll/list-by-trace | Include session-scoped stream rows by cursor ASC. | DRC-5/DRC-6 |
-| Queue items and attempts | `engine_queue_items` table | current list is queue-scoped by creation time | Replay list uses stable durable key order: queue ASC + created_at ASC + receipt_id ASC, and includes attempt records. | DRC-5/DRC-7 |
+| Session events | `events` table through `EventStore` | `session_id`, `sequence ASC` for session exports | Include every event for the requested session, including provider request audit events, in sequence order / sequence ASC. | DRC-5/DRC-6 passed |
+| Provider request audit | `model.provider_request` event | session sequence | Persist provider/model/request audit before provider stream open; include it in replay manifest/hashes. | DRC-4/DRC-5/DRC-6 passed |
+| Trace records | `trace_records` table through `EventStore` | current list is newest-first by timestamp | Replay list uses ascending stable order: timestamp ASC + id ASC. | DRC-5/DRC-6 passed |
+| Engine invocations | `engine_invocations` table through engine ledger | ledger append order | Include session-scoped invocation records in append order plus invocation IDs. | DRC-5/DRC-6 passed; DRC-7 refs |
+| Engine streams | `engine_stream_events` table | cursor ascending for poll/list-by-trace | Include session-scoped stream rows by cursor ASC. | DRC-5/DRC-6 passed |
+| Queue items and attempts | `engine_queue_items` table | current list is queue-scoped by creation time | Replay list uses stable durable key order: queue ASC + created_at ASC + receipt_id ASC, and includes attempt records. | DRC-5/DRC-6 passed; DRC-7 refs |
 | Resources | engine resource tables | resource/version/link order varies by API | Replay v1 records resource refs and hashes carried by invocation/trace rows; direct resource export is explicit only if DRC-7 proves it is needed. | DRC-7 |
 | Logs | `logs` table | newest-first UI query | Replay v1 excludes log text unless trace records reference it; logs remain diagnostics, not replay causality. | DRC-7 |
-| Storage payload blobs | `storage_payloads`/`blobs` | referenced by owner IDs | Replay resolves stored JSON payload refs before hashing manifest sections. | DRC-5/DRC-6 |
+| Storage payload blobs | `storage_payloads`/`blobs` | referenced by owner IDs | Replay resolves stored JSON payload refs before hashing manifest sections. | DRC-5/DRC-6 passed |
 
 ## Entropy Sources
 
@@ -45,8 +45,8 @@ Machine-readable inventory:
 | Surface | Current state | Replay change |
 |---------|---------------|---------------|
 | `session::export` | returns `format: "tron.session.v1"` with session row and session events only | Keep as session backup/export; do not overload it into replay. |
-| `session::replay_manifest` | not implemented | Add pure-read `format: "tron.replay.v1"` manifest capability. |
-| `execute` operation `replay_manifest` | not implemented | Delegate to the same session replay builder for the current session. |
+| `session::replay_manifest` | implemented pure read | Returns canonical `format: "tron.replay.v1"` manifest with section hashes and overall `replayHash`. |
+| `execute` operation `replay_manifest` | implemented read-only current-session operation | Delegates to the same session replay builder and does not create a trace record. |
 | iOS persisted event decoding | `model.provider_request` decodes as non-rendering metadata | DRC-9 completes protocol/docs parity after replay manifest/API changes land. |
 
 ## Proof Surfaces
@@ -55,8 +55,8 @@ Machine-readable inventory:
 |-------|---------|-----------|
 | `determinism_replayability_invariants` | Static and focused behavioral DRC target | DRC-0 through DRC-10 |
 | Provider-audit test | Proves audit persists before stream open | DRC-4 passed |
-| Replay manifest hash test | Proves canonical JSON/hash stability | DRC-5/DRC-6 |
-| Replay ordering test | Proves no timestamp-only replay order | DRC-6 |
+| Replay manifest hash test | Proves canonical JSON/hash stability | DRC-5/DRC-6 passed |
+| Replay ordering test | Proves no timestamp-only replay order | DRC-6 passed |
 | Cross-record reference test | Proves trace/queue/stream/invocation refs explain a turn | DRC-7 |
 | Offline roundtrip test | Rebuilds from durable records without side effects | DRC-8 |
 | Final closeout test | Enforces 100/100 and no stale active open-loop wording | DRC-10 |
@@ -85,3 +85,18 @@ Machine-readable inventory:
   responders receive a provider-independent snapshot through the trait default.
 - `execute_turn` persists the audit before `responder.respond(model_request)`;
   persistence failure returns a turn error without opening the model stream.
+
+## DRC-5/DRC-6 Closure Notes
+
+- `packages/agent/src/domains/session/replay/` owns the canonical
+  `tron.replay.v1` manifest builder, sorted-key JSON hashing, section hashes,
+  and overall replay hash.
+- `session::replay_manifest` is a pure-read capability with required
+  `sessionId`.
+- `execute` operation `replay_manifest` delegates to the same builder for the
+  current session and bypasses execute trace creation so it does not mutate the
+  manifest it exports.
+- Engine-owned replay rows are read through narrow owner APIs:
+  `ledger_invocations_by_session`, stream `list_by_session`, queue
+  `list_by_session`, and `EngineHostHandle::replay_snapshot`.
+  Session-owned trace replay rows use `timestamp ASC + id ASC`.

@@ -2,7 +2,8 @@
 //!
 //! This module owns the only model-facing tool on the primitive branch:
 //! `capability::execute`. Concrete host actions happen through direct primitive
-//! operations.
+//! operations. `replay_manifest` is the read-only evidence operation: it returns
+//! the current session replay manifest without creating a trace record.
 //!
 //! ## Submodules
 //!
@@ -18,7 +19,8 @@
 //! as checked-in target functions.
 //! Agent-launched executions persist trace provider ownership and canonical
 //! working directory from trusted `CausalContext` runtime metadata, not from
-//! model-id string parsing or shell aliases.
+//! model-id string parsing or shell aliases. Replay manifest reads deliberately
+//! bypass trace insertion so the exported manifest is not changed by the read.
 
 pub(crate) mod contract;
 mod operations;

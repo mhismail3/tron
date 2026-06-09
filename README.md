@@ -481,7 +481,9 @@ primitive fields such as `input`, `scope`, `namespace`, `key`, `value`, `path`,
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata; trace records use those facts directly instead of inferring
-provider ownership from model id strings.
+provider ownership from model id strings. `replay_manifest` is the read-only
+exception: it returns the current session replay manifest without creating a
+trace record, so the read does not mutate the manifest it exports.
 
 Current primitive operations:
 
@@ -497,6 +499,7 @@ Current primitive operations:
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
+| `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest without provider/tool/process/file/resource side effects. |
 
 Startup registration currently keeps only loop infrastructure domains: `system`,
 `capability`, `blob`, `message`, `settings`, `auth`, `agent`, `logs`, `session`,
@@ -600,10 +603,11 @@ infrastructure rather than a checked-in product lifecycle.
 Engine substrate primitives still provide host infrastructure behind the loop:
 state, streams, queues, triggers, grants, generic resources, storage operations,
 and bounded internal projections. They are not exported as model tools. The
-agent-visible evidence path is `execute` with `trace_list`, `trace_get`, and
-`log_recent`; trace operations read durable `trace_records` emitted around every
-`execute` call, while `log_recent` reads bounded retained logs through the same
-single tool.
+agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
+`log_recent`, and `replay_manifest`; trace operations read durable
+`trace_records` emitted around effectful `execute` calls, while `log_recent`
+reads bounded retained logs and `replay_manifest` reads the canonical replay
+snapshot through the same single tool.
 Each trace record carries the causal trace id, invocation id, provider tool-call
 id, session/workspace, turn, model id/provider, authority envelope, VCS revision
 when available, result/error hashes, and file attribution with content hashes.
@@ -685,6 +689,12 @@ ordered ancestor chain ending at the child head so inherited parent history and
 child events arrive in one server-authored timeline. `tree::get_ancestors`
 returns resolved wire `events` for the same reason: clients inspect lineage
 without maintaining a second tree-only event shape.
+`session::replay_manifest` is a separate pure-read audit export. It returns
+`format: "tron.replay.v1"` with resolved session events, provider request audit
+events, trace records, engine invocation rows, stream rows, queue rows, section
+hashes, and an overall `replayHash`. It is for offline audit/reconstruction and
+does not call providers, run tools, write files, spawn processes, drain queues,
+publish streams, or mutate resources.
 
 Agent authority is declared before the loop starts through the causal authority
 envelope and the one model-visible `execute` primitive. The engine does not
@@ -890,11 +900,12 @@ server/iOS logs, and compressed content-addressed blobs share that same SQLite
 file. Large correctness and audit payloads flow through blob refs where the
 owning row needs them; compact rows keep human/agent-readable JSON inline. The
 model-visible evidence read path is `capability::execute` with `trace_list`,
-`trace_get`, and `log_recent`. Trace reads are backed by `trace_records`; every
-`execute` call inserts a running record before the effect runs and updates that
-same record with status, duration, result/error hashes, authority,
-provider/model metadata, VCS revision when available, and file
-attribution/content hashes after completion.
+`trace_get`, `log_recent`, and `replay_manifest`. Trace reads are backed by
+`trace_records`; effectful `execute` calls insert a running record before the
+effect runs and update that same record with status, duration, result/error
+hashes, authority, provider/model metadata, VCS revision when available, and
+file attribution/content hashes after completion. The `replay_manifest`
+operation is read-only and does not insert a trace record.
 
 ### Tables
 

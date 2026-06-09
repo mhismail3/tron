@@ -10,8 +10,9 @@
 //! |--------|----------------|
 //! | `contract` | Capability contracts and stream topic declarations. |
 //! | `lifecycle` | Create, delete, fork, archive, and lifecycle operation wrappers. |
-//! | `query` | Resume, list, head/state/history, and export operation wrappers. |
+//! | `query` | Resume, list, head/state/history, export, and replay manifest operation wrappers. |
 //! | `reconstruction` | Server-owned session reconstruction and in-flight reconciliation. |
+//! | `replay` | Canonical `tron.replay.v1` manifest export and hashing. |
 //! | `event_store` | Durable event/session/blob/log/trace storage and reconstruction primitives. |
 //!
 //! ## Invariants
@@ -32,6 +33,7 @@ pub mod event_store;
 pub(crate) mod lifecycle;
 pub(crate) mod query;
 pub(crate) mod reconstruction;
+pub(crate) mod replay;
 
 use std::sync::Arc;
 
@@ -44,6 +46,7 @@ use crate::domains::session::event_store::EventStore;
 
 #[derive(Clone)]
 pub(crate) struct Deps {
+    pub(super) engine_host: crate::engine::EngineHostHandle,
     pub(super) event_store: Arc<EventStore>,
     pub(super) orchestrator: Arc<Orchestrator>,
     pub(super) session_manager: Arc<SessionManager>,
@@ -52,6 +55,7 @@ pub(crate) struct Deps {
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         Self {
+            engine_host: deps.engine_host.clone(),
             event_store: deps.event_store.clone(),
             orchestrator: deps.orchestrator.clone(),
             session_manager: deps.session_manager.clone(),
@@ -85,7 +89,8 @@ use lifecycle::{
 };
 use query::{
     session_export_value, session_get_head_value, session_get_history_value,
-    session_get_state_value, session_list_value, session_resume_value,
+    session_get_state_value, session_list_value, session_replay_manifest_value,
+    session_resume_value,
 };
 use reconstruction::session_reconstruct_value;
 
@@ -131,6 +136,9 @@ operation_bindings! {
         },
         "export" => |invocation, deps| {
             session_export_value(Some(&invocation.payload), deps).await
+        },
+        "replay_manifest" => |invocation, deps| {
+            session_replay_manifest_value(Some(&invocation.payload), deps).await
         },
     ];
 }

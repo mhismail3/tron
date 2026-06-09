@@ -43,4 +43,10 @@ impl EventStore {
         let conn = self.conn()?;
         TraceRepo::list(&conn, options)
     }
+
+    /// List session trace records in replay order.
+    pub fn list_trace_records_for_replay(&self, session_id: &str) -> Result<Vec<AgentTraceRecord>> {
+        let conn = self.conn()?;
+        TraceRepo::list_by_session_for_replay(&conn, session_id)
+    }
 }

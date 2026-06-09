@@ -126,6 +126,11 @@ impl LiveCatalog {
     pub fn ledger_catalog_changes(&self) -> Result<Vec<CatalogChange>> {
         self.ledger.list_catalog_changes()
     }
+
+    /// Durable invocation records for one session in append order.
+    pub fn ledger_invocations_by_session(&self, session_id: &str) -> Result<Vec<InvocationRecord>> {
+        self.ledger.list_invocations_by_session(session_id)
+    }
 }
 
 impl Default for LiveCatalog {

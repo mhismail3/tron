@@ -289,6 +289,13 @@ impl EngineLedgerStore for ReserveFailingLedger {
         Ok(Vec::new())
     }
 
+    fn list_invocations_by_session(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<crate::engine::invocation::model::InvocationRecord>> {
+        Ok(Vec::new())
+    }
+
     fn reserve_idempotency(
         &mut self,
         _reservation: IdempotencyReservation,
@@ -369,6 +376,13 @@ impl EngineLedgerStore for CatalogChangeFailingLedger {
     }
 
     fn list_invocations(&self) -> Result<Vec<crate::engine::invocation::model::InvocationRecord>> {
+        Ok(Vec::new())
+    }
+
+    fn list_invocations_by_session(
+        &self,
+        _session_id: &str,
+    ) -> Result<Vec<crate::engine::invocation::model::InvocationRecord>> {
         Ok(Vec::new())
     }
 
@@ -465,6 +479,15 @@ pub(in crate::engine::tests) fn engine_ledger_contract(store: &mut dyn EngineLed
     assert_eq!(records[0].session_id.as_deref(), Some("session-a"));
     assert_eq!(records[0].workspace_id.as_deref(), Some("workspace-a"));
     assert_eq!(records[0].result_value, Some(json!({"ok": true})));
+    let session_records = store.list_invocations_by_session("session-a").unwrap();
+    assert_eq!(session_records.len(), 1);
+    assert_eq!(session_records[0].invocation_id, invocation.id);
+    assert!(
+        store
+            .list_invocations_by_session("session-other")
+            .unwrap()
+            .is_empty()
+    );
 
     let key = IdempotencyKey {
         function_id: fid("alpha::write"),

@@ -151,6 +151,26 @@ impl TraceRepo {
         }
     }
 
+    /// List records for replay in deterministic ascending order.
+    pub fn list_by_session_for_replay(
+        conn: &Connection,
+        session_id: &str,
+    ) -> Result<Vec<AgentTraceRecord>> {
+        let mut stmt = conn.prepare(
+            "SELECT id, trace_id, invocation_id, parent_invocation_id,
+                    provider_invocation_id, session_id, workspace_id, turn,
+                    model_primitive_name, operation, status, timestamp,
+                    completed_at, duration_ms, record_json
+             FROM trace_records
+             WHERE session_id = ?1
+             ORDER BY timestamp ASC, id ASC",
+        )?;
+        let rows = stmt
+            .query_map(params![session_id], Self::map_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
+    }
+
     fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentTraceRecord> {
         let record_json: String = row.get(14)?;
         let record_json = serde_json::from_str(&record_json).map_err(|error| {

@@ -2,7 +2,7 @@
 
 Created: 2026-06-09
 
-Current score: **50/100**
+Current score: **74/100**
 
 Status: **active**
 
@@ -25,8 +25,8 @@ and
 | DRC-2 | passed_after_fix | Static entropy/order guard scans source for raw time, UUIDv7, RNG, and timestamp-only ordering outside explicit owner paths. |
 | DRC-3 | passed_after_fix | Deterministic event/session/workspace/fork identities and invocation-record timestamp constructor are implemented and tested. |
 | DRC-4 | passed_after_fix | `model.provider_request` event, responder-boundary audit payload, provider exact-envelope marking, and pre-stream turn-runner persistence are implemented and tested. |
-| DRC-5 | pending | `tron.replay.v1` manifest builder and `session::replay_manifest` operation not yet implemented. |
-| DRC-6 | pending | Canonical JSON hashing and stable row-order proof not yet implemented. |
+| DRC-5 | passed_after_fix | `tron.replay.v1` manifest builder, `session::replay_manifest`, and read-only `execute` operation `replay_manifest` are implemented and tested. |
+| DRC-6 | passed_after_fix | Section and overall replay hashes use sorted-key canonical JSON; replay rows use stable non-timestamp-only order and focused tests cover byte stability. |
 | DRC-7 | pending | Cross-record replay reference proof not yet implemented. |
 | DRC-8 | pending | Offline roundtrip harness not yet implemented. |
 | DRC-9 | pending | Progressive docs, README, protocol docs, and iOS decode updates will be closed after event/API changes land. |
@@ -167,6 +167,76 @@ Proof:
 
 Open rows after DRC-4: DRC-5, DRC-6, DRC-7, DRC-8, DRC-9, and DRC-10.
 
+## DRC-5 Evidence
+
+Files added:
+
+- `packages/agent/src/domains/session/replay/mod.rs`
+- `packages/agent/src/domains/session/replay/tests.rs`
+- `packages/agent/src/domains/capability/operations/replay.rs`
+- `packages/agent/src/engine/durability/replay.rs`
+
+Files updated:
+
+- `packages/agent/src/domains/session/mod.rs`
+- `packages/agent/src/domains/session/contract.rs`
+- `packages/agent/src/domains/session/query/mod.rs`
+- `packages/agent/src/domains/session/query/operations.rs`
+- `packages/agent/src/domains/capability/operations/mod.rs`
+- `packages/agent/src/domains/capability/contract.rs`
+- `packages/agent/src/engine/invocation/host/substrate_handle.rs`
+- `packages/agent/src/engine/catalog/registry/mod.rs`
+- `packages/agent/src/engine/durability/mod.rs`
+- `packages/agent/tests/primitive_trace_execution.rs`
+
+Proof:
+
+- `session::replay_manifest` is registered as a `PureRead` session capability.
+- The manifest builder returns `format: "tron.replay.v1"` with sections for
+  session row, resolved session events, provider audit events, trace records,
+  engine invocations, stream rows, and queue rows.
+- `capability::execute` operation `replay_manifest` delegates to the same
+  builder for the current session and bypasses execute trace creation so the
+  read does not mutate trace records.
+- `execute_replay_manifest_is_read_only_and_does_not_create_trace_record`
+  proves the execute surface returns a manifest without adding a trace row.
+
+Open rows after DRC-5: DRC-7, DRC-8, DRC-9, and DRC-10.
+
+## DRC-6 Evidence
+
+Files updated:
+
+- `packages/agent/src/domains/session/replay/mod.rs`
+- `packages/agent/src/domains/session/event_store/sqlite/repositories/trace.rs`
+- `packages/agent/src/domains/session/event_store/store/event_store/trace_log.rs`
+- `packages/agent/src/engine/durability/ledger/mod.rs`
+- `packages/agent/src/engine/durability/ledger/memory.rs`
+- `packages/agent/src/engine/durability/ledger/sqlite_store.rs`
+- `packages/agent/src/engine/durability/queue/memory.rs`
+- `packages/agent/src/engine/durability/queue/sqlite_store.rs`
+- `packages/agent/src/engine/durability/streams/memory.rs`
+- `packages/agent/src/engine/durability/streams/sqlite_store.rs`
+- `packages/agent/src/engine/primitives/stores.rs`
+- `packages/agent/src/engine/tests/fixtures/mod.rs`
+
+Proof:
+
+- `canonical_hash` serializes sorted-object JSON and hashes with SHA-256 hex.
+- Replay section hashes cover each section, and `replayHash` covers the
+  manifest without the self-referential `replayHash` field.
+- Replay ordering is section-specific and stable: session event sequence,
+  provider audit event sequence, trace `timestamp ASC, id ASC`, invocation
+  durable append order plus invocation id, stream cursor ASC, and queue
+  `queue ASC, created_at ASC, receipt_id ASC`.
+- `replay_manifest_is_byte_stable_and_covers_durable_sections` proves repeated
+  exports are equal, hashes are present, provider audits are included, trace
+  timestamp ties use id order, streams are session-scoped, queue rows use the
+  durable key order, and engine invocations are included.
+- `canonical_hash_sorts_nested_object_keys` proves nested object key sorting.
+
+Open rows after DRC-6: DRC-7, DRC-8, DRC-9, and DRC-10.
+
 ## Verification Log
 
 | Time | Command | Exit | Notes |
@@ -203,11 +273,17 @@ Open rows after DRC-4: DRC-5, DRC-6, DRC-7, DRC-8, DRC-9, and DRC-10.
 | 2026-06-09 | `git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj` | 0 | `xcodegen generate` left the project file unchanged. |
 | 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-4 changes. |
 | 2026-06-09 | `git diff --check` | 0 | DRC-4 checkpoint diff has no whitespace errors. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 101 | Initial DRC-5/6 replay test compile caught missing trait methods on test ledger fixtures and an invalid synthetic authority grant. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml replay --lib -- --nocapture` | 0 | Replay builder/hash test passed: 12 filtered replay-related tests passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml execute_replay_manifest_is_read_only_and_does_not_create_trace_record --test primitive_trace_execution -- --nocapture` | 0 | Execute replay manifest read-only test passed: 1 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | 0 | DRC-5/6 invariant target passed: 13 passed, 0 failed. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml clarification_includes_capability_execution_guidance --lib -- --nocapture` | 0 | Provider primer guidance test passed after adding `replay_manifest` and its trace exception. |
+| 2026-06-09 | `cargo test --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml execute_schema_exposes_primitive_operations_not_catalog_targets --lib -- --nocapture` | 0 | Capability schema test passed after adding `replay_manifest` to the provider-visible operation description. |
+| 2026-06-09 | `cargo check --manifest-path /Users/moose/Downloads/projects/tron/packages/agent/Cargo.toml` | 0 | Agent crate check passed for DRC-5/6 changes. |
 
 ## Residual Risk Log
 
 | Risk | Owner Row | State |
 |------|-----------|-------|
-| Replay manifest does not yet include engine substrate rows. | DRC-5 | Open. |
-| Replay hashing/order are not yet byte-stable. | DRC-6 | Open. |
+| Replay manifest direct resource export is intentionally deferred until cross-record proof shows whether invocation/trace refs are sufficient. | DRC-7 | Open. |
 | Offline replay harness does not yet exist. | DRC-8 | Open. |

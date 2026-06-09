@@ -448,9 +448,10 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("file_write"));
     assert!(result.contains("process_run"));
     assert!(result.contains("trace_list"));
+    assert!(result.contains("replay_manifest"));
     assert!(result.contains("Do not send `target`"));
     assert!(result.contains("Put operation fields at the top level"));
-    assert!(result.contains("The engine records a trace record"));
+    assert!(result.contains("Except for read-only `replay_manifest`"));
     assert!(result.contains("When authority is unavailable"));
 }
 

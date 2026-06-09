@@ -99,6 +99,15 @@ impl EngineLedgerStore for InMemoryEngineLedgerStore {
         Ok(self.invocations.clone())
     }
 
+    fn list_invocations_by_session(&self, session_id: &str) -> Result<Vec<InvocationRecord>> {
+        Ok(self
+            .invocations
+            .iter()
+            .filter(|record| record.session_id.as_deref() == Some(session_id))
+            .cloned()
+            .collect())
+    }
+
     fn reserve_idempotency(
         &mut self,
         reservation: IdempotencyReservation,

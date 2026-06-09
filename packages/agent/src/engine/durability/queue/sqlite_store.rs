@@ -381,6 +381,25 @@ CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
             .collect()
     }
 
+    /// List queue items scoped to one session for replay.
+    pub fn list_by_session(&self, session_id: &str) -> Result<Vec<EngineQueueItem>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT * FROM engine_queue_items
+                 WHERE session_id = ?1
+                 ORDER BY queue ASC, created_at ASC, receipt_id ASC",
+            )
+            .map_err(|err| sqlite_err("queue.list_by_session.prepare", err.to_string()))?;
+        let rows = stmt
+            .query_map(params![session_id], |row| {
+                row_to_queue_item(&self.conn, row)
+            })
+            .map_err(|err| sqlite_err("queue.list_by_session.query", err.to_string()))?;
+        rows.map(|row| row.map_err(|err| sqlite_err("queue.list_by_session.row", err.to_string())))
+            .collect()
+    }
+
     fn insert_item(&mut self, item: &EngineQueueItem) -> Result<()> {
         self.conn
             .execute(

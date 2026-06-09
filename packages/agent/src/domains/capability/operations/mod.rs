@@ -3,7 +3,9 @@
 //! `capability::execute` is the only model-facing tool on this branch. It does
 //! not search, inspect, route, bind, approve, or execute catalog targets. It
 //! performs one direct host primitive operation and returns a model-visible
-//! observation with engine details for audit.
+//! observation with engine details for audit. `replay_manifest` is the only
+//! read-only operation that bypasses trace-record creation; tracing that read
+//! would mutate the manifest it returns.
 
 use std::time::Instant;
 
@@ -19,12 +21,14 @@ use crate::shared::server::errors::CapabilityError;
 mod filesystem;
 mod logs;
 mod process;
+mod replay;
 mod state;
 mod trace;
 
 use filesystem::{file_read, file_write};
 use logs::log_recent;
 use process::process_run;
+use replay::replay_manifest;
 use state::{state_get, state_list, state_set};
 use trace::{complete_trace_record, started_trace_record, trace_get, trace_list};
 
@@ -32,9 +36,13 @@ pub(crate) async fn execute_value(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    let operation = required_str(&invocation.payload, "operation")?.to_owned();
+    if operation == "replay_manifest" {
+        return result_value(replay_manifest(invocation, deps).await?);
+    }
+
     let started_at = Utc::now().to_rfc3339();
     let start = Instant::now();
-    let operation = required_str(&invocation.payload, "operation")?.to_owned();
     let mut trace_record = started_trace_record(invocation, deps, &operation, &started_at)?;
     deps.event_store
         .append_trace_record(&trace_record)
@@ -87,10 +95,11 @@ async fn execute_operation(
         "trace_list" => trace_list(invocation, deps)?,
         "trace_get" => trace_get(invocation, deps)?,
         "log_recent" => log_recent(invocation, deps).await?,
+        "replay_manifest" => replay_manifest(invocation, deps).await?,
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, or log_recent."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, or replay_manifest."
                 ),
             });
         }
@@ -145,7 +154,7 @@ fn optional_u64(payload: &Value, field: &str) -> Result<Option<u64>, CapabilityE
     }
 }
 
-fn ok_result(text: String, details: Value) -> CapabilityResult {
+pub(super) fn ok_result(text: String, details: Value) -> CapabilityResult {
     CapabilityResult {
         content: CapabilityResultBody::Blocks(vec![CapabilityResultContent::text(text)]),
         details: Some(details),
@@ -171,7 +180,7 @@ fn compact_json(value: &Value) -> String {
     serde_json::to_string(value).unwrap_or_else(|_| "<unserializable>".to_owned())
 }
 
-fn internal(message: impl Into<String>) -> CapabilityError {
+pub(super) fn internal(message: impl Into<String>) -> CapabilityError {
     CapabilityError::Internal {
         message: message.into(),
     }

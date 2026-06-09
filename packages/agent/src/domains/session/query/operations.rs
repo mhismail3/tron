@@ -77,3 +77,11 @@ pub(crate) async fn session_export_value(
     let session_id = require_string_param(params, "sessionId")?;
     crate::domains::session::query::SessionQueryService::export(deps, session_id).await
 }
+
+pub(crate) async fn session_replay_manifest_value(
+    params: Option<&Value>,
+    deps: &Deps,
+) -> Result<Value, CapabilityError> {
+    let session_id = require_string_param(params, "sessionId")?;
+    crate::domains::session::query::SessionQueryService::replay_manifest(deps, session_id).await
+}

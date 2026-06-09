@@ -47,6 +47,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                 "description": concat!(
                     "Primitive host operation for the bare Tron loop. ",
                     "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, and inspect agent trace/log records. ",
+                    "It can also export the current session replay manifest without side effects. ",
                     "Choose one operation per call. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()
@@ -68,7 +69,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "properties": {
             "operation": {
                 "type": "string",
-                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, or log_recent."
+                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, or replay_manifest."
             },
             "input": {"type": "string", "description": "Text to record for observe."},
             "scope": {"type": "string", "description": "State scope: session, workspace, or system."},

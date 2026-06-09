@@ -81,6 +81,10 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
         CapabilityContract::new("session::export", "session", EffectClass::PureRead, RiskLevel::Low, Some("session.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
             .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .build()?,
+        CapabilityContract::new("session::replay_manifest", "session", EffectClass::PureRead, RiskLevel::Low, Some("session.read"))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"required":["sessionId"],"type":"object"}))
+            .response_schema(json!({"additionalProperties":true,"type":"object"}))
             .build()?
     ])
 }
