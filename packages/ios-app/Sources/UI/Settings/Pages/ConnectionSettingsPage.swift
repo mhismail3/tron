@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ConnectionSettingsPage: View {
     let settingsState: SettingsState
-    let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
+    let updateServerSetting: (SettingsMutation) -> Void
     let startServerOnboarding: (PairedServer?) -> Void
 
     @Environment(\.dependencies) private var dependencies
@@ -10,7 +10,7 @@ struct ConnectionSettingsPage: View {
 
     init(
         settingsState: SettingsState,
-        updateServerSetting: @escaping (() -> ServerSettingsUpdate) -> Void,
+        updateServerSetting: @escaping (SettingsMutation) -> Void,
         startServerOnboarding: @escaping (PairedServer?) -> Void = { ServerOnboardingLauncher.post(prefill: $0) }
     ) {
         self.settingsState = settingsState
@@ -89,7 +89,7 @@ struct ConnectionSettingsPage: View {
     }
 
     private var activeServerUnavailable: Bool {
-        hasActiveServer && !dependencies.engineClient.connectionState.isConnected
+        hasActiveServer && !dependencies.connectionRepository.connectionState.isConnected
     }
 
     private var hasActiveServer: Bool {
@@ -314,11 +314,7 @@ struct ConnectionSettingsPage: View {
                         current: settingsState.observabilityLogLevel
                     ) { newValue in
                         settingsState.observabilityLogLevel = newValue
-                        updateServerSetting {
-                            var update = ServerSettingsUpdate()
-                            update.observability = .init(logLevel: newValue)
-                            return update
-                        }
+                        updateServerSetting(.observabilityLogLevel(newValue))
                     }
                 }
                 SettingsRowDivider()
@@ -328,11 +324,7 @@ struct ConnectionSettingsPage: View {
                         set: { newValue in
                             let clamped = UInt64(min(max(newValue, 1), 90))
                             settingsState.observabilityVerboseRetentionDays = clamped
-                            updateServerSetting {
-                                var update = ServerSettingsUpdate()
-                                update.observability = .init(verboseRetentionDays: clamped)
-                                return update
-                            }
+                            updateServerSetting(.observabilityVerboseRetentionDays(clamped))
                         }
                     ), in: 1...90) {
                         Text("\(settingsState.observabilityVerboseRetentionDays)d")
@@ -348,11 +340,7 @@ struct ConnectionSettingsPage: View {
                             get: { settingsState.storageRetentionEnabled },
                             set: { newValue in
                                 settingsState.storageRetentionEnabled = newValue
-                                updateServerSetting {
-                                    var update = ServerSettingsUpdate()
-                                    update.storage = .init(retentionEnabled: newValue)
-                                    return update
-                                }
+                                updateServerSetting(.storageRetentionEnabled(newValue))
                             }
                         )
                     )
@@ -366,11 +354,7 @@ struct ConnectionSettingsPage: View {
                         set: { newValue in
                             let clamped = UInt64(min(max(newValue, 64), 8192))
                             settingsState.storageMaxDatabaseMb = clamped
-                            updateServerSetting {
-                                var update = ServerSettingsUpdate()
-                                update.storage = .init(maxDatabaseMb: clamped)
-                                return update
-                            }
+                            updateServerSetting(.storageMaxDatabaseMb(clamped))
                         }
                     ), in: 64...8192, step: 64) {
                         Text("\(settingsState.storageMaxDatabaseMb) MB")

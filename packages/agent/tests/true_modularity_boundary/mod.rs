@@ -17,7 +17,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Scorecard",
         "Status: **active**",
-        "Current score: **70/100**",
+        "Current score: **80/100**",
         "Branch: `codex/primitive-engine-teardown`",
         "This scorecard formalizes the True Modularity Boundary campaign.",
         "## Boundary Taxonomy",
@@ -35,7 +35,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-4 | Harden domain worker boundaries | 10 | passed_after_fix |",
         "| TMB-5 | Encapsulate state and storage | 10 | passed_after_fix |",
         "| TMB-6 | Make transport adapter-only | 10 | passed_after_fix |",
-        "| TMB-7 | Make iOS Engine access black-boxed | 10 | open |",
+        "| TMB-7 | Make iOS Engine access black-boxed | 10 | passed_after_fix |",
         "| TMB-8 | Define boundary-local error contracts | 8 | open |",
         "| TMB-9 | Update docs and README | 6 | open |",
         "| TMB-10 | Final adversarial closeout | 6 | open |",
@@ -60,7 +60,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Evidence Manifest",
         "Status: **active**",
-        "Current score: **70/100**",
+        "Current score: **80/100**",
         "| TMB-0 | passed_after_fix |",
         "| TMB-1 | passed_after_fix |",
         "| TMB-2 | passed_after_fix |",
@@ -68,6 +68,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-4 | passed_after_fix |",
         "| TMB-5 | passed_after_fix |",
         "| TMB-6 | passed_after_fix |",
+        "| TMB-7 | passed_after_fix |",
         "## TMB-0 Red Proof",
         "The first invariant run is intentionally red.",
         "Rust agent loop imports `domains::model::providers` directly",
@@ -77,6 +78,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "After TMB-4, `domain_workers_expose_contracts_not_services` passes.",
         "After TMB-5, `state_stores_are_owner_private` passes.",
         "After TMB-6, `transport_is_adapter_only` passes.",
+        "After TMB-7, `ios_ui_uses_repositories_not_engine_transport` passes.",
     ] {
         assert!(
             manifest.contains(required),
@@ -335,6 +337,28 @@ fn transport_is_adapter_only() {
 
 #[test]
 fn ios_ui_uses_repositories_not_engine_transport() {
+    let banned_identifiers = [
+        "EngineClient",
+        "WebSocket",
+        "EngineProtocolTypes",
+        "ServerSettings",
+        "ServerSettingsUpdate",
+        "AuthState",
+        "AuthUpdateParams",
+        "AuthClearParams",
+        "OAuthBeginResponse",
+        "ActiveCredentialParam",
+        "ProviderAuthInfo",
+        "ServiceAuthInfo",
+        "AccountInfo",
+        "ApiKeyInfo",
+        "ActiveCredentialInfo",
+        "AnyCodableOptional",
+        "OAuthInput",
+        "EngineConnection",
+        "EngineTransport",
+        "EngineSubscription",
+    ];
     let leaks = swift_source_lines("packages/ios-app/Sources")
         .into_iter()
         .filter(|line| {
@@ -343,10 +367,9 @@ fn ios_ui_uses_repositories_not_engine_transport() {
                 || path.starts_with("packages/ios-app/Sources/UI/")
         })
         .filter(|line| {
-            line.contains("EngineClient")
-                || line.contains("WebSocket")
-                || line.contains("EngineProtocolTypes")
-                || line.contains("Server")
+            banned_identifiers
+                .iter()
+                .any(|identifier| line_has_identifier(line, identifier))
         })
         .collect::<Vec<_>>();
 
@@ -416,6 +439,25 @@ fn path_from_line(line: &str) -> &str {
 
 fn path_has_any_prefix(path: &str, prefixes: &[&str]) -> bool {
     prefixes.iter().any(|prefix| path.starts_with(prefix))
+}
+
+fn line_has_identifier(line: &str, identifier: &str) -> bool {
+    line.match_indices(identifier).any(|(index, _)| {
+        let before = index
+            .checked_sub(1)
+            .and_then(|before| line.as_bytes().get(before))
+            .is_none_or(|byte| !is_identifier_byte(*byte));
+        let after_index = index + identifier.len();
+        let after = line
+            .as_bytes()
+            .get(after_index)
+            .is_none_or(|byte| !is_identifier_byte(*byte));
+        before && after
+    })
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
 }
 
 fn rust_source_lines(root: &str) -> Vec<String> {

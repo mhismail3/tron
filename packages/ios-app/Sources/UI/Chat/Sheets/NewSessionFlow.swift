@@ -5,7 +5,9 @@ internal enum NewSessionFlowPresentation {
 }
 
 struct NewSessionFlow: View {
-    let engineClient: EngineClient
+    let connectionRepository: any AppConnectionRepository
+    let modelRepository: any ModelRepository
+    let sessionRepository: any NetworkSessionRepository
     let defaultModel: String
     let eventStoreManager: EventStoreManager
     let onSessionCreated: (NewSessionCreated) -> Void
@@ -109,7 +111,7 @@ struct NewSessionFlow: View {
             .task {
                 await loadModels()
             }
-            .onChange(of: engineClient.connectionState) { oldState, newState in
+            .onChange(of: connectionRepository.connectionState) { oldState, newState in
                 if newState.isConnected && !oldState.isConnected {
                     _ = Task {
                         await loadModels()
@@ -257,13 +259,13 @@ struct NewSessionFlow: View {
         isLoadingModels = true
 
         // Ensure connection is established.
-        await engineClient.connect()
-        if !engineClient.isConnected {
+        await connectionRepository.connect()
+        if !connectionRepository.isConnected {
             try? await Task.sleep(for: .milliseconds(100))
         }
 
         do {
-            let models = try await engineClient.model.list()
+            let models = try await modelRepository.list(forceRefresh: false)
             await MainActor.run {
                 availableModels = models
 
@@ -288,7 +290,7 @@ struct NewSessionFlow: View {
 
         Task {
             do {
-                let result = try await engineClient.session.create(
+                let result = try await sessionRepository.create(
                     workingDirectory: intent.workingDirectory,
                     model: intent.model,
                     idempotencyKey: .userAction("session.create")
@@ -296,8 +298,8 @@ struct NewSessionFlow: View {
 
                 // Persist non-default reasoning level to the new session.
                 if selectedReasoningLevel != "medium" {
-                    _ = try? await engineClient.model.setReasoningLevel(
-                        result.sessionId,
+                    _ = try? await modelRepository.setReasoningLevel(
+                        sessionId: result.sessionId,
                         level: selectedReasoningLevel,
                         idempotencyKey: .userAction("config.setReasoningLevel")
                     )

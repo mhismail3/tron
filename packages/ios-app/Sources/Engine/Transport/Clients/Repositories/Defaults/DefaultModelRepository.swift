@@ -42,6 +42,18 @@ final class DefaultModelRepository: ModelRepository {
         try await modelClient.switchModel(sessionId, model: modelId, idempotencyKey: idempotencyKey)
     }
 
+    func setReasoningLevel(
+        sessionId: String,
+        level: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ReasoningLevelResult {
+        try await modelClient.setReasoningLevel(
+            sessionId,
+            level: level,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func invalidateCache() {
         cachedModels = []
         // Also invalidate the underlying client cache if possible

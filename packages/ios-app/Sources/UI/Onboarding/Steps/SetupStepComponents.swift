@@ -33,8 +33,8 @@ struct CompactApiKeyCard: View {
     let title: String
     let placeholder: String
     let existingSummary: OnboardingCredentialSummary?
-    let save: (String) async throws -> AuthState
-    let onSaved: (AuthState) -> Void
+    let save: (String) async throws -> AuthSnapshot
+    let onSaved: (AuthSnapshot) -> Void
 
     @State private var key = ""
     @State private var isSaving = false

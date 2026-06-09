@@ -19,7 +19,7 @@ enum ProviderAuthActionItem: Equatable, Identifiable, Sendable {
         provider.supportsOAuth ? [.oauthLogin, .addApiKey] : [.addApiKey]
     }
 
-    static func visibleItems(for provider: ProviderInfo, providerAuth: ProviderAuthInfo?) -> [Self] {
+    static func visibleItems(for provider: ProviderInfo, providerAuth: ProviderAuthSnapshot?) -> [Self] {
         items(for: provider).filter { item in
             switch item {
             case .oauthLogin:
@@ -152,50 +152,50 @@ struct ProviderCredentialClearPillLabel: View {
 }
 
 enum ProviderStatusHelpers {
-    static func accountStatus(_ account: AccountInfo) -> String {
+    static func accountStatus(_ account: ProviderAccountSnapshot) -> String {
         if account.isExpired {
             return account.hasRefreshToken ? "Will refresh" : "Expired"
         }
         return "Active"
     }
 
-    static func accountStatusColor(_ account: AccountInfo) -> Color {
+    static func accountStatusColor(_ account: ProviderAccountSnapshot) -> Color {
         if account.isExpired {
             return account.hasRefreshToken ? .tronAmber : .tronError
         }
         return .tronSuccess
     }
 
-    static func accountDetail(_ account: AccountInfo) -> String {
+    static func accountDetail(_ account: ProviderAccountSnapshot) -> String {
         if account.isExpired {
             return account.hasRefreshToken ? "OAuth will refresh" : "OAuth expired"
         }
         return "Logged in with OAuth"
     }
 
-    static func isProviderConfigured(_ info: ProviderAuthInfo?) -> Bool {
+    static func isProviderConfigured(_ info: ProviderAuthSnapshot?) -> Bool {
         guard let info else { return false }
-        let hasAccounts = !(info.accounts?.isEmpty ?? true)
-        let hasKeys = !(info.apiKeys?.isEmpty ?? true)
+        let hasAccounts = !info.accounts.isEmpty
+        let hasKeys = !info.apiKeys.isEmpty
         return info.hasApiKey || info.hasOAuth || hasAccounts || hasKeys
     }
 
-    static func isAccountActive(_ info: ProviderAuthInfo?, label: String) -> Bool {
+    static func isAccountActive(_ info: ProviderAuthSnapshot?, label: String) -> Bool {
         guard let active = info?.activeCredential else { return false }
         return active.isOAuth && active.label == label
     }
 
-    static func isApiKeyActive(_ info: ProviderAuthInfo?, label: String) -> Bool {
+    static func isApiKeyActive(_ info: ProviderAuthSnapshot?, label: String) -> Bool {
         guard let active = info?.activeCredential else { return false }
         return active.isApiKey && active.label == label
     }
 
-    static func hasRefreshableOAuth(_ info: ProviderAuthInfo?) -> Bool {
+    static func hasRefreshableOAuth(_ info: ProviderAuthSnapshot?) -> Bool {
         guard let accounts = info?.accounts, !accounts.isEmpty else { return false }
         return accounts.contains { !$0.isExpired || $0.hasRefreshToken }
     }
 
-    static func isServiceConfigured(_ info: ServiceAuthInfo?) -> Bool {
+    static func isServiceConfigured(_ info: ServiceAuthSnapshot?) -> Bool {
         info?.hasApiKey == true
     }
 

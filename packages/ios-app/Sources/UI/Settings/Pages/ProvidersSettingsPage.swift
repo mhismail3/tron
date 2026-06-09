@@ -9,11 +9,11 @@ struct ProvidersSettingsPage: View {
 
     static let title = SettingsLabels.providers
 
-    @State private var authState: AuthState?
+    @State private var authState: AuthSnapshot?
     @State private var error: String?
     @State private var oauthProvider: OAuthProvider?
 
-    private var engineClient: EngineClient { dependencies.engineClient }
+    private var authRepository: any AuthRepository { dependencies.authRepository }
 
     var body: some View {
         SettingsPageContainer(title: Self.title) {
@@ -131,15 +131,15 @@ struct ProvidersSettingsPage: View {
 
     private func loadAuthState() async {
         do {
-            authState = try await engineClient.auth.get()
+            authState = try await authRepository.get()
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    private func setActive(provider: String, credential: ActiveCredentialParam) async -> ProviderAuthActionResult {
+    private func setActive(provider: String, credential: AuthCredentialSelection) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await engineClient.auth.setActive(
+            try await authRepository.setActive(
                 provider: provider,
                 credential: credential,
                 idempotencyKey: .userAction("auth.setActive")
@@ -149,7 +149,7 @@ struct ProvidersSettingsPage: View {
 
     private func removeAccount(provider: String, label: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await engineClient.auth.removeAccount(
+            try await authRepository.removeAccount(
                 provider: provider,
                 label: label,
                 idempotencyKey: .userAction("auth.removeAccount")
@@ -159,7 +159,7 @@ struct ProvidersSettingsPage: View {
 
     private func removeApiKey(provider: String, label: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await engineClient.auth.removeApiKey(
+            try await authRepository.removeApiKey(
                 provider: provider,
                 label: label,
                 idempotencyKey: .userAction("auth.removeApiKey")
@@ -169,7 +169,7 @@ struct ProvidersSettingsPage: View {
 
     private func addApiKey(provider: String, label: String, key: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await engineClient.auth.addNamedApiKey(
+            try await authRepository.addNamedApiKey(
                 provider: provider,
                 label: label,
                 key: key,
@@ -178,10 +178,10 @@ struct ProvidersSettingsPage: View {
         }
     }
 
-    private func saveProvider(_ params: AuthUpdateParams) async -> ProviderAuthActionResult {
+    private func saveProvider(_ mutation: AuthMutation) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await engineClient.auth.update(
-                params,
+            try await authRepository.update(
+                mutation,
                 idempotencyKey: .userAction("auth.update")
             )
         }
@@ -189,8 +189,8 @@ struct ProvidersSettingsPage: View {
 
     private func clearProvider(_ providerId: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await engineClient.auth.clear(
-                AuthClearParams(provider: providerId),
+            try await authRepository.clear(
+                .provider(providerId),
                 idempotencyKey: .userAction("auth.clear")
             )
         }
@@ -198,14 +198,14 @@ struct ProvidersSettingsPage: View {
 
     private func clearService(_ serviceId: String) async -> ProviderAuthActionResult {
         await performAuthAction {
-            try await engineClient.auth.clear(
-                AuthClearParams(service: serviceId),
+            try await authRepository.clear(
+                .service(serviceId),
                 idempotencyKey: .userAction("auth.clear")
             )
         }
     }
 
-    private func performAuthAction(_ action: () async throws -> AuthState) async -> ProviderAuthActionResult {
+    private func performAuthAction(_ action: () async throws -> AuthSnapshot) async -> ProviderAuthActionResult {
         do {
             authState = try await action()
             return .succeeded

@@ -154,7 +154,7 @@ struct OnboardingStateTests {
         let state = OnboardingState(defaults: ephemeralDefaults())
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/stale"}}"#))
         state.hasPairedMac = true
-        state.hydrateSetup(serverId: "old-server", settings: settings, authState: nil)
+        state.hydrateSetup(serverId: "old-server", settings: ServerSettingsSnapshot(settings), authState: nil)
 
         state.acceptPairingPayload(.init(host: "new-host", port: 9847, token: "new-token", label: "New Mac"))
 
@@ -173,7 +173,7 @@ struct OnboardingStateTests {
         state.pairingPort = "1111"
         state.pairingToken = "stale-token"
         state.pairingLabel = "Stale"
-        state.hydrateSetup(serverId: "old-server", settings: settings, authState: nil)
+        state.hydrateSetup(serverId: "old-server", settings: ServerSettingsSnapshot(settings), authState: nil)
 
         state.prepareServerOnboarding(prefill: nil)
 
@@ -397,7 +397,7 @@ struct OnboardingStateTests {
         """.utf8))
 
         var snapshot = OnboardingSetupSnapshot()
-        snapshot.hydrate(serverId: "server-1", settings: settings, authState: auth)
+        snapshot.hydrate(serverId: "server-1", settings: ServerSettingsSnapshot(settings), authState: AuthSnapshot(auth))
 
         #expect(snapshot.serverId == "server-1")
         #expect(snapshot.defaultWorkspace == "/tmp/tron-fixtures/example/project")
@@ -423,7 +423,7 @@ struct OnboardingStateTests {
     func resetClearsSetupSnapshot() throws {
         let state = OnboardingState(defaults: ephemeralDefaults())
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/tmp"}}"#))
-        state.hydrateSetup(serverId: "server-1", settings: settings, authState: nil)
+        state.hydrateSetup(serverId: "server-1", settings: ServerSettingsSnapshot(settings), authState: nil)
 
         state.reset()
 
@@ -461,11 +461,11 @@ struct OnboardingStateTests {
 
         state.hydrateSetup(
             serverId: "server-1",
-            settings: settings,
-            authState: emptyAuth,
+            settings: ServerSettingsSnapshot(settings),
+            authState: AuthSnapshot(emptyAuth),
             authLoadError: "temporary auth failure"
         )
-        state.refreshSetupAuth(refreshedAuth)
+        state.refreshSetupAuth(AuthSnapshot(refreshedAuth))
 
         #expect(state.setupSnapshot.serverId == "server-1")
         #expect(state.setupSnapshot.defaultWorkspace == "/tmp/tron-fixtures/example/project")

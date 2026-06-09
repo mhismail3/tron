@@ -28,6 +28,13 @@ protocol ModelRepository: AnyObject {
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> ModelSwitchResult
 
+    /// Persist the reasoning level for a session.
+    func setReasoningLevel(
+        sessionId: String,
+        level: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ReasoningLevelResult
+
     /// Invalidate the model cache
     func invalidateCache()
 }

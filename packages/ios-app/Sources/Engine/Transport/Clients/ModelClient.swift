@@ -10,6 +10,11 @@ protocol ModelClientProtocol {
         model: String,
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> ModelSwitchResult
+    func setReasoningLevel(
+        _ sessionId: String,
+        level: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ReasoningLevelResult
 }
 
 /// Client for model-related engine capabilities.

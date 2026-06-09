@@ -4,8 +4,8 @@ import Foundation
 
 @Suite("Providers Page Tests")
 struct ProvidersSettingsPageTests {
-    private func providerInfo(json: String) throws -> ProviderAuthInfo {
-        try JSONDecoder().decode(ProviderAuthInfo.self, from: Data(json.utf8))
+    private func providerInfo(json: String) throws -> ProviderAuthSnapshot {
+        ProviderAuthSnapshot(try JSONDecoder().decode(ProviderAuthInfo.self, from: Data(json.utf8)))
     }
 
     @Test("provider settings copy matches current label")

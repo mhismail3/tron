@@ -361,7 +361,7 @@ extension ChatViewModel {
         }
 
         do {
-            let result = try await engineClient.session.reconstruct(
+            let result = try await services.sessions.reconstruct(
                 sessionId: sessionId,
                 limit: Self.additionalMessageBatchSize,
                 beforeEventId: oldestEventId

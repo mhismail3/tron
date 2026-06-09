@@ -2,7 +2,7 @@ import Foundation
 
 /// Observable state for server-authoritative settings.
 ///
-/// Loads values via engine protocol on first appearance and sends updates back to the server
+/// Loads values via the settings repository on first appearance and sends updates back to the server
 /// when the user changes a setting. SettingsView retains this object and passes
 /// `@Bindable` projections to section views.
 @Observable
@@ -24,7 +24,7 @@ final class SettingsState {
     var storageMaxDatabaseMb: UInt64 = 512
 
     @ObservationIgnored
-    private var lastLoadedSettings: ServerSettings?
+    private var lastLoadedSettings: ServerSettingsSnapshot?
 
     // MARK: - Load State
 
@@ -46,12 +46,12 @@ final class SettingsState {
     // MARK: - Load from Server
 
     func load(
-        using engineClient: EngineClient,
+        using settingsRepository: any SettingsRepository,
         acceptResult: @escaping @MainActor () -> Bool = { true }
     ) async {
         guard !isLoaded else { return }
         do {
-            let settings = try await engineClient.settings.get()
+            let settings = try await settingsRepository.get()
             guard acceptResult() else { return }
             applyServerSettings(settings)
             isLoaded = true
@@ -62,22 +62,23 @@ final class SettingsState {
     }
 
     func reload(
-        using engineClient: EngineClient,
+        settingsRepository: any SettingsRepository,
+        modelRepository: any ModelRepository,
         acceptResult: @escaping @MainActor () -> Bool = { true }
     ) async {
         clearServerSnapshot()
-        await load(using: engineClient, acceptResult: acceptResult)
+        await load(using: settingsRepository, acceptResult: acceptResult)
         guard acceptResult() else { return }
-        await loadModels(using: engineClient, acceptResult: acceptResult)
+        await loadModels(using: modelRepository, acceptResult: acceptResult)
     }
 
     func loadModels(
-        using engineClient: EngineClient,
+        using modelRepository: any ModelRepository,
         acceptResult: @escaping @MainActor () -> Bool = { true }
     ) async {
         isLoadingModels = true
         do {
-            let models = try await engineClient.model.list()
+            let models = try await modelRepository.list(forceRefresh: false)
             guard acceptResult() else { return }
             availableModels = models
         } catch {
@@ -94,10 +95,10 @@ final class SettingsState {
     /// and returns the new values — no hardcoded defaults on the client.
     @discardableResult
     func resetToDefaults(
-        using engineClient: EngineClient,
+        using settingsRepository: any SettingsRepository,
         acceptResult: @escaping @MainActor () -> Bool = { true }
-    ) async throws -> ServerSettings {
-        let settings = try await engineClient.settings.resetToDefaults(
+    ) async throws -> ServerSettingsSnapshot {
+        let settings = try await settingsRepository.resetToDefaults(
             idempotencyKey: .userAction("settings.resetToDefaults")
         )
         guard acceptResult() else { return settings }
@@ -121,17 +122,17 @@ final class SettingsState {
         loadError = message
     }
 
-    /// Apply a ServerSettings response to local state (shared by load and reset).
+    /// Apply a server settings snapshot to local state (shared by load and reset).
     ///
     /// Every field is overwritten from the active server's effective settings.
     /// That keeps the iOS UI honest when switching between Macs: a value that
     /// was present on server A cannot linger after server B reports its own
     /// default or a missing optional field.
-    func applyServerSettings(_ settings: ServerSettings) {
+    func applyServerSettings(_ settings: ServerSettingsSnapshot) {
         lastLoadedSettings = settings
         defaultModel = settings.defaultModel
-        preserveRecentCount = settings.compaction.preserveRecentCount
-        triggerTokenThreshold = settings.compaction.triggerTokenThreshold
+        preserveRecentCount = settings.compactionPreserveRecentCount
+        triggerTokenThreshold = settings.compactionTriggerTokenThreshold
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
         observabilityLogLevel = settings.observabilityLogLevel
         observabilityVerboseRetentionDays = settings.observabilityVerboseRetentionDays

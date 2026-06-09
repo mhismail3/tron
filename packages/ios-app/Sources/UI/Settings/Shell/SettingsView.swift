@@ -7,7 +7,7 @@ struct SettingsView: View {
     @Environment(\.dependencies) var dependencies
     @AppStorage("confirmArchive") private var confirmArchive = true
 
-    private var engineClient: EngineClient { dependencies.engineClient }
+    private var connectionRepository: any AppConnectionRepository { dependencies.connectionRepository }
     var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     @State var showingResetAlert = false
     @State private var showLogViewer = false
@@ -37,13 +37,13 @@ struct SettingsView: View {
 
     var serverSettingsReady: Bool {
         dependencies.pairedServerStore.activeServer != nil
-            && engineClient.connectionState.isConnected
+            && connectionRepository.connectionState.isConnected
             && settingsState.isLoaded
     }
 
     var activeServerUnavailable: Bool {
         dependencies.pairedServerStore.activeServer != nil
-            && !engineClient.connectionState.isConnected
+            && !connectionRepository.connectionState.isConnected
     }
 
     var showsServerUnavailableState: Bool {
@@ -135,7 +135,7 @@ struct SettingsView: View {
                 settingsState.clearServerSnapshot()
                 Task { await loadServerSettingsIfAvailable() }
             }
-            .onChange(of: engineClient.connectionState) { oldState, newState in
+            .onChange(of: connectionRepository.connectionState) { oldState, newState in
                 guard hasPairedServers else { return }
                 if newState.isConnected {
                     Task { await loadServerSettingsIfAvailable() }
@@ -214,14 +214,15 @@ struct SettingsView: View {
             settingsState.clearServerSnapshot()
             return
         }
-        let client = engineClient
-        guard client.connectionState.isConnected else {
+        let selectionVersion = dependencies.activeServerSelectionVersion
+        let connection = dependencies.connectionRepository
+        guard connection.connectionState.isConnected else {
             settingsState.clearServerSnapshot()
             return
         }
-        let isAlive = await client.verifyConnection()
+        let isAlive = await connection.verifyConnection()
         guard dependencies.pairedServerStore.activeServer?.id == activeServer.id,
-              dependencies.engineClient === client else {
+              dependencies.activeServerSelectionVersion == selectionVersion else {
             return
         }
         guard isAlive else {
@@ -229,9 +230,12 @@ struct SettingsView: View {
             await dependencies.manualRetry()
             return
         }
-        await settingsState.reload(using: client) {
+        await settingsState.reload(
+            settingsRepository: dependencies.settingsRepository,
+            modelRepository: dependencies.modelRepository
+        ) {
             dependencies.pairedServerStore.activeServer?.id == activeServer.id
-                && dependencies.engineClient === client
+                && dependencies.activeServerSelectionVersion == selectionVersion
         }
     }
 
@@ -243,21 +247,22 @@ struct SettingsView: View {
         confirmArchive = true
         guard serverSettingsReady else { return }
         let activeServerId = dependencies.pairedServerStore.activeServer?.id
-        let client = engineClient
+        let selectionVersion = dependencies.activeServerSelectionVersion
+        let settingsRepository = dependencies.settingsRepository
         Task {
             do {
-                let fresh = try await settingsState.resetToDefaults(using: client) {
+                let fresh = try await settingsState.resetToDefaults(using: settingsRepository) {
                     dependencies.pairedServerStore.activeServer?.id == activeServerId
-                        && dependencies.engineClient === client
+                        && dependencies.activeServerSelectionVersion == selectionVersion
                 }
                 if let activeServerId,
                    dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                   dependencies.engineClient === client {
+                   dependencies.activeServerSelectionVersion == selectionVersion {
                     dependencies.applyServerSettingsSnapshot(fresh, for: activeServerId)
                 }
             } catch {
                 if dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                   dependencies.engineClient === client {
+                   dependencies.activeServerSelectionVersion == selectionVersion {
                     settingsState.loadError = "Failed to reset: \(error.localizedDescription)"
                 }
             }
@@ -315,20 +320,20 @@ struct SettingsView: View {
         }
     }
 
-    private func updateServerSetting(_ build: () -> ServerSettingsUpdate) {
-        let update = build()
-        let client = engineClient
+    private func updateServerSetting(_ mutation: SettingsMutation) {
+        let settingsRepository = dependencies.settingsRepository
         let activeServerId = dependencies.pairedServerStore.activeServer?.id
+        let selectionVersion = dependencies.activeServerSelectionVersion
         Task {
             do {
-                try await client.settings.update(
-                    update,
+                try await settingsRepository.update(
+                    mutation,
                     idempotencyKey: .userAction("settings.update")
                 )
-                let fresh = try await client.settings.get()
+                let fresh = try await settingsRepository.get()
                 await MainActor.run {
                     guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.engineClient === client
+                          dependencies.activeServerSelectionVersion == selectionVersion
                     else { return }
                     settingsState.applyServerSettings(fresh)
                     settingsState.isLoaded = true
@@ -340,7 +345,7 @@ struct SettingsView: View {
             } catch {
                 await MainActor.run {
                     guard dependencies.pairedServerStore.activeServer?.id == activeServerId,
-                          dependencies.engineClient === client
+                          dependencies.activeServerSelectionVersion == selectionVersion
                     else { return }
                     settingsState.rollbackToLastLoadedSettings(
                         message: "Could not save server setting: \(error.localizedDescription)"

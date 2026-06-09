@@ -36,6 +36,10 @@ final class DefaultSessionRepository: NetworkSessionRepository {
         try await sessionClient.resume(sessionId: sessionId, idempotencyKey: idempotencyKey)
     }
 
+    func reconstruct(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult {
+        try await sessionClient.reconstruct(sessionId: sessionId, limit: limit, beforeEventId: beforeEventId)
+    }
+
     func archive(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws {
         try await sessionClient.archive(sessionId, idempotencyKey: idempotencyKey)
     }

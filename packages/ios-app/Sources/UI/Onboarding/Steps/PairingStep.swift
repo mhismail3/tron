@@ -326,13 +326,16 @@ struct PairingStep: View {
         }
 
         dependencies.replacePairedServers(plan.updatedServers, activeServer: plan.activeServer)
-        let client = dependencies.engineClient
+        let selectionVersion = dependencies.activeServerSelectionVersion
+        let connection = dependencies.connectionRepository
+        let settingsRepository = dependencies.settingsRepository
+        let authRepository = dependencies.authRepository
 
         do {
-            await client.connect()
-            let settings = try await client.settings.get()
+            await connection.connect()
+            let settings = try await settingsRepository.get()
             guard dependencies.pairedServerStore.activeServer?.id == plan.activeServer.id,
-                  dependencies.engineClient === client
+                  dependencies.activeServerSelectionVersion == selectionVersion
             else {
                 state.pairingError = .settingsFailed("Active server changed before setup settings loaded.")
                 state.isConnecting = false
@@ -341,7 +344,7 @@ struct PairingStep: View {
             dependencies.applyServerSettingsSnapshot(settings, for: plan.activeServer.id)
 
             do {
-                let authState = try await client.auth.get()
+                let authState = try await authRepository.get()
                 state.hydrateSetup(serverId: plan.activeServer.id, settings: settings, authState: authState)
             } catch {
                 state.hydrateSetup(

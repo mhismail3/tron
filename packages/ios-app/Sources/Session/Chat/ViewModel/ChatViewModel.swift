@@ -101,9 +101,9 @@ final class ChatViewModel {
 
     // MARK: - Internal State (accessible to extensions)
 
-    let engineClient: EngineClient
+    let services: ChatSessionServices
     let sessionId: String
-    /// Task for handling event stream from EngineClient
+    /// Task for handling the live session event stream.
     @ObservationIgnored
     private var eventTask: Task<Void, Never>?
     @ObservationIgnored
@@ -213,12 +213,12 @@ final class ChatViewModel {
 
     // MARK: - Initialization
 
-    init(engineClient: EngineClient, sessionId: String, eventStoreManager: EventStoreManager? = nil) {
-        self.engineClient = engineClient
+    init(services: ChatSessionServices, sessionId: String, eventStoreManager: EventStoreManager? = nil) {
+        self.services = services
         self.sessionId = sessionId
         self.eventStoreManager = eventStoreManager
-        self.connectionState = engineClient.connectionState
-        self.modelPickerState = ModelPickerState(modelClient: engineClient.model)
+        self.connectionState = services.connection.connectionState
+        self.modelPickerState = ModelPickerState(modelRepository: services.models)
         setupBindings()
         setupEventProcessingCallbacks()
     }
@@ -243,7 +243,7 @@ final class ChatViewModel {
     }
 
     private func setupBindings() {
-        observationTasks.append(Self.observeLoop({ self.engineClient.connectionState }) { [self] state in
+        observationTasks.append(Self.observeLoop({ self.services.connection.connectionState }) { [self] state in
             self.connectionState = state
 
             // Clear stale processing state on disconnect.
@@ -266,7 +266,7 @@ final class ChatViewModel {
     }
 
     func startLiveEventStream() {
-        // Subscribe to plugin-based event stream from EngineClient using async stream
+        // Subscribe to plugin-based event stream using the session event repository.
         // Filter to only handle events for this session
         guard eventTask == nil else { return }
         eventTaskGeneration += 1
@@ -274,7 +274,7 @@ final class ChatViewModel {
         eventTask = Task { [weak self] in
             guard let self else { return }
             logger.info("[LIVE] Starting engine event stream for session \(sessionId)", category: .events)
-            for await event in engineClient.events(for: sessionId) {
+            for await event in services.events.events(for: sessionId) {
                 guard !Task.isCancelled else { break }
                 logger.verbose(
                     "[LIVE] ChatViewModel received event \(event.eventType) session=\(event.sessionId ?? "nil") seq=\(event.sequence?.description ?? "nil")",
@@ -461,7 +461,7 @@ final class ChatViewModel {
     /// This sends an engine request to append a message.deleted event.
     /// The message will be filtered out during two-pass reconstruction.
     func deleteMessage(_ message: ChatMessage) async {
-        guard let sessionId = engineClient.currentSessionId else {
+        guard let sessionId = services.events.currentSessionId else {
             handleError("No active session", severity: .fatal)
             return
         }
@@ -480,8 +480,8 @@ final class ChatViewModel {
         logger.info("Deleting message: eventId=\(eventId)", category: .session)
 
         do {
-            let result = try await engineClient.message.deleteMessage(
-                sessionId,
+            let result = try await services.messages.deleteMessage(
+                sessionId: sessionId,
                 targetEventId: eventId,
                 idempotencyKey: .userAction("message.delete")
             )
@@ -543,11 +543,11 @@ final class ChatViewModel {
     }
 
     var currentModel: String {
-        engineClient.currentModel
+        services.events.currentModel
     }
 
     var hasActiveSession: Bool {
-        engineClient.hasActiveSession
+        services.events.hasActiveSession
     }
 
     /// Updates the context window based on available model info

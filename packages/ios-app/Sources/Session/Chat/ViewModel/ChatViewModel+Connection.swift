@@ -6,26 +6,26 @@ import SwiftUI
 extension ChatViewModel: ConnectionContext {
 
     var isConnected: Bool {
-        engineClient.isConnected
+        services.connection.isConnected
     }
 
     func connect() async {
-        await engineClient.connect()
+        await services.connection.connect()
     }
 
     func disconnect() async {
-        await engineClient.disconnect()
+        await services.connection.disconnect()
     }
 
     func resumeSession(sessionId: String) async throws {
-        try await engineClient.session.resume(
+        try await services.sessions.resume(
             sessionId: sessionId,
             idempotencyKey: .userAction("session.resume")
         )
     }
 
     func reconstructSession(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult {
-        try await engineClient.session.reconstruct(sessionId: sessionId, limit: limit, beforeEventId: beforeEventId)
+        try await services.sessions.reconstruct(sessionId: sessionId, limit: limit, beforeEventId: beforeEventId)
     }
 
     /// Clear state that refers to an in-flight turn (streaming text,

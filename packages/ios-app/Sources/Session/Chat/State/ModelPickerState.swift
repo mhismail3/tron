@@ -19,12 +19,16 @@ final class ModelPickerState {
 
     // MARK: - Dependencies
 
-    private let modelClient: ModelClientProtocol
+    private let modelRepository: any ModelRepository
 
     // MARK: - Initialization
 
-    init(modelClient: ModelClientProtocol) {
-        self.modelClient = modelClient
+    init(modelRepository: any ModelRepository) {
+        self.modelRepository = modelRepository
+    }
+
+    convenience init(modelClient: ModelClientProtocol) {
+        self.init(modelRepository: ModelClientRepositoryAdapter(modelClient: modelClient))
     }
 
     // MARK: - Display Helpers
@@ -48,7 +52,7 @@ final class ModelPickerState {
         isLoadingModels = true
         defer { isLoadingModels = false }
 
-        guard let models = try? await modelClient.list(forceRefresh: false) else {
+        guard let models = try? await modelRepository.list(forceRefresh: false) else {
             return
         }
         cachedModels = models
@@ -80,9 +84,9 @@ final class ModelPickerState {
         onOptimisticSet(model.id)
 
         do {
-            let result = try await modelClient.switchModel(
-                sessionId,
-                model: model.id,
+            let result = try await modelRepository.switchModel(
+                sessionId: sessionId,
+                to: model.id,
                 idempotencyKey: .userAction("model.switch")
             )
             // Clear optimistic update - real value now reflected
@@ -107,5 +111,48 @@ final class ModelPickerState {
     /// Set optimistic model name directly (for testing)
     func setOptimisticModelName(_ name: String?) {
         optimisticModelName = name
+    }
+}
+
+@MainActor
+private final class ModelClientRepositoryAdapter: ModelRepository {
+    private let modelClient: ModelClientProtocol
+    private(set) var cachedModels: [ModelInfo] = []
+    private(set) var isLoading = false
+
+    init(modelClient: ModelClientProtocol) {
+        self.modelClient = modelClient
+    }
+
+    func list(forceRefresh: Bool) async throws -> [ModelInfo] {
+        isLoading = true
+        defer { isLoading = false }
+        let models = try await modelClient.list(forceRefresh: forceRefresh)
+        cachedModels = models
+        return models
+    }
+
+    func switchModel(
+        sessionId: String,
+        to modelId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ModelSwitchResult {
+        try await modelClient.switchModel(sessionId, model: modelId, idempotencyKey: idempotencyKey)
+    }
+
+    func setReasoningLevel(
+        sessionId: String,
+        level: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ReasoningLevelResult {
+        try await modelClient.setReasoningLevel(
+            sessionId,
+            level: level,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func invalidateCache() {
+        cachedModels = []
     }
 }

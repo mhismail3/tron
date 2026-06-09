@@ -99,15 +99,23 @@ final class SessionSwitchingTests: XCTestCase {
         XCTAssertTrue(viewModel2.messages.isEmpty)
     }
 
-    func testViewModelsShareEngineClient() {
-        // Given: Two ViewModels sharing the same EngineClient
+    func testViewModelsShareConnectionRepository() {
+        // Given: Two ViewModels sharing the same transport-backed services
         let mockURL = URL(string: "ws://localhost:8080/engine")!
         let engineClient = EngineClient(serverURL: mockURL)
+        let services = ChatSessionServices(
+            connection: DefaultAppConnectionRepository(client: engineClient),
+            events: DefaultSessionEventRepository(client: engineClient),
+            sessions: DefaultSessionRepository(sessionClient: engineClient.session),
+            agent: DefaultAgentRepository(agentClient: engineClient.agent),
+            models: DefaultModelRepository(modelClient: engineClient.model),
+            messages: DefaultMessageRepository(messageClient: engineClient.message)
+        )
 
-        let viewModel1 = ChatViewModel(engineClient: engineClient, sessionId: "session-A")
-        let viewModel2 = ChatViewModel(engineClient: engineClient, sessionId: "session-B")
+        let viewModel1 = ChatViewModel(services: services, sessionId: "session-A")
+        let viewModel2 = ChatViewModel(services: services, sessionId: "session-B")
 
-        // Then: Both should reference the same EngineClient (for efficient connection reuse)
-        XCTAssertTrue(viewModel1.engineClient === viewModel2.engineClient)
+        // Then: Both should reference the same connection boundary.
+        XCTAssertTrue(viewModel1.services.connection === viewModel2.services.connection)
     }
 }

@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct GoogleCloudRows: View {
-    let providerInfo: ProviderAuthInfo?
-    let onSave: (AuthUpdateParams) async -> ProviderAuthActionResult
+    let providerInfo: ProviderAuthSnapshot?
+    let onSave: (AuthMutation) async -> ProviderAuthActionResult
     let onClear: () async -> ProviderAuthActionResult
 
     @State private var isEditing = false
@@ -200,11 +200,12 @@ struct GoogleCloudRows: View {
     private func save() {
         Task { @MainActor in
             isSaving = true
-            var params = AuthUpdateParams(provider: "google")
-            if !clientId.isEmpty { params.clientId = clientId }
-            if !clientSecret.isEmpty { params.clientSecret = clientSecret }
-            if !projectId.isEmpty { params.projectId = projectId }
-            let result = await onSave(params)
+            let result = await onSave(.googleCloud(
+                provider: "google",
+                clientId: clientId.isEmpty ? nil : clientId,
+                clientSecret: clientSecret.isEmpty ? nil : clientSecret,
+                projectId: projectId.isEmpty ? nil : projectId
+            ))
             isSaving = false
             guard result.shouldCommitLocalFormChanges else { return }
             clientId = ""

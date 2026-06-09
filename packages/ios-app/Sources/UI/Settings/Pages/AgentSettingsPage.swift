@@ -5,7 +5,7 @@ struct AgentSettingsPage: View {
 
     let settingsState: SettingsState
     let selectedModelDisplayName: String
-    let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
+    let updateServerSetting: (SettingsMutation) -> Void
 
     @State private var showQuickSessionWorkspaceSelector = false
     @State private var showDefaultModelPicker = false
@@ -25,9 +25,7 @@ struct AgentSettingsPage: View {
                     set: { newValue in
                         settingsState.quickSessionWorkspace = newValue
                         dependencies.quickSessionWorkspace = newValue
-                        updateServerSetting {
-                            ServerSettingsUpdate(server: .init(defaultWorkspace: newValue))
-                        }
+                        updateServerSetting(.defaultWorkspace(newValue))
                     }
                 )
             )
@@ -38,9 +36,7 @@ struct AgentSettingsPage: View {
                 currentModelId: settingsState.defaultModel,
                 onSelect: { model in
                     settingsState.defaultModel = model.id
-                    updateServerSetting {
-                        ServerSettingsUpdate(server: .init(defaultModel: model.id))
-                    }
+                    updateServerSetting(.defaultModel(model.id))
                 }
             )
         }

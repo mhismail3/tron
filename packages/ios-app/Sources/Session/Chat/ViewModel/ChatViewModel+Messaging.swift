@@ -11,7 +11,7 @@ extension ChatViewModel: MessagingContext {
         reasoningLevel: String?,
         idempotencyKey: EngineIdempotencyKey
     ) async throws {
-        try await engineClient.agent.sendPrompt(
+        try await services.agent.sendPrompt(
             text,
             attachments: attachments,
             reasoningLevel: reasoningLevel,
@@ -21,11 +21,11 @@ extension ChatViewModel: MessagingContext {
 
     func ensureLiveEventSubscription() async throws {
         logger.info("Ensuring live engine event subscription before prompt send", category: .events)
-        try await engineClient.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
+        try await services.events.ensureSessionEventSubscription(sessionId: sessionId, workspaceId: nil)
     }
 
     func abortAgentOnServer(idempotencyKey: EngineIdempotencyKey) async throws {
-        try await engineClient.agent.abort(idempotencyKey: idempotencyKey)
+        try await services.agent.abort(idempotencyKey: idempotencyKey)
     }
 
     func appendInterruptedMessage() {
@@ -83,7 +83,7 @@ extension ChatViewModel {
     func abortCapabilityInvocation(invocationId: String, idempotencyKey: EngineIdempotencyKey) {
         Task {
             do {
-                _ = try await engineClient.agent.abortCapabilityInvocation(invocationId: invocationId, idempotencyKey: idempotencyKey)
+                _ = try await services.agent.abortCapabilityInvocation(invocationId: invocationId, idempotencyKey: idempotencyKey)
             } catch {
                 logError("Failed to abort capability \(invocationId): \(error.localizedDescription)")
             }
@@ -99,7 +99,7 @@ extension ChatViewModel {
     /// Semantics:
     /// - Walks `messages` in reverse looking for the newest `role == .user`
     ///   message with `.text(…)` content.
-    /// - If found, calls `engineClient.agent.sendPrompt` with that text and
+    /// - If found, sends the prompt through the agent repository with that text and
     ///   the message's original attachments; the server emits a fresh
     ///   `message.user` event and starts a new turn.
     /// - If not found (empty history, or last user message is an image-only

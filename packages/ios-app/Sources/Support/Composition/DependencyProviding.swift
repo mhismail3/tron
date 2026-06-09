@@ -28,6 +28,24 @@ protocol DependencyProviding: AnyObject {
 
     /// Agent repository for agent operations
     var agentRepository: AgentRepository { get }
+
+    /// Connection repository for app and session connection state.
+    var connectionRepository: any AppConnectionRepository { get }
+
+    /// Live session event repository.
+    var sessionEventRepository: any SessionEventRepository { get }
+
+    /// Settings repository for server-authoritative settings.
+    var settingsRepository: any SettingsRepository { get }
+
+    /// Auth repository for provider credentials.
+    var authRepository: any AuthRepository { get }
+
+    /// Message mutation repository.
+    var messageRepository: any MessageRepository { get }
+
+    /// Protocol-typed dependency bundle for chat sessions.
+    var chatSessionServices: ChatSessionServices { get }
 }
 
 // MARK: - Server Settings Provider Protocol

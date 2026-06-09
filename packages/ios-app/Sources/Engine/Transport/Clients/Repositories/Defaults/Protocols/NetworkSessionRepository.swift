@@ -30,6 +30,9 @@ protocol NetworkSessionRepository: AnyObject {
     /// - Parameter sessionId: The session ID to resume
     func resume(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws
 
+    /// Reconstruct persisted session events from the server.
+    func reconstruct(sessionId: String, limit: Int?, beforeEventId: String?) async throws -> SessionReconstructResult
+
     /// Archive a session.
     /// - Parameter sessionId: The session ID to archive
     func archive(sessionId: String, idempotencyKey: EngineIdempotencyKey) async throws

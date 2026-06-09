@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-09 (TPC-8 iOS UI/session split).
+> Last verified: 2026-06-09 (TMB-7 iOS engine-access boundary).
 
 ## Overview
 
@@ -70,8 +70,8 @@ icon catalog, or fork-row state model.
 ## Data Flow
 
 ```
-Prompt:  InputBar -> ChatViewModel -> AgentClient -> agent::prompt
-Live:    WebSocket -> EngineClient -> EventRegistry -> Plugin -> ChatViewModel
+Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
+Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 ```
@@ -100,6 +100,16 @@ files live under `Engine/Transport/Clients` as thin method wrappers over
 miscellaneous facade. They must not encode product policy. Any fixed
 workflow-specific client removed in PET-8 must stay removed unless a later
 scorecard row proves it is boot infrastructure.
+
+SwiftUI and `Session/` code do not depend on concrete `EngineClient`,
+`EngineConnection`, WebSocket transport types, or settings/auth wire DTOs.
+They consume protocol-typed repositories and view models: `ChatSessionServices`
+for mounted chat sessions, `AppConnectionRepository` for connection state,
+`SessionEventRepository` for live events, `SettingsRepository` for settings
+snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
+the existing model/session/agent/message repositories for chat workflows.
+`Support/Composition` is the production composition root allowed to wire those
+protocols to engine-owned clients.
 
 Transport tests mirror the production owners: retry policy tests live under
 `Tests/Engine/Transport/Retry`, and WebSocket/request-response tests live under

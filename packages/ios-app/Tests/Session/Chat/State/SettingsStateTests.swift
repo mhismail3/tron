@@ -53,7 +53,7 @@ final class SettingsStateTests: XCTestCase {
         }
         """))
 
-        state.applyServerSettings(settings)
+        state.applyServerSettings(ServerSettingsSnapshot(settings))
 
         XCTAssertEqual(state.observabilityLogLevel, "debug")
         XCTAssertEqual(state.observabilityVerboseRetentionDays, 3)
@@ -68,7 +68,7 @@ final class SettingsStateTests: XCTestCase {
         state.quickSessionWorkspace = "/from/previous/server"
 
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
-        state.applyServerSettings(settings)
+        state.applyServerSettings(ServerSettingsSnapshot(settings))
 
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
     }
@@ -80,7 +80,7 @@ final class SettingsStateTests: XCTestCase {
             from: try ServerSettingsFixture.data(#"{"server":{"defaultModel":"claude-opus-4-6"}}"#)
         )
 
-        state.applyServerSettings(settings)
+        state.applyServerSettings(ServerSettingsSnapshot(settings))
 
         XCTAssertEqual(state.defaultModel, "claude-opus-4-6")
     }
@@ -102,7 +102,7 @@ final class SettingsStateTests: XCTestCase {
     func testClearServerSnapshotClearsRollbackAnchor() throws {
         let state = SettingsState()
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/old/server"}}"#))
-        state.applyServerSettings(settings)
+        state.applyServerSettings(ServerSettingsSnapshot(settings))
 
         state.clearServerSnapshot()
         state.quickSessionWorkspace = "/optimistic"
@@ -116,7 +116,7 @@ final class SettingsStateTests: XCTestCase {
     func testFailedUpdateRollsBackToLastLoadedServerSettings() throws {
         let state = SettingsState()
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/loaded"}}"#))
-        state.applyServerSettings(settings)
+        state.applyServerSettings(ServerSettingsSnapshot(settings))
         state.quickSessionWorkspace = "/optimistic"
         state.defaultModel = "locally-selected-before-server-accepted"
 

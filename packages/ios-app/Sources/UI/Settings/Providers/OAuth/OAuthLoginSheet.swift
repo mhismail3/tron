@@ -31,7 +31,7 @@ struct OAuthProvider: Identifiable {
 
 struct OAuthLoginSheet: View {
     let provider: OAuthProvider
-    var onComplete: (AuthState) -> Void = { _ in }
+    var onComplete: (AuthSnapshot) -> Void = { _ in }
 
     @Environment(\.dependencies) private var dependencies
     @Environment(\.dismiss) private var dismiss
@@ -42,7 +42,7 @@ struct OAuthLoginSheet: View {
     @State private var webAuthSession: ASWebAuthenticationSession?
     @State private var loopbackServer: OAuthLoopbackServer?
 
-    private var engineClient: EngineClient { dependencies.engineClient }
+    private var authRepository: any AuthRepository { dependencies.authRepository }
 
     var body: some View {
         NavigationStack {
@@ -274,7 +274,7 @@ struct OAuthLoginSheet: View {
 
     private func beginOAuthFlow() async {
         do {
-            let response = try await engineClient.auth.oauthBegin(
+            let response = try await authRepository.oauthBegin(
                 provider: provider.id,
                 idempotencyKey: .userAction("auth.oauthBegin")
             )
@@ -311,7 +311,7 @@ struct OAuthLoginSheet: View {
 
         Task {
             do {
-                let authState = try await engineClient.auth.oauthComplete(
+                let authState = try await authRepository.oauthComplete(
                     flowId: flowId,
                     code: code,
                     label: label,

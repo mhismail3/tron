@@ -132,7 +132,7 @@ extension ChatView {
                         // .unauthorized repair goes straight to the app-level pairing sheet
                         // so it does not depend on a nested Settings page being mounted.
                         ConnectionStatusPill(
-                            connectionState: engineClient.connectionState,
+                            connectionState: viewModel.connectionState,
                             isReady: initialLoadComplete,
                             onRePair: {
                                 ServerOnboardingLauncher.post(prefill: dependencies.pairedServerStore.activeServer)
@@ -229,7 +229,7 @@ extension ChatView {
                     }
                 }
                 // Auto-scroll when ConnectionStatusPill appears/disappears
-                .onChange(of: engineClient.connectionState) { _, _ in
+                .onChange(of: viewModel.connectionState) { _, _ in
                     guard initialLoadComplete else { return }
                     guard scrollCoordinator.shouldAutoScroll else { return }
                     Task { @MainActor in

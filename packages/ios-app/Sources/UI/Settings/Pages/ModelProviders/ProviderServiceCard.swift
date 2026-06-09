@@ -2,8 +2,8 @@ import SwiftUI
 
 struct ProviderServiceCard: View {
     let service: ProviderInfo
-    let serviceAuth: ServiceAuthInfo?
-    let onSave: (AuthUpdateParams) async -> ProviderAuthActionResult
+    let serviceAuth: ServiceAuthSnapshot?
+    let onSave: (AuthMutation) async -> ProviderAuthActionResult
     let onClear: () async -> ProviderAuthActionResult
 
     @State private var showAddApiKeyPrompt = false
@@ -67,7 +67,7 @@ struct ProviderServiceCard: View {
             onSelect: { _ in showAddApiKeyPrompt = true }
         )
         .providerApiKeyAlert(isPresented: $showAddApiKeyPrompt, scope: apiKeyPromptScope) { draft in
-            await onSave(AuthUpdateParams(service: service.id, apiKey: .value(draft.apiKey)))
+            await onSave(.serviceApiKey(service: service.id, key: draft.apiKey))
         }
     }
 }

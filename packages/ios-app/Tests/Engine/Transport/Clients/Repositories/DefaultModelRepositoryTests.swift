@@ -17,6 +17,7 @@ final class MockModelClientForRepository {
     var lastSwitchModelModelId: String?
     var switchModelResultToReturn: ModelSwitchResult?
     var switchModelError: Error?
+    var reasoningLevelResultToReturn: ReasoningLevelResult?
 
     func list(forceRefresh: Bool) async throws -> [ModelInfo] {
         listCallCount += 1
@@ -46,6 +47,18 @@ final class MockModelClientForRepository {
         {"previousModel": "claude-3-sonnet", "newModel": "claude-4-opus"}
         """
         return try! JSONDecoder().decode(ModelSwitchResult.self, from: json.data(using: .utf8)!)
+    }
+
+    func setReasoningLevel(
+        _ sessionId: String,
+        level: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ReasoningLevelResult {
+        reasoningLevelResultToReturn ?? ReasoningLevelResult(
+            previousLevel: nil,
+            newLevel: level,
+            changed: true
+        )
     }
 }
 
@@ -84,6 +97,14 @@ final class MockModelRepository: ModelRepository {
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> ModelSwitchResult {
         try await mockClient.switchModel(sessionId, model: modelId, idempotencyKey: idempotencyKey)
+    }
+
+    func setReasoningLevel(
+        sessionId: String,
+        level: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> ReasoningLevelResult {
+        try await mockClient.setReasoningLevel(sessionId, level: level, idempotencyKey: idempotencyKey)
     }
 
     func invalidateCache() {

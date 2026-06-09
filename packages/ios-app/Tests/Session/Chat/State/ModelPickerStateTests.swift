@@ -21,6 +21,7 @@ struct ModelPickerStateTests {
         var switchModelId: String?
         var switchResult: ModelSwitchResult?
         var switchShouldThrow = false
+        var reasoningLevelResult: ReasoningLevelResult?
 
         func list(forceRefresh: Bool) async throws -> [ModelInfo] {
             listCallCount += 1
@@ -42,6 +43,18 @@ struct ModelPickerStateTests {
                 throw TestError.mockError
             }
             return switchResult ?? ModelSwitchResult(previousModel: "", newModel: model)
+        }
+
+        func setReasoningLevel(
+            _ sessionId: String,
+            level: String,
+            idempotencyKey: EngineIdempotencyKey
+        ) async throws -> ReasoningLevelResult {
+            reasoningLevelResult ?? ReasoningLevelResult(
+                previousLevel: nil,
+                newLevel: level,
+                changed: true
+            )
         }
 
         enum TestError: Error {

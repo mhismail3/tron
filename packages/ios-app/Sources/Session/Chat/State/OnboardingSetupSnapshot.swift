@@ -11,8 +11,8 @@ struct OnboardingSetupSnapshot {
     static let defaultApiKeyLabel = "Default"
 
     private(set) var serverId: String?
-    private(set) var settings: ServerSettings?
-    private(set) var authState: AuthState?
+    private(set) var settings: ServerSettingsSnapshot?
+    private(set) var authState: AuthSnapshot?
     private(set) var authLoadError: String?
 
     var defaultWorkspace: String {
@@ -25,8 +25,8 @@ struct OnboardingSetupSnapshot {
 
     mutating func hydrate(
         serverId: String,
-        settings: ServerSettings,
-        authState: AuthState?,
+        settings: ServerSettingsSnapshot,
+        authState: AuthSnapshot?,
         authLoadError: String? = nil
     ) {
         self.serverId = serverId
@@ -42,7 +42,7 @@ struct OnboardingSetupSnapshot {
         authLoadError = nil
     }
 
-    mutating func refreshAuth(_ authState: AuthState) {
+    mutating func refreshAuth(_ authState: AuthSnapshot) {
         self.authState = authState
         authLoadError = nil
     }
@@ -52,7 +52,7 @@ struct OnboardingSetupSnapshot {
 
         if let active = info.activeCredential {
             if active.isOAuth {
-                let account = info.accounts?.first { $0.label == active.label }
+                let account = info.accounts.first { $0.label == active.label }
                 return OnboardingCredentialSummary(
                     title: oauthTitle(for: providerId, isExpired: account?.isExpired == true),
                     detail: active.label,
@@ -63,7 +63,7 @@ struct OnboardingSetupSnapshot {
             }
 
             if active.isApiKey {
-                let key = info.apiKeys?.first { $0.label == active.label }
+                let key = info.apiKeys.first { $0.label == active.label }
                 let keyHint = key?.keyHint ?? info.apiKeyHint
                 return OnboardingCredentialSummary(
                     title: "API key saved",
@@ -76,7 +76,7 @@ struct OnboardingSetupSnapshot {
             }
         }
 
-        if let account = info.accounts?.first {
+        if let account = info.accounts.first {
             return OnboardingCredentialSummary(
                 title: oauthTitle(for: providerId, isExpired: account.isExpired),
                 detail: account.label,
@@ -86,7 +86,7 @@ struct OnboardingSetupSnapshot {
             )
         }
 
-        if let key = info.apiKeys?.first {
+        if let key = info.apiKeys.first {
             return OnboardingCredentialSummary(
                 title: "API key saved",
                 detail: joinedDetail(key.label, key.keyHint),
@@ -108,7 +108,7 @@ struct OnboardingSetupSnapshot {
         }
 
         if providerId == "google" {
-            let hasGoogleConfig = info.hasClientId == true || info.hasClientSecret == true || info.projectId != nil
+            let hasGoogleConfig = info.hasClientId || info.hasClientSecret || info.projectId != nil
             if hasGoogleConfig {
                 return OnboardingCredentialSummary(
                     title: "Google Cloud configured",
@@ -138,7 +138,7 @@ struct OnboardingSetupSnapshot {
         if let active = info.activeCredential, active.isApiKey {
             return active.label
         }
-        if let key = info.apiKeys?.first {
+        if let key = info.apiKeys.first {
             return key.label
         }
         return Self.defaultApiKeyLabel

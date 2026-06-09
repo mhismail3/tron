@@ -1,11 +1,11 @@
 # Event Handling
 
-> Last verified: 2026-06-09 (TPC-8 runtime callback split).
+> Last verified: 2026-06-09 (TMB-7 iOS engine-access boundary).
 
 The iOS app handles engine events through two paths:
 
 ```
-Live:   WebSocket -> EngineClient -> EventRegistry -> Plugin -> ChatViewModel
+Live:   Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored: EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage array
 ```
 
@@ -14,6 +14,11 @@ history from durable event rows. Neither path owns repository workflow state,
 assistant-management state, curated prompt state, skill state, prompt-queue
 state, hook suggestion state, or fixed audit panels on the primitive teardown
 branch.
+
+The transport and subscription details stay in the Engine layer. Session view
+models subscribe through `SessionEventRepository`, so event plugins receive
+parsed event contracts without SwiftUI/session code importing concrete engine
+transport or raw settings/auth protocol DTOs.
 
 ## Plugin Boundary
 

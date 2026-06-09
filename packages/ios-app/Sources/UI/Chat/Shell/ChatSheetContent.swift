@@ -6,7 +6,6 @@ import SwiftUI
 struct ChatSheetContent: View {
     let sheet: ChatSheet
     let viewModel: ChatViewModel
-    let engineClient: EngineClient
     let sessionId: String
     let workspaceDeleted: Bool
     let sheetCoordinator: SheetCoordinator?

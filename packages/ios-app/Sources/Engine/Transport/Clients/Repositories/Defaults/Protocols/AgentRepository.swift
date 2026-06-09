@@ -21,9 +21,10 @@ protocol AgentRepository: AnyObject {
     /// Abort the current agent operation.
     func abort(idempotencyKey: EngineIdempotencyKey) async throws
 
-    /// Send a capability result for interactive capabilities.
-    /// - Parameters:
-    ///   - sessionId: The session ID
-    ///   - invocationId: The capability invocation ID to respond to
-    ///   - result: The result of the user interaction
+    /// Abort one in-flight capability invocation without stopping the whole turn.
+    @discardableResult
+    func abortCapabilityInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> Bool
 }

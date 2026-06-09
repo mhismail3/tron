@@ -37,7 +37,7 @@ struct ContentView: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     // Convenience accessors
-    private var engineClient: EngineClient { dependencies.engineClient }
+    private var connectionRepository: any AppConnectionRepository { dependencies.connectionRepository }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     private var defaultModel: String { dependencies.defaultModel }
     private var quickSessionWorkspace: String { dependencies.quickSessionWorkspace }
@@ -110,7 +110,7 @@ struct ContentView: View {
                 processPendingDeepLinkSession()
             }
             .onDisappear {}
-            .onChange(of: engineClient.connectionState) { oldState, newState in
+            .onChange(of: connectionRepository.connectionState) { oldState, newState in
                 // Session list refresh on reconnect is now handled by the central
                 // SessionRefreshService via ConnectionManager.runOnReconnect. Other
                 // connection-restored side effects still live here until migrated.
@@ -230,7 +230,9 @@ struct ContentView: View {
 
     private var newSessionFlowSheet: some View {
         NewSessionFlow(
-            engineClient: engineClient,
+            connectionRepository: dependencies.connectionRepository,
+            modelRepository: dependencies.modelRepository,
+            sessionRepository: dependencies.sessionRepository,
             defaultModel: defaultModel,
             eventStoreManager: eventStoreManager,
             onSessionCreated: { created in
@@ -314,7 +316,7 @@ struct ContentView: View {
     private func chatViewForSession(_ sessionId: String) -> some View {
         if horizontalSizeClass == .regular {
             ChatView(
-                engineClient: engineClient,
+                services: dependencies.chatSessionServices,
                 sessionId: sessionId,
                 workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget,
@@ -323,7 +325,7 @@ struct ContentView: View {
             .id(sessionId)
         } else {
             ChatView(
-                engineClient: engineClient,
+                services: dependencies.chatSessionServices,
                 sessionId: sessionId,
                 workspaceDeleted: coordinator?.workspaceDeletedForSession[sessionId] ?? false,
                 scrollTarget: $currentScrollTarget

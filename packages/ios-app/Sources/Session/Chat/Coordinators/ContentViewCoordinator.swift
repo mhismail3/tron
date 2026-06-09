@@ -7,7 +7,6 @@ import Foundation
 final class ContentViewCoordinator {
     private let dependencies: DependencyContainer
 
-    private var engineClient: EngineClient { dependencies.engineClient }
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
 
     // MARK: - State
@@ -108,7 +107,7 @@ final class ContentViewCoordinator {
 
         Task {
             do {
-                let result = try await engineClient.session.create(
+                let result = try await dependencies.sessionRepository.create(
                     workingDirectory: workspace,
                     model: dependencies.defaultModel,
                     idempotencyKey: .userAction("session.create")

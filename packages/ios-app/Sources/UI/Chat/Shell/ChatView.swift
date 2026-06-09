@@ -51,17 +51,17 @@ struct ChatView: View {
 
     // MARK: - Stored Properties (internal for extension access)
     let sessionId: String
-    let engineClient: EngineClient
+    let services: ChatSessionServices
     let workspaceDeleted: Bool
     var onToggleSidebar: (() -> Void)?
 
-    init(engineClient: EngineClient, sessionId: String, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
+    init(services: ChatSessionServices, sessionId: String, workspaceDeleted: Bool = false, scrollTarget: Binding<ScrollTarget?> = .constant(nil), onToggleSidebar: (() -> Void)? = nil) {
         self.sessionId = sessionId
-        self.engineClient = engineClient
+        self.services = services
         self.workspaceDeleted = workspaceDeleted
         self._scrollTarget = scrollTarget
         self.onToggleSidebar = onToggleSidebar
-        _viewModel = State(wrappedValue: ChatViewModel(engineClient: engineClient, sessionId: sessionId))
+        _viewModel = State(wrappedValue: ChatViewModel(services: services, sessionId: sessionId))
     }
 
     // MARK: - Body
@@ -71,7 +71,6 @@ struct ChatView: View {
         .chatSheets(
             coordinator: sheetCoordinator,
             viewModel: viewModel,
-            engineClient: engineClient,
             sessionId: sessionId,
             workspaceDeleted: workspaceDeleted
         )
@@ -112,8 +111,8 @@ struct ChatView: View {
                 viewModel.addReasoningLevelChangeNotification(from: previousLevel, to: level)
                 // Persist to server (event-sourced, survives reinstall/migration)
                 Task {
-                    try? await engineClient.model.setReasoningLevel(
-                        sessionId,
+                    try? await services.models.setReasoningLevel(
+                        sessionId: sessionId,
                         level: level,
                         idempotencyKey: .userAction("config.setReasoningLevel")
                     )
@@ -179,7 +178,7 @@ struct ChatView: View {
             await handleInitialMessageVisibility()
             logger.debug("[INIT] handleInitialMessageVisibility done, initialLoadComplete=\(initialLoadComplete)", category: .ui)
         }
-        .onChange(of: engineClient.connectionState) { oldState, newState in
+        .onChange(of: services.connection.connectionState) { oldState, newState in
             // React when connection transitions to connected
             if newState.isConnected && !oldState.isConnected {
                 Task {

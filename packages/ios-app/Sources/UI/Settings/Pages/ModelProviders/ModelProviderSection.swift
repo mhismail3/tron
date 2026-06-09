@@ -2,13 +2,13 @@ import SwiftUI
 
 struct ModelProviderSection: View {
     let provider: ProviderInfo
-    let providerAuth: ProviderAuthInfo?
-    let onSetActive: (ActiveCredentialParam) async -> ProviderAuthActionResult
+    let providerAuth: ProviderAuthSnapshot?
+    let onSetActive: (AuthCredentialSelection) async -> ProviderAuthActionResult
     let onRemoveAccount: (String) async -> ProviderAuthActionResult
     let onRemoveApiKey: (String) async -> ProviderAuthActionResult
     let onAddApiKey: (String, String) async -> ProviderAuthActionResult
     let onOAuthLogin: () -> Void
-    let onSaveProvider: (AuthUpdateParams) async -> ProviderAuthActionResult
+    let onSaveProvider: (AuthMutation) async -> ProviderAuthActionResult
     let onClear: () async -> ProviderAuthActionResult
 
     @State private var showAddApiKeyPrompt = false
@@ -17,8 +17,8 @@ struct ModelProviderSection: View {
         ProviderStatusHelpers.isProviderConfigured(providerAuth)
     }
 
-    private var accounts: [AccountInfo] { providerAuth?.accounts ?? [] }
-    private var apiKeys: [ApiKeyInfo] { providerAuth?.apiKeys ?? [] }
+    private var accounts: [ProviderAccountSnapshot] { providerAuth?.accounts ?? [] }
+    private var apiKeys: [ProviderApiKeySnapshot] { providerAuth?.apiKeys ?? [] }
     private var accountRows: [ProviderAccountCredentialRow] {
         accounts.map { ProviderAccountCredentialRow(account: $0) }
     }
@@ -126,7 +126,7 @@ struct ModelProviderSection: View {
                 status: ProviderStatusHelpers.accountDetail(account),
                 statusColor: ProviderStatusHelpers.accountStatusColor(account),
                 onSelect: {
-                    _ = await onSetActive(ActiveCredentialParam(type: "oauth", label: account.label))
+                    _ = await onSetActive(AuthCredentialSelection(kind: .oauth, label: account.label))
                 },
                 onDelete: { _ = await onRemoveAccount(account.label) }
             )
@@ -137,7 +137,7 @@ struct ModelProviderSection: View {
                 status: key.keyHint,
                 statusColor: .tronTextSecondary,
                 onSelect: {
-                    _ = await onSetActive(ActiveCredentialParam(type: "apiKey", label: key.label))
+                    _ = await onSetActive(AuthCredentialSelection(kind: .apiKey, label: key.label))
                 },
                 onDelete: { _ = await onRemoveApiKey(key.label) }
             )
@@ -218,9 +218,9 @@ private struct ProviderAuthActionButtonLabel: View {
 
 private struct ProviderAccountCredentialRow: Identifiable {
     let item: ProviderCredentialRowItem
-    let account: AccountInfo
+    let account: ProviderAccountSnapshot
 
-    init(account: AccountInfo) {
+    init(account: ProviderAccountSnapshot) {
         self.account = account
         item = .oauth(account)
     }
@@ -232,9 +232,9 @@ private struct ProviderAccountCredentialRow: Identifiable {
 
 private struct ProviderApiKeyCredentialRow: Identifiable {
     let item: ProviderCredentialRowItem
-    let key: ApiKeyInfo
+    let key: ProviderApiKeySnapshot
 
-    init(key: ApiKeyInfo) {
+    init(key: ProviderApiKeySnapshot) {
         self.key = key
         item = .apiKey(key)
     }
@@ -245,8 +245,8 @@ private struct ProviderApiKeyCredentialRow: Identifiable {
 }
 
 private enum ProviderCredentialDisplayRow: Identifiable {
-    case account(AccountInfo)
-    case apiKey(ApiKeyInfo)
+    case account(ProviderAccountSnapshot)
+    case apiKey(ProviderApiKeySnapshot)
 
     var id: String {
         switch self {

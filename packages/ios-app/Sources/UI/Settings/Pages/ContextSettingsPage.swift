@@ -2,7 +2,7 @@ import SwiftUI
 
 struct ContextSettingsPage: View {
     let settingsState: SettingsState
-    let updateServerSetting: (() -> ServerSettingsUpdate) -> Void
+    let updateServerSetting: (SettingsMutation) -> Void
 
     var body: some View {
         SettingsPageContainer(title: "Context") {
@@ -60,11 +60,7 @@ struct ContextSettingsPage: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 12)
                         .onChange(of: settingsState.triggerTokenThreshold) { _, newValue in
-                            updateServerSetting {
-                                ServerSettingsUpdate(context: .init(compactor: .init(
-                                    triggerTokenThreshold: newValue
-                                )))
-                            }
+                            updateServerSetting(.compactionTriggerTokenThreshold(newValue))
                         }
                     }
                 }
@@ -83,9 +79,7 @@ struct ContextSettingsPage: View {
                             )
                         }
                         .onChange(of: settingsState.preserveRecentCount) { _, newValue in
-                            updateServerSetting {
-                                ServerSettingsUpdate(context: .init(compactor: .init(preserveRecentCount: newValue)))
-                            }
+                            updateServerSetting(.compactionPreserveRecentCount(newValue))
                         }
                     }
                 }

@@ -13,11 +13,11 @@ struct ProviderCredentialRowItem: Identifiable, Equatable {
         "\(kind.rawValue):\(label)"
     }
 
-    static func oauth(_ account: AccountInfo) -> Self {
+    static func oauth(_ account: ProviderAccountSnapshot) -> Self {
         Self(kind: .oauth, label: account.label)
     }
 
-    static func apiKey(_ key: ApiKeyInfo) -> Self {
+    static func apiKey(_ key: ProviderApiKeySnapshot) -> Self {
         Self(kind: .apiKey, label: key.label)
     }
 }

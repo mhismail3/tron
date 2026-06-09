@@ -34,4 +34,14 @@ final class DefaultAgentRepository: AgentRepository {
         try await agentClient.abort(idempotencyKey: idempotencyKey)
     }
 
+    func abortCapabilityInvocation(
+        invocationId: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> Bool {
+        try await agentClient.abortCapabilityInvocation(
+            invocationId: invocationId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
 }

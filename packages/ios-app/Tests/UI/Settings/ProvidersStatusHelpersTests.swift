@@ -11,13 +11,13 @@ struct ProviderStatusHelpersTests {
         label: String = "work",
         isExpired: Bool = false,
         hasRefreshToken: Bool = true
-    ) throws -> AccountInfo {
+    ) throws -> ProviderAccountSnapshot {
         let json = #"{"label":"\#(label)","expiresAt":0,"isExpired":\#(isExpired),"hasRefreshToken":\#(hasRefreshToken)}"#
-        return try JSONDecoder().decode(AccountInfo.self, from: Data(json.utf8))
+        return ProviderAccountSnapshot(try JSONDecoder().decode(AccountInfo.self, from: Data(json.utf8)))
     }
 
-    private func providerInfo(json: String) throws -> ProviderAuthInfo {
-        try JSONDecoder().decode(ProviderAuthInfo.self, from: Data(json.utf8))
+    private func providerInfo(json: String) throws -> ProviderAuthSnapshot {
+        ProviderAuthSnapshot(try JSONDecoder().decode(ProviderAuthInfo.self, from: Data(json.utf8)))
     }
 
     // MARK: - accountStatus
@@ -237,8 +237,8 @@ struct ProviderStatusHelpersTests {
 
     @Test("isServiceConfigured reflects service API key state")
     func isServiceConfiguredReflectsApiKeyState() throws {
-        let configured = try JSONDecoder().decode(ServiceAuthInfo.self, from: Data(#"{"hasApiKey":true,"apiKeyHint":"BSA0...abc"}"#.utf8))
-        let empty = try JSONDecoder().decode(ServiceAuthInfo.self, from: Data(#"{"hasApiKey":false}"#.utf8))
+        let configured = ServiceAuthSnapshot(try JSONDecoder().decode(ServiceAuthInfo.self, from: Data(#"{"hasApiKey":true,"apiKeyHint":"BSA0...abc"}"#.utf8)))
+        let empty = ServiceAuthSnapshot(try JSONDecoder().decode(ServiceAuthInfo.self, from: Data(#"{"hasApiKey":false}"#.utf8)))
 
         #expect(ProviderStatusHelpers.isServiceConfigured(configured))
         #expect(!ProviderStatusHelpers.isServiceConfigured(empty))

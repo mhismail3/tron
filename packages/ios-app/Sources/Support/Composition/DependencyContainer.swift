@@ -73,7 +73,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     // MARK: - Recreatable Services (When Server Changes)
 
-    /// engine client for server communication - recreated when active server changes
+    /// Engine transport for server communication. Kept inside the composition
+    /// root; UI and session code consume the protocol repositories below.
     private(set) var engineClient: EngineClient
 
     /// Centralized connection policy layer (replaces scattered `engineClient.connectionState`
@@ -97,6 +98,32 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     /// Agent repository for agent operations
     private(set) var agentRepository: AgentRepository
+
+    /// Connection repository for app and session connection state.
+    private(set) var connectionRepository: any AppConnectionRepository
+
+    /// Live session event repository.
+    private(set) var sessionEventRepository: any SessionEventRepository
+
+    /// Settings repository for server-authoritative settings.
+    private(set) var settingsRepository: any SettingsRepository
+
+    /// Auth repository for provider credentials.
+    private(set) var authRepository: any AuthRepository
+
+    /// Message mutation repository.
+    private(set) var messageRepository: any MessageRepository
+
+    var chatSessionServices: ChatSessionServices {
+        ChatSessionServices(
+            connection: connectionRepository,
+            events: sessionEventRepository,
+            sessions: sessionRepository,
+            agent: agentRepository,
+            models: modelRepository,
+            messages: messageRepository
+        )
+    }
 
     // MARK: - Observable Active Server Selection Version
 
@@ -187,9 +214,14 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         eventStoreManager = EventStoreManager(eventDB: db, engineClient: client)
 
         // Initialize repositories
+        connectionRepository = DefaultAppConnectionRepository(client: client)
+        sessionEventRepository = DefaultSessionEventRepository(client: client)
         modelRepository = DefaultModelRepository(modelClient: client.model)
         sessionRepository = DefaultSessionRepository(sessionClient: client.session)
         agentRepository = DefaultAgentRepository(agentClient: client.agent)
+        settingsRepository = DefaultSettingsRepository(settingsClient: client.settings)
+        authRepository = DefaultAuthRepository(authClient: client.auth)
+        messageRepository = DefaultMessageRepository(messageClient: client.message)
 
         // Wire draft store into event store manager for cleanup on session delete
         eventStoreManager.draftStore = draftStore
@@ -307,16 +339,16 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// the previously selected Mac.
     func reloadServerSettings() async {
         guard let activeServer = pairedServerStore.activeServer else { return }
-        let client = engineClient
+        let selectionVersion = activeServerSelectionVersion
         do {
-            let settings = try await client.settings.get()
+            let settings = try await settingsRepository.get()
             guard pairedServerStore.activeServer?.id == activeServer.id,
-                  engineClient === client
+                  activeServerSelectionVersion == selectionVersion
             else { return }
             applyServerSettingsSnapshot(settings, for: activeServer.id)
         } catch {
             guard pairedServerStore.activeServer?.id == activeServer.id,
-                  engineClient === client
+                  activeServerSelectionVersion == selectionVersion
             else { return }
             pairedServerStore.updateMetadata(for: activeServer.id) { server in
                 server.lastKnownStatus = "Offline"
@@ -325,7 +357,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         }
     }
 
-    func applyServerSettingsSnapshot(_ settings: ServerSettings, for serverId: String) {
+    func applyServerSettingsSnapshot(_ settings: ServerSettingsSnapshot, for serverId: String) {
         guard pairedServerStore.activeServer?.id == serverId else { return }
         quickSessionWorkspace = settings.defaultWorkspace ?? AppConstants.defaultWorkspace
         if !settings.defaultModel.isEmpty {
@@ -375,9 +407,14 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
         eventStoreManager.updateEngineClient(newClient)
         eventStoreManager.attachConnectionManager(newManager)
+        connectionRepository = DefaultAppConnectionRepository(client: newClient)
+        sessionEventRepository = DefaultSessionEventRepository(client: newClient)
         modelRepository = DefaultModelRepository(modelClient: newClient.model)
         sessionRepository = DefaultSessionRepository(sessionClient: newClient.session)
         agentRepository = DefaultAgentRepository(agentClient: newClient.agent)
+        settingsRepository = DefaultSettingsRepository(settingsClient: newClient.settings)
+        authRepository = DefaultAuthRepository(authClient: newClient.auth)
+        messageRepository = DefaultMessageRepository(messageClient: newClient.message)
         eventStoreManager.loadSessions()
         activeServerSelectionVersion += 1
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)

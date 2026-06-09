@@ -168,8 +168,8 @@ final class OnboardingState {
 
     func hydrateSetup(
         serverId: String,
-        settings: ServerSettings,
-        authState: AuthState?,
+        settings: ServerSettingsSnapshot,
+        authState: AuthSnapshot?,
         authLoadError: String? = nil
     ) {
         setupSnapshot.hydrate(
@@ -180,7 +180,7 @@ final class OnboardingState {
         )
     }
 
-    func refreshSetupAuth(_ authState: AuthState) {
+    func refreshSetupAuth(_ authState: AuthSnapshot) {
         setupSnapshot.refreshAuth(authState)
     }
 

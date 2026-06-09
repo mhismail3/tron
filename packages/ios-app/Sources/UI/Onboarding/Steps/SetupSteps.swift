@@ -75,11 +75,8 @@ struct WorkspaceSetupOnboardingPage: View {
         status = nil
         Task {
             do {
-                let update = ServerSettingsUpdate(
-                    server: ServerSettingsUpdate.ServerUpdate(defaultWorkspace: trimmed)
-                )
-                try await dependencies.engineClient.settings.update(
-                    update,
+                try await dependencies.settingsRepository.update(
+                    .defaultWorkspace(trimmed),
                     idempotencyKey: .userAction("settings.update")
                 )
                 dependencies.quickSessionWorkspace = trimmed
@@ -168,7 +165,7 @@ struct ProviderSetupOnboardingPage: View {
         status = nil
         Task {
             do {
-                let authState = try await dependencies.engineClient.auth.addNamedApiKey(
+                let authState = try await dependencies.authRepository.addNamedApiKey(
                     provider: provider.id,
                     label: label,
                     key: key,
@@ -204,7 +201,7 @@ struct RemainingProvidersOnboardingPage: View {
                         placeholder: "\(provider.displayName) API key",
                         existingSummary: state.setupSnapshot.providerSummary(for: provider.id),
                         save: { key in
-                            try await dependencies.engineClient.auth.addNamedApiKey(
+                            try await dependencies.authRepository.addNamedApiKey(
                                 provider: provider.id,
                                 label: OnboardingSetupSnapshot.defaultApiKeyLabel,
                                 key: key,
@@ -234,8 +231,8 @@ struct ServicesSetupOnboardingPage: View {
                         placeholder: "\(service.displayName) API key",
                         existingSummary: state.setupSnapshot.serviceSummary(for: service.id),
                         save: { key in
-                            try await dependencies.engineClient.auth.update(
-                                AuthUpdateParams(service: service.id, apiKey: .value(key)),
+                            try await dependencies.authRepository.update(
+                                .serviceApiKey(service: service.id, key: key),
                                 idempotencyKey: .userAction("auth.update")
                             )
                         },
@@ -330,8 +327,8 @@ struct ModelSetupOnboardingPage: View {
         guard models.isEmpty else { return }
         isLoading = true
         do {
-            await dependencies.engineClient.connect()
-            models = try await dependencies.engineClient.model.list()
+            await dependencies.connectionRepository.connect()
+            models = try await dependencies.modelRepository.list(forceRefresh: false)
             let hydratedModel = state.setupSnapshot.defaultModel
             selectedModel = hydratedModel.isEmpty
                 ? (dependencies.defaultModel.isEmpty
@@ -361,15 +358,12 @@ struct ModelSetupOnboardingPage: View {
         status = nil
         Task {
             do {
-                let update = ServerSettingsUpdate(
-                    server: ServerSettingsUpdate.ServerUpdate(defaultModel: model)
-                )
-                try await dependencies.engineClient.settings.update(
-                    update,
+                try await dependencies.settingsRepository.update(
+                    .defaultModel(model),
                     idempotencyKey: .userAction("settings.update")
                 )
                 dependencies.defaultModel = model
-                dependencies.engineClient.model.invalidateCache()
+                dependencies.modelRepository.invalidateCache()
                 onComplete()
             } catch {
                 status = "Could not save model: \(error.localizedDescription)"
