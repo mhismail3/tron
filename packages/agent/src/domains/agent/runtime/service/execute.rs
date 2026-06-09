@@ -17,8 +17,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         orchestrator,
         session_manager,
         broadcast,
-        provider_factory,
-        health_tracker,
+        responder_factory,
         event_store,
         shutdown_token,
         engine_host,
@@ -93,8 +92,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         mut agent,
         provider_type,
     } = match build_prompt_agent(
-        provider_factory,
-        health_tracker,
+        responder_factory,
         engine_host.clone(),
         &broadcast,
         settings.as_ref(),
@@ -151,7 +149,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
 
     let run_context = RunContext {
         reasoning_level: reasoning_level.and_then(|level| {
-            crate::domains::agent::r#loop::types::ReasoningLevel::from_str_loose(&level)
+            crate::domains::agent::r#loop::types::ReasoningLevel::from_str_canonical(&level)
         }),
         agent_state_context,
         user_content_override,

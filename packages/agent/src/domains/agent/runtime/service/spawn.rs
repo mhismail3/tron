@@ -16,8 +16,7 @@ pub fn spawn_prompt_run(
         orchestrator: runtime_deps.orchestrator.clone(),
         session_manager: runtime_deps.session_manager.clone(),
         broadcast: runtime_deps.orchestrator.broadcast().clone(),
-        provider_factory: agent_deps.provider_factory.clone(),
-        health_tracker: runtime_deps.health_tracker.clone(),
+        responder_factory: agent_deps.responder_factory.clone(),
         event_store: runtime_deps.event_store.clone(),
         shutdown_token: runtime_deps
             .shutdown_coordinator

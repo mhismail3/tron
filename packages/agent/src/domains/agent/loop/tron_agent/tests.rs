@@ -1,37 +1,30 @@
 use super::*;
 use crate::domains::agent::context::types::ContextManagerConfig;
-use crate::domains::model::providers::shared::provider::{
-    Provider, ProviderError, ProviderStreamOptions, StreamEventStream,
+use crate::domains::model::responder::{
+    ModelResponder, ModelResponderInfo, ModelResponse, ModelResponseError, ModelResponseRequest,
+    ModelResponseStream,
 };
-use crate::domains::model::routing::models::types::Provider as ProviderKind;
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent, TronEvent};
-use crate::shared::protocol::messages::{
-    CapabilityResultMessageContent, Context, Message, TokenUsage,
-};
+use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message, TokenUsage};
 use async_trait::async_trait;
 use futures::stream;
 use parking_lot::Mutex;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-struct MockProvider;
+struct MockResponder;
 
 #[async_trait]
-impl Provider for MockProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
+impl ModelResponder for MockResponder {
+    fn info(&self) -> ModelResponderInfo {
+        test_responder_info()
     }
 
-    fn model(&self) -> &'static str {
-        "mock-model"
-    }
-
-    async fn stream(
+    async fn respond(
         &self,
-        _context: &crate::shared::protocol::messages::Context,
-        _options: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
+        _request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
         let events = vec![
             Ok(StreamEvent::Start),
             Ok(StreamEvent::TextDelta {
@@ -45,27 +38,22 @@ impl Provider for MockProvider {
                 stop_reason: "end_turn".into(),
             }),
         ];
-        Ok(Box::pin(stream::iter(events)))
+        Ok(model_response(events))
     }
 }
 
-struct TokenUsageProvider;
+struct TokenUsageResponder;
 
 #[async_trait]
-impl Provider for TokenUsageProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
+impl ModelResponder for TokenUsageResponder {
+    fn info(&self) -> ModelResponderInfo {
+        test_responder_info()
     }
 
-    fn model(&self) -> &'static str {
-        "mock-model"
-    }
-
-    async fn stream(
+    async fn respond(
         &self,
-        _context: &crate::shared::protocol::messages::Context,
-        _options: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
+        _request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
         let events = vec![
             Ok(StreamEvent::Start),
             Ok(StreamEvent::TextDelta {
@@ -83,30 +71,26 @@ impl Provider for TokenUsageProvider {
                 stop_reason: "end_turn".into(),
             }),
         ];
-        Ok(Box::pin(stream::iter(events)))
+        Ok(model_response(events))
     }
 }
 
-struct PrimitiveExecuteLoopProvider {
+struct PrimitiveExecuteLoopResponder {
     calls: Arc<AtomicUsize>,
     observed_result: Arc<Mutex<Option<String>>>,
 }
 
 #[async_trait]
-impl Provider for PrimitiveExecuteLoopProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
+impl ModelResponder for PrimitiveExecuteLoopResponder {
+    fn info(&self) -> ModelResponderInfo {
+        test_responder_info()
     }
 
-    fn model(&self) -> &'static str {
-        "mock-model"
-    }
-
-    async fn stream(
+    async fn respond(
         &self,
-        context: &Context,
-        _options: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
+        request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
+        let context = &request.context;
         let capability_names = context
             .capabilities
             .as_ref()
@@ -150,7 +134,7 @@ impl Provider for PrimitiveExecuteLoopProvider {
                     stop_reason: "capability_invocation".into(),
                 }),
             ];
-            return Ok(Box::pin(stream::iter(events)));
+            return Ok(model_response(events));
         }
 
         let observed = context
@@ -200,7 +184,23 @@ impl Provider for PrimitiveExecuteLoopProvider {
                 stop_reason: "end_turn".into(),
             }),
         ];
-        Ok(Box::pin(stream::iter(events)))
+        Ok(model_response(events))
+    }
+}
+
+fn test_responder_info() -> ModelResponderInfo {
+    ModelResponderInfo {
+        provider_type: crate::shared::protocol::messages::Provider::Anthropic,
+        provider_name: "anthropic",
+        model: "mock-model".to_owned(),
+        context_window: 200_000,
+    }
+}
+
+fn model_response(events: Vec<Result<StreamEvent, ModelResponseError>>) -> ModelResponse {
+    ModelResponse {
+        info: test_responder_info(),
+        stream: Box::pin(stream::iter(events)) as ModelResponseStream,
     }
 }
 
@@ -214,9 +214,9 @@ fn test_context_manager(model: &str) -> ContextManager {
     })
 }
 
-fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
+fn make_deps(responder: impl ModelResponder + 'static) -> AgentDeps {
     AgentDeps {
-        provider: Arc::new(provider),
+        responder: Arc::new(responder),
         context_manager: test_context_manager("mock-model"),
         compaction_trigger_config:
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
@@ -225,18 +225,22 @@ fn make_deps(provider: impl Provider + 'static) -> AgentDeps {
 }
 
 fn make_primitive_loop_deps(
-    provider: impl Provider + 'static,
+    responder: impl ModelResponder + 'static,
     engine_host: crate::engine::EngineHostHandle,
 ) -> AgentDeps {
     AgentDeps {
         engine_host: Some(engine_host),
-        ..make_deps(provider)
+        ..make_deps(responder)
     }
 }
 
 #[test]
 fn agent_uses_empty_initial_capability_snapshot() {
-    let agent = TronAgent::new(AgentConfig::default(), make_deps(MockProvider), "s1".into());
+    let agent = TronAgent::new(
+        AgentConfig::default(),
+        make_deps(MockResponder),
+        "s1".into(),
+    );
     assert!(agent.context_manager().model_capability_names().is_empty());
 }
 
@@ -247,7 +251,7 @@ async fn text_only_run_succeeds_without_frozen_capabilities() {
             max_turns: 1,
             ..AgentConfig::default()
         },
-        make_deps(MockProvider),
+        make_deps(MockResponder),
         "s1".into(),
     );
     let result = agent
@@ -274,7 +278,7 @@ async fn primitive_loop_calls_execute_observes_result_and_continues() {
             ..AgentConfig::default()
         },
         make_primitive_loop_deps(
-            PrimitiveExecuteLoopProvider {
+            PrimitiveExecuteLoopResponder {
                 calls: calls.clone(),
                 observed_result: observed_result.clone(),
             },
@@ -318,7 +322,7 @@ async fn resumed_session_offset_is_used_for_turn_events_and_token_record() {
             max_turns: 1,
             ..AgentConfig::default()
         },
-        make_deps(TokenUsageProvider),
+        make_deps(TokenUsageResponder),
         "s1".into(),
     );
     agent.set_completed_turn_offset(4);

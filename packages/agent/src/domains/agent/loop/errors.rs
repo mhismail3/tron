@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 /// Errors that can occur during agent runtime execution.
 #[derive(Debug, thiserror::Error)]
 pub enum RuntimeError {
-    /// LLM provider error (streaming, auth, rate limit).
+    /// Model response error (streaming, auth, rate limit).
     #[error("Provider error: {0}")]
-    Provider(#[from] crate::domains::model::providers::shared::provider::ProviderError),
+    ModelResponse(#[from] crate::domains::model::responder::ModelResponseError),
 
     /// Capability invocation error.
     #[error("Capability error: {model_primitive_name}: {message}")]
@@ -62,7 +62,7 @@ impl RuntimeError {
     /// Whether the error is recoverable (user can retry).
     pub fn is_recoverable(&self) -> bool {
         match self {
-            Self::Provider(e) => e.is_retryable(),
+            Self::ModelResponse(e) => e.is_retryable(),
             Self::Cancelled
             | Self::MaxTurns(_)
             | Self::SessionBusy(_)
@@ -78,7 +78,7 @@ impl RuntimeError {
     /// Error category string for event emission.
     pub fn category(&self) -> &str {
         match self {
-            Self::Provider(_) => "provider",
+            Self::ModelResponse(_) => "provider",
             Self::ModelCapability { .. } => "capability",
             Self::Context(_) => "context",
             Self::Cancelled => "cancelled",

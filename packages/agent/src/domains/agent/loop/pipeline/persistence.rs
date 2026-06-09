@@ -4,9 +4,9 @@
 //! and iOS client expect. Token normalization delegates to the provider-aware
 //! token module for correct context, cache, and cost semantics.
 
-use crate::domains::model::providers::tokens::normalization::normalize_tokens;
-use crate::domains::model::providers::tokens::pricing::calculate_pricing;
-use crate::domains::model::providers::tokens::types::{TokenMeta, TokenSource};
+use crate::domains::model::tokens::normalization::normalize_tokens;
+use crate::domains::model::tokens::pricing::calculate_pricing;
+use crate::domains::model::tokens::types::{TokenMeta, TokenSource};
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::messages::{Provider, TokenUsage};
 use serde_json::{Value, json};
@@ -60,7 +60,7 @@ pub fn build_token_usage_json(usage: &TokenUsage) -> Value {
 
 /// Build the nested `tokenRecord` structure consumed by iOS event DTOs.
 ///
-/// Delegates to `crate::domains::model::providers::tokens::normalize_tokens()` for correct per-turn
+/// Delegates to `crate::domains::model::tokens::normalize_tokens()` for correct per-turn
 /// delta calculation using cross-turn baseline tracking.
 pub fn build_token_record(
     usage: &TokenUsage,

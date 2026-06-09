@@ -1,11 +1,7 @@
 //! Runtime configuration and result types.
 
-use std::sync::Arc;
-
 use crate::domains::agent::context::types::CompactionConfig;
-use crate::domains::model::providers::shared::{
-    AnthropicEffortLevel, ProviderHealthTracker, ReasoningEffort,
-};
+pub use crate::domains::model::responder::ModelReasoningLevel as ReasoningLevel;
 use crate::shared::protocol::messages::TokenUsage;
 use serde::{Deserialize, Serialize};
 
@@ -14,84 +10,6 @@ use crate::domains::agent::r#loop::errors::StopReason;
 // ─────────────────────────────────────────────────────────────────────────────
 // Agent configuration
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Reasoning level for agent execution.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ReasoningLevel {
-    /// No reasoning.
-    None,
-    /// Low reasoning effort.
-    Low,
-    /// Medium reasoning effort.
-    Medium,
-    /// High reasoning effort.
-    High,
-    /// Extra-high reasoning effort (Anthropic only, maps to High for other providers).
-    XHigh,
-    /// Maximum reasoning effort (Anthropic only, maps to High for other providers).
-    Max,
-}
-
-impl ReasoningLevel {
-    /// Convert to Google Gemini thinking level string.
-    /// Gemini supports: `THINKING_DISABLED`, `THINKING_LOW`, `THINKING_MEDIUM`, `THINKING_HIGH`.
-    /// XHigh/Max clamp to `THINKING_HIGH`.
-    pub fn as_gemini_thinking_level(&self) -> &str {
-        match self {
-            Self::None => "THINKING_DISABLED",
-            Self::Low => "THINKING_LOW",
-            Self::Medium => "THINKING_MEDIUM",
-            Self::High | Self::XHigh | Self::Max => "THINKING_HIGH",
-        }
-    }
-
-    /// Convert to Anthropic [`AnthropicEffortLevel`].
-    ///
-    /// Returns `None` for `ReasoningLevel::None` (use model default). Anthropic
-    /// now supports the full `low/medium/high/xhigh/max` ladder (xhigh is new
-    /// in Opus 4.7). Per-model support is advertised via
-    /// `ClaudeModelInfo::reasoning_levels`; callers that pick a level not
-    /// supported by the target model will surface a 400 from the API.
-    pub fn as_anthropic_effort(&self) -> Option<AnthropicEffortLevel> {
-        match self {
-            Self::None => None,
-            Self::Low => Some(AnthropicEffortLevel::Low),
-            Self::Medium => Some(AnthropicEffortLevel::Medium),
-            Self::High => Some(AnthropicEffortLevel::High),
-            Self::XHigh => Some(AnthropicEffortLevel::Xhigh),
-            Self::Max => Some(AnthropicEffortLevel::Max),
-        }
-    }
-
-    /// Convert to `OpenAI` [`ReasoningEffort`].
-    ///
-    /// Full pass-through for GPT 5.4 levels. Provider-side clamping
-    /// handles older models that don't support all levels.
-    pub fn as_openai_reasoning(&self) -> ReasoningEffort {
-        match self {
-            Self::None => ReasoningEffort::None,
-            Self::Low => ReasoningEffort::Low,
-            Self::Medium => ReasoningEffort::Medium,
-            Self::High => ReasoningEffort::High,
-            Self::XHigh => ReasoningEffort::Xhigh,
-            Self::Max => ReasoningEffort::Max,
-        }
-    }
-
-    /// Parse from a string, case-insensitive.
-    pub fn from_str_loose(s: &str) -> Option<Self> {
-        match s.to_lowercase().as_str() {
-            "none" => Some(Self::None),
-            "low" => Some(Self::Low),
-            "medium" => Some(Self::Medium),
-            "high" => Some(Self::High),
-            "xhigh" | "x_high" | "x-high" => Some(Self::XHigh),
-            "max" => Some(Self::Max),
-            _ => Option::None,
-        }
-    }
-}
 
 /// Configuration for creating a `TronAgent`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -135,9 +53,6 @@ pub struct AgentConfig {
     /// Retry configuration for provider stream failures.
     #[serde(skip)]
     pub retry: Option<crate::shared::foundation::retry::RetryConfig>,
-    /// Shared provider health tracker for recording success/failure outcomes.
-    #[serde(skip)]
-    pub health_tracker: Option<Arc<ProviderHealthTracker>>,
     /// Workspace ID for scoping memory recall (resolved from working directory).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub workspace_id: Option<String>,
@@ -163,7 +78,6 @@ impl Default for AgentConfig {
             working_directory: None,
             server_origin: None,
             retry: None,
-            health_tracker: None,
             workspace_id: None,
         }
     }
@@ -548,129 +462,32 @@ mod tests {
     }
 
     #[test]
-    fn reasoning_level_as_gemini_thinking_level() {
+    fn reasoning_level_from_str_canonical() {
         assert_eq!(
-            ReasoningLevel::None.as_gemini_thinking_level(),
-            "THINKING_DISABLED"
-        );
-        assert_eq!(
-            ReasoningLevel::Low.as_gemini_thinking_level(),
-            "THINKING_LOW"
-        );
-        assert_eq!(
-            ReasoningLevel::Medium.as_gemini_thinking_level(),
-            "THINKING_MEDIUM"
-        );
-        assert_eq!(
-            ReasoningLevel::High.as_gemini_thinking_level(),
-            "THINKING_HIGH"
-        );
-        // XHigh and Max clamp to THINKING_HIGH for Gemini
-        assert_eq!(
-            ReasoningLevel::XHigh.as_gemini_thinking_level(),
-            "THINKING_HIGH"
-        );
-        assert_eq!(
-            ReasoningLevel::Max.as_gemini_thinking_level(),
-            "THINKING_HIGH"
-        );
-    }
-
-    #[test]
-    fn reasoning_level_as_anthropic_effort() {
-        assert_eq!(ReasoningLevel::None.as_anthropic_effort(), None);
-        assert_eq!(
-            ReasoningLevel::Low.as_anthropic_effort(),
-            Some(AnthropicEffortLevel::Low)
-        );
-        assert_eq!(
-            ReasoningLevel::Medium.as_anthropic_effort(),
-            Some(AnthropicEffortLevel::Medium)
-        );
-        assert_eq!(
-            ReasoningLevel::High.as_anthropic_effort(),
-            Some(AnthropicEffortLevel::High)
-        );
-        // XHigh and Max pass through to Anthropic (Anthropic supports the
-        // full ladder; per-model support is advertised via reasoning_levels).
-        assert_eq!(
-            ReasoningLevel::XHigh.as_anthropic_effort(),
-            Some(AnthropicEffortLevel::Xhigh)
-        );
-        assert_eq!(
-            ReasoningLevel::Max.as_anthropic_effort(),
-            Some(AnthropicEffortLevel::Max)
-        );
-    }
-
-    #[test]
-    fn reasoning_level_as_openai_reasoning() {
-        assert_eq!(
-            ReasoningLevel::None.as_openai_reasoning(),
-            ReasoningEffort::None
-        );
-        assert_eq!(
-            ReasoningLevel::Low.as_openai_reasoning(),
-            ReasoningEffort::Low
-        );
-        assert_eq!(
-            ReasoningLevel::Medium.as_openai_reasoning(),
-            ReasoningEffort::Medium
-        );
-        assert_eq!(
-            ReasoningLevel::High.as_openai_reasoning(),
-            ReasoningEffort::High
-        );
-        assert_eq!(
-            ReasoningLevel::XHigh.as_openai_reasoning(),
-            ReasoningEffort::Xhigh
-        );
-        assert_eq!(
-            ReasoningLevel::Max.as_openai_reasoning(),
-            ReasoningEffort::Max
-        );
-    }
-
-    #[test]
-    fn reasoning_level_from_str_loose() {
-        assert_eq!(
-            ReasoningLevel::from_str_loose("none"),
+            ReasoningLevel::from_str_canonical("none"),
             Some(ReasoningLevel::None)
         );
         assert_eq!(
-            ReasoningLevel::from_str_loose("LOW"),
-            Some(ReasoningLevel::Low)
-        );
-        assert_eq!(
-            ReasoningLevel::from_str_loose("Medium"),
+            ReasoningLevel::from_str_canonical("medium"),
             Some(ReasoningLevel::Medium)
         );
         assert_eq!(
-            ReasoningLevel::from_str_loose("HIGH"),
+            ReasoningLevel::from_str_canonical("high"),
             Some(ReasoningLevel::High)
         );
         assert_eq!(
-            ReasoningLevel::from_str_loose("xhigh"),
+            ReasoningLevel::from_str_canonical("x_high"),
             Some(ReasoningLevel::XHigh)
         );
         assert_eq!(
-            ReasoningLevel::from_str_loose("x_high"),
-            Some(ReasoningLevel::XHigh)
-        );
-        assert_eq!(
-            ReasoningLevel::from_str_loose("x-high"),
-            Some(ReasoningLevel::XHigh)
-        );
-        assert_eq!(
-            ReasoningLevel::from_str_loose("max"),
+            ReasoningLevel::from_str_canonical("max"),
             Some(ReasoningLevel::Max)
         );
-        assert_eq!(
-            ReasoningLevel::from_str_loose("MAX"),
-            Some(ReasoningLevel::Max)
-        );
-        assert_eq!(ReasoningLevel::from_str_loose("unknown"), Option::None);
-        assert_eq!(ReasoningLevel::from_str_loose(""), Option::None);
+        assert_eq!(ReasoningLevel::from_str_canonical("LOW"), Option::None);
+        assert_eq!(ReasoningLevel::from_str_canonical("xhigh"), Option::None);
+        assert_eq!(ReasoningLevel::from_str_canonical("x-high"), Option::None);
+        assert_eq!(ReasoningLevel::from_str_canonical("unknown"), Option::None);
+        assert_eq!(ReasoningLevel::from_str_canonical(""), Option::None);
     }
 
     #[test]

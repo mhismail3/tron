@@ -14,12 +14,6 @@
 //! | [`stream_handler`]    | OpenAI SSE → `StreamEvent` ([`crate::shared::protocol::events`]); handles output deltas, capability invocations, and terminal events |
 //! | [`types`]             | [`OpenAIAuth`], [`OpenAIConfig`], [`ApiEndpoint`], endpoint-aware model profiles, and Responses wire DTOs split by owned surface |
 //!
-//! ## Re-exports
-//!
-//! - [`OpenAIProvider`] — the OpenAI provider payload behind the shared
-//!   provider enum
-//! - [`ApiEndpoint`] — the resolved Responses endpoint (`codex` or `platform`)
-//!
 //! ## Invariants
 //!
 //! - API-key credentials never route to `chatgpt.com/backend-api/codex`; they
@@ -50,6 +44,3 @@ pub mod message_converter;
 pub mod provider;
 pub mod stream_handler;
 pub mod types;
-
-pub use provider::OpenAIProvider;
-pub use types::{ApiEndpoint, OpenAIAuth, OpenAIConfig};

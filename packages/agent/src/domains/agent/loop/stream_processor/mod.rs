@@ -1,4 +1,4 @@
-//! Stream processor — consumes `StreamEventStream`, accumulates content blocks.
+//! Stream processor — consumes `ModelResponseStream`, accumulates content blocks.
 //!
 //! The heavy lifting lives in [`super::stream_state`]: `StreamState` holds the
 //! accumulators and `handle_normal_event` / `handle_drain_event` classify each
@@ -16,7 +16,7 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
 use crate::domains::agent::r#loop::types::StreamResult;
-use crate::domains::model::providers::shared::provider::{ProviderError, StreamEventStream};
+use crate::domains::model::responder::ModelResponseStream;
 use crate::engine::{InvocationId, TraceId};
 
 use super::stream_state::{StreamAction, StreamState, StreamTraceContext};
@@ -31,7 +31,7 @@ use super::stream_state::{StreamAction, StreamState, StreamTraceContext};
 /// provider's final message.
 #[cfg(test)]
 pub async fn process_stream(
-    stream: StreamEventStream,
+    stream: ModelResponseStream,
     session_id: &str,
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
@@ -57,7 +57,7 @@ pub async fn process_stream(
 /// runtime event.
 #[allow(clippy::too_many_arguments)]
 pub async fn process_stream_with_trace(
-    mut stream: StreamEventStream,
+    mut stream: ModelResponseStream,
     session_id: &str,
     emitter: &Arc<EventEmitter>,
     cancel: &CancellationToken,
@@ -90,11 +90,11 @@ pub async fn process_stream_with_trace(
                     "Stream ended without Done event".into(),
                 ));
             }
-            Some(Err(ProviderError::Cancelled)) => {
+            Some(Err(error)) if error.is_cancelled() => {
                 return Ok(state.build_interrupted_result());
             }
             Some(Err(e)) => {
-                return Err(RuntimeError::Provider(e));
+                return Err(RuntimeError::ModelResponse(e));
             }
             Some(Ok(stream_event)) => {
                 let action = if state.draining {

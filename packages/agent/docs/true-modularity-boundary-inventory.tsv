@@ -76,7 +76,6 @@ packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.r
 packages/agent/src/domains/agent/loop/turn_runner/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/agent/loop/turn_runner/persistence/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/agent/loop/turn_runner/persistence/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
-packages/agent/src/domains/agent/loop/turn_runner/provider.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/agent/loop/turn_runner/result.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/agent/loop/turn_runner/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
 packages/agent/src/domains/agent/loop/turn_runner/turn_context.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
@@ -215,11 +214,12 @@ packages/agent/src/domains/model/providers/shared/retry.rs	rust	adapter	rust:dom
 packages/agent/src/domains/model/providers/shared/sse.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
 packages/agent/src/domains/model/providers/shared/stream_common.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
 packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
-packages/agent/src/domains/model/providers/tokens/errors.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
-packages/agent/src/domains/model/providers/tokens/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
-packages/agent/src/domains/model/providers/tokens/normalization.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
-packages/agent/src/domains/model/providers/tokens/pricing.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
-packages/agent/src/domains/model/providers/tokens/types.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/model/responder/mod.rs	rust	facade	rust:domain-model	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/model/tokens/errors.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/tokens/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/tokens/normalization.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/tokens/pricing.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/tokens/types.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
 packages/agent/src/domains/model/routing/catalog.rs	rust	implementation	rust:domain-model	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/model/routing/mod.rs	rust	facade	rust:domain-model	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/model/routing/models/mod.rs	rust	facade	rust:domain-model	callers may depend on this narrow owner-approved surface only

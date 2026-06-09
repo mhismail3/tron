@@ -10,7 +10,6 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
-use tron::domains::model::providers::shared::ProviderHealthTracker;
 use tron::domains::session::event_store::{
     AgentTraceListOptions, ConnectionConfig, EventStore, new_file, run_migrations,
 };
@@ -70,7 +69,6 @@ fn test_runtime() -> TestRuntime {
         profile_runtime,
         agent_deps: None,
         server_start_time: Instant::now(),
-        health_tracker: Arc::new(ProviderHealthTracker::new()),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_owned(),
         auth_path,

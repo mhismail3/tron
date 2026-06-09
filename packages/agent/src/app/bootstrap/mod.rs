@@ -17,8 +17,7 @@ use crate::app::bootstrap::config::ServerConfig;
 use crate::app::bootstrap::server::TronServer;
 use crate::app::cli::{Cli, run_subcommand};
 use crate::domains::agent::r#loop::{Orchestrator, SessionManager, recover_incomplete_turns};
-use crate::domains::model::providers::factory as provider_factory;
-use crate::domains::model::providers::shared::provider::ProviderFactory;
+use crate::domains::model::responder::{DefaultModelResponderFactory, ModelResponderFactory};
 use crate::domains::session::event_store::{ConnectionConfig, EventStore};
 use crate::domains::settings::db_path_policy::resolve_production_db_path;
 use crate::shared::server::context::{
@@ -258,11 +257,11 @@ async fn init_services(
         tracing::debug!("no orphaned journals found, clean startup");
     }
 
-    let (provider_factory, shared_http_client) = init_provider_factory(settings).await;
+    let (responder_factory, shared_http_client) = init_model_responder_factory(settings).await;
     let _ = shared_http_client;
 
     let agent_deps = Some(AgentDeps {
-        provider_factory: provider_factory.clone(),
+        responder_factory: responder_factory.clone(),
     });
 
     Ok(ServiceState {
@@ -273,15 +272,15 @@ async fn init_services(
     })
 }
 
-/// Create provider factory and check startup auth availability.
-async fn init_provider_factory(
+/// Create model responder factory and check startup auth availability.
+async fn init_model_responder_factory(
     settings: &crate::domains::settings::TronSettings,
-) -> (Arc<dyn ProviderFactory>, reqwest::Client) {
-    let default_factory = provider_factory::DefaultProviderFactory::new(settings);
+) -> (Arc<dyn ModelResponderFactory>, reqwest::Client) {
+    let default_factory = DefaultModelResponderFactory::new(settings);
     let shared_http_client = default_factory.http_client();
-    let provider_factory: Arc<dyn ProviderFactory> = Arc::new(default_factory);
+    let responder_factory: Arc<dyn ModelResponderFactory> = Arc::new(default_factory);
 
-    let startup_auth_ok = provider_factory
+    let startup_auth_ok = responder_factory
         .create_for_model(&settings.server.default_model)
         .await
         .is_ok();
@@ -295,7 +294,7 @@ async fn init_provider_factory(
         tracing::warn!("no auth found at startup — sign in via Settings > Providers");
     }
 
-    (provider_factory, shared_http_client)
+    (responder_factory, shared_http_client)
 }
 
 /// Build the runtime context that holds shared state for domain functions.
@@ -315,9 +314,6 @@ fn build_server_runtime_context(
         profile_runtime,
         agent_deps: services.agent_deps,
         server_start_time: std::time::Instant::now(),
-        health_tracker: Arc::new(
-            crate::domains::model::providers::shared::ProviderHealthTracker::new(),
-        ),
         shutdown_coordinator: None,
         origin,
         auth_path: auth_path(),

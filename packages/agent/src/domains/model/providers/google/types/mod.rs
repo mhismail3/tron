@@ -458,8 +458,7 @@ pub struct GeminiApiError {
 mod models;
 
 pub use models::{
-    GEMINI_MODELS, GeminiModelInfo, all_gemini_model_ids, all_gemini_models_api_json,
-    get_gemini_model, is_gemini_3_model,
+    all_gemini_model_ids, all_gemini_models_api_json, get_gemini_model, is_gemini_3_model,
 };
 
 /// Default API base URL (used for both API key and OAuth authentication).

@@ -7,9 +7,7 @@ pub(crate) struct PromptRunPlan {
     pub(super) session_manager:
         Arc<crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager>,
     pub(super) broadcast: Arc<crate::domains::agent::r#loop::EventEmitter>,
-    pub(super) provider_factory:
-        Arc<dyn crate::domains::model::providers::shared::provider::ProviderFactory>,
-    pub(super) health_tracker: Arc<crate::domains::model::providers::shared::ProviderHealthTracker>,
+    pub(super) responder_factory: Arc<dyn crate::domains::model::responder::ModelResponderFactory>,
     pub(super) event_store: Arc<crate::domains::session::event_store::EventStore>,
     pub(super) shutdown_token: Option<tokio_util::sync::CancellationToken>,
     pub(super) engine_host: crate::engine::EngineHostHandle,

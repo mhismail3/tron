@@ -6,7 +6,7 @@ use std::collections::HashSet;
 use std::pin::Pin;
 
 use super::super::stream_state::{build_message, finalize_capability_invocation};
-use crate::domains::model::providers::shared::provider::ProviderError;
+use crate::domains::model::responder::{ModelResponseError, ModelResponseStream};
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, RetryErrorInfo, StreamEvent, TronEvent};
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, TokenUsage};
@@ -19,7 +19,7 @@ fn no_stopping_capabilities() -> HashSet<String> {
     HashSet::new()
 }
 
-fn text_stream(text: &str) -> StreamEventStream {
+fn text_stream(text: &str) -> ModelResponseStream {
     let text = text.to_owned();
     let s = stream! {
         yield Ok(StreamEvent::Start);
@@ -38,10 +38,11 @@ fn text_stream(text: &str) -> StreamEventStream {
             stop_reason: "end_turn".into(),
         });
     };
-    Box::pin(s) as Pin<Box<dyn futures::Stream<Item = Result<StreamEvent, ProviderError>> + Send>>
+    Box::pin(s)
+        as Pin<Box<dyn futures::Stream<Item = Result<StreamEvent, ModelResponseError>> + Send>>
 }
 
-fn thinking_then_text_stream() -> StreamEventStream {
+fn thinking_then_text_stream() -> ModelResponseStream {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::ThinkingStart);
@@ -64,7 +65,7 @@ fn thinking_then_text_stream() -> StreamEventStream {
     Box::pin(s)
 }
 
-fn capability_invocation_stream() -> StreamEventStream {
+fn capability_invocation_stream() -> ModelResponseStream {
     let mut args = serde_json::Map::new();
     let _ = args.insert("command".into(), serde_json::json!("ls"));
     let s = stream! {
@@ -235,12 +236,7 @@ async fn error_mid_stream() {
     let s = stream! {
         yield Ok(StreamEvent::Start);
         yield Ok(StreamEvent::TextDelta { delta: "partial".into() });
-        yield Err(ProviderError::Api {
-            status: 500,
-            message: "server error".into(),
-            code: None,
-            retryable: false,
-        });
+        yield Err(ModelResponseError::other("server error"));
     };
 
     let emitter = make_emitter();
@@ -257,7 +253,10 @@ async fn error_mid_stream() {
     .await;
 
     assert!(result.is_err());
-    assert!(matches!(result.unwrap_err(), RuntimeError::Provider(_)));
+    assert!(matches!(
+        result.unwrap_err(),
+        RuntimeError::ModelResponse(_)
+    ));
 }
 
 #[tokio::test]

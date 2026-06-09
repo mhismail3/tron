@@ -11,7 +11,7 @@ use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister
 use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::turn_runner;
 use crate::domains::agent::r#loop::types::{AgentConfig, RunContext, RunResult};
-use crate::domains::model::providers::shared::provider::Provider;
+use crate::domains::model::responder::ModelResponder;
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::protocol::messages::{Message, TokenUsage, UserMessageContent};
 use tokio::sync::broadcast;
@@ -37,7 +37,7 @@ impl Drop for RunGuard<'_> {
 }
 
 pub struct AgentDeps {
-    pub provider: Arc<dyn Provider>,
+    pub responder: Arc<dyn ModelResponder>,
     pub context_manager: ContextManager,
     pub compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
     pub engine_host: Option<crate::engine::EngineHostHandle>,
@@ -45,7 +45,7 @@ pub struct AgentDeps {
 
 pub struct TronAgent {
     config: AgentConfig,
-    provider: Arc<dyn Provider>,
+    responder: Arc<dyn ModelResponder>,
     context_manager: ContextManager,
     emitter: Arc<EventEmitter>,
     compaction: Arc<CompactionHandler>,
@@ -65,7 +65,7 @@ impl TronAgent {
     pub fn new(config: AgentConfig, deps: AgentDeps, session_id: String) -> Self {
         Self {
             config,
-            provider: deps.provider,
+            responder: deps.responder,
             context_manager: deps.context_manager,
             emitter: Arc::new(EventEmitter::new()),
             compaction: Arc::new(CompactionHandler::new(deps.compaction_trigger_config)),
@@ -148,7 +148,7 @@ impl TronAgent {
             let result = turn_runner::execute_turn(turn_runner::TurnParams {
                 turn: session_turn,
                 context_manager: &mut self.context_manager,
-                provider: &self.provider,
+                responder: &self.responder,
                 compaction: &self.compaction,
                 session_id: &self.session_id,
                 emitter: &self.emitter,
@@ -157,7 +157,6 @@ impl TronAgent {
                 persister: self.persister.as_deref(),
                 previous_context_baseline,
                 retry_config: self.config.retry.as_ref(),
-                health_tracker: self.config.health_tracker.as_ref(),
                 workspace_id: self.config.workspace_id.as_deref(),
                 server_origin: self.config.server_origin.as_deref(),
                 sequence_counter: self.sequence_counter.as_ref().map(|c| c.as_ref()),

@@ -1,7 +1,7 @@
 # True Modularity Boundary Scorecard
 
 Status: **active**
-Current score: **13/100**
+Current score: **28/100**
 Branch: `codex/primitive-engine-teardown`
 
 This scorecard formalizes the True Modularity Boundary campaign. The campaign
@@ -34,7 +34,7 @@ concrete implementations only when listed in the inventory.
 |---|---|---:|---|---|
 | TMB-0 | Create the campaign harness | 5 | passed_after_fix | Added this scorecard, the evidence manifest, README links, and `true_modularity_boundary_invariants`; the first invariant run exposes current boundary leaks. |
 | TMB-1 | Define boundary taxonomy and inventory | 8 | passed_after_fix | Added `true-modularity-boundary-inventory.md` and `.tsv`; every tracked Rust/Swift source has a class, owner, and dependency-direction row. |
-| TMB-2 | Build the model response black box | 15 | open | Agent loop still reaches provider internals directly. |
+| TMB-2 | Build the model response black box | 15 | passed_after_fix | Added the model-owned `ModelResponder` boundary, moved provider selection/retry/health/error mapping behind it, made provider modules crate-private, removed provider-root re-export veneers, deleted the old agent turn-runner provider helper, and moved canonical token accounting to `domains::model::tokens`. |
 | TMB-3 | Narrow engine facade ownership | 12 | open | Engine facade exposure still needs narrowing or justification. |
 | TMB-4 | Harden domain worker boundaries | 10 | open | Domain service/internal imports still need guard coverage and cleanup. |
 | TMB-5 | Encapsulate state and storage | 10 | open | Store/backend/SQL access still needs owner-private guard coverage and cleanup. |

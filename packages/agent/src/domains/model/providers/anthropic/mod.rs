@@ -16,13 +16,6 @@
 //! | [`message_sanitizer`]  | Drop empty assistant messages and normalise internal capability-result ordering before provider conversion |
 //! | [`types`]              | [`AnthropicAuth`] (ApiKey / Oauth / ClaudeAgentSdk), [`AnthropicConfig`], [`AnthropicProviderSettings`] |
 //!
-//! ## Re-exports
-//!
-//! - [`AnthropicProvider`] — the Anthropic provider payload behind the
-//!   shared provider enum
-//! - [`AnthropicAuth`] — used by provider construction to select an active credential
-//! - [`AnthropicProviderSettings`] — user-facing overrides plumbed from settings
-//!
 //! ## Invariants
 //!
 //! - Cache breakpoints are capped at 4 per request
@@ -39,6 +32,3 @@ pub mod message_sanitizer;
 pub mod provider;
 pub mod stream_handler;
 pub mod types;
-
-pub use provider::AnthropicProvider;
-pub use types::{AnthropicAuth, AnthropicConfig, AnthropicProviderSettings};

@@ -6,11 +6,11 @@ use crate::domains::agent::context::context_manager::ContextManager;
 use crate::domains::agent::context::types::ContextManagerConfig;
 use crate::domains::agent::r#loop::tron_agent::{AgentDeps, TronAgent};
 use crate::domains::agent::r#loop::types::AgentConfig;
-use crate::domains::model::providers::shared::provider::Provider;
+use crate::domains::model::responder::ModelResponder;
 use crate::shared::protocol::messages::Message;
 
 pub struct CreateAgentOpts {
-    pub provider: Arc<dyn Provider>,
+    pub responder: Arc<dyn ModelResponder>,
     pub initial_messages: Vec<Message>,
     pub initial_turn_count: u32,
     pub compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
@@ -19,14 +19,14 @@ pub struct CreateAgentOpts {
 
 impl CreateAgentOpts {
     pub fn primitive(
-        provider: Arc<dyn Provider>,
+        responder: Arc<dyn ModelResponder>,
         initial_messages: Vec<Message>,
         initial_turn_count: u32,
         compaction_trigger_config: crate::domains::agent::context::types::CompactionTriggerConfig,
         engine_host: Option<crate::engine::EngineHostHandle>,
     ) -> Self {
         Self {
-            provider,
+            responder,
             initial_messages,
             initial_turn_count,
             compaction_trigger_config,
@@ -45,7 +45,7 @@ impl AgentFactory {
     ) -> TronAgent {
         let initial_turn_count = opts.initial_turn_count;
         let mut compaction = config.compaction.clone();
-        compaction.context_limit = opts.provider.context_window();
+        compaction.context_limit = opts.responder.context_window();
         let mut context_manager = ContextManager::new(ContextManagerConfig {
             model: config.model.clone(),
             system_prompt: config.system_prompt.clone(),
@@ -60,7 +60,7 @@ impl AgentFactory {
         let mut agent = TronAgent::new(
             config,
             AgentDeps {
-                provider: opts.provider,
+                responder: opts.responder,
                 context_manager,
                 compaction_trigger_config: opts.compaction_trigger_config,
                 engine_host: opts.engine_host,
@@ -75,38 +75,35 @@ impl AgentFactory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::model::providers::shared::provider::{
-        Provider, ProviderError, ProviderStreamOptions, StreamEventStream,
+    use crate::domains::model::responder::{
+        ModelResponder, ModelResponderInfo, ModelResponse, ModelResponseError, ModelResponseRequest,
     };
-    use crate::domains::model::routing::models::types::Provider as ProviderKind;
     use async_trait::async_trait;
 
-    struct MockProvider;
+    struct MockResponder;
 
     #[async_trait]
-    impl Provider for MockProvider {
-        fn provider_type(&self) -> ProviderKind {
-            ProviderKind::Anthropic
+    impl ModelResponder for MockResponder {
+        fn info(&self) -> ModelResponderInfo {
+            ModelResponderInfo {
+                provider_type: crate::shared::protocol::messages::Provider::Anthropic,
+                provider_name: "anthropic",
+                model: "mock".to_owned(),
+                context_window: 200_000,
+            }
         }
 
-        fn model(&self) -> &'static str {
-            "mock"
-        }
-
-        async fn stream(
+        async fn respond(
             &self,
-            _context: &crate::shared::protocol::messages::Context,
-            _options: &ProviderStreamOptions,
-        ) -> Result<StreamEventStream, ProviderError> {
-            Err(ProviderError::Other {
-                message: "mock".into(),
-            })
+            _request: ModelResponseRequest,
+        ) -> Result<ModelResponse, ModelResponseError> {
+            Err(ModelResponseError::other("mock"))
         }
     }
 
-    fn default_opts(provider: Arc<dyn Provider>) -> CreateAgentOpts {
+    fn default_opts(responder: Arc<dyn ModelResponder>) -> CreateAgentOpts {
         CreateAgentOpts::primitive(
-            provider,
+            responder,
             vec![],
             0,
             crate::domains::agent::context::types::CompactionTriggerConfig::default(),
@@ -122,7 +119,7 @@ mod tests {
                 ..AgentConfig::default()
             },
             "s1".into(),
-            default_opts(Arc::new(MockProvider)),
+            default_opts(Arc::new(MockResponder)),
         );
         assert!(agent.context_manager().model_capability_names().is_empty());
     }

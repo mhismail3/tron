@@ -15,12 +15,6 @@
 //! | [`stream_handler`]    | Gemini SSE `v1beta/{model}:streamGenerateContent` → `StreamEvent` sequence ([`crate::shared::protocol::events`]) |
 //! | [`types`]             | [`GoogleAuth`] (API key), [`GoogleConfig`] (model + generation parameters) |
 //!
-//! ## Re-exports
-//!
-//! - [`GoogleProvider`] — the Google provider payload behind the shared
-//!   provider enum
-//! - [`GoogleAuth`], [`GoogleConfig`] — consumed by provider construction
-//!
 //! ## Invariants
 //!
 //! - The v1beta API is strict about unknown fields; the converter
@@ -34,6 +28,3 @@ pub mod message_converter;
 pub mod provider;
 pub mod stream_handler;
 pub mod types;
-
-pub use provider::GoogleProvider;
-pub use types::{GoogleAuth, GoogleConfig};

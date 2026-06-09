@@ -34,9 +34,6 @@ async fn server_boots_and_responds() {
         settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
-        health_tracker: Arc::new(
-            crate::domains::model::providers::shared::ProviderHealthTracker::new(),
-        ),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),
@@ -97,9 +94,6 @@ async fn server_graceful_shutdown() {
         settings_path,
         agent_deps: None,
         server_start_time: std::time::Instant::now(),
-        health_tracker: Arc::new(
-            crate::domains::model::providers::shared::ProviderHealthTracker::new(),
-        ),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         auth_path: dir.path().join("auth.json"),

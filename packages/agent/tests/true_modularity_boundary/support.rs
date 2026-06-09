@@ -46,6 +46,7 @@ pub(super) fn tracked_boundary_sources() -> Vec<String> {
             (path.starts_with("packages/agent/src/") && path.ends_with(".rs"))
                 || (path.starts_with("packages/ios-app/Sources/") && path.ends_with(".swift"))
         })
+        .filter(|path| repo_path(path).exists())
         .filter(|path| !is_test_support_path(path))
         .collect()
 }

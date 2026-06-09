@@ -17,7 +17,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Scorecard",
         "Status: **active**",
-        "Current score: **13/100**",
+        "Current score: **28/100**",
         "Branch: `codex/primitive-engine-teardown`",
         "This scorecard formalizes the True Modularity Boundary campaign.",
         "## Boundary Taxonomy",
@@ -30,7 +30,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "`generated-wire-dto`",
         "| TMB-0 | Create the campaign harness | 5 | passed_after_fix |",
         "| TMB-1 | Define boundary taxonomy and inventory | 8 | passed_after_fix |",
-        "| TMB-2 | Build the model response black box | 15 | open |",
+        "| TMB-2 | Build the model response black box | 15 | passed_after_fix |",
         "| TMB-3 | Narrow engine facade ownership | 12 | open |",
         "| TMB-4 | Harden domain worker boundaries | 10 | open |",
         "| TMB-5 | Encapsulate state and storage | 10 | open |",
@@ -60,13 +60,15 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Evidence Manifest",
         "Status: **active**",
-        "Current score: **13/100**",
+        "Current score: **28/100**",
         "| TMB-0 | passed_after_fix |",
         "| TMB-1 | passed_after_fix |",
+        "| TMB-2 | passed_after_fix |",
         "## TMB-0 Red Proof",
         "The first invariant run is intentionally red.",
         "Rust agent loop imports `domains::model::providers` directly",
         "Provider factory and provider health types cross into server and agent",
+        "After TMB-2, `agent_loop_uses_model_responder_boundary` passes.",
     ] {
         assert!(
             manifest.contains(required),
@@ -385,6 +387,9 @@ fn source_lines(root: &str, extension: &str) -> Vec<String> {
         if !path.starts_with(root)
             || Path::new(&path).extension().and_then(|e| e.to_str()) != Some(extension)
         {
+            continue;
+        }
+        if !repo_path(&path).exists() {
             continue;
         }
         if is_test_support_path(&path) {

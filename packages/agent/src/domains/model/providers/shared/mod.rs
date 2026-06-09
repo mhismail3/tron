@@ -56,14 +56,7 @@ pub mod sse;
 pub mod stream_common;
 pub mod stream_pipeline;
 
-pub use context_composition::{
-    GroupedContextParts, compose_context_parts, compose_context_parts_grouped,
-};
+pub use context_composition::{compose_context_parts, compose_context_parts_grouped};
 pub use health::ProviderHealthTracker;
-pub use provider::{
-    AnthropicEffortLevel, Provider, ProviderError, ProviderFactory, ProviderResult,
-    ProviderStreamOptions, ReasoningEffort, StreamEventStream,
-};
 pub use retry::{StreamFactory, StreamRetryConfig, with_provider_retry};
-pub use sse::{SseParserOptions, parse_sse_lines};
-pub use stream_common::StreamAccumulator;
+pub use sse::SseParserOptions;

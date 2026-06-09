@@ -12,20 +12,25 @@ mod responses;
 #[cfg(test)]
 mod tests;
 
-pub use crate::domains::model::providers::shared::provider::ReasoningEffort;
-pub use config::{
-    ApiEndpoint, DEFAULT_BASE_URL, DEFAULT_MAX_OUTPUT_TOKENS, DEFAULT_MODEL,
-    DEFAULT_PLATFORM_BASE_URL, OpenAIApiSettings, OpenAIAuth, OpenAIAuthPath, OpenAIConfig,
+#[cfg(test)]
+pub(crate) use crate::domains::model::providers::shared::provider::ReasoningEffort;
+pub(crate) use config::{
+    ApiEndpoint, OpenAIApiSettings, OpenAIAuth, OpenAIAuthPath, OpenAIConfig,
     TOOL_RESULT_MAX_LENGTH,
 };
-pub use models::{
-    OPENAI_MODELS, OpenAIModelInfo, OpenAIModelProfile, all_openai_model_ids,
-    all_openai_models_api_json, all_openai_models_api_json_for_auth_path,
-    canonical_openai_model_id, get_openai_model, get_openai_model_profile,
-    openai_model_available_for_auth_path, openai_request_model_id, strip_openai_provider_prefix,
+#[cfg(test)]
+pub(crate) use config::{DEFAULT_BASE_URL, DEFAULT_MODEL, DEFAULT_PLATFORM_BASE_URL};
+pub(crate) use models::{
+    OpenAIModelProfile, all_openai_model_ids, all_openai_models_api_json_for_auth_path,
+    get_openai_model, get_openai_model_profile, openai_model_available_for_auth_path,
+    openai_request_model_id,
 };
-pub use responses::{
-    MessageContent, OutputContent, OutputItemType, ReasoningConfig, ResponseTextConfig,
-    ResponsesInputItem, ResponsesOutputItem, ResponsesRequest, ResponsesResponse,
-    ResponsesSseEvent, ResponsesToolEntry, ResponsesUsage, SseEventType,
+#[cfg(test)]
+pub(crate) use models::{all_openai_models_api_json, canonical_openai_model_id};
+pub(crate) use responses::{
+    MessageContent, OutputItemType, ReasoningConfig, ResponseTextConfig, ResponsesInputItem,
+    ResponsesOutputItem, ResponsesRequest, ResponsesResponse, ResponsesSseEvent,
+    ResponsesToolEntry, SseEventType,
 };
+#[cfg(test)]
+pub(crate) use responses::{OutputContent, ResponsesUsage};

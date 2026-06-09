@@ -14,8 +14,7 @@ pub(super) struct BuiltPromptAgent {
 }
 
 pub(super) async fn build_prompt_agent(
-    provider_factory: Arc<dyn crate::domains::model::providers::shared::provider::ProviderFactory>,
-    health_tracker: Arc<crate::domains::model::providers::shared::ProviderHealthTracker>,
+    responder_factory: Arc<dyn crate::domains::model::responder::ModelResponderFactory>,
     engine_host: crate::engine::EngineHostHandle,
     broadcast: &Arc<crate::domains::agent::r#loop::EventEmitter>,
     settings: &crate::domains::settings::TronSettings,
@@ -27,8 +26,8 @@ pub(super) async fn build_prompt_agent(
     initial_turn_count: u32,
     resolved_workspace_id: Option<String>,
 ) -> Result<BuiltPromptAgent, ()> {
-    let provider = match provider_factory.create_for_model(model).await {
-        Ok(provider) => provider,
+    let responder = match responder_factory.create_for_model(model).await {
+        Ok(responder) => responder,
         Err(error) => {
             warn!(
                 model = %model,
@@ -53,7 +52,8 @@ pub(super) async fn build_prompt_agent(
     };
 
     let compactor_settings = &settings.context.compactor;
-    let context_limit = provider.context_window();
+    let responder_info = responder.info();
+    let context_limit = responder_info.context_window;
     let config = AgentConfig {
         model: model.to_owned(),
         working_directory: Some(working_dir.to_owned()),
@@ -72,17 +72,16 @@ pub(super) async fn build_prompt_agent(
             max_delay_ms: settings.retry.max_delay_ms,
             jitter_factor: settings.retry.jitter_factor,
         }),
-        health_tracker: Some(health_tracker),
         workspace_id: resolved_workspace_id,
         ..AgentConfig::default()
     };
 
-    let provider_type = provider.provider_type().as_str().to_string();
+    let provider_type = responder_info.provider_name.to_string();
     let agent = AgentFactory::create_agent(
         config,
         session_id.to_owned(),
         CreateAgentOpts::primitive(
-            provider,
+            responder,
             messages,
             initial_turn_count,
             compactor_settings.into(),

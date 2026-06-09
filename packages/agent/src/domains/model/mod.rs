@@ -5,17 +5,21 @@
 //! Model listing, switching, presets, and provider-neutral registry helpers
 //! live under `routing/`.
 //! Provider-native stream and function-call details are isolated under
-//! `protocol/` before being converted to canonical capability history;
+//! `providers/`, `protocol/`, and the `responder/` boundary before being
+//! converted to canonical capability history;
 //! malformed provider capability arguments fail closed at that boundary.
+//! Token normalization, pricing, and token record types live under `tokens/`
+//! because they are canonical model-domain accounting, not provider wiring.
 
 pub(crate) mod contract;
 pub(crate) mod deps;
 pub(crate) mod handlers;
 pub mod protocol;
-pub mod providers;
+pub(crate) mod providers;
+pub mod responder;
 pub mod routing;
+pub mod tokens;
 pub(crate) use deps::Deps;
-pub use providers::*;
 
 use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::registration::worker::DomainWorkerModule;

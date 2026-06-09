@@ -70,11 +70,9 @@ pub mod minimax;
 pub mod ollama;
 pub mod openai;
 pub mod shared;
-pub mod tokens;
 
 pub use crate::domains::model::protocol::remap_invocation_id;
 pub use crate::domains::model::protocol::{
     CapabilityArgumentParseError, CapabilityCallContext, IdFormat, build_invocation_id_mapping,
-    capability_parsing, id_remapping, is_valid_capability_call_arguments,
-    parse_capability_call_arguments,
+    id_remapping, parse_capability_call_arguments,
 };

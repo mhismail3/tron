@@ -36,9 +36,9 @@ Any other concrete cross-boundary wiring must be promoted into one of these root
 | `adapter` | 132 |
 | `composition-root` | 11 |
 | `contract` | 90 |
-| `facade` | 85 |
+| `facade` | 86 |
 | `generated-wire-dto` | 22 |
-| `implementation` | 470 |
+| `implementation` | 469 |
 | `test-support` | 119 |
 
 Total tracked source rows: **929**.

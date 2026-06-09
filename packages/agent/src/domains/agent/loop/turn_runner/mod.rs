@@ -8,7 +8,6 @@
 
 mod capability_invocations;
 mod persistence;
-mod provider;
 mod result;
 mod turn_context;
 
@@ -17,8 +16,7 @@ use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 
 use crate::domains::agent::context::context_manager::ContextManager;
-use crate::domains::model::providers::shared::ProviderHealthTracker;
-use crate::domains::model::providers::shared::provider::Provider;
+use crate::domains::model::responder::{ModelResponder, ModelResponseRequest};
 use crate::shared::protocol::events::{BaseEvent, TronEvent};
 
 use metrics::{counter, histogram};
@@ -31,7 +29,6 @@ use self::persistence::{
     emit_turn_end, emit_turn_start, persist_completed_assistant_message,
     persist_interrupted_message,
 };
-use self::provider::{build_stream_options, open_stream};
 use self::result::determine_turn_stop_reason;
 use self::turn_context::{build_turn_context, resolve_provider_primitive_surface};
 use crate::domains::agent::r#loop::compaction_handler::CompactionHandler;
@@ -62,8 +59,8 @@ pub struct TurnParams<'a> {
     pub turn: u32,
     /// Context manager owning messages, agent state summaries, and token tracking.
     pub context_manager: &'a mut ContextManager,
-    /// LLM provider for streaming.
-    pub provider: &'a Arc<dyn Provider>,
+    /// Model responder for streaming.
+    pub responder: &'a Arc<dyn ModelResponder>,
     /// Compaction handler for pre-turn context checks.
     pub compaction: &'a CompactionHandler,
     /// Session identifier.
@@ -80,8 +77,6 @@ pub struct TurnParams<'a> {
     pub previous_context_baseline: u64,
     /// Optional retry configuration for provider stream retries.
     pub retry_config: Option<&'a crate::shared::foundation::retry::RetryConfig>,
-    /// Optional provider health tracker for circuit-breaking.
-    pub health_tracker: Option<&'a Arc<ProviderHealthTracker>>,
     /// Workspace ID for scoping capability context (e.g. memory recall).
     pub workspace_id: Option<&'a str>,
     /// Server origin (e.g. `"localhost:9847"`) for system prompt.
@@ -98,12 +93,12 @@ pub struct TurnParams<'a> {
 
 /// Execute a single turn of the agent loop.
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]
-#[instrument(skip_all, fields(session_id, turn, model = params.provider.model()))]
+#[instrument(skip_all, fields(session_id, turn, model = %params.responder.model()))]
 pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     let TurnParams {
         turn,
         context_manager,
-        provider,
+        responder,
         compaction,
         session_id,
         emitter,
@@ -112,7 +107,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         persister,
         previous_context_baseline,
         retry_config,
-        health_tracker,
         workspace_id,
         server_origin,
         sequence_counter,
@@ -192,33 +186,29 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         primitive_surface.capabilities.clone(),
     );
 
-    // 4. Build stream options (thinking always enabled — provider handles model-specific config)
-    let stream_options = build_stream_options(run_context, session_id);
-
-    // 5. Stream from Provider (with retry if configured)
-    let provider_name: &'static str = provider.provider_type().as_str();
-    let model_name: String = provider.model().to_owned();
-    counter!("provider_requests_total", "provider" => provider_name).increment(1);
-    let request_start = Instant::now();
-
-    let stream = match open_stream(provider, context, stream_options, cancel, retry_config).await {
-        Ok(stream) => stream,
+    // 4. Stream from the model responder. Provider selection, provider-native
+    // options, retry wrapping, and provider error mapping stay inside
+    // `domains::model`.
+    let response = match responder
+        .respond(ModelResponseRequest {
+            context,
+            session_id: session_id.to_owned(),
+            reasoning_level: run_context.reasoning_level.clone(),
+            cancel: cancel.clone(),
+            retry_config: retry_config.cloned(),
+        })
+        .await
+    {
+        Ok(response) => response,
         Err(error) => {
-            if let Some(ht) = health_tracker {
-                ht.record_failure(provider_name);
-            }
             let error_msg = error.to_string();
             let category = error.category().to_owned();
             let recoverable = error.is_retryable();
-            counter!("provider_errors_total", "provider" => provider_name, "status" => category.clone()).increment(1);
-            histogram!("provider_request_duration_seconds", "provider" => provider_name)
-                .record(request_start.elapsed().as_secs_f64());
             warn!(
-                provider = %provider_name,
-                model = %provider.model(),
+                model = %responder.model(),
                 status = %category,
                 error = %error,
-                "provider stream error"
+                "model response error"
             );
 
             if let Some(counter) = sequence_counter {
@@ -254,8 +244,13 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             };
         }
     };
+    let response_info = response.info;
+    let provider_name: &'static str = response_info.provider_name;
+    let provider_type = response_info.provider_type;
+    let model_name = response_info.model;
+    let stream = response.stream;
 
-    // 6. Create streaming journal for crash recovery.
+    // 5. Create streaming journal for crash recovery.
     //
     // Failure is a turn error, not a warning. Without the journal, a
     // mid-stream crash loses the partial assistant message and session
@@ -289,7 +284,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         }
     };
 
-    // 7. Process stream (drain after turn-stopping capabilities to capture token usage cleanly)
+    // 6. Process stream (drain after turn-stopping capabilities to capture token usage cleanly)
     let stream_result = match stream_processor::process_stream_with_trace(
         stream,
         session_id,
@@ -303,18 +298,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     )
     .await
     {
-        Ok(r) => {
-            if let Some(ht) = health_tracker {
-                ht.record_success(provider_name);
-            }
-            r
-        }
+        Ok(r) => r,
         Err(e) => {
-            if let Some(ht) = health_tracker {
-                ht.record_failure(provider_name);
-            }
-            histogram!("provider_request_duration_seconds", "provider" => provider_name)
-                .record(request_start.elapsed().as_secs_f64());
             let error_msg = e.to_string();
             error!(session_id, turn, error = %error_msg, "stream failed");
             if let Some(counter) = sequence_counter {
@@ -350,10 +335,6 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         }
     };
 
-    // Record provider request duration (covers full stream consumption)
-    histogram!("provider_request_duration_seconds", "provider" => provider_name)
-        .record(request_start.elapsed().as_secs_f64());
-
     // Record time-to-first-token if available
     if let Some(ttft) = stream_result.ttft_ms {
         histogram!("provider_ttft_seconds", "provider" => provider_name).record({
@@ -380,8 +361,8 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 stream_result.token_usage.as_ref(),
                 session_id,
                 turn,
-                provider.model(),
-                provider.provider_type(),
+                &model_name,
+                provider_type,
                 previous_context_baseline,
             ),
             sequence_counter,
@@ -408,11 +389,11 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     // 8. Build token record + cost BEFORE ResponseComplete (iOS attaches stats from this)
     let (token_record_json, cost) = build_token_record_json(
         stream_result.token_usage.as_ref(),
-        provider.provider_type(),
+        provider_type,
         session_id,
         turn,
         previous_context_baseline,
-        provider.model(),
+        &model_name,
     );
 
     // INVARIANT: persist message.assistant BEFORE broadcasting
@@ -432,10 +413,10 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     let assistant_payload = build_completed_assistant_payload(
         &stream_result,
         turn,
-        provider.model(),
+        &model_name,
         turn_start.elapsed().as_millis() as u64,
         has_thinking,
-        provider.provider_type(),
+        provider_type,
         token_record_json.as_ref(),
         cost,
     );
@@ -540,7 +521,7 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         session_id,
         turn,
         duration_ms = duration,
-        model = provider.model(),
+        model = %model_name,
         stop_reason = %stream_result.stop_reason,
         capabilities = invocation_phase.capability_invocations_executed,
         has_thinking,

@@ -105,10 +105,10 @@ mod tests {
     use crate::domains::agent::context::context_manager::ContextManager;
     use crate::domains::agent::context::types::ContextManagerConfig;
     use crate::domains::agent::r#loop::errors::StopReason;
-    use crate::domains::model::providers::shared::provider::{
-        ProviderError, ProviderStreamOptions, StreamEventStream,
+    use crate::domains::model::responder::{
+        ModelResponder, ModelResponderInfo, ModelResponse, ModelResponseError,
+        ModelResponseRequest, ModelResponseStream,
     };
-    use crate::domains::model::routing::models::types::Provider;
     use crate::shared::protocol::content::AssistantContent;
     use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
     use crate::shared::protocol::messages::TokenUsage;
@@ -118,39 +118,58 @@ mod tests {
     use crate::domains::agent::r#loop::tron_agent::AgentDeps;
     use crate::domains::agent::r#loop::types::AgentConfig;
 
-    struct MockProvider;
+    struct StreamBackedResponder {
+        events: Vec<Result<StreamEvent, ModelResponseError>>,
+    }
+
+    impl StreamBackedResponder {
+        fn new(events: Vec<Result<StreamEvent, ModelResponseError>>) -> Self {
+            Self { events }
+        }
+    }
+
     #[async_trait]
-    impl crate::domains::model::providers::shared::provider::Provider for MockProvider {
-        fn provider_type(&self) -> Provider {
-            Provider::Anthropic
+    impl ModelResponder for StreamBackedResponder {
+        fn info(&self) -> ModelResponderInfo {
+            ModelResponderInfo {
+                provider_type: crate::shared::protocol::messages::Provider::Anthropic,
+                provider_name: "anthropic",
+                model: "mock".to_owned(),
+                context_window: 200_000,
+            }
         }
-        fn model(&self) -> &'static str {
-            "mock"
-        }
-        async fn stream(
+
+        async fn respond(
             &self,
-            _c: &crate::shared::protocol::messages::Context,
-            _o: &ProviderStreamOptions,
-        ) -> Result<StreamEventStream, ProviderError> {
-            let s = stream::iter(vec![
-                Ok(StreamEvent::Start),
-                Ok(StreamEvent::TextDelta {
-                    delta: "Hello".into(),
-                }),
-                Ok(StreamEvent::Done {
-                    message: AssistantMessage {
-                        content: vec![AssistantContent::text("Hello")],
-                        token_usage: Some(TokenUsage {
-                            input_tokens: 10,
-                            output_tokens: 5,
-                            ..Default::default()
-                        }),
-                    },
-                    stop_reason: "end_turn".into(),
-                }),
-            ]);
-            Ok(Box::pin(s))
+            _request: ModelResponseRequest,
+        ) -> Result<ModelResponse, ModelResponseError> {
+            let events = self.events.clone();
+            let s = stream::iter(events);
+            Ok(ModelResponse {
+                info: self.info(),
+                stream: Box::pin(s) as ModelResponseStream,
+            })
         }
+    }
+
+    fn default_events() -> Vec<Result<StreamEvent, ModelResponseError>> {
+        vec![
+            Ok(StreamEvent::Start),
+            Ok(StreamEvent::TextDelta {
+                delta: "Hello".into(),
+            }),
+            Ok(StreamEvent::Done {
+                message: AssistantMessage {
+                    content: vec![AssistantContent::text("Hello")],
+                    token_usage: Some(TokenUsage {
+                        input_tokens: 10,
+                        output_tokens: 5,
+                        ..Default::default()
+                    }),
+                },
+                stop_reason: "end_turn".into(),
+            }),
+        ]
     }
 
     struct JournalCleanup {
@@ -178,15 +197,15 @@ mod tests {
         format!("agent-runner-test-{}", uuid::Uuid::now_v7())
     }
 
-    fn make_agent_with_provider(
-        provider: Arc<dyn crate::domains::model::providers::shared::provider::Provider>,
+    fn make_agent_with_responder(
+        responder: Arc<dyn ModelResponder>,
     ) -> (TronAgent, JournalCleanup) {
         let session_id = unique_test_session_id();
         let cleanup = JournalCleanup::new(&session_id);
         let agent = TronAgent::new(
             AgentConfig::default(),
             AgentDeps {
-                provider,
+                responder,
                 context_manager: ContextManager::new(ContextManagerConfig {
                     model: "mock".into(),
                     system_prompt: Some("You are helpful.".into()),
@@ -204,7 +223,7 @@ mod tests {
     }
 
     fn make_agent() -> (TronAgent, JournalCleanup) {
-        make_agent_with_provider(Arc::new(MockProvider))
+        make_agent_with_responder(Arc::new(StreamBackedResponder::new(default_events())))
     }
 
     fn run_context() -> RunContext {
@@ -288,27 +307,9 @@ mod tests {
 
     #[tokio::test]
     async fn run_agent_error_still_emits_ready() {
-        struct ErrorProvider;
-        #[async_trait]
-        impl crate::domains::model::providers::shared::provider::Provider for ErrorProvider {
-            fn provider_type(&self) -> Provider {
-                Provider::Anthropic
-            }
-            fn model(&self) -> &'static str {
-                "mock"
-            }
-            async fn stream(
-                &self,
-                _c: &crate::shared::protocol::messages::Context,
-                _o: &ProviderStreamOptions,
-            ) -> Result<StreamEventStream, ProviderError> {
-                Err(ProviderError::Auth {
-                    message: "expired".into(),
-                })
-            }
-        }
-
-        let (mut agent, _journal) = make_agent_with_provider(Arc::new(ErrorProvider));
+        let (mut agent, _journal) = make_agent_with_responder(Arc::new(
+            StreamBackedResponder::new(vec![Err(ModelResponseError::other("expired"))]),
+        ));
 
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();
@@ -328,45 +329,26 @@ mod tests {
 
     #[tokio::test]
     async fn forward_task_drains_all_events() {
-        // Use a multi-turn provider to generate many events
-        struct MultiEventProvider;
-        #[async_trait]
-        impl crate::domains::model::providers::shared::provider::Provider for MultiEventProvider {
-            fn provider_type(&self) -> Provider {
-                Provider::Anthropic
-            }
-            fn model(&self) -> &'static str {
-                "mock"
-            }
-            async fn stream(
-                &self,
-                _c: &crate::shared::protocol::messages::Context,
-                _o: &ProviderStreamOptions,
-            ) -> Result<StreamEventStream, ProviderError> {
-                let s = stream::iter(vec![
-                    Ok(StreamEvent::Start),
-                    Ok(StreamEvent::TextDelta { delta: "a".into() }),
-                    Ok(StreamEvent::TextDelta { delta: "b".into() }),
-                    Ok(StreamEvent::TextDelta { delta: "c".into() }),
-                    Ok(StreamEvent::TextDelta { delta: "d".into() }),
-                    Ok(StreamEvent::TextDelta { delta: "e".into() }),
-                    Ok(StreamEvent::Done {
-                        message: AssistantMessage {
-                            content: vec![AssistantContent::text("abcde")],
-                            token_usage: Some(TokenUsage {
-                                input_tokens: 10,
-                                output_tokens: 5,
-                                ..Default::default()
-                            }),
-                        },
-                        stop_reason: "end_turn".into(),
-                    }),
-                ]);
-                Ok(Box::pin(s))
-            }
-        }
-
-        let (mut agent, _journal) = make_agent_with_provider(Arc::new(MultiEventProvider));
+        let (mut agent, _journal) =
+            make_agent_with_responder(Arc::new(StreamBackedResponder::new(vec![
+                Ok(StreamEvent::Start),
+                Ok(StreamEvent::TextDelta { delta: "a".into() }),
+                Ok(StreamEvent::TextDelta { delta: "b".into() }),
+                Ok(StreamEvent::TextDelta { delta: "c".into() }),
+                Ok(StreamEvent::TextDelta { delta: "d".into() }),
+                Ok(StreamEvent::TextDelta { delta: "e".into() }),
+                Ok(StreamEvent::Done {
+                    message: AssistantMessage {
+                        content: vec![AssistantContent::text("abcde")],
+                        token_usage: Some(TokenUsage {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            ..Default::default()
+                        }),
+                    },
+                    stop_reason: "end_turn".into(),
+                }),
+            ])));
 
         let broadcast = Arc::new(EventEmitter::new());
         let mut rx = broadcast.subscribe();

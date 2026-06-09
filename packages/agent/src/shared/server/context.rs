@@ -7,8 +7,7 @@ use std::time::{Duration, Instant};
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::model::providers::shared::ProviderHealthTracker;
-use crate::domains::model::providers::shared::provider::ProviderFactory;
+use crate::domains::model::responder::ModelResponderFactory;
 use crate::domains::session::event_store::EventStore;
 use crate::engine::EngineHostHandle;
 use metrics::{counter, histogram};
@@ -164,8 +163,8 @@ pub fn register_blocking_supervisor_shutdown(shutdown: &Arc<ShutdownCoordinator>
 /// Dependencies needed to create and run agents.
 #[derive(Clone)]
 pub struct AgentDeps {
-    /// Factory that creates a fresh LLM provider per request (reads current model + auth).
-    pub provider_factory: Arc<dyn ProviderFactory>,
+    /// Factory that creates a fresh model responder per request.
+    pub responder_factory: Arc<dyn ModelResponderFactory>,
 }
 
 /// Broad server runtime context used at app setup and domain registration.
@@ -191,8 +190,6 @@ pub struct ServerRuntimeContext {
     pub agent_deps: Option<AgentDeps>,
     /// When the server started (for uptime calculation).
     pub server_start_time: Instant,
-    /// Provider health tracker for rolling-window error rate monitoring.
-    pub health_tracker: Arc<ProviderHealthTracker>,
     /// Shutdown coordinator for registering background task handles.
     pub shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     /// Server origin (e.g. `"localhost:9847"`).
@@ -293,6 +290,7 @@ fn record_blocking_outcome(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domains::model::responder::ModelResponderFactory;
     use crate::shared::server::test_support::{
         ModelAwareMockFactory, StrictMockFactory, make_test_agent_deps, make_test_context,
     };
@@ -535,29 +533,29 @@ mod tests {
     }
 
     #[test]
-    fn agent_deps_provider_factory_accessible() {
+    fn agent_deps_responder_factory_accessible() {
         let deps = make_test_agent_deps();
-        assert!(Arc::strong_count(&deps.provider_factory) >= 1);
+        assert!(Arc::strong_count(&deps.responder_factory) >= 1);
     }
 
     #[tokio::test]
-    async fn agent_deps_factory_creates_provider() {
+    async fn agent_deps_factory_creates_responder() {
         let deps = make_test_agent_deps();
-        let provider = deps
-            .provider_factory
+        let responder = deps
+            .responder_factory
             .create_for_model("claude-opus-4-6")
             .await
             .unwrap();
-        assert_eq!(provider.model(), "mock");
+        assert_eq!(responder.model(), "claude-opus-4-6");
     }
 
     #[tokio::test]
     async fn model_aware_factory_returns_correct_model() {
         let factory = ModelAwareMockFactory;
-        let p1 = factory.create_for_model("claude-opus-4-6").await.unwrap();
-        let p2 = factory.create_for_model("gpt-5.3-codex").await.unwrap();
-        assert_eq!(p1.model(), "claude-opus-4-6");
-        assert_eq!(p2.model(), "gpt-5.3-codex");
+        let r1 = factory.create_for_model("claude-opus-4-6").await.unwrap();
+        let r2 = factory.create_for_model("gpt-5.3-codex").await.unwrap();
+        assert_eq!(r1.model(), "claude-opus-4-6");
+        assert_eq!(r2.model(), "gpt-5.3-codex");
     }
 
     #[tokio::test]

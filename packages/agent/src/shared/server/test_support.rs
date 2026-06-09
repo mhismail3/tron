@@ -15,10 +15,10 @@ use async_trait::async_trait;
 
 use crate::domains::agent::r#loop::orchestrator::core::Orchestrator;
 use crate::domains::agent::r#loop::orchestrator::session_manager::SessionManager;
-use crate::domains::model::providers::shared::provider::{
-    Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
+use crate::domains::model::responder::{
+    ModelResponder, ModelResponderFactory, ModelResponderInfo, ModelResponse, ModelResponseError,
+    ModelResponseRequest,
 };
-use crate::domains::model::routing::models::types::Provider as ProviderKind;
 use crate::domains::session::event_store::EventStore;
 use crate::shared::server::context::{AgentDeps, ServerRuntimeContext};
 
@@ -56,77 +56,76 @@ pub(crate) fn test_profile_runtime(
     Arc::new(crate::domains::agent::r#loop::ProfileRuntime::load(home).unwrap())
 }
 
-/// A no-op mock provider for tests.
-pub struct MockProvider;
+/// A no-op model responder for tests.
+pub struct MockModelResponder {
+    model: String,
+}
+
+impl MockModelResponder {
+    fn new(model: impl Into<String>) -> Self {
+        Self {
+            model: model.into(),
+        }
+    }
+}
+
 #[async_trait]
-impl Provider for MockProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
+impl ModelResponder for MockModelResponder {
+    fn info(&self) -> ModelResponderInfo {
+        ModelResponderInfo {
+            provider_type: crate::shared::protocol::messages::Provider::Anthropic,
+            provider_name: "anthropic",
+            model: self.model.clone(),
+            context_window: 200_000,
+        }
     }
-    fn model(&self) -> &'static str {
-        "mock"
-    }
-    async fn stream(
+
+    async fn respond(
         &self,
-        _c: &crate::shared::protocol::messages::Context,
-        _o: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
-        Err(ProviderError::Other {
-            message: "mock provider".into(),
-        })
+        _request: ModelResponseRequest,
+    ) -> Result<ModelResponse, ModelResponseError> {
+        Err(ModelResponseError::other("mock provider"))
     }
 }
 
-/// Mock provider factory that creates `MockProvider` for any model.
-pub struct MockProviderFactory;
+/// Mock responder factory that creates `MockModelResponder` for any model.
+pub struct MockModelResponderFactory;
 #[async_trait]
-impl ProviderFactory for MockProviderFactory {
-    async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        Ok(Arc::new(MockProvider))
+impl ModelResponderFactory for MockModelResponderFactory {
+    async fn create_for_model(
+        &self,
+        model: &str,
+    ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+        Ok(Arc::new(MockModelResponder::new(model)))
     }
 }
 
-/// Mock factory that returns model-aware providers (for model-switch tests).
+/// Mock factory that returns model-aware responders (for model-switch tests).
 pub struct ModelAwareMockFactory;
 #[async_trait]
-impl ProviderFactory for ModelAwareMockFactory {
-    async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        Ok(Arc::new(ModelAwareMockProvider(model.to_owned())))
-    }
-}
-
-/// A mock provider that remembers which model it was created for.
-pub struct ModelAwareMockProvider(pub String);
-#[async_trait]
-impl Provider for ModelAwareMockProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
-    }
-    fn model(&self) -> &str {
-        &self.0
-    }
-    async fn stream(
+impl ModelResponderFactory for ModelAwareMockFactory {
+    async fn create_for_model(
         &self,
-        _c: &crate::shared::protocol::messages::Context,
-        _o: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
-        Err(ProviderError::Other {
-            message: "mock".into(),
-        })
+        model: &str,
+    ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
+        Ok(Arc::new(MockModelResponder::new(model)))
     }
 }
 
 /// Mock factory that fails for unknown providers (auth error).
 pub struct StrictMockFactory;
 #[async_trait]
-impl ProviderFactory for StrictMockFactory {
-    async fn create_for_model(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
+impl ModelResponderFactory for StrictMockFactory {
+    async fn create_for_model(
+        &self,
+        model: &str,
+    ) -> Result<Arc<dyn ModelResponder>, ModelResponseError> {
         if model.starts_with("mock") || model.starts_with("claude") {
-            Ok(Arc::new(MockProvider))
+            Ok(Arc::new(MockModelResponder::new(model)))
         } else {
-            Err(ProviderError::Auth {
-                message: format!("No auth for model '{model}'"),
-            })
+            Err(ModelResponseError::auth(format!(
+                "No auth for model '{model}'"
+            )))
         }
     }
 }
@@ -134,7 +133,7 @@ impl ProviderFactory for StrictMockFactory {
 /// Build `AgentDeps` for testing with a mock provider factory.
 pub fn make_test_agent_deps() -> AgentDeps {
     AgentDeps {
-        provider_factory: Arc::new(MockProviderFactory),
+        responder_factory: Arc::new(MockModelResponderFactory),
     }
 }
 
@@ -168,9 +167,6 @@ pub fn make_test_context() -> ServerRuntimeContext {
         profile_runtime,
         agent_deps: None,
         server_start_time: Instant::now(),
-        health_tracker: Arc::new(
-            crate::domains::model::providers::shared::ProviderHealthTracker::new(),
-        ),
         shutdown_coordinator: None,
         origin: "localhost:9847".to_string(),
         auth_path,

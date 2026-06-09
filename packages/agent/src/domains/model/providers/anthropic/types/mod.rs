@@ -10,13 +10,13 @@ use serde_json::{Map, Value};
 mod catalog;
 mod stream;
 
-pub use catalog::{
-    ClaudeModelInfo, DEFAULT_MODEL, all_claude_model_ids, all_claude_models_api_json,
-    get_claude_model,
-};
-pub use stream::{
-    AnthropicSseEvent, SseCacheCreation, SseContentBlock, SseDelta, SseError, SseMessage,
-    SseMessageDelta, SseUsage, SseUsageDelta,
+#[cfg(test)]
+pub(crate) use catalog::DEFAULT_MODEL;
+pub use catalog::{all_claude_model_ids, all_claude_models_api_json, get_claude_model};
+pub(crate) use stream::{AnthropicSseEvent, SseContentBlock, SseDelta};
+#[cfg(test)]
+pub(crate) use stream::{
+    SseCacheCreation, SseError, SseMessage, SseMessageDelta, SseUsage, SseUsageDelta,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
