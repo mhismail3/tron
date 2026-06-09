@@ -4,7 +4,6 @@ import XCTest
 /// Integration tests for ChatViewModel event routing.
 /// These tests verify that events flow correctly from handlers to coordinators and state.
 ///
-/// Following TDD - tests written FIRST to define expected behavior.
 @MainActor
 final class ChatViewModelEventRoutingTests: XCTestCase {
 
@@ -270,7 +269,7 @@ final class ChatViewModelEventRoutingTests: XCTestCase {
         }
     }
 
-    func test_capabilityProgress_unknownInvocationId_isNoop() {
+    func test_capabilityProgress_unknownInvocationId_isIgnored() {
         let initialCount = viewModel.messages.count
         let progress = CapabilityInvocationProgressPlugin.Result(
             invocationId: "not-found",

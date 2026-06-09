@@ -108,11 +108,12 @@ extension SourceGuardTests {
             HierarchyBudget(
                 relativePath: "Tests/Session/Chat/Messaging",
                 minimumFileCount: 1,
-                maximumFileCount: 1,
+                maximumFileCount: 2,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: [],
                 requiredFiles: [
                     "Tests/Session/Chat/Messaging/StreamingManagerTests.swift",
+                    "Tests/Session/Chat/Messaging/StreamingManagerTypewriterTests.swift",
                 ]
             ),
             HierarchyBudget(

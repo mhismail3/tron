@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-08 (HRA-10 Session hierarchy).
+> Last verified: 2026-06-09 (TPC-8 runtime callback split).
 
 The iOS app handles engine events through two paths:
 
@@ -56,8 +56,10 @@ func dispatch(type: String, transform: () -> (any EventResult)?, context: EventD
 ```
 
 `ChatViewModel` conforms to the composed dispatch target through small handler
-extensions. The target exposes chat/session primitives, not fixed product
-session-list APIs.
+extensions. The root state object owns orchestration; streaming, UI queue,
+capability-completion, and live event callback installation lives in
+`ChatViewModel+RuntimeCallbacks.swift`. The target exposes chat/session
+primitives, not fixed product session-list APIs.
 
 ## Stored Reconstruction
 

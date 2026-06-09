@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-08 (HRA-16 final hierarchy closeout).
+> Last verified: 2026-06-09 (TPC-8 iOS UI/session split).
 
 ## Overview
 
@@ -80,6 +80,14 @@ The shell mounts `ContentView` even before onboarding is complete. First-run
 onboarding is presented as a sheet over the shell. When `onboardingComplete` is
 true but no active paired server exists, the shell stays visible.
 
+`ChatViewModel.swift` keeps the mounted session state and orchestration
+boundary. Runtime callback installation for streaming text, UI update queue
+drain, capability completion ordering, and live event processing lives in
+`ChatViewModel+RuntimeCallbacks.swift` so new callback behavior does not grow
+the root state object. `ChatView.swift` keeps shell composition; message-list
+scrolling, pagination, composer, and sheet rendering live in
+`ChatView+MessageList.swift` and the existing toolbar/helper extensions.
+
 ## Engine Client Boundary
 
 `Engine/Transport/WebSocket` owns the WebSocket request/response transport.
@@ -129,6 +137,21 @@ layout primitives and submits only generic action coordinates or encoded action
 payloads supplied by the runtime surface. Pure icon, formatting, array, and row
 preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
+
+## Settings And Theme Boundaries
+
+`SettingsView.swift` owns settings-shell state, navigation, toolbar actions,
+and sheet presentation. The main settings grid and destructive action section
+live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
+`SettingsView+FooterSupport.swift`; paired-server row/menu helpers live in
+`SettingsServerSupport.swift`; and shared row/card primitives stay in
+`SettingsSupport.swift`.
+
+`ModelPickerSheet.swift` owns the model-picker sheet frame and loading/error
+state. Provider, family, model-card, reasoning-visibility, and reasoning
+popover rendering live in `ModelPickerSheet+Sections.swift`. `TronColors.swift`
+owns the base palette; semantic derived tokens and shape-style conveniences
+live in `TronThemeTokens.swift`.
 
 ## Diagnostics And Build Identity
 

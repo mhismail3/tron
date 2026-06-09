@@ -621,6 +621,7 @@ packages/agent/tests/true_primitive_cleanup/external_workers.rs	test	test_harnes
 packages/agent/tests/true_primitive_cleanup/inventory.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/invocation_primitives.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/ios_engine_protocol.rs	test	test_harness	TPC-7	static gate coverage for iOS engine, protocol, and Swift split cleanup
+packages/agent/tests/true_primitive_cleanup/ios_ui_state.rs	test	test_harness	TPC-8	static gate coverage for iOS UI/session state split cleanup
 packages/agent/tests/true_primitive_cleanup/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/provider_auth_model.rs	test	test_harness	TPC-5	static gate coverage for provider/auth/model cleanup row
 packages/agent/tests/true_primitive_cleanup/scorecard.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -852,6 +853,7 @@ packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Events.swift	imple
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Pagination.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Reconstruction.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+RuntimeCallbacks.swift	implementation	ios_session	TPC-8	runtime callback wiring split from the chat view-model root
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+TurnLifecycleContext.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
 packages/ios-app/Sources/Session/Parsing/CapabilityArgumentParser.swift	implementation	ios_session	TPC-8	session/chat state implementation for the primitive shell
@@ -971,6 +973,7 @@ packages/ios-app/Sources/UI/Chat/Sheets/WorkspaceSelector.swift	implementation	i
 packages/ios-app/Sources/UI/Chat/Shell/ChatSheetContent.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Shell/ChatSheetModifier.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Shell/ChatView+Helpers.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
+packages/ios-app/Sources/UI/Chat/Shell/ChatView+MessageList.swift	implementation	ios_ui	TPC-8	message-list and pagination rendering split from the chat shell root
 packages/ios-app/Sources/UI/Chat/Shell/ChatView+Toolbar.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Shell/ContentView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
@@ -1002,6 +1005,7 @@ packages/ios-app/Sources/UI/RuntimeSurfaces/Display/StreamSheetView.swift	implem
 packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+RenderingHelpers.swift	implementation	ios_ui	TPC-7	pure generated-runtime rendering helpers split from the root view
 packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift	implementation	ios_ui	TPC-7	generic runtime surface root kept under the TPC hard budget
+packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet+Sections.swift	implementation	ios_ui	TPC-8	model-picker provider, family, model, and reasoning sections split from the sheet root
 packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/AgentSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/AppearanceSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
@@ -1030,7 +1034,9 @@ packages/ios-app/Sources/UI/Settings/Shell/SettingsRow.swift	implementation	ios_
 packages/ios-app/Sources/UI/Settings/Shell/SettingsRowDivider.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Shell/SettingsSectionHeader.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
+packages/ios-app/Sources/UI/Settings/Shell/SettingsServerSupport.swift	implementation	ios_ui	TPC-8	paired-server row and menu helpers split from shared settings support
 packages/ios-app/Sources/UI/Settings/Shell/SettingsView+FooterSupport.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
+packages/ios-app/Sources/UI/Settings/Shell/SettingsView+MainSection.swift	implementation	ios_ui	TPC-8	main settings grid and action sections split from the settings shell root
 packages/ios-app/Sources/UI/Settings/Shell/SettingsView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Shell/TronStepper.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/System/CompactionDetailSheet.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
@@ -1045,6 +1051,7 @@ packages/ios-app/Sources/UI/Theme/TronColors.swift	implementation	ios_ui	TPC-8	S
 packages/ios-app/Sources/UI/Theme/TronFontLoader.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Theme/TronIcons.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Theme/TronSpacing.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
+packages/ios-app/Sources/UI/Theme/TronThemeTokens.swift	implementation	ios_ui	TPC-8	derived theme tokens split from the base color palette
 packages/ios-app/Sources/UI/Theme/TronTypography.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Tests/Engine/Events/AsyncEventStreamTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Engine/Events/CapabilityArgumentExtractorTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -1150,6 +1157,7 @@ packages/ios-app/Tests/Session/Chat/EventDispatchCoordinatorTests.swift	test	tes
 packages/ios-app/Tests/Session/Chat/InputBarStateTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Session/Chat/LiveSessionPruningTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Session/Chat/Messaging/StreamingManagerTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/ios-app/Tests/Session/Chat/Messaging/StreamingManagerTypewriterTests.swift	test	test_harness	TPC-8	typewriter streaming verification split from the broad streaming manager test root
 packages/ios-app/Tests/Session/Chat/Navigation/ForkNavigationTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Session/Chat/Navigation/MessageFinderTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/Session/Chat/Navigation/MessageIndexTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage

@@ -3,6 +3,7 @@ mod external_workers;
 mod inventory;
 mod invocation_primitives;
 mod ios_engine_protocol;
+mod ios_ui_state;
 mod provider_auth_model;
 mod scorecard;
 mod support;
