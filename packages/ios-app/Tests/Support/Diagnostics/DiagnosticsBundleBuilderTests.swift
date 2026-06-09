@@ -213,7 +213,12 @@ private struct DiagnosticsHarness {
         DiagnosticsBundleBuilder(
             eventDatabase: database,
             eventStoreManager: eventStoreManager,
-            engineClient: engineClient,
+            engineEndpoint: DiagnosticsEngineEndpoint(
+                isConnected: { engineClient.connectionState.isConnected },
+                connectionStateName: { "disconnected" },
+                currentSessionId: { engineClient.currentSessionId },
+                recentServerLogs: { _ in [] }
+            ),
             activeServer: nil,
             metricKitStore: metricKitStore,
             now: now,

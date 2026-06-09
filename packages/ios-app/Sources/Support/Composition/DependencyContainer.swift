@@ -125,6 +125,10 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         )
     }
 
+    var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint {
+        Self.makeDiagnosticsEngineEndpoint(client: engineClient)
+    }
+
     // MARK: - Observable Active Server Selection Version
 
     /// Incremented when local paired-server selection changes. Settings observes
@@ -203,7 +207,16 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
         )
         engineClient = client
-        clientLogIngestionService = ClientLogIngestionService(engineClient: client)
+        clientLogIngestionService = ClientLogIngestionService(
+            endpoint: Self.makeClientLogIngestionEndpoint(client: client),
+            logsProvider: {
+                TronLogger.shared.getRecentLogs(
+                    count: ClientLogIngestionPlanner.defaultMaxEntries,
+                    level: .verbose,
+                    category: nil
+                )
+            }
+        )
 
         // Initialize centralized connection policy layer
         let manager = ConnectionManager(provider: client)
@@ -384,6 +397,50 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         return url
     }
 
+    private static func makeClientLogIngestionEndpoint(client: EngineClient) -> ClientLogIngestionEndpoint {
+        ClientLogIngestionEndpoint(
+            isConnected: { client.connectionState.isConnected },
+            ingest: { entries, idempotencyKey in
+                _ = try await client.logs.ingestLogs(entries: entries, idempotencyKey: idempotencyKey)
+            }
+        )
+    }
+
+    private static func makeDiagnosticsEngineEndpoint(client: EngineClient) -> DiagnosticsEngineEndpoint {
+        DiagnosticsEngineEndpoint(
+            isConnected: { client.connectionState.isConnected },
+            connectionStateName: { Self.connectionStateName(client.connectionState) },
+            currentSessionId: { client.currentSessionId },
+            recentServerLogs: { limit in
+                let result = try await client.logs.recentLogs(limit: limit)
+                return result.entries.map { entry in
+                    DiagnosticsServerLogRecord(
+                        id: String(entry.id),
+                        timestamp: entry.timestamp,
+                        level: entry.level,
+                        component: entry.component,
+                        message: entry.message,
+                        origin: entry.origin ?? "",
+                        sessionId: entry.sessionId,
+                        errorMessage: entry.errorMessage
+                    )
+                }
+            }
+        )
+    }
+
+    private static func connectionStateName(_ state: ConnectionState) -> String {
+        switch state {
+        case .disconnected: return "disconnected"
+        case .connecting: return "connecting"
+        case .connected: return "connected"
+        case .reconnecting: return "reconnecting"
+        case .deployRestarting: return "deploy_restarting"
+        case .failed: return "failed"
+        case .unauthorized: return "unauthorized"
+        }
+    }
+
     private func rebuildServerBoundServices() {
         let oldClient = engineClient
         Task {
@@ -399,7 +456,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             bearerTokenProvider: { Self.resolveBearerToken(tokenStore: tokenStore) }
         )
         engineClient = newClient
-        clientLogIngestionService.updateEngineClient(newClient)
+        clientLogIngestionService.updateEndpoint(Self.makeClientLogIngestionEndpoint(client: newClient))
 
         let newManager = ConnectionManager(provider: newClient)
         connectionManager = newManager

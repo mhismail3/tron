@@ -46,6 +46,10 @@ protocol DependencyProviding: AnyObject {
 
     /// Protocol-typed dependency bundle for chat sessions.
     var chatSessionServices: ChatSessionServices { get }
+
+    /// Diagnostics-only engine endpoint. Support diagnostics must not depend
+    /// on concrete transport clients.
+    var diagnosticsEngineEndpoint: DiagnosticsEngineEndpoint { get }
 }
 
 // MARK: - Server Settings Provider Protocol

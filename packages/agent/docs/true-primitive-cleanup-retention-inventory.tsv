@@ -1412,3 +1412,20 @@ scripts/tron.d/manual-deploy.sh	support	scripts	TPC-9	explicit manual contributo
 scripts/tron.d/dev.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron.d/quality.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
 scripts/tron.d/workspace.sh	support	scripts	TPC-9	manual contributor, runtime, release, or verification helper script
+packages/agent/docs/true-modularity-boundary-evidence-manifest.md	docs	docs/static gates	TMB-10	True Modularity Boundary evidence artifact retained after final closeout.
+packages/agent/docs/true-modularity-boundary-inventory.md	docs	docs/static gates	TMB-10	True Modularity Boundary inventory retained after final closeout.
+packages/agent/docs/true-modularity-boundary-inventory.tsv	docs	docs/static gates	TMB-10	True Modularity Boundary machine-readable inventory retained after final closeout.
+packages/agent/docs/true-modularity-boundary-scorecard.md	docs	docs/static gates	TMB-10	True Modularity Boundary scorecard retained after final closeout.
+packages/agent/src/domains/model/responder/mod.rs	implementation	model_provider	TMB-10	model responder boundary retained after final modularity closeout
+packages/agent/src/domains/model/tokens/errors.rs	implementation	model_provider	TMB-10	model token error contract retained after final modularity closeout
+packages/agent/src/domains/model/tokens/mod.rs	implementation	model_provider	TMB-10	model token accounting facade retained after final modularity closeout
+packages/agent/src/domains/model/tokens/normalization.rs	implementation	model_provider	TMB-10	model token normalization implementation retained after final modularity closeout
+packages/agent/src/domains/model/tokens/pricing.rs	implementation	model_provider	TMB-10	model token pricing implementation retained after final modularity closeout
+packages/agent/src/domains/model/tokens/types.rs	implementation	model_provider	TMB-10	model token contract types retained after final modularity closeout
+packages/agent/src/domains/session/event_store/store/event_store/logs.rs	implementation	session_store	TMB-10	session event-store log boundary retained after final modularity closeout
+packages/agent/tests/true_modularity_boundary/mod.rs	test	test_harness	TMB-10	True Modularity Boundary invariant module retained after final closeout.
+packages/agent/tests/true_modularity_boundary/support.rs	test	test_harness	TMB-10	True Modularity Boundary test support retained after final closeout.
+packages/agent/tests/true_modularity_boundary_invariants.rs	test	test_harness	TMB-10	True Modularity Boundary invariant target retained after final closeout.
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultEngineAccessRepositories.swift	implementation	ios_engine	TMB-10	iOS engine access repository adapter retained after final modularity closeout
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/EngineAccessRepositories.swift	implementation	ios_engine	TMB-10	iOS engine access repository contract retained after final modularity closeout
+packages/ios-app/Tests/Session/Chat/ChatViewModelTestServices.swift	test	test_harness	TMB-10	iOS chat test-service composition retained after final modularity closeout.

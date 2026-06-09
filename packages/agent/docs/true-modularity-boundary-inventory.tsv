@@ -470,7 +470,7 @@ packages/agent/src/engine/tests/runtime/restart_chaos.rs	rust	test-support	rust:
 packages/agent/src/engine/tests/runtime/trigger_helpers.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/engine/tests/runtime/triggers.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/lib.rs	rust	implementation	unknown	owner-private; callers must enter through the owner facade or contract
-packages/agent/src/main.rs	rust	composition-root	unknown	may wire concrete implementations listed by this inventory; no reusable domain logic
+packages/agent/src/main.rs	rust	composition-root	rust:binary-entrypoint	may wire concrete implementations listed by this inventory; no reusable domain logic
 packages/agent/src/platform/device_broker.rs	rust	implementation	rust:platform	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/platform/mod.rs	rust	facade	rust:platform	callers may depend on this narrow owner-approved surface only
 packages/agent/src/shared/foundation/constants.rs	rust	implementation	rust:shared-foundation	owner-private; callers must enter through the owner facade or contract

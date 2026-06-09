@@ -157,16 +157,7 @@ enum ClientLogIngestionPlanner {
 
 struct ClientLogIngestionEndpoint {
     let isConnected: @MainActor () -> Bool
-    let ingest: @MainActor ([ClientLogEntry], EngineIdempotencyKey) async throws -> LogsIngestResult
-
-    static func engineClient(_ client: EngineClient) -> ClientLogIngestionEndpoint {
-        ClientLogIngestionEndpoint(
-            isConnected: { client.connectionState.isConnected },
-            ingest: { entries, idempotencyKey in
-                try await client.logs.ingestLogs(entries: entries, idempotencyKey: idempotencyKey)
-            }
-        )
-    }
+    let ingest: @MainActor ([ClientLogEntry], EngineIdempotencyKey) async throws -> Void
 }
 
 @MainActor
@@ -185,20 +176,6 @@ final class ClientLogIngestionService {
     private var endpointGeneration = 0
     private var retryNotBefore: Date?
     private(set) var uploadedEntryFingerprints: Set<String> = []
-
-    convenience init(engineClient: EngineClient, logger: TronLogger = .shared) {
-        self.init(
-            endpoint: .engineClient(engineClient),
-            logger: logger,
-            logsProvider: {
-                logger.getRecentLogs(
-                    count: ClientLogIngestionPlanner.defaultMaxEntries,
-                    level: .verbose,
-                    category: nil
-                )
-            }
-        )
-    }
 
     init(
         endpoint: ClientLogIngestionEndpoint,
@@ -239,10 +216,6 @@ final class ClientLogIngestionService {
         uploadTask = nil
         uploadTaskSerial += 1
         isUploading = false
-    }
-
-    func updateEngineClient(_ client: EngineClient) {
-        updateEndpoint(.engineClient(client))
     }
 
     func updateEndpoint(_ endpoint: ClientLogIngestionEndpoint) {

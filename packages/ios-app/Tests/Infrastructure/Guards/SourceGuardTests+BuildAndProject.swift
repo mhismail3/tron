@@ -85,7 +85,7 @@ extension SourceGuardTests {
         #expect(ingestionService.contains("uploadTaskSerial"))
         #expect(ingestionService.contains("isSuccessfulIngestionPlumbing"))
         #expect(dependencyContainer.contains("clientLogIngestionService.start()"))
-        #expect(dependencyContainer.contains("clientLogIngestionService.updateEngineClient(newClient)"))
+        #expect(dependencyContainer.contains("clientLogIngestionService.updateEndpoint(Self.makeClientLogIngestionEndpoint(client: newClient))"))
         #expect(app.contains("container.clientLogIngestionService.handleConnectionChange"))
         #expect(app.contains("container.clientLogIngestionService.handleScenePhaseChange"))
         #expect(logsClient.contains("func ingestLogs(entries: [ClientLogEntry], idempotencyKey: EngineIdempotencyKey) async throws -> LogsIngestResult"))

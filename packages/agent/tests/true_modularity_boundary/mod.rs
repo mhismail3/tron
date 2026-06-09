@@ -16,8 +16,8 @@ fn true_modularity_scorecard_stays_formalized() {
 
     for required in [
         "# True Modularity Boundary Scorecard",
-        "Status: **active**",
-        "Current score: **94/100**",
+        "Status: **completed**",
+        "Current score: **100/100**",
         "Branch: `codex/primitive-engine-teardown`",
         "This scorecard formalizes the True Modularity Boundary campaign.",
         "## Boundary Taxonomy",
@@ -38,7 +38,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-7 | Make iOS Engine access black-boxed | 10 | passed_after_fix |",
         "| TMB-8 | Define boundary-local error contracts | 8 | passed_after_fix |",
         "| TMB-9 | Update docs and README | 6 | passed_after_fix |",
-        "| TMB-10 | Final adversarial closeout | 6 | open |",
+        "| TMB-10 | Final adversarial closeout | 6 | passed_after_fix |",
         "`true_modularity_scorecard_stays_formalized`",
         "`boundary_inventory_covers_tracked_sources`",
         "`agent_loop_uses_model_responder_boundary`",
@@ -59,8 +59,8 @@ fn true_modularity_scorecard_stays_formalized() {
 
     for required in [
         "# True Modularity Boundary Evidence Manifest",
-        "Status: **active**",
-        "Current score: **94/100**",
+        "Status: **completed**",
+        "Current score: **100/100**",
         "| TMB-0 | passed_after_fix |",
         "| TMB-1 | passed_after_fix |",
         "| TMB-2 | passed_after_fix |",
@@ -71,6 +71,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-7 | passed_after_fix |",
         "| TMB-8 | passed_after_fix |",
         "| TMB-9 | passed_after_fix |",
+        "| TMB-10 | passed_after_fix |",
         "## TMB-0 Red Proof",
         "The first invariant run is intentionally red.",
         "Rust agent loop imports `domains::model::providers` directly",
@@ -83,6 +84,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "After TMB-7, `ios_ui_uses_repositories_not_engine_transport` passes.",
         "After TMB-8, `provider_internals_do_not_escape_model_domain` and",
         "After TMB-9, README, affected Rust module docs, iOS architecture docs, and",
+        "After TMB-10, `final_modularity_closeout_is_complete` passes.",
     ] {
         assert!(
             manifest.contains(required),
@@ -381,6 +383,22 @@ fn ios_ui_uses_repositories_not_engine_transport() {
         leaks.is_empty(),
         "iOS session/UI layers must depend on repositories/view models, not concrete engine transport or raw DTOs:\n{}",
         leaks.join("\n")
+    );
+
+    let engine_client_leaks = swift_source_lines("packages/ios-app/Sources")
+        .into_iter()
+        .filter(|line| {
+            let path = path_from_line(line);
+            !path.starts_with("packages/ios-app/Sources/Engine/")
+                && !path.starts_with("packages/ios-app/Sources/Support/Composition/")
+        })
+        .filter(|line| line_has_identifier(line, "EngineClient"))
+        .collect::<Vec<_>>();
+
+    assert!(
+        engine_client_leaks.is_empty(),
+        "concrete EngineClient must stay inside Engine-owned code or the composition root:\n{}",
+        engine_client_leaks.join("\n")
     );
 }
 

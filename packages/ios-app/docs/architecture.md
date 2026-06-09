@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-09 (TMB-9 boundary docs audit).
+> Last verified: 2026-06-09 (TMB-10 diagnostics endpoint boundary closeout).
 
 ## Overview
 
@@ -171,6 +171,9 @@ connected, creating a self-feeding diagnostics loop that the runtime can inspect
 without relying on a debug-only export button.
 `DiagnosticsBundleBuilder.swift` owns bundle assembly; DTOs, event sanitization,
 hashing, and host classification live in `DiagnosticsBundleTypes.swift`.
+Diagnostics support consumes `DiagnosticsEngineEndpoint` and
+`ClientLogIngestionEndpoint`; `Support/Composition` is the only support-layer
+owner that adapts those endpoints to concrete `EngineClient` instances.
 
 `ProdDebug` backs the `Tron Fast` scheme: it keeps production bundle identity
 and entitlements while using debug build settings for fast local iteration.

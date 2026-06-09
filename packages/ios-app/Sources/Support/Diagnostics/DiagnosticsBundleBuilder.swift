@@ -36,6 +36,24 @@ struct DiagnosticsBundleLogSummary: Equatable, Sendable {
 
 typealias DiagnosticsIOSLogsProvider = () -> [(Date, LogCategory, LogLevel, String)]
 
+struct DiagnosticsServerLogRecord: Sendable {
+    let id: String
+    let timestamp: String
+    let level: String
+    let component: String
+    let message: String
+    let origin: String
+    let sessionId: String?
+    let errorMessage: String?
+}
+
+struct DiagnosticsEngineEndpoint {
+    let isConnected: @MainActor () -> Bool
+    let connectionStateName: @MainActor () -> String
+    let currentSessionId: @MainActor () -> String?
+    let recentServerLogs: @MainActor (_ limit: Int) async throws -> [DiagnosticsServerLogRecord]
+}
+
 @MainActor
 struct DiagnosticsBundleBuilder {
     private static let maxIOSLogs = 1_000
@@ -47,7 +65,7 @@ struct DiagnosticsBundleBuilder {
 
     let eventDatabase: EventDatabase
     let eventStoreManager: EventStoreManager
-    let engineClient: EngineClient
+    let engineEndpoint: DiagnosticsEngineEndpoint
     let activeServer: PairedServer?
     let metricKitStore: MetricKitDiagnosticsStore
     let now: () -> Date
@@ -61,7 +79,7 @@ struct DiagnosticsBundleBuilder {
     ) {
         self.eventDatabase = dependencies.eventDatabase
         self.eventStoreManager = dependencies.eventStoreManager
-        self.engineClient = dependencies.engineClient
+        self.engineEndpoint = dependencies.diagnosticsEngineEndpoint
         self.activeServer = dependencies.pairedServerStore.activeServer
         self.metricKitStore = metricKitStore
         self.now = now
@@ -73,7 +91,7 @@ struct DiagnosticsBundleBuilder {
     init(
         eventDatabase: EventDatabase,
         eventStoreManager: EventStoreManager,
-        engineClient: EngineClient,
+        engineEndpoint: DiagnosticsEngineEndpoint,
         activeServer: PairedServer?,
         metricKitStore: MetricKitDiagnosticsStore,
         now: @escaping () -> Date = { Date() },
@@ -81,7 +99,7 @@ struct DiagnosticsBundleBuilder {
     ) {
         self.eventDatabase = eventDatabase
         self.eventStoreManager = eventStoreManager
-        self.engineClient = engineClient
+        self.engineEndpoint = engineEndpoint
         self.activeServer = activeServer
         self.metricKitStore = metricKitStore
         self.now = now
@@ -145,7 +163,7 @@ struct DiagnosticsBundleBuilder {
                 platform: "iOS",
                 osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
                 deviceModelClass: UIDevice.current.model,
-                connectionState: Self.connectionStateName(engineClient.connectionState),
+                connectionState: engineEndpoint.connectionStateName(),
                 eventDatabaseStorageMode: eventDatabase.storageMode.rawValue,
                 activeServer: DiagnosticsActiveServer(server: activeServer)
             ),
@@ -181,16 +199,15 @@ struct DiagnosticsBundleBuilder {
     }
 
     private func buildServerLogs(redactor: DiagnosticsRedactor) async -> DiagnosticsServerLogsResult {
-        guard engineClient.connectionState.isConnected else {
+        guard engineEndpoint.isConnected() else {
             return DiagnosticsServerLogsResult(entries: [], timestamps: [])
         }
         do {
-            let result = try await engineClient.logs.recentLogs(limit: Self.maxServerLogs)
-            let includedEntries = Array(result.entries.prefix(Self.maxServerLogs))
+            let includedEntries = try await engineEndpoint.recentServerLogs(Self.maxServerLogs)
             return DiagnosticsServerLogsResult(
                 entries: includedEntries.map { entry in
                     DiagnosticsServerLogEntry(
-                        idHash: DiagnosticsHash.hash(String(entry.id)),
+                        idHash: DiagnosticsHash.hash(entry.id),
                         timestamp: entry.timestamp,
                         level: entry.level,
                         component: entry.component,
@@ -235,18 +252,6 @@ struct DiagnosticsBundleBuilder {
         let timestamps: [Date]
     }
 
-    private static func connectionStateName(_ state: ConnectionState) -> String {
-        switch state {
-        case .disconnected: return "disconnected"
-        case .connecting: return "connecting"
-        case .connected: return "connected"
-        case .reconnecting: return "reconnecting"
-        case .deployRestarting: return "deploy_restarting"
-        case .failed: return "failed"
-        case .unauthorized: return "unauthorized"
-        }
-    }
-
     private static func levelLabel(_ level: LogLevel) -> String {
         switch level {
         case .verbose: return "verbose"
@@ -274,7 +279,7 @@ struct DiagnosticsBundleBuilder {
 
     private func selectedSessions() async -> [CachedSession] {
         let sessions = (try? await eventDatabase.sessions.getAll()) ?? eventStoreManager.sessions
-        let activeId = eventStoreManager.activeSessionId ?? engineClient.currentSessionId
+        let activeId = eventStoreManager.activeSessionId ?? engineEndpoint.currentSessionId()
         var selected: [CachedSession] = []
         var seen: Set<String> = []
 

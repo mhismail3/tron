@@ -104,7 +104,6 @@ struct ClientLogIngestionServiceTests {
             isConnected: { state.connected },
             ingest: { entries, idempotencyKey in
                 state.uploads.append((entries, idempotencyKey))
-                return LogsIngestResult(success: true, inserted: entries.count)
             }
         )
         let service = ClientLogIngestionService(
@@ -138,14 +137,12 @@ struct ClientLogIngestionServiceTests {
             isConnected: { state.connected },
             ingest: { _, _ in
                 state.oldEndpointUploads += 1
-                return LogsIngestResult(success: true, inserted: 1)
             }
         )
         let newEndpoint = ClientLogIngestionEndpoint(
             isConnected: { state.connected },
             ingest: { _, _ in
                 state.newEndpointUploads += 1
-                return LogsIngestResult(success: true, inserted: 1)
             }
         )
         let service = ClientLogIngestionService(
@@ -174,14 +171,12 @@ struct ClientLogIngestionServiceTests {
                 state.oldEndpointStarted = true
                 try await Task.sleep(for: .milliseconds(200))
                 state.oldEndpointUploads += 1
-                return LogsIngestResult(success: true, inserted: 1)
             }
         )
         let newEndpoint = ClientLogIngestionEndpoint(
             isConnected: { state.connected },
             ingest: { _, _ in
                 state.newEndpointUploads += 1
-                return LogsIngestResult(success: true, inserted: 1)
             }
         )
         let service = ClientLogIngestionService(

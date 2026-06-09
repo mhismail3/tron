@@ -1464,3 +1464,20 @@ packages/ios-app/Sources/UI/Settings/Shell/SettingsServerSupport.swift	retain	tp
 packages/ios-app/Sources/UI/Settings/Shell/SettingsView+MainSection.swift	retain	tpc ios source	TPC-11	Current TPC settings main section split retained after final closeout.
 packages/ios-app/Sources/UI/Theme/TronThemeTokens.swift	retain	tpc ios source	TPC-11	Current TPC theme token split retained after final closeout.
 packages/ios-app/Tests/Session/Chat/Messaging/StreamingManagerTypewriterTests.swift	retain	tpc ios test	TPC-11	Current TPC streaming manager test split retained after final closeout.
+packages/agent/docs/true-modularity-boundary-evidence-manifest.md	retain	tmb docs	TMB-10	Current True Modularity Boundary evidence artifact retained after final closeout.
+packages/agent/docs/true-modularity-boundary-inventory.md	retain	tmb docs	TMB-10	Current True Modularity Boundary inventory retained after final closeout.
+packages/agent/docs/true-modularity-boundary-inventory.tsv	retain	tmb docs	TMB-10	Current True Modularity Boundary machine-readable inventory retained after final closeout.
+packages/agent/docs/true-modularity-boundary-scorecard.md	retain	tmb docs	TMB-10	Current True Modularity Boundary scorecard retained after final closeout.
+packages/agent/src/domains/model/responder/mod.rs	retain	tmb rust source	TMB-10	Model responder boundary retained after final modularity closeout.
+packages/agent/src/domains/model/tokens/errors.rs	retain	tmb rust source	TMB-10	Model token error contract retained after final modularity closeout.
+packages/agent/src/domains/model/tokens/mod.rs	retain	tmb rust source	TMB-10	Model token accounting facade retained after final modularity closeout.
+packages/agent/src/domains/model/tokens/normalization.rs	retain	tmb rust source	TMB-10	Model token normalization implementation retained after final modularity closeout.
+packages/agent/src/domains/model/tokens/pricing.rs	retain	tmb rust source	TMB-10	Model token pricing implementation retained after final modularity closeout.
+packages/agent/src/domains/model/tokens/types.rs	retain	tmb rust source	TMB-10	Model token contract types retained after final modularity closeout.
+packages/agent/src/domains/session/event_store/store/event_store/logs.rs	retain	tmb rust source	TMB-10	Session event-store log boundary retained after final modularity closeout.
+packages/agent/tests/true_modularity_boundary/mod.rs	retain	tmb rust test	TMB-10	Current True Modularity Boundary invariant module retained after final closeout.
+packages/agent/tests/true_modularity_boundary/support.rs	retain	tmb rust test	TMB-10	Current True Modularity Boundary test support retained after final closeout.
+packages/agent/tests/true_modularity_boundary_invariants.rs	retain	tmb rust test	TMB-10	Current True Modularity Boundary invariant target retained after final closeout.
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultEngineAccessRepositories.swift	retain	tmb ios source	TMB-10	iOS engine access repository adapter retained after final modularity closeout.
+packages/ios-app/Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/EngineAccessRepositories.swift	retain	tmb ios source	TMB-10	iOS engine access repository contract retained after final modularity closeout.
+packages/ios-app/Tests/Session/Chat/ChatViewModelTestServices.swift	retain	tmb ios test	TMB-10	iOS chat test-service composition retained after final modularity closeout.
