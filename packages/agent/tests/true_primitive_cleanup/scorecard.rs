@@ -9,13 +9,14 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# True Primitive Cleanup Scorecard",
-        "Current score: **5/100**",
+        "Current score: **13/100**",
         "Status: **in_progress**",
         "Branch: `codex/primitive-engine-teardown`",
         "Hard Targets",
         "Initial Red Findings",
         "Static Gates",
         "| TPC-0 | Scorecard setup | 5 | passed_after_fix |",
+        "| TPC-1 | Retention inventory | 8 | passed_after_fix |",
         "| TPC-11 | Final closeout | 5 | pending |",
         "Total weight: **100**",
     ] {
@@ -27,9 +28,10 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
 
     for required in [
         "# True Primitive Cleanup Evidence Manifest",
-        "Current score: **5/100**",
+        "Current score: **13/100**",
         "Status: **in_progress**",
         "| TPC-0 | passed_after_fix |",
+        "| TPC-1 | passed_after_fix |",
         "| TPC-11 | pending |",
         "Red Baseline Commands",
     ] {
@@ -42,6 +44,8 @@ fn true_primitive_cleanup_scorecard_stays_formalized() {
     for required in [
         "packages/agent/docs/true-primitive-cleanup-scorecard.md",
         "packages/agent/docs/true-primitive-cleanup-evidence-manifest.md",
+        "packages/agent/docs/true-primitive-cleanup-retention-inventory.md",
+        "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv",
         "packages/agent/tests/true_primitive_cleanup_invariants.rs",
     ] {
         assert!(
@@ -209,8 +213,8 @@ fn initial_red_findings_are_recorded_until_resolved() {
 fn tpc_source_files_are_classified_or_in_pending_inventory_setup() {
     let scorecard = read_repo_file("packages/agent/docs/true-primitive-cleanup-scorecard.md");
     assert!(
-        scorecard.contains("| TPC-1 | Retention inventory | 8 | pending |"),
-        "TPC-1 must remain visible until the complete retention inventory lands"
+        scorecard.contains("| TPC-1 | Retention inventory | 8 | passed_after_fix |"),
+        "TPC-1 must stay visible after the complete retention inventory lands"
     );
 
     let tracked_sources: Vec<_> = git_ls_files()

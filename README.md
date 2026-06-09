@@ -120,6 +120,11 @@ Current living entry points:
   Mac/scripts helper scope, and closeout evidence.
 - `packages/agent/docs/true-primitive-cleanup-evidence-manifest.md`: companion
   evidence manifest for the active True Primitive Cleanup scorecard.
+- `packages/agent/docs/true-primitive-cleanup-retention-inventory.md`: active
+  TPC retention inventory that classifies every tracked source/docs/script path
+  in scope as primitive, implementation, support, test, docs, or delete.
+- `packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv`:
+  machine-readable TPC retention inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -172,8 +177,8 @@ Current living entry points:
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
-guidance is owned by the current README, package docs, source module docs, and
-completed AHA scorecard.
+guidance is owned by the current README, package docs, source module docs, the
+completed AHA scorecard, and the active TPC scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
