@@ -6,8 +6,8 @@ use super::extractors::{
     extract_tokens,
 };
 use super::{EVENT_COLUMNS, EventRepo};
+use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::errors::Result;
-use crate::domains::session::event_store::sqlite::row_types::EventRow;
 use crate::domains::session::event_store::types::SessionEvent;
 
 impl EventRepo {

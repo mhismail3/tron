@@ -65,6 +65,14 @@ pub enum EventStoreError {
 /// Convenience type alias for event store results.
 pub type Result<T> = std::result::Result<T, EventStoreError>;
 
+impl EventStoreError {
+    /// Whether this error represents transient database contention.
+    pub fn is_busy(&self) -> bool {
+        matches!(self, Self::Busy { .. })
+            || matches!(self, Self::Sqlite(error) if super::sqlite::contention::is_rusqlite_busy(error))
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────

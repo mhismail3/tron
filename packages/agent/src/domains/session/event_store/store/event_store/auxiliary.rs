@@ -1,7 +1,7 @@
 use crate::domains::session::event_store::errors::Result;
 use crate::domains::session::event_store::sqlite::repositories::blob::BlobRepo;
 use crate::domains::session::event_store::sqlite::repositories::workspace::WorkspaceRepo;
-use crate::domains::session::event_store::sqlite::row_types::{BlobRow, WorkspaceRow};
+use crate::domains::session::event_store::{BlobRow, WorkspaceRow};
 
 use super::EventStore;
 

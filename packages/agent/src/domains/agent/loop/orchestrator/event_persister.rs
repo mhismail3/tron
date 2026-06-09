@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Instant;
 
-use crate::domains::session::event_store::sqlite::row_types::EventRow;
+use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::{AppendOptions, EventStore, EventType};
 use metrics::{counter, histogram};
 use serde_json::Value;

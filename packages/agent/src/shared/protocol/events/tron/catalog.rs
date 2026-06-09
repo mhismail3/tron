@@ -443,7 +443,7 @@ tron_events! {
         #[serde(rename = "parentSessionId", skip_serializing_if = "Option::is_none")]
         parent_session_id: Option<String>,
         #[serde(rename = "activityLines", skip_serializing_if = "Option::is_none")]
-        activity_lines: Option<Vec<crate::domains::session::event_store::sqlite::repositories::session::ActivitySummaryLine>>,
+        activity_lines: Option<Vec<crate::domains::session::event_store::ActivitySummaryLine>>,
     } => "session_updated",
 
     /// Context cleared.

@@ -10,17 +10,19 @@ use std::collections::HashMap;
 use std::sync::{Mutex, Weak};
 
 use crate::domains::session::event_store::sqlite::connection::ConnectionPool;
-use crate::domains::session::event_store::sqlite::row_types::{EventRow, SessionRow};
 use crate::domains::session::event_store::types::EventType;
+use crate::domains::session::event_store::{EventRow, SessionRow};
 
 mod auxiliary;
 mod event_log;
 mod locking;
+mod logs;
 mod session_lifecycle;
 mod state;
 mod trace_log;
 
 pub use self::state::event_rows_to_session_events;
+pub use logs::{ClientLogEntry, ClientLogIngestResult, LogEntry, LogSessionFilter, RecentLogQuery};
 
 /// Result of creating a new session.
 #[derive(Debug)]
@@ -90,10 +92,6 @@ impl EventStore {
             global_write_lock: Mutex::new(()),
             session_write_locks: Mutex::new(HashMap::new()),
         }
-    }
-    /// Get the raw connection pool (for advanced/custom queries).
-    pub fn pool(&self) -> &ConnectionPool {
-        &self.pool
     }
 }
 

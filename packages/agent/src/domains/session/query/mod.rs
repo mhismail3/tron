@@ -210,7 +210,7 @@ impl SessionQueryService {
                     message: format!("Session '{session_id_for_export}' not found"),
                 })?;
 
-            let opts = crate::domains::session::event_store::sqlite::repositories::event::ListEventsOptions::default();
+            let opts = crate::domains::session::event_store::ListEventsOptions::default();
             let events = event_store
                 .get_events_by_session(&session_id_for_export, &opts)
                 .map_err(|error| CapabilityError::Internal {

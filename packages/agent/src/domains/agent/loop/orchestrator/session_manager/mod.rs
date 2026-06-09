@@ -242,10 +242,7 @@ impl SessionManager {
     pub fn get_session(
         &self,
         session_id: &str,
-    ) -> Result<
-        Option<crate::domains::session::event_store::sqlite::row_types::SessionRow>,
-        RuntimeError,
-    > {
+    ) -> Result<Option<crate::domains::session::event_store::SessionRow>, RuntimeError> {
         self.event_store
             .get_session(session_id)
             .map_err(|e| RuntimeError::Persistence(e.to_string()))
@@ -255,11 +252,8 @@ impl SessionManager {
     pub fn list_sessions(
         &self,
         filter: &SessionFilter,
-    ) -> Result<
-        Vec<crate::domains::session::event_store::sqlite::row_types::SessionRow>,
-        RuntimeError,
-    > {
-        use crate::domains::session::event_store::sqlite::repositories::session::ListSessionsOptions;
+    ) -> Result<Vec<crate::domains::session::event_store::SessionRow>, RuntimeError> {
+        use crate::domains::session::event_store::ListSessionsOptions;
         let opts = ListSessionsOptions {
             workspace_id: None,
             working_directory: filter.workspace_path.as_deref(),

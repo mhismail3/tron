@@ -11,7 +11,7 @@ pub struct ResumedPromptSession {
 }
 
 pub struct SessionUpdateData {
-    pub session: crate::domains::session::event_store::sqlite::row_types::SessionRow,
+    pub session: crate::domains::session::event_store::SessionRow,
     pub preview: Option<MessagePreview>,
     pub activity_lines: Vec<ActivitySummaryLine>,
 }
@@ -22,14 +22,7 @@ const SESSION_UPDATE_LOAD_RETRY_DELAY: Duration = Duration::from_millis(25);
 fn session_update_read_error_is_busy(
     error: &crate::domains::session::event_store::EventStoreError,
 ) -> bool {
-    matches!(
-        error,
-        crate::domains::session::event_store::EventStoreError::Busy { .. }
-    ) || matches!(
-        error,
-        crate::domains::session::event_store::EventStoreError::Sqlite(sqlite_error)
-            if crate::domains::session::event_store::sqlite::contention::is_rusqlite_busy(sqlite_error)
-    )
+    error.is_busy()
 }
 
 pub async fn resume_prompt_session(

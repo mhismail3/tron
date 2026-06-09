@@ -17,8 +17,8 @@
 
 use rusqlite::{Connection, OptionalExtension, params};
 
+use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::errors::Result;
-use crate::domains::session::event_store::sqlite::row_types::EventRow;
 
 mod crud;
 pub(crate) mod extractors;

@@ -154,9 +154,8 @@ pub fn make_test_context() -> ServerRuntimeContext {
     let settings_path = test_user_profile_path(&home);
     let auth_path = test_auth_path(&home);
     let profile_runtime = test_profile_runtime(&home);
-    let settings =
-        crate::domains::settings::profile::storage::loader::load_settings_from_path(&settings_path)
-            .expect("test profile settings should load from isolated Tron home");
+    let settings = crate::domains::settings::profile::load_settings_from_path(&settings_path)
+        .expect("test profile settings should load from isolated Tron home");
     crate::domains::settings::init_settings(settings);
     let ctx = ServerRuntimeContext {
         orchestrator: orch,

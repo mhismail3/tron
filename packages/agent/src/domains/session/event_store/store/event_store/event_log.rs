@@ -11,10 +11,10 @@ use crate::domains::session::event_store::sqlite::repositories::event::{
 use crate::domains::session::event_store::sqlite::repositories::session::{
     IncrementCounters, SessionRepo,
 };
-use crate::domains::session::event_store::sqlite::row_types::{EventRow, SessionRow};
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::TokenTotals;
 use crate::domains::session::event_store::types::base::SessionEvent;
+use crate::domains::session::event_store::{EventRow, SessionRow};
 
 use super::{AppendOptions, EventStore};
 use crate::domains::session::event_store::redaction::redact_sensitive_content;

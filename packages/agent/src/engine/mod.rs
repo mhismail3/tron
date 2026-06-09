@@ -129,43 +129,32 @@ pub(crate) mod kernel;
 pub(crate) mod primitives;
 pub(crate) mod runtime;
 
-pub use authority::compensation::{
-    EngineCompensationRecord, EngineCompensationStatus, InMemoryEngineCompensationStore,
-    SqliteEngineCompensationStore,
-};
+pub use authority::compensation::{EngineCompensationRecord, EngineCompensationStatus};
 pub use authority::grants::{
-    DeriveGrant, EngineGrant, EngineGrantEvent, EngineGrantLifecycle, EngineGrantStoreBackend,
-    InMemoryEngineGrantStore, ListGrants, SqliteEngineGrantStore,
+    DeriveGrant, EngineGrant, EngineGrantEvent, EngineGrantLifecycle, ListGrants,
 };
-pub use authority::leases::{
-    AcquireResourceLease, EngineResourceLease, EngineResourceLeaseStatus,
-    InMemoryEngineResourceLeaseStore, SqliteEngineResourceLeaseStore,
-};
+pub use authority::leases::{AcquireResourceLease, EngineResourceLease, EngineResourceLeaseStatus};
 pub use catalog::capabilities::AgentCapabilityClient;
 pub use catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
 pub use catalog::registry::LiveCatalog;
 pub use durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, IdempotencyKey, IdempotencyReservation,
-    IdempotencyReservationOutcome, IdempotencyStatus, InMemoryEngineLedgerStore,
-    SqliteEngineLedgerStore, StoredEngineError, StoredInvocationOutcome,
+    IdempotencyReservationOutcome, IdempotencyStatus, StoredEngineError, StoredInvocationOutcome,
 };
 pub use durability::queue::{
     EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime,
-    EnqueueInvocation, InMemoryEngineQueueStore, QueueAttemptOutcome, QueueItemStatus,
-    SqliteEngineQueueStore,
+    EnqueueInvocation, QueueAttemptOutcome, QueueItemStatus,
 };
 pub use durability::resources::{
     CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
     EngineResourceLink, EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
-    EngineResourceVersion, EngineResourceVersioningMode, InMemoryEngineResourceStore,
-    LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
+    EngineResourceVersion, EngineResourceVersioningMode, LinkResources, ListResources,
+    RegisterResourceType, UpdateResource,
 };
-pub use durability::state::{
-    EngineStateEntry, EngineStateScope, InMemoryEngineStateStore, SqliteEngineStateStore,
-};
+pub use durability::state::{EngineStateEntry, EngineStateScope};
 pub use durability::streams::{
-    EngineStreamEvent, EngineStreamPage, EngineStreamSubscription, InMemoryEngineStreamStore,
-    PublishStreamEvent, SqliteEngineStreamStore, StreamActorScope, StreamCursor,
+    EngineStreamEvent, EngineStreamPage, EngineStreamSubscription, PublishStreamEvent,
+    StreamActorScope, StreamCursor,
 };
 pub use invocation::host::{
     CatalogWatchRequest, CatalogWatchResponse, EngineHost, EngineHostHandle,

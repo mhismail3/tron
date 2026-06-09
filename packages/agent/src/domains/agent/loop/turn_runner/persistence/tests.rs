@@ -5,9 +5,9 @@
 //! reconnect would diverge from what live clients already rendered.
 use super::*;
 use crate::domains::agent::r#loop::types::StreamResult;
+use crate::domains::session::event_store::ListEventsOptions;
 use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;
-use crate::domains::session::event_store::sqlite::repositories::event::ListEventsOptions;
 use crate::domains::session::event_store::{AppendOptions, EventStore};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};

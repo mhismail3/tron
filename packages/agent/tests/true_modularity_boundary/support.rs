@@ -54,6 +54,7 @@ pub(super) fn tracked_boundary_sources() -> Vec<String> {
 pub(super) fn is_test_support_path(path: &str) -> bool {
     path.contains("/tests/")
         || path.contains("/Tests/")
+        || path.ends_with("/tests.rs")
         || path.ends_with("_tests.rs")
         || path.ends_with("test_support.rs")
         || path.contains("SourceGuardTests")
@@ -82,7 +83,7 @@ pub(super) fn strip_cfg_test_modules(text: &str) -> String {
             continue;
         }
 
-        if pending_cfg_test && trimmed.starts_with("mod tests") {
+        if pending_cfg_test && trimmed.starts_with("mod ") {
             let depth = brace_delta(line);
             if depth > 0 {
                 skip_depth = Some(depth);

@@ -1,8 +1,8 @@
 use rusqlite::{Connection, params};
 
 use super::{EVENT_COLUMNS, EventRepo};
+use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::errors::Result;
-use crate::domains::session::event_store::sqlite::row_types::EventRow;
 
 impl EventRepo {
     /// Get ancestor chain from root to the given event (inclusive), using recursive CTE.

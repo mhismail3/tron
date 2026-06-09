@@ -17,7 +17,7 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Scorecard",
         "Status: **active**",
-        "Current score: **50/100**",
+        "Current score: **60/100**",
         "Branch: `codex/primitive-engine-teardown`",
         "This scorecard formalizes the True Modularity Boundary campaign.",
         "## Boundary Taxonomy",
@@ -33,7 +33,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-2 | Build the model response black box | 15 | passed_after_fix |",
         "| TMB-3 | Narrow engine facade ownership | 12 | passed_after_fix |",
         "| TMB-4 | Harden domain worker boundaries | 10 | passed_after_fix |",
-        "| TMB-5 | Encapsulate state and storage | 10 | open |",
+        "| TMB-5 | Encapsulate state and storage | 10 | passed_after_fix |",
         "| TMB-6 | Make transport adapter-only | 10 | open |",
         "| TMB-7 | Make iOS Engine access black-boxed | 10 | open |",
         "| TMB-8 | Define boundary-local error contracts | 8 | open |",
@@ -60,12 +60,13 @@ fn true_modularity_scorecard_stays_formalized() {
     for required in [
         "# True Modularity Boundary Evidence Manifest",
         "Status: **active**",
-        "Current score: **50/100**",
+        "Current score: **60/100**",
         "| TMB-0 | passed_after_fix |",
         "| TMB-1 | passed_after_fix |",
         "| TMB-2 | passed_after_fix |",
         "| TMB-3 | passed_after_fix |",
         "| TMB-4 | passed_after_fix |",
+        "| TMB-5 | passed_after_fix |",
         "## TMB-0 Red Proof",
         "The first invariant run is intentionally red.",
         "Rust agent loop imports `domains::model::providers` directly",
@@ -73,6 +74,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "After TMB-2, `agent_loop_uses_model_responder_boundary` passes.",
         "After TMB-3, `engine_facade_is_the_only_cross_module_engine_api` passes.",
         "After TMB-4, `domain_workers_expose_contracts_not_services` passes.",
+        "After TMB-5, `state_stores_are_owner_private` passes.",
     ] {
         assert!(
             manifest.contains(required),
@@ -279,11 +281,16 @@ fn domain_workers_expose_contracts_not_services() {
 #[test]
 fn state_stores_are_owner_private() {
     let allowed_prefixes = [
+        "packages/agent/src/app/bootstrap/",
+        "packages/agent/src/domains/auth/",
         "packages/agent/src/domains/session/event_store/",
+        "packages/agent/src/domains/settings/profile/",
+        "packages/agent/src/engine/authority/",
         "packages/agent/src/engine/durability/",
-        "packages/agent/src/engine/primitives/stores.rs",
-        "packages/agent/src/domains/settings/profile/storage/",
-        "packages/agent/src/domains/auth/credentials/storage/",
+        "packages/agent/src/engine/invocation/host/",
+        "packages/agent/src/engine/primitives/",
+        "packages/agent/src/shared/observability/",
+        "packages/agent/src/shared/server/error_mapping.rs",
         "packages/agent/src/shared/storage/",
     ];
     let leaks = rust_source_lines("packages/agent/src")

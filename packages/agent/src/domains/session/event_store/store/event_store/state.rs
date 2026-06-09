@@ -6,10 +6,10 @@ use crate::domains::session::event_store::reconstruction::{
 };
 use crate::domains::session::event_store::sqlite::repositories::event::EventRepo;
 use crate::domains::session::event_store::sqlite::repositories::session::SessionRepo;
-use crate::domains::session::event_store::sqlite::row_types::{EventRow, SessionRow};
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::base::SessionEvent;
 use crate::domains::session::event_store::types::state::SessionState;
+use crate::domains::session::event_store::{EventRow, SessionRow};
 
 use super::EventStore;
 

@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
+use crate::domains::session::event_store::SessionRow;
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
 use crate::domains::session::event_store::sqlite::repositories::event::EventRepo;
 use crate::domains::session::event_store::sqlite::repositories::session::{
@@ -9,7 +10,6 @@ use crate::domains::session::event_store::sqlite::repositories::session::{
     MessagePreview, SessionRepo,
 };
 use crate::domains::session::event_store::sqlite::repositories::workspace::WorkspaceRepo;
-use crate::domains::session::event_store::sqlite::row_types::SessionRow;
 use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::types::base::SessionEvent;
 
@@ -263,6 +263,23 @@ impl EventStore {
         self.with_session_write_lock(session_id, || {
             let conn = self.conn()?;
             SessionRepo::update_title(&conn, session_id, title)
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_session_last_activity_for_test(
+        &self,
+        session_id: &str,
+        rfc3339: &str,
+    ) -> Result<bool> {
+        self.with_session_write_lock(session_id, || {
+            let conn = self.conn()?;
+            conn.execute(
+                "UPDATE sessions SET last_activity_at = ?1 WHERE id = ?2",
+                rusqlite::params![rfc3339, session_id],
+            )
+            .map(|changed| changed > 0)
+            .map_err(crate::domains::session::event_store::EventStoreError::from)
         })
     }
 

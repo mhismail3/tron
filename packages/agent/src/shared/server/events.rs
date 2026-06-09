@@ -4,7 +4,7 @@
 //! engine streams. Client transports convert those neutral payloads into their
 //! own wire shapes at the boundary.
 
-use crate::domains::session::event_store::sqlite::row_types::EventRow;
+use crate::domains::session::event_store::EventRow;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -141,7 +141,7 @@ pub(crate) fn event_row_to_wire_with_payload(row: &EventRow, payload: Option<Val
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domains::session::event_store::sqlite::row_types::EventRow;
+    use crate::domains::session::event_store::EventRow;
     use serde_json::json;
 
     #[test]

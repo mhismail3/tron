@@ -49,7 +49,8 @@
 //! Depends on: core foundation paths and profile defaults.
 //! Depended on by: domain registration, profile runtime, transport handlers, and iOS settings sync.
 //! Loader-specific filesystem work stays under [`storage::loader`]; this root
-//! exposes no loader compatibility facade.
+//! exposes only narrow path and snapshot-loading facades needed by bootstrap,
+//! health checks, profile runtime, and provider auth setup.
 //!
 //! ## Invariants
 //!
@@ -74,13 +75,12 @@ pub mod store;
 pub mod types;
 
 pub use errors::{Result, SettingsError};
-use storage::loader::load_settings_from_path;
 #[cfg(test)]
-use storage::loader::{deep_merge, settings_path};
+use storage::loader::deep_merge;
 pub use store::SettingsStore;
 pub use types::*;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
 use arc_swap::ArcSwapOption;
@@ -138,6 +138,31 @@ pub fn get_settings() -> Arc<TronSettings> {
 /// server startup where the settings path is known.
 pub fn init_settings(settings: TronSettings) {
     settings_slot().store(Some(Arc::new(settings)));
+}
+
+/// Resolve the active sparse user profile settings path.
+pub fn settings_path() -> PathBuf {
+    storage::loader::settings_path()
+}
+
+/// Resolve the active provider auth path.
+pub fn auth_path() -> PathBuf {
+    storage::loader::auth_path()
+}
+
+/// Resolve the active Tron home used by profile-backed settings.
+pub fn tron_home_dir() -> PathBuf {
+    storage::loader::tron_home_dir()
+}
+
+/// Load an effective settings snapshot from a specific sparse profile path.
+pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
+    storage::loader::load_settings_from_path(path)
+}
+
+/// Apply environment overrides to a settings snapshot.
+pub(crate) fn apply_env_overrides(settings: &mut TronSettings) {
+    storage::loader::apply_env_overrides(settings);
 }
 
 /// Reload settings from a specific file path.

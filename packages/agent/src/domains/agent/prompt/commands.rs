@@ -41,16 +41,10 @@ pub(crate) async fn status_value(
     let event_store = deps.event_store.clone();
     let sid_for_latest = session_id.clone();
     let latest_timestamp = run_blocking_task("agent.status.latest_event", move || {
-        let pool = event_store.pool().clone();
-        let conn = pool.get().map_err(|e| CapabilityError::Internal {
-            message: format!("DB connection failed: {e}"),
-        })?;
-        crate::domains::session::event_store::sqlite::repositories::event::EventRepo::get_latest(
-            &conn,
-            &sid_for_latest,
-        )
-        .map(|opt| opt.map(|row| row.timestamp))
-        .map_err(crate::shared::server::error_mapping::map_event_store_error)
+        event_store
+            .get_latest_events(&sid_for_latest, Some(1))
+            .map(|mut events| events.pop().map(|row| row.timestamp))
+            .map_err(crate::shared::server::error_mapping::map_event_store_error)
     })
     .await?;
     let time_since_last_event_ms = latest_timestamp

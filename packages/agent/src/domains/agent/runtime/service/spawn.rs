@@ -5,7 +5,7 @@ use super::{
 pub fn spawn_prompt_run(
     runtime_deps: &PromptRuntimeDeps,
     agent_deps: &AgentDeps,
-    session: &crate::domains::session::event_store::sqlite::row_types::SessionRow,
+    session: &crate::domains::session::event_store::SessionRow,
     started_run: StartedRun,
     run_id: String,
     request: PromptRequest,

@@ -134,7 +134,7 @@ pub(crate) async fn validate_prompt_submission(
 ) -> Result<
     (
         PromptSubmission,
-        crate::domains::session::event_store::sqlite::row_types::SessionRow,
+        crate::domains::session::event_store::SessionRow,
         crate::shared::server::context::AgentDeps,
     ),
     CapabilityError,

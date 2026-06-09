@@ -51,7 +51,7 @@ use parking_lot::Mutex;
 use rand::RngCore;
 
 use crate::domains::auth::credentials::errors::AuthError;
-use crate::domains::auth::credentials::storage::{
+use crate::domains::auth::credentials::{
     load_auth_storage, load_or_init_for_write, save_auth_storage,
 };
 

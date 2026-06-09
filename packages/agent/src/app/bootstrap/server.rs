@@ -252,8 +252,8 @@ async fn health_handler(State(state): State<AppState>) -> Json<HealthResponse> {
 async fn deep_health_handler(State(state): State<AppState>) -> Json<health::DeepHealthResponse> {
     let connections = state.engine_clients.connection_count();
     let sessions = state.runtime_context.orchestrator.active_session_count();
-    let pool = state.runtime_context.event_store.pool().clone();
-    let tron_home = crate::domains::settings::profile::storage::loader::tron_home_dir();
+    let event_store = state.runtime_context.event_store.clone();
+    let tron_home = crate::domains::settings::profile::tron_home_dir();
     let response = state
         .runtime_context
         .run_blocking("http.health.deep", move || {
@@ -261,7 +261,7 @@ async fn deep_health_handler(State(state): State<AppState>) -> Json<health::Deep
                 state.start_time,
                 connections,
                 sessions,
-                &pool,
+                &event_store,
                 &tron_home,
             ))
         })

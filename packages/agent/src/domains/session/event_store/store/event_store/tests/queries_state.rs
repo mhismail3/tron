@@ -305,7 +305,7 @@ fn get_messages_at_head_resolves_blob_backed_event_payloads() {
         result.messages_with_event_ids[0].message.content,
         serde_json::Value::String(content)
     );
-    let conn = store.pool().get().unwrap();
+    let conn = store.conn().unwrap();
     let refs: i64 = conn
         .query_row("SELECT COUNT(*) FROM storage_payload_refs", [], |row| {
             row.get(0)

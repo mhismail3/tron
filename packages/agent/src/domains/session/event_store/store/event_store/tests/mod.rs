@@ -1,12 +1,12 @@
 #![allow(unused_results)]
 
 use super::*;
+use crate::domains::session::event_store::ListSessionsOptions;
 use crate::domains::session::event_store::sqlite::connection::{self, ConnectionConfig};
 use crate::domains::session::event_store::sqlite::migrations::run_migrations;
 use crate::domains::session::event_store::sqlite::repositories::event::{
     EventRepo, ListEventsOptions,
 };
-use crate::domains::session::event_store::sqlite::repositories::session::ListSessionsOptions;
 
 fn setup() -> EventStore {
     let pool = connection::new_in_memory(&ConnectionConfig::default()).unwrap();

@@ -70,7 +70,7 @@ async fn end_session() {
 /// the append) because the iOS display layer treats the event as current.
 #[tokio::test]
 async fn end_session_emits_session_end_event() {
-    use crate::domains::session::event_store::sqlite::repositories::event::ListEventsOptions;
+    use crate::domains::session::event_store::ListEventsOptions;
 
     let mgr = make_manager();
     let sid = mgr

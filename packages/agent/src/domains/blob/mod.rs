@@ -79,15 +79,10 @@ async fn blob_get_value(payload: &Value, deps: &Deps) -> Result<Value, Capabilit
             message: "missing 'blobId' parameter".into(),
         })?
         .to_owned();
-    let pool = deps.event_store.pool().clone();
+    let event_store = deps.event_store.clone();
     run_blocking_task("blob::get", move || {
-        let conn = pool.get().map_err(|error| CapabilityError::Internal {
-            message: format!("database connection error: {error}"),
-        })?;
-        let blob =
-            crate::domains::session::event_store::sqlite::repositories::blob::BlobRepo::get_by_id(
-                &conn, &blob_id,
-            )
+        let blob = event_store
+            .get_blob(&blob_id)
             .map_err(|error| CapabilityError::Internal {
                 message: format!("blob lookup error: {error}"),
             })?

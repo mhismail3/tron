@@ -12,8 +12,7 @@ impl AgentCommandService {
     pub(crate) async fn load_prompt_session(
         deps: &Deps,
         session_id: &str,
-    ) -> Result<crate::domains::session::event_store::sqlite::row_types::SessionRow, CapabilityError>
-    {
+    ) -> Result<crate::domains::session::event_store::SessionRow, CapabilityError> {
         let session_manager = deps.session_manager.clone();
         let session_id = session_id.to_owned();
         run_blocking_task("agent.prompt.load_session", move || {

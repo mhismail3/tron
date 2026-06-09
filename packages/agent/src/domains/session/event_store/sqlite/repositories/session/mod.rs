@@ -9,8 +9,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
 
+use crate::domains::session::event_store::SessionRow;
 use crate::domains::session::event_store::errors::Result;
-use crate::domains::session::event_store::sqlite::row_types::SessionRow;
 
 mod projections;
 #[cfg(test)]

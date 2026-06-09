@@ -11,15 +11,15 @@ use tempfile::TempDir;
 use tokio::sync::Mutex;
 use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
 use tron::domains::session::event_store::{
-    AgentTraceListOptions, ConnectionConfig, EventStore, new_file, run_migrations,
-};
-use tron::engine::invocation::model::{
-    RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
-    RUNTIME_METADATA_WORKING_DIRECTORY,
+    AgentTraceListOptions, ClientLogEntry, ConnectionConfig, EventStore, new_file, run_migrations,
 };
 use tron::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, TraceId,
+};
+use tron::engine::{
+    RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
+    RUNTIME_METADATA_WORKING_DIRECTORY,
 };
 use tron::shared::protocol::model_capabilities::CapabilityResult;
 use tron::shared::server::context::ServerRuntimeContext;
@@ -347,31 +347,34 @@ async fn execute_log_recent_exposes_bounded_session_trace_logs() {
         )
         .unwrap();
     let trace_id = TraceId::generate();
-    {
-        let conn = runtime.ctx.event_store.pool().get().unwrap();
-        conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message, session_id, trace_id) \
-             VALUES (?1, 'info', 30, 'agent.loop', 'current session evidence', ?2, ?3)",
-            rusqlite::params![
-                "2026-06-07T16:00:00.000Z",
-                created.session.id.as_str(),
-                trace_id.as_str()
-            ],
-        )
+    let mut current_session = ClientLogEntry::new(
+        "2026-06-07T16:00:00.000Z",
+        "info",
+        "Engine",
+        "current session evidence",
+    );
+    current_session.session_id = Some(created.session.id.clone());
+    current_session.trace_id = Some(trace_id.to_string());
+    let mut global_trace = ClientLogEntry::new(
+        "2026-06-07T16:00:01.000Z",
+        "warn",
+        "Engine",
+        "global trace evidence",
+    );
+    global_trace.trace_id = Some(trace_id.to_string());
+    let mut other_session = ClientLogEntry::new(
+        "2026-06-07T16:00:02.000Z",
+        "error",
+        "Engine",
+        "other session evidence",
+    );
+    other_session.session_id = Some("sess_other".to_owned());
+    other_session.trace_id = Some(trace_id.to_string());
+    runtime
+        .ctx
+        .event_store
+        .ingest_client_logs(&[current_session, global_trace, other_session])
         .unwrap();
-        conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message, trace_id) \
-             VALUES (?1, 'warn', 40, 'agent.loop', 'global trace evidence', ?2)",
-            rusqlite::params!["2026-06-07T16:00:01.000Z", trace_id.as_str()],
-        )
-        .unwrap();
-        conn.execute(
-            "INSERT INTO logs (timestamp, level, level_num, component, message, session_id, trace_id) \
-             VALUES (?1, 'error', 50, 'agent.loop', 'other session evidence', 'sess_other', ?2)",
-            rusqlite::params!["2026-06-07T16:00:02.000Z", trace_id.as_str()],
-        )
-        .unwrap();
-    }
 
     let logs_value = invoke_execute(
         &runtime.ctx,

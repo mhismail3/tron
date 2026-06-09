@@ -333,12 +333,10 @@ impl DefaultProviderFactory {
         // token refresh. Without this, ensure_valid_tokens() would fail after
         // the access token expires (~1 hour).
         let provider_settings = if google_auth_is_oauth {
-            let gpa = crate::domains::auth::credentials::storage::get_google_provider_auth(
-                &self.auth_path,
-            )
-            .map_err(|e| ProviderError::Auth {
-                message: e.to_string(),
-            })?;
+            let gpa = crate::domains::auth::credentials::get_google_provider_auth(&self.auth_path)
+                .map_err(|e| ProviderError::Auth {
+                    message: e.to_string(),
+                })?;
             crate::domains::model::providers::google::types::GoogleApiSettings {
                 token_url: None,
                 client_id: gpa.as_ref().and_then(|g| g.client_id.clone()),
@@ -367,13 +365,11 @@ impl DefaultProviderFactory {
         ))
     }
     fn create_minimax(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        let provider_auth = crate::domains::auth::credentials::storage::get_provider_auth(
-            &self.auth_path,
-            "minimax",
-        )
-        .map_err(|e| ProviderError::Auth {
-            message: e.to_string(),
-        })?;
+        let provider_auth =
+            crate::domains::auth::credentials::get_provider_auth(&self.auth_path, "minimax")
+                .map_err(|e| ProviderError::Auth {
+                    message: e.to_string(),
+                })?;
         let api_key = if let Some(pa) = provider_auth {
             if let Some(key) = pa
                 .api_keys
@@ -422,10 +418,11 @@ impl DefaultProviderFactory {
 
     fn create_kimi(&self, model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
         let provider_auth =
-            crate::domains::auth::credentials::storage::get_provider_auth(&self.auth_path, "kimi")
-                .map_err(|e| ProviderError::Auth {
+            crate::domains::auth::credentials::get_provider_auth(&self.auth_path, "kimi").map_err(
+                |e| ProviderError::Auth {
                     message: e.to_string(),
-                })?;
+                },
+            )?;
         let api_key = if let Some(pa) = provider_auth {
             if let Some(key) = pa
                 .api_keys
@@ -552,7 +549,7 @@ impl ProviderFactory for DefaultProviderFactory {
 
 /// Resolve the auth file path (`~/.tron/profiles/auth.json`).
 fn auth_path() -> PathBuf {
-    crate::domains::settings::profile::storage::loader::auth_path()
+    crate::domains::settings::profile::auth_path()
 }
 
 #[cfg(test)]

@@ -33,7 +33,7 @@ use serde_json::{Value, json};
 use tracing::{debug, instrument};
 
 use crate::domains::session::Deps;
-use crate::domains::session::event_store::sqlite::row_types::EventRow;
+use crate::domains::session::event_store::EventRow;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::{self, CapabilityError};
 use crate::shared::server::events::event_row_to_wire_with_payload;

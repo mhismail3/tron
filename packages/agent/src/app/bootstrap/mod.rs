@@ -106,7 +106,7 @@ pub(crate) fn ensure_parent_dir(path: &std::path::Path) -> Result<()> {
 
 /// Resolve the auth file path (`~/.tron/profiles/auth.json`).
 pub(crate) fn auth_path() -> PathBuf {
-    crate::domains::settings::profile::storage::loader::auth_path()
+    crate::domains::settings::profile::auth_path()
 }
 
 /// Ensure `~/.tron/` has the primitive Tron Home layout.
@@ -376,7 +376,7 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
         )
         .context("Failed to load active profile runtime")?,
     );
-    let settings_path = crate::domains::settings::profile::storage::loader::settings_path();
+    let settings_path = crate::domains::settings::profile::settings_path();
     let settings = profile_runtime.current().settings.clone();
     crate::domains::settings::init_settings(settings.clone());
     let origin = format!("localhost:{}", args.port);

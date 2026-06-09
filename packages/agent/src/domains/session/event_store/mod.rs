@@ -72,13 +72,16 @@ pub use factory::{EventChainBuilder, EventFactory};
 pub use reconstruction::{
     COMPACTION_ACK_TEXT, COMPACTION_SUMMARY_PREFIX, ReconstructionResult, reconstruct_from_events,
 };
-pub use sqlite::repositories::session::{ActivitySummaryLine, MessagePreview};
+pub use sqlite::repositories::event::ListEventsOptions;
+pub use sqlite::repositories::session::{ActivitySummaryLine, ListSessionsOptions, MessagePreview};
+pub use sqlite::row_types::{BlobRow, EventRow, SessionRow, WorkspaceRow};
 pub use sqlite::{
     ConnectionConfig, ConnectionPool, DatabaseLock, LockError, MigrationResult, PooledConnection,
     acquire_database_lock, check_integrity, new_file, new_in_memory, run_migrations,
 };
 pub use store::{
-    AppendOptions, CreateSessionResult, EventStore, ForkOptions, ForkResult,
+    AppendOptions, ClientLogEntry, ClientLogIngestResult, CreateSessionResult, EventStore,
+    ForkOptions, ForkResult, LogEntry, LogSessionFilter, RecentLogQuery,
     event_rows_to_session_events,
 };
 pub use trace::{AGENT_TRACE_VERSION, AgentTraceListOptions, AgentTraceRecord};

@@ -1,8 +1,8 @@
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::{EVENT_COLUMNS, EventRepo, SQLITE_BIND_LIMIT};
+use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::errors::Result;
-use crate::domains::session::event_store::sqlite::row_types::EventRow;
 use crate::domains::session::event_store::types::payloads::TokenTotals;
 
 impl EventRepo {

@@ -1,7 +1,7 @@
 # True Modularity Boundary Scorecard
 
 Status: **active**
-Current score: **50/100**
+Current score: **60/100**
 Branch: `codex/primitive-engine-teardown`
 
 This scorecard formalizes the True Modularity Boundary campaign. The campaign
@@ -37,7 +37,7 @@ concrete implementations only when listed in the inventory.
 | TMB-2 | Build the model response black box | 15 | passed_after_fix | Added the model-owned `ModelResponder` boundary, moved provider selection/retry/health/error mapping behind it, made provider modules crate-private, removed provider-root re-export veneers, deleted the old agent turn-runner provider helper, and moved canonical token accounting to `domains::model::tokens`. |
 | TMB-3 | Narrow engine facade ownership | 12 | passed_after_fix | Made engine submodules crate-private, promoted required runtime metadata constants and external-worker invoker trait onto the engine facade, and updated non-engine callers to import only `crate::engine::{...}`. |
 | TMB-4 | Harden domain worker boundaries | 10 | passed_after_fix | Made domain worker registration crate-private behind the transport setup facade, strengthened the guard against public worker constructors and non-central registration callers, and verified runtime/transport/app code does not import domain handlers, services, deps, or operations. |
-| TMB-5 | Encapsulate state and storage | 10 | open | Store/backend/SQL access still needs owner-private guard coverage and cleanup. |
+| TMB-5 | Encapsulate state and storage | 10 | passed_after_fix | Removed non-owner raw `EventStore::pool()` access, moved log-table reads/writes behind typed event-store methods, routed health/log domains through storage owner contracts, narrowed concrete engine store re-exports, and strengthened the state/storage invariant owner allow-list. |
 | TMB-6 | Make transport adapter-only | 10 | open | Transport adapter-only guard coverage and cleanup remain open. |
 | TMB-7 | Make iOS Engine access black-boxed | 10 | open | SwiftUI/session access to concrete engine transport and DTOs still needs cleanup. |
 | TMB-8 | Define boundary-local error contracts | 8 | open | Provider, SQL, transport, and decoding errors still need boundary mapping guards. |

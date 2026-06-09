@@ -1,22 +1,21 @@
 //! logs domain worker.
 //!
 //! This module owns the small logs namespace contract/deps/handler binding.
-//! Client log ingestion stays in `client_logs` because it is a real service
-//! boundary with parsing, dedupe, and storage behavior.
+//! Durable log storage is accessed through the event-store facade so request
+//! translation stays separate from SQL/backend details.
 
-use crate::domains::logs::client_logs::ClientLogEntry;
-use crate::domains::logs::client_logs::ClientLogsService;
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
 use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::registration::worker::DomainWorkerModule;
-use crate::domains::session::event_store::EventStore;
+use crate::domains::session::event_store::{ClientLogEntry, EventStore, LogEntry, RecentLogQuery};
 use crate::engine::{
     CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
     Result as EngineResult, RiskLevel,
 };
 use crate::shared::server::context::run_blocking_task;
+use crate::shared::server::error_mapping::map_event_store_error;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::errors::to_json_value;
 use serde::Deserialize;
@@ -37,8 +36,6 @@ pub(crate) fn worker_module(
         )
     }
 }
-
-pub(crate) mod client_logs;
 
 const STREAM_TOPICS: &[&str] = &["logs.ingest"];
 const DEFAULT_RECENT_LIMIT: u32 = 200;
@@ -143,12 +140,11 @@ async fn ingest_logs_value(params: Option<&Value>, deps: &Deps) -> Result<Value,
             }
         })?;
 
-    let pool = deps.event_store.pool().clone();
+    let event_store = deps.event_store.clone();
     let result = run_blocking_task("logs::ingest", move || {
-        let mut conn = pool.get().map_err(|error| CapabilityError::Internal {
-            message: format!("Failed to get DB connection: {error}"),
-        })?;
-        ClientLogsService::ingest(&mut conn, &entries)
+        event_store
+            .ingest_client_logs(&entries)
+            .map_err(map_event_store_error)
     })
     .await?;
 
@@ -173,42 +169,15 @@ async fn recent_logs_value(params: Option<Value>, deps: &Deps) -> Result<Value, 
         });
     }
 
-    let limit = i64::from(params.limit);
-    let pool = deps.event_store.pool().clone();
+    let query = RecentLogQuery::all(i64::from(params.limit));
+    let event_store = deps.event_store.clone();
     let result = run_blocking_task("logs::recent", move || {
-        let conn = pool.get().map_err(|error| CapabilityError::Internal {
-            message: format!("Failed to get DB connection: {error}"),
-        })?;
-        let mut stmt = conn
-            .prepare(
-                "SELECT id, timestamp, level, component, message, session_id, error_message \
-                 FROM logs ORDER BY id DESC LIMIT ?1",
-            )
-            .map_err(|error| CapabilityError::Internal {
-                message: format!("Failed to prepare logs query: {error}"),
-            })?;
-        let rows = stmt
-            .query_map([limit], |row| {
-                Ok(RecentLogEntry {
-                    id: row.get(0)?,
-                    timestamp: row.get(1)?,
-                    level: row.get(2)?,
-                    component: row.get(3)?,
-                    message: row.get(4)?,
-                    session_id: row.get(5)?,
-                    error_message: row.get(6)?,
-                })
-            })
-            .map_err(|error| CapabilityError::Internal {
-                message: format!("Failed to read logs: {error}"),
-            })?;
-
-        let mut entries =
-            rows.collect::<Result<Vec<_>, _>>()
-                .map_err(|error| CapabilityError::Internal {
-                    message: format!("Failed to decode logs: {error}"),
-                })?;
-        entries.reverse();
+        let entries = event_store
+            .list_recent_logs(query)
+            .map_err(map_event_store_error)?
+            .into_iter()
+            .map(RecentLogEntry::from)
+            .collect::<Vec<_>>();
         Ok(RecentLogsResult {
             count: entries.len(),
             entries,
@@ -218,4 +187,18 @@ async fn recent_logs_value(params: Option<Value>, deps: &Deps) -> Result<Value, 
     serde_json::to_value(result).map_err(|error| CapabilityError::Internal {
         message: error.to_string(),
     })
+}
+
+impl From<LogEntry> for RecentLogEntry {
+    fn from(entry: LogEntry) -> Self {
+        Self {
+            id: entry.id,
+            timestamp: entry.timestamp,
+            level: entry.level,
+            component: entry.component,
+            message: entry.message,
+            session_id: entry.session_id,
+            error_message: entry.error_message,
+        }
+    }
 }

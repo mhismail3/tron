@@ -136,7 +136,6 @@ packages/agent/src/domains/capability/operations/mod.rs	rust	facade	rust:domain-
 packages/agent/src/domains/capability/operations/process.rs	rust	implementation	rust:domain-capability	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/capability/operations/state.rs	rust	implementation	rust:domain-capability	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/capability/operations/trace.rs	rust	implementation	rust:domain-capability	owner-private; callers must enter through the owner facade or contract
-packages/agent/src/domains/logs/client_logs.rs	rust	implementation	rust:domain-logs	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/logs/mod.rs	rust	facade	rust:domain-logs	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/message/mod.rs	rust	facade	rust:domain-message	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/mod.rs	rust	facade	rust:domains	callers may depend on this narrow owner-approved surface only
@@ -274,6 +273,7 @@ packages/agent/src/domains/session/event_store/sqlite/row_types.rs	rust	adapter	
 packages/agent/src/domains/session/event_store/store/event_store/auxiliary.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/session/event_store/store/event_store/event_log.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/session/event_store/store/event_store/locking.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/session/event_store/store/event_store/logs.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/session/event_store/store/event_store/mod.rs	rust	facade	rust:domain-session	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/session/event_store/store/event_store/session_lifecycle.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/session/event_store/store/event_store/state.rs	rust	implementation	rust:domain-session	owner-private; callers must enter through the owner facade or contract

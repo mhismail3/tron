@@ -148,7 +148,7 @@ impl EventChainBuilder {
         event_type: EventType,
         payload: Value,
     ) -> crate::domains::session::event_store::errors::Result<
-        crate::domains::session::event_store::sqlite::row_types::EventRow,
+        crate::domains::session::event_store::EventRow,
     > {
         let event = self.store.append(
             &crate::domains::session::event_store::store::AppendOptions {

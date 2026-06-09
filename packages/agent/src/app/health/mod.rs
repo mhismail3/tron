@@ -67,12 +67,12 @@ pub fn deep_health_check(
     start_time: Instant,
     connections: usize,
     sessions: usize,
-    pool: &crate::domains::session::event_store::ConnectionPool,
+    event_store: &crate::domains::session::event_store::EventStore,
     tron_home: &Path,
 ) -> DeepHealthResponse {
     let checks = vec![
         // 1. Database
-        check_database(pool),
+        check_database(event_store),
         // 2. Settings
         check_settings(
             &tron_home
@@ -111,32 +111,25 @@ pub fn deep_health_check(
     }
 }
 
-fn check_database(pool: &crate::domains::session::event_store::ConnectionPool) -> DeepHealthCheck {
-    match pool.get() {
-        Ok(conn) => match conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| {
-            row.get::<_, i64>(0)
-        }) {
-            Ok(session_count) => DeepHealthCheck {
-                name: "database".into(),
-                status: "ok".into(),
-                detail: Some(json!({ "sessions": session_count })),
-            },
-            Err(error) => DeepHealthCheck {
-                name: "database".into(),
-                status: "fail".into(),
-                detail: Some(json!({ "error": error.to_string() })),
-            },
+fn check_database(
+    event_store: &crate::domains::session::event_store::EventStore,
+) -> DeepHealthCheck {
+    match event_store.session_count_for_health() {
+        Ok(session_count) => DeepHealthCheck {
+            name: "database".into(),
+            status: "ok".into(),
+            detail: Some(json!({ "sessions": session_count })),
         },
-        Err(e) => DeepHealthCheck {
+        Err(error) => DeepHealthCheck {
             name: "database".into(),
             status: "fail".into(),
-            detail: Some(json!({ "error": e.to_string() })),
+            detail: Some(json!({ "error": error.to_string() })),
         },
     }
 }
 
 fn check_settings(path: &Path) -> DeepHealthCheck {
-    match crate::domains::settings::profile::storage::loader::load_settings_from_path(path) {
+    match crate::domains::settings::profile::load_settings_from_path(path) {
         Ok(_) => DeepHealthCheck {
             name: "settings".into(),
             status: "ok".into(),
@@ -372,7 +365,8 @@ mod tests {
             &crate::domains::session::event_store::ConnectionConfig::default(),
         )
         .unwrap();
-        let check = check_database(&pool);
+        let event_store = crate::domains::session::event_store::EventStore::new(pool);
+        let check = check_database(&event_store);
         assert_eq!(check.name, "database");
         assert_eq!(check.status, "fail");
         assert!(
@@ -394,6 +388,7 @@ mod tests {
             let conn = pool.get().unwrap();
             crate::domains::session::event_store::run_migrations(&conn).unwrap();
         }
+        let event_store = crate::domains::session::event_store::EventStore::new(pool);
         let dir = tempfile::tempdir().unwrap();
         crate::shared::foundation::constitution::ensure_tron_home_at(dir.path()).unwrap();
         let settings_dir = dir
@@ -406,7 +401,7 @@ mod tests {
         )
         .unwrap();
 
-        let resp = deep_health_check(Instant::now(), 0, 0, &pool, dir.path());
+        let resp = deep_health_check(Instant::now(), 0, 0, &event_store, dir.path());
         let settings = resp
             .checks
             .iter()
@@ -427,6 +422,7 @@ mod tests {
             let conn = pool.get().unwrap();
             crate::domains::session::event_store::run_migrations(&conn).unwrap();
         }
+        let event_store = crate::domains::session::event_store::EventStore::new(pool);
         let dir = tempfile::tempdir().unwrap();
         crate::shared::foundation::constitution::ensure_tron_home_at(dir.path()).unwrap();
         let settings_dir = dir
@@ -449,7 +445,7 @@ enforced = true
         )
         .unwrap();
 
-        let resp = deep_health_check(Instant::now(), 0, 0, &pool, dir.path());
+        let resp = deep_health_check(Instant::now(), 0, 0, &event_store, dir.path());
         let settings = resp
             .checks
             .iter()

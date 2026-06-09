@@ -1,8 +1,8 @@
 use rusqlite::{Connection, params};
 
 use super::{EVENT_COLUMNS, EventRepo, ListEventsOptions};
+use crate::domains::session::event_store::EventRow;
 use crate::domains::session::event_store::errors::Result;
-use crate::domains::session::event_store::sqlite::row_types::EventRow;
 
 impl EventRepo {
     /// Get events for a session, ordered by sequence.

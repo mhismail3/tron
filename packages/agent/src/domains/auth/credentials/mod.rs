@@ -56,7 +56,8 @@ pub use errors::AuthError;
 pub use pkce::{PkcePair, generate_pkce};
 pub(crate) use provider_state::*;
 pub(crate) use storage::{
-    acquire_auth_file_lock, clear_provider_auth, load_or_init_for_write, save_named_api_key,
+    acquire_auth_file_lock, clear_provider_auth, get_google_provider_auth, get_provider_auth,
+    load_or_init_for_write, save_named_api_key,
 };
 pub use storage::{auth_file_path, load_auth_storage, save_auth_storage};
 pub use types::{
