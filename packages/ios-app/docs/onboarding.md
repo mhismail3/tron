@@ -374,6 +374,7 @@ Sources/UI/Onboarding/
   ├── OnboardingShell.swift
   ├── QRCodeScannerSheet.swift
   └── Steps/
+      ├── SetupStepComponents.swift
       ├── SetupSteps.swift
       └── PairingStep.swift
 

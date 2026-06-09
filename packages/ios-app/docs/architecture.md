@@ -126,8 +126,9 @@ See `events.md` for the current plugin categories and reconstruction boundary.
 `UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift` is the retained
 generic renderer for server/agent-authored runtime data. It uses native SwiftUI
 layout primitives and submits only generic action coordinates or encoded action
-payloads supplied by the runtime surface. It must not map fixed feature names
-into custom sheets.
+payloads supplied by the runtime surface. Pure icon, formatting, array, and row
+preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
+It must not map fixed feature names into custom sheets.
 
 ## Diagnostics And Build Identity
 
@@ -135,6 +136,8 @@ The settings toolbar exposes Logs in every build configuration. The client log
 ingestion service mirrors bounded client logs into the server `logs` table while
 connected, creating a self-feeding diagnostics loop that the runtime can inspect
 without relying on a debug-only export button.
+`DiagnosticsBundleBuilder.swift` owns bundle assembly; DTOs, event sanitization,
+hashing, and host classification live in `DiagnosticsBundleTypes.swift`.
 
 `ProdDebug` backs the `Tron Fast` scheme: it keeps production bundle identity
 and entitlements while using debug build settings for fast local iteration.

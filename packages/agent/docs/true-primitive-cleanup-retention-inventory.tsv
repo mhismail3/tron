@@ -620,6 +620,7 @@ packages/agent/tests/true_primitive_cleanup/engine_durability.rs	test	test_harne
 packages/agent/tests/true_primitive_cleanup/external_workers.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/inventory.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/invocation_primitives.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/tests/true_primitive_cleanup/ios_engine_protocol.rs	test	test_harness	TPC-7	static gate coverage for iOS engine, protocol, and Swift split cleanup
 packages/agent/tests/true_primitive_cleanup/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/provider_auth_model.rs	test	test_harness	TPC-5	static gate coverage for provider/auth/model cleanup row
 packages/agent/tests/true_primitive_cleanup/scorecard.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -882,6 +883,7 @@ packages/ios-app/Sources/Support/Composition/DependencyEnvironment.swift	support
 packages/ios-app/Sources/Support/Composition/DependencyProviding.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
 packages/ios-app/Sources/Support/Diagnostics/ClientLogIngestionService.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
 packages/ios-app/Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
+packages/ios-app/Sources/Support/Diagnostics/DiagnosticsBundleTypes.swift	support	ios	TPC-7	iOS diagnostics bundle DTO, sanitizer, and hashing support
 packages/ios-app/Sources/Support/Diagnostics/DiagnosticsRedactor.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
 packages/ios-app/Sources/Support/Diagnostics/ErrorHandler.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
 packages/ios-app/Sources/Support/Diagnostics/MetricKitDiagnosticsStore.swift	support	ios	TPC-7	iOS app lifecycle or support infrastructure
@@ -993,11 +995,13 @@ packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingFlowView.swift	implementat
 packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingShell.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Onboarding/Pairing/QRCodeScannerSheet.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Onboarding/Steps/PairingStep.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Onboarding/Steps/SetupSteps.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
+packages/ios-app/Sources/UI/Onboarding/Steps/SetupStepComponents.swift	implementation	ios_ui	TPC-7	reusable onboarding setup controls split from the setup step root
+packages/ios-app/Sources/UI/Onboarding/Steps/SetupSteps.swift	implementation	ios_ui	TPC-7	SwiftUI onboarding setup root kept under the TPC hard budget
 packages/ios-app/Sources/UI/RuntimeSurfaces/Display/GenerativeWebView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/RuntimeSurfaces/Display/StreamSheetView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
+packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+RenderingHelpers.swift	implementation	ios_ui	TPC-7	pure generated-runtime rendering helpers split from the root view
 packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
+packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift	implementation	ios_ui	TPC-7	generic runtime surface root kept under the TPC hard budget
 packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/AgentSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Settings/Pages/AppearanceSettingsPage.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
