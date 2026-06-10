@@ -515,11 +515,11 @@ fn invocation_result_hash(
 
 fn engine_error_value(error: &crate::engine::EngineError) -> Value {
     engine_error_to_failure(error)
-        .with_details(Some(engine_error_legacy_details(error)))
+        .with_details(Some(engine_error_replay_details(error)))
         .details_with_failure()
 }
 
-fn engine_error_legacy_details(error: &crate::engine::EngineError) -> Value {
+fn engine_error_replay_details(error: &crate::engine::EngineError) -> Value {
     match error {
         crate::engine::EngineError::InvalidId { kind, value } => {
             json!({"kind": "invalid_id", "idKind": kind, "value": value})

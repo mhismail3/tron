@@ -31,7 +31,7 @@ use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::{ModelProviderRequestAudit, ProviderAuditPayload};
 use crate::shared::server::failure::{
     FailureCategory, FailureEnvelope, FailureOrigin, MODEL_AUTH_ERROR,
-    MODEL_PROVIDER_REQUEST_AUDIT_FAILED, MODEL_RESPONSE_ERROR,
+    MODEL_PROVIDER_REQUEST_AUDIT_FAILED, MODEL_RESPONSE_ERROR, PROVIDER_SSE_PARSE_ERROR,
 };
 
 /// Boxed stream returned by the model responder boundary.
@@ -188,6 +188,27 @@ impl ModelResponseError {
         Self::from_failure(failure, cancelled)
     }
 
+    fn from_provider_stream_event_error(
+        message: String,
+        provider_name: &'static str,
+        model: &str,
+    ) -> Self {
+        Self::from_failure(
+            FailureEnvelope::new(
+                PROVIDER_SSE_PARSE_ERROR,
+                FailureCategory::Parse,
+                message,
+                false,
+                true,
+                FailureOrigin::ModelProvider,
+            )
+            .with_provider_model(provider_name, model)
+            .with_error_type(Some("stream_event_error".to_owned()))
+            .with_details(Some(serde_json::json!({ "kind": "stream_event_error" }))),
+            false,
+        )
+    }
+
     /// Error category string for event emission.
     pub fn category(&self) -> &str {
         self.failure.category.as_str()
@@ -206,17 +227,6 @@ impl ModelResponseError {
     /// Canonical failure envelope for this model response error.
     pub fn failure(&self) -> &FailureEnvelope {
         &self.failure
-    }
-}
-
-impl From<ProviderError> for ModelResponseError {
-    fn from(error: ProviderError) -> Self {
-        let category = error.category();
-        let cancelled = matches!(error, ProviderError::Cancelled);
-        let failure = error.to_failure("unknown", "unknown").with_details(Some(
-            serde_json::json!({ "modelResponderFallback": true, "category": category }),
-        ));
-        Self::from_failure(failure, cancelled)
     }
 }
 
@@ -554,6 +564,17 @@ fn wrap_provider_stream(
         let mut saw_done = false;
         while let Some(item) = stream.next().await {
             match item {
+                Ok(StreamEvent::Error { error }) => {
+                    health.record_failure(provider_name);
+                    histogram!("provider_request_duration_seconds", "provider" => provider_name)
+                        .record(request_start.elapsed().as_secs_f64());
+                    yield Err(ModelResponseError::from_provider_stream_event_error(
+                        error,
+                        provider_name,
+                        &model,
+                    ));
+                    return;
+                }
                 Ok(event) => {
                     if matches!(event, StreamEvent::Done { .. }) {
                         saw_done = true;
@@ -591,7 +612,7 @@ mod tests {
     use super::*;
     use crate::shared::protocol::messages::{Message, UserMessageContent};
     use crate::shared::protocol::model_audit::ProviderAuditPayloadKind;
-    use futures::stream;
+    use futures::{StreamExt, stream};
 
     struct AuditProvider;
 
@@ -794,6 +815,39 @@ mod tests {
         assert_eq!(failure.category, FailureCategory::Auth);
         assert!(!failure.retryable);
         assert!(failure.recoverable);
+    }
+
+    #[tokio::test]
+    async fn provider_stream_error_event_becomes_canonical_model_response_error() {
+        let stream: StreamEventStream = Box::pin(stream::iter([Ok(StreamEvent::Error {
+            error: "malformed provider stream JSON".into(),
+        })]));
+        let health = Arc::new(ModelResponderHealth::new());
+        let mut wrapped = wrap_provider_stream(
+            stream,
+            "openai",
+            "gpt-5.5".to_owned(),
+            health,
+            Instant::now(),
+        );
+
+        let item = wrapped.next().await.expect("stream item");
+        let error = item.expect_err("stream error should become model response error");
+        let failure = error.failure();
+
+        assert_eq!(
+            failure.code,
+            crate::shared::server::failure::PROVIDER_SSE_PARSE_ERROR
+        );
+        assert_eq!(failure.category, FailureCategory::Parse);
+        assert_eq!(failure.origin, FailureOrigin::ModelProvider);
+        assert_eq!(failure.provider.as_deref(), Some("openai"));
+        assert_eq!(failure.model.as_deref(), Some("gpt-5.5"));
+        assert_eq!(failure.error_type.as_deref(), Some("stream_event_error"));
+        assert_eq!(
+            failure.details.as_ref().unwrap()["kind"],
+            "stream_event_error"
+        );
     }
 
     #[test]

@@ -339,7 +339,9 @@ impl StreamState {
                     final_message: None,
                 }
             }
-            StreamEvent::Error { error } => StreamAction::Err(RuntimeError::Internal(error)),
+            StreamEvent::Error { .. } => StreamAction::Err(RuntimeError::Internal(
+                "provider stream error event escaped model responder boundary".into(),
+            )),
             StreamEvent::SafetyBlock {
                 blocked_categories,
                 error,
@@ -517,8 +519,10 @@ impl StreamState {
                 };
             }
 
-            StreamEvent::Error { error } => {
-                return StreamAction::Err(RuntimeError::Internal(error));
+            StreamEvent::Error { .. } => {
+                return StreamAction::Err(RuntimeError::Internal(
+                    "provider stream error event escaped model responder boundary".into(),
+                ));
             }
 
             StreamEvent::Retry {

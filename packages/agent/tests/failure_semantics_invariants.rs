@@ -50,8 +50,9 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Campaign Scorecard",
         "Status: **active**",
-        "Current score: **82/100**",
+        "Current score: **90/100**",
         "| FSC-0 | Campaign harness | 6 | passed_after_fix |",
+        "| FSC-1 | Failure inventory | 8 | passed_after_fix |",
         "| FSC-2 | Canonical envelope | 12 | passed_after_fix |",
         "| FSC-3 | Error mapping matrix | 12 | passed_after_fix |",
         "| FSC-7 | Provider retry semantics | 8 | passed_after_fix |",
@@ -90,8 +91,9 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Evidence Manifest",
         "Status: **active**",
-        "Current score: **82/100**",
+        "Current score: **90/100**",
         "| FSC-0 | passed_after_fix |",
+        "| FSC-1 | passed_after_fix |",
         "| FSC-2 | passed_after_fix |",
         "| FSC-3 | passed_after_fix |",
         "| FSC-7 | passed_after_fix |",
@@ -101,6 +103,7 @@ fn failure_semantics_campaign_harness_exists() {
         "## FSC-0 Findings",
         "## Server Core Checkpoint Findings",
         "## Error Mapping Closeout Findings",
+        "## Inventory Closeout Findings",
         "## Durable Replay Checkpoint Findings",
         "## iOS Parity Checkpoint Findings",
         "## Verification Log",
@@ -171,6 +174,20 @@ fn failure_semantics_inventory_tsv_covers_initial_surfaces() {
             "FSC inventory missing initial surface path: {required}"
         );
     }
+
+    for forbidden in [
+        "without_envelope",
+        "no_failure_envelope_field",
+        "string_only",
+        "auth_session_event_tests_pending",
+        "fallback",
+        "legacy",
+    ] {
+        assert!(
+            !inventory.contains(forbidden),
+            "inventory TSV contains stale failure-semantics gap marker: {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -227,6 +244,30 @@ fn failure_semantics_server_core_uses_canonical_envelope() {
     assert!(
         socket.contains(".to_failure(FailureOrigin::Transport)"),
         "engine socket errors must serialize canonical failure envelopes"
+    );
+
+    let responder = read_repo_file("packages/agent/src/domains/model/responder/mod.rs");
+    assert!(
+        responder.contains("fn from_provider_stream_event_error")
+            && responder.contains("PROVIDER_SSE_PARSE_ERROR")
+            && !responder.contains("impl From<ProviderError> for ModelResponseError")
+            && !responder.contains("modelResponderFallback"),
+        "model responder must preserve provider/model failure context without unknown fallback conversion"
+    );
+
+    let stream_state = read_repo_file("packages/agent/src/domains/agent/loop/stream_state.rs");
+    assert!(
+        !stream_state.contains("RuntimeError::Internal(error)")
+            && stream_state
+                .contains("provider stream error event escaped model responder boundary"),
+        "stream state must not propagate provider stream error text as string-only internal failure"
+    );
+
+    let replay = read_repo_file("packages/agent/src/domains/session/replay/mod.rs");
+    assert!(
+        replay.contains("engine_error_replay_details")
+            && !replay.contains("engine_error_legacy_details"),
+        "replay failure diagnostics must not be named as legacy compatibility details"
     );
 }
 
