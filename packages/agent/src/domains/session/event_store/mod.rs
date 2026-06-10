@@ -51,6 +51,10 @@
 //! - `model.provider_request` is written before any provider stream opens.
 //! - Replay/import paths use explicit identities instead of ambient time or
 //!   UUID generation when durable IDs/timestamps must be stable.
+//! - The event log is append-only for normal lifecycle operations. Archiving
+//!   sets session-row `ended_at`, message deletion appends `message.deleted`,
+//!   and physical event cleanup happens only when the owning session is
+//!   explicitly deleted.
 //!
 //! ## Test Ownership
 //!

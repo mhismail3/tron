@@ -133,12 +133,6 @@ impl EventRepo {
         Ok(count)
     }
 
-    /// Delete a single event.
-    pub fn delete(conn: &Connection, event_id: &str) -> Result<bool> {
-        let changed = conn.execute("DELETE FROM events WHERE id = ?1", params![event_id])?;
-        Ok(changed > 0)
-    }
-
     /// Delete all events for a session. Returns count deleted.
     pub fn delete_by_session(conn: &Connection, session_id: &str) -> Result<usize> {
         let changed = conn.execute(

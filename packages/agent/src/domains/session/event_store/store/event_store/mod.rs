@@ -2,7 +2,10 @@
 //!
 //! Composes all repository operations into atomic, session-centric methods.
 //! Every write method runs inside a single `SQLite` transaction — callers
-//! never observe partial state.
+//! never observe partial state. The event log is append-only except for the
+//! session-scoped cleanup performed by [`EventStore::delete_session`];
+//! individual message removal is represented by a durable `message.deleted`
+//! event and applied during reconstruction.
 
 use serde_json::Value;
 
@@ -72,12 +75,13 @@ pub struct ForkOptions<'a> {
 
 /// High-level `EventStore` wrapping a connection pool and all repositories.
 ///
-/// All write methods are transactional — they run inside `SAVEPOINT`/`RELEASE`
-/// blocks so callers never see partial state.
+/// All write methods are transactional, so callers never see partial state.
 ///
 /// INVARIANT: session writes are serialized per-session via in-process mutex
 /// locks (`with_session_write_lock`). Global mutations use a separate global
-/// lock. `SQLite` `UNIQUE(session_id, sequence)` enforces ordering at the DB level.
+/// lock. `SQLite` `UNIQUE(session_id, sequence)` enforces ordering at the DB
+/// level. Physical event deletion is only valid inside `delete_session`, after
+/// the owning session row is selected by ID.
 pub struct EventStore {
     pool: ConnectionPool,
     global_write_lock: Mutex<()>,

@@ -9,7 +9,7 @@
 //!
 //! | Module            | Contents                                              |
 //! |-------------------|-------------------------------------------------------|
-//! | `crud`            | insert, get_by_id, get_latest, exists, count, delete  |
+//! | `crud`            | insert, get_by_id, get_latest, exists, count, session-scoped delete |
 //! | `extractors`      | Free functions that pull denormalized fields from JSON |
 //! | `session_queries` | Session-scoped listing and pagination                 |
 //! | `tree_queries`    | Ancestor / child / descendant recursive CTEs          |

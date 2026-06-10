@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-5 `passed_after_fix`; 478 state-surface rows inventoried and classified.
+Status: SOL-6 `passed_after_fix`; 479 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -28,14 +28,15 @@ The machine-readable inventory now covers every tracked production Rust/Swift
 file containing one of the SOL lifecycle markers, plus the required script/CI
 and docs-owned state claim rows. SOL-1 generated 476 initial rows; SOL-4 added
 two narrower runtime-service rows for queue-drainer and worker-heartbeat
-cancellation ownership.
+cancellation ownership, and SOL-6 added the session lifecycle module contract
+row.
 
 State class distribution:
 
 | State class | Rows |
 |---|---:|
 | `ephemeral_runtime` | 262 |
-| `projection_cache` | 71 |
+| `projection_cache` | 72 |
 | `durable_substrate` | 68 |
 | `canonical_truth` | 41 |
 | `secret` | 16 |
@@ -100,6 +101,20 @@ The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
 | Shared storage payload refs | `shared_storage` | Large JSON payloads record owner kind, owner id, field name, retention class, and expiry metadata; shared storage owns retention, checkpoint, export, pruning, and stats. |
 | Primitive store bundle | `engine_primitives` | `PrimitiveStores::sqlite` opens stream, state, queue, lease, resource, grant, and compensation stores as one SQLite-backed bundle and installs built-in resource types before exposure through `EngineHost`. |
 
+## SOL-6 Session And Event-Store Lifecycle Proof
+
+| Surface | Owner | Lifecycle proof |
+|---|---|---|
+| Session lifecycle wrappers | `session_lifecycle` | Create normalizes working directories and initializes sequence counters; fork initializes a child counter; archive/unarchive mutates reversible `ended_at` row state; delete removes active-session projections and calls session-scoped event-store cleanup. |
+| Session manager active cache | `agent_orchestrator` | Active session entries insert on create/resume/fork, remove on end/delete, retain only while recent or processing, and rebuild on resume from event-store truth after eviction or restart. |
+| Event-store create transaction | `session_event_store` | Session creation owns workspace get/create, session row insertion, root `session.start` event insertion, root/head updates, and counter initialization in one event-store boundary. |
+| Append ordering and payload refs | `session_event_store` / `shared_storage` | Appends acquire the session lock, derive `MAX(sequence) + 1`, enforce `UNIQUE(session_id, sequence)`, store large payloads as shared-storage refs, and update session head/counters atomically. |
+| Forked ancestor history | `session_event_store` | Fork creates a child session row and `session.fork` root event parented to the source event; reconstruction follows the ordered cross-session ancestor chain without copying source-session truth. |
+| End/archive/unarchive/delete | `session_event_store` / `session_lifecycle` | End appends `session.end`; archive sets `ended_at`; unarchive clears `ended_at`; delete is the only physical event-row cleanup path and is session-scoped. |
+| Append-only message deletion | `session_event_store` | Individual message deletion appends a `message.deleted` event; the unused physical `EventRepo::delete(event_id)` helper and test were removed. |
+| Reconstruction and query | `session_event_store` / `session_query` | Resume/list/state/history/export read event-store rows, capped ancestor pagination, blob-backed payload refs, in-flight state, message previews, and ordered `tron.session.v1` event payloads. |
+| Replay manifest overlap | `session_replay` | Replay manifests are byte-stable over durable session sections; SOL-9 owns broader observability and recovery evidence. |
+
 Non-source state surfaces covered by SOL-1:
 
 - `README.md`
@@ -118,6 +133,7 @@ Non-source state surfaces covered by SOL-1:
 | Surface | Current classification | Owner | Lifecycle note | SOL rows |
 |---|---|---|---|---|
 | `SessionManager::plan_mode` | deleted dead state | none accepted | `DashMap<String, bool>` had only local setter/getter references and was removed in SOL-4. | SOL-4 |
+| `EventRepo::delete(event_id)` | deleted dead state | none accepted | Single-event physical delete was repository-only dead code and conflicted with append-only event ownership; SOL-6 removed it and retained only session-scoped delete cleanup. | SOL-6 |
 | Engine compensation records | durable audit substrate | engine authority | Records are appended during invocation and inspectable through the engine host; SOL-5 proved the audit-only lifecycle with the single `recorded` status. Future rollback needs explicit owner/status transitions/tests. | SOL-5 |
 | iOS `EventStoreManager` session metadata | projection cache | iOS event persistence | Local counts/head/root are reconstructable local projections and must not override canonical server truth. | SOL-8 |
 | iOS pairing/token stores | local device preference / secret | iOS support composition | Pairing list is device-local; bearer tokens are Keychain secrets keyed by paired server id. | SOL-8 |
@@ -129,6 +145,6 @@ Non-source state surfaces covered by SOL-1:
   contains one of the lifecycle markers enforced by the invariant target.
 - SOL-1 also added rows for script/CI state surfaces and docs-owned state claims
   named by the scorecard.
-- SOL-2 must ensure every TSV row uses exactly one allowed state class.
+- SOL-2 ensures every TSV row uses exactly one allowed state class.
 - Later rows may refine broad rows into narrower lifecycle owners, but active
   rows may not describe closed work as open after SOL-10.

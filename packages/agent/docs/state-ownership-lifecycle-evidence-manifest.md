@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **59/100**
+Current score: **69/100**
 
 Scorecard:
 [`state-ownership-lifecycle-scorecard.md`](state-ownership-lifecycle-scorecard.md)
@@ -17,12 +17,12 @@ and
 | Row | Status | Evidence | Verification | Open loops | Checkpoint |
 |---|---|---|---|---|---|
 | SOL-0 | passed_after_fix | Added the campaign scorecard, evidence manifest, inventory scaffolding, machine-readable TSV header, invariant target, and README living-doc links. The invariant target is intentionally red for later rows until inventory coverage and closeout are complete. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` expected to fail on final-state gates at SOL-0. | SOL-1 through SOL-10 remain open by design. | SOL-0 campaign harness checkpoint |
-| SOL-1 | passed_after_fix | Generated `state-ownership-lifecycle-inventory.tsv` with an initial 476 rows covering every tracked production Rust/Swift file containing SOL lifecycle markers plus README, SOL docs, scripts, and CI workflow state surfaces. Owner pass removed all `unclassified_owner` rows. SOL-4 added two narrower runtime service rows, bringing the active TSV to 478 rows. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory -- --nocapture` -> exit 0, 3 passed. | Later rows refine lifecycle proof for engine substrate, session/event store, settings/auth, iOS local state, and observability. | SOL-1 state inventory checkpoint |
+| SOL-1 | passed_after_fix | Generated `state-ownership-lifecycle-inventory.tsv` with an initial 476 rows covering every tracked production Rust/Swift file containing SOL lifecycle markers plus README, SOL docs, scripts, and CI workflow state surfaces. Owner pass removed all `unclassified_owner` rows. SOL-4 added two narrower runtime service rows and SOL-6 added the session lifecycle module contract row, bringing the active TSV to 479 rows. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory -- --nocapture` -> exit 0, 3 passed. | Later rows refine lifecycle proof for engine substrate, session/event store, settings/auth, iOS local state, and observability. | SOL-1 state inventory checkpoint |
 | SOL-2 | passed_after_fix | Added and passed owner-scoped truth taxonomy guards over the TSV: allowed classes are documented; `unclassified_owner` is rejected; iOS/script/CI/docs rows cannot claim canonical server truth; canonical truth is restricted to session event-store, settings profile, and shared profile owners; secret rows are restricted to auth/Keychain/token owners; local device preferences remain iOS-local. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_truth_taxonomy -- --nocapture` -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory_rows_are_structured_and_classified -- --nocapture` -> exit 0. | Later rows prove lifecycle behavior behind each classified owner. | SOL-2 truth taxonomy checkpoint |
 | SOL-3 | passed_after_fix | Source-backed bootstrap lifecycle proof now covers directories, bearer-token materialization, canonical DB policy, generation archive, process flock, integrity check, migrations, shared storage schema, logging, startup retention/size-budget maintenance, engine host durable catalog hydration, domain/worker registration, crash-journal recovery, background task registration, bind, graceful shutdown, log flush, and final checkpoint. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_server_bootstrap_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation targets listed in the SOL-3 evidence section passed. | Later rows prove steady-state runtime tasks, engine substrate, sessions, settings/auth, iOS state, and observability. | SOL-3 server bootstrap lifecycle checkpoint |
 | SOL-4 | passed_after_fix | Deleted dead `SessionManager::plan_mode` state and added source-backed runtime lifecycle proof for active-session cache flags, run/retain RAII guards, sequence/compaction cleanup, invocation abort guards, capability pending cleanup, shutdown task registry, blocking supervisor drain, runtime service cancellation, and app bootstrap task registration. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_runtime_task_memory_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-4 evidence passed. | No SOL-4 open loops; later rows prove durable engine substrate, sessions, settings/auth, iOS local state, observability, and final closeout. | SOL-4 runtime task and memory lifecycle checkpoint |
 | SOL-5 | passed_after_fix | Added source-backed durable substrate proof for the engine ledger, idempotency rows, queues, streams, resource versions, grants, leases, audit-only compensation records, state store revisions, payload refs, retention, checkpoint, export, and SQLite/in-memory primitive store bundles. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_engine_durable_substrate_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-5 evidence passed. | No SOL-5 open loops; later rows prove session/event-store lifecycle, settings/auth/secrets, iOS local/projection state, observability, and final closeout. | SOL-5 engine durable substrate lifecycle checkpoint |
-| SOL-6 | pending | Not started. | Not run. | Session/event-store lifecycle proof remains. | pending |
+| SOL-6 | passed_after_fix | Removed dead single-event physical deletion and added source-backed session/event-store lifecycle proof for create, resume, append, fork, end, archive, unarchive, delete, query, reconstruction, export, and session-scoped cleanup. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_session_event_store_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-6 evidence passed. | No SOL-6 open loops; later rows prove settings/auth/secrets, iOS projection/local state, observability, and final closeout. | SOL-6 session event-store lifecycle checkpoint |
 | SOL-7 | pending | Not started. | Not run. | Settings/auth/secrets lifecycle proof remains. | pending |
 | SOL-8 | pending | Not started. | Not run. | iOS projection/local state lifecycle proof remains. | pending |
 | SOL-9 | pending | Not started. | Not run. | Observability/recovery evidence remains. | pending |
@@ -55,10 +55,10 @@ Initial red findings captured in the scorecard:
 
 Inventory coverage:
 
-- Total TSV rows: 478. SOL-1 generated 476 initial rows; SOL-4 added explicit
+- Total TSV rows: 479. SOL-1 generated 476 initial rows; SOL-4 added explicit
   runtime-service rows for queue-drainer and worker-heartbeat cancellation
-  ownership.
-- State class counts: `ephemeral_runtime` 262, `projection_cache` 71,
+  ownership, and SOL-6 added the session lifecycle module contract row.
+- State class counts: `ephemeral_runtime` 262, `projection_cache` 72,
   `durable_substrate` 68, `canonical_truth` 41, `secret` 16,
   `diagnostic_buffer` 11, `local_device_preference` 9.
 - Required non-Rust/Swift surfaces are covered: `README.md`,
@@ -167,6 +167,47 @@ Engine durable substrate lifecycle proof:
   resource types, and exposes them through `EngineHost` instead of direct
   external callers.
 
+## SOL-6 Evidence
+
+Session/event-store lifecycle proof:
+
+- Removed the unused `EventRepo::delete(event_id)` path and its repository-only
+  test. Event rows are append-only except for `EventStore::delete_session`,
+  which performs session-scoped physical cleanup after the owning session is
+  explicitly deleted. Individual message deletion remains represented by a
+  `message.deleted` event.
+- Session creation is source-backed by a single event-store transaction:
+  workspace get/create, session row creation, root `session.start` event,
+  session root/head updates, and token/cost counter initialization.
+- Append lifecycle is guarded by the event-store append lock, derives the next
+  per-session sequence from `SELECT MAX(sequence) + 1`, enforces
+  `UNIQUE(session_id, sequence)`, stores large payloads through shared-storage
+  payload refs, and updates session head/counters in the same owner boundary.
+- Fork lifecycle creates a child session row, appends a `session.fork` root
+  event parented to the chosen source event, initializes the child runtime
+  sequence counter, and reconstructs ancestor history through the ordered
+  cross-session chain owned by the event store.
+- End, archive, unarchive, and delete are explicit session lifecycle paths:
+  end appends `session.end`; archive sets `ended_at`; unarchive clears
+  `ended_at`; delete removes the active cache entry, clears sequence and
+  compaction projections, emits `SessionDeleted`, and calls session-scoped
+  event-store cleanup.
+- Runtime session-manager state is a reconstructable projection over event-store
+  truth. Active sessions insert on create/resume/fork, remove on end/delete,
+  idle eviction skips processing sessions, and resume rebuilds missing cache
+  entries from stored session state.
+- Query, reconstruction, and export paths remain event-store owned: resume/list
+  read session rows and previews, state reconstruction resolves blob-backed
+  payload refs, pagination is capped, fork-inherited ancestors stay owned by
+  their source sessions, in-flight state is rebuilt from event data, and export
+  emits ordered `tron.session.v1` event payloads.
+- Progressive disclosure docs now state the session ownership rules in
+  `domains/session/lifecycle`, `domains/session/event_store`, and
+  `domains/session/event_store/store/event_store`: archive/unarchive is
+  reversible row state, message deletion is append-only, projection cleanup is
+  reconstructable, and physical event deletion is valid only inside
+  `delete_session`.
+
 ## Verification Log
 
 - SOL-0 harness proof:
@@ -236,6 +277,24 @@ Engine durable substrate lifecycle proof:
 - SOL-5 current full-target status:
   `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
   -> exit 101, with 14 passing gates and 1 expected remaining failure:
+  `final_closeout_is_complete`.
+- SOL-6 static source-backed verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_session_event_store_lifecycle_is_source_backed -- --nocapture`
+  -> exit 0.
+- SOL-6 implementation verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml session_manager --lib -- --nocapture`
+  -> exit 0, 26 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::store::event_store --lib -- --nocapture`
+  -> exit 0, 96 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::sqlite::repositories::event --lib -- --nocapture`
+  -> exit 0, 72 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::sqlite::repositories::session --lib -- --nocapture`
+  -> exit 0, 30 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::lifecycle --lib -- --nocapture`
+  -> exit 0, 9 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::query --lib -- --nocapture`
+  -> exit 0, 5 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::reconstruction --lib -- --nocapture`
+  -> exit 0, 9 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::replay --lib -- --nocapture`
+  -> exit 0, 2 passed; `cargo test --manifest-path packages/agent/Cargo.toml --test integration session_create_reconstruct_and_execute_observe_stay_on_primitive_surface -- --nocapture`
+  -> exit 0, 1 passed.
+- SOL-6 current full-target status:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
+  -> exit 101, with 15 passing gates and 1 expected remaining failure:
   `final_closeout_is_complete`.
 
 ## Residual Risk Log

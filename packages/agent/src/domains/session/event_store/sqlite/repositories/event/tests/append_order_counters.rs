@@ -348,19 +348,6 @@ fn exists_event() {
 }
 
 #[test]
-fn delete_event() {
-    let conn = setup();
-    EventRepo::insert(
-        &conn,
-        &make_event("evt_1", 1, EventType::SessionStart, None, json!({})),
-    )
-    .unwrap();
-
-    assert!(EventRepo::delete(&conn, "evt_1").unwrap());
-    assert!(!EventRepo::exists(&conn, "evt_1").unwrap());
-}
-
-#[test]
 fn delete_by_session() {
     let conn = setup();
     for i in 1..=3 {
