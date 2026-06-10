@@ -103,12 +103,29 @@ fn csd_invariant_target_is_in_closeout_ci_lists() {
     for (path, required) in [
         ("scripts/tron.d/quality.sh", target),
         (".github/workflows/ci.yml", target),
-        ("README.md", "PET/PCC/HRA/AHA/PAC/CSD invariants"),
     ] {
         let source = read_repo_file(path);
         assert!(
             source.contains(required),
             "{path} must list the CSD invariant target in closeout CI documentation"
+        );
+    }
+
+    let readme = read_repo_file("README.md");
+    for required in [
+        "primitive_engine_teardown_plan_invariants",
+        "determinism_replayability_invariants",
+        "primitive_code_cleanup_invariants",
+        "hierarchical_rearchitecture_invariants",
+        "post_hra_adversarial_hardening_invariants",
+        "post_aha_adversarial_closeout_invariants",
+        target,
+        "primitive_trace_execution",
+        "serial `integration`",
+    ] {
+        assert!(
+            readme.contains(required),
+            "README closeout CI documentation missing target: {required}"
         );
     }
 }

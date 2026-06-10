@@ -1332,11 +1332,15 @@ tron ci fmt check            # Subset: formatting + compilation
 tron ci clippy test          # Subset: linting + tests
 ```
 
-`tron ci test` runs Rust lib/bin tests first, then the named closeout targets
-(`db_path_guard`, PET/PCC/HRA/AHA/PAC/CSD invariants,
-`primitive_trace_execution`, and serial `integration`). GitHub's Rust
-static-gates job runs the same named target set for docs, template, iOS, Mac,
-script, and CI changes.
+`tron ci test` runs Rust lib/bin tests first, then the named closeout targets:
+`db_path_guard`, `primitive_engine_teardown_plan_invariants`,
+`determinism_replayability_invariants`, `primitive_code_cleanup_invariants`,
+`hierarchical_rearchitecture_invariants`,
+`post_hra_adversarial_hardening_invariants`,
+`post_aha_adversarial_closeout_invariants`,
+`concurrency_scheduling_discipline_invariants`, `primitive_trace_execution`,
+and serial `integration`. GitHub's Rust static-gates job runs the same named
+target set for docs, template, iOS, Mac, script, and CI changes.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

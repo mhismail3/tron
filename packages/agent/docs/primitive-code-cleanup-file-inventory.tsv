@@ -1529,3 +1529,12 @@ packages/agent/tests/state_ownership_lifecycle/scorecard_inventory.rs	retain	sol
 packages/agent/tests/state_ownership_lifecycle/session_event_store.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle session event-store invariant module retained after final closeout.
 packages/agent/tests/state_ownership_lifecycle/settings_auth.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle settings/auth invariant module retained after final closeout.
 packages/agent/tests/state_ownership_lifecycle/support.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle invariant test support retained after final closeout.
+packages/agent/docs/concurrency-scheduling-discipline-evidence-manifest.md	retain	csd docs	CSD-10	Current Concurrency Scheduling Discipline evidence manifest retained after final closeout.
+packages/agent/docs/concurrency-scheduling-discipline-inventory.md	retain	csd docs	CSD-10	Current Concurrency Scheduling Discipline inventory retained after final closeout.
+packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv	retain	csd docs	CSD-10	Current Concurrency Scheduling Discipline machine-readable inventory retained after final closeout.
+packages/agent/docs/concurrency-scheduling-discipline-scorecard.md	retain	csd docs	CSD-10	Current Concurrency Scheduling Discipline scorecard retained after final closeout.
+packages/agent/tests/concurrency_scheduling_discipline/mod.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline invariant module registry retained after final closeout.
+packages/agent/tests/concurrency_scheduling_discipline/scorecard_inventory.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline scorecard/inventory invariant module retained after final closeout.
+packages/agent/tests/concurrency_scheduling_discipline/static_guards.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline static guard module retained after final closeout.
+packages/agent/tests/concurrency_scheduling_discipline/support.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline invariant test support retained after final closeout.
+packages/agent/tests/concurrency_scheduling_discipline_invariants.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline invariant target retained after final closeout.

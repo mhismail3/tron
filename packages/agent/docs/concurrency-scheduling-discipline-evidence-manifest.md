@@ -39,6 +39,12 @@ and
 | First `scripts/tron ci fmt check clippy test` closeout attempt | exit 1 | CI caught missing DRC-9 replay parity wording in iOS architecture docs after the CSD doc update. The DRC wording was restored in the same checkpoint. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 0 | DRC replay manifest/event parity target passed after the architecture doc fix: 17 passed. |
 | Final `scripts/tron ci fmt check clippy test` | exit 0 | Formatting, check, clippy, workspace tests, named closeout targets including CSD, primitive trace, and serial integration all passed. |
+| CSD closeout remediation `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | PCC tracked-file inventory coverage passed after adding retain rows for all CSD artifacts. |
+| CSD closeout remediation `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 101 | The CSD guard still expected the old README abbreviation list; the guard was updated to assert the concrete closeout target names. |
+| CSD closeout remediation `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | CSD invariant target passed with the README precision fix and updated static assertion. |
+| CSD closeout remediation `scripts/tron ci fmt check clippy test` rerun | exit 1 | CI then caught missing HRA file-inventory and ownership-map rows for the new CSD artifacts; matching CSD-10 rows were added to both HRA TSVs. |
+| CSD closeout remediation `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | HRA tracked-file ownership coverage passed after adding CSD rows to both HRA inventories. |
+| CSD closeout remediation `scripts/tron ci fmt check clippy test` rerun | exit 0 | Reran after adding CSD artifacts to PCC and HRA inventories, tightening README closeout-target wording, and updating the CSD static guard. |
 | `scripts/personal-info-guard.sh` | exit 0 | Full personal-info scan reported no source leaks. |
 | `cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj` | exit 0 | XcodeGen produced no tracked project drift. |
 | `git diff --check` | exit 0 | Whitespace check passed. |
