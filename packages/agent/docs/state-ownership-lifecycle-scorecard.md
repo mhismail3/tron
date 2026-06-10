@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **93/100**
+Current score: **97/100**
 
 Status: **active**
 
@@ -66,7 +66,7 @@ documented and tested.
 | SOL-6 | Session/event-store lifecycle | 10 | passed_after_fix | session/event store/orchestrator projections | Deleted dead single-event physical delete state; added `sol_session_event_store_lifecycle_is_source_backed`; proved create/resume/fork/archive/unarchive/delete/end, append ordering, active cache eviction and reconstruction, projection cleanup, payload refs, export, and session-scoped cleanup. | No SOL-6 open loops; later rows prove settings/auth/secrets, iOS local/projection state, observability, and final closeout. | SOL-6 session event-store lifecycle checkpoint |
 | SOL-7 | Settings/auth/secrets lifecycle | 10 | passed_after_fix | settings/auth/profile runtime/provider factory | Fixed Google credential refresh to use the same process-local lock, auth-file lock, disk re-read, stale-token retry, and under-lock persistence protocol as Anthropic/OpenAI; tightened all OAuth refresh paths so persistence failures fail refresh instead of falling back to stale durable truth; added `sol_settings_auth_secrets_lifecycle_is_source_backed`; proved sparse settings writes/rollback, profile runtime snapshots, auth.json materialization, bearer-token lifecycle, OAuth pending-flow TTL, canonical auth write boundaries, provider refresh persistence, and ephemeral model-provider auth copies. | No SOL-7 open loops; later rows prove iOS local/projection state, observability/recovery, and final closeout. | SOL-7 settings auth secrets checkpoint |
 | SOL-8 | iOS projection and local state lifecycle | 14 | passed_after_fix | iOS engine/support/session/ui | Removed the production temporary event database and MetricKit temporary-directory production paths; added `sol_ios_projection_local_state_lifecycle_is_source_backed`; proved Documents-backed event projection storage, server-list/event-sync reconstruction, stream cursor ACK-only state, connection task cleanup, server settings snapshots, pairing/token stores, drafts/history/share handoff, bounded MetricKit diagnostics, SourceGuard/TPC gates, and architecture docs. | No SOL-8 open loops; later rows prove observability/recovery evidence and final closeout. | SOL-8 iOS projection/local state checkpoint |
-| SOL-9 | Observability/recovery evidence | 4 | pending | health/logs/recovery | Not started. | Health/deep status, logs, storage stats, retention runs, replay manifests, and shutdown drain visibility need evidence. | pending |
+| SOL-9 | Observability/recovery evidence | 4 | passed_after_fix | health/logs/recovery | Added `sol_observability_recovery_lifecycle_is_source_backed`; proved health/deep/metrics routing, deep-health owner checks, SQLite-backed logs, bounded `log_recent`, logs domain ingestion/query contracts, storage stats/checkpoint/export/retention audit rows, replay manifests, crash-journal recovery evidence, and shutdown drain/callback metrics. | No SOL-9 open loops; SOL-10 final closeout remains. | SOL-9 observability/recovery checkpoint |
 | SOL-10 | Final closeout | 3 | pending | static gates/verification | Not started. | Stale wording guards, unclassified-state scan, orphan task/map scan, full verification, and clean worktree proof remain. | pending |
 
 Total weight: **100**
@@ -91,6 +91,9 @@ Total weight: **100**
   Documents-backed event projection DB. SOL-8 proved explicit
   local/projection classification and removed temporary production substrate
   paths.
+- Observability and recovery are not separate truth owners. SOL-9 proved they
+  expose owner-backed diagnostics over health, metrics, logs, storage
+  maintenance, replay, crash-recovery, and shutdown drain paths.
 
 ## Static Gates
 
@@ -110,6 +113,9 @@ Total weight: **100**
 - iOS event DB, drafts, cursors, pairing, Keychain tokens, diagnostics, and
   pending share content are documented as projections/local state, never server
   truth.
+- Observability and recovery surfaces are source-backed by health/deep checks,
+  durable logs, storage stats/maintenance audit rows, replay manifests, and
+  shutdown drain metrics.
 - Active campaign docs reject stale open-loop wording after closeout.
 
 ## Verification Commands
@@ -153,6 +159,14 @@ cargo test --manifest-path packages/agent/Cargo.toml profile_runtime --lib -- --
 cargo test --manifest-path packages/agent/Cargo.toml app::lifecycle::onboarding --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml transport::http::auth --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml domains::model::providers::factory --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution execute_replay_manifest_is_read_only_and_does_not_create_trace_record -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution execute_log_recent_exposes_bounded_session_trace_logs -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml app::health --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml shared::observability --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml shared::storage --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml domains::session::replay --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml recovery --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml app::lifecycle::shutdown --lib -- --nocapture
 ```
 
 iOS focused targets:

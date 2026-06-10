@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **93/100**
+Current score: **97/100**
 
 Scorecard:
 [`state-ownership-lifecycle-scorecard.md`](state-ownership-lifecycle-scorecard.md)
@@ -25,7 +25,7 @@ and
 | SOL-6 | passed_after_fix | Removed dead single-event physical deletion and added source-backed session/event-store lifecycle proof for create, resume, append, fork, end, archive, unarchive, delete, query, reconstruction, export, and session-scoped cleanup. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_session_event_store_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-6 evidence passed. | No SOL-6 open loops; later rows prove settings/auth/secrets, iOS projection/local state, observability, and final closeout. | SOL-6 session event-store lifecycle checkpoint |
 | SOL-7 | passed_after_fix | Fixed Google credential refresh so persisted tokens are updated only after the refresh path acquires the process-local refresh mutex, auth file lock, and fresh disk snapshot; tightened all OAuth refresh paths so persistence failures fail refresh instead of falling back to stale durable truth; added source-backed proof for sparse settings writes/rollback, profile runtime snapshots, auth.json materialization, bearer-token lifecycle, OAuth pending-flow TTL, canonical auth write boundaries, provider refresh persistence, and ephemeral model-provider auth copies. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_settings_auth_secrets_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-7 evidence passed. | No SOL-7 open loops; later rows prove iOS projection/local state, observability/recovery, and final closeout. | SOL-7 settings auth secrets checkpoint |
 | SOL-8 | passed_after_fix | Removed production temporary event-database and MetricKit temporary-directory paths; added source-backed proof for iOS projection/local owners, including Documents-backed event cache, server-sync reconstruction, ACK-only stream cursors, connection task cleanup, settings snapshots, paired-server preferences, Keychain tokens, drafts/history/share handoff, bounded diagnostics, SourceGuard/TPC regression gates, and architecture docs. | Focused Rust SOL gates, TPC guard, XcodeGen, and the combined iOS SOL-8 target pass; see SOL-8 verification log below for exact commands. | No SOL-8 open loops; later rows prove observability/recovery and final closeout. | SOL-8 iOS projection/local state checkpoint |
-| SOL-9 | pending | Not started. | Not run. | Observability/recovery evidence remains. | pending |
+| SOL-9 | passed_after_fix | Added source-backed proof for health/deep/metrics routing, deep-health owner checks, SQLite-backed logging, logs ingestion/query contracts, bounded `log_recent`, storage stats/checkpoint/export/retention audit rows, replay manifests, crash-journal recovery, and shutdown drain/callback metrics. Existing inventory rows for these surfaces are now SOL-9-tagged. | Focused SOL-9 static gate and implementation filters passed; see SOL-9 verification log below for exact commands. | No SOL-9 open loops; SOL-10 final closeout remains. | SOL-9 observability/recovery checkpoint |
 | SOL-10 | pending | Not started. | Not run. | Final verification and clean worktree proof remain. | pending |
 
 ## SOL-0 Evidence
@@ -298,6 +298,38 @@ iOS projection and local-state lifecycle proof:
   secrets, and diagnostic buffers, not canonical server truth. The SOL
   inventory includes the doc-owned state claim as a SOL-8 row.
 
+## SOL-9 Evidence
+
+Observability and recovery evidence proof:
+
+- `TronServer::router` exposes `/health`, `/health/deep`, and `/metrics`.
+  Health reads live connection/session counters; deep health executes
+  database, settings, auth, binary, and disk checks through owner boundaries;
+  metrics renders the installed Prometheus recorder.
+- SQLite-backed logging remains owned by `shared_observability`: the subscriber
+  installs `SqliteTransport`, batches entries, flushes warn/error entries
+  immediately, persists batches transactionally to `logs`, and exposes a flush
+  handle for shutdown.
+- `logs::ingest`, `logs::recent`, and execute `log_recent` all pass through the
+  event-store owner boundary. Ingestion is bounded, truncates oversized client
+  messages, deduplicates via `INSERT OR IGNORE`, and recent-log reads are
+  bounded and session/trace scoped.
+- Storage evidence is owned by `shared_storage` and exposed through engine
+  primitives: `storage::stats` reports table/payload-owner/unowned-blob/expired
+  ref data; checkpoint/export/retention writes `storage_checkpoints`,
+  `storage_exports`, and `storage_retention_runs` audit rows while pruning only
+  eligible diagnostics, expired refs, and unowned blobs.
+- `replay_manifest` is a read-only audit projection: it requires a current
+  session, reads event-store rows, resolved payload refs, trace records, and
+  engine replay snapshots, then emits `tron.replay.v1` section hashes and a
+  replay hash. Regression tests prove it does not create trace records.
+- Crash recovery scans orphaned streaming journals on startup, appends recovered
+  partial output through the session event store, deletes recovered journals,
+  and logs the recovery outcome before service bind.
+- `ShutdownCoordinator` exposes drain visibility through registered-task
+  gauges/counters, callback duration/panic/timeout metrics, drain duration
+  histograms, timeout counters, abort counts, and remaining-task warnings.
+
 ## Verification Log
 
 - SOL-0 harness proof:
@@ -424,6 +456,23 @@ iOS projection and local-state lifecycle proof:
 - SOL-8 current full-target status:
   `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
   -> exit 101, with 17 passing gates and 1 expected remaining failure:
+  `final_closeout_is_complete`.
+- SOL-9 static source-backed verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_observability_recovery_lifecycle_is_source_backed -- --nocapture`
+  -> exit 0.
+- SOL-9 implementation verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml app::health --lib -- --nocapture`
+  -> exit 0, 15 passed; `cargo test --manifest-path packages/agent/Cargo.toml shared::observability --lib -- --nocapture`
+  -> exit 0, 29 passed; `cargo test --manifest-path packages/agent/Cargo.toml shared::storage --lib -- --nocapture`
+  -> exit 0, 6 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::replay --lib -- --nocapture`
+  -> exit 0, 2 passed; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution execute_replay_manifest_is_read_only_and_does_not_create_trace_record -- --nocapture`
+  -> exit 0, 1 passed; `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution execute_log_recent_exposes_bounded_session_trace_logs -- --nocapture`
+  -> exit 0, 1 passed; `cargo test --manifest-path packages/agent/Cargo.toml recovery --lib -- --nocapture`
+  -> exit 0, 8 passed; `cargo test --manifest-path packages/agent/Cargo.toml app::lifecycle::shutdown --lib -- --nocapture`
+  -> exit 0, 21 passed.
+- SOL-9 current full-target status:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
+  -> exit 101, with 18 passing gates and 1 expected remaining failure:
   `final_closeout_is_complete`.
 
 ## Residual Risk Log

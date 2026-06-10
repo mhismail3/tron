@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-8 `passed_after_fix`; 480 state-surface rows inventoried and classified.
+Status: SOL-9 `passed_after_fix`; 480 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -29,7 +29,9 @@ file containing one of the SOL lifecycle markers, plus the required script/CI
 and docs-owned state claim rows. SOL-1 generated 476 initial rows; SOL-4 added
 two narrower runtime-service rows for queue-drainer and worker-heartbeat
 cancellation ownership, SOL-6 added the session lifecycle module contract row,
-and SOL-8 added the iOS architecture state-ownership doc row.
+SOL-8 added the iOS architecture state-ownership doc row, and SOL-9 tagged the
+already-inventoried observability/recovery rows for health, logs, storage
+maintenance, replay, crash recovery, and shutdown drain visibility.
 
 State class distribution:
 
@@ -144,6 +146,18 @@ The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
 | MetricKit diagnostics | `ios_diagnostics` | MetricKit payloads live in Application Support behind an `NSLock`, are written atomically, and are pruned by age, file count, and total bytes before diagnostics bundle inclusion. |
 | iOS architecture docs | `project_docs` | `packages/ios-app/docs/architecture.md` records that iOS owns projections, local device preferences, Keychain secrets, and diagnostic buffers, never canonical server truth. |
 
+## SOL-9 Observability And Recovery Lifecycle Proof
+
+| Surface | Owner | Lifecycle proof |
+|---|---|---|
+| Health/deep health/metrics routes | `app_bootstrap` / `app_health` | `TronServer::router` exposes `/health`, `/health/deep`, and `/metrics`. Health reads live connection/session counters, deep health runs database/settings/auth/binary/disk checks through owner facades, and metrics render the installed Prometheus recorder. |
+| SQLite log transport | `shared_observability` | `init_subscriber_with_sqlite` installs a batching `SqliteTransport`, exposes a flush handle, flushes warn/error entries immediately, writes batches transactionally into `logs`, and the bootstrap shutdown path aborts the periodic task after a final flush. |
+| Logs capabilities | `logs_domain` / `session_event_store` | `logs::ingest` is append-only and idempotent through the engine ledger, stores client logs via `EventStore::ingest_client_logs`, caps batch and message size, deduplicates rows with `INSERT OR IGNORE`, and `logs::recent`/`log_recent` read bounded scoped evidence through `list_recent_logs`. |
+| Storage stats and maintenance | `shared_storage` / `engine_primitives` | `storage::stats` is pure read over table and payload-owner statistics. Checkpoint, export, and retention are engine-authorized storage primitives that record `storage_checkpoints`, `storage_exports`, and `storage_retention_runs` audit rows while pruning only retention-eligible diagnostics/expired refs/unowned blobs. |
+| Replay manifests | `session_replay` | `replay_manifest` requires the current session, reads event-store rows, resolved payload refs, trace records, and engine replay snapshots, computes stable section hashes plus a replay hash, and regression tests prove it does not create trace records. |
+| Crash recovery | `agent_orchestrator` | Startup recovery scans orphaned streaming journals, appends recovered partial output through the session event store, deletes recovered journals, and logs recovery outcomes before the server accepts traffic. |
+| Shutdown drain visibility | `app_lifecycle` | `ShutdownCoordinator` tracks registered task counts, rejects late tasks, runs phase callbacks with timeout/panic metrics, records drain duration and timeout counters, aborts slow tasks, and reports any post-abort remaining task count. |
+
 Non-source state surfaces covered by SOL-1:
 
 - `README.md`
@@ -167,6 +181,7 @@ Non-source state surfaces covered by SOL-1:
 | iOS `EventStoreManager` session metadata | projection cache | iOS event persistence | Local counts/head/root are reconstructable local projections and must not override canonical server truth. | SOL-8 |
 | iOS pairing/token stores | local device preference / secret | iOS support composition | Pairing list is device-local; bearer tokens are Keychain secrets keyed by paired server id. | SOL-8 |
 | iOS drafts/history/share/diagnostics | local device preference / projection / diagnostic buffer | iOS support/session | Drafts and pending share are local user workflow state; diagnostics are observation buffers. | SOL-8 |
+| Health/log/storage/replay/shutdown evidence | diagnostic buffer / durable substrate / projection cache | app health, shared observability/storage, logs domain, session replay, app lifecycle | SOL-9 proved these surfaces expose owner-backed evidence without creating alternate truth owners. | SOL-9 |
 
 ## Coverage Rules
 
