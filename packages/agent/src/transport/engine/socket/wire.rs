@@ -1,7 +1,6 @@
 //! JSON wire DTOs and validation helpers for `/engine` messages.
 
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
@@ -38,10 +37,6 @@ pub(super) struct WireContext {
     pub(super) trace_id: Option<String>,
     #[serde(default)]
     pub(super) parent_invocation_id: Option<String>,
-    #[serde(default)]
-    pub(super) authority_scopes: Vec<String>,
-    #[serde(default)]
-    pub(super) runtime_metadata: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]

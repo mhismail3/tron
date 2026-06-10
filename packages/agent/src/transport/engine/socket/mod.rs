@@ -3,9 +3,11 @@
 //! This module owns only WebSocket framing, protocol validation, correlation
 //! ids, heartbeat, and stream cursor subscription state. Worker/client
 //! discover/inspect/watch/invoke/promote messages are translated into
-//! [`crate::transport::engine::EngineTransportRequest`] and then dispatched through the canonical engine
-//! transport path. Model providers do not receive this transport surface; they
-//! receive only the capability-domain `execute` orchestrator.
+//! [`crate::transport::engine::EngineTransportRequest`] and then dispatched
+//! through the canonical engine transport path. Public context is limited to
+//! session/workspace/trace correlation; authority scopes and runtime metadata
+//! are not accepted on the wire. Model providers do not receive this transport
+//! surface; they receive only the capability-domain `execute` orchestrator.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -412,8 +414,6 @@ impl EngineWsSession {
             workspace_id: override_context.workspace_id.or(hello.workspace_id),
             trace_id: override_context.trace_id,
             parent_invocation_id: override_context.parent_invocation_id,
-            authority_scopes: override_context.authority_scopes,
-            runtime_metadata: override_context.runtime_metadata,
         }
     }
 

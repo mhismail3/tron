@@ -617,10 +617,11 @@ Engine protocol messages are JSON objects with a `type`, optional correlation
 idempotency key. Message ids are correlation ids only.
 
 When test clients invoke `capability::execute` directly, the transport dispatches
-it as the agent actor and passes only the envelope's session, workspace, trace,
-authority scopes, and explicit runtime metadata through to the engine. The
-transport does not derive profile scopes or capability runtime metadata;
-`execute` is the primitive operation boundary.
+it as the agent actor and passes only server-derived session, workspace, trace,
+parent invocation, target-derived authority scopes, and explicit idempotency
+through to the engine. Public wire context does not accept `authorityScopes` or
+`runtimeMetadata`; runtime metadata is reserved for trusted engine and
+agent-owned execution paths. `execute` is the primitive operation boundary.
 
 Hidden functions remain in the engine catalog for internal runtime effects such
 as agent apply/run-turn and prompt-history capture. Normal discovery excludes

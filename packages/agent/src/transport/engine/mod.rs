@@ -7,15 +7,15 @@
 //! explicit idempotency. Protocol message ids stay outside engine semantics as
 //! correlation ids.
 //!
-//! Public transport authority scopes are assembled into a deduped causal scope
-//! list so trace/ledger evidence reflects the authority set, not construction
-//! order artifacts.
+//! Public transports do not accept caller-provided authority scopes or runtime
+//! metadata. Authority scopes are derived from registered transport contracts
+//! and canonical targets; runtime metadata is reserved for trusted engine and
+//! agent-owned execution paths.
 
 pub mod contracts;
 pub mod socket;
 
 use serde_json::Value;
-use std::collections::BTreeMap;
 
 use crate::domains::registration::catalog;
 use crate::domains::registration::catalog::TransportIdempotencyMode;
@@ -38,10 +38,6 @@ pub struct EngineTransportContext {
     pub trace_id: Option<String>,
     /// Parent invocation id.
     pub parent_invocation_id: Option<String>,
-    /// Additional authority scopes explicitly granted by the transport.
-    pub authority_scopes: Vec<String>,
-    /// Engine-internal runtime metadata supplied by trusted clients.
-    pub runtime_metadata: BTreeMap<String, String>,
 }
 
 /// Input used to build a protocol-neutral engine transport envelope.
@@ -107,16 +103,6 @@ pub fn build_engine_transport_request(
     if spec.operation_key.as_str() == "invoke" {
         for scope in target_authority_scopes_for_engine_invoke(&input.params_payload) {
             push_scope_once(&mut causal_context, scope);
-        }
-    }
-    for scope in &input.context.authority_scopes {
-        if !scope.trim().is_empty() {
-            push_scope_once(&mut causal_context, scope.clone());
-        }
-    }
-    for (key, value) in &input.context.runtime_metadata {
-        if !key.trim().is_empty() {
-            causal_context = causal_context.with_runtime_metadata(key.clone(), value.clone());
         }
     }
     if spec.effect_class.is_mutating() {
@@ -301,7 +287,6 @@ fn strip_transport_only_fields(method: &str, mut payload: Value) -> Value {
             let _ = object.remove("workspaceId");
             let _ = object.remove("traceId");
             let _ = object.remove("parentInvocationId");
-            let _ = object.remove("authorityScopes");
         }
     }
     if method == "promote" {
@@ -309,7 +294,6 @@ fn strip_transport_only_fields(method: &str, mut payload: Value) -> Value {
             let _ = object.remove("idempotencyKey");
             let _ = object.remove("traceId");
             let _ = object.remove("parentInvocationId");
-            let _ = object.remove("authorityScopes");
         }
     }
     payload
@@ -325,7 +309,6 @@ fn extract_string(payload: &Value, key: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use serde_json::json;
-    use std::collections::BTreeMap;
 
     use super::*;
 
@@ -365,9 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn transport_context_runtime_metadata_reaches_causal_context() {
-        let mut runtime_metadata = BTreeMap::new();
-        let _ = runtime_metadata.insert("runtime.trace".to_owned(), "ui-shell".to_owned());
+    fn public_transport_context_cannot_inject_runtime_metadata() {
         let envelope = build_engine_transport_request(EngineTransportBuildRequest {
             correlation_id: "request-1".to_owned(),
             public_method: "invoke".to_owned(),
@@ -375,17 +356,11 @@ mod tests {
                 "functionId": "capability::execute",
                 "payload": {"operation": "observe", "input": {"text": "read file"}}
             }),
-            context: EngineTransportContext {
-                runtime_metadata,
-                ..EngineTransportContext::default()
-            },
+            context: EngineTransportContext::default(),
         })
         .expect("transport envelope builds")
         .expect("invoke maps to engine transport");
 
-        assert_eq!(
-            envelope.causal_context.runtime_metadata("runtime.trace"),
-            Some("ui-shell")
-        );
+        assert!(envelope.causal_context.runtime_metadata.is_empty());
     }
 }

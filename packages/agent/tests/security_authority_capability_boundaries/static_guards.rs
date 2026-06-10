@@ -80,3 +80,46 @@ fn sacb_public_engine_routes_stay_bearer_gated_and_workers_loopback_only() {
         );
     }
 }
+
+#[test]
+fn sacb_public_engine_context_rejects_authority_and_runtime_metadata() {
+    let wire = read_repo_file("packages/agent/src/transport/engine/socket/wire.rs");
+    for forbidden in ["authority_scopes", "runtime_metadata"] {
+        assert!(
+            !wire.contains(forbidden),
+            "public WireContext must not deserialize {forbidden}"
+        );
+    }
+    assert!(
+        wire.contains("#[serde(rename_all = \"camelCase\", deny_unknown_fields)]"),
+        "public WireContext must continue denying unknown context fields"
+    );
+
+    let transport = read_repo_file("packages/agent/src/transport/engine/mod.rs");
+    for forbidden in [
+        "pub authority_scopes:",
+        "pub runtime_metadata:",
+        "input.context.authority_scopes",
+        "input.context.runtime_metadata",
+        "with_runtime_metadata(key.clone(), value.clone())",
+        "remove(\"authorityScopes\")",
+    ] {
+        assert!(
+            !transport.contains(forbidden),
+            "public EngineTransportContext must not accept or copy {forbidden}"
+        );
+    }
+    for required in [
+        "Public transports do not accept caller-provided authority scopes or runtime",
+        "pub session_id: Option<String>",
+        "pub workspace_id: Option<String>",
+        "pub trace_id: Option<String>",
+        "pub parent_invocation_id: Option<String>",
+        "target_authority_scopes_for_engine_invoke(&input.params_payload)",
+    ] {
+        assert!(
+            transport.contains(required),
+            "public transport context boundary missing required text: {required}"
+        );
+    }
+}

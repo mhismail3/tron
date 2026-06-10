@@ -37,7 +37,7 @@ async fn hello_sets_defaults() {
 }
 
 #[test]
-fn invoke_message_maps_to_engine_invoke_payload() {
+fn invoke_message_maps_to_engine_invoke_payload_context() {
     let value = json!({
         "type": "invoke",
         "id": "i1",
@@ -47,18 +47,40 @@ fn invoke_message_maps_to_engine_invoke_payload() {
         "context": {
             "sessionId": "s1",
             "traceId": "trace-1",
-            "authorityScopes": ["system.read"],
-            "runtimeMetadata": {"agent.runId": "run-1"}
+            "parentInvocationId": "019eb0c4-b406-7d54-83bb-d32f6a4a7a5a"
         }
     });
     let message: InvokeMessage = serde_json::from_value(value).unwrap();
     assert_eq!(message.function_id, "system::ping");
     let context = message.context.unwrap();
-    assert_eq!(context.authority_scopes, vec!["system.read".to_owned()]);
+    assert_eq!(context.session_id.as_deref(), Some("s1"));
+    assert_eq!(context.trace_id.as_deref(), Some("trace-1"));
     assert_eq!(
-        context.runtime_metadata.get("agent.runId"),
-        Some(&"run-1".to_owned())
+        context.parent_invocation_id.as_deref(),
+        Some("019eb0c4-b406-7d54-83bb-d32f6a4a7a5a")
     );
+}
+
+#[test]
+fn invoke_message_rejects_authority_and_runtime_metadata_context() {
+    for forbidden in [
+        json!({"authorityScopes": ["system.read"]}),
+        json!({"runtimeMetadata": {"agent.runId": "run-1"}}),
+    ] {
+        let value = json!({
+            "type": "invoke",
+            "id": "i1",
+            "functionId": "system::ping",
+            "payload": {"protocolVersion": 1},
+            "context": forbidden
+        });
+        let error = serde_json::from_value::<InvokeMessage>(value)
+            .expect_err("public context authority/runtime metadata must be rejected");
+        assert!(
+            error.to_string().contains("unknown field"),
+            "unexpected context rejection error: {error}"
+        );
+    }
 }
 
 #[test]
