@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-06-10 (SACB-8 diagnostics redaction parity; HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
+> Last verified: 2026-06-10 (SACB-9 pairing lifecycle; SACB-8 diagnostics redaction parity; HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
 
 ## Overview
 
@@ -190,6 +190,10 @@ caches `server.tailscaleIp` into `profiles/user/profile.toml` for future wrapper
 reads and later server settings reloads. If the cache write fails, the freshly
 resolved QR payload still works; settings are cached support state, not a
 prerequisite for first-run pairing.
+The QR/manual payload builder accepts only a bare DNS name, IPv4 address, or
+unbracketed IPv6 address plus a `1...65535` port, mirroring iOS
+`PairingURLParser`; it refuses URL-shaped, path, query, userinfo, bracketed,
+or malformed host values before emitting `tron://pair`.
 
 ### Subsequent launches (menu-bar-only path)
 
@@ -236,10 +240,11 @@ host, port, token, and server name. That window reuses the
 pairing resolver/QR/copy controls without wizard navigation or a progress pill.
 The shared pairing surface resolves live when it opens, showing one centered
 emerald spinner directly on the window background until the complete payload
-and QR code are ready; it keeps the generated QR image in state so the spinner
-can crossfade smoothly into the QR/manual-value containers on a custom timing
-curve. Copy actions quickly swap to a checkmark for two seconds so the user gets
-deterministic visual feedback. "Show logs" opens a native logs window fed by
+and QR code are ready; the same strict QR payload builder used by onboarding
+backs the pairing-only window. It keeps the generated QR image in state so the
+spinner can crossfade smoothly into the QR/manual-value containers on a custom
+timing curve. Copy actions quickly swap to a checkmark for two seconds so the
+user gets deterministic visual feedback. "Show logs" opens a native logs window fed by
 the read-only `logs::recent` engine protocol, with refresh and copy controls.
 The uptime row normalizes raw `ps` elapsed-time strings such as `10:48` to the
 same `HH:MM:SS` format used by the live one-second ticker, so opening the menu

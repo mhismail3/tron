@@ -82,6 +82,25 @@ struct PairingPersistorTests {
         #expect(plan.activeServer.label == "Friend's Mac")
     }
 
+    @Test("plan(): direct payload values are canonicalized before storage")
+    func directPayloadValuesCanonicalized() {
+        let payload = PairingURLParser.PairingPayload(
+            host: "  Studio.Tailnet.Ts.Net.  ",
+            port: 9847,
+            token: "  tok-fresh\n",
+            label: "  Studio Mac  "
+        )
+        let plan = PairingPersistor.plan(
+            payload: payload,
+            existing: [],
+            idGenerator: { "id-canonical" }
+        )
+
+        #expect(plan.activeServer.host == "studio.tailnet.ts.net")
+        #expect(plan.activeServer.label == "Studio Mac")
+        #expect(plan.token == "tok-fresh")
+    }
+
     @Test("plan(): preserves existing servers when adding a new one")
     func preservesExistingServers() {
         let other = PairedServer(id: "p-other", label: "Old", host: "10.0.0.1", port: 9847)
@@ -165,5 +184,39 @@ struct PairingPersistorTests {
         )
         #expect(plan.activeServer.id == "p2")
         #expect(plan.updatedServers.count == 2)
+    }
+
+    // MARK: - Rollback path
+
+    @Test("rollbackPlan(): new-server failure restores previous servers and removes candidate token")
+    func rollbackNewServerRemovesCandidateToken() {
+        let existing = PairedServer(id: "old", label: "Old", host: "100.64.0.1", port: 9847)
+        let rollback = PairingPersistor.rollbackPlan(
+            previousServers: [existing],
+            previousActiveId: existing.id,
+            pairedServerId: "new",
+            previousToken: nil
+        )
+
+        #expect(rollback.servers == [existing])
+        #expect(rollback.activeServerId == existing.id)
+        #expect(rollback.pairedServerId == "new")
+        #expect(rollback.tokenAction == .remove)
+    }
+
+    @Test("rollbackPlan(): re-pair failure restores the old token")
+    func rollbackExistingServerRestoresPreviousToken() {
+        let existing = PairedServer(id: "keep", label: "Studio", host: "100.64.0.1", port: 9847)
+        let rollback = PairingPersistor.rollbackPlan(
+            previousServers: [existing],
+            previousActiveId: existing.id,
+            pairedServerId: existing.id,
+            previousToken: "tok-old"
+        )
+
+        #expect(rollback.servers == [existing])
+        #expect(rollback.activeServerId == existing.id)
+        #expect(rollback.pairedServerId == existing.id)
+        #expect(rollback.tokenAction == .restore("tok-old"))
     }
 }

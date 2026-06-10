@@ -7,6 +7,7 @@ struct ConnectionSettingsPage: View {
 
     @Environment(\.dependencies) private var dependencies
     @State private var serverPendingRemoval: PairedServer?
+    @State private var serverRemovalError: String?
 
     init(
         settingsState: SettingsState,
@@ -31,6 +32,11 @@ struct ConnectionSettingsPage: View {
             Button("Cancel", role: .cancel) {}
         } message: { server in
             Text("Removes \(server.label) from this iPhone. Server settings and sessions on the Mac are unchanged.")
+        }
+        .alert("Could not forget server", isPresented: removalErrorAlertBinding) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(serverRemovalError ?? "The pairing token could not be removed from Keychain.")
         }
     }
 
@@ -383,8 +389,19 @@ struct ConnectionSettingsPage: View {
     }
 
     private func forget(_ server: PairedServer) {
-        _ = dependencies.forgetPairedServer(server)
         serverPendingRemoval = nil
+        do {
+            _ = try dependencies.forgetPairedServer(server)
+        } catch {
+            serverRemovalError = "The pairing token could not be removed from Keychain: \(error.localizedDescription)"
+        }
+    }
+
+    private var removalErrorAlertBinding: Binding<Bool> {
+        Binding(
+            get: { serverRemovalError != nil },
+            set: { if !$0 { serverRemovalError = nil } }
+        )
     }
 
     private var removalAlertBinding: Binding<Bool> {

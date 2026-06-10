@@ -41,5 +41,4 @@ or the SACB invariant target fails.
 
 ## Open Loops
 
-- SACB-9: prove pairing lifecycle and unauthorized flow.
 - SACB-10: run final closeout and remove stale active-state wording.

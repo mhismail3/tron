@@ -29,6 +29,21 @@ enum PairingPersistor {
         let token: String
     }
 
+    /// The token side effect needed when a post-pairing setup read fails.
+    enum RollbackTokenAction: Equatable {
+        case restore(String)
+        case remove
+    }
+
+    /// The side effects needed to restore local pairing state after a commit
+    /// wrote a candidate token and server selection but setup hydration failed.
+    struct RollbackPlan: Equatable {
+        let servers: [PairedServer]
+        let activeServerId: String?
+        let pairedServerId: String
+        let tokenAction: RollbackTokenAction
+    }
+
     /// Compute the side-effect plan for a pairing payload + existing
     /// local server list. Pure — no I/O, deterministic given `idGenerator`.
     static func plan(
@@ -36,8 +51,11 @@ enum PairingPersistor {
         existing: [PairedServer],
         idGenerator: () -> String = { UUID().uuidString }
     ) -> Plan {
-        let host = payload.host
+        guard let host = PairingHostValidator.canonicalHost(payload.host) else {
+            preconditionFailure("PairingPersistor requires a validated pairing host")
+        }
         let port = payload.port
+        let token = payload.token.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalizedHost = normalizeHost(host)
 
         // Existing server: same normalized (host, port) preserves identity so the
@@ -46,7 +64,7 @@ enum PairingPersistor {
             return Plan(
                 activeServer: match,
                 updatedServers: existing,
-                token: payload.token
+                token: token
             )
         }
 
@@ -54,7 +72,10 @@ enum PairingPersistor {
         // one — matches the OnboardingState.pairingLabel default so the
         // server row never reads as unlabeled.
         let label: String = {
-            if let provided = payload.label, !provided.isEmpty { return provided }
+            if let provided = payload.label?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !provided.isEmpty {
+                return provided
+            }
             return "My Mac"
         }()
 
@@ -67,7 +88,22 @@ enum PairingPersistor {
         return Plan(
             activeServer: server,
             updatedServers: existing + [server],
-            token: payload.token
+            token: token
+        )
+    }
+
+    /// Compute the local state restoration plan for a failed commit.
+    static func rollbackPlan(
+        previousServers: [PairedServer],
+        previousActiveId: String?,
+        pairedServerId: String,
+        previousToken: String?
+    ) -> RollbackPlan {
+        RollbackPlan(
+            servers: previousServers,
+            activeServerId: previousActiveId,
+            pairedServerId: pairedServerId,
+            tokenAction: previousToken.map(RollbackTokenAction.restore) ?? .remove
         )
     }
 

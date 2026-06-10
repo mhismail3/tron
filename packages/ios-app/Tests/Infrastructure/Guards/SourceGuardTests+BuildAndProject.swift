@@ -184,6 +184,83 @@ extension SourceGuardTests {
         #expect(!networkFormatter.contains("Bearer \\("))
     }
 
+    @Test("pairing lifecycle validates host input and forgets tokens fail-closed")
+    func testPairingLifecycleBoundaries() throws {
+        let iosRoot = iosAppRoot()
+
+        let parser = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Pairing/PairingURLParser.swift"),
+            encoding: .utf8
+        )
+        let validator = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Pairing/Onboarding/PairingStepValidator.swift"),
+            encoding: .utf8
+        )
+        let persistor = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Pairing/Onboarding/PairingPersistor.swift"),
+            encoding: .utf8
+        )
+        let pairingStep = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Onboarding/Steps/PairingStep.swift"),
+            encoding: .utf8
+        )
+        let dependencyContainer = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
+            encoding: .utf8
+        )
+        let parserTests = try String(
+            contentsOf: iosRoot.appendingPathComponent("Tests/Support/Pairing/PairingURLParserTests.swift"),
+            encoding: .utf8
+        )
+        let persistorTests = try String(
+            contentsOf: iosRoot.appendingPathComponent("Tests/Support/Pairing/PairingPersistorTests.swift"),
+            encoding: .utf8
+        )
+        let dependencyTests = try String(
+            contentsOf: iosRoot.appendingPathComponent("Tests/Support/Composition/DependencyContainerTests.swift"),
+            encoding: .utf8
+        )
+
+        for required in [
+            "enum PairingHostValidator",
+            "case invalidHost(String)",
+            "PairingHostValidator.canonicalHost(host)",
+            "!trimmed.contains(\"://\")",
+            "CharacterSet(charactersIn: \"/\\\\?#@[]\")",
+            "isValidIPv6",
+            "UInt8($0) != nil",
+        ] {
+            #expect(parser.contains(required), "PairingURLParser missing lifecycle marker: \(required)")
+        }
+        #expect(validator.contains("case invalidHost(String)"))
+        #expect(validator.contains("PairingHostValidator.canonicalHost(trimmedHost)"))
+        #expect(persistor.contains("enum RollbackTokenAction"))
+        #expect(persistor.contains("struct RollbackPlan"))
+        #expect(persistor.contains("static func rollbackPlan("))
+        #expect(persistor.contains("PairingHostValidator.canonicalHost(payload.host)"))
+        #expect(persistor.contains("preconditionFailure(\"PairingPersistor requires a validated pairing host\")"))
+        #expect(pairingStep.contains("PairingPersistor.rollbackPlan("))
+        #expect(!pairingStep.contains("try? dependencies.pairedServerTokenStore"))
+        #expect(dependencyContainer.contains("func forgetPairedServer(_ server: PairedServer) throws"))
+        #expect(dependencyContainer.contains("try pairedServerTokenStore.remove(serverId: server.id)"))
+        #expect(!dependencyContainer.contains("try? pairedServerTokenStore.remove(serverId: server.id)"))
+
+        for required in [
+            "rejectsURLShapedHostValue",
+            "rejectsHostFragments",
+            "makeURLRejectsMalformedRequiredFields",
+        ] {
+            #expect(parserTests.contains(required), "Pairing URL parser tests missing \(required)")
+        }
+        for required in [
+            "rollbackNewServerRemovesCandidateToken",
+            "rollbackExistingServerRestoresPreviousToken",
+        ] {
+            #expect(persistorTests.contains(required), "Pairing persistor tests missing \(required)")
+        }
+        #expect(dependencyTests.contains("test_forgetPairedServer_removesTokenBeforeMetadataCompletes"))
+    }
+
 
     @Test("DependencyProviding stays concrete-engine-client free")
     func testDependencyProvidingDoesNotExposeEngineClient() throws {

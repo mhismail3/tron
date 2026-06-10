@@ -189,6 +189,21 @@ final class DependencyContainerTests: XCTestCase {
         XCTAssertTrue(url.host?.contains("newhost") ?? false)
     }
 
+    func test_forgetPairedServer_removesTokenBeforeMetadataCompletes() async throws {
+        let id = "forget-\(UUID().uuidString)"
+        let (container, server) = pairedContainer(id: id, host: "forget.example.com", port: 19013)
+        try container.pairedServerTokenStore.setToken("tok-forget", forServerId: server.id)
+        defer { try? container.pairedServerTokenStore.remove(serverId: server.id) }
+
+        let plan = try container.forgetPairedServer(server)
+
+        XCTAssertTrue(plan.removedWasActive)
+        XCTAssertTrue(plan.shouldReturnToOnboarding)
+        XCTAssertNil(container.pairedServerTokenStore.token(forServerId: server.id))
+        XCTAssertFalse(container.pairedServerStore.servers.contains(where: { $0.id == server.id }))
+        XCTAssertNil(container.pairedServerStore.activeServerId)
+    }
+
     // MARK: - App Settings Tests (use shared container for read, fresh for write)
 
     func test_effectiveWorkingDirectory_fallsBackToDocuments() async throws {

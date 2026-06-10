@@ -355,13 +355,13 @@ struct PairingStep: View {
                 )
             }
         } catch {
-            rollbackPairingState(
+            let rollbackFailure = rollbackPairingState(
                 to: existing,
                 previousActiveId: previousActiveId,
                 pairedServerId: plan.activeServer.id,
                 previousToken: previousToken
             )
-            state.pairingError = .settingsFailed(error.localizedDescription)
+            state.pairingError = rollbackFailure ?? .settingsFailed(error.localizedDescription)
             state.isConnecting = false
             return
         }
@@ -375,13 +375,25 @@ struct PairingStep: View {
         previousActiveId: String?,
         pairedServerId: String,
         previousToken: String?
-    ) {
-        dependencies.replacePairedServers(servers, activeId: previousActiveId)
-        if let previousToken {
-            try? dependencies.pairedServerTokenStore.setToken(previousToken, forServerId: pairedServerId)
-        } else {
-            try? dependencies.pairedServerTokenStore.remove(serverId: pairedServerId)
+    ) -> PairingStepValidator.Failure? {
+        let rollback = PairingPersistor.rollbackPlan(
+            previousServers: servers,
+            previousActiveId: previousActiveId,
+            pairedServerId: pairedServerId,
+            previousToken: previousToken
+        )
+        dependencies.replacePairedServers(rollback.servers, activeId: rollback.activeServerId)
+        do {
+            switch rollback.tokenAction {
+            case .restore(let token):
+                try dependencies.pairedServerTokenStore.setToken(token, forServerId: rollback.pairedServerId)
+            case .remove:
+                try dependencies.pairedServerTokenStore.remove(serverId: rollback.pairedServerId)
+            }
+        } catch {
+            return .keychainFailed("Rollback failed: \(error.localizedDescription)")
         }
+        return nil
     }
 }
 

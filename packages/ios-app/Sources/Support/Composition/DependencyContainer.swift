@@ -287,9 +287,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     }
 
     @discardableResult
-    func forgetPairedServer(_ server: PairedServer) -> PairedServerStore.RemovalPlan {
+    func forgetPairedServer(_ server: PairedServer) throws -> PairedServerStore.RemovalPlan {
+        try pairedServerTokenStore.remove(serverId: server.id)
         let plan = pairedServerStore.remove(server)
-        try? pairedServerTokenStore.remove(serverId: server.id)
         if plan.removedWasActive {
             rebuildServerBoundServices()
             if plan.nextActiveServer != nil {

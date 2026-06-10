@@ -58,6 +58,15 @@ struct PairingURLBuilderTests {
     func invalidPortRejected() throws {
         #expect(PairingURLBuilder.makeURL(PairingPayload(host: "1.2.3.4", port: 0, token: "t", label: nil)) == nil)
         #expect(PairingURLBuilder.makeURL(PairingPayload(host: "1.2.3.4", port: -1, token: "t", label: nil)) == nil)
+        #expect(PairingURLBuilder.makeURL(PairingPayload(host: "1.2.3.4", port: 65_536, token: "t", label: nil)) == nil)
+    }
+
+    @Test("port boundaries match iOS parser")
+    func portBoundaries() throws {
+        let payload = PairingPayload(host: "1.2.3.4", port: 65_535, token: "t", label: nil)
+        let url = try #require(PairingURLBuilder.makeURL(payload))
+        let parsed = try #require(PairingURLBuilder.parse(url))
+        #expect(parsed.port == 65_535)
     }
 
     @Test("parse rejects wrong scheme")
@@ -90,6 +99,12 @@ struct PairingURLBuilderTests {
         #expect(PairingURLBuilder.parse(url) == nil)
     }
 
+    @Test("parse rejects out-of-range port")
+    func parseRejectsOutOfRangePort() throws {
+        let url = try #require(URL(string: "tron://pair?host=1.2.3.4&port=65536&token=t"))
+        #expect(PairingURLBuilder.parse(url) == nil)
+    }
+
     @Test("parse rejects missing token field")
     func parseRejectsMissingTokenField() throws {
         let url = try #require(URL(string: "tron://pair?host=1.2.3.4&port=9847"))
@@ -113,9 +128,40 @@ struct PairingURLBuilderTests {
 
     @Test("hostnames (not just IPs) are accepted")
     func hostnameAsHost() throws {
-        let payload = PairingPayload(host: "my-mac.tail-scale.ts.net", port: 9847, token: "t", label: nil)
+        let payload = PairingPayload(host: "My-Mac.Tail-Scale.Ts.Net.", port: 9847, token: "t", label: nil)
         let url = try #require(PairingURLBuilder.makeURL(payload))
         let parsed = try #require(PairingURLBuilder.parse(url))
         #expect(parsed.host == "my-mac.tail-scale.ts.net")
+    }
+
+    @Test("IPv6 host is accepted unbracketed")
+    func ipv6HostAccepted() throws {
+        let payload = PairingPayload(host: "FD7A:115C:A1E0::1", port: 9847, token: "t", label: nil)
+        let url = try #require(PairingURLBuilder.makeURL(payload))
+        let parsed = try #require(PairingURLBuilder.parse(url))
+        #expect(parsed.host == "fd7a:115c:a1e0::1")
+    }
+
+    @Test("full URL, path, userinfo, bracketed host, and invalid IP are rejected")
+    func malformedHostsRejected() throws {
+        for host in [
+            "https://100.64.0.1",
+            "100.64.0.1/engine",
+            "user@100.64.0.1",
+            "[fd7a:115c:a1e0::1]",
+            "999.1.1.1",
+            "mac..tailnet.ts.net",
+        ] {
+            #expect(
+                PairingURLBuilder.makeURL(PairingPayload(host: host, port: 9847, token: "t", label: nil)) == nil,
+                "expected \(host) to be rejected"
+            )
+        }
+    }
+
+    @Test("parse rejects URL-shaped host query values")
+    func parseRejectsURLShapedHost() throws {
+        let url = try #require(URL(string: "tron://pair?host=https%3A%2F%2F100.64.0.1&port=9847&token=t"))
+        #expect(PairingURLBuilder.parse(url) == nil)
     }
 }

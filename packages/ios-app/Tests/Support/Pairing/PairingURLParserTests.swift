@@ -56,6 +56,13 @@ struct PairingURLParserTests {
         #expect(parsed == original)
     }
 
+    @Test("IPv6 hosts are accepted and round-tripped unbracketed")
+    func acceptsIPv6Host() {
+        let url = PairingURLParser.makeURL(host: "FD7A:115C:A1E0::1", port: 9847, token: "tok")!
+        let parsed = try? PairingURLParser.parse(url.absoluteString).get()
+        #expect(parsed?.host == "fd7a:115c:a1e0::1")
+    }
+
     // MARK: - Schemes & hosts
 
     @Test("Rejects non-tron schemes")
@@ -81,6 +88,49 @@ struct PairingURLParserTests {
     @Test("Scheme matching is case-insensitive")
     func acceptsMixedCaseScheme() {
         #expect((try? PairingURLParser.parse("TRON://pair?host=h&port=1&token=t").get()) != nil)
+    }
+
+    @Test("Rejects URL-shaped host query values")
+    func rejectsURLShapedHostValue() {
+        let result = PairingURLParser.parse("tron://pair?host=https%3A%2F%2F100.64.0.1&port=1&token=t")
+        if case .failure(let err) = result {
+            #expect(err == .invalidHost("https://100.64.0.1"))
+        } else { Issue.record("expected invalidHost") }
+    }
+
+    @Test("Rejects path, query, userinfo, and bracketed-host fragments")
+    func rejectsHostFragments() {
+        for host in [
+            "100.64.0.1%2Fengine",
+            "100.64.0.1%3Ftoken%3Dt",
+            "user%40100.64.0.1",
+            "%5Bfd7a%3A115c%3Aa1e0%3A%3A1%5D",
+        ] {
+            let result = PairingURLParser.parse("tron://pair?host=\(host)&port=1&token=t")
+            if case .failure(.invalidHost) = result {
+                continue
+            }
+            Issue.record("expected invalidHost for \(host), got \(result)")
+        }
+    }
+
+    @Test("Rejects invalid IPv4 and malformed DNS labels")
+    func rejectsInvalidIPAndDNSHosts() {
+        for host in ["999.1.1.1", "-mac.tailnet.ts.net", "mac..tailnet.ts.net"] {
+            let result = PairingURLParser.parse("tron://pair?host=\(host)&port=1&token=t")
+            if case .failure(.invalidHost) = result {
+                continue
+            }
+            Issue.record("expected invalidHost for \(host), got \(result)")
+        }
+    }
+
+    @Test("makeURL rejects malformed host, bad port, and empty token")
+    func makeURLRejectsMalformedRequiredFields() {
+        #expect(PairingURLParser.makeURL(host: "https://100.64.0.1", port: 9847, token: "t") == nil)
+        #expect(PairingURLParser.makeURL(host: "100.64.0.1", port: 0, token: "t") == nil)
+        #expect(PairingURLParser.makeURL(host: "100.64.0.1", port: 65_536, token: "t") == nil)
+        #expect(PairingURLParser.makeURL(host: "100.64.0.1", port: 9847, token: "  ") == nil)
     }
 
     // MARK: - Missing fields

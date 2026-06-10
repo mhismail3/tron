@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-10 (SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-10 (SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -21,7 +21,8 @@ source-control state, worker state, or product panels locally.
 
 ## Retained Surface
 
-- Connection, pairing, onboarding, and local paired-server selection.
+- Connection, strict pairing host validation, onboarding, and local paired-server
+  selection.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
 - Session list, session creation/fork/resume, prompt composer, unified
@@ -79,6 +80,15 @@ Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 The shell mounts `ContentView` even before onboarding is complete. First-run
 onboarding is presented as a sheet over the shell. When `onboardingComplete` is
 true but no active paired server exists, the shell stays visible.
+
+Pairing accepts only bare DNS names, IPv4 addresses, or unbracketed IPv6
+addresses from QR/deep-link paste and manual entry. Full URLs, paths, query
+strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are
+rejected before a WebSocket probe or `PairedServerStore` write. The pairing
+commit path stores bearer tokens only in `PairedServerTokenStore`, rolls back
+failed setup hydration by restoring the previous token or removing the
+candidate token, and forgetting a server deletes the Keychain token before
+removing metadata.
 
 `ChatViewModel.swift` keeps the mounted session state and orchestration
 boundary. Runtime callback installation for streaming text, UI update queue

@@ -35,7 +35,7 @@ struct PairingValidationTests {
     @Test("Whitespace and newlines trimmed from inputs")
     func trimsAllWhitespace() {
         let result = PairingStepValidator.validate(
-            host: "  100.64.0.1\n",
+            host: "  Studio.Tailnet.Ts.Net.\n",
             port: " 9847 ",
             token: "  tok\n",
             label: "  My Mac  "
@@ -44,7 +44,7 @@ struct PairingValidationTests {
             Issue.record("expected success")
             return
         }
-        #expect(payload.host == "100.64.0.1")
+        #expect(payload.host == "studio.tailnet.ts.net")
         #expect(payload.port == 9847)
         #expect(payload.token == "tok")
         #expect(payload.label == "My Mac")
@@ -74,6 +74,25 @@ struct PairingValidationTests {
         if case .failure(let err) = result {
             #expect(err == .missingFields)
         } else { Issue.record("expected missingFields") }
+    }
+
+    @Test("URL-shaped host classified as invalidHost")
+    func urlShapedHost() {
+        let result = PairingStepValidator.validate(host: "https://100.64.0.1", port: "9847", token: "t", label: "L")
+        if case .failure(let err) = result {
+            #expect(err == .invalidHost("https://100.64.0.1"))
+        } else { Issue.record("expected invalidHost") }
+    }
+
+    @Test("Host with path or query classified as invalidHost")
+    func pathOrQueryHost() {
+        for host in ["100.64.0.1/engine", "100.64.0.1?token=t"] {
+            let result = PairingStepValidator.validate(host: host, port: "9847", token: "t", label: "L")
+            if case .failure(.invalidHost) = result {
+                continue
+            }
+            Issue.record("expected invalidHost for \(host), got \(result)")
+        }
     }
 
     @Test("Empty port classified as missingFields (caught BEFORE invalidPort)")
@@ -122,6 +141,10 @@ struct PairingValidationTests {
 
         let invalid = PairingStepValidator.Failure.invalidPort("99").userFacingMessage
         #expect(invalid.contains("65535"))
+
+        let invalidHost = PairingStepValidator.Failure.invalidHost("https://100.64.0.1").userFacingMessage
+        #expect(invalidHost.lowercased().contains("host"))
+        #expect(invalidHost.lowercased().contains("url"))
 
         let unreachable = PairingStepValidator.Failure.unreachable("100.64.0.1").userFacingMessage
         #expect(unreachable.lowercased().contains("can"))

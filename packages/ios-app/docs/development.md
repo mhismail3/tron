@@ -20,11 +20,13 @@ open TronMobile.xcodeproj
 
 The app connects to the Tron engine over `/engine`. Physical device testing
 uses the Mac pairing QR code, which carries the Mac's trusted local or Tailscale
-address, port, bearer token, and label. The iOS app declares local-network use
-so iOS can prompt for permission when a direct Mac/Tailscale connection needs it.
-Engine protocol envelopes are JSON WebSocket text frames; the client accepts
-text or binary responses for diagnostics, but outbound engine requests stay text
-so they match the server protocol.
+address, port, bearer token, and label. QR/deep-link paste and manual entry
+accept only a bare DNS name, IPv4 address, or unbracketed IPv6 address; paste
+`100.64.x.y` or `mac.tailnet.ts.net`, not `http://.../engine`. The iOS app
+declares local-network use so iOS can prompt for permission when a direct
+Mac/Tailscale connection needs it. Engine protocol envelopes are JSON WebSocket
+text frames; the client accepts text or binary responses for diagnostics, but
+outbound engine requests stay text so they match the server protocol.
 
 If pairing times out before showing an authorization error, verify that
 Tailscale is connected on both devices, accept the iOS local-network permission

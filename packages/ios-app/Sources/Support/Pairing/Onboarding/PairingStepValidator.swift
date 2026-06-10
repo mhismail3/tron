@@ -16,6 +16,9 @@ enum PairingStepValidator {
     enum Failure: Error, Equatable {
         /// Any of label / host / port / token is empty or whitespace-only.
         case missingFields
+        /// Host must be a bare DNS name, IPv4 address, or unbracketed IPv6
+        /// address. Full URLs and path/query/userinfo fragments are rejected.
+        case invalidHost(String)
         /// Port doesn't parse as an integer or is outside `1...65535`.
         case invalidPort(String)
         /// Network error reaching the server (connection refused, timeout, DNS).
@@ -41,6 +44,8 @@ enum PairingStepValidator {
             switch self {
             case .missingFields:
                 return "Fill in all four fields before connecting."
+            case .invalidHost:
+                return "Host must be a Tailscale IP or hostname, not a full URL."
             case .invalidPort:
                 return "Port must be a number between 1 and 65535."
             case .unreachable(let host):
@@ -78,12 +83,16 @@ enum PairingStepValidator {
             return .failure(.missingFields)
         }
 
+        guard let canonicalHost = PairingHostValidator.canonicalHost(trimmedHost) else {
+            return .failure(.invalidHost(trimmedHost))
+        }
+
         guard let parsedPort = Int(trimmedPort), (1...65_535).contains(parsedPort) else {
             return .failure(.invalidPort(trimmedPort))
         }
 
         return .success(.init(
-            host: trimmedHost,
+            host: canonicalHost,
             port: parsedPort,
             token: trimmedToken,
             label: trimmedLabel

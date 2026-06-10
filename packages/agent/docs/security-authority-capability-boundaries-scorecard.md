@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **88/100**
+Current score: **95/100**
 
 Status: **active**
 
@@ -61,7 +61,7 @@ file roots, worker identity, or credential custody.
 | SACB-6 | `capability::execute` least privilege for file/process/state/trace/log/replay operations | 12 | passed_after_fix | domains/capability | Agent-launched primitive calls derive a per-call child grant from `agent-capability-runtime` with the exact target function, canonical working-directory file root, no namespace authority, state read/write support, and `networkPolicy: none`; the execute worker rejects bootstrap grants and non-agent/non-system callers, resolves file roots from trusted runtime metadata only, denies system state scope, requires current-session context for trace/log/replay reads, and runs `process_run` only under a grant inspected as `networkPolicy none` with a fail-closed network-denial sandbox. | Closed. | SACB-6 capability execute least-privilege checkpoint |
 | SACB-7 | External worker protocol isolation: scoped token, namespace, trigger, stream, result ownership | 8 | passed_after_fix | engine/runtime/transport | External worker hellos now require loopback bearer auth, `WorkerKind::External`, active grant/revision validation, matching grant subjects, session/workspace token bindings for visible workers, non-wildcard stream selectors, and strict namespace segment matching instead of substring matching. Function metadata, trigger ids/targets, trigger authority grants, stream visibility, stream session/workspace scope, and stream topics are all checked against the accepted connection and token. Socket invocation results remain owned by the per-connection pending map and disconnect/backpressure paths fail pending calls with worker transport failures. | Closed. | SACB-7 external worker protocol isolation checkpoint |
 | SACB-8 | Secrets, token storage, redaction, auth.json permissions, provider credential custody | 7 | passed_after_fix | auth/iOS/Mac diagnostics | `auth.json` writes remain atomic `0o600` through the auth credential store, bearer-token creation/rotation materializes only the pristine `{}` sentinel and refuses malformed non-empty files, model providers consume ephemeral credential copies, server event/log redaction now covers JSON and debug-description OAuth/API-key fields, `logs::ingest` redacts before durable storage, iOS paired-server metadata stays token-free in UserDefaults while bearer tokens stay in Keychain, and Mac diagnostics redaction is aligned with iOS for camelCase and Swift-description auth fields. | Closed. | SACB-8 secret custody and redaction checkpoint |
-| SACB-9 | iOS/Mac pairing lifecycle: Keychain, QR/deep-link parsing, forget/re-pair/unauthorized flow | 7 | pending | iOS/Mac pairing | Not started in this checkpoint. | Open: pairing lifecycle and unauthorized flow proof. | pending |
+| SACB-9 | iOS/Mac pairing lifecycle: Keychain, QR/deep-link parsing, forget/re-pair/unauthorized flow | 7 | passed_after_fix | iOS/Mac pairing | iOS QR/deep-link parsing and manual validation now share a strict bare-host validator that accepts DNS, IPv4, and unbracketed IPv6 while rejecting full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels; Mac QR building/parsing uses the same host and `1...65535` port contract. Pairing persistence canonicalizes direct payloads and treats invalid internal hosts as programmer errors instead of carrying a fallback, rollback is an explicit pure plan that restores the previous token or removes the candidate token, and forgetting a server removes the Keychain token before metadata and throws instead of swallowing failures. Unauthorized transport state remains parked until the re-pair flow writes a fresh token. | Closed. | SACB-9 pairing lifecycle checkpoint |
 | SACB-10 | Final closeout, static gates, full verification, clean status | 5 | pending | static gates/verification | Not started in this checkpoint. | Open: final full verification and no stale open-loop wording. | pending |
 
 Total weight: **100**
@@ -97,6 +97,10 @@ Total weight: **100**
   OAuth/API-key fields before event/log storage, proving iOS bearer tokens stay
   in Keychain rather than paired-server metadata/UserDefaults, and aligning Mac
   diagnostics redaction with iOS.
+- SACB-9 closed pairing lifecycle gaps by rejecting URL-shaped host input on
+  iOS and Mac, making pairing rollback/forget token side effects explicit and
+  non-silent, and proving re-pair/unauthorized behavior through focused iOS/Mac
+  tests and static guards.
 
 ## Static Gates
 
@@ -126,6 +130,10 @@ now, and will own row-specific guards as later rows close:
   bearer-token lifecycle through the auth store, server-side log/event
   redaction, iOS Keychain-only bearer custody, token-free paired-server
   metadata, and Mac/iOS diagnostics redaction parity.
+- Pairing lifecycle static guards require strict iOS/Mac host validation,
+  QR/deep-link/manual parser parity, explicit rollback token actions,
+  fail-closed Keychain deletion before paired-server metadata removal, and
+  focused iOS/Mac regression tests.
 - Final closeout rejects stale active/open-loop wording once the scorecard is
   complete.
 
