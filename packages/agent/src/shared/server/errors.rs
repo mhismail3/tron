@@ -137,6 +137,9 @@ impl CapabilityError {
 
     /// Convert this capability error to the canonical failure envelope.
     pub fn to_failure(&self, origin: FailureOrigin) -> FailureEnvelope {
+        if let Some(failure) = self.embedded_failure() {
+            return failure;
+        }
         let message = self.public_message();
         let code = self.code().to_owned();
         let category = category_for_capability_code(&code);
@@ -188,6 +191,17 @@ impl CapabilityError {
             | Self::Custom { message, .. } => message.clone(),
             Self::Internal { .. } => "Internal error".to_string(),
         }
+    }
+
+    fn embedded_failure(&self) -> Option<FailureEnvelope> {
+        let details = match self {
+            Self::Custom {
+                details: Some(details),
+                ..
+            } => details,
+            _ => return None,
+        };
+        serde_json::from_value(details.get("failure")?.clone()).ok()
     }
 }
 
@@ -374,5 +388,54 @@ mod tests {
         assert_eq!(details["key"], "abc");
         assert_eq!(details["failure"]["code"], IDEMPOTENCY_CONFLICT);
         assert_eq!(details["failure"]["category"], "conflict");
+    }
+
+    #[test]
+    fn capability_error_to_failure_reuses_embedded_canonical_envelope() {
+        let embedded = FailureEnvelope::new(
+            "ENGINE_SCHEMA_VIOLATION",
+            FailureCategory::InvalidRequest,
+            "payload is missing required field",
+            false,
+            true,
+            FailureOrigin::Engine,
+        )
+        .with_details(Some(serde_json::json!({
+            "functionId": "system::ping",
+            "path": "$.protocolVersion"
+        })));
+        let err = CapabilityError::Custom {
+            code: embedded.code.clone(),
+            message: embedded.message.clone(),
+            details: Some(embedded.details_with_failure()),
+        };
+
+        let failure = err.to_failure(FailureOrigin::Transport);
+
+        assert_eq!(failure, embedded);
+        assert_eq!(failure.category, FailureCategory::InvalidRequest);
+        assert_eq!(failure.origin, FailureOrigin::Engine);
+    }
+
+    #[test]
+    fn malformed_embedded_failure_uses_plain_capability_classification() {
+        let err = CapabilityError::Custom {
+            code: "UNMAPPED_CAPABILITY_CODE".to_owned(),
+            message: "plain capability error".to_owned(),
+            details: Some(serde_json::json!({
+                "failure": {
+                    "code": "BROKEN",
+                    "category": "invalid_request"
+                },
+                "safe": true
+            })),
+        };
+
+        let failure = err.to_failure(FailureOrigin::Transport);
+
+        assert_eq!(failure.code, "UNMAPPED_CAPABILITY_CODE");
+        assert_eq!(failure.category, FailureCategory::Unknown);
+        assert_eq!(failure.origin, FailureOrigin::Transport);
+        assert_eq!(failure.details.unwrap()["safe"], true);
     }
 }

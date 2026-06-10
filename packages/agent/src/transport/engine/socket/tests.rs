@@ -1,7 +1,9 @@
 use super::*;
 
-use crate::engine::{PublishStreamEvent, VisibilityScope};
+use crate::engine::{EngineError, PublishStreamEvent, VisibilityScope};
+use crate::shared::server::error_mapping::engine_error_to_capability_error;
 use crate::shared::server::events::ServerEventPayload;
+use crate::shared::server::failure::ENGINE_SCHEMA_VIOLATION;
 use crate::shared::server::test_support::make_test_context;
 use serde_json::json;
 
@@ -240,6 +242,65 @@ async fn topic_poll_requires_explicit_cursor() {
     assert_eq!(
         value.pointer("/error/recoverable").and_then(Value::as_bool),
         Some(true)
+    );
+}
+
+#[tokio::test]
+async fn send_error_with_trace_preserves_embedded_engine_failure_on_outer_error() {
+    let (session, mut rx) = test_session();
+    let error = engine_error_to_capability_error(EngineError::SchemaViolation {
+        function_id: "system::ping".to_owned(),
+        direction: "request",
+        path: "$.protocolVersion".to_owned(),
+        message: "protocolVersion is required".to_owned(),
+    });
+
+    assert!(session.send_error_with_trace(
+        Some("schema-1".to_owned()),
+        error,
+        Some("trace-schema".to_owned())
+    ));
+    let response = rx.recv().await.expect("error response");
+    let value: Value = serde_json::from_str(&response).expect("response JSON");
+
+    assert_eq!(value.get("ok").and_then(Value::as_bool), Some(false));
+    assert_eq!(
+        value.pointer("/error/code").and_then(Value::as_str),
+        Some(ENGINE_SCHEMA_VIOLATION)
+    );
+    assert_eq!(
+        value.pointer("/error/category").and_then(Value::as_str),
+        Some("invalid_request")
+    );
+    assert_eq!(
+        value.pointer("/error/origin").and_then(Value::as_str),
+        Some("engine")
+    );
+    assert_eq!(
+        value.pointer("/error/retryable").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        value.pointer("/error/recoverable").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        value.pointer("/error/traceId").and_then(Value::as_str),
+        Some("trace-schema")
+    );
+    assert_eq!(
+        value.pointer("/traceId").and_then(Value::as_str),
+        Some("trace-schema")
+    );
+    assert_eq!(
+        value
+            .pointer("/error/details/functionId")
+            .and_then(Value::as_str),
+        Some("system::ping")
+    );
+    assert_eq!(
+        value.pointer("/error/details/path").and_then(Value::as_str),
+        Some("$.protocolVersion")
     );
 }
 

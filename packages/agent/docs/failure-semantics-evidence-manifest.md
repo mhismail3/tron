@@ -25,6 +25,16 @@ for the Failure Semantics Campaign.
 | FSC-9 | passed_after_fix | Added canonical optional fields to durable error/turn-failed payloads, wrote interrupted durable `turn.failed` rows from `FailureEnvelope`, and exported replay engine invocation errors as `error.failure` plus replay diagnostics. | `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::types::payloads --lib`; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::replay --lib` | None for current durable/replay surfaces. | durable replay checkpoint |
 | FSC-10 | passed_after_fix | Added closeout guards for campaign artifact status, runtime failure construction sites, removed text-only capability helpers, canonical transport error fields, iOS canonical failure decoding, server auth/event-store code coverage, category vocabulary, and TSV source coverage. | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture`; full closeout commands listed below. | No known failure-semantics closeout item remains. | closeout gates checkpoint |
 
+## Post-Closeout Audit Remediation Evidence
+
+| Row | Status | Change | Verification | Closeout note | Commit |
+|---|---|---|---|---|---|
+| FSAR-1 | passed_after_fix | `CapabilityError::to_failure` now reuses a valid embedded canonical `details.failure` envelope exactly instead of reclassifying it through the capability-code table. Malformed embedded failures continue down the plain capability classification path. | `cargo test --manifest-path packages/agent/Cargo.toml shared::server::errors --lib -- --nocapture`; `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | Preserves original engine/provider/auth/event-store origin and category when crossing `/engine` or capability boundaries. | FSAR-1/2 checkpoint |
+| FSAR-2 | passed_after_fix | Added a socket-level regression that maps `EngineError::SchemaViolation` and asserts the public outer `/engine` `error` object carries `ENGINE_SCHEMA_VIOLATION`, `invalid_request`, `retryable=false`, `recoverable=true`, `origin=engine`, and the trace id. | `cargo test --manifest-path packages/agent/Cargo.toml transport::engine::socket --lib -- --nocapture`; `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | The regression fails if the outer envelope falls back to `unknown` or `transport` classification. | FSAR-1/2 checkpoint |
+| FSAR-3 | not_started | Journal-touching `TronAgent::run` test isolation audit. | Pending. | Pending. | Pending. |
+| FSAR-4 | not_started | Closed wording and static guard hardening for FSC artifacts. | Pending. | Pending. | Pending. |
+| FSAR-5 | not_started | Required focused and closeout verification. | Pending. | Pending. | Pending. |
+
 ## FSC-0 Findings
 
 - Active runtime paths directly construct `TronEvent::TurnFailed` in
