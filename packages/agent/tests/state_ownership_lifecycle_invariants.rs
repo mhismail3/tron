@@ -79,6 +79,16 @@ fn read_repo_file(path: &str) -> String {
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
 }
 
+fn assert_contains_in_order(name: &str, text: &str, needles: &[&str]) {
+    let mut offset = 0;
+    for needle in needles {
+        let Some(index) = text[offset..].find(needle) else {
+            panic!("{name} missing `{needle}` after byte offset {offset}");
+        };
+        offset += index + needle.len();
+    }
+}
+
 fn git_ls_files() -> Vec<String> {
     let output = Command::new("git")
         .arg("ls-files")
@@ -410,6 +420,164 @@ fn sol_inventory_covers_scripts_ci_and_docs_state_claims() {
         assert!(
             inventory.contains_key(required),
             "SOL inventory must cover script/CI/docs state surface: {required}"
+        );
+    }
+}
+
+#[test]
+fn sol_server_bootstrap_lifecycle_is_source_backed() {
+    let bootstrap = read_repo_file("packages/agent/src/app/bootstrap/mod.rs");
+    let run_server = bootstrap
+        .split("pub(crate) async fn run_server")
+        .nth(1)
+        .expect("run_server must remain the server bootstrap entry point");
+    assert_contains_in_order(
+        "server bootstrap sequence",
+        run_server,
+        &[
+            "init_directories()",
+            "initialize_bearer_token_at",
+            "init_database(args.db_path)",
+            "ProfileRuntime::load",
+            "init_logging",
+            "retention_run(false",
+            "enforce_size_budget",
+            "EventStore::new",
+            "init_engine_host",
+            "init_services",
+            "build_server_runtime_context",
+            "TronServer::new",
+            "register_server_domains_for_context",
+            "EngineStreamEventPump::new",
+            "EngineRuntimeServices::start",
+            "spawn_background_tasks",
+            "spawn_watcher",
+            "server.listen()",
+            "wait_for_shutdown_signal",
+            "graceful_shutdown",
+            "flush_task.abort",
+            "log_handle.flush",
+            "checkpoint()",
+        ],
+    );
+    assert_contains_in_order(
+        "database bootstrap sequence",
+        &bootstrap,
+        &[
+            "resolve_production_db_path",
+            "ensure_parent_dir",
+            "prepare_active_database",
+            "acquire_database_lock",
+            "new_file",
+            "check_integrity",
+            "run_migrations",
+            "ensure_storage_schema",
+        ],
+    );
+    assert!(
+        bootstrap.contains("recover_incomplete_turns(&event_store)"),
+        "bootstrap must recover crash journals before accepting traffic"
+    );
+
+    let onboarding = read_repo_file("packages/agent/src/app/lifecycle/onboarding/mod.rs");
+    assert_contains_in_order(
+        "bearer-token materialization sequence",
+        &onboarding,
+        &[
+            "load_or_create_bearer_token",
+            "read_token(path)",
+            "rotate_lock().lock()",
+            "load_or_init_for_write(path)",
+            "generate_bearer_token()",
+            "save_auth_storage(path",
+        ],
+    );
+
+    let storage = read_repo_file("packages/agent/src/shared/storage/mod.rs");
+    assert_contains_in_order(
+        "storage runtime startup sequence",
+        &storage,
+        &[
+            "pub const CURRENT_STORAGE_GENERATION",
+            "pub fn open_connection",
+            "apply_runtime_pragmas(&conn)",
+            "ensure_storage_schema(&conn)",
+            "pub fn prepare_for_startup",
+            "prepare_active_database(&self.path)",
+        ],
+    );
+
+    let archive = read_repo_file("packages/agent/src/shared/storage/archive.rs");
+    assert_contains_in_order(
+        "storage generation archive sequence",
+        &archive,
+        &[
+            "archive_non_current_active_database",
+            "active_database_generation",
+            "CURRENT_STORAGE_GENERATION",
+            "archive_named_files",
+            "fs::rename",
+        ],
+    );
+
+    let schema = read_repo_file("packages/agent/src/shared/storage/schema.rs");
+    for required in [
+        "PRAGMA journal_mode = WAL",
+        "PRAGMA busy_timeout = 5000",
+        "CREATE TABLE IF NOT EXISTS storage_metadata",
+        "STORAGE_GENERATION_KEY",
+    ] {
+        assert!(
+            schema.contains(required),
+            "storage schema bootstrap missing `{required}`"
+        );
+    }
+
+    let engine_host = read_repo_file("packages/agent/src/engine/invocation/host/bootstrap.rs");
+    assert_contains_in_order(
+        "engine host sqlite bootstrap sequence",
+        &engine_host,
+        &[
+            "pub fn open_sqlite",
+            "prepare_for_startup",
+            "open_connection",
+            "checkpoint",
+            "SqliteEngineLedgerStore::open",
+            "hydrate_durable_catalog_from_ledger",
+            "PrimitiveStores::sqlite",
+            "bootstrap_meta_capabilities",
+        ],
+    );
+
+    let process_lock =
+        read_repo_file("packages/agent/src/domains/session/event_store/sqlite/process_lock.rs");
+    for required in [
+        "flock(2)",
+        "Every production startup path acquires this lock before",
+        "DatabaseLock",
+        "AlreadyLocked",
+        "try_flock_exclusive",
+    ] {
+        assert!(
+            process_lock.contains(required),
+            "database process-lock owner missing `{required}`"
+        );
+    }
+
+    let inventory = inventory_by_path();
+    for required in [
+        "packages/agent/src/app/bootstrap/mod.rs",
+        "packages/agent/src/app/bootstrap/server.rs",
+        "packages/agent/src/app/lifecycle/onboarding/mod.rs",
+        "packages/agent/src/shared/storage/archive.rs",
+        "packages/agent/src/shared/storage/schema.rs",
+        "packages/agent/src/shared/foundation/paths/mod.rs",
+    ] {
+        assert!(
+            inventory
+                .get(required)
+                .is_some_and(|rows| rows.iter().any(|row| row.sol_rows.contains("SOL-3"))),
+            "SOL inventory must tag {required} as part of SOL-3"
         );
     }
 }
