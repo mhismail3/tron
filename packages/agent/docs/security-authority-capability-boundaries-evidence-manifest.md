@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **5/100**
+Current score: **15/100**
 
 Scorecard:
 [`security-authority-capability-boundaries-scorecard.md`](security-authority-capability-boundaries-scorecard.md)
@@ -17,7 +17,7 @@ and
 | Row | Status | Evidence | Verification | Closure | Checkpoint |
 |---|---|---|---|---|---|
 | SACB-0 | passed_after_fix | Added scorecard, evidence manifest, inventory summary, machine-readable TSV header/seed rows, invariant target, README links, local/GitHub CI closeout wiring, and cross-campaign PCC/HRA rows for new SACB artifacts. Initial findings record the public transport context trust gap and grant derivation file-root narrowing gap discovered during baseline source inspection. | SACB target passed with 6 tests; PCC inventory target passed with 16 tests; HRA inventory target passed with 35 tests; rustfmt check and whitespace checks passed. | Closed for harness. Open rows SACB-1 through SACB-10 remain explicitly pending in the scorecard. | SACB-0 campaign harness checkpoint |
-| SACB-1 | pending | Not started. | Not run. | Open: whole-repo boundary inventory. | pending |
+| SACB-1 | passed_after_fix | Replaced the SACB-0 seed TSV with a 601-row marker-derived inventory covering tracked server, iOS, Mac, script, workflow, docs, tests, and TSV evidence surfaces for public transport, authority grants, runtime metadata, primitive execution, external workers, secret storage, pairing lifecycle, and static gates. Added static marker coverage so every tracked security-marker file must have a SACB row. | SACB target passed with the marker coverage and boundary-class guards. | Closed for whole-repo inventory. Later rows must keep the inventory current as they delete unsafe fields or add focused tests. | SACB-1 boundary inventory checkpoint |
 | SACB-2 | pending | Not started. | Not run. | Open: public route/auth/loopback proof. | pending |
 | SACB-3 | pending | Not started. | Not run. | Open: public context trust hardening. | pending |
 | SACB-4 | pending | Not started. | Not run. | Open: grants, file roots, network policy, bootstrap proof. | pending |
@@ -49,3 +49,5 @@ and
 | `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | Existing HRA tracked-file ownership target passed after adding SACB rows: 35 tests. |
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust formatting check passed after rustfmt applied to new invariant modules. |
 | `git diff --check --cached && git diff --check` | exit 0 | Staged and unstaged whitespace checks passed. |
+| `node` marker inventory generator | exit 0 | Generated 601 SACB inventory rows from tracked security-marker files after excluding non-security token-accounting/model-catalog surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB-1 inventory coverage target passed after adding marker coverage and boundary-class guards: 8 tests. |

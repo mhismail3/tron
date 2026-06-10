@@ -3,7 +3,7 @@ use std::collections::BTreeSet;
 use super::support::{
     EVIDENCE_PATH, INVARIANT_TEST_PATH, INVENTORY_PATH, INVENTORY_TSV_PATH, SCORECARD_PATH,
     git_ls_files, inventory_by_path, parse_inventory, parse_scorecard_rows, read_repo_file,
-    repo_path,
+    repo_path, security_marker_paths,
 };
 
 #[test]
@@ -15,9 +15,10 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Scorecard",
-        "Current score: **5/100**",
+        "Current score: **15/100**",
         "Status: **active**",
         "| SACB-0 | Campaign harness, red gates, README/CI links, evidence/inventory scaffolding | 5 | passed_after_fix |",
+        "| SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix |",
         "| SACB-10 | Final closeout, static gates, full verification, clean status | 5 | pending |",
         "`../tests/security_authority_capability_boundaries_invariants.rs`",
     ] {
@@ -30,8 +31,9 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
     for required in [
         "# Security Authority Capability Boundaries Evidence Manifest",
         "Status: **active**",
-        "Current score: **5/100**",
+        "Current score: **15/100**",
         "| SACB-0 | passed_after_fix |",
+        "| SACB-1 | passed_after_fix |",
         "| SACB-10 | pending |",
         "## Baseline Evidence",
     ] {
@@ -43,11 +45,12 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Inventory",
-        "Status: SACB-0 `passed_after_fix`; seed rows only.",
+        "Status: SACB-1 `passed_after_fix`; 601 security boundary rows inventoried and",
         "## Boundary Classes",
         "`public_transport`",
         "`authority_grant`",
         "`execute_primitive`",
+        "## Coverage Policy",
         "## Open Loops",
     ] {
         assert!(
@@ -114,10 +117,7 @@ fn sacb_invariant_target_is_in_closeout_ci_lists() {
 #[test]
 fn sacb_inventory_rows_are_structured_and_reference_tracked_paths() {
     let rows = parse_inventory();
-    assert!(
-        rows.len() >= 9,
-        "SACB-0 inventory should keep scaffold and baseline finding rows"
-    );
+    assert!(rows.len() >= 601, "SACB inventory row count regressed");
     let tracked: BTreeSet<_> = git_ls_files().into_iter().collect();
     let mut paths = BTreeSet::new();
     for row in &rows {
@@ -176,6 +176,20 @@ fn sacb_inventory_rows_are_structured_and_reference_tracked_paths() {
             "SACB inventory missing seed row: {required}"
         );
     }
+}
+
+#[test]
+fn sacb_inventory_covers_all_tracked_security_marker_files() {
+    let inventory = inventory_by_path();
+    let missing = security_marker_paths()
+        .into_iter()
+        .filter(|path| !inventory.contains_key(path))
+        .collect::<Vec<_>>();
+    assert!(
+        missing.is_empty(),
+        "SACB inventory missing security marker files:\n{}",
+        missing.join("\n")
+    );
 }
 
 #[test]

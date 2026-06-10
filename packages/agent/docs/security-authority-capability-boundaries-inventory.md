@@ -1,8 +1,7 @@
 # Security Authority Capability Boundaries Inventory
 
-Status: SACB-0 `passed_after_fix`; seed rows only. SACB-1 must replace this
-with a whole-repo security boundary inventory covering Rust, iOS, Mac, scripts,
-docs, and CI security markers.
+Status: SACB-1 `passed_after_fix`; 601 security boundary rows inventoried and
+classified across tracked Rust, Swift, scripts, workflows, docs, and tests.
 
 Machine-readable inventory:
 [`security-authority-capability-boundaries-inventory.tsv`](security-authority-capability-boundaries-inventory.tsv)
@@ -25,17 +24,23 @@ Machine-readable inventory:
   and unauthorized flows.
 - `static_gate`: docs, test, CI, and inventory gates that preserve the campaign.
 
-## SACB-0 Seed Rows
+## Coverage Policy
 
-The TSV currently contains only the campaign-owned scaffold and the primary
-baseline finding surfaces. SACB-1 must expand it so every tracked security
-surface with authority, credential, public route, runtime metadata, worker,
-pairing, diagnostics, or process/file execution markers is classified.
+SACB-1 uses marker-driven coverage. The invariant target scans tracked files
+under `packages/agent/`, `packages/ios-app/`, `packages/mac-app/`, `scripts/`,
+`.github/`, and root project docs for security markers such as bearer auth,
+provider credentials, `auth.json`, Keychain/UserDefaults custody, `/engine`,
+worker routes, authority grants, runtime metadata, primitive file/process
+operations, network policy, diagnostics redaction, OAuth, pairing URLs, QR
+payloads, and loopback boundaries.
+
+The only marker exclusions are non-security token-accounting and model-catalog
+surfaces where the word "token" describes model usage or pricing rather than
+auth/custody. Any future tracked security-marker file must be added to the TSV
+or the SACB invariant target fails.
 
 ## Open Loops
 
-- SACB-1: inventory all marked source, docs, script, CI, iOS, and Mac boundary
-  surfaces.
 - SACB-2: prove public route authentication and loopback worker gating.
 - SACB-3: delete/deny public authority scope and runtime metadata injection.
 - SACB-4: prove grant derivation and bootstrap wildcard boundaries.

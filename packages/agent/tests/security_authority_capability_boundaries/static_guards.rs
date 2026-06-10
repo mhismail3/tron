@@ -1,4 +1,6 @@
-use super::support::{INVARIANT_TEST_PATH, read_repo_file};
+use std::collections::BTreeSet;
+
+use super::support::{INVARIANT_TEST_PATH, parse_inventory, read_repo_file};
 
 #[test]
 fn sacb_static_guard_module_is_active() {
@@ -18,6 +20,29 @@ fn sacb_static_guard_module_is_active() {
         assert!(
             module.contains(required),
             "SACB module registry missing {required}"
+        );
+    }
+}
+
+#[test]
+fn sacb_inventory_covers_required_boundary_classes() {
+    let classes = parse_inventory()
+        .into_iter()
+        .map(|row| row.boundary_class)
+        .collect::<BTreeSet<_>>();
+    for required in [
+        "public_transport",
+        "authority_grant",
+        "runtime_metadata",
+        "execute_primitive",
+        "external_worker",
+        "secret_storage",
+        "pairing_lifecycle",
+        "static_gate",
+    ] {
+        assert!(
+            classes.contains(required),
+            "SACB inventory missing boundary class {required}"
         );
     }
 }

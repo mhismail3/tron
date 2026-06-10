@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **5/100**
+Current score: **15/100**
 
 Status: **active**
 
@@ -53,7 +53,7 @@ file roots, worker identity, or credential custody.
 | Row | Requirement | Points | Status | Owner | Evidence | Closure | Checkpoint |
 |---|---|---:|---|---|---|---|---|
 | SACB-0 | Campaign harness, red gates, README/CI links, evidence/inventory scaffolding | 5 | passed_after_fix | docs/static gates | Added SACB scorecard, evidence manifest, inventory docs/TSV, invariant target, README links, CI/static-gate wiring, and prior-campaign inventory rows for the new artifacts. | Closed. | SACB-0 campaign harness checkpoint |
-| SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | pending | inventory/static gates | Not started in this checkpoint. | Open: inventory must classify every security-marker source and docs/script boundary surface. | pending |
+| SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix | inventory/static gates | Expanded the inventory to 601 marker-derived rows across server, iOS, Mac, scripts, workflows, active docs, historical scorecards, TSV evidence, and tests. Static gates now recompute tracked security-marker files and require every one to have a structured inventory row. | Closed. | SACB-1 boundary inventory checkpoint |
 | SACB-2 | Public transport auth, route exposure, bearer handling, loopback worker boundary | 10 | pending | transport/http/runtime | Not started in this checkpoint. | Open: route, auth, bearer, and worker loopback proof. | pending |
 | SACB-3 | Transport context trust: remove/deny untrusted authority scope and runtime metadata injection | 14 | pending | transport/engine | Not started in this checkpoint. | Open: public wire DTOs still require hardening against authority/runtime metadata injection. | pending |
 | SACB-4 | Authority grant model: derivation, file roots, network policy, budgets, bootstrap grants | 12 | pending | engine/authority | Not started in this checkpoint. | Open: canonical file-root derivation and network-policy proof. | pending |
@@ -80,8 +80,8 @@ Total weight: **100**
 ## Static Gates
 
 `packages/agent/tests/security_authority_capability_boundaries_invariants.rs`
-and its focused modules enforce the SACB harness now and will own row-specific
-guards as each row closes:
+and its focused modules enforce the SACB harness and SACB-1 inventory coverage
+now, and will own row-specific guards as later rows close:
 
 - Scorecard row weights sum to 100.
 - Current score equals the sum of `passed_after_fix` row weights.
@@ -89,6 +89,12 @@ guards as each row closes:
 - Local and GitHub closeout target lists include the SACB invariant target.
 - Inventory TSV rows are structured, use the SACB header, point at existing
   tracked files, and reference SACB rows.
+- Every tracked Rust, Swift, script, workflow, and docs file with security
+  markers is covered by the SACB inventory unless it is an explicitly excluded
+  non-security token-accounting/model-catalog surface.
+- Inventory rows cover public transport, authority grants, runtime metadata,
+  primitive execution, external workers, secret storage, pairing lifecycle, and
+  static gates.
 - Final closeout rejects stale active/open-loop wording once the scorecard is
   complete.
 

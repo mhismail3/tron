@@ -15,6 +15,55 @@ pub(super) const INVARIANT_TEST_PATH: &str =
 
 pub(super) const INVENTORY_HEADER: &str = "path\tlanguage\tsurface\tboundary_class\ttrusted_owner\tuntrusted_input\tauthority_source\tenforcement_point\tdeny_policy\tsecret_or_token_policy\ttest_evidence\tsacb_rows";
 
+const SECURITY_MARKERS: &[&str] = &[
+    "Authorization",
+    "authorization",
+    "Bearer",
+    "bearer",
+    "bearerToken",
+    "accessToken",
+    "refreshToken",
+    "apiKey",
+    "clientSecret",
+    "auth.json",
+    "Keychain",
+    "UserDefaults",
+    "/engine",
+    "engine/workers",
+    "ENGINE_INTERNAL_INVOKE_SCOPE",
+    "engine.internal.invoke",
+    "authority",
+    "AuthorityGrant",
+    "grant",
+    "runtimeMetadata",
+    "runtime_metadata",
+    "RUNTIME_METADATA",
+    "workingDirectory",
+    "working_directory",
+    "RUNTIME_METADATA_WORKING_DIRECTORY",
+    "process_run",
+    "file_read",
+    "file_write",
+    "Command::new",
+    "networkPolicy",
+    "network_policy",
+    "DiagnosticsRedactor",
+    "redact",
+    "oauth",
+    "OAuth",
+    "secret",
+    "credential",
+    "Pairing",
+    "paired",
+    "tron://pair",
+    "QRCode",
+    "QR",
+    "deep-link",
+    "loopback",
+    "WorkerToken",
+    "worker token",
+];
+
 #[derive(Debug, Clone)]
 pub(super) struct InventoryRow {
     pub(super) path: String,
@@ -67,6 +116,51 @@ pub(super) fn git_ls_files() -> Vec<String> {
         .expect("git output should be UTF-8")
         .lines()
         .map(str::to_owned)
+        .collect()
+}
+
+fn is_sacb_scanned_path(path: &str) -> bool {
+    let in_scope = path.starts_with("packages/agent/")
+        || path.starts_with("packages/ios-app/")
+        || path.starts_with("packages/mac-app/")
+        || path.starts_with("scripts/")
+        || path.starts_with(".github/")
+        || matches!(path, "README.md" | "CONTRIBUTING.md" | "AGENTS.md");
+    if !in_scope {
+        return false;
+    }
+    let allowed_extension = [
+        ".rs", ".swift", ".sh", ".py", ".yml", ".yaml", ".md", ".tsv", ".toml", ".json", ".plist",
+    ]
+    .iter()
+    .any(|extension| path.ends_with(extension))
+        || path == "scripts/tron";
+    if !allowed_extension {
+        return false;
+    }
+    ![
+        "packages/agent/src/domains/model/tokens/",
+        "packages/agent/src/domains/agent/context/token_estimator",
+        "packages/ios-app/Sources/Session/Timeline/Tokens/",
+        "packages/ios-app/Tests/Session/Timeline/Tokens/",
+    ]
+    .iter()
+    .any(|excluded| path.contains(excluded))
+        && !(path.starts_with("packages/agent/src/domains/model/providers/")
+            && path.contains("/types/models"))
+}
+
+pub(super) fn security_marker_paths() -> Vec<String> {
+    git_ls_files()
+        .into_iter()
+        .filter(|path| is_sacb_scanned_path(path))
+        .filter(|path| repo_path(path).is_file())
+        .filter(|path| {
+            let source = read_repo_file(path);
+            SECURITY_MARKERS
+                .iter()
+                .any(|marker| source.contains(marker))
+        })
         .collect()
 }
 
