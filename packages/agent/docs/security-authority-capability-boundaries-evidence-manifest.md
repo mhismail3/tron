@@ -166,3 +166,11 @@ and
 | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | exit 0 | FSC failure-semantics verification passed after the remediation docs and inventory edits: 9 tests. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB invariant rerun passed after post-audit evidence, scorecard, row-count, inventory guard, and no-default worker token hash updates: 16 tests. |
 | `cargo fmt --manifest-path packages/agent/Cargo.toml --all && cargo test --manifest-path packages/agent/Cargo.toml --lib external_worker -- --nocapture && cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | Post-audit fallback removal verification passed after `ScopedWorkerToken::loopback` was changed to fail loudly instead of defaulting an empty grant hash: external-worker 26 tests and SACB 16 tests. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Final post-audit Rust formatting check passed. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Final post-audit broad Rust CI passed: formatting, compile check, clippy, and all Rust tests completed successfully. |
+| `scripts/personal-info-guard.sh` | exit 0 | Final post-audit personal-info guard passed with a full source scan. |
+| `cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj` | exit 0 | Final post-audit iOS project generation had no drift. |
+| `cd packages/mac-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/mac-app/TronMac.xcodeproj` | exit 0 | Final post-audit Mac project generation had no drift. |
+| `git diff --check` | exit 0 | Final post-audit whitespace check passed. |
+| `git ls-files -ci --exclude-standard` | exit 0 | Final post-audit ignored-file audit produced no tracked ignored files. |
+| `git status --short` | exit 0 | Final post-audit status was clean before appending the final evidence rows. |
