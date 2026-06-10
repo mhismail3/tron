@@ -44,7 +44,7 @@ The TSV covers tracked and newly introduced files under:
 | primitive | 106 |
 | implementation | 497 |
 | support | 380 |
-| test | 461 |
+| test | 463 |
 | docs | 56 |
 | delete | 0 |
 
@@ -77,7 +77,7 @@ The TSV covers tracked and newly introduced files under:
 | `session_store` | 3 |
 | `settings` | 16 |
 | `shared_foundation` | 44 |
-| `test_harness` | 461 |
+| `test_harness` | 463 |
 | `transport` | 25 |
 
 ## Delete Candidates

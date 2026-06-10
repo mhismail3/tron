@@ -152,6 +152,11 @@ impl EngineHost {
                 ));
             }
         };
+        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
+            return PreparedDelegatedInvocationDecision::Finished(Box::new(
+                self.finish_meta_invocation(invocation, function, Err(err), None),
+            ));
+        }
         let child = if is_host_dispatched_primitive_function(&child.function_id) {
             PreparedDelegatedChild::Sync(PreparedSyncInvocationDecision::Finished(Box::new(
                 self.invoke_sync_host_dispatched_primitive(child),
@@ -159,11 +164,6 @@ impl EngineHost {
         } else {
             PreparedDelegatedChild::Sync(self.catalog.prepare_sync_invocation(child))
         };
-        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
-            return PreparedDelegatedInvocationDecision::Finished(Box::new(
-                self.finish_meta_invocation(invocation, function, Err(err), None),
-            ));
-        }
         PreparedDelegatedInvocationDecision::Execute(Box::new(PreparedDelegatedInvocation {
             meta_invocation: invocation,
             meta_function: function,

@@ -43,6 +43,8 @@ file roots, worker identity, or credential custody.
   server/agent context, not by public `/engine` clients.
 - Grants must narrow by canonical path containment, network policy, budgets,
   actor/worker subjects, and resource selectors.
+- Delegated `engine::invoke` wrappers must consume valid parent-wrapper
+  invocation budget before preparing or dispatching any child.
 - Direct invocation through `engine::invoke` must not bypass catalog visibility
   or internal/admin/worker-only function constraints.
 - Secrets and bearer/API/OAuth tokens must stay out of UserDefaults, logs,
@@ -53,7 +55,7 @@ file roots, worker identity, or credential custody.
 | Row | Requirement | Points | Status | Owner | Evidence | Closure | Checkpoint |
 |---|---|---:|---|---|---|---|---|
 | SACB-0 | Campaign harness, red gates, README/CI links, evidence/inventory scaffolding | 5 | passed_after_fix | docs/static gates | Added SACB scorecard, evidence manifest, inventory docs/TSV, invariant target, README links, CI/static-gate wiring, and prior-campaign inventory rows for the new artifacts. | Closed. | SACB-0 campaign harness checkpoint |
-| SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix | inventory/static gates | Expanded the inventory to marker-derived coverage across server, iOS, Mac, scripts, workflows, active docs, historical scorecards, TSV evidence, and tests; current coverage is 610 structured rows after post-audit remediation. Static gates now recompute tracked security-marker files and require every one to have a structured inventory row. | Closed. | SACB-1 boundary inventory checkpoint |
+| SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix | inventory/static gates | Expanded the inventory to marker-derived coverage across server, iOS, Mac, scripts, workflows, active docs, historical scorecards, TSV evidence, and tests; current coverage is 611 structured rows after post-audit remediation. Static gates now recompute tracked security-marker files and require every one to have a structured inventory row. | Closed. | SACB-1 boundary inventory checkpoint |
 | SACB-2 | Public transport auth, route exposure, bearer handling, loopback worker boundary | 10 | passed_after_fix | transport/http/runtime | Added focused server tests proving `/engine/workers` requires bearer auth, allows bearer-authenticated loopback upgrades, and rejects non-loopback worker peers with `403` through the extracted peer guard. Added static guards proving `/engine` and `/engine/workers` stay wired through `ws_auth_gate`, bearer parsing stays strict, and the worker handler keeps `ConnectInfo<SocketAddr>` plus `is_loopback()`. | Closed. | SACB-2 public transport boundary checkpoint |
 | SACB-3 | Transport context trust: remove/deny untrusted authority scope and runtime metadata injection | 14 | passed_after_fix | transport/engine | Deleted public `authorityScopes` and `runtimeMetadata` fields from `WireContext` and `EngineTransportContext`, removed the transport copy loops into `CausalContext`, removed silent top-level `authorityScopes` stripping, inverted the socket DTO tests to reject those fields, and added static guards against field/copy-loop reintroduction. README now documents that public wire context carries only identity and correlation scope. | Closed. | SACB-3 public context trust checkpoint |
 | SACB-4 | Authority grant model: derivation, file roots, network policy, budgets, bootstrap grants | 12 | passed_after_fix | engine/authority | Added shared canonical grant file-root helpers, changed child grant derivation from raw string-prefix checks to canonical path containment with unresolved suffix normalization, added prefix-sibling and parent-component escape regression tests, proved network policy narrowing, and added explicit bootstrap root-grant proof plus static guards for wildcard bootstrap provenance. Post-audit remediation added durable pre-handler `remainingInvocations` consumption with idempotency replay exemption and SQLite persistence proof. Updated ownership/cleanup/modularity/SOL/SACB inventories for the new helpers. | Closed. | SACB-4 authority grant boundary checkpoint |
@@ -70,7 +72,8 @@ Total weight: **100**
 
 | Checkpoint | Scope | Status | Evidence | Verification |
 |---|---|---|---|---|
-| POST-1 | Durable grant invocation budgets and scoped worker token grant hashes | passed_after_fix | `remainingInvocations` is consumed durably after idempotency replay/schema/routing checks and before handler dispatch; scoped worker hellos compare the token grant hash to the active grant policy hash instead of accepting a placeholder. Evidence row: `SACB-POST-1`. | Focused authority, external-worker, primitive trace, capability executor, and SACB invariant targets passed before final broad verification. |
+| POST-1 | Durable grant invocation budgets and scoped worker token grant hashes | passed_after_fix | `remainingInvocations` is consumed durably after idempotency replay/schema/routing checks and before direct handler or host-dispatched primitive execution; scoped worker hellos compare the token grant hash to the active grant policy hash instead of accepting a placeholder. Evidence row: `SACB-POST-1`. | Focused authority, external-worker, primitive trace, capability executor, and SACB invariant targets passed before final broad verification. |
+| POST-2 | Delegated `engine::invoke` parent-budget ordering | passed_after_fix | `EngineHostHandle::invoke("engine::invoke")` now consumes a valid parent wrapper's `remainingInvocations` budget immediately after child payload parsing and before host-dispatched child invocation or regular child preparation. Evidence row: `SACB-POST-2`. | Focused invocation, meta primitive, authority, SACB invariant, broad CI, personal-info, whitespace, ignored-file, and worktree gates passed for the remediation. |
 
 ## Initial Findings
 
@@ -84,9 +87,12 @@ Total weight: **100**
   authorization.
 - SACB-4 explicitly proves bootstrap grants are engine-owned wildcard roots
   with `engine.bootstrap` provenance, not public-callable permission data.
-- SACB post-audit remediation consumes modeled `remainingInvocations` budgets
-  before handler dispatch and records `grant.budget_consumed` events with
-  invocation/function/trace provenance.
+- SACB-POST-1 consumes modeled `remainingInvocations` budgets before direct
+  handler or host-dispatched primitive execution and records
+  `grant.budget_consumed` events with invocation/function/trace provenance.
+- SACB-POST-2 closes the delegated `EngineHostHandle::invoke("engine::invoke")`
+  ordering gap by consuming parent-wrapper budget before child preparation or
+  host-dispatched primitive side effects.
 - SACB-5 closed the direct invocation gap by denying raw public
   `engine.internal.invoke` scope strings and proving public `engine::invoke`
   cannot reach internal, admin, or worker-only targets.
@@ -135,7 +141,8 @@ and row-specific security boundary guards:
   network denial, and state/trace/log/replay scope checks.
 - Authority-grant static guards require durable `remainingInvocations`
   consumption, revision increments, budget-consumed audit events, replay-safe
-  idempotency ordering, and deterministic grant policy hashing.
+  idempotency ordering, delegated `engine::invoke` parent-budget-before-child
+  ordering, and deterministic grant policy hashing.
 - External-worker static guards require active scoped-token grant checks,
   active grant policy hash comparison, strict namespace matching, trigger target
   ownership, scoped stream publishing, and per-socket pending result ownership.

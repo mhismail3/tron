@@ -474,6 +474,7 @@ packages/agent/src/engine/tests/durability/resource_wrappers.rs	retain	rust agen
 packages/agent/src/engine/tests/durability/state_primitives.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/durability/streams.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/fixtures/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/engine/tests/invocation/host_invocation_delegated_budget_ordering.rs	retain	rust agent	SACB-POST-2	Focused delegated engine::invoke budget-ordering regressions retained with invocation tests.
 packages/agent/src/engine/tests/invocation/host_invocation.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/invocation/idempotency.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/invocation/meta_primitives.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1222,6 +1223,7 @@ packages/ios-app/Tests/UI/Components/CardEntranceModifierTests.swift	retain	ios 
 packages/ios-app/Tests/UI/Components/RecentWorkspacesTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/Components/ToastBannerLayoutTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/Onboarding/BindingPasteAwareTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/ios-app/Tests/UI/Onboarding/OnboardingFlowLayoutTests.swift	retain	ios test	SACB-POST-2	Tracked onboarding layout guard classified during delegated budget remediation inventory repair.
 packages/ios-app/Tests/UI/Onboarding/OnboardingStateTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/RuntimeSurfaces/GeneratedUIRendererTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/Settings/AgentContextSettingsPageTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
