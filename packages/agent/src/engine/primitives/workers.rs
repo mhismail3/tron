@@ -15,6 +15,8 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         .with_namespace_claim("claim")
         .with_namespace_claim("evidence")
         .with_namespace_claim("decision")
+        .with_namespace_claim("agent_memory")
+        .with_namespace_claim("agent_rule")
         .with_namespace_claim("materialized_file")
         .with_namespace_claim("patch");
     Ok(vec![

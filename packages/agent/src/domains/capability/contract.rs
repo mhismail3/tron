@@ -1,8 +1,8 @@
 //! Capability contracts owned by the capability domain worker.
 //!
 //! This worker is the model-facing harness collapse point: providers see one
-//! `execute` primitive that can observe, touch agent-owned state, read/write the
-//! workspace, and run bounded local commands.
+//! `execute` primitive that can observe, touch agent-owned state, author typed
+//! resources, read/write the workspace, and run bounded local commands.
 
 use serde_json::json;
 
@@ -46,7 +46,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                 "name": "execute",
                 "description": concat!(
                     "Primitive host operation for the bare Tron loop. ",
-                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, and inspect agent trace/log records. ",
+                    "Use execute to observe, read/write agent-owned state, author typed resources, read/write files under the current working directory, run a bounded local command, and inspect agent trace/log records. ",
                     "It can also export the current session replay manifest without side effects. ",
                     "Choose one operation per call. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
@@ -69,13 +69,25 @@ fn execute_model_request_schema() -> serde_json::Value {
         "properties": {
             "operation": {
                 "type": "string",
-                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, or replay_manifest."
+                "description": "One primitive operation: observe, state_get, state_set, state_list, resource_create, resource_update, resource_link, resource_inspect, resource_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, or replay_manifest."
             },
             "input": {"type": "string", "description": "Text to record for observe."},
-            "scope": {"type": "string", "description": "State scope: session, workspace, or system."},
+            "scope": {"type": "string", "description": "Scope for state/resource operations; execute rejects system scope for agent calls."},
             "namespace": {"type": "string", "description": "Agent-owned state namespace."},
             "key": {"type": "string", "description": "Agent-owned state key."},
             "value": {"description": "JSON value for state_set."},
+            "kind": {"type": "string", "description": "Typed resource kind for resource_create/resource_list."},
+            "resourceId": {"type": "string", "description": "Resource id for resource operations."},
+            "resourcePayload": {"description": "JSON payload for resource_create/resource_update."},
+            "schemaId": {"type": "string", "description": "Optional resource schema id."},
+            "lifecycle": {"type": "string", "description": "Optional resource lifecycle filter or target state."},
+            "expectedCurrentVersionId": {"type": "string", "description": "Optional CAS guard for resource_update."},
+            "sourceResourceId": {"type": "string", "description": "Source resource id for resource_link."},
+            "targetResourceId": {"type": "string", "description": "Target resource id for resource_link."},
+            "relation": {"type": "string", "description": "Relation name for resource_link."},
+            "metadata": {"type": "object", "description": "Optional metadata for resource_link."},
+            "policy": {"type": "object", "description": "Optional resource policy envelope."},
+            "locations": {"type": "array", "description": "Optional materialized resource locations."},
             "path": {"type": "string", "description": "Relative file path under the current working directory."},
             "content": {"type": "string", "description": "UTF-8 file content for file_write."},
             "command": {"type": "string", "description": "Shell command for process_run."},
@@ -113,6 +125,7 @@ mod tests {
             .as_str()
             .expect("execute description");
         assert!(description.contains("Primitive host operation"));
+        assert!(description.contains("author typed resources"));
         assert!(description.contains("Choose one operation per call"));
 
         let schema = execute_model_request_schema();
@@ -123,6 +136,10 @@ mod tests {
             "primitive execute should accept only its direct request shape"
         );
         assert_eq!(schema["properties"]["operation"]["type"], json!("string"));
+        assert_eq!(
+            schema["properties"]["resourcePayload"]["description"],
+            json!("JSON payload for resource_create/resource_update.")
+        );
         assert!(schema["properties"].get("target").is_none());
         assert!(schema["properties"].get("contractId").is_none());
         assert!(schema["properties"].get("functionId").is_none());

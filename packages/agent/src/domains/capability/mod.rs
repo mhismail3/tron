@@ -3,9 +3,11 @@
 //! This module owns the only model-facing tool on the primitive branch:
 //! `capability::execute`. Concrete host actions happen through direct primitive
 //! operations after the trusted agent runtime derives a least-privilege child
-//! grant for the current call. `replay_manifest` is the read-only evidence
-//! operation: it returns the current session replay manifest without creating a
-//! trace record.
+//! grant for the current call. Durable self-authorship uses typed
+//! `resource_*` operations inside this one primitive rather than a second
+//! provider-visible tool. `replay_manifest` is the read-only evidence operation:
+//! it returns the current session replay manifest without creating a trace
+//! record.
 //!
 //! ## Submodules
 //!
@@ -17,8 +19,8 @@
 //! # INVARIANT: the model-facing surface is tiny
 //!
 //! Provider integrations must expose exactly this one tool. Additional behavior
-//! can only appear later as agent-owned state or generated helper substrate, not
-//! as checked-in target functions.
+//! can only appear later as agent-owned state, typed resources, or generated
+//! helper substrate, not as checked-in target functions.
 //! Agent-launched executions persist trace provider ownership and canonical
 //! working directory from trusted `CausalContext` runtime metadata, not from
 //! model-id string parsing, shell aliases, caller-supplied public context, or

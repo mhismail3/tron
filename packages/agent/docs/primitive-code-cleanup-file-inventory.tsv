@@ -116,7 +116,6 @@ packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/persistence/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/agent/loop/turn_runner/provider.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/result.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/turn_context.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -176,7 +175,6 @@ packages/agent/src/domains/capability/operations/mod.rs	retain	rust agent	PCC-10
 packages/agent/src/domains/capability/operations/process.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/capability/operations/state.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/capability/operations/trace.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/logs/client_logs.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/logs/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/message/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -249,11 +247,6 @@ packages/agent/src/domains/model/providers/shared/retry.rs	retain	rust agent	PCC
 packages/agent/src/domains/model/providers/shared/sse.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/shared/stream_common.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/tokens/errors.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/tokens/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/tokens/normalization.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/tokens/pricing.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/tokens/types.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/catalog.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/models/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1554,3 +1547,23 @@ packages/agent/tests/security_authority_capability_boundaries/scorecard_inventor
 packages/agent/tests/security_authority_capability_boundaries/static_guards.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries static guard module retained for the current campaign.
 packages/agent/tests/security_authority_capability_boundaries/support.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant test support retained for the current campaign.
 packages/agent/tests/security_authority_capability_boundaries_invariants.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant target retained for the current campaign.
+packages/agent/docs/observability-diagnostics-auditability-evidence-manifest.md	retain	oda docs	ODA-10	Current Observability Diagnostics Auditability evidence manifest retained after closeout.
+packages/agent/docs/observability-diagnostics-auditability-inventory.md	retain	oda docs	ODA-10	Current Observability Diagnostics Auditability inventory retained after closeout.
+packages/agent/docs/observability-diagnostics-auditability-inventory.tsv	retain	oda docs	ODA-10	Current Observability Diagnostics Auditability machine-readable inventory retained after closeout.
+packages/agent/docs/observability-diagnostics-auditability-scorecard.md	retain	oda docs	ODA-10	Current Observability Diagnostics Auditability scorecard retained after closeout.
+packages/agent/tests/observability_diagnostics_auditability/mod.rs	retain	oda rust test	ODA-10	Current Observability Diagnostics Auditability invariant module registry retained after closeout.
+packages/agent/tests/observability_diagnostics_auditability/scorecard_inventory.rs	retain	oda rust test	ODA-10	Current Observability Diagnostics Auditability scorecard and inventory invariant retained after closeout.
+packages/agent/tests/observability_diagnostics_auditability/source_guards.rs	retain	oda rust test	ODA-10	Current Observability Diagnostics Auditability source guard invariant retained after closeout.
+packages/agent/tests/observability_diagnostics_auditability/support.rs	retain	oda rust test	ODA-10	Current Observability Diagnostics Auditability invariant support retained after closeout.
+packages/agent/tests/observability_diagnostics_auditability_invariants.rs	retain	oda rust test	ODA-10	Current Observability Diagnostics Auditability invariant target retained after closeout.
+packages/agent/docs/self-adapting-agent-authorship-evidence-manifest.md	retain	saa docs	SAA-10	Current Self-Adapting Agent Authorship evidence manifest retained for primitive authorship closeout.
+packages/agent/docs/self-adapting-agent-authorship-inventory.md	retain	saa docs	SAA-10	Current Self-Adapting Agent Authorship inventory retained for primitive authorship closeout.
+packages/agent/docs/self-adapting-agent-authorship-inventory.tsv	retain	saa docs	SAA-10	Current Self-Adapting Agent Authorship machine-readable inventory retained for primitive authorship closeout.
+packages/agent/docs/self-adapting-agent-authorship-scorecard.md	retain	saa docs	SAA-10	Current Self-Adapting Agent Authorship scorecard retained for primitive authorship closeout.
+packages/agent/src/domains/capability/operations/resource.rs	retain	saa rust source	SAA-2	Execute resource operation adapter retained for self-adapting authorship through the primitive execute tool.
+packages/agent/tests/self_adapting_agent_authorship/mod.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant module registry retained for closeout verification.
+packages/agent/tests/self_adapting_agent_authorship/resource_fixtures.rs	retain	saa rust test	SAA-3/SAA-6	Current Self-Adapting Agent Authorship resource fixture invariants retained for closeout verification.
+packages/agent/tests/self_adapting_agent_authorship/scorecard_inventory.rs	retain	saa rust test	SAA-0/SAA-1	Current Self-Adapting Agent Authorship scorecard and inventory invariant retained for closeout verification.
+packages/agent/tests/self_adapting_agent_authorship/source_guards.rs	retain	saa rust test	SAA-2/SAA-9	Current Self-Adapting Agent Authorship source guard invariant retained for closeout verification.
+packages/agent/tests/self_adapting_agent_authorship/support.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant support retained for closeout verification.
+packages/agent/tests/self_adapting_agent_authorship_invariants.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant target retained for closeout verification.

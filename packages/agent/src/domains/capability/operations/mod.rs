@@ -3,17 +3,20 @@
 //! `capability::execute` is the only model-facing tool on this branch. It does
 //! not search, inspect, route, bind, approve, or execute catalog targets. It
 //! performs one direct host primitive operation and returns a model-visible
-//! observation with engine details for audit. `replay_manifest` is the only
-//! read-only operation that bypasses trace-record creation; tracing that read
-//! would mutate the manifest it returns.
+//! observation with engine details for audit. Resource operations are typed
+//! `resource::*` calls inside the same primitive envelope, not catalog routing
+//! or a second provider tool. `replay_manifest` is the only read-only operation
+//! that bypasses trace-record creation; tracing that read would mutate the
+//! manifest it returns.
 //!
 //! The operation gate is intentionally stricter than the provider schema:
 //! `execute` accepts only trusted agent/system runtime contexts, rejects
 //! bootstrap authority grants, requires a derived least-privilege grant for
 //! every effectful call, resolves file/process roots from trusted runtime
-//! metadata, denies system-scoped state, and keeps trace/log/replay reads bound
-//! to the current session. `process_run` additionally inspects the active grant
-//! and runs only when it carries `networkPolicy none`.
+//! metadata, denies system-scoped state and resources, and keeps
+//! trace/log/replay reads bound to the current session. `process_run`
+//! additionally inspects the active grant and runs only when it carries
+//! `networkPolicy none`.
 
 use std::time::Instant;
 
@@ -30,6 +33,7 @@ mod filesystem;
 mod logs;
 mod process;
 mod replay;
+mod resource;
 mod state;
 mod trace;
 
@@ -37,6 +41,7 @@ use filesystem::{file_read, file_write};
 use logs::log_recent;
 use process::process_run;
 use replay::replay_manifest;
+use resource::{resource_create, resource_inspect, resource_link, resource_list, resource_update};
 use state::{state_get, state_list, state_set};
 use trace::{complete_trace_record, started_trace_record, trace_get, trace_list};
 
@@ -121,6 +126,10 @@ fn validate_execute_context(
     }
     match operation {
         "state_get" | "state_set" | "state_list" => validate_state_scope(invocation),
+        "resource_create" | "resource_list" => validate_resource_scope(invocation),
+        "resource_inspect" | "resource_update" | "resource_link" => {
+            require_current_session(invocation, "resource operation")
+        }
         "trace_list" | "trace_get" | "log_recent" | "replay_manifest" => {
             require_current_session(invocation, operation)
         }
@@ -143,6 +152,26 @@ fn validate_state_scope(invocation: &Invocation) -> Result<(), CapabilityError> 
             "capability::execute cannot read or write system-scoped state",
         )),
         other => Err(invalid(format!("unsupported execute state scope {other}"))),
+    }
+}
+
+fn validate_resource_scope(invocation: &Invocation) -> Result<(), CapabilityError> {
+    match optional_str(&invocation.payload, "scope")?.unwrap_or("session") {
+        "session" => require_current_session(invocation, "resource operation"),
+        "workspace" => {
+            if invocation.causal_context.workspace_id.is_none() {
+                return Err(invalid(
+                    "workspace resource requires trusted workspace context",
+                ));
+            }
+            Ok(())
+        }
+        "system" => Err(invalid(
+            "capability::execute cannot read or write system-scoped resources",
+        )),
+        other => Err(invalid(format!(
+            "unsupported execute resource scope {other}"
+        ))),
     }
 }
 
@@ -171,6 +200,11 @@ async fn execute_operation(
         "file_read" => file_read(invocation).await?,
         "file_write" => file_write(invocation).await?,
         "process_run" => process_run(invocation, deps).await?,
+        "resource_create" => resource_create(invocation, deps).await?,
+        "resource_update" => resource_update(invocation, deps).await?,
+        "resource_link" => resource_link(invocation, deps).await?,
+        "resource_inspect" => resource_inspect(invocation, deps).await?,
+        "resource_list" => resource_list(invocation, deps).await?,
         "trace_list" => trace_list(invocation, deps)?,
         "trace_get" => trace_get(invocation, deps)?,
         "log_recent" => log_recent(invocation, deps).await?,
@@ -178,7 +212,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, or replay_manifest."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, resource_create, resource_update, resource_link, resource_inspect, resource_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, or replay_manifest."
                 ),
             });
         }

@@ -27,6 +27,11 @@ pub(super) async fn derive_capability_runtime_grant(
 ) -> Result<AuthorityGrantId, FailureEnvelope> {
     let mut allowed_capabilities = vec![
         target_function_id.as_str().to_owned(),
+        "resource::create".to_owned(),
+        "resource::inspect".to_owned(),
+        "resource::link".to_owned(),
+        "resource::list".to_owned(),
+        "resource::update".to_owned(),
         "state::get".to_owned(),
         "state::set".to_owned(),
         "state::list".to_owned(),
@@ -34,9 +39,15 @@ pub(super) async fn derive_capability_runtime_grant(
     allowed_capabilities.sort();
     allowed_capabilities.dedup();
     let mut allowed_authority_scopes = target_authority_scopes.to_vec();
-    allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
+    allowed_authority_scopes.extend([
+        "resource.read".to_owned(),
+        "resource.write".to_owned(),
+        "state.read".to_owned(),
+        "state.write".to_owned(),
+    ]);
     allowed_authority_scopes.sort();
     allowed_authority_scopes.dedup();
+    let allowed_resource_kinds = self_adapting_resource_kinds();
     let idempotency_material = json!({
         "version": 1,
         "sessionId": session_id,
@@ -74,8 +85,8 @@ pub(super) async fn derive_capability_runtime_grant(
         "allowedCapabilities": allowed_capabilities,
         "allowedNamespaces": ["__no_namespace_authority__"],
         "allowedAuthorityScopes": allowed_authority_scopes,
-        "allowedResourceKinds": ["agent_state"],
-        "resourceSelectors": ["kind:agent_state"],
+        "allowedResourceKinds": allowed_resource_kinds,
+        "resourceSelectors": ["*"],
         "fileRoots": [working_directory],
         "networkPolicy": "none",
         "maxRisk": "medium",
@@ -131,6 +142,23 @@ pub(super) async fn derive_capability_runtime_grant(
             )
         })?;
     AuthorityGrantId::new(grant_id.to_owned()).map_err(|error| engine_error_to_failure(&error))
+}
+
+fn self_adapting_resource_kinds() -> Vec<&'static str> {
+    vec![
+        "agent_memory",
+        "agent_result",
+        "agent_rule",
+        "artifact",
+        "claim",
+        "decision",
+        "evidence",
+        "execution_output",
+        "goal",
+        "materialized_file",
+        "patch_proposal",
+        "ui_surface",
+    ]
 }
 
 #[allow(clippy::too_many_arguments)]

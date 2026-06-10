@@ -38,6 +38,7 @@ run_tests() {
         concurrency_scheduling_discipline_invariants
         security_authority_capability_boundaries_invariants
         observability_diagnostics_auditability_invariants
+        self_adapting_agent_authorship_invariants
         primitive_trace_execution
         integration
     )

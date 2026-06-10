@@ -206,6 +206,18 @@ Current living entry points:
   completed ODA source inventory taxonomy and proof notes.
 - `packages/agent/docs/observability-diagnostics-auditability-inventory.tsv`:
   machine-readable ODA source inventory used by static gates.
+- `packages/agent/docs/self-adapting-agent-authorship-scorecard.md`:
+  completed Self-Adapting Agent Authorship scorecard for proving durable
+  goals, evidence, decisions, memories/rules, patch proposals, materialized
+  files, generated UI surfaces, promotion-ready artifacts, and trace evidence
+  through the single `execute` primitive.
+- `packages/agent/docs/self-adapting-agent-authorship-evidence-manifest.md`:
+  companion evidence manifest for SAA row checkpoints, verification logs, and
+  residual promotion/loop risks.
+- `packages/agent/docs/self-adapting-agent-authorship-inventory.md`:
+  completed SAA source inventory taxonomy and proof notes.
+- `packages/agent/docs/self-adapting-agent-authorship-inventory.tsv`:
+  machine-readable SAA source inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -284,12 +296,17 @@ Current living entry points:
   completed SACB scorecard, inventory, CI wiring, and security boundary gates, with
   focused modules under
   `packages/agent/tests/security_authority_capability_boundaries/`.
+- `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
+  completed SAA scorecard, evidence, inventory, execute resource operation,
+  durable memory/rule, generated UI, promotion boundary, autonomous-loop
+  safety, observability, and closeout gates, with focused modules under
+  `packages/agent/tests/self_adapting_agent_authorship/`.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB scorecards.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -556,19 +573,22 @@ surface is intentionally collapsed to one provider-visible function:
 
 `capability::execute` is a direct primitive operation endpoint. Its request
 schema requires an `operation` field and accepts only operation-specific
-primitive fields such as `input`, `scope`, `namespace`, `key`, `value`, `path`,
-`content`, `command`, `traceId`, `traceRecordId`, `limit`, `timeoutMs`,
-`maxOutputBytes`, `idempotencyKey`, and `reason`.
+primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
+`kind`, `resourceId`, `resourcePayload`, `sourceResourceId`,
+`targetResourceId`, `relation`, `path`, `content`, `command`, `traceId`,
+`traceRecordId`, `limit`, `timeoutMs`, `maxOutputBytes`, `idempotencyKey`, and
+`reason`.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata under a per-call derived authority grant. The child grant is
 scoped to the exact primitive function, the canonical working directory, no
-namespace authority, state read/write support, and `networkPolicy: none`; the
-worker rejects bootstrap grants and public caller contexts. Trace records use
-those trusted facts directly instead of inferring provider ownership from model
-id strings. `replay_manifest` is the read-only exception: it returns the current
-session replay manifest without creating a trace record, so the read does not
-mutate the manifest it exports.
+namespace authority, state/resource read/write support for the approved SAA
+resource kinds, and `networkPolicy: none`; the worker rejects bootstrap grants,
+public caller contexts, system-scoped state, and system-scoped resources. Trace
+records use those trusted facts directly instead of inferring provider ownership
+from model id strings. `replay_manifest` is the read-only exception: it returns
+the current session replay manifest without creating a trace record, so the read
+does not mutate the manifest it exports.
 
 Current primitive operations:
 
@@ -578,6 +598,11 @@ Current primitive operations:
 | `state_get` | Read an agent-owned state value. |
 | `state_set` | Write an agent-owned state value. |
 | `state_list` | List agent-owned state entries for a scope/namespace. |
+| `resource_create` | Create a typed session/workspace resource such as goal, evidence, decision, agent_memory, agent_rule, patch_proposal, materialized_file, or ui_surface. |
+| `resource_update` | Append a typed resource version with an optional current-version guard. |
+| `resource_link` | Create a typed relation between two resources. |
+| `resource_inspect` | Inspect one resource with versions, links, and events. |
+| `resource_list` | List typed resources by scope, kind, lifecycle, and limit. |
 | `file_read` | Read a UTF-8 file under the current working directory. |
 | `file_write` | Write UTF-8 content under the current working directory. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
@@ -1391,9 +1416,10 @@ tron ci clippy test          # Subset: linting + tests
 `post_aha_adversarial_closeout_invariants`,
 `concurrency_scheduling_discipline_invariants`,
 `security_authority_capability_boundaries_invariants`,
-`primitive_trace_execution`, and serial `integration`. GitHub's Rust
-static-gates job runs the same named target set for docs, template, iOS, Mac,
-script, and CI changes.
+`observability_diagnostics_auditability_invariants`,
+`self_adapting_agent_authorship_invariants`, `primitive_trace_execution`, and
+serial `integration`. GitHub's Rust static-gates job runs the same named target
+set for docs, template, iOS, Mac, script, and CI changes.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

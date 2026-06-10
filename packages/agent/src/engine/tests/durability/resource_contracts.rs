@@ -17,6 +17,8 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
         "materialized_file",
         "patch_proposal",
         "execution_output",
+        "agent_memory",
+        "agent_rule",
         "agent_result",
     ] {
         assert!(
@@ -47,6 +49,54 @@ fn resource_kernel_builtin_definitions_keep_core_kinds_and_relations() {
                 .iter()
                 .any(|allowed| allowed == relation),
             "decision resources must keep primitive relation `{relation}`"
+        );
+    }
+
+    let agent_memory = definitions
+        .iter()
+        .find(|definition| definition.kind == "agent_memory")
+        .unwrap();
+    for required in ["statement", "status", "scope", "provenance", "evidenceRefs"] {
+        assert!(
+            agent_memory
+                .schema
+                .get("required")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|fields| fields.iter().any(|field| field.as_str() == Some(required))),
+            "agent_memory must require {required}"
+        );
+    }
+    for lifecycle in ["active", "superseded", "revoked"] {
+        assert!(
+            agent_memory
+                .lifecycle_states
+                .iter()
+                .any(|state| state == lifecycle),
+            "agent_memory lifecycle missing {lifecycle}"
+        );
+    }
+
+    let agent_rule = definitions
+        .iter()
+        .find(|definition| definition.kind == "agent_rule")
+        .unwrap();
+    for required in ["rule", "status", "scope", "provenance", "evidenceRefs"] {
+        assert!(
+            agent_rule
+                .schema
+                .get("required")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|fields| fields.iter().any(|field| field.as_str() == Some(required))),
+            "agent_rule must require {required}"
+        );
+    }
+    for relation in ["supported_by", "supersedes", "revoked_by", "decided_by"] {
+        assert!(
+            agent_rule
+                .allowed_link_relations
+                .iter()
+                .any(|allowed| allowed == relation),
+            "agent_rule relation missing {relation}"
         );
     }
 }

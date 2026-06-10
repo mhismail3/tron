@@ -445,6 +445,7 @@ fn clarification_includes_capability_execution_guidance() {
     let result = generate_capability_instruction_text(&[]);
     assert!(result.contains("Execute Operations"));
     assert!(result.contains("state_get"));
+    assert!(result.contains("resource_create"));
     assert!(result.contains("file_write"));
     assert!(result.contains("process_run"));
     assert!(result.contains("trace_list"));
