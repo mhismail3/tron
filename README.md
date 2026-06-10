@@ -104,7 +104,7 @@ Current living entry points:
   source-audited deletion map for every current Rust domain, engine primitive
   worker, runner context plane, managed skill, doc, iOS source/view root, and
   settings surface.
-- `packages/agent/docs/determinism-replayability-scorecard.md`: active
+- `packages/agent/docs/determinism-replayability-scorecard.md`: completed
   Determinism Replayability Campaign scorecard for proving offline audit and
   reconstruction replay from durable session, provider, trace, ledger, stream,
   queue, and hash records.
@@ -125,40 +125,52 @@ Current living entry points:
   cleanup target tree.
 - `packages/agent/docs/primitive-code-cleanup-file-inventory.tsv`:
   machine-readable per-file cleanup classification used by static gates.
-- `packages/agent/docs/true-primitive-cleanup-scorecard.md`: active
+- `packages/agent/docs/true-primitive-cleanup-scorecard.md`: completed
   scorecard for the final strict primitive cleanup pass over oversized roots,
   residue review, dead state, provider/model ownership, iOS shell flattening,
   Mac/scripts helper scope, and closeout evidence.
 - `packages/agent/docs/true-primitive-cleanup-evidence-manifest.md`: companion
-  evidence manifest for the active True Primitive Cleanup scorecard.
-- `packages/agent/docs/true-primitive-cleanup-retention-inventory.md`: active
+  evidence manifest for the completed True Primitive Cleanup scorecard.
+- `packages/agent/docs/true-primitive-cleanup-retention-inventory.md`: completed
   TPC retention inventory that classifies every tracked source/docs/script path
   in scope as primitive, implementation, support, test, docs, or delete.
 - `packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv`:
   machine-readable TPC retention inventory used by static gates.
-- `packages/agent/docs/true-modularity-boundary-scorecard.md`: active
+- `packages/agent/docs/true-modularity-boundary-scorecard.md`: completed
   scorecard for proving Rust and iOS boundaries are black-boxed by ownership,
   narrow APIs, and guarded dependency direction.
 - `packages/agent/docs/true-modularity-boundary-evidence-manifest.md`:
-  companion evidence manifest for the active True Modularity Boundary campaign.
-- `packages/agent/docs/true-modularity-boundary-inventory.md`: active TMB
+  companion evidence manifest for the completed True Modularity Boundary campaign.
+- `packages/agent/docs/true-modularity-boundary-inventory.md`: completed TMB
   boundary taxonomy, dependency-direction rules, and composition-root exception
   list.
 - `packages/agent/docs/true-modularity-boundary-inventory.tsv`:
   machine-readable Rust/Swift source ownership inventory used by TMB static
   gates.
-- `packages/agent/docs/failure-semantics-scorecard.md`: active Failure
+- `packages/agent/docs/failure-semantics-scorecard.md`: completed Failure
   Semantics Campaign scorecard for enforcing one canonical error envelope
   across provider/model errors, runtime turn failures, capability results,
   transport responses, durable events, replay, and iOS projections.
 - `packages/agent/docs/failure-semantics-evidence-manifest.md`: companion
   evidence manifest for FSC row checkpoints, verification logs, and residual
   failure-contract risks.
-- `packages/agent/docs/failure-semantics-inventory.md`: active FSC inventory of
+- `packages/agent/docs/failure-semantics-inventory.md`: completed FSC inventory of
   server, engine, provider, runtime, transport, durable replay, and iOS failure
   surfaces.
 - `packages/agent/docs/failure-semantics-inventory.tsv`: machine-readable FSC
   failure-surface inventory used by static gates.
+- `packages/agent/docs/state-ownership-lifecycle-scorecard.md`: active State
+  Ownership And Lifecycle campaign scorecard for proving every stateful server,
+  engine, iOS, script/CI, and docs-owned state claim has one owner, lifecycle
+  class, mutation boundary, hydration path, retirement path, and concurrency or
+  task guard.
+- `packages/agent/docs/state-ownership-lifecycle-evidence-manifest.md`:
+  companion evidence manifest for SOL row checkpoints, verification logs, and
+  residual lifecycle risks.
+- `packages/agent/docs/state-ownership-lifecycle-inventory.md`: active SOL
+  state-surface lifecycle taxonomy and inventory notes.
+- `packages/agent/docs/state-ownership-lifecycle-inventory.tsv`:
+  machine-readable SOL state ownership inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -193,7 +205,7 @@ Current living entry points:
 - `packages/agent/tests/primitive_engine_teardown_plan_invariants.rs`:
   absence, traceability, schema, registration, and documentation gates for the
   primitive branch.
-- `packages/agent/tests/determinism_replayability_invariants.rs`: active DRC
+- `packages/agent/tests/determinism_replayability_invariants.rs`: completed DRC
   gates for scorecard state, replay source inventory, entropy scan coverage,
   provider request audit wiring, replay manifest hashing, stable ordering,
   cross-record replay references, offline roundtrip proof, docs parity, and
@@ -210,21 +222,24 @@ Current living entry points:
 - `packages/agent/tests/post_aha_adversarial_closeout_invariants.rs`: completed
   post-AHA closeout gates for Mac project policy, docs/runtime parity, Mac/iOS
   ownership, Rust docs/budgets, CI parity, provenance, privacy, and residue.
-- `packages/agent/tests/true_primitive_cleanup_invariants.rs`: active TPC
+- `packages/agent/tests/true_primitive_cleanup_invariants.rs`: completed TPC
   scorecard, evidence, initial red-finding, and tracked-source setup gates.
-- `packages/agent/tests/true_modularity_boundary_invariants.rs`: active TMB
+- `packages/agent/tests/true_modularity_boundary_invariants.rs`: completed TMB
   scorecard, boundary inventory, responder, facade, domain, storage, transport,
   iOS engine-access, boundary-error, and final closeout gates.
-- `packages/agent/tests/failure_semantics_invariants.rs`: active FSC scorecard,
+- `packages/agent/tests/failure_semantics_invariants.rs`: completed FSC scorecard,
   inventory, failure-surface, canonical-envelope, event-emission, transport,
   provider, iOS parity, replay, and closeout gates.
+- `packages/agent/tests/state_ownership_lifecycle_invariants.rs`: active SOL
+  scorecard, inventory, stateful-marker coverage, runtime task lifecycle,
+  iOS local-state classification, owner-private settings/auth writes, and final
+  closeout gates.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, the
-completed AHA scorecard, the active TPC scorecard, and the active TMB
-scorecard, and the active FSC scorecard.
+completed HRA/AHA/PCC/TPC/TMB/DRC/FSC scorecards, and the active SOL scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
