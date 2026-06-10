@@ -255,16 +255,16 @@ fn read_tokens_from_disk(auth_path: &std::path::Path, account_label: &str) -> Op
 }
 
 /// Save refreshed tokens back to auth.json.
-fn persist_tokens(auth_path: &std::path::Path, account_label: &str, tokens: &OAuthTokens) {
+fn persist_tokens(
+    auth_path: &std::path::Path,
+    account_label: &str,
+    tokens: &OAuthTokens,
+) -> Result<(), AuthError> {
     tracing::info!(
         account = account_label,
         "persisting refreshed OpenAI account tokens"
     );
-    if let Err(e) =
-        super::storage::save_account_oauth_tokens(auth_path, PROVIDER_KEY, account_label, tokens)
-    {
-        tracing::warn!(error = %e, "failed to persist refreshed OpenAI tokens");
-    }
+    super::storage::save_account_oauth_tokens(auth_path, PROVIDER_KEY, account_label, tokens)
 }
 
 /// Check if a refresh failure indicates the refresh token was already consumed.
@@ -343,7 +343,7 @@ async fn maybe_refresh_tokens(
 
     match do_refresh(&effective_tokens).await {
         Ok((new_tokens, true)) => {
-            persist_tokens(&auth_path, &account_label_owned, &new_tokens);
+            persist_tokens(&auth_path, &account_label_owned, &new_tokens)?;
             Ok((new_tokens, true))
         }
         Ok(not_refreshed) => Ok(not_refreshed),
@@ -359,7 +359,7 @@ async fn maybe_refresh_tokens(
                     tracing::info!("retrying OpenAI refresh with updated token from disk");
                     match do_refresh(&rt).await {
                         Ok((new_tokens, true)) => {
-                            persist_tokens(&auth_path, &account_label_owned, &new_tokens);
+                            persist_tokens(&auth_path, &account_label_owned, &new_tokens)?;
                             Ok((new_tokens, true))
                         }
                         Ok(not_refreshed) => Ok(not_refreshed),

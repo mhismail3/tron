@@ -220,22 +220,13 @@ pub async fn load_server_auth_with_client(
                 ..cfg
             };
 
-            match maybe_refresh_tokens(&acct.oauth, &cfg_with_creds, client).await {
-                Ok((tokens, refreshed)) => {
-                    if refreshed {
-                        tracing::info!("persisting refreshed Google tokens");
-                        let _ = super::storage::save_account_oauth_tokens(
-                            auth_path,
-                            "google",
-                            &acct.label,
-                            &tokens,
-                        );
-                    }
-                    Ok(Some(GoogleAuth {
-                        auth: ServerAuth::from_oauth(&tokens),
-                        project_id: gpa.project_id.clone(),
-                    }))
-                }
+            match maybe_refresh_tokens(auth_path, &acct.label, &acct.oauth, &cfg_with_creds, client)
+                .await
+            {
+                Ok((tokens, _refreshed)) => Ok(Some(GoogleAuth {
+                    auth: ServerAuth::from_oauth(&tokens),
+                    project_id: gpa.project_id.clone(),
+                })),
                 Err(e) => {
                     tracing::warn!("Google OAuth refresh failed: {e}");
                     Err(e)
@@ -249,26 +240,143 @@ pub async fn load_server_auth_with_client(
     }
 }
 
+/// Read the current tokens for a specific Google account from auth.json.
+///
+/// Returns `None` both when the provider is not configured and when the
+/// account does not exist. A malformed auth file surfaces as `None` here; the
+/// outer `load_server_auth_with_client` path has already parsed the provider
+/// strictly before entering refresh, and the later persist path will refuse to
+/// overwrite a malformed file.
+fn read_tokens_from_disk(auth_path: &std::path::Path, account_label: &str) -> Option<OAuthTokens> {
+    let gpa = super::storage::get_google_provider_auth(auth_path)
+        .ok()
+        .flatten()?;
+    gpa.base
+        .accounts?
+        .into_iter()
+        .find(|a| a.label == account_label)
+        .map(|a| a.oauth)
+}
+
+/// Save refreshed Google tokens back to auth.json.
+///
+/// Called while holding the auth file lock.
+fn persist_tokens(
+    auth_path: &std::path::Path,
+    account_label: &str,
+    tokens: &OAuthTokens,
+) -> Result<(), AuthError> {
+    tracing::info!(
+        account = account_label,
+        "persisting refreshed Google tokens"
+    );
+    super::storage::save_account_oauth_tokens(auth_path, "google", account_label, tokens)
+}
+
+/// Check if a refresh failure indicates the refresh token was already consumed.
+///
+/// HTTP 400 with `invalid_grant` means the single-use refresh token was used
+/// by another process/server between our read and our refresh attempt.
+fn is_stale_token_error(e: &AuthError) -> bool {
+    matches!(e, AuthError::OAuth { status: 400, message } if message.contains("invalid_grant"))
+}
+
 /// Refresh tokens if expired, returning `(tokens, was_refreshed)`.
+///
+/// Serializes concurrent refresh attempts with both a process-local lock
+/// (for async tasks) and a file-level advisory lock (for multiple processes).
+/// Re-reads from disk after acquiring the file lock in case another process
+/// refreshed while we waited. On stale-token errors (HTTP 400 `invalid_grant`),
+/// retries once with tokens re-read from disk.
 async fn maybe_refresh_tokens(
+    auth_path: &std::path::Path,
+    account_label: &str,
     tokens: &OAuthTokens,
     config: &GoogleOAuthConfig,
     client: &reqwest::Client,
 ) -> Result<(OAuthTokens, bool), AuthError> {
+    use std::sync::OnceLock;
+    use tokio::sync::Mutex as TokioMutex;
+
+    static REFRESH_LOCK: OnceLock<TokioMutex<()>> = OnceLock::new();
+
+    let buffer_ms = config.oauth.token_expiry_buffer_seconds * 1000;
+    if super::types::now_ms() + buffer_ms < tokens.expires_at {
+        return Ok((tokens.clone(), false));
+    }
+
+    let lock = REFRESH_LOCK.get_or_init(|| TokioMutex::new(()));
+    let _guard = lock.lock().await;
+
+    if super::types::now_ms() + buffer_ms < tokens.expires_at {
+        return Ok((tokens.clone(), false));
+    }
+
+    let _file_lock = super::storage::acquire_auth_file_lock(auth_path).map_err(AuthError::Io)?;
+
+    let disk_tokens = read_tokens_from_disk(auth_path, account_label);
+    if let Some(ref dt) = disk_tokens
+        && super::types::now_ms() + buffer_ms < dt.expires_at
+    {
+        return Ok((dt.clone(), true));
+    }
+    let effective_tokens = disk_tokens.unwrap_or_else(|| tokens.clone());
+
     let client = client.clone();
     let config = config.clone();
-    super::refresh::maybe_refresh(
-        tokens,
-        config.oauth.token_expiry_buffer_seconds,
-        "google",
-        |refresh_tok| {
-            let client = client.clone();
-            let config = config.clone();
-            let refresh_tok = refresh_tok.to_owned();
-            async move { refresh_token_with_client(&config, &refresh_tok, &client).await }
-        },
-    )
-    .await
+    let auth_path = auth_path.to_path_buf();
+    let account_label_owned = account_label.to_string();
+
+    let do_refresh = |tok: &OAuthTokens| {
+        let client = client.clone();
+        let config = config.clone();
+        let tok = tok.clone();
+        async move {
+            super::refresh::maybe_refresh(
+                &tok,
+                config.oauth.token_expiry_buffer_seconds,
+                "google",
+                |refresh_tok| {
+                    let client = client.clone();
+                    let config = config.clone();
+                    let refresh_tok = refresh_tok.to_owned();
+                    async move { refresh_token_with_client(&config, &refresh_tok, &client).await }
+                },
+            )
+            .await
+        }
+    };
+
+    match do_refresh(&effective_tokens).await {
+        Ok((new_tokens, true)) => {
+            persist_tokens(&auth_path, &account_label_owned, &new_tokens)?;
+            Ok((new_tokens, true))
+        }
+        Ok(not_refreshed) => Ok(not_refreshed),
+        Err(e) if is_stale_token_error(&e) => {
+            tracing::info!(
+                "Google refresh token consumed by another process, re-reading auth.json"
+            );
+
+            let retry_tokens = read_tokens_from_disk(&auth_path, &account_label_owned);
+            match retry_tokens {
+                Some(rt) if super::types::now_ms() + buffer_ms < rt.expires_at => Ok((rt, true)),
+                Some(rt) => {
+                    tracing::info!("retrying Google refresh with updated token from disk");
+                    match do_refresh(&rt).await {
+                        Ok((new_tokens, true)) => {
+                            persist_tokens(&auth_path, &account_label_owned, &new_tokens)?;
+                            Ok((new_tokens, true))
+                        }
+                        Ok(not_refreshed) => Ok(not_refreshed),
+                        Err(retry_err) => Err(retry_err),
+                    }
+                }
+                None => Err(e),
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Google token endpoint response.
@@ -497,6 +605,97 @@ mod tests {
             msg.contains("tron auth google"),
             "error must include re-auth guidance, got: {msg}"
         );
+    }
+
+    #[test]
+    fn stale_refresh_errors_detected() {
+        let err = AuthError::OAuth {
+            status: 400,
+            message: r#"{"error":"invalid_grant"}"#.to_string(),
+        };
+        assert!(is_stale_token_error(&err));
+    }
+
+    #[test]
+    fn non_stale_refresh_errors_not_detected() {
+        assert!(!is_stale_token_error(&AuthError::OAuth {
+            status: 400,
+            message: "bad_request".to_string(),
+        }));
+        assert!(!is_stale_token_error(&AuthError::OAuth {
+            status: 401,
+            message: "invalid_grant".to_string(),
+        }));
+        assert!(!is_stale_token_error(&AuthError::Io(
+            std::io::Error::other("test",)
+        )));
+    }
+
+    #[test]
+    fn read_tokens_from_disk_account() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let tokens = OAuthTokens {
+            access_token: "disk-tok".to_string(),
+            refresh_token: "disk-ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::domains::auth::credentials::storage::save_account_oauth_tokens(
+            &path,
+            "google",
+            "user@example.com",
+            &tokens,
+        )
+        .unwrap();
+
+        let loaded = read_tokens_from_disk(&path, "user@example.com").unwrap();
+        assert_eq!(loaded.access_token, "disk-tok");
+
+        assert!(read_tokens_from_disk(&path, "nonexistent").is_none());
+    }
+
+    #[tokio::test]
+    async fn maybe_refresh_uses_disk_tokens_after_lock() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("auth.json");
+
+        let expired = OAuthTokens {
+            access_token: "expired-tok".to_string(),
+            refresh_token: "old-ref".to_string(),
+            expires_at: 0,
+        };
+        crate::domains::auth::credentials::storage::save_account_oauth_tokens(
+            &path,
+            "google",
+            "user@example.com",
+            &expired,
+        )
+        .unwrap();
+
+        let fresh = OAuthTokens {
+            access_token: "fresh-tok".to_string(),
+            refresh_token: "new-ref".to_string(),
+            expires_at: now_ms() + 3_600_000,
+        };
+        crate::domains::auth::credentials::storage::save_account_oauth_tokens(
+            &path,
+            "google",
+            "user@example.com",
+            &fresh,
+        )
+        .unwrap();
+
+        let mut cfg = cloud_code_assist_config();
+        cfg.oauth.client_id = "client-id".to_string();
+        let client = reqwest::Client::new();
+        let (tokens, refreshed) =
+            maybe_refresh_tokens(&path, "user@example.com", &expired, &cfg, &client)
+                .await
+                .unwrap();
+
+        assert!(refreshed);
+        assert_eq!(tokens.access_token, "fresh-tok");
     }
 
     #[test]

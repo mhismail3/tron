@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-6 `passed_after_fix`; 479 state-surface rows inventoried and classified.
+Status: SOL-7 `passed_after_fix`; 479 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -114,6 +114,20 @@ The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
 | Append-only message deletion | `session_event_store` | Individual message deletion appends a `message.deleted` event; the unused physical `EventRepo::delete(event_id)` helper and test were removed. |
 | Reconstruction and query | `session_event_store` / `session_query` | Resume/list/state/history/export read event-store rows, capped ancestor pagination, blob-backed payload refs, in-flight state, message previews, and ordered `tron.session.v1` event payloads. |
 | Replay manifest overlap | `session_replay` | Replay manifests are byte-stable over durable session sections; SOL-9 owns broader observability and recovery evidence. |
+
+## SOL-7 Settings/Auth/Secrets Lifecycle Proof
+
+| Surface | Owner | Lifecycle proof |
+|---|---|---|
+| Sparse settings overlay | `settings_profile` | `SettingsStore` owns `profiles/user/profile.toml` writes, serializes sync writes through `SETTINGS_WRITE_LOCK`, validates merged effective settings before atomic temp-file persistence, reloads the global settings cache, and restores prior sparse JSON for rollback. |
+| Settings operation rollback | `settings_profile` / `agent_domain` | Settings update/reset handlers take `SettingsStore::operation_lock`, snapshot the sparse overlay, write through the store, reload `ProfileRuntime`, and restore the sparse file plus last-known-good settings if profile compilation fails. |
+| Profile runtime snapshot | `agent_domain` | `ProfileRuntime` stores the current valid compiled profile in `ArcSwap`; reloads are all-or-previous, watcher changes are cancellation-token scoped, and the profile hash excludes `auth.json` so secret rotation does not reload profile settings. |
+| Auth storage file | `auth_credentials` | `auth.json` accepts only missing or exact `{}` as first-use state; malformed non-empty files hard error. Writes update `last_updated`, persist through same-directory temp files with 0o600 permissions, and cross-process mutation uses `run/auth.lock` with `flock`. |
+| Canonical auth operations | `auth_credentials` | `auth_update`, `auth_clear`, OAuth completion, rename, active-credential selection, account removal, and API-key removal acquire the auth lock before mutation, rebuild masked state, and publish `auth.updated` events. |
+| Bearer token | `app_lifecycle` / `auth_credentials` | Startup materializes `auth.json.bearerToken` through auth storage; rotation uses the onboarding process mutex plus atomic auth storage writes; HTTP auth caches by file mtime and compares presented bearer tokens in constant time. |
+| Pending OAuth flows | `auth_credentials` | Pending flow entries live in the auth domain map, are pruned on begin, removed on completion, and expire after the explicit 600-second TTL before token exchange persistence. |
+| Provider OAuth refresh | `auth_credentials` | Anthropic, OpenAI, and Google refresh paths use a process-local refresh mutex, auth-file `flock`, disk re-read after lock acquisition, under-lock persistence with persistence-error propagation, and stale `invalid_grant` retry from the latest disk snapshot. Google was fixed in SOL-7 to match this protocol. |
+| Model provider auth copies | `model_domain` | Provider factory re-reads auth snapshots on provider creation; Google provider stores only an ephemeral in-memory token mutex for mid-session continuity and does not persist durable auth truth. |
 
 Non-source state surfaces covered by SOL-1:
 

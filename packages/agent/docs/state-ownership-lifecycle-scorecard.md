@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **69/100**
+Current score: **79/100**
 
 Status: **active**
 
@@ -64,7 +64,7 @@ documented and tested.
 | SOL-4 | Runtime task and memory lifecycle | 12 | passed_after_fix | agent runtime/orchestrator/shutdown | Deleted dead `SessionManager::plan_mode`; added `sol_runtime_task_memory_lifecycle_is_source_backed`; proved active-session cache processing flags, run/retain RAII guards, sequence/compaction cleanup, invocation abort registry guards, capability pending cleanup, shutdown task registry, blocking supervisor drain, runtime service cancellation, and bootstrap background-task registration. | No SOL-4 open loops; later rows prove durable engine substrate, sessions, settings/auth, iOS state, observability, and final closeout. | SOL-4 runtime task and memory lifecycle checkpoint |
 | SOL-5 | Engine durable substrate lifecycle | 14 | passed_after_fix | engine durability/authority/shared storage | Added `sol_engine_durable_substrate_lifecycle_is_source_backed`; proved ledger catalog/invocation/idempotency rows, queues and attempts, streams and cursors, resources and versions, grants, leases, audit-only compensation, state store revisions, payload refs, retention, checkpoint, export, and SQLite/in-memory primitive store ownership. | No SOL-5 open loops; later rows prove sessions, settings/auth, iOS state, observability, and final closeout. | SOL-5 engine durable substrate lifecycle checkpoint |
 | SOL-6 | Session/event-store lifecycle | 10 | passed_after_fix | session/event store/orchestrator projections | Deleted dead single-event physical delete state; added `sol_session_event_store_lifecycle_is_source_backed`; proved create/resume/fork/archive/unarchive/delete/end, append ordering, active cache eviction and reconstruction, projection cleanup, payload refs, export, and session-scoped cleanup. | No SOL-6 open loops; later rows prove settings/auth/secrets, iOS local/projection state, observability, and final closeout. | SOL-6 session event-store lifecycle checkpoint |
-| SOL-7 | Settings/auth/secrets lifecycle | 10 | pending | settings/auth | Not started. | Server-authoritative settings, atomic sparse writes, rollback, snapshots, auth.json materialization, OAuth pending-flow TTL, and token refresh need proof. | pending |
+| SOL-7 | Settings/auth/secrets lifecycle | 10 | passed_after_fix | settings/auth/profile runtime/provider factory | Fixed Google credential refresh to use the same process-local lock, auth-file lock, disk re-read, stale-token retry, and under-lock persistence protocol as Anthropic/OpenAI; tightened all OAuth refresh paths so persistence failures fail refresh instead of falling back to stale durable truth; added `sol_settings_auth_secrets_lifecycle_is_source_backed`; proved sparse settings writes/rollback, profile runtime snapshots, auth.json materialization, bearer-token lifecycle, OAuth pending-flow TTL, canonical auth write boundaries, provider refresh persistence, and ephemeral model-provider auth copies. | No SOL-7 open loops; later rows prove iOS local/projection state, observability/recovery, and final closeout. | SOL-7 settings auth secrets checkpoint |
 | SOL-8 | iOS projection and local state lifecycle | 14 | pending | iOS engine/support/session/ui | Not started. | EventDatabase, sync cursors, SessionSynchronizer, EventStoreManager, connection tasks, settings snapshots, pairing/token stores, drafts/history/share/diagnostics need projection/local classification. | pending |
 | SOL-9 | Observability/recovery evidence | 4 | pending | health/logs/recovery | Not started. | Health/deep status, logs, storage stats, retention runs, replay manifests, and shutdown drain visibility need evidence. | pending |
 | SOL-10 | Final closeout | 3 | pending | static gates/verification | Not started. | Stale wording guards, unclassified-state scan, orphan task/map scan, full verification, and clean worktree proof remain. | pending |
@@ -146,6 +146,11 @@ cargo test --manifest-path packages/agent/Cargo.toml domains::session::replay --
 cargo test --manifest-path packages/agent/Cargo.toml --test integration session_create_reconstruct_and_execute_observe_stay_on_primitive_surface -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml domains::settings --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml domains::auth --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml domains::auth::credentials::google --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml profile_runtime --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml app::lifecycle::onboarding --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml transport::http::auth --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml domains::model::providers::factory --lib -- --nocapture
 ```
 
 iOS focused targets:

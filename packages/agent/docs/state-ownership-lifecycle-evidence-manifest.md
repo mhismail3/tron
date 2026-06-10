@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **69/100**
+Current score: **79/100**
 
 Scorecard:
 [`state-ownership-lifecycle-scorecard.md`](state-ownership-lifecycle-scorecard.md)
@@ -23,7 +23,7 @@ and
 | SOL-4 | passed_after_fix | Deleted dead `SessionManager::plan_mode` state and added source-backed runtime lifecycle proof for active-session cache flags, run/retain RAII guards, sequence/compaction cleanup, invocation abort guards, capability pending cleanup, shutdown task registry, blocking supervisor drain, runtime service cancellation, and app bootstrap task registration. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_runtime_task_memory_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-4 evidence passed. | No SOL-4 open loops; later rows prove durable engine substrate, sessions, settings/auth, iOS local state, observability, and final closeout. | SOL-4 runtime task and memory lifecycle checkpoint |
 | SOL-5 | passed_after_fix | Added source-backed durable substrate proof for the engine ledger, idempotency rows, queues, streams, resource versions, grants, leases, audit-only compensation records, state store revisions, payload refs, retention, checkpoint, export, and SQLite/in-memory primitive store bundles. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_engine_durable_substrate_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-5 evidence passed. | No SOL-5 open loops; later rows prove session/event-store lifecycle, settings/auth/secrets, iOS local/projection state, observability, and final closeout. | SOL-5 engine durable substrate lifecycle checkpoint |
 | SOL-6 | passed_after_fix | Removed dead single-event physical deletion and added source-backed session/event-store lifecycle proof for create, resume, append, fork, end, archive, unarchive, delete, query, reconstruction, export, and session-scoped cleanup. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_session_event_store_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-6 evidence passed. | No SOL-6 open loops; later rows prove settings/auth/secrets, iOS projection/local state, observability, and final closeout. | SOL-6 session event-store lifecycle checkpoint |
-| SOL-7 | pending | Not started. | Not run. | Settings/auth/secrets lifecycle proof remains. | pending |
+| SOL-7 | passed_after_fix | Fixed Google credential refresh so persisted tokens are updated only after the refresh path acquires the process-local refresh mutex, auth file lock, and fresh disk snapshot; tightened all OAuth refresh paths so persistence failures fail refresh instead of falling back to stale durable truth; added source-backed proof for sparse settings writes/rollback, profile runtime snapshots, auth.json materialization, bearer-token lifecycle, OAuth pending-flow TTL, canonical auth write boundaries, provider refresh persistence, and ephemeral model-provider auth copies. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_settings_auth_secrets_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-7 evidence passed. | No SOL-7 open loops; later rows prove iOS projection/local state, observability/recovery, and final closeout. | SOL-7 settings auth secrets checkpoint |
 | SOL-8 | pending | Not started. | Not run. | iOS projection/local state lifecycle proof remains. | pending |
 | SOL-9 | pending | Not started. | Not run. | Observability/recovery evidence remains. | pending |
 | SOL-10 | pending | Not started. | Not run. | Final verification and clean worktree proof remain. | pending |
@@ -208,6 +208,44 @@ Session/event-store lifecycle proof:
   reconstructable, and physical event deletion is valid only inside
   `delete_session`.
 
+## SOL-7 Evidence
+
+Settings/auth/secrets lifecycle proof:
+
+- Settings updates are sparse profile overlay writes owned by `SettingsStore`.
+  The store serializes sync writes, validates merged effective settings before
+  atomic temp-file persistence, reloads the global settings cache after writes,
+  and exposes an async operation lock for higher-level update/reset workflows.
+- Settings operation bodies snapshot the previous sparse overlay before update
+  or reset, reload `ProfileRuntime`, and restore the sparse file plus
+  last-known-good in-memory settings if the compiled profile runtime rejects the
+  new state.
+- `ProfileRuntime` holds the current valid compiled profile in `ArcSwap`.
+  Startup and watcher reloads are all-or-previous: invalid profile edits return
+  errors while the previous valid snapshot remains active. The watcher hashes
+  profile TOML/MD files and intentionally ignores `auth.json`.
+- Auth storage treats only exact `{}` as the pristine installer sentinel. Missing
+  files are first-use; malformed non-empty files are hard errors. Writes update
+  `last_updated` and persist through same-directory temp files with 0o600
+  permissions. Mutating operations acquire the auth file `flock` before saving.
+- Bearer-token lifecycle is owned by onboarding/auth storage. Startup
+  materializes `auth.json.bearerToken`, rotation is process-mutex serialized,
+  HTTP transport caches the token by file mtime, and verification uses
+  constant-time comparison.
+- Pending OAuth flows live in the auth domain's process-local map, are keyed by
+  flow id, pruned on begin, removed on complete, and expire after the explicit
+  600-second TTL before token exchange persistence.
+- Anthropic, OpenAI, and Google credential refresh now share the same durable
+  protocol: process-local refresh mutex, auth file lock, disk re-read after the
+  lock, persistence while holding the lock, persistence-error propagation, and
+  stale `invalid_grant` retry from the latest disk snapshot.
+- Provider factory re-reads auth snapshots when creating model providers.
+  Google model providers keep only an ephemeral in-memory token mutex for
+  mid-session request continuity and do not write durable `auth.json` state.
+- The root README Authentication section now documents the auth-owned refresh
+  mutex, auth-file lock, disk re-read, persistence-error propagation, and
+  model-provider ephemeral-token boundary.
+
 ## Verification Log
 
 - SOL-0 harness proof:
@@ -295,6 +333,22 @@ Session/event-store lifecycle proof:
 - SOL-6 current full-target status:
   `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
   -> exit 101, with 15 passing gates and 1 expected remaining failure:
+  `final_closeout_is_complete`.
+- SOL-7 static source-backed verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_settings_auth_secrets_lifecycle_is_source_backed -- --nocapture`
+  -> exit 0.
+- SOL-7 implementation verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml domains::settings --lib -- --nocapture`
+  -> exit 0, 122 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::auth --lib -- --nocapture`
+  -> exit 0, 205 passed; `cargo test --manifest-path packages/agent/Cargo.toml profile_runtime --lib -- --nocapture`
+  -> exit 0, 5 passed; `cargo test --manifest-path packages/agent/Cargo.toml app::lifecycle::onboarding --lib -- --nocapture`
+  -> exit 0, 22 passed; `cargo test --manifest-path packages/agent/Cargo.toml transport::http::auth --lib -- --nocapture`
+  -> exit 0, 21 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::model::providers::factory --lib -- --nocapture`
+  -> exit 0, 25 passed; `cargo test --manifest-path packages/agent/Cargo.toml domains::auth::credentials::google --lib -- --nocapture`
+  -> exit 0, 14 passed.
+- SOL-7 current full-target status:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
+  -> exit 101, with 16 passing gates and 1 expected remaining failure:
   `final_closeout_is_complete`.
 
 ## Residual Risk Log
