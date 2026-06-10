@@ -302,6 +302,87 @@ fn sol_inventory_rows_are_structured_and_classified() {
 }
 
 #[test]
+fn sol_truth_taxonomy_is_owner_scoped() {
+    let inventory_doc = read_repo_file(INVENTORY_PATH);
+    for class in ALLOWED_STATE_CLASSES {
+        assert!(
+            inventory_doc.contains(&format!("`{class}`")),
+            "SOL inventory docs must define allowed state class `{class}`"
+        );
+    }
+
+    let rows = parse_inventory();
+    let mut bad_rows = Vec::new();
+
+    for row in rows {
+        if row.owner.contains("unclassified") {
+            bad_rows.push(format!("{} has unclassified owner {}", row.path, row.owner));
+        }
+
+        if row.path.starts_with("packages/ios-app/") && row.state_class == "canonical_truth" {
+            bad_rows.push(format!(
+                "{} is iOS-local but claims canonical server truth",
+                row.path
+            ));
+        }
+
+        if (row.path.starts_with("scripts/")
+            || row.path.starts_with(".github/")
+            || row.path.starts_with("packages/agent/docs/")
+            || row.path == "README.md")
+            && matches!(
+                row.state_class.as_str(),
+                "canonical_truth" | "durable_substrate" | "secret"
+            )
+        {
+            bad_rows.push(format!(
+                "{} is docs/script/CI state but claims {}",
+                row.path, row.state_class
+            ));
+        }
+
+        if row.state_class == "canonical_truth"
+            && !matches!(
+                row.owner.as_str(),
+                "session_event_store" | "settings_profile" | "shared_foundation"
+            )
+        {
+            bad_rows.push(format!(
+                "{} canonical truth has unexpected owner {}",
+                row.path, row.owner
+            ));
+        }
+
+        if row.state_class == "secret"
+            && !(row.owner == "auth_credentials"
+                || row.owner == "ios_local_storage"
+                || row.path.contains("Keychain")
+                || row.path.contains("TokenStore"))
+        {
+            bad_rows.push(format!(
+                "{} secret has unexpected owner {}",
+                row.path, row.owner
+            ));
+        }
+
+        if row.state_class == "local_device_preference"
+            && !row.path.starts_with("packages/ios-app/")
+        {
+            bad_rows.push(format!(
+                "{} local_device_preference is not owned by iOS local state",
+                row.path
+            ));
+        }
+    }
+
+    assert!(
+        bad_rows.is_empty(),
+        "SOL truth taxonomy violations:\n{}",
+        bad_rows.join("\n")
+    );
+}
+
+#[test]
 fn sol_inventory_covers_stateful_marker_sources() {
     let inventory = inventory_by_path();
     let missing = marker_paths()

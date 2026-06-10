@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-1 `passed_after_fix`; 476 state-surface rows inventoried.
+Status: SOL-2 `passed_after_fix`; 476 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -39,6 +39,19 @@ State class distribution:
 | `secret` | 16 |
 | `diagnostic_buffer` | 11 |
 | `local_device_preference` | 9 |
+
+## SOL-2 Taxonomy Proof
+
+The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
+
+- Every row uses exactly one allowed state class.
+- No row has an unclassified owner.
+- Canonical truth is server-side only and limited to session event-store,
+  settings profile, and shared profile owners.
+- iOS, script, CI, and docs rows cannot claim canonical server truth.
+- Secret rows are owned by auth credentials, Keychain, or paired-server token
+  storage.
+- Local device preference rows stay iOS-local.
 
 Non-source state surfaces covered by SOL-1:
 

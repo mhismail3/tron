@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **15/100**
+Current score: **23/100**
 
 Status: **active**
 
@@ -59,7 +59,7 @@ documented and tested.
 |---|---|---:|---|---|---|---|---|
 | SOL-0 | Campaign harness, red static gate, README links, scorecard/evidence/inventory scaffolding | 5 | passed_after_fix | docs/static gates | Added SOL scorecard, evidence manifest, inventory docs/TSV, invariant target, README links, stale living-doc cleanup scope, and red final-state gates for inventory coverage and closeout. | Later rows must populate the full inventory, delete or own dead state, and close every final gate. | SOL-0 campaign harness checkpoint |
 | SOL-1 | Whole-repo state inventory for Rust server, iOS app, scripts/CI state, docs-owned state claims | 10 | passed_after_fix | docs/static gates | Generated a 476-row TSV covering every tracked production Rust/Swift file with SOL lifecycle markers plus required script/CI/docs state rows; no `unclassified_owner` rows remain. | Later rows refine and prove the lifecycle claims in those rows. | SOL-1 state inventory checkpoint |
-| SOL-2 | Truth taxonomy for every state surface | 8 | pending | docs/static gates | Not started. | Every row needs exactly one allowed `state_class`. | pending |
+| SOL-2 | Truth taxonomy for every state surface | 8 | passed_after_fix | docs/static gates | Added `sol_truth_taxonomy_is_owner_scoped`; verified every row uses exactly one allowed `state_class`, has no unclassified owner, prevents iOS/script/docs rows from claiming canonical server truth, restricts canonical truth to session/settings/profile owners, restricts secrets to auth/Keychain/token owners, and keeps local device preferences iOS-local. | Later rows add subsystem-specific lifecycle proof over the classified inventory. | SOL-2 truth taxonomy checkpoint |
 | SOL-3 | Server bootstrap lifecycle | 10 | pending | app/storage/auth/bootstrap | Not started. | Directories, auth token materialization, DB generation/archive/flock/migrations, logging, engine host hydration, worker hydration, and crash journal recovery need source-backed proof. | pending |
 | SOL-4 | Runtime task and memory lifecycle | 12 | pending | agent runtime/orchestrator/shutdown | Not started. | Orchestrator runs, processing flags, counters, retain guards, abort registries, supervisors, shutdown coordinator, and background tasks need cleanup ownership. | pending |
 | SOL-5 | Engine durable substrate lifecycle | 14 | pending | engine durability/authority | Not started. | Ledger, idempotency, queues, streams, resources, grants, leases, compensation, state store, payload refs, retention, checkpoint, and export need explicit lifecycle proof. | pending |

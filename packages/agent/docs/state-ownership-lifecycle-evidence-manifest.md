@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **15/100**
+Current score: **23/100**
 
 Scorecard:
 [`state-ownership-lifecycle-scorecard.md`](state-ownership-lifecycle-scorecard.md)
@@ -18,7 +18,7 @@ and
 |---|---|---|---|---|---|
 | SOL-0 | passed_after_fix | Added the campaign scorecard, evidence manifest, inventory scaffolding, machine-readable TSV header, invariant target, and README living-doc links. The invariant target is intentionally red for later rows until inventory coverage and closeout are complete. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` expected to fail on final-state gates at SOL-0. | SOL-1 through SOL-10 remain open by design. | SOL-0 campaign harness checkpoint |
 | SOL-1 | passed_after_fix | Generated `state-ownership-lifecycle-inventory.tsv` with 476 rows covering every tracked production Rust/Swift file containing SOL lifecycle markers plus README, SOL docs, scripts, and CI workflow state surfaces. Owner pass removed all `unclassified_owner` rows. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory -- --nocapture` -> exit 0, 3 passed. | Later rows refine lifecycle proof for bootstrap, runtime tasks, engine substrate, session/event store, settings/auth, iOS local state, and observability. | SOL-1 state inventory checkpoint |
-| SOL-2 | pending | Not started. | Not run. | Truth taxonomy remains. | pending |
+| SOL-2 | passed_after_fix | Added and passed owner-scoped truth taxonomy guards over the 476-row TSV: allowed classes are documented; `unclassified_owner` is rejected; iOS/script/CI/docs rows cannot claim canonical server truth; canonical truth is restricted to session event-store, settings profile, and shared profile owners; secret rows are restricted to auth/Keychain/token owners; local device preferences remain iOS-local. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_truth_taxonomy -- --nocapture` -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory_rows_are_structured_and_classified -- --nocapture` -> exit 0. | Later rows prove lifecycle behavior behind each classified owner. | SOL-2 truth taxonomy checkpoint |
 | SOL-3 | pending | Not started. | Not run. | Server bootstrap lifecycle proof remains. | pending |
 | SOL-4 | pending | Not started. | Not run. | Runtime task/memory lifecycle proof and dead `plan_mode` cleanup remain. | pending |
 | SOL-5 | pending | Not started. | Not run. | Engine durable substrate lifecycle proof remains. | pending |
@@ -61,6 +61,19 @@ Inventory coverage:
   `scripts/tron-lib.d/service.sh`, and `.github/workflows/ci.yml`.
 - Owner audit: no `unclassified_owner` rows remain.
 
+## SOL-2 Evidence
+
+Taxonomy guard:
+
+- `sol_truth_taxonomy_is_owner_scoped` requires every allowed state class to be
+  documented and rejects taxonomy drift in the TSV.
+- Canonical truth rows are limited to `session_event_store`,
+  `settings_profile`, and `shared_foundation`.
+- iOS, script, CI, and docs rows cannot claim canonical server truth.
+- Secrets are limited to auth credentials, Keychain, and paired-server token
+  storage.
+- Local device preference rows are iOS-owned.
+
 ## Verification Log
 
 - SOL-0 harness proof:
@@ -83,6 +96,10 @@ Inventory coverage:
   `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
   -> exit 101, with 9 passing gates and 2 expected remaining failures:
   `dead_plan_mode_state_is_removed` and `final_closeout_is_complete`.
+- SOL-2 focused verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_truth_taxonomy -- --nocapture`
+  -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory_rows_are_structured_and_classified -- --nocapture`
+  -> exit 0.
 
 ## Residual Risk Log
 
