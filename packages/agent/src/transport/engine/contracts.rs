@@ -56,8 +56,8 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Medium,
         )
         .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
-        .request_schema(json!({"additionalProperties":false,"properties":{"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"targetVisibility":{"type":"string"},"workspaceId":{"type":"string"}},"required":["functionId","targetVisibility","idempotencyKey"],"type":"object"}))
-        .response_schema(json!({"additionalProperties":false,"properties":{"functionId":{"type":"string"},"revision":{"type":"integer"},"visibility":{"enum":["workspace","system"],"type":"string"}},"required":["functionId","revision","visibility"],"type":"object"}))
+        .request_schema(json!({"additionalProperties":false,"properties":{"candidateResourceIds":{"items":{"type":"string"},"minItems":1,"type":"array"},"decisionResourceId":{"type":"string"},"evidenceResourceIds":{"items":{"type":"string"},"minItems":1,"type":"array"},"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"promotionReason":{"type":"string"},"targetVisibility":{"enum":["workspace","system"],"type":"string"},"workspaceId":{"type":"string"}},"required":["functionId","targetVisibility","idempotencyKey","decisionResourceId","evidenceResourceIds","candidateResourceIds","promotionReason"],"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"candidateResourceIds":{"items":{"type":"string"},"type":"array"},"decisionResourceId":{"type":"string"},"evidenceResourceIds":{"items":{"type":"string"},"type":"array"},"functionId":{"type":"string"},"revision":{"type":"integer"},"visibility":{"enum":["workspace","system"],"type":"string"}},"required":["functionId","revision","visibility","decisionResourceId","evidenceResourceIds","candidateResourceIds"],"type":"object"}))
         .idempotency(IdempotencyContract::caller_session_engine_ledger())
         .compensation(crate::engine::CompensationContract::new(
             crate::engine::CompensationKind::InverseCommandAvailable,
@@ -221,7 +221,14 @@ mod tests {
 
         assert_eq!(
             schema["required"],
-            json!(["functionId", "revision", "visibility"])
+            json!([
+                "functionId",
+                "revision",
+                "visibility",
+                "decisionResourceId",
+                "evidenceResourceIds",
+                "candidateResourceIds"
+            ])
         );
         assert!(schema["properties"]["newVisibility"].is_null());
         assert!(schema["properties"]["promoted"].is_null());

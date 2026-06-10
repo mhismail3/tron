@@ -46,7 +46,9 @@
 //!   into a pluggable engine ledger; invocation prepare resolves that grant from
 //!   the engine-owned grant store before any handler runs;
 //! - declared request/response schemas are enforced before/after handlers;
-//! - session capabilities can be explicitly promoted to workspace/system scope;
+//! - session capabilities can be explicitly promoted to workspace/system scope
+//!   only through `engine::promote` with validated decision, evidence, and
+//!   candidate resource refs plus target-specific authority;
 //! - `EngineHost` exposes privileged `engine::*` transport functions for live
 //!   worker/client discovery, inspection, cursor watch, delegated invocation,
 //!   and promotion;

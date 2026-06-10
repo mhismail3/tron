@@ -286,6 +286,7 @@ async fn derive_execute_grant(
                     "agent_result",
                     "agent_rule",
                     "artifact",
+                    "capability_definition",
                     "claim",
                     "decision",
                     "evidence",

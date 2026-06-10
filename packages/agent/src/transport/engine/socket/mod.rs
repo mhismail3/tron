@@ -339,6 +339,34 @@ impl EngineWsSession {
             "idempotencyKey".to_owned(),
             Value::String(message.idempotency_key),
         );
+        payload.insert(
+            "decisionResourceId".to_owned(),
+            Value::String(message.decision_resource_id),
+        );
+        payload.insert(
+            "evidenceResourceIds".to_owned(),
+            Value::Array(
+                message
+                    .evidence_resource_ids
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+        payload.insert(
+            "candidateResourceIds".to_owned(),
+            Value::Array(
+                message
+                    .candidate_resource_ids
+                    .into_iter()
+                    .map(Value::String)
+                    .collect(),
+            ),
+        );
+        payload.insert(
+            "promotionReason".to_owned(),
+            Value::String(message.promotion_reason),
+        );
         if let Some(workspace_id) = message.workspace_id {
             payload.insert("workspaceId".to_owned(), Value::String(workspace_id));
         }

@@ -42,7 +42,7 @@ engine promotion/worker boundaries.
 The only new model-facing vocabulary is additional `operation` values inside the
 existing `execute` schema. All durable SAA objects are typed resources or
 scoped state with resource refs, trace ids, and evidence links. The remaining
-live-scale risk is operator policy: future slices that promote generated
-artifacts into live capabilities must add explicit decision/evidence checks at
-the promotion entrypoint rather than treating SAA resource authorship as
-permission to launch.
+promotion policy is now owned by
+`self-adapting-agent-promotion-governance-scorecard.md`: generated artifacts
+remain resource-backed candidates until that governed promotion entrypoint
+validates decision, evidence, candidate, and authority refs.

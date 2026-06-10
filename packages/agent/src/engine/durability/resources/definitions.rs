@@ -269,6 +269,30 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             json!({"read": ["resource.read"], "write": ["resource.write"], "apply": ["resource.write"]}),
         ),
         builtin_type(
+            "capability_definition",
+            "tron.resource.capability_definition.v1",
+            json!({
+                "type": "object",
+                "required": ["functionId", "definition"],
+                "additionalProperties": true,
+                "properties": {
+                    "functionId": {"type": "string"},
+                    "definition": {"type": "object"},
+                    "generatedBy": {"type": "string"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["draft", "reviewed", "promoted", "discarded", "archived"],
+            vec![
+                "candidate_output",
+                "derived_from",
+                "promoted_output",
+                "supported_by",
+                "evidence_for",
+            ],
+            json!({"read": ["resource.read"], "write": ["resource.write"], "promote": ["resource.write"], "delete": ["resource.write"]}),
+        ),
+        builtin_type(
             "execution_output",
             "tron.resource.execution_output.v1",
             json!({

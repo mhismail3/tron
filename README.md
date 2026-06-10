@@ -301,12 +301,20 @@ Current living entry points:
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
   safety, observability, and closeout gates, with focused modules under
   `packages/agent/tests/self_adapting_agent_authorship/`.
+- `packages/agent/docs/self-adapting-agent-promotion-governance-scorecard.md`:
+  completed SAPG scorecard for evidence-backed `engine::promote` governance.
+- `packages/agent/docs/self-adapting-agent-promotion-governance-evidence-manifest.md`:
+  companion evidence manifest for promotion governance validation and closeout.
+- `packages/agent/tests/self_adapting_agent_promotion_governance_invariants.rs`:
+  completed SAPG gates for promote contract schemas, decision/evidence/candidate
+  validation, authority boundaries, non-launch worker policy, CI wiring, and
+  README parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA scorecards.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -681,10 +689,13 @@ persist delivered cursors locally and ACK the latest delivered cursor per
 subscription, not every event in a burst; ACK responses use normal engine
 backpressure so catch-up traffic does not become a socket-fatal overload.
 Public `promote` is a user-owned `engine::promote` path, not a client-side
-catalog edit: it requires a non-empty `idempotencyKey`, workspace/system
-authority, and workspace context for workspace promotion. Owner mismatch,
-idempotency, and invalid visibility promotion failures return typed public
-error codes with structured details.
+catalog edit: it requires a non-empty `idempotencyKey`, `decisionResourceId`,
+one or more accepted verified `evidenceResourceIds`, one or more linked
+`candidateResourceIds`, a non-empty `promotionReason`, workspace/system
+authority, and workspace context for workspace promotion. The decision resource
+must be final/accepted and approve the requested function and target visibility.
+Owner mismatch, idempotency, governance, and invalid visibility promotion
+failures return typed public error codes with structured details.
 Failed `/engine` responses expose the same canonical failure envelope used by
 runtime events: stable `code`, `category`, sanitized `message`, `retryable`,
 `recoverable`, `origin`, optional provider/model/status/error-type/retry-after
@@ -1417,9 +1428,11 @@ tron ci clippy test          # Subset: linting + tests
 `concurrency_scheduling_discipline_invariants`,
 `security_authority_capability_boundaries_invariants`,
 `observability_diagnostics_auditability_invariants`,
-`self_adapting_agent_authorship_invariants`, `primitive_trace_execution`, and
-serial `integration`. GitHub's Rust static-gates job runs the same named target
-set for docs, template, iOS, Mac, script, and CI changes.
+`self_adapting_agent_authorship_invariants`,
+`self_adapting_agent_promotion_governance_invariants`,
+`primitive_trace_execution`, and serial `integration`. GitHub's Rust
+static-gates job runs the same named target set for docs, template, iOS, Mac,
+script, and CI changes.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

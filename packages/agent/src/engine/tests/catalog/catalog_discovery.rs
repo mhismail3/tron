@@ -391,7 +391,8 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
             &fid("alpha::session"),
             &wid("other"),
             VisibilityScope::Workspace,
-            Some("workspace-a".to_owned())
+            Some("workspace-a".to_owned()),
+            None,
         ),
         Err(EngineError::OwnerMismatch { .. })
     ));
@@ -400,7 +401,8 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
             &fid("alpha::session"),
             &wid("w1"),
             VisibilityScope::Session,
-            None
+            None,
+            None,
         ),
         Err(EngineError::InvalidVisibilityPromotion { .. })
     ));
@@ -410,6 +412,7 @@ fn inspect_and_promotion_are_visibility_and_owner_checked() {
             &wid("w1"),
             VisibilityScope::Workspace,
             Some("workspace-a".to_owned()),
+            None,
         )
         .unwrap();
     assert_eq!(revision, FunctionRevision(2));

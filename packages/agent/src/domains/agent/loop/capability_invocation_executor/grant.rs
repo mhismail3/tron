@@ -150,6 +150,7 @@ fn self_adapting_resource_kinds() -> Vec<&'static str> {
         "agent_result",
         "agent_rule",
         "artifact",
+        "capability_definition",
         "claim",
         "decision",
         "evidence",

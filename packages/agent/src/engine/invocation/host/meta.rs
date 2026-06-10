@@ -210,13 +210,25 @@ fn invoke_schema() -> Value {
 fn promote_schema() -> Value {
     json!({
         "type": "object",
-        "required": ["functionId", "targetVisibility"],
+        "required": [
+            "functionId",
+            "targetVisibility",
+            "idempotencyKey",
+            "decisionResourceId",
+            "evidenceResourceIds",
+            "candidateResourceIds",
+            "promotionReason"
+        ],
         "additionalProperties": false,
         "properties": {
-            "functionId": {"type": "string"},
-            "ownerWorker": {"type": "string"},
+            "functionId": {"type": "string", "minLength": 1},
             "targetVisibility": {"type": "string", "enum": ["workspace", "system"]},
-            "workspaceId": {"type": "string"}
+            "idempotencyKey": {"type": "string", "minLength": 1},
+            "workspaceId": {"type": "string", "minLength": 1},
+            "decisionResourceId": {"type": "string", "minLength": 1},
+            "evidenceResourceIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "candidateResourceIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+            "promotionReason": {"type": "string", "minLength": 1}
         }
     })
 }

@@ -246,10 +246,12 @@ impl EngineHostHandle {
         target: VisibilityScope,
         workspace_id: Option<String>,
     ) -> Result<FunctionRevision> {
-        self.inner
-            .lock()
-            .await
-            .catalog
-            .promote_function_visibility(id, owner, target, workspace_id)
+        self.inner.lock().await.catalog.promote_function_visibility(
+            id,
+            owner,
+            target,
+            workspace_id,
+            None,
+        )
     }
 }
