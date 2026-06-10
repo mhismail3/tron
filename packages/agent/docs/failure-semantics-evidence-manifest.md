@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **70/100**
+Current score: **82/100**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -16,7 +16,7 @@ the Failure Semantics Campaign.
 | FSC-0 | passed_after_fix | Added the campaign scorecard, inventory, TSV, evidence manifest, invariant target, and README living-doc links. | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | FSC-1 through FSC-10 remain open implementation rows. | `e9b180fa1` |
 | FSC-1 | in_progress | Updated the source inventory to name canonical envelope owners plus Rust, durable replay, and iOS failure consumers. | Source scan with `rg` for live `TurnFailed`/`Error`, text-only capability errors, provider/model/runtime mappings, optional code/category sites, and iOS `details.failure` consumers. | Re-audit the TSV against source before closeout and add a final stale-row static gate. | iOS parity checkpoint |
 | FSC-2 | passed_after_fix | Added `shared::server::failure::FailureEnvelope`, canonical category/origin vocabulary, stable failure codes, references, and `details_with_failure`. | `cargo test --manifest-path packages/agent/Cargo.toml shared::server::failure --lib`; `cargo test --manifest-path packages/agent/Cargo.toml shared::protocol::model_capabilities --lib` | None for server-side envelope; consumers remain covered by later rows. | server core checkpoint |
-| FSC-3 | in_progress | Added canonical conversions for `CapabilityError`, `EngineError`, `ProviderError`, `ModelResponseError`, and `RuntimeError`. | `cargo test --manifest-path packages/agent/Cargo.toml shared::server::error_mapping --lib`; `cargo test --manifest-path packages/agent/Cargo.toml domains::model --lib`; `cargo test --manifest-path packages/agent/Cargo.toml domains::agent::loop::errors --lib` | Add explicit auth/session/event-store mapping assertions and final enum/source guards. | server core checkpoint |
+| FSC-3 | passed_after_fix | Added canonical conversions for `CapabilityError`, `EngineError`, `ProviderError`, `ModelResponseError`, `RuntimeError`, auth errors, session not-found codes, and event-store errors. Event-store busy/failure and auth storage/transport/OAuth cases now embed `details.failure` with stable code/category/retryability/origin and safe details. | `cargo test --manifest-path packages/agent/Cargo.toml shared::server::error_mapping --lib -- --nocapture`; `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`; `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | None for current mapped error sources. | error mapping closeout checkpoint |
 | FSC-4 | passed_after_fix | Replaced production live `TurnFailed` and `Error` construction with canonical event builders and projected origin/retryable/recoverable/details. | `cargo test --manifest-path packages/agent/Cargo.toml shared::protocol::events --lib` | Durable payload enrichment remains FSC-9. | server core checkpoint |
 | FSC-5 | passed_after_fix | Replaced text-only capability failures with canonical `failure_result` details and preserved engine invocation failures in `capability.invocation.completed`. | `cargo test --manifest-path packages/agent/Cargo.toml capability_invocation_executor::tests --lib` | Durable replay/export enrichment remains FSC-9. | server core checkpoint |
 | FSC-6 | passed_after_fix | Extended `/engine` WebSocket error frames to serialize canonical failure envelopes with sanitized messages and trace ids. | `cargo test --manifest-path packages/agent/Cargo.toml transport::engine::socket --lib` | Add final static transport guard in FSC-10. | server core checkpoint |
@@ -52,6 +52,21 @@ the Failure Semantics Campaign.
   while retaining the outer trace id.
 - Remaining open loops are auth/session/event-store mapping tests, inventory
   closeout, and final static gates.
+
+## Error Mapping Closeout Findings
+
+- `map_event_store_error` now emits canonical envelopes for session, event,
+  workspace, and blob not-found cases with typed id details.
+- Event-store busy maps to retryable `EVENT_STORE_BUSY` with
+  `unavailable` category and operation/attempt details; SQLite, pool, serde,
+  migration, and internal failures map to `EVENT_STORE_FAILURE` with
+  `persistence` category and safe reason/kind details.
+- `map_auth_error` now preserves auth-not-configured, token-expired, OAuth,
+  auth-storage, and auth-transport failures as canonical envelopes. Malformed
+  auth-file errors no longer carry local filesystem paths in public failure
+  messages or structured details.
+- The static campaign gate now checks the new auth/event-store codes,
+  category mapping, mapper branches, and focused test coverage markers.
 
 ## Durable Replay Checkpoint Findings
 
@@ -103,6 +118,6 @@ xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platfor
 ## Residual Risk
 
 The server, durable/replay, and iOS surfaces are materially improved but not a
-campaign closeout. FSC-1 must finish the final inventory audit, FSC-3 must close
-auth/session/event-store mapping assertions, and FSC-10 must add static guards
-that make direct ad hoc failure emission regressions fail loudly.
+campaign closeout. FSC-1 must finish the final inventory audit, and FSC-10 must
+add final static guards that make stale docs, direct ad hoc failure emission, and
+category/coverage regressions fail loudly.

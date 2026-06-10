@@ -50,9 +50,10 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Campaign Scorecard",
         "Status: **active**",
-        "Current score: **70/100**",
+        "Current score: **82/100**",
         "| FSC-0 | Campaign harness | 6 | passed_after_fix |",
         "| FSC-2 | Canonical envelope | 12 | passed_after_fix |",
+        "| FSC-3 | Error mapping matrix | 12 | passed_after_fix |",
         "| FSC-7 | Provider retry semantics | 8 | passed_after_fix |",
         "| FSC-8 | iOS parity | 8 | passed_after_fix |",
         "| FSC-9 | Observability and replay | 6 | passed_after_fix |",
@@ -89,15 +90,17 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Evidence Manifest",
         "Status: **active**",
-        "Current score: **70/100**",
+        "Current score: **82/100**",
         "| FSC-0 | passed_after_fix |",
         "| FSC-2 | passed_after_fix |",
+        "| FSC-3 | passed_after_fix |",
         "| FSC-7 | passed_after_fix |",
         "| FSC-8 | passed_after_fix |",
         "| FSC-9 | passed_after_fix |",
         "| FSC-10 | pending |",
         "## FSC-0 Findings",
         "## Server Core Checkpoint Findings",
+        "## Error Mapping Closeout Findings",
         "## Durable Replay Checkpoint Findings",
         "## iOS Parity Checkpoint Findings",
         "## Verification Log",
@@ -225,6 +228,75 @@ fn failure_semantics_server_core_uses_canonical_envelope() {
         socket.contains(".to_failure(FailureOrigin::Transport)"),
         "engine socket errors must serialize canonical failure envelopes"
     );
+}
+
+#[test]
+fn failure_semantics_error_mapping_matrix_covers_auth_session_event_store() {
+    let errors = read_repo_file("packages/agent/src/shared/server/errors.rs");
+    for required in [
+        "pub const SESSION_NOT_FOUND",
+        "pub const EVENT_NOT_FOUND",
+        "pub const WORKSPACE_NOT_FOUND",
+        "pub const BLOB_NOT_FOUND",
+        "pub const EVENT_STORE_BUSY",
+        "pub const EVENT_STORE_FAILURE",
+        "pub const AUTH_NOT_CONFIGURED",
+        "pub const AUTH_TOKEN_EXPIRED",
+        "pub const AUTH_OAUTH_ERROR",
+        "pub const AUTH_STORAGE_ERROR",
+        "pub const AUTH_TRANSPORT_ERROR",
+        "EVENT_STORE_BUSY => FailureCategory::Unavailable",
+        "AUTH_TRANSPORT_ERROR => FailureCategory::Network",
+        "EVENT_STORE_FAILURE => FailureCategory::Persistence",
+    ] {
+        assert!(
+            errors.contains(required),
+            "server error contract missing mapped code/category coverage: {required}"
+        );
+    }
+
+    let mapping = read_repo_file("packages/agent/src/shared/server/error_mapping.rs");
+    for required in [
+        "E::SessionNotFound(id) => CapabilityError::from_failure",
+        "E::EventNotFound(id) => CapabilityError::from_failure",
+        "E::WorkspaceNotFound(id) => CapabilityError::from_failure",
+        "E::BlobNotFound(id) => CapabilityError::from_failure",
+        "E::Busy",
+        "codes::EVENT_STORE_BUSY",
+        "event_store_internal_failure",
+        "codes::EVENT_STORE_FAILURE",
+        "A::NotConfigured(provider) => CapabilityError::from_failure",
+        "A::TokenExpired(message) => CapabilityError::from_failure",
+        "A::OAuth { status, message }",
+        "codes::AUTH_OAUTH_ERROR",
+        "A::MalformedProviderAuth { provider, details }",
+        "A::MalformedAuthFile { details, .. }",
+        "codes::AUTH_STORAGE_ERROR",
+        "A::Http(error)",
+        "codes::AUTH_TRANSPORT_ERROR",
+    ] {
+        assert!(
+            mapping.contains(required),
+            "error mapping matrix missing canonical branch: {required}"
+        );
+    }
+    assert!(
+        !mapping.contains("Malformed auth file at '{path}'"),
+        "auth-file mapping must not leak local paths in public failure messages"
+    );
+
+    for required_test in [
+        "every_engine_error_variant_has_stable_failure_mapping",
+        "event_store_busy_is_retryable_unavailable",
+        "event_store_internal_errors_preserve_persistence_failure",
+        "auth_oauth_transient_status_is_retryable",
+        "auth_malformed_auth_file_is_sanitized_storage_error",
+    ] {
+        assert!(
+            mapping.contains(required_test),
+            "error mapping tests missing coverage marker: {required_test}"
+        );
+    }
 }
 
 #[test]

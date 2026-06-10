@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **70/100**
+Current score: **82/100**
 
 Branch: `codex/primitive-engine-teardown`
 
@@ -43,7 +43,7 @@ projections.
 | FSC-0 | Campaign harness | 6 | passed_after_fix | docs/static gates | Scorecard, inventory, TSV, evidence manifest, invariant target, and README links exist. | Implementation rows remain pending. | FSC-0 campaign harness checkpoint |
 | FSC-1 | Failure inventory | 8 | in_progress | docs/static gates | Inventory now names the canonical envelope owners and completed Rust, durable replay, and iOS source mappings. | Re-audit the TSV against source before closeout and make the inventory gate fail on stale rows. | iOS parity checkpoint |
 | FSC-2 | Canonical envelope | 12 | passed_after_fix | server error contract | `shared::server::failure::FailureEnvelope` owns code/category/message/retryable/recoverable/origin/provider/model/status/error type/retry-after/suggestion/details/references and `details_with_failure`. | None for current envelope consumers. | server core checkpoint |
-| FSC-3 | Error mapping matrix | 12 | in_progress | server/model/engine | `EngineError`, `CapabilityError`, `ProviderError`, `ModelResponseError`, and `RuntimeError` now map to canonical failures with focused tests. | Add explicit auth/session/event-store mapping assertions and final static enum/source coverage. | server core checkpoint |
+| FSC-3 | Error mapping matrix | 12 | passed_after_fix | server/model/engine | `EngineError`, `CapabilityError`, `ProviderError`, `ModelResponseError`, `RuntimeError`, auth, session, and event-store errors now map to canonical failures with focused tests and static source guards. | None for current mapped error sources. | error mapping closeout checkpoint |
 | FSC-4 | Runtime event emission | 12 | passed_after_fix | agent runtime | Production live `TurnFailed` and `Error` emissions route through `turn_failed_event` / `error_event`; projections only match events. | Durable payload enrichment remains FSC-9. | server core checkpoint |
 | FSC-5 | Capability and engine results | 10 | passed_after_fix | engine/capability | Capability executor failures use `failure_result`; engine invocation failures preserve canonical failure details through `capability.invocation.completed`. | Durable capability replay/export enrichment remains FSC-9. | server core checkpoint |
 | FSC-6 | Transport contract | 8 | passed_after_fix | transport | `/engine` socket errors serialize the canonical failure envelope with sanitized message, trace id, category, retryability, recoverability, origin, and details. | Add final static guard for transport error frame fields in FSC-10. | server core checkpoint |
@@ -57,8 +57,10 @@ projections.
 - The server-side canonical envelope and core Rust source mappings are in
   place for live runtime events, model/provider failures, engine transport
   errors, and model-facing capability results.
-- `FSC-3` remains open because auth/session/event-store mapping assertions and
-  final static enum/source guards are not complete.
+- `FSC-3` is closed for current mapped error sources: event-store busy and
+  persistence failures now preserve retryability, category, origin, and safe
+  details; auth storage/transport/OAuth failures preserve sanitized canonical
+  details without leaking local paths.
 - Durable event payloads and replay exports now preserve canonical failure
   details for the active interrupted turn-failure writer and engine invocation
   replay errors.

@@ -304,66 +304,234 @@ fn capability_error_from_parts(
 pub(crate) fn map_event_store_error(e: EventStoreError) -> CapabilityError {
     use EventStoreError as E;
     match e {
-        E::SessionNotFound(id) => CapabilityError::NotFound {
-            code: codes::SESSION_NOT_FOUND.into(),
-            message: format!("Session not found: {id}"),
-        },
-        E::EventNotFound(id) => CapabilityError::NotFound {
-            code: codes::EVENT_NOT_FOUND.into(),
-            message: format!("Event not found: {id}"),
-        },
-        E::WorkspaceNotFound(id) => CapabilityError::NotFound {
-            code: codes::WORKSPACE_NOT_FOUND.into(),
-            message: format!("Workspace not found: {id}"),
-        },
-        E::BlobNotFound(id) => CapabilityError::NotFound {
-            code: codes::BLOB_NOT_FOUND.into(),
-            message: format!("Blob not found: {id}"),
-        },
-        E::InvalidOperation(m) => CapabilityError::InvalidParams { message: m },
-        E::Sqlite(_)
-        | E::Pool(_)
-        | E::Serde(_)
-        | E::Migration { .. }
-        | E::Busy { .. }
-        | E::Internal(_) => CapabilityError::Internal {
-            message: e.to_string(),
-        },
+        E::SessionNotFound(id) => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::SESSION_NOT_FOUND,
+                FailureCategory::NotFound,
+                format!("Session not found: {id}"),
+                false,
+                true,
+                FailureOrigin::EventStore,
+            )
+            .with_details(Some(serde_json::json!({ "sessionId": id }))),
+        ),
+        E::EventNotFound(id) => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::EVENT_NOT_FOUND,
+                FailureCategory::NotFound,
+                format!("Event not found: {id}"),
+                false,
+                true,
+                FailureOrigin::EventStore,
+            )
+            .with_details(Some(serde_json::json!({ "eventId": id }))),
+        ),
+        E::WorkspaceNotFound(id) => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::WORKSPACE_NOT_FOUND,
+                FailureCategory::NotFound,
+                format!("Workspace not found: {id}"),
+                false,
+                true,
+                FailureOrigin::EventStore,
+            )
+            .with_details(Some(serde_json::json!({ "workspaceId": id }))),
+        ),
+        E::BlobNotFound(id) => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::BLOB_NOT_FOUND,
+                FailureCategory::NotFound,
+                format!("Blob not found: {id}"),
+                false,
+                true,
+                FailureOrigin::EventStore,
+            )
+            .with_details(Some(serde_json::json!({ "blobId": id }))),
+        ),
+        E::InvalidOperation(message) => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::INVALID_PARAMS,
+                FailureCategory::InvalidRequest,
+                message.clone(),
+                false,
+                true,
+                FailureOrigin::EventStore,
+            )
+            .with_details(Some(serde_json::json!({ "reason": message }))),
+        ),
+        E::Busy {
+            operation,
+            attempts,
+        } => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::EVENT_STORE_BUSY,
+                FailureCategory::Unavailable,
+                format!("Event store busy during {operation}"),
+                true,
+                true,
+                FailureOrigin::EventStore,
+            )
+            .with_details(Some(serde_json::json!({
+                "operation": operation,
+                "attempts": attempts,
+            }))),
+        ),
+        E::Sqlite(error) => event_store_internal_failure("sqlite", Some(error.to_string())),
+        E::Pool(error) => event_store_internal_failure("pool", Some(error.to_string())),
+        E::Serde(error) => event_store_internal_failure("serde", Some(error.to_string())),
+        E::Migration { message } => event_store_internal_failure("migration", Some(message)),
+        E::Internal(message) => event_store_internal_failure("internal", Some(message)),
     }
 }
 
 pub(crate) fn map_auth_error(e: AuthError) -> CapabilityError {
     use AuthError as A;
     match e {
-        A::NotConfigured(provider) => CapabilityError::NotFound {
-            code: codes::AUTH_NOT_CONFIGURED.into(),
-            message: format!("No auth configured for provider: {provider}"),
-        },
-        A::TokenExpired(m) => CapabilityError::Custom {
-            code: codes::AUTH_TOKEN_EXPIRED.into(),
-            message: format!("Token expired and refresh failed: {m}"),
-            details: None,
-        },
-        A::OAuth { status, message } => CapabilityError::Custom {
-            code: codes::AUTH_OAUTH_ERROR.into(),
-            message: format!("OAuth error ({status}): {message}"),
-            details: None,
-        },
-        A::MalformedProviderAuth { provider, details } => CapabilityError::NotFound {
-            code: codes::AUTH_NOT_CONFIGURED.into(),
-            message: format!(
-                "Malformed auth for {provider}: {details}. Re-authenticate via `tron auth {provider}`."
-            ),
-        },
-        A::MalformedAuthFile { path, details } => CapabilityError::Internal {
-            message: format!(
-                "Malformed auth file at '{path}': {details}. Fix the file or run `tron auth reset` to wipe and re-authenticate."
-            ),
-        },
-        A::Http(_) | A::Json { .. } | A::Io(_) => CapabilityError::Internal {
-            message: e.to_string(),
-        },
+        A::NotConfigured(provider) => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::AUTH_NOT_CONFIGURED,
+                FailureCategory::Auth,
+                format!("No auth configured for provider: {provider}"),
+                false,
+                true,
+                FailureOrigin::Auth,
+            )
+            .with_details(Some(serde_json::json!({ "provider": provider })))
+            .with_suggestion(Some(format!("Run `tron auth {provider}`."))),
+        ),
+        A::TokenExpired(message) => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::AUTH_TOKEN_EXPIRED,
+                FailureCategory::Auth,
+                "Auth token expired and refresh failed",
+                false,
+                true,
+                FailureOrigin::Auth,
+            )
+            .with_details(Some(serde_json::json!({ "reason": message })))
+            .with_suggestion(Some("Re-authenticate the provider.".to_owned())),
+        ),
+        A::OAuth { status, message } => {
+            let retryable = matches!(status, 408 | 429 | 502 | 503 | 504);
+            CapabilityError::from_failure(
+                FailureEnvelope::new(
+                    codes::AUTH_OAUTH_ERROR,
+                    FailureCategory::Auth,
+                    format!("OAuth error ({status}): {message}"),
+                    retryable,
+                    true,
+                    FailureOrigin::Auth,
+                )
+                .with_status_code(Some(status))
+                .with_details(Some(serde_json::json!({
+                    "status": status,
+                    "reason": message,
+                }))),
+            )
+        }
+        A::MalformedProviderAuth { provider, details } => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::AUTH_NOT_CONFIGURED,
+                FailureCategory::Auth,
+                format!("Malformed auth for {provider}. Re-authenticate the provider."),
+                false,
+                true,
+                FailureOrigin::Auth,
+            )
+            .with_details(Some(serde_json::json!({
+                "provider": provider,
+                "reason": details,
+            })))
+            .with_suggestion(Some(format!("Run `tron auth {provider}`."))),
+        ),
+        A::MalformedAuthFile { details, .. } => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::AUTH_STORAGE_ERROR,
+                FailureCategory::Auth,
+                "Malformed auth storage. Fix the file or run `tron auth reset`.",
+                false,
+                true,
+                FailureOrigin::Auth,
+            )
+            .with_details(Some(serde_json::json!({ "reason": details })))
+            .with_suggestion(Some(
+                "Run `tron auth reset` if the file cannot be repaired.".to_owned(),
+            )),
+        ),
+        A::Http(error) => {
+            let status = error.status();
+            let retryable = error.is_timeout()
+                || error.is_connect()
+                || status.is_some_and(|status| {
+                    status.is_server_error() || status == reqwest::StatusCode::TOO_MANY_REQUESTS
+                });
+            let error_type = if error.is_timeout() {
+                "timeout"
+            } else if error.is_connect() {
+                "connect"
+            } else if status.is_some() {
+                "http_status"
+            } else {
+                "request"
+            };
+            CapabilityError::from_failure(
+                FailureEnvelope::new(
+                    codes::AUTH_TRANSPORT_ERROR,
+                    FailureCategory::Network,
+                    "Auth provider request failed",
+                    retryable,
+                    true,
+                    FailureOrigin::Auth,
+                )
+                .with_status_code(status.map(|status| status.as_u16()))
+                .with_error_type(Some(error_type.to_owned()))
+                .with_details(Some(serde_json::json!({ "kind": error_type }))),
+            )
+        }
+        A::Json { operation, message } => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::AUTH_STORAGE_ERROR,
+                FailureCategory::Auth,
+                "Auth storage JSON operation failed",
+                false,
+                true,
+                FailureOrigin::Auth,
+            )
+            .with_details(Some(serde_json::json!({
+                "operation": operation,
+                "reason": message,
+            }))),
+        ),
+        A::Io(error) => CapabilityError::from_failure(
+            FailureEnvelope::new(
+                codes::AUTH_STORAGE_ERROR,
+                FailureCategory::Auth,
+                "Auth storage I/O operation failed",
+                false,
+                true,
+                FailureOrigin::Auth,
+            )
+            .with_error_type(Some(format!("{:?}", error.kind())))
+            .with_details(Some(
+                serde_json::json!({ "kind": format!("{:?}", error.kind()) }),
+            )),
+        ),
     }
+}
+
+fn event_store_internal_failure(kind: &'static str, reason: Option<String>) -> CapabilityError {
+    CapabilityError::from_failure(
+        FailureEnvelope::new(
+            codes::EVENT_STORE_FAILURE,
+            FailureCategory::Persistence,
+            "Event store operation failed",
+            false,
+            false,
+            FailureOrigin::EventStore,
+        )
+        .with_error_type(Some(kind.to_owned()))
+        .with_details(Some(serde_json::json!({ "kind": kind, "reason": reason }))),
+    )
 }
 
 #[cfg(test)]
@@ -375,12 +543,32 @@ mod tests {
     use crate::domains::auth::credentials::errors::AuthError as A;
     use crate::domains::session::event_store::errors::EventStoreError as E;
     use crate::engine::EngineError;
+    use crate::shared::server::errors::{self as codes, CapabilityError};
     use crate::shared::server::failure::{
         ENGINE_DELIVERY_MODE_NOT_ALLOWED, ENGINE_HANDLER_FAILED, ENGINE_INVALID_FUNCTION_ID,
         ENGINE_INVALID_ID, ENGINE_INVALID_SCHEMA, ENGINE_LEDGER_FAILURE, ENGINE_NAMESPACE_DENIED,
         ENGINE_NOT_ROUTABLE, ENGINE_POLICY_VIOLATION, ENGINE_SCHEMA_VIOLATION,
         ENGINE_STORED_INVOCATION_ERROR, ENGINE_UNSUPPORTED_DELIVERY_MODE, FailureCategory,
+        FailureOrigin,
     };
+
+    fn assert_embedded_failure(
+        mapped: &CapabilityError,
+        expected_code: &str,
+        expected_category: FailureCategory,
+        expected_origin: FailureOrigin,
+        expected_retryable: bool,
+        expected_recoverable: bool,
+    ) -> serde_json::Value {
+        assert_eq!(mapped.code(), expected_code);
+        let details = mapped.details().expect("canonical failure details");
+        assert_eq!(details["failure"]["code"], expected_code);
+        assert_eq!(details["failure"]["category"], expected_category.as_str());
+        assert_eq!(details["failure"]["origin"], expected_origin.as_str());
+        assert_eq!(details["failure"]["retryable"], expected_retryable);
+        assert_eq!(details["failure"]["recoverable"], expected_recoverable);
+        details
+    }
 
     #[test]
     fn every_engine_error_variant_has_stable_failure_mapping() {
@@ -570,56 +758,156 @@ mod tests {
     #[test]
     fn event_store_session_not_found_is_typed() {
         let mapped = map_event_store_error(E::SessionNotFound("sess-42".into()));
-        assert_eq!(mapped.code(), "SESSION_NOT_FOUND");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::SESSION_NOT_FOUND,
+            FailureCategory::NotFound,
+            FailureOrigin::EventStore,
+            false,
+            true,
+        );
+        assert_eq!(details["sessionId"], "sess-42");
         assert!(mapped.to_string().contains("sess-42"));
     }
 
     #[test]
     fn event_store_event_not_found_is_typed() {
         let mapped = map_event_store_error(E::EventNotFound("evt-7".into()));
-        assert_eq!(mapped.code(), "EVENT_NOT_FOUND");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::EVENT_NOT_FOUND,
+            FailureCategory::NotFound,
+            FailureOrigin::EventStore,
+            false,
+            true,
+        );
+        assert_eq!(details["eventId"], "evt-7");
         assert!(mapped.to_string().contains("evt-7"));
     }
 
     #[test]
     fn event_store_workspace_not_found_is_typed() {
         let mapped = map_event_store_error(E::WorkspaceNotFound("ws-1".into()));
-        assert_eq!(mapped.code(), "WORKSPACE_NOT_FOUND");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::WORKSPACE_NOT_FOUND,
+            FailureCategory::NotFound,
+            FailureOrigin::EventStore,
+            false,
+            true,
+        );
+        assert_eq!(details["workspaceId"], "ws-1");
         assert!(mapped.to_string().contains("ws-1"));
     }
 
     #[test]
     fn event_store_blob_not_found_is_typed() {
         let mapped = map_event_store_error(E::BlobNotFound("blob-abc".into()));
-        assert_eq!(mapped.code(), "BLOB_NOT_FOUND");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::BLOB_NOT_FOUND,
+            FailureCategory::NotFound,
+            FailureOrigin::EventStore,
+            false,
+            true,
+        );
+        assert_eq!(details["blobId"], "blob-abc");
         assert!(mapped.to_string().contains("blob-abc"));
     }
 
     #[test]
     fn event_store_invalid_operation_is_invalid_params() {
         let mapped = map_event_store_error(E::InvalidOperation("can't fork".into()));
-        assert_eq!(mapped.code(), "INVALID_PARAMS");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::INVALID_PARAMS,
+            FailureCategory::InvalidRequest,
+            FailureOrigin::EventStore,
+            false,
+            true,
+        );
+        assert_eq!(details["reason"], "can't fork");
         assert!(mapped.to_string().contains("can't fork"));
     }
 
     #[test]
-    fn event_store_internal_errors_stay_internal() {
+    fn event_store_busy_is_retryable_unavailable() {
+        let mapped = map_event_store_error(E::Busy {
+            operation: "append_event",
+            attempts: 5,
+        });
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::EVENT_STORE_BUSY,
+            FailureCategory::Unavailable,
+            FailureOrigin::EventStore,
+            true,
+            true,
+        );
+        assert_eq!(details["operation"], "append_event");
+        assert_eq!(details["attempts"], 5);
+    }
+
+    #[test]
+    fn event_store_internal_errors_preserve_persistence_failure() {
         let mapped = map_event_store_error(E::Sqlite(rusqlite::Error::QueryReturnedNoRows));
-        assert_eq!(mapped.code(), "INTERNAL_ERROR");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::EVENT_STORE_FAILURE,
+            FailureCategory::Persistence,
+            FailureOrigin::EventStore,
+            false,
+            false,
+        );
+        assert_eq!(details["kind"], "sqlite");
+        assert_eq!(details["failure"]["errorType"], "sqlite");
+    }
+
+    #[test]
+    fn event_store_migration_errors_preserve_safe_reason() {
+        let mapped = map_event_store_error(E::Migration {
+            message: "v003 failed".into(),
+        });
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::EVENT_STORE_FAILURE,
+            FailureCategory::Persistence,
+            FailureOrigin::EventStore,
+            false,
+            false,
+        );
+        assert_eq!(details["kind"], "migration");
+        assert_eq!(details["reason"], "v003 failed");
     }
 
     #[test]
     fn auth_not_configured_is_typed() {
         let mapped = map_auth_error(A::NotConfigured("anthropic".into()));
-        assert_eq!(mapped.code(), "AUTH_NOT_CONFIGURED");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::AUTH_NOT_CONFIGURED,
+            FailureCategory::Auth,
+            FailureOrigin::Auth,
+            false,
+            true,
+        );
+        assert_eq!(details["provider"], "anthropic");
         assert!(mapped.to_string().contains("anthropic"));
     }
 
     #[test]
     fn auth_token_expired_is_typed() {
         let mapped = map_auth_error(A::TokenExpired("refresh returned 403".into()));
-        assert_eq!(mapped.code(), "AUTH_TOKEN_EXPIRED");
-        assert!(mapped.to_string().contains("refresh returned 403"));
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::AUTH_TOKEN_EXPIRED,
+            FailureCategory::Auth,
+            FailureOrigin::Auth,
+            false,
+            true,
+        );
+        assert_eq!(details["reason"], "refresh returned 403");
+        assert_eq!(mapped.to_string(), "Auth token expired and refresh failed");
     }
 
     #[test]
@@ -628,24 +916,66 @@ mod tests {
             status: 401,
             message: "invalid_grant".into(),
         });
-        assert_eq!(mapped.code(), "AUTH_OAUTH_ERROR");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::AUTH_OAUTH_ERROR,
+            FailureCategory::Auth,
+            FailureOrigin::Auth,
+            false,
+            true,
+        );
+        assert_eq!(details["status"], 401);
+        assert_eq!(details["failure"]["statusCode"], 401);
         assert!(mapped.to_string().contains("invalid_grant"));
     }
 
     #[test]
-    fn auth_io_is_internal() {
+    fn auth_oauth_transient_status_is_retryable() {
+        let mapped = map_auth_error(A::OAuth {
+            status: 503,
+            message: "unavailable".into(),
+        });
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::AUTH_OAUTH_ERROR,
+            FailureCategory::Auth,
+            FailureOrigin::Auth,
+            true,
+            true,
+        );
+        assert_eq!(details["failure"]["statusCode"], 503);
+    }
+
+    #[test]
+    fn auth_io_is_storage_error() {
         let mapped = map_auth_error(A::Io(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "x",
         )));
-        assert_eq!(mapped.code(), "INTERNAL_ERROR");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::AUTH_STORAGE_ERROR,
+            FailureCategory::Auth,
+            FailureOrigin::Auth,
+            false,
+            true,
+        );
+        assert_eq!(details["kind"], "NotFound");
     }
 
     #[test]
-    fn auth_json_is_internal() {
+    fn auth_json_is_storage_error() {
         let serde_err = serde_json::from_str::<String>("not json").unwrap_err();
         let mapped = map_auth_error(A::json("decode auth", serde_err));
-        assert_eq!(mapped.code(), "INTERNAL_ERROR");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::AUTH_STORAGE_ERROR,
+            FailureCategory::Auth,
+            FailureOrigin::Auth,
+            false,
+            true,
+        );
+        assert_eq!(details["operation"], "decode auth");
     }
 
     #[test]
@@ -654,10 +984,37 @@ mod tests {
             provider: "google".into(),
             details: "unknown field `endpoint`".into(),
         });
-        assert_eq!(mapped.code(), "AUTH_NOT_CONFIGURED");
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::AUTH_NOT_CONFIGURED,
+            FailureCategory::Auth,
+            FailureOrigin::Auth,
+            false,
+            true,
+        );
+        assert_eq!(details["provider"], "google");
+        assert_eq!(details["reason"], "unknown field `endpoint`");
         let msg = mapped.to_string();
         assert!(msg.contains("google"));
-        assert!(msg.contains("endpoint"));
-        assert!(msg.contains("tron auth google"));
+        assert_eq!(details["failure"]["suggestion"], "Run `tron auth google`.");
+    }
+
+    #[test]
+    fn auth_malformed_auth_file_is_sanitized_storage_error() {
+        let mapped = map_auth_error(A::MalformedAuthFile {
+            path: "/Users/local-secret/.tron/profiles/auth.json".into(),
+            details: "unknown field `services`".into(),
+        });
+        let details = assert_embedded_failure(
+            &mapped,
+            codes::AUTH_STORAGE_ERROR,
+            FailureCategory::Auth,
+            FailureOrigin::Auth,
+            false,
+            true,
+        );
+        assert_eq!(details["reason"], "unknown field `services`");
+        assert!(!mapped.to_string().contains("/Users/local-secret"));
+        assert!(!details.to_string().contains("/Users/local-secret"));
     }
 }

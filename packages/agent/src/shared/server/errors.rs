@@ -39,6 +39,10 @@ pub const EVENT_NOT_FOUND: &str = "EVENT_NOT_FOUND";
 pub const WORKSPACE_NOT_FOUND: &str = "WORKSPACE_NOT_FOUND";
 /// Requested blob was not found.
 pub const BLOB_NOT_FOUND: &str = "BLOB_NOT_FOUND";
+/// Event store write/read contention exceeded its retry budget.
+pub const EVENT_STORE_BUSY: &str = "EVENT_STORE_BUSY";
+/// Event store failed without a narrower public classification.
+pub const EVENT_STORE_FAILURE: &str = "EVENT_STORE_FAILURE";
 
 // ── Typed auth errors ────────────────────────────────────────────────
 //
@@ -50,6 +54,10 @@ pub const AUTH_NOT_CONFIGURED: &str = "AUTH_NOT_CONFIGURED";
 pub const AUTH_TOKEN_EXPIRED: &str = "AUTH_TOKEN_EXPIRED";
 /// OAuth flow returned an error from the upstream provider.
 pub const AUTH_OAUTH_ERROR: &str = "AUTH_OAUTH_ERROR";
+/// Auth credential storage is malformed or unavailable.
+pub const AUTH_STORAGE_ERROR: &str = "AUTH_STORAGE_ERROR";
+/// Auth provider transport failed before a usable OAuth response.
+pub const AUTH_TRANSPORT_ERROR: &str = "AUTH_TRANSPORT_ERROR";
 
 // ── Version handshake (L6) ──────────────────────────────────────────
 //
@@ -163,7 +171,7 @@ impl CapabilityError {
             INTERNAL_ERROR => Self::Internal { message },
             NOT_AVAILABLE => Self::NotAvailable { message },
             NOT_FOUND | SESSION_NOT_FOUND | EVENT_NOT_FOUND | WORKSPACE_NOT_FOUND
-            | BLOB_NOT_FOUND | AUTH_NOT_CONFIGURED => Self::NotFound { code, message },
+            | BLOB_NOT_FOUND => Self::NotFound { code, message },
             _ => Self::Custom {
                 code,
                 message,
@@ -188,11 +196,16 @@ fn category_for_capability_code(code: &str) -> FailureCategory {
         INVALID_PARAMS | CLIENT_VERSION_UNSUPPORTED | INVALID_VISIBILITY_PROMOTION => {
             FailureCategory::InvalidRequest
         }
-        SESSION_NOT_FOUND | EVENT_NOT_FOUND | WORKSPACE_NOT_FOUND | BLOB_NOT_FOUND | NOT_FOUND
-        | AUTH_NOT_CONFIGURED => FailureCategory::NotFound,
-        NOT_AVAILABLE => FailureCategory::Unavailable,
+        SESSION_NOT_FOUND | EVENT_NOT_FOUND | WORKSPACE_NOT_FOUND | BLOB_NOT_FOUND | NOT_FOUND => {
+            FailureCategory::NotFound
+        }
+        NOT_AVAILABLE | EVENT_STORE_BUSY => FailureCategory::Unavailable,
         SESSION_BUSY | IDEMPOTENCY_CONFLICT | ENGINE_OWNER_MISMATCH => FailureCategory::Conflict,
-        AUTH_TOKEN_EXPIRED | AUTH_OAUTH_ERROR => FailureCategory::Auth,
+        AUTH_NOT_CONFIGURED | AUTH_TOKEN_EXPIRED | AUTH_OAUTH_ERROR | AUTH_STORAGE_ERROR => {
+            FailureCategory::Auth
+        }
+        AUTH_TRANSPORT_ERROR => FailureCategory::Network,
+        EVENT_STORE_FAILURE => FailureCategory::Persistence,
         INTERNAL_ERROR => FailureCategory::Internal,
         _ => FailureCategory::Unknown,
     }
@@ -203,6 +216,7 @@ fn retry_recover_for_category(category: FailureCategory, code: &str) -> (bool, b
         (FailureCategory::Conflict, SESSION_BUSY) => (true, true),
         (FailureCategory::Conflict, IDEMPOTENCY_CONFLICT | ENGINE_OWNER_MISMATCH) => (false, true),
         (FailureCategory::Unavailable, _) => (true, true),
+        (FailureCategory::Network, _) => (true, true),
         (FailureCategory::NotFound, _) | (FailureCategory::InvalidRequest, _) => (false, true),
         (FailureCategory::Auth, _) => (false, true),
         (FailureCategory::Internal, _) => (false, false),

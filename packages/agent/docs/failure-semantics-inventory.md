@@ -39,7 +39,7 @@ replay boundary.
 |---|---|---|
 | `shared::server::failure::FailureEnvelope` | Canonical server envelope and vocabulary exist with stable code/category/message/retryable/recoverable/origin and optional provider/model/status/error type/retry-after/suggestion/details/references. | Keep as the single server-side failure contract; do not add parallel category taxonomies. |
 | `shared::server::errors::CapabilityError` | Converts to/from `FailureEnvelope` while preserving stable code and structured details. | Add final static guards that active transports use the envelope conversion before emitting errors. |
-| `shared::server::error_mapping` | Exhaustively maps every current `EngineError` variant; auth/session/event-store helpers still need explicit row-level mapping assertions. | Close FSC-3 with auth/session/event-store tests and uncovered-variant guards. |
+| `shared::server::error_mapping` | Exhaustively maps every current `EngineError` variant and canonicalizes auth/session/event-store failures, including event-store busy/failure and auth storage/transport/OAuth cases with safe `details.failure`. | Keep new error variants covered by focused tests and static source guards. |
 | `engine::kernel::EngineError` | Rich variants now map to stable public failure code/category/retryability/recoverability through `engine_error_to_failure`. | Keep new variants covered by the mapping matrix. |
 | `domains::model::providers::shared::ProviderError` | Produces canonical provider failures preserving provider, model, status, provider code, retry-after, retryable, recoverable, and cancellation. | Keep provider consumers on the canonical envelope. |
 | `domains::model::responder::ModelResponseError` | Carries a `FailureEnvelope` from provider/model boundary to agent runtime. | Remove or guard fallback conversions that lack provider/model context before closeout if still reachable. |
@@ -71,8 +71,8 @@ replay boundary.
 
 - FSC-1 remains open until this inventory and the TSV are re-audited against
   source and protected by a closeout guard.
-- FSC-3 still needs explicit auth/session/event-store mapping assertions and
-  closeout guards for new enum variants.
+- FSC-3 is closed for current mapped error sources; new auth, event-store, or
+  engine error variants must update the mapping matrix and source guards.
 - FSC-8 is closed for current server-authored iOS failure surfaces. Local
   transport/network reachability classifications may remain local only when no
   server failure envelope exists.
