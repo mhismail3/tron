@@ -4,7 +4,7 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `compensation` | Compensation records and rollback audit state for resource-changing invocations. |
+//! | `compensation` | Append-only compensation audit records for resource-changing invocations. |
 //! | `grants` | Durable authority grants, grant derivation, and invocation authorization. |
 //! | `leases` | Resource lease acquisition and release for shared-state mutation. |
 //!
@@ -23,7 +23,10 @@
 //!
 //! - Caller-supplied authority scopes are audit context, not permission truth.
 //! - Grants are resolved from the engine-owned store before execution.
-//! - Lease/compensation state records inspectable mutation ownership.
+//! - Lease state has active/released/expired transitions enforced by the store.
+//! - Compensation is audit-only durable state in this branch: the only accepted
+//!   status is `recorded`, and future automated rollback must add a new owner,
+//!   status transitions, and tests instead of overloading the audit record.
 //!
 //! ## Test Ownership
 //!

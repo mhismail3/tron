@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **45/100**
+Current score: **59/100**
 
 Status: **active**
 
@@ -62,7 +62,7 @@ documented and tested.
 | SOL-2 | Truth taxonomy for every state surface | 8 | passed_after_fix | docs/static gates | Added `sol_truth_taxonomy_is_owner_scoped`; verified every row uses exactly one allowed `state_class`, has no unclassified owner, prevents iOS/script/docs rows from claiming canonical server truth, restricts canonical truth to session/settings/profile owners, restricts secrets to auth/Keychain/token owners, and keeps local device preferences iOS-local. | Later rows add subsystem-specific lifecycle proof over the classified inventory. | SOL-2 truth taxonomy checkpoint |
 | SOL-3 | Server bootstrap lifecycle | 10 | passed_after_fix | app/storage/auth/bootstrap | Added `sol_server_bootstrap_lifecycle_is_source_backed`; verified startup order from Tron Home and bearer-token materialization through canonical DB generation/archive/flock/migrations, logging, retention/size-budget startup maintenance, engine host durable catalog hydration, domain/worker registration, crash-journal recovery, background task registration, bind, graceful shutdown, log flush, and final checkpoint. | No SOL-3 open loops; later rows prove steady-state runtime tasks, engine substrate, sessions, settings/auth, iOS state, and observability. | SOL-3 server bootstrap lifecycle checkpoint |
 | SOL-4 | Runtime task and memory lifecycle | 12 | passed_after_fix | agent runtime/orchestrator/shutdown | Deleted dead `SessionManager::plan_mode`; added `sol_runtime_task_memory_lifecycle_is_source_backed`; proved active-session cache processing flags, run/retain RAII guards, sequence/compaction cleanup, invocation abort registry guards, capability pending cleanup, shutdown task registry, blocking supervisor drain, runtime service cancellation, and bootstrap background-task registration. | No SOL-4 open loops; later rows prove durable engine substrate, sessions, settings/auth, iOS state, observability, and final closeout. | SOL-4 runtime task and memory lifecycle checkpoint |
-| SOL-5 | Engine durable substrate lifecycle | 14 | pending | engine durability/authority | Not started. | Ledger, idempotency, queues, streams, resources, grants, leases, compensation, state store, payload refs, retention, checkpoint, and export need explicit lifecycle proof. | pending |
+| SOL-5 | Engine durable substrate lifecycle | 14 | passed_after_fix | engine durability/authority/shared storage | Added `sol_engine_durable_substrate_lifecycle_is_source_backed`; proved ledger catalog/invocation/idempotency rows, queues and attempts, streams and cursors, resources and versions, grants, leases, audit-only compensation, state store revisions, payload refs, retention, checkpoint, export, and SQLite/in-memory primitive store ownership. | No SOL-5 open loops; later rows prove sessions, settings/auth, iOS state, observability, and final closeout. | SOL-5 engine durable substrate lifecycle checkpoint |
 | SOL-6 | Session/event-store lifecycle | 10 | pending | session/event store | Not started. | Create/resume/fork/archive/delete/end, append ordering, active cache eviction, reconstruction, and session-scoped cleanup need proof. | pending |
 | SOL-7 | Settings/auth/secrets lifecycle | 10 | pending | settings/auth | Not started. | Server-authoritative settings, atomic sparse writes, rollback, snapshots, auth.json materialization, OAuth pending-flow TTL, and token refresh need proof. | pending |
 | SOL-8 | iOS projection and local state lifecycle | 14 | pending | iOS engine/support/session/ui | Not started. | EventDatabase, sync cursors, SessionSynchronizer, EventStoreManager, connection tasks, settings snapshots, pairing/token stores, drafts/history/share/diagnostics need projection/local classification. | pending |
@@ -76,9 +76,11 @@ Total weight: **100**
 - `packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs`
   contained `SessionManager::plan_mode: DashMap<String, bool>` with only local
   setter/getter references; SOL-4 deleted it rather than documenting dead state.
-- `packages/agent/src/engine/authority/compensation.rs` stores Engine compensation records as durable audit records with a single `Recorded` status. SOL-5 owns
-  the proof that this is audit-only durable state or the implementation of
-  terminal transitions.
+- Engine compensation records in
+  `packages/agent/src/engine/authority/compensation.rs` are durable audit
+  records with a single `Recorded` status. SOL-5 proved this is audit-only
+  durable state; future automated rollback requires a new owner, status
+  transitions, and tests rather than overloading the audit record.
 - `packages/ios-app/Sources/Engine/Persistence/Sync/EventStoreManager+Sync.swift`
   merges server session info with local projections. SOL-8 owns proof that local
   counts/head/root never become canonical server truth.
@@ -128,6 +130,12 @@ cargo test --manifest-path packages/agent/Cargo.toml app::lifecycle::shutdown --
 cargo test --manifest-path packages/agent/Cargo.toml shared::server::context --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml transport::runtime --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml app::bootstrap --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::authority --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::invocation::idempotency --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::invocation::meta_primitives --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::runtime::external_worker --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml shared::storage --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml domains::settings --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml domains::auth --lib -- --nocapture
 ```

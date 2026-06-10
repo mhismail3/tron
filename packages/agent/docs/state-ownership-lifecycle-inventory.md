@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-4 `passed_after_fix`; 478 state-surface rows inventoried and classified.
+Status: SOL-5 `passed_after_fix`; 478 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -85,6 +85,21 @@ The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
 | Runtime service loops | `runtime_transport` | Queue drainer and worker-heartbeat tasks are registered with shutdown and receive cancellation tokens that break their select loops. |
 | App background tasks | `app_bootstrap` | Cache eviction, blocking-supervisor shutdown, runtime services, and profile watcher are registered during bootstrap before the server binds. |
 
+## SOL-5 Engine Durable Substrate Lifecycle Proof
+
+| Surface | Owner | Lifecycle proof |
+|---|---|---|
+| Engine ledger | `engine_invocation` | Catalog changes, durable worker/function definitions, invocation rows, produced resource refs, idempotency reserve/complete records, and session listings are persisted behind the ledger store facade. |
+| Idempotency records | `engine_invocation` | Mutating host paths reserve idempotency before handler execution and complete or replay through ledger-owned rows; duplicate handling never calls handlers outside the ledger policy. |
+| Queues and attempts | `engine_runtime` / `engine_invocation` | Queue items move through ready, leased, completed, cancelled, and dead-lettered states; terminal transitions clear lease ownership and persist attempt records with resource lease and compensation refs. |
+| Streams and subscriptions | `engine_invocation` | Stream stores own publish, subscribe, latest-cursor, poll, acknowledge, unsubscribe, visibility filtering, and session-listing lifecycle paths. |
+| Resource store | `engine_resource_store` | Resource type registration, create, update, link, inspect, list, current-version pointers, CAS conflict handling, lifecycle events, and version payload refs remain behind the resource store owner. |
+| Grants and leases | `engine_authority` | Grants are resolved from owner-private stores before execution; resource leases have acquire/release/expiration state and emit acquired/released stream events through host bookkeeping. |
+| Compensation audit records | `engine_authority` | Compensation is audit-only durable state in this branch: the only accepted status is `recorded`; future automated rollback needs a new owner, status transitions, and tests. |
+| Engine state store | `engine_state_store` | Namespaced state entries mutate through monotonic revisions, CAS conflict checks, delete/list paths, and shared-storage payload refs. |
+| Shared storage payload refs | `shared_storage` | Large JSON payloads record owner kind, owner id, field name, retention class, and expiry metadata; shared storage owns retention, checkpoint, export, pruning, and stats. |
+| Primitive store bundle | `engine_primitives` | `PrimitiveStores::sqlite` opens stream, state, queue, lease, resource, grant, and compensation stores as one SQLite-backed bundle and installs built-in resource types before exposure through `EngineHost`. |
+
 Non-source state surfaces covered by SOL-1:
 
 - `README.md`
@@ -103,7 +118,7 @@ Non-source state surfaces covered by SOL-1:
 | Surface | Current classification | Owner | Lifecycle note | SOL rows |
 |---|---|---|---|---|
 | `SessionManager::plan_mode` | deleted dead state | none accepted | `DashMap<String, bool>` had only local setter/getter references and was removed in SOL-4. | SOL-4 |
-| Engine compensation records | durable audit substrate | engine authority | Records are appended during invocation and inspectable through the engine host; SOL-5 must prove audit-only status is intentional or add terminal transitions. | SOL-5 |
+| Engine compensation records | durable audit substrate | engine authority | Records are appended during invocation and inspectable through the engine host; SOL-5 proved the audit-only lifecycle with the single `recorded` status. Future rollback needs explicit owner/status transitions/tests. | SOL-5 |
 | iOS `EventStoreManager` session metadata | projection cache | iOS event persistence | Local counts/head/root are reconstructable local projections and must not override canonical server truth. | SOL-8 |
 | iOS pairing/token stores | local device preference / secret | iOS support composition | Pairing list is device-local; bearer tokens are Keychain secrets keyed by paired server id. | SOL-8 |
 | iOS drafts/history/share/diagnostics | local device preference / projection / diagnostic buffer | iOS support/session | Drafts and pending share are local user workflow state; diagnostics are observation buffers. | SOL-8 |
