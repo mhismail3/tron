@@ -1538,3 +1538,12 @@ packages/agent/tests/concurrency_scheduling_discipline/scorecard_inventory.rs	re
 packages/agent/tests/concurrency_scheduling_discipline/static_guards.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline static guard module retained after final closeout.
 packages/agent/tests/concurrency_scheduling_discipline/support.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline invariant test support retained after final closeout.
 packages/agent/tests/concurrency_scheduling_discipline_invariants.rs	retain	csd rust test	CSD-10	Current Concurrency Scheduling Discipline invariant target retained after final closeout.
+packages/agent/docs/security-authority-capability-boundaries-evidence-manifest.md	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries evidence manifest retained for the current campaign.
+packages/agent/docs/security-authority-capability-boundaries-inventory.md	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries inventory retained for the current campaign.
+packages/agent/docs/security-authority-capability-boundaries-inventory.tsv	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries machine-readable inventory retained for the current campaign.
+packages/agent/docs/security-authority-capability-boundaries-scorecard.md	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries scorecard retained for the current campaign.
+packages/agent/tests/security_authority_capability_boundaries/mod.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant module registry retained for the current campaign.
+packages/agent/tests/security_authority_capability_boundaries/scorecard_inventory.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries scorecard/inventory invariant module retained for the current campaign.
+packages/agent/tests/security_authority_capability_boundaries/static_guards.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries static guard module retained for the current campaign.
+packages/agent/tests/security_authority_capability_boundaries/support.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant test support retained for the current campaign.
+packages/agent/tests/security_authority_capability_boundaries_invariants.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant target retained for the current campaign.

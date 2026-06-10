@@ -36,6 +36,7 @@ run_tests() {
         post_hra_adversarial_hardening_invariants
         post_aha_adversarial_closeout_invariants
         concurrency_scheduling_discipline_invariants
+        security_authority_capability_boundaries_invariants
         primitive_trace_execution
         integration
     )

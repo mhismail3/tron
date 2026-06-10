@@ -183,6 +183,17 @@ Current living entry points:
   CSD taxonomy and scheduling-surface proof notes.
 - `packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`:
   machine-readable CSD scheduling inventory used by static gates.
+- `packages/agent/docs/security-authority-capability-boundaries-scorecard.md`:
+  active Security Authority Capability Boundaries scorecard for public
+  transport auth, authority grants, capability execution, worker isolation,
+  secrets, redaction, and pairing lifecycle proof.
+- `packages/agent/docs/security-authority-capability-boundaries-evidence-manifest.md`:
+  companion evidence manifest for SACB row checkpoints, verification logs, and
+  security boundary findings.
+- `packages/agent/docs/security-authority-capability-boundaries-inventory.md`:
+  active SACB boundary taxonomy and security-surface proof notes.
+- `packages/agent/docs/security-authority-capability-boundaries-inventory.tsv`:
+  machine-readable SACB security boundary inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -252,12 +263,17 @@ Current living entry points:
   ownership, bounded channel/stream, Swift banned-pattern, stored-task
   cancellation, timer/deadline, blocking-isolation, and closeout gates, with
   focused modules under `packages/agent/tests/concurrency_scheduling_discipline/`.
+- `packages/agent/tests/security_authority_capability_boundaries_invariants.rs`:
+  active SACB scorecard, inventory, CI wiring, and security boundary gates, with
+  focused modules under
+  `packages/agent/tests/security_authority_capability_boundaries/`.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD scorecards.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD scorecards plus the active
+SACB scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1338,9 +1354,11 @@ tron ci clippy test          # Subset: linting + tests
 `hierarchical_rearchitecture_invariants`,
 `post_hra_adversarial_hardening_invariants`,
 `post_aha_adversarial_closeout_invariants`,
-`concurrency_scheduling_discipline_invariants`, `primitive_trace_execution`,
-and serial `integration`. GitHub's Rust static-gates job runs the same named
-target set for docs, template, iOS, Mac, script, and CI changes.
+`concurrency_scheduling_discipline_invariants`,
+`security_authority_capability_boundaries_invariants`,
+`primitive_trace_execution`, and serial `integration`. GitHub's Rust
+static-gates job runs the same named target set for docs, template, iOS, Mac,
+script, and CI changes.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

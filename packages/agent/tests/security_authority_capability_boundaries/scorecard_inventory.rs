@@ -1,0 +1,213 @@
+use std::collections::BTreeSet;
+
+use super::support::{
+    EVIDENCE_PATH, INVARIANT_TEST_PATH, INVENTORY_PATH, INVENTORY_TSV_PATH, SCORECARD_PATH,
+    git_ls_files, inventory_by_path, parse_inventory, parse_scorecard_rows, read_repo_file,
+    repo_path,
+};
+
+#[test]
+fn sacb_campaign_harness_is_linked_and_formalized() {
+    let scorecard = read_repo_file(SCORECARD_PATH);
+    let evidence = read_repo_file(EVIDENCE_PATH);
+    let inventory = read_repo_file(INVENTORY_PATH);
+    let readme = read_repo_file("README.md");
+
+    for required in [
+        "# Security Authority Capability Boundaries Scorecard",
+        "Current score: **5/100**",
+        "Status: **active**",
+        "| SACB-0 | Campaign harness, red gates, README/CI links, evidence/inventory scaffolding | 5 | passed_after_fix |",
+        "| SACB-10 | Final closeout, static gates, full verification, clean status | 5 | pending |",
+        "`../tests/security_authority_capability_boundaries_invariants.rs`",
+    ] {
+        assert!(
+            scorecard.contains(required),
+            "SACB scorecard missing required text: {required}"
+        );
+    }
+
+    for required in [
+        "# Security Authority Capability Boundaries Evidence Manifest",
+        "Status: **active**",
+        "Current score: **5/100**",
+        "| SACB-0 | passed_after_fix |",
+        "| SACB-10 | pending |",
+        "## Baseline Evidence",
+    ] {
+        assert!(
+            evidence.contains(required),
+            "SACB evidence manifest missing required text: {required}"
+        );
+    }
+
+    for required in [
+        "# Security Authority Capability Boundaries Inventory",
+        "Status: SACB-0 `passed_after_fix`; seed rows only.",
+        "## Boundary Classes",
+        "`public_transport`",
+        "`authority_grant`",
+        "`execute_primitive`",
+        "## Open Loops",
+    ] {
+        assert!(
+            inventory.contains(required),
+            "SACB inventory missing required text: {required}"
+        );
+    }
+
+    for required in [
+        SCORECARD_PATH,
+        EVIDENCE_PATH,
+        INVENTORY_PATH,
+        INVENTORY_TSV_PATH,
+        INVARIANT_TEST_PATH,
+    ] {
+        assert!(
+            readme.contains(required),
+            "README living-doc map must link {required}"
+        );
+    }
+}
+
+#[test]
+fn sacb_scorecard_weights_sum_to_100_and_current_score_matches_closed_rows() {
+    let rows = parse_scorecard_rows();
+    assert_eq!(
+        rows.len(),
+        11,
+        "SACB scorecard must contain rows SACB-0..10"
+    );
+    let total: u32 = rows.iter().map(|row| row.points).sum();
+    assert_eq!(total, 100, "SACB scorecard row weights must sum to 100");
+
+    let closed: u32 = rows
+        .iter()
+        .filter(|row| row.status == "passed_after_fix")
+        .map(|row| row.points)
+        .sum();
+    let scorecard = read_repo_file(SCORECARD_PATH);
+    assert!(
+        scorecard.contains(&format!("Current score: **{closed}/100**")),
+        "SACB current score must equal closed row weights"
+    );
+}
+
+#[test]
+fn sacb_invariant_target_is_in_closeout_ci_lists() {
+    let target = "security_authority_capability_boundaries_invariants";
+    for path in ["scripts/tron.d/quality.sh", ".github/workflows/ci.yml"] {
+        let source = read_repo_file(path);
+        assert!(
+            source.contains(target),
+            "{path} must list the SACB invariant target in closeout CI documentation"
+        );
+    }
+
+    let readme = read_repo_file("README.md");
+    assert!(
+        readme.contains(target),
+        "README closeout CI documentation missing target: {target}"
+    );
+}
+
+#[test]
+fn sacb_inventory_rows_are_structured_and_reference_tracked_paths() {
+    let rows = parse_inventory();
+    assert!(
+        rows.len() >= 9,
+        "SACB-0 inventory should keep scaffold and baseline finding rows"
+    );
+    let tracked: BTreeSet<_> = git_ls_files().into_iter().collect();
+    let mut paths = BTreeSet::new();
+    for row in &rows {
+        assert!(
+            paths.insert(row.path.clone()),
+            "duplicate SACB row: {}",
+            row.path
+        );
+        assert!(
+            tracked.contains(&row.path) || repo_path(&row.path).exists(),
+            "SACB row path must be tracked or already staged for tracking: {}",
+            row.path
+        );
+        for (field, value) in [
+            ("language", &row.language),
+            ("surface", &row.surface),
+            ("boundary_class", &row.boundary_class),
+            ("trusted_owner", &row.trusted_owner),
+            ("untrusted_input", &row.untrusted_input),
+            ("authority_source", &row.authority_source),
+            ("enforcement_point", &row.enforcement_point),
+            ("deny_policy", &row.deny_policy),
+            ("secret_or_token_policy", &row.secret_or_token_policy),
+            ("test_evidence", &row.test_evidence),
+            ("sacb_rows", &row.sacb_rows),
+        ] {
+            assert!(
+                !value.trim().is_empty() && !value.contains("unclassified"),
+                "{} has invalid {} field: `{}`",
+                row.path,
+                field,
+                value
+            );
+        }
+        assert!(
+            row.sacb_rows.contains("SACB-"),
+            "{} must reference SACB rows",
+            row.path
+        );
+    }
+
+    let by_path = inventory_by_path();
+    for required in [
+        SCORECARD_PATH,
+        EVIDENCE_PATH,
+        INVENTORY_PATH,
+        INVENTORY_TSV_PATH,
+        INVARIANT_TEST_PATH,
+        "packages/agent/src/transport/engine/socket/wire.rs",
+        "packages/agent/src/transport/engine/mod.rs",
+        "packages/agent/src/engine/authority/grants/derivation.rs",
+        "packages/agent/src/domains/capability/operations/filesystem.rs",
+    ] {
+        assert!(
+            by_path.contains_key(required),
+            "SACB inventory missing seed row: {required}"
+        );
+    }
+}
+
+#[test]
+fn sacb_closeout_artifacts_reject_stale_state_after_completion() {
+    let scorecard = read_repo_file(SCORECARD_PATH);
+    if !scorecard.contains("Current score: **100/100**")
+        || !scorecard.contains("Status: **complete**")
+    {
+        return;
+    }
+
+    let files = [
+        ("scorecard", scorecard),
+        ("evidence", read_repo_file(EVIDENCE_PATH)),
+        ("inventory", read_repo_file(INVENTORY_PATH)),
+        ("inventory_tsv", read_repo_file(INVENTORY_TSV_PATH)),
+    ];
+    for (name, content) in files {
+        for forbidden in [
+            "Status: **active**",
+            "open loop",
+            "open-loop",
+            "Open:",
+            "Not started.",
+            "pending |",
+            "current_gap",
+            "TODO",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{name} contains stale SACB closeout marker: {forbidden}"
+            );
+        }
+    }
+}
