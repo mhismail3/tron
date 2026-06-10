@@ -100,10 +100,7 @@ struct OnboardingFlowView: View {
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
 
-                VStack(spacing: OnboardingNavigationMetrics.footerSpacing) {
-                    OnboardingNavigationControls(state: state)
-                    OnboardingPageDots(currentStep: state.currentStep)
-                }
+                OnboardingPageDots(currentStep: state.currentStep)
                 .padding(.horizontal, TronSpacing.xlarge)
                 .padding(.bottom, OnboardingPageDotsMetrics.bottomPadding)
             }
@@ -111,8 +108,8 @@ struct OnboardingFlowView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                if allowsDismiss {
-                    ToolbarItem(placement: .topBarLeading) {
+                ToolbarItemGroup(placement: .topBarLeading) {
+                    if allowsDismiss {
                         Button(action: onDismiss) {
                             Image(systemName: "xmark")
                                 .font(TronTypography.buttonSM)
@@ -120,9 +117,30 @@ struct OnboardingFlowView: View {
                         }
                         .accessibilityLabel("Dismiss onboarding")
                     }
+
+                    if state.canNavigateBackward {
+                        toolbarNavigationButton(
+                            title: "Back",
+                            systemImage: "chevron.left",
+                            accessibilityLabel: "Back",
+                            action: state.goBack
+                        )
+                    }
                 }
+
                 ToolbarItem(placement: .principal) {
                     SheetTitle(title: state.currentStep.toolbarTitle, color: .tronEmerald)
+                }
+
+                ToolbarItem(placement: .topBarTrailing) {
+                    if state.canNavigateForward {
+                        toolbarNavigationButton(
+                            title: "Next",
+                            systemImage: "chevron.right",
+                            accessibilityLabel: "Next",
+                            action: state.goForward
+                        )
+                    }
                 }
             }
         }
@@ -158,6 +176,25 @@ struct OnboardingFlowView: View {
                 state.selectStep(nextStep)
             }
         )
+    }
+
+    private func toolbarNavigationButton(
+        title: String,
+        systemImage: String,
+        accessibilityLabel: String,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            withAnimation(.snappy(duration: 0.24)) {
+                action()
+            }
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                .foregroundStyle(Color.tronEmerald)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -220,63 +257,6 @@ internal enum OnboardingPageDotsMetrics {
     static let dotHeight: CGFloat = 6
     static let horizontalPadding: CGFloat = 10
     static let verticalPadding: CGFloat = 6
-}
-
-internal enum OnboardingNavigationMetrics {
-    static let footerSpacing: CGFloat = 8
-    static let buttonHeight: CGFloat = 42
-    static let buttonMinWidth: CGFloat = 112
-}
-
-private struct OnboardingNavigationControls: View {
-    let state: OnboardingState
-
-    var body: some View {
-        HStack(spacing: TronSpacing.sm) {
-            if state.canNavigateBackward {
-                navigationButton(
-                    title: "Back",
-                    systemImage: "chevron.left",
-                    accessibilityLabel: "Back",
-                    action: state.goBack
-                )
-            }
-
-            Spacer(minLength: TronSpacing.sm)
-
-            if state.canNavigateForward {
-                navigationButton(
-                    title: "Next",
-                    systemImage: "chevron.right",
-                    accessibilityLabel: "Next",
-                    action: state.goForward
-                )
-            }
-        }
-        .frame(maxWidth: 620)
-    }
-
-    private func navigationButton(
-        title: String,
-        systemImage: String,
-        accessibilityLabel: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button {
-            withAnimation(.snappy(duration: 0.24)) {
-                action()
-            }
-        } label: {
-            Label(title, systemImage: systemImage)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(Color.tronEmerald)
-                .frame(minWidth: OnboardingNavigationMetrics.buttonMinWidth)
-                .frame(height: OnboardingNavigationMetrics.buttonHeight)
-        }
-        .buttonStyle(.plain)
-        .glassEffect(.regular.tint(Color.tronEmerald.opacity(0.14)), in: Capsule())
-        .accessibilityLabel(accessibilityLabel)
-    }
 }
 
 private struct OnboardingPageDots: View {

@@ -96,9 +96,6 @@ struct OnboardingStateTests {
         #expect(OnboardingPageDotsMetrics.dotHeight == 6)
         #expect(OnboardingPageDotsMetrics.horizontalPadding == 10)
         #expect(OnboardingPageDotsMetrics.verticalPadding == 6)
-        #expect(OnboardingNavigationMetrics.footerSpacing == 8)
-        #expect(OnboardingNavigationMetrics.buttonHeight == 42)
-        #expect(OnboardingNavigationMetrics.buttonMinWidth == 112)
     }
 
     @Test("complete() flips the AppStorage flag")
