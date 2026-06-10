@@ -31,6 +31,7 @@ pub(super) async fn log_recent(
             .list_recent_logs(RecentLogQuery {
                 limit,
                 trace_id: trace_id.as_deref(),
+                workspace_id: None,
                 session_filter,
             })
             .map(|entries| entries.into_iter().map(log_entry_value).collect::<Vec<_>>())

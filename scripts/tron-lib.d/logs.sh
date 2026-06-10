@@ -7,6 +7,8 @@ query_logs() {
     local format="text"
     local limit=50
     local session=""
+    local workspace=""
+    local trace=""
     local search=""
 
     while [[ $# -gt 0 ]]; do
@@ -17,6 +19,8 @@ query_logs() {
             --tail)        limit="$2"; shift 2 ;;
             --json)        format="json"; shift ;;
             -s|--session) session="$2"; shift 2 ;;
+            -w|--workspace) workspace="$2"; shift 2 ;;
+            -t|--trace) trace="$2"; shift 2 ;;
             -q|--search)  search="$2"; shift 2 ;;
             -h|--help)
                 echo ""
@@ -31,6 +35,8 @@ query_logs() {
                 echo "  --json               Emit newline-delimited JSON rows"
                 echo "  -o, --output FILE    Write output to file"
                 echo "  -s, --session ID     Filter by session ID"
+                echo "  -w, --workspace ID   Filter by workspace ID"
+                echo "  -t, --trace ID       Filter by trace ID"
                 echo "  -q, --search TEXT    Search log messages"
                 echo ""
                 return 0
@@ -72,7 +78,27 @@ query_logs() {
         conditions+=("level_num >= $level_num")
     fi
 
-    [ -n "$session" ] && conditions+=("session_id LIKE '%$session%'")
+    sql_quote_literal() {
+        local value=${1//\'/\'\'}
+        printf "'%s'" "$value"
+    }
+
+    join_conditions() {
+        local joined=""
+        local condition
+        for condition in "$@"; do
+            if [ -n "$joined" ]; then
+                joined="$joined AND $condition"
+            else
+                joined="$condition"
+            fi
+        done
+        printf "%s" "$joined"
+    }
+
+    [ -n "$session" ] && conditions+=("session_id = $(sql_quote_literal "$session")")
+    [ -n "$workspace" ] && conditions+=("workspace_id = $(sql_quote_literal "$workspace")")
+    [ -n "$trace" ] && conditions+=("trace_id = $(sql_quote_literal "$trace")")
     if ! [[ "$limit" =~ ^[0-9]+$ ]] || [ "$limit" -lt 1 ]; then
         print_error "Invalid limit: $limit"
         return 1
@@ -80,7 +106,7 @@ query_logs() {
 
     local where_clause=""
     if [ ${#conditions[@]} -gt 0 ]; then
-        where_clause="WHERE $(IFS=' AND '; echo "${conditions[*]}")"
+        where_clause="WHERE $(join_conditions "${conditions[@]}")"
     fi
 
     local sql
@@ -90,8 +116,9 @@ query_logs() {
     fi
 
     if [ -n "$search" ]; then
-        local escaped_search="${search//\'/\'\'}"
-        local search_cond="(message LIKE '%${escaped_search}%' OR component LIKE '%${escaped_search}%' OR error_message LIKE '%${escaped_search}%')"
+        local search_literal
+        search_literal=$(sql_quote_literal "$search")
+        local search_cond="(message LIKE '%' || ${search_literal} || '%' OR component LIKE '%' || ${search_literal} || '%' OR error_message LIKE '%' || ${search_literal} || '%')"
         sql="SELECT $select_clause
              FROM logs
              WHERE ${search_cond}

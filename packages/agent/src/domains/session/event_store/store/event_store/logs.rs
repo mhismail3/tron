@@ -81,6 +81,8 @@ pub struct RecentLogQuery<'a> {
     pub limit: i64,
     /// Optional trace id constraint.
     pub trace_id: Option<&'a str>,
+    /// Optional workspace id constraint.
+    pub workspace_id: Option<&'a str>,
     /// Session/global scope constraint.
     pub session_filter: LogSessionFilter<'a>,
 }
@@ -91,6 +93,7 @@ impl RecentLogQuery<'_> {
         Self {
             limit,
             trace_id: None,
+            workspace_id: None,
             session_filter: LogSessionFilter::All,
         }
     }
@@ -208,6 +211,11 @@ fn query_recent_logs(
     if let Some(trace_id) = query.trace_id {
         params.push(SqlValue::Text(trace_id.to_owned()));
         conditions.push(format!("trace_id = ?{}", params.len()));
+    }
+
+    if let Some(workspace_id) = query.workspace_id {
+        params.push(SqlValue::Text(workspace_id.to_owned()));
+        conditions.push(format!("workspace_id = ?{}", params.len()));
     }
 
     match query.session_filter {
@@ -508,6 +516,7 @@ mod tests {
             .list_recent_logs(RecentLogQuery {
                 limit: 10,
                 trace_id: Some("trace_1"),
+                workspace_id: None,
                 session_filter: LogSessionFilter::SessionAndGlobal("sess_current"),
             })
             .unwrap();
@@ -521,6 +530,7 @@ mod tests {
             .list_recent_logs(RecentLogQuery {
                 limit: 10,
                 trace_id: Some("trace_1"),
+                workspace_id: None,
                 session_filter: LogSessionFilter::OnlyGlobal,
             })
             .unwrap();
@@ -529,5 +539,38 @@ mod tests {
             .map(|entry| entry.message.as_str())
             .collect::<Vec<_>>();
         assert_eq!(global_messages, ["global"]);
+    }
+
+    #[test]
+    fn list_recent_logs_applies_workspace_scope_and_keeps_correlation_ids() {
+        let store = make_store();
+        let mut current =
+            ClientLogEntry::new("2026-03-03T14:30:05.100Z", "info", "Engine", "current");
+        current.session_id = Some("sess_current".to_owned());
+        current.workspace_id = Some("workspace_a".to_owned());
+        current.trace_id = Some("trace_a".to_owned());
+        let mut other_workspace =
+            ClientLogEntry::new("2026-03-03T14:30:05.200Z", "warn", "Engine", "other");
+        other_workspace.session_id = Some("sess_current".to_owned());
+        other_workspace.workspace_id = Some("workspace_b".to_owned());
+        other_workspace.trace_id = Some("trace_a".to_owned());
+        store
+            .ingest_client_logs(&[current, other_workspace])
+            .unwrap();
+
+        let scoped = store
+            .list_recent_logs(RecentLogQuery {
+                limit: 10,
+                trace_id: Some("trace_a"),
+                workspace_id: Some("workspace_a"),
+                session_filter: LogSessionFilter::OnlySession("sess_current"),
+            })
+            .unwrap();
+
+        assert_eq!(scoped.len(), 1);
+        assert_eq!(scoped[0].message, "current");
+        assert_eq!(scoped[0].session_id.as_deref(), Some("sess_current"));
+        assert_eq!(scoped[0].workspace_id.as_deref(), Some("workspace_a"));
+        assert_eq!(scoped[0].trace_id.as_deref(), Some("trace_a"));
     }
 }

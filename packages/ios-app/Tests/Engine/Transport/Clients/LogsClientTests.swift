@@ -26,11 +26,38 @@ struct LogsClientTests {
         transport.readHandler = { functionId, payload, _ in
             #expect(functionId.rawValue == "logs::recent")
             #expect((payload as? LogsRecentParams)?.limit == 1000)
+            #expect((payload as? LogsRecentParams)?.sessionId == nil)
+            #expect((payload as? LogsRecentParams)?.workspaceId == nil)
+            #expect((payload as? LogsRecentParams)?.traceId == nil)
             return LogsRecentResult(entries: [], count: 0)
         }
 
         _ = try await client.recentLogs(limit: 10_000)
         #expect(transport.lastReadFunctionId?.rawValue == "logs::recent")
+    }
+
+    @Test("recentLogs sends optional correlation filters")
+    func recentLogsSendsCorrelationFilters() async throws {
+        let transport = MockEngineTransport()
+        transport.engineConnection = EngineConnection(serverURL: URL(string: "ws://127.0.0.1:9847/engine")!)
+        let client = LogsClient(transport: transport)
+
+        transport.readHandler = { functionId, payload, _ in
+            #expect(functionId.rawValue == "logs::recent")
+            let params = try #require(payload as? LogsRecentParams)
+            #expect(params.limit == 50)
+            #expect(params.sessionId == "session-1")
+            #expect(params.workspaceId == "workspace-1")
+            #expect(params.traceId == "trace-1")
+            return LogsRecentResult(entries: [], count: 0)
+        }
+
+        _ = try await client.recentLogs(
+            limit: 50,
+            sessionId: "session-1",
+            workspaceId: "workspace-1",
+            traceId: "trace-1"
+        )
     }
 
     @Test("ingestLogs writes entries")

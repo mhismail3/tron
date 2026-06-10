@@ -21,6 +21,21 @@ struct SystemPingParams: Encodable {
 
 struct LogsRecentParams: Encodable {
     let limit: Int?
+    let sessionId: String?
+    let workspaceId: String?
+    let traceId: String?
+
+    init(
+        limit: Int?,
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
+        traceId: String? = nil
+    ) {
+        self.limit = limit
+        self.sessionId = sessionId
+        self.workspaceId = workspaceId
+        self.traceId = traceId
+    }
 }
 
 struct LogsRecentResult: Decodable, Sendable {
@@ -36,6 +51,8 @@ struct RecentLogEntry: Decodable, Sendable {
     let message: String
     let origin: String?
     let sessionId: String?
+    let workspaceId: String?
+    let traceId: String?
     let errorMessage: String?
 }
 

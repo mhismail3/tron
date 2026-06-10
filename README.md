@@ -194,6 +194,18 @@ Current living entry points:
   completed SACB boundary taxonomy and security-surface proof notes.
 - `packages/agent/docs/security-authority-capability-boundaries-inventory.tsv`:
   machine-readable SACB security boundary inventory used by static gates.
+- `packages/agent/docs/observability-diagnostics-auditability-scorecard.md`:
+  completed Observability Diagnostics Auditability scorecard for proving
+  session events, provider audits, primitive trace records, engine ledger rows,
+  logs, diagnostics bundles, runtime decisions, and CLI/dev diagnostics remain
+  inspectable through stable IDs without leaking secrets.
+- `packages/agent/docs/observability-diagnostics-auditability-evidence-manifest.md`:
+  companion evidence manifest for ODA row checkpoints, verification logs, and
+  residual observability risks.
+- `packages/agent/docs/observability-diagnostics-auditability-inventory.md`:
+  completed ODA source inventory taxonomy and proof notes.
+- `packages/agent/docs/observability-diagnostics-auditability-inventory.tsv`:
+  machine-readable ODA source inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -258,6 +270,11 @@ Current living entry points:
   iOS local-state classification, owner-private settings/auth writes, and final
   closeout gates, with focused modules under
   `packages/agent/tests/state_ownership_lifecycle/`.
+- `packages/agent/tests/observability_diagnostics_auditability_invariants.rs`:
+  completed ODA scorecard, evidence, inventory, source guard, logs filter,
+  diagnostics bundle, provider audit, runtime decision, CLI/dev UX, and final
+  closeout gates, with focused modules under
+  `packages/agent/tests/observability_diagnostics_auditability/`.
 - `packages/agent/tests/concurrency_scheduling_discipline_invariants.rs`:
   completed CSD scorecard, inventory, scheduling-marker coverage, spawn/task
   ownership, bounded channel/stream, Swift banned-pattern, stored-task
@@ -512,7 +529,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm) |
 | `tron login` | Authenticate with a provider (`--label <name>` for multi-account) |
 | `tron auth rotate` | Rotate the WebSocket bearer token (forces every paired iOS device to pair again) |
-| `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs (`-h` for filter options) |
+| `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs with bounded level/search/session/workspace/trace filters (`-h` for options; `--json` emits machine-readable rows with session/workspace/trace IDs) |
 | `tron errors` | Show recent errors |
 
 ### Build Profiles
@@ -1016,7 +1033,9 @@ attribution/content hashes after completion. The `replay_manifest` operation is
 read-only and does not insert a trace record; it reads session events, provider
 audits, trace records, idempotency entries, invocation ledger rows, stream rows,
 and queue rows through owner APIs and returns canonical section hashes plus the
-overall `replayHash`.
+overall `replayHash`. The direct `logs::recent` worker and `tron logs` CLI both
+return bounded rows and can narrow by stable session, workspace, and trace IDs
+without exposing bearer/API/OAuth secrets.
 
 ### Tables
 
@@ -1027,7 +1046,7 @@ overall `replayHash`.
 | `sessions` | Session metadata: head pointer, title, model, working directory, turn/token counts, tags, and fork lineage |
 | `events` | Immutable append-only event log. Denormalized columns (`role`, `model_primitive_name`, `invocation_id`, `turn`, token counts, `model`, `latency_ms`, `stop_reason`, `provider_type`, `cost`, ...) extracted from payloads for indexed queries |
 | `blobs` | Content-addressable deduplicated storage (hash, compressed content, MIME type, uncompressed/compressed size metadata) |
-| `logs` | Application logs (level, component, message, error fields, trace IDs) |
+| `logs` | Application logs (level, component, message, error fields, session/workspace/trace IDs) |
 | `trace_records` | Agent Trace-style durable records for primitive `execute` calls, including trace/session/invocation/provider ids, model primitive name, operation, status, timestamps, duration, and full JSON `record_json` |
 | `engine_invocations` | Engine invocation ledger: function, worker, trace, parent, idempotency, status, result/error summaries |
 | `engine_grants`, `engine_grant_events` | Engine-owned authority model: parent/child grants, subject binding, allowed capabilities/namespaces/resource selectors/file roots/network/risk/budget/expiry/delegation, plus lifecycle events |

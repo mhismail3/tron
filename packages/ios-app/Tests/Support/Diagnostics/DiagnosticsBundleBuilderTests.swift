@@ -103,6 +103,42 @@ struct DiagnosticsBundleBuilderTests {
         await harness.cleanup()
     }
 
+    @Test("server log diagnostics hash correlation IDs")
+    func serverLogDiagnosticsHashCorrelationIDs() async throws {
+        let harness = try await makeHarness()
+        let logs = [
+            DiagnosticsServerLogRecord(
+                id: "log-raw",
+                timestamp: "2026-04-29T21:15:30Z",
+                level: "info",
+                component: "server",
+                message: "trace finished",
+                origin: "origin-raw",
+                sessionId: "session-raw",
+                workspaceId: "workspace-raw",
+                traceId: "trace-raw",
+                errorMessage: nil
+            )
+        ]
+
+        let attachment = try await harness
+            .builder(iosLogs: [], serverLogs: logs, connected: true)
+            .build()
+        let object = try JSONSerialization.jsonObject(with: attachment.data) as? [String: Any]
+        let logsObject = object?["logs"] as? [String: Any]
+        let serverLogs = logsObject?["server"] as? [[String: Any]]
+        let serverLog = try #require(serverLogs?.first)
+        let json = String(data: attachment.data, encoding: .utf8) ?? ""
+
+        #expect(serverLog["sessionIdHash"] != nil)
+        #expect(serverLog["workspaceIdHash"] != nil)
+        #expect(serverLog["traceIdHash"] != nil)
+        #expect(!json.contains("session-raw"))
+        #expect(!json.contains("workspace-raw"))
+        #expect(!json.contains("trace-raw"))
+        await harness.cleanup()
+    }
+
     @Test("builder truncates event summaries at the event cap")
     func builderTruncatesEvents() async throws {
         let harness = try await makeHarness()
@@ -208,16 +244,18 @@ private struct DiagnosticsHarness {
 
     func builder(
         now: @escaping () -> Date = { Date() },
-        iosLogs: [(Date, LogCategory, LogLevel, String)] = []
+        iosLogs: [(Date, LogCategory, LogLevel, String)] = [],
+        serverLogs: [DiagnosticsServerLogRecord] = [],
+        connected: Bool = false
     ) -> DiagnosticsBundleBuilder {
         DiagnosticsBundleBuilder(
             eventDatabase: database,
             eventStoreManager: eventStoreManager,
             engineEndpoint: DiagnosticsEngineEndpoint(
-                isConnected: { engineClient.connectionState.isConnected },
+                isConnected: { connected || engineClient.connectionState.isConnected },
                 connectionStateName: { "disconnected" },
                 currentSessionId: { engineClient.currentSessionId },
-                recentServerLogs: { _ in [] }
+                recentServerLogs: { _ in serverLogs }
             ),
             activeServer: nil,
             metricKitStore: metricKitStore,

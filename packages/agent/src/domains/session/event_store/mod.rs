@@ -11,6 +11,8 @@
 //! - **Event factory**: Scoped event creation with auto-generated IDs and timestamps
 //! - **Replay identities**: Explicit IDs/timestamps for deterministic replay/import tests
 //! - **Provider request audits**: `model.provider_request` events persisted before model streams
+//! - **Logs and traces**: bounded log queries plus Agent Trace-style records
+//!   keyed by session, workspace, trace, invocation, and provider identifiers
 //! - **Event chain builder**: Automates `parent_id` threading across sequential events
 //! - **Message reconstructor**: Two-pass algorithm for rebuilding provider context from event
 //!   history, preserving separate client display text and model-facing capability result text
@@ -49,6 +51,8 @@
 //! - SQLite row shape and migrations stay under the SQLite owner.
 //! - Reconstruction is deterministic over persisted event order.
 //! - `model.provider_request` is written before any provider stream opens.
+//! - Log query filters are applied in the storage owner so diagnostics callers
+//!   cannot silently broaden session/workspace/trace scope.
 //! - Replay/import paths use explicit identities instead of ambient time or
 //!   UUID generation when durable IDs/timestamps must be stable.
 //! - The event log is append-only for normal lifecycle operations. Archiving

@@ -44,6 +44,8 @@ struct DiagnosticsServerLogRecord: Sendable {
     let message: String
     let origin: String
     let sessionId: String?
+    let workspaceId: String?
+    let traceId: String?
     let errorMessage: String?
 }
 
@@ -213,6 +215,8 @@ struct DiagnosticsBundleBuilder {
                         message: redactor.redactMessage(entry.message),
                         originHash: DiagnosticsHash.hash(entry.origin),
                         sessionIdHash: DiagnosticsHash.hash(entry.sessionId),
+                        workspaceIdHash: DiagnosticsHash.hash(entry.workspaceId),
+                        traceIdHash: DiagnosticsHash.hash(entry.traceId),
                         errorMessage: entry.errorMessage.map(redactor.redactMessage)
                     )
                 },
@@ -229,6 +233,8 @@ struct DiagnosticsBundleBuilder {
                         message: "logs::recent failed: \(redactor.redactMessage(error.localizedDescription))",
                         originHash: nil,
                         sessionIdHash: nil,
+                        workspaceIdHash: nil,
+                        traceIdHash: nil,
                         errorMessage: nil
                     )
                 ],

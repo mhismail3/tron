@@ -412,6 +412,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
                         message: entry.message,
                         origin: entry.origin ?? "",
                         sessionId: entry.sessionId,
+                        workspaceId: entry.workspaceId,
+                        traceId: entry.traceId,
                         errorMessage: entry.errorMessage
                     )
                 }

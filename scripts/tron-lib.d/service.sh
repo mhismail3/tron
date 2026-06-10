@@ -412,7 +412,7 @@ cmd_status() {
 
     echo ""
     echo -e "${DIM}Logs:${NC}"
-    echo -e "  ${DIM}Query: tron logs [-l level] [-q search] [-s session]${NC}"
+    echo -e "  ${DIM}Query: tron logs [-l level] [-q search] [-s session] [-w workspace] [-t trace]${NC}"
     echo ""
 }
 

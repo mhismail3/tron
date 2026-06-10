@@ -2,14 +2,18 @@
 //!
 //! This module owns the small logs namespace contract/deps/handler binding.
 //! Durable log storage is accessed through the event-store facade so request
-//! translation stays separate from SQL/backend details.
+//! translation stays separate from SQL/backend details. Recent-log reads are
+//! bounded and may be narrowed by session, workspace, and trace identifiers;
+//! the event-store owner applies those predicates before rows are returned.
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
 use crate::domains::registration::worker::DomainRegistrationContext;
 use crate::domains::registration::worker::DomainWorkerModule;
-use crate::domains::session::event_store::{ClientLogEntry, EventStore, LogEntry, RecentLogQuery};
+use crate::domains::session::event_store::{
+    ClientLogEntry, EventStore, LogEntry, LogSessionFilter, RecentLogQuery,
+};
 use crate::engine::{
     CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
     Result as EngineResult, RiskLevel,
@@ -78,7 +82,7 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
             RiskLevel::Low,
             Some("logs.read"),
         )
-        .request_schema(json!({"additionalProperties":false,"properties":{"limit":{"type":"integer"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"}))
+        .request_schema(json!({"additionalProperties":false,"properties":{"limit":{"type":"integer"},"sessionId":{"type":"string"},"workspaceId":{"type":"string"},"traceId":{"type":"string"}},"type":"object"}))
         .response_schema(json!({"additionalProperties":false,"properties":{"count":{"type":"integer"},"entries":{"items":{"additionalProperties":true,"type":"object"},"type":"array"}},"required":["entries","count"],"type":"object"}))
         .build()?,
     ])
@@ -102,6 +106,12 @@ operation_bindings! {
 struct RecentLogsParams {
     #[serde(default = "default_recent_limit")]
     limit: u32,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    workspace_id: Option<String>,
+    #[serde(default)]
+    trace_id: Option<String>,
 }
 
 fn default_recent_limit() -> u32 {
@@ -124,6 +134,8 @@ struct RecentLogEntry {
     component: String,
     message: String,
     session_id: Option<String>,
+    workspace_id: Option<String>,
+    trace_id: Option<String>,
     error_message: Option<String>,
 }
 
@@ -160,6 +172,9 @@ async fn recent_logs_value(params: Option<Value>, deps: &Deps) -> Result<Value, 
         }
         None => RecentLogsParams {
             limit: DEFAULT_RECENT_LIMIT,
+            session_id: None,
+            workspace_id: None,
+            trace_id: None,
         },
     };
 
@@ -169,9 +184,22 @@ async fn recent_logs_value(params: Option<Value>, deps: &Deps) -> Result<Value, 
         });
     }
 
-    let query = RecentLogQuery::all(i64::from(params.limit));
+    let limit = i64::from(params.limit);
+    let session_id = params.session_id;
+    let workspace_id = params.workspace_id;
+    let trace_id = params.trace_id;
     let event_store = deps.event_store.clone();
     let result = run_blocking_task("logs::recent", move || {
+        let session_filter = session_id
+            .as_deref()
+            .map(LogSessionFilter::OnlySession)
+            .unwrap_or(LogSessionFilter::All);
+        let query = RecentLogQuery {
+            limit,
+            trace_id: trace_id.as_deref(),
+            workspace_id: workspace_id.as_deref(),
+            session_filter,
+        };
         let entries = event_store
             .list_recent_logs(query)
             .map_err(map_event_store_error)?
@@ -198,7 +226,80 @@ impl From<LogEntry> for RecentLogEntry {
             component: entry.component,
             message: entry.message,
             session_id: entry.session_id,
+            workspace_id: entry.workspace_id,
+            trace_id: entry.trace_id,
             error_message: entry.error_message,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::domains::session::event_store::{
+        ConnectionConfig, EventStore, new_in_memory, run_migrations,
+    };
+
+    fn make_deps() -> Deps {
+        let pool = new_in_memory(&ConnectionConfig::default()).expect("pool");
+        {
+            let conn = pool.get().expect("conn");
+            run_migrations(&conn).expect("migrate");
+        }
+        Deps {
+            event_store: Arc::new(EventStore::new(pool)),
+        }
+    }
+
+    #[tokio::test]
+    async fn recent_logs_honors_session_workspace_and_trace_filters() {
+        let deps = make_deps();
+        let mut current =
+            ClientLogEntry::new("2026-03-03T14:30:05.100Z", "info", "Engine", "current");
+        current.session_id = Some("sess_current".to_owned());
+        current.workspace_id = Some("workspace_current".to_owned());
+        current.trace_id = Some("trace_current".to_owned());
+        let mut other_session = ClientLogEntry::new(
+            "2026-03-03T14:30:05.200Z",
+            "warn",
+            "Engine",
+            "other session",
+        );
+        other_session.session_id = Some("sess_other".to_owned());
+        other_session.workspace_id = Some("workspace_current".to_owned());
+        other_session.trace_id = Some("trace_current".to_owned());
+        let mut other_workspace = ClientLogEntry::new(
+            "2026-03-03T14:30:05.300Z",
+            "error",
+            "Engine",
+            "other workspace",
+        );
+        other_workspace.session_id = Some("sess_current".to_owned());
+        other_workspace.workspace_id = Some("workspace_other".to_owned());
+        other_workspace.trace_id = Some("trace_current".to_owned());
+
+        deps.event_store
+            .ingest_client_logs(&[current, other_session, other_workspace])
+            .expect("ingest");
+
+        let value = recent_logs_value(
+            Some(json!({
+                "limit": 10,
+                "sessionId": "sess_current",
+                "workspaceId": "workspace_current",
+                "traceId": "trace_current"
+            })),
+            &deps,
+        )
+        .await
+        .expect("recent logs");
+
+        assert_eq!(value["count"], 1);
+        assert_eq!(value["entries"][0]["message"], "current");
+        assert_eq!(value["entries"][0]["sessionId"], "sess_current");
+        assert_eq!(value["entries"][0]["workspaceId"], "workspace_current");
+        assert_eq!(value["entries"][0]["traceId"], "trace_current");
     }
 }

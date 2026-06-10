@@ -169,5 +169,7 @@ struct RecentLogEntry: Decodable, Equatable {
     var message: String
     var origin: String?
     var sessionId: String?
+    var workspaceId: String?
+    var traceId: String?
     var errorMessage: String?
 }

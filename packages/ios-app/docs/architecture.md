@@ -29,8 +29,8 @@ source-control state, worker state, or product panels locally.
   attachments for images/documents, and message rendering.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Generic capability invocation chips and generic generated runtime surfaces.
-- Local logs, feedback bundles, MetricKit payload retention, and bounded local
-  event cache integrity.
+- Local logs, feedback bundles, MetricKit payload retention, hashed
+  server-log correlation IDs, and bounded local event cache integrity.
 
 ## Deleted Fixed Product Modes
 

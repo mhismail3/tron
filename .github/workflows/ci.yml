@@ -142,6 +142,7 @@ jobs:
           cargo test --test post_aha_adversarial_closeout_invariants -- --quiet
           cargo test --test concurrency_scheduling_discipline_invariants -- --quiet
           cargo test --test security_authority_capability_boundaries_invariants -- --quiet
+          cargo test --test observability_diagnostics_auditability_invariants -- --quiet
           cargo test --test primitive_trace_execution -- --quiet
           cargo test --test integration -- --test-threads=1 --quiet
 

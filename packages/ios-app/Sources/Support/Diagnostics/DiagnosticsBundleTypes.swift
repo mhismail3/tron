@@ -87,6 +87,8 @@ struct DiagnosticsServerLogEntry: Encodable, Sendable {
     let message: String
     let originHash: String?
     let sessionIdHash: String?
+    let workspaceIdHash: String?
+    let traceIdHash: String?
     let errorMessage: String?
 }
 
