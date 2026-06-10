@@ -151,11 +151,11 @@ fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots()
 
     let paths = read_repo_file("packages/agent/src/engine/authority/grants/paths.rs");
     for required in [
-        "pub(super) fn canonical_payload_path(path: &str)",
+        "pub(super) fn canonical_payload_path(path: impl AsRef<Path>)",
         "pub(super) fn root_allows_path(root: &str, path: &Path)",
         "Component::ParentDir",
         "path.starts_with(canonical_root)",
-        "file path {path} has no existing ancestor",
+        "file path {display} has no existing ancestor",
     ] {
         assert!(
             paths.contains(required),
@@ -180,6 +180,120 @@ fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots()
         assert!(
             model.contains(required),
             "bootstrap grant boundary missing required text: {required}"
+        );
+    }
+}
+
+#[test]
+fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
+    let executor = read_repo_file(
+        "packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs",
+    );
+    for required in [
+        "derive_capability_runtime_grant",
+        "FunctionId::new(\"grant::derive\")",
+        "\"parentGrantId\": \"agent-capability-runtime\"",
+        "target.function_id.clone()",
+        "target_function_id.as_str().to_owned()",
+        "\"allowedCapabilities\": allowed_capabilities",
+        "\"allowedNamespaces\": [\"__no_namespace_authority__\"]",
+        "\"networkPolicy\": \"none\"",
+        "normalize_working_directory(working_directory)",
+        "with_agent_working_directory_metadata(",
+        "RUNTIME_METADATA_WORKING_DIRECTORY",
+    ] {
+        assert!(
+            executor.contains(required),
+            "agent capability executor missing least-privilege grant text: {required}"
+        );
+    }
+
+    let operations = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    for required in [
+        "validate_execute_context(invocation, &operation)?",
+        "is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id)",
+        "capability::execute requires a derived least-privilege authority grant",
+        "capability::execute requires a trusted agent or system runtime context",
+        "workspace state requires trusted workspace context",
+        "capability::execute cannot read or write system-scoped state",
+        "requires trusted current session context",
+    ] {
+        assert!(
+            operations.contains(required),
+            "capability execute operation guard missing required text: {required}"
+        );
+    }
+
+    let filesystem =
+        read_repo_file("packages/agent/src/domains/capability/operations/filesystem.rs");
+    assert!(
+        !filesystem.contains("std::env::current_dir"),
+        "capability filesystem operations must not fall back to process cwd"
+    );
+    assert!(
+        filesystem.contains("capability::execute requires trusted working directory metadata"),
+        "capability filesystem operations must require trusted working-directory metadata"
+    );
+
+    let grant_authorization =
+        read_repo_file("packages/agent/src/engine/authority/grants/authorization.rs");
+    for required in [
+        "capability_execute_requires_working_directory(invocation)",
+        "RUNTIME_METADATA_WORKING_DIRECTORY",
+        "normalize_working_directory(raw)",
+        "resolve_invocation_path(invocation, raw)",
+    ] {
+        assert!(
+            grant_authorization.contains(required),
+            "grant authorization missing capability execute root guard text: {required}"
+        );
+    }
+
+    let process = read_repo_file("packages/agent/src/domains/capability/operations/process.rs");
+    for required in [
+        "inspect_authority_grant(&invocation.causal_context.authority_grant_id)",
+        "process_run requires an authority grant with networkPolicy none",
+        "/usr/bin/sandbox-exec",
+        "(deny network*)",
+    ] {
+        assert!(
+            process.contains(required),
+            "process_run missing network-denial guard text: {required}"
+        );
+    }
+
+    let state = read_repo_file("packages/agent/src/domains/capability/operations/state.rs");
+    assert!(
+        state.contains("capability::execute cannot read or write system-scoped state"),
+        "state operations must reject system scope"
+    );
+    for (path, required) in [
+        (
+            "packages/agent/src/domains/capability/operations/trace.rs",
+            "requires trusted current session context",
+        ),
+        (
+            "packages/agent/src/domains/capability/operations/logs.rs",
+            "requires trusted current session context",
+        ),
+    ] {
+        let source = read_repo_file(path);
+        assert!(
+            source.contains(required),
+            "{path} missing trusted current-session guard text"
+        );
+    }
+
+    let trace_tests = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
+    for required in [
+        "execute_rejects_public_client_context",
+        "execute_rejects_bootstrap_authority_grants",
+        "execute_rejects_system_scoped_state",
+        "execute_process_run_requires_none_network_policy",
+    ] {
+        assert!(
+            trace_tests.contains(required),
+            "primitive trace tests missing SACB-6 regression: {required}"
         );
     }
 }

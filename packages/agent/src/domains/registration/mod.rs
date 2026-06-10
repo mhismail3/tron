@@ -149,7 +149,8 @@ mod tests {
     use crate::engine::{
         ActorContext, ActorId, ActorKind, AuthorityGrantId, CausalContext, EffectClass,
         FunctionDefinition, FunctionId, FunctionQuery, InProcessFunctionHandler, Invocation,
-        TraceId, VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
+        RUNTIME_METADATA_WORKING_DIRECTORY, TraceId, VisibilityScope, WorkerDefinition, WorkerId,
+        WorkerKind,
     };
 
     #[derive(Debug)]
@@ -253,21 +254,59 @@ mod tests {
     #[tokio::test]
     async fn primitive_execute_observes_without_registry_routing() {
         let ctx = crate::shared::server::test_support::make_test_context();
+        let tempdir = tempfile::tempdir().expect("working directory");
+        let actor_id = ActorId::new("agent:primitive-test").expect("actor id");
+        let grant = ctx
+            .engine_host
+            .invoke(Invocation::new_sync(
+                FunctionId::new("grant::derive").expect("function id"),
+                json!({
+                    "parentGrantId": "agent-capability-runtime",
+                    "subjectActorId": actor_id.as_str(),
+                    "allowedCapabilities": ["capability::execute"],
+                    "allowedNamespaces": ["__no_namespace_authority__"],
+                    "allowedAuthorityScopes": ["capability.execute"],
+                    "allowedResourceKinds": ["agent_state"],
+                    "resourceSelectors": ["kind:agent_state"],
+                    "fileRoots": [tempdir.path().display().to_string()],
+                    "networkPolicy": "none",
+                    "maxRisk": "medium",
+                    "budget": {"remainingInvocations": 1},
+                    "canDelegate": false,
+                    "provenance": {"source": "registration-test"}
+                }),
+                CausalContext::new(
+                    ActorId::new("system:registration-test").expect("actor id"),
+                    ActorKind::System,
+                    AuthorityGrantId::new("grant").expect("grant id"),
+                    TraceId::generate(),
+                )
+                .with_scope("grant.write")
+                .with_session_id("primitive-test")
+                .with_idempotency_key("primitive-execute-observe-grant"),
+            ))
+            .await;
+        assert_eq!(grant.error, None, "derive grant failed: {:?}", grant.error);
+        let grant_id = AuthorityGrantId::new(
+            grant.value.expect("grant value")["grant"]["grantId"]
+                .as_str()
+                .expect("grant id"),
+        )
+        .expect("grant id");
         let invocation = Invocation::new_sync(
             FunctionId::new("capability::execute").expect("function id"),
             json!({
                 "operation": "observe",
                 "input": "hello primitive loop"
             }),
-            CausalContext::new(
-                ActorId::new("agent:primitive-test").expect("actor id"),
-                ActorKind::Agent,
-                AuthorityGrantId::new("agent-capability-runtime").expect("grant id"),
-                TraceId::generate(),
-            )
-            .with_scope("capability.execute")
-            .with_session_id("primitive-test")
-            .with_idempotency_key("primitive-execute-observe"),
+            CausalContext::new(actor_id, ActorKind::Agent, grant_id, TraceId::generate())
+                .with_scope("capability.execute")
+                .with_session_id("primitive-test")
+                .with_runtime_metadata(
+                    RUNTIME_METADATA_WORKING_DIRECTORY,
+                    tempdir.path().display().to_string(),
+                )
+                .with_idempotency_key("primitive-execute-observe"),
         );
         let result = ctx.engine_host.invoke(invocation).await;
         assert!(

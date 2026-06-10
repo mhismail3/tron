@@ -35,6 +35,18 @@ impl EngineHostHandle {
         })
     }
 
+    /// Inspect one authority grant through the engine-owned store.
+    pub async fn inspect_authority_grant(
+        &self,
+        grant_id: &AuthorityGrantId,
+    ) -> Result<Option<EngineGrant>> {
+        let store = self.inner.lock().await.primitives.grants.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .inspect(grant_id)
+    }
+
     /// Acquire a high-risk resource lease and publish a lease lifecycle stream
     /// event. This is a primitive API for domain functions that mutate shared
     /// resources and need fail-closed exclusion.

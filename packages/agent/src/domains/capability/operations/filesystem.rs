@@ -92,12 +92,8 @@ pub(super) fn working_directory(invocation: &Invocation) -> Result<PathBuf, Capa
     let raw = invocation
         .causal_context
         .runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| {
-            std::env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("."))
-                .display()
-                .to_string()
-        });
-    crate::shared::foundation::paths::normalize_working_directory(&raw).map_err(internal)
+        .ok_or_else(|| CapabilityError::InvalidParams {
+            message: "capability::execute requires trusted working directory metadata".to_owned(),
+        })?;
+    crate::shared::foundation::paths::normalize_working_directory(raw).map_err(internal)
 }

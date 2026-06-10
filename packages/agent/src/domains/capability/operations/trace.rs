@@ -10,7 +10,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::filesystem::working_directory;
-use super::{Deps, internal, ok_result, optional_str, optional_u64, required_str};
+use super::{Deps, internal, invalid, ok_result, optional_str, optional_u64, required_str};
 use crate::domains::session::event_store::trace::TRON_TRACE_METADATA_KEY;
 use crate::domains::session::event_store::{
     AGENT_TRACE_VERSION, AgentTraceListOptions, AgentTraceRecord,
@@ -32,10 +32,15 @@ pub(super) fn trace_list(
         .unwrap_or(50)
         .clamp(1, 500) as i64;
     let trace_id = optional_str(&invocation.payload, "traceId")?;
+    let session_id = invocation
+        .causal_context
+        .session_id
+        .as_deref()
+        .ok_or_else(|| invalid("trace_list requires trusted current session context"))?;
     let records = deps
         .event_store
         .list_trace_records(&AgentTraceListOptions {
-            session_id: invocation.causal_context.session_id.as_deref(),
+            session_id: Some(session_id),
             trace_id,
             limit: Some(limit),
         })
@@ -59,6 +64,11 @@ pub(super) fn trace_get(
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
     let id = required_str(&invocation.payload, "traceRecordId")?;
+    let session_id = invocation
+        .causal_context
+        .session_id
+        .as_deref()
+        .ok_or_else(|| invalid("trace_get requires trusted current session context"))?;
     let Some(record) = deps
         .event_store
         .get_trace_record(id)
@@ -68,9 +78,7 @@ pub(super) fn trace_get(
             message: format!("trace record not found: {id}"),
         });
     };
-    if let Some(session_id) = invocation.causal_context.session_id.as_deref()
-        && record.session_id.as_deref() != Some(session_id)
-    {
+    if record.session_id.as_deref() != Some(session_id) {
         return Err(CapabilityError::InvalidParams {
             message: format!("trace record not found for current session: {id}"),
         });

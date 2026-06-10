@@ -1,6 +1,6 @@
 # Security Authority Capability Boundaries Inventory
 
-Status: SACB-1 `passed_after_fix`; 601 security boundary rows inventoried and
+Status: SACB-1 `passed_after_fix`; 603 security boundary rows inventoried and
 classified across tracked Rust, Swift, scripts, workflows, docs, and tests.
 
 Machine-readable inventory:
@@ -41,11 +41,6 @@ or the SACB invariant target fails.
 
 ## Open Loops
 
-- SACB-2: prove public route authentication and loopback worker gating.
-- SACB-3: delete/deny public authority scope and runtime metadata injection.
-- SACB-4: prove grant derivation and bootstrap wildcard boundaries.
-- SACB-5: prove catalog visibility and `engine::invoke` delegation boundaries.
-- SACB-6: prove `capability::execute` least privilege.
 - SACB-7: prove external worker protocol isolation.
 - SACB-8: prove secrets, redaction, auth.json permissions, and provider custody.
 - SACB-9: prove pairing lifecycle and unauthorized flow.

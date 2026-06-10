@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use super::{Deps, compact_json, internal, ok_result, optional_str, required_str};
+use super::{Deps, compact_json, internal, invalid, ok_result, optional_str, required_str};
 use crate::engine::{CausalContext, FunctionId, Invocation};
 use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
@@ -56,7 +56,7 @@ pub(super) async fn state_list(
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
     let mut payload = json!({
-        "scope": optional_str(&invocation.payload, "scope")?.unwrap_or("session"),
+        "scope": state_scope(invocation)?,
         "namespace": required_str(&invocation.payload, "namespace")?,
     });
     if let Some(prefix) = optional_str(&invocation.payload, "keyPrefix")? {
@@ -81,7 +81,7 @@ pub(super) async fn state_list(
 
 fn state_payload(invocation: &Invocation, include_value: bool) -> Result<Value, CapabilityError> {
     let mut payload = json!({
-        "scope": optional_str(&invocation.payload, "scope")?.unwrap_or("session"),
+        "scope": state_scope(invocation)?,
         "namespace": required_str(&invocation.payload, "namespace")?,
         "key": required_str(&invocation.payload, "key")?,
     });
@@ -93,6 +93,15 @@ fn state_payload(invocation: &Invocation, include_value: bool) -> Result<Value, 
         })?;
     }
     Ok(payload)
+}
+
+fn state_scope(invocation: &Invocation) -> Result<&str, CapabilityError> {
+    match optional_str(&invocation.payload, "scope")?.unwrap_or("session") {
+        "system" => Err(invalid(
+            "capability::execute cannot read or write system-scoped state",
+        )),
+        scope => Ok(scope),
+    }
 }
 
 async fn invoke_engine_value(

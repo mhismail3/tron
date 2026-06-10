@@ -2,7 +2,7 @@
 
 use serde_json::{Value, json};
 
-use super::{Deps, ok_result, optional_str, optional_u64};
+use super::{Deps, invalid, ok_result, optional_str, optional_u64};
 use crate::domains::session::event_store::{LogEntry, LogSessionFilter, RecentLogQuery};
 use crate::engine::Invocation;
 use crate::shared::protocol::model_capabilities::CapabilityResult;
@@ -19,13 +19,14 @@ pub(super) async fn log_recent(
         .unwrap_or(50)
         .clamp(1, 500);
     let trace_id = optional_str(&invocation.payload, "traceId")?.map(str::to_owned);
-    let session_id = invocation.causal_context.session_id.clone();
+    let session_id = invocation
+        .causal_context
+        .session_id
+        .clone()
+        .ok_or_else(|| invalid("log_recent requires trusted current session context"))?;
     let event_store = deps.event_store.clone();
     let entries = run_blocking_task("execute::log_recent", move || {
-        let session_filter = match session_id.as_deref() {
-            Some(session_id) => LogSessionFilter::SessionAndGlobal(session_id),
-            None => LogSessionFilter::OnlyGlobal,
-        };
+        let session_filter = LogSessionFilter::SessionAndGlobal(&session_id);
         event_store
             .list_recent_logs(RecentLogQuery {
                 limit,

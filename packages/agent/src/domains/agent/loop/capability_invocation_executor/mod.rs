@@ -1,4 +1,11 @@
 //! Model capability executor for the primitive `execute` surface.
+//!
+//! Each model-launched primitive call first derives a non-delegable child grant
+//! from `agent-capability-runtime` with the current canonical working directory
+//! as its only file root, `networkPolicy none`, no namespace authority, and the
+//! exact target function being invoked. The derived grant id, not the bootstrap
+//! runtime grant, is then placed in the engine causal context for
+//! `capability::execute`.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
@@ -13,7 +20,7 @@ use crate::domains::agent::r#loop::primitive_surface::{
 };
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, Invocation,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
     InvocationId, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
     RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
     RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
@@ -24,8 +31,8 @@ use crate::shared::protocol::model_capabilities::{CapabilityResult, failure_resu
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::failure::{
     CAPABILITY_ENGINE_HOST_UNAVAILABLE, CAPABILITY_ENGINE_RESULT_MISSING,
-    CAPABILITY_PRIMITIVE_NOT_FOUND, CAPABILITY_RESULT_INVALID, FailureCategory, FailureEnvelope,
-    FailureOrigin, RUNTIME_CANCELLED,
+    CAPABILITY_PRIMITIVE_NOT_FOUND, CAPABILITY_RESULT_INVALID, ENGINE_POLICY_VIOLATION,
+    FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
 };
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -388,13 +395,36 @@ async fn execute_capability_primitive_via_engine(
     parent_invocation_id: Option<&InvocationId>,
     effective_args: Value,
 ) -> crate::shared::protocol::model_capabilities::CapabilityResult {
+    let working_directory =
+        match crate::shared::foundation::paths::normalize_working_directory(working_directory) {
+            Ok(path) => path.display().to_string(),
+            Err(error) => {
+                let failure = FailureEnvelope::new(
+                    ENGINE_POLICY_VIOLATION,
+                    FailureCategory::Engine,
+                    format!("Capability runtime working directory is not trusted: {error}"),
+                    false,
+                    false,
+                    FailureOrigin::Engine,
+                );
+                return capability_failure_result(
+                    failure,
+                    model_primitive_name,
+                    invocation_id,
+                    session_id,
+                    inherited_trace_id,
+                    parent_invocation_id,
+                    None,
+                );
+            }
+        };
     let idempotency_key = model_capability_invocation_idempotency_key(
         run_id,
         session_id,
         turn,
         invocation_id,
         model_primitive_name,
-        working_directory,
+        &working_directory,
         workspace_id,
         &effective_args,
     );
@@ -412,26 +442,42 @@ async fn execute_capability_primitive_via_engine(
             );
         }
     };
-    let grant_id = match AuthorityGrantId::new("agent-capability-runtime") {
-        Ok(id) => id,
-        Err(error) => {
+    let trace_id = inherited_trace_id
+        .cloned()
+        .unwrap_or_else(TraceId::generate);
+    let function_id = target.function_id.clone();
+    let grant_id = match derive_capability_runtime_grant(
+        engine_host,
+        &actor_id,
+        &function_id,
+        &target.function.required_authority.scopes,
+        session_id,
+        workspace_id,
+        &working_directory,
+        &trace_id,
+        invocation_id,
+        model_primitive_name,
+        turn,
+        run_id,
+    )
+    .await
+    {
+        Ok(grant_id) => grant_id,
+        Err(failure) => {
             return capability_failure_result(
-                engine_error_to_failure(&error),
+                failure,
                 model_primitive_name,
                 invocation_id,
                 session_id,
-                inherited_trace_id,
+                Some(&trace_id),
                 parent_invocation_id,
                 None,
             );
         }
     };
-    let trace_id = inherited_trace_id
-        .cloned()
-        .unwrap_or_else(TraceId::generate);
     let mut causal_context = with_agent_working_directory_metadata(
         CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id),
-        working_directory,
+        &working_directory,
     )
     .with_scope("capability.execute")
     .with_runtime_metadata(
@@ -461,7 +507,6 @@ async fn execute_capability_primitive_via_engine(
             causal_context = causal_context.with_scope(scope.clone());
         }
     }
-    let function_id = target.function_id.clone();
     let invocation = Invocation::new_sync(function_id.clone(), effective_args, causal_context);
     let result = engine_host.invoke(invocation).await;
     let result_trace_id = Some(result.trace_id.clone());
@@ -534,6 +579,129 @@ async fn execute_capability_primitive_via_engine(
             })),
         )
     })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn derive_capability_runtime_grant(
+    engine_host: &EngineHostHandle,
+    actor_id: &ActorId,
+    target_function_id: &FunctionId,
+    target_authority_scopes: &[String],
+    session_id: &str,
+    workspace_id: Option<&str>,
+    working_directory: &str,
+    trace_id: &TraceId,
+    invocation_id: &str,
+    model_primitive_name: &str,
+    turn: i64,
+    run_id: Option<&str>,
+) -> Result<AuthorityGrantId, FailureEnvelope> {
+    let mut allowed_capabilities = vec![
+        target_function_id.as_str().to_owned(),
+        "state::get".to_owned(),
+        "state::set".to_owned(),
+        "state::list".to_owned(),
+    ];
+    allowed_capabilities.sort();
+    allowed_capabilities.dedup();
+    let mut allowed_authority_scopes = target_authority_scopes.to_vec();
+    allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
+    allowed_authority_scopes.sort();
+    allowed_authority_scopes.dedup();
+    let idempotency_material = json!({
+        "version": 1,
+        "sessionId": session_id,
+        "workspaceId": workspace_id,
+        "workingDirectory": working_directory,
+        "actorId": actor_id.as_str(),
+        "targetFunctionId": target_function_id.as_str(),
+        "targetAuthorityScopes": target_authority_scopes,
+        "providerInvocationId": invocation_id,
+        "modelPrimitiveName": model_primitive_name,
+        "turn": turn,
+        "runId": run_id
+    });
+    let idempotency_key = format!(
+        "capability-runtime-grant:v1:{}",
+        sha256_hex(
+            serde_json::to_string(&idempotency_material)
+                .unwrap_or_else(|_| "{}".to_owned())
+                .as_bytes()
+        )
+    );
+    let derive_context = CausalContext::new(
+        ActorId::new("system:capability-runtime")
+            .map_err(|error| engine_error_to_failure(&error))?,
+        ActorKind::System,
+        AuthorityGrantId::new("grant").map_err(|error| engine_error_to_failure(&error))?,
+        trace_id.clone(),
+    )
+    .with_scope("grant.write")
+    .with_session_id(session_id.to_owned())
+    .with_idempotency_key(idempotency_key);
+    let payload = json!({
+        "parentGrantId": "agent-capability-runtime",
+        "subjectActorId": actor_id.as_str(),
+        "allowedCapabilities": allowed_capabilities,
+        "allowedNamespaces": ["__no_namespace_authority__"],
+        "allowedAuthorityScopes": allowed_authority_scopes,
+        "allowedResourceKinds": ["agent_state"],
+        "resourceSelectors": ["kind:agent_state"],
+        "fileRoots": [working_directory],
+        "networkPolicy": "none",
+        "maxRisk": "medium",
+        "budget": {
+            "remainingInvocations": 2,
+            "remainingProcessMs": 120000
+        },
+        "canDelegate": false,
+        "provenance": {
+            "source": "agent.capability_runtime",
+            "sessionId": session_id,
+            "workspaceId": workspace_id,
+            "targetFunctionId": target_function_id.as_str(),
+            "providerInvocationId": invocation_id,
+            "modelPrimitiveName": model_primitive_name,
+            "turn": turn,
+            "runId": run_id,
+            "workingDirectory": working_directory
+        }
+    });
+    let result = engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("grant::derive").map_err(|error| engine_error_to_failure(&error))?,
+            payload,
+            derive_context,
+        ))
+        .await;
+    if let Some(error) = result.error {
+        return Err(engine_error_to_failure(&error));
+    }
+    let value = result.value.ok_or_else(|| {
+        FailureEnvelope::new(
+            ENGINE_POLICY_VIOLATION,
+            FailureCategory::Engine,
+            "Capability runtime grant derivation returned no value",
+            false,
+            false,
+            FailureOrigin::Engine,
+        )
+    })?;
+    let grant_id = value
+        .get("grant")
+        .and_then(|grant| grant.get("grantId"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            FailureEnvelope::new(
+                CAPABILITY_RESULT_INVALID,
+                FailureCategory::Parse,
+                "Capability runtime grant derivation returned an invalid grant payload",
+                false,
+                false,
+                FailureOrigin::Engine,
+            )
+        })?;
+    AuthorityGrantId::new(grant_id.to_owned()).map_err(|error| engine_error_to_failure(&error))
 }
 
 #[allow(clippy::too_many_arguments)]

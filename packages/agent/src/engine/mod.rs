@@ -53,6 +53,9 @@
 //! - `EngineHostHandle` gives server startup and runtime services an intent-shaped
 //!   boundary that prepares under lock, executes direct and delegated handlers
 //!   outside the lock, and finishes ledger/idempotency bookkeeping under lock;
+//!   read-only grant inspection through the handle is reserved for domain
+//!   workers that must enforce policy against the active stored grant without
+//!   importing grant-store internals;
 //! - model-facing agents act through the capability-domain `execute` primitive;
 //!   retained registration policy checks infrastructure contracts such as
 //!   idempotency, schema shape, resource leases, and compensation;
@@ -191,6 +194,14 @@ pub use runtime::worker_protocol::{
     WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
     WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
+
+/// Return whether a grant id is one of the engine-owned bootstrap roots.
+#[must_use]
+pub(crate) fn is_bootstrap_authority_grant_id(grant_id: &AuthorityGrantId) -> bool {
+    authority::grants::BOOTSTRAP_GRANT_IDS
+        .iter()
+        .any(|bootstrap| grant_id.as_str() == *bootstrap)
+}
 
 #[cfg(test)]
 mod tests;

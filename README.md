@@ -545,10 +545,14 @@ primitive fields such as `input`, `scope`, `namespace`, `key`, `value`, `path`,
 `maxOutputBytes`, `idempotencyKey`, and `reason`.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
-runtime metadata; trace records use those facts directly instead of inferring
-provider ownership from model id strings. `replay_manifest` is the read-only
-exception: it returns the current session replay manifest without creating a
-trace record, so the read does not mutate the manifest it exports.
+runtime metadata under a per-call derived authority grant. The child grant is
+scoped to the exact primitive function, the canonical working directory, no
+namespace authority, state read/write support, and `networkPolicy: none`; the
+worker rejects bootstrap grants and public caller contexts. Trace records use
+those trusted facts directly instead of inferring provider ownership from model
+id strings. `replay_manifest` is the read-only exception: it returns the current
+session replay manifest without creating a trace record, so the read does not
+mutate the manifest it exports.
 
 Current primitive operations:
 
@@ -560,7 +564,7 @@ Current primitive operations:
 | `state_list` | List agent-owned state entries for a scope/namespace. |
 | `file_read` | Read a UTF-8 file under the current working directory. |
 | `file_write` | Write UTF-8 content under the current working directory. |
-| `process_run` | Run a bounded local shell command with timeout and output limits. |
+| `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -619,9 +623,12 @@ idempotency key. Message ids are correlation ids only.
 When test clients invoke `capability::execute` directly, the transport dispatches
 it as the agent actor and passes only server-derived session, workspace, trace,
 parent invocation, target-derived authority scopes, and explicit idempotency
-through to the engine. Public wire context does not accept `authorityScopes` or
-`runtimeMetadata`; runtime metadata is reserved for trusted engine and
-agent-owned execution paths. `execute` is the primitive operation boundary.
+through to the engine. Tests and trusted agent runtime paths must use a derived
+least-privilege grant and trusted working-directory runtime metadata; bootstrap
+grants are rejected by the primitive worker. Public wire context does not accept
+`authorityScopes` or `runtimeMetadata`; runtime metadata is reserved for trusted
+engine and agent-owned execution paths. `execute` is the primitive operation
+boundary.
 
 Hidden functions remain in the engine catalog for internal runtime effects such
 as agent apply/run-turn and prompt-history capture. Normal discovery excludes
@@ -993,15 +1000,16 @@ server/iOS logs, and compressed content-addressed blobs share that same SQLite
 file. Large correctness and audit payloads flow through blob refs where the
 owning row needs them; compact rows keep human/agent-readable JSON inline. The
 model-visible evidence read path is `capability::execute` with `trace_list`,
-`trace_get`, `log_recent`, and `replay_manifest`. Trace reads are backed by
-`trace_records`; effectful `execute` calls insert a running record before the
-effect runs and update that same record with status, duration, result/error
-hashes, authority, provider/model metadata, VCS revision when available, and
-file attribution/content hashes after completion. The `replay_manifest`
-operation is read-only and does not insert a trace record; it reads session
-events, provider audits, trace records, idempotency entries, invocation ledger
-rows, stream rows, and queue rows through owner APIs and returns canonical
-section hashes plus the overall `replayHash`.
+`trace_get`, `log_recent`, and `replay_manifest`; those reads require trusted
+current-session context. Trace reads are backed by `trace_records`; effectful
+`execute` calls insert a running record before the effect runs and update that
+same record with status, duration, result/error hashes, authority,
+provider/model metadata, VCS revision when available, and file
+attribution/content hashes after completion. The `replay_manifest` operation is
+read-only and does not insert a trace record; it reads session events, provider
+audits, trace records, idempotency entries, invocation ledger rows, stream rows,
+and queue rows through owner APIs and returns canonical section hashes plus the
+overall `replayHash`.
 
 ### Tables
 

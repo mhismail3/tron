@@ -6,6 +6,14 @@
 //! observation with engine details for audit. `replay_manifest` is the only
 //! read-only operation that bypasses trace-record creation; tracing that read
 //! would mutate the manifest it returns.
+//!
+//! The operation gate is intentionally stricter than the provider schema:
+//! `execute` accepts only trusted agent/system runtime contexts, rejects
+//! bootstrap authority grants, requires a derived least-privilege grant for
+//! every effectful call, resolves file/process roots from trusted runtime
+//! metadata, denies system-scoped state, and keeps trace/log/replay reads bound
+//! to the current session. `process_run` additionally inspects the active grant
+//! and runs only when it carries `networkPolicy none`.
 
 use std::time::Instant;
 
@@ -13,7 +21,7 @@ use chrono::Utc;
 use serde_json::{Value, json};
 
 use super::Deps;
-use crate::engine::Invocation;
+use crate::engine::{ActorKind, Invocation, is_bootstrap_authority_grant_id};
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::errors::CapabilityError;
@@ -37,9 +45,11 @@ pub(crate) async fn execute_value(
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
     let operation = required_str(&invocation.payload, "operation")?.to_owned();
+    validate_execute_context(invocation, &operation)?;
     if operation == "replay_manifest" {
         return result_value(replay_manifest(invocation, deps).await?);
     }
+    let _root = filesystem::working_directory(invocation)?;
 
     let started_at = Utc::now().to_rfc3339();
     let start = Instant::now();
@@ -79,6 +89,75 @@ pub(crate) async fn execute_value(
     }
 }
 
+fn validate_execute_context(
+    invocation: &Invocation,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    match invocation.causal_context.actor_kind {
+        ActorKind::Agent => {
+            let session_id = invocation
+                .causal_context
+                .session_id
+                .as_deref()
+                .ok_or_else(|| invalid("capability::execute agent context requires session id"))?;
+            let expected_actor = format!("agent:{session_id}");
+            if invocation.causal_context.actor_id.as_str() != expected_actor {
+                return Err(invalid(
+                    "capability::execute agent actor must match the current session",
+                ));
+            }
+        }
+        ActorKind::System => {}
+        _ => {
+            return Err(invalid(
+                "capability::execute requires a trusted agent or system runtime context",
+            ));
+        }
+    }
+    if is_bootstrap_authority_grant_id(&invocation.causal_context.authority_grant_id) {
+        return Err(invalid(
+            "capability::execute requires a derived least-privilege authority grant",
+        ));
+    }
+    match operation {
+        "state_get" | "state_set" | "state_list" => validate_state_scope(invocation),
+        "trace_list" | "trace_get" | "log_recent" | "replay_manifest" => {
+            require_current_session(invocation, operation)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_state_scope(invocation: &Invocation) -> Result<(), CapabilityError> {
+    match optional_str(&invocation.payload, "scope")?.unwrap_or("session") {
+        "session" => require_current_session(invocation, "state operation"),
+        "workspace" => {
+            if invocation.causal_context.workspace_id.is_none() {
+                return Err(invalid(
+                    "workspace state requires trusted workspace context",
+                ));
+            }
+            Ok(())
+        }
+        "system" => Err(invalid(
+            "capability::execute cannot read or write system-scoped state",
+        )),
+        other => Err(invalid(format!("unsupported execute state scope {other}"))),
+    }
+}
+
+fn require_current_session(
+    invocation: &Invocation,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    if invocation.causal_context.session_id.is_none() {
+        return Err(invalid(format!(
+            "{operation} requires trusted current session context"
+        )));
+    }
+    Ok(())
+}
+
 async fn execute_operation(
     operation: &str,
     invocation: &Invocation,
@@ -91,7 +170,7 @@ async fn execute_operation(
         "state_list" => state_list(invocation, deps).await?,
         "file_read" => file_read(invocation).await?,
         "file_write" => file_write(invocation).await?,
-        "process_run" => process_run(invocation).await?,
+        "process_run" => process_run(invocation, deps).await?,
         "trace_list" => trace_list(invocation, deps)?,
         "trace_get" => trace_get(invocation, deps)?,
         "log_recent" => log_recent(invocation, deps).await?,
@@ -182,6 +261,12 @@ fn compact_json(value: &Value) -> String {
 
 pub(super) fn internal(message: impl Into<String>) -> CapabilityError {
     CapabilityError::Internal {
+        message: message.into(),
+    }
+}
+
+fn invalid(message: impl Into<String>) -> CapabilityError {
+    CapabilityError::InvalidParams {
         message: message.into(),
     }
 }

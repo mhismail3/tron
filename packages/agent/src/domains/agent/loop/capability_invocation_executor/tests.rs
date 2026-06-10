@@ -384,13 +384,15 @@ async fn engine_capability_result_stop_turn_pauses_runner_even_when_target_is_no
     let cancel = CancellationToken::new();
     let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
     ctx.engine_host = Some(&engine_host);
+    let tempdir = tempfile::tempdir().expect("working directory");
+    let working_directory = tempdir.path().to_str().expect("utf8 tempdir");
 
     let call = CapabilityInvocationDraft::new("capability-invocation-1", "execute", {
         let mut args = serde_json::Map::new();
         args.insert("mode".to_owned(), json!("invoke"));
         args
     });
-    let result = execute_capability_invocation(&call, "session-1", "/tmp/workspace", &ctx).await;
+    let result = execute_capability_invocation(&call, "session-1", working_directory, &ctx).await;
 
     assert!(result.result.is_error.unwrap_or(false));
     assert!(result.stops_turn);
@@ -460,17 +462,49 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
     ctx.engine_host = Some(&engine_host);
     ctx.trace_id = Some(&trace_id);
     ctx.parent_invocation_id = Some(&parent_invocation_id);
+    let tempdir = tempfile::tempdir().expect("working directory");
+    let working_directory = crate::shared::foundation::paths::normalize_working_directory(
+        tempdir.path().to_str().expect("utf8 tempdir"),
+    )
+    .expect("normalized working directory")
+    .display()
+    .to_string();
 
     let mut args = serde_json::Map::new();
     args.insert("value".to_owned(), Value::String("hello".to_owned()));
     let call = CapabilityInvocationDraft::new("capability-invocation-1", "execute", args);
-    let result = execute_capability_invocation(&call, "session-1", "/tmp/workspace", &ctx).await;
+    let result = execute_capability_invocation(&call, "session-1", &working_directory, &ctx).await;
 
     assert_eq!(result.result.is_error, None);
     let invocation = captured
         .lock()
         .clone()
         .expect("capability invocation should be captured");
+    assert_ne!(
+        invocation.causal_context.authority_grant_id.as_str(),
+        "agent-capability-runtime"
+    );
+    let grant = engine_host
+        .inspect_authority_grant(&invocation.causal_context.authority_grant_id)
+        .await
+        .expect("inspect derived grant")
+        .expect("derived grant exists");
+    assert_eq!(
+        grant.parent_grant_id.as_ref().map(AuthorityGrantId::as_str),
+        Some("agent-capability-runtime")
+    );
+    assert_eq!(
+        grant.subject_actor_id.as_ref().map(ActorId::as_str),
+        Some("agent:session-1")
+    );
+    assert_eq!(grant.file_roots, vec![working_directory.clone()]);
+    assert_eq!(grant.network_policy, "none");
+    assert!(
+        grant
+            .allowed_capabilities
+            .contains(&"capability::capture".to_owned())
+    );
+    assert!(!grant.allowed_namespaces.contains(&"capability".to_owned()));
     assert_eq!(invocation.causal_context.trace_id, trace_id);
     assert_eq!(
         invocation.causal_context.parent_invocation_id,
@@ -488,7 +522,7 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
         1,
         "capability-invocation-1",
         "execute",
-        "/tmp/workspace",
+        &working_directory,
         None,
         &json!({"value": "hello"}),
     );
@@ -562,11 +596,18 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
     let cancel = CancellationToken::new();
     let mut ctx = capability_exec_ctx(&surface, &emitter, &cancel);
     ctx.engine_host = Some(&engine_host);
+    let tempdir = tempfile::tempdir().expect("working directory");
+    let working_directory = crate::shared::foundation::paths::normalize_working_directory(
+        tempdir.path().to_str().expect("utf8 tempdir"),
+    )
+    .expect("normalized working directory")
+    .display()
+    .to_string();
 
     let payload = json!({
-        "operation": "file_read",
-        "path": "README.md",
-        "idempotencyKey": "manual-file-read-explicit-001"
+        "operation": "observe",
+        "input": "wrapper idempotency proof",
+        "idempotencyKey": "manual-observe-explicit-001"
     });
     let first_call =
         CapabilityInvocationDraft::new("provider-call-id-1", "execute", payload_object(&payload));
@@ -578,9 +619,9 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
         payload_object(&replay_payload),
     );
     let first_result =
-        execute_capability_invocation(&first_call, "session-1", "/tmp/workspace", &ctx).await;
+        execute_capability_invocation(&first_call, "session-1", &working_directory, &ctx).await;
     let second_result =
-        execute_capability_invocation(&second_call, "session-1", "/tmp/workspace", &ctx).await;
+        execute_capability_invocation(&second_call, "session-1", &working_directory, &ctx).await;
 
     assert_eq!(first_result.result.is_error, None);
     assert_eq!(second_result.result.is_error, None);
@@ -596,7 +637,7 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
         1,
         "provider-call-id-1",
         "execute",
-        "/tmp/workspace",
+        &working_directory,
         None,
         &payload,
     );
@@ -606,7 +647,7 @@ async fn execute_model_primitive_keeps_wrapper_idempotency_provider_call_scoped(
         1,
         "provider-call-id-2",
         "execute",
-        "/tmp/workspace",
+        &working_directory,
         None,
         &replay_payload,
     );

@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **61/100**
+Current score: **73/100**
 
 Status: **active**
 
@@ -53,12 +53,12 @@ file roots, worker identity, or credential custody.
 | Row | Requirement | Points | Status | Owner | Evidence | Closure | Checkpoint |
 |---|---|---:|---|---|---|---|---|
 | SACB-0 | Campaign harness, red gates, README/CI links, evidence/inventory scaffolding | 5 | passed_after_fix | docs/static gates | Added SACB scorecard, evidence manifest, inventory docs/TSV, invariant target, README links, CI/static-gate wiring, and prior-campaign inventory rows for the new artifacts. | Closed. | SACB-0 campaign harness checkpoint |
-| SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix | inventory/static gates | Expanded the inventory to 601 marker-derived rows across server, iOS, Mac, scripts, workflows, active docs, historical scorecards, TSV evidence, and tests. Static gates now recompute tracked security-marker files and require every one to have a structured inventory row. | Closed. | SACB-1 boundary inventory checkpoint |
+| SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix | inventory/static gates | Expanded the inventory to marker-derived coverage across server, iOS, Mac, scripts, workflows, active docs, historical scorecards, TSV evidence, and tests; current coverage is 603 structured rows. Static gates now recompute tracked security-marker files and require every one to have a structured inventory row. | Closed. | SACB-1 boundary inventory checkpoint |
 | SACB-2 | Public transport auth, route exposure, bearer handling, loopback worker boundary | 10 | passed_after_fix | transport/http/runtime | Added focused server tests proving `/engine/workers` requires bearer auth, allows bearer-authenticated loopback upgrades, and rejects non-loopback worker peers with `403` through the extracted peer guard. Added static guards proving `/engine` and `/engine/workers` stay wired through `ws_auth_gate`, bearer parsing stays strict, and the worker handler keeps `ConnectInfo<SocketAddr>` plus `is_loopback()`. | Closed. | SACB-2 public transport boundary checkpoint |
 | SACB-3 | Transport context trust: remove/deny untrusted authority scope and runtime metadata injection | 14 | passed_after_fix | transport/engine | Deleted public `authorityScopes` and `runtimeMetadata` fields from `WireContext` and `EngineTransportContext`, removed the transport copy loops into `CausalContext`, removed silent top-level `authorityScopes` stripping, inverted the socket DTO tests to reject those fields, and added static guards against field/copy-loop reintroduction. README now documents that public wire context carries only identity and correlation scope. | Closed. | SACB-3 public context trust checkpoint |
 | SACB-4 | Authority grant model: derivation, file roots, network policy, budgets, bootstrap grants | 12 | passed_after_fix | engine/authority | Added shared canonical grant file-root helpers, changed child grant derivation from raw string-prefix checks to canonical path containment with unresolved suffix normalization, added prefix-sibling and parent-component escape regression tests, proved network policy and budget narrowing through existing derivation cases, and added explicit bootstrap root-grant proof plus static guards for wildcard bootstrap provenance. Updated ownership/cleanup/modularity/SOL/SACB inventories for the new helper. | Closed. | SACB-4 authority grant boundary checkpoint |
 | SACB-5 | Catalog visibility and direct invocation boundaries, including `engine::invoke` delegation | 10 | passed_after_fix | engine/catalog/invocation | Tightened `engine.internal.invoke` so raw scope strings unlock internal visibility only for trusted runtime actor kinds, made hidden agent prompt/apply delegation reset to an engine-owned system causal context, added public `engine::invoke` regressions for internal/admin/worker-only targets and raw internal-scope denial, and added transport/static guards proving public `/engine` never mints the internal scope. | Closed. | SACB-5 catalog visibility/direct invocation checkpoint |
-| SACB-6 | `capability::execute` least privilege for file/process/state/trace/log/replay operations | 12 | pending | domains/capability | Not started in this checkpoint. | Open: execute root, process, state, trace, log, replay least-privilege proof. | pending |
+| SACB-6 | `capability::execute` least privilege for file/process/state/trace/log/replay operations | 12 | passed_after_fix | domains/capability | Agent-launched primitive calls derive a per-call child grant from `agent-capability-runtime` with the exact target function, canonical working-directory file root, no namespace authority, state read/write support, and `networkPolicy: none`; the execute worker rejects bootstrap grants and non-agent/non-system callers, resolves file roots from trusted runtime metadata only, denies system state scope, requires current-session context for trace/log/replay reads, and runs `process_run` only under a grant inspected as `networkPolicy none` with a fail-closed network-denial sandbox. | Closed. | SACB-6 capability execute least-privilege checkpoint |
 | SACB-7 | External worker protocol isolation: scoped token, namespace, trigger, stream, result ownership | 8 | pending | engine/runtime/transport | Not started in this checkpoint. | Open: worker token, namespace, trigger, stream, and result ownership proof. | pending |
 | SACB-8 | Secrets, token storage, redaction, auth.json permissions, provider credential custody | 7 | pending | auth/iOS/Mac diagnostics | Not started in this checkpoint. | Open: redaction, auth.json mode, provider custody proof. | pending |
 | SACB-9 | iOS/Mac pairing lifecycle: Keychain, QR/deep-link parsing, forget/re-pair/unauthorized flow | 7 | pending | iOS/Mac pairing | Not started in this checkpoint. | Open: pairing lifecycle and unauthorized flow proof. | pending |
@@ -81,6 +81,12 @@ Total weight: **100**
 - SACB-5 closed the direct invocation gap by denying raw public
   `engine.internal.invoke` scope strings and proving public `engine::invoke`
   cannot reach internal, admin, or worker-only targets.
+- SACB-6 closed the primitive execution gap by deriving scoped runtime grants
+  for model-launched calls, rejecting bootstrap grants at `capability::execute`,
+  removing process-cwd fallback, enforcing canonical root authorization from
+  trusted runtime metadata, denying system-scoped state, requiring current
+  session context for trace/log/replay reads, and fail-closing `process_run`
+  unless its inspected grant has `networkPolicy none`.
 
 ## Static Gates
 
@@ -100,6 +106,9 @@ now, and will own row-specific guards as later rows close:
 - Inventory rows cover public transport, authority grants, runtime metadata,
   primitive execution, external workers, secret storage, pairing lifecycle, and
   static gates.
+- `capability::execute` static guards require per-call grant derivation,
+  trusted working-directory metadata, bootstrap-grant rejection, process
+  network denial, and state/trace/log/replay scope checks.
 - Final closeout rejects stale active/open-loop wording once the scorecard is
   complete.
 

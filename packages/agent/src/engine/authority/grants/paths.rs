@@ -9,11 +9,12 @@ pub(super) fn root_allows_path(root: &str, path: &Path) -> Result<bool> {
     Ok(path.starts_with(canonical_root))
 }
 
-pub(super) fn canonical_payload_path(path: &str) -> Result<PathBuf> {
-    let candidate = Path::new(path);
+pub(super) fn canonical_payload_path(path: impl AsRef<Path>) -> Result<PathBuf> {
+    let candidate = path.as_ref();
+    let display = candidate.display();
     if candidate.exists() {
         return candidate.canonicalize().map_err(|error| {
-            EngineError::PolicyViolation(format!("canonicalize file path {path}: {error}"))
+            EngineError::PolicyViolation(format!("canonicalize file path {display}: {error}"))
         });
     }
     let absolute = if candidate.is_absolute() {
@@ -26,7 +27,7 @@ pub(super) fn canonical_payload_path(path: &str) -> Result<PathBuf> {
     let mut ancestor = absolute.as_path();
     while !ancestor.exists() {
         ancestor = ancestor.parent().ok_or_else(|| {
-            EngineError::PolicyViolation(format!("file path {path} has no existing ancestor"))
+            EngineError::PolicyViolation(format!("file path {display} has no existing ancestor"))
         })?;
     }
     let canonical_ancestor = ancestor.canonicalize().map_err(|error| {

@@ -80,7 +80,8 @@ fn test_runtime() -> TestRuntime {
     TestRuntime { _temp: temp, ctx }
 }
 
-fn causal_context(
+async fn causal_context(
+    ctx: &ServerRuntimeContext,
     trace_id: TraceId,
     session_id: &str,
     workspace_id: &str,
@@ -89,6 +90,7 @@ fn causal_context(
     idempotency_key: &str,
 ) -> CausalContext {
     causal_context_raw(
+        ctx,
         trace_id,
         session_id,
         workspace_id,
@@ -96,9 +98,11 @@ fn causal_context(
         provider_invocation_id,
         idempotency_key,
     )
+    .await
 }
 
-fn causal_context_raw(
+async fn causal_context_raw(
+    ctx: &ServerRuntimeContext,
     trace_id: TraceId,
     session_id: &str,
     workspace_id: &str,
@@ -106,28 +110,114 @@ fn causal_context_raw(
     provider_invocation_id: &str,
     idempotency_key: &str,
 ) -> CausalContext {
-    CausalContext::new(
-        ActorId::new(format!("agent:{session_id}")).unwrap(),
-        ActorKind::Agent,
-        AuthorityGrantId::new("agent-capability-runtime").unwrap(),
-        trace_id,
-    )
-    .with_scope("capability.execute")
-    .with_session_id(session_id.to_owned())
-    .with_workspace_id(workspace_id.to_owned())
-    .with_idempotency_key(idempotency_key.to_owned())
-    .with_runtime_metadata(
-        RUNTIME_METADATA_WORKING_DIRECTORY,
-        working_directory.to_owned(),
-    )
-    .with_runtime_metadata(
-        RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+    let actor_id = ActorId::new(format!("agent:{session_id}")).unwrap();
+    let grant_id = derive_capability_execute_grant(
+        ctx,
+        &actor_id,
+        trace_id.clone(),
+        session_id,
+        workspace_id,
+        working_directory,
         provider_invocation_id,
+        "none",
     )
-    .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
-    .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
-    .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, "run_trace_test")
-    .with_runtime_metadata(RUNTIME_METADATA_TURN, "1")
+    .await;
+    CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
+        .with_scope("capability.execute")
+        .with_session_id(session_id.to_owned())
+        .with_workspace_id(workspace_id.to_owned())
+        .with_idempotency_key(idempotency_key.to_owned())
+        .with_runtime_metadata(
+            RUNTIME_METADATA_WORKING_DIRECTORY,
+            working_directory.to_owned(),
+        )
+        .with_runtime_metadata(
+            RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+            provider_invocation_id,
+        )
+        .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
+        .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
+        .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, "run_trace_test")
+        .with_runtime_metadata(RUNTIME_METADATA_TURN, "1")
+}
+
+async fn derive_capability_execute_grant(
+    ctx: &ServerRuntimeContext,
+    actor_id: &ActorId,
+    trace_id: TraceId,
+    session_id: &str,
+    workspace_id: &str,
+    working_directory: &str,
+    provider_invocation_id: &str,
+    network_policy: &str,
+) -> AuthorityGrantId {
+    let root = tron::shared::foundation::paths::normalize_working_directory(working_directory)
+        .unwrap()
+        .display()
+        .to_string();
+    let result = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("grant::derive").unwrap(),
+            json!({
+                "parentGrantId": "agent-capability-runtime",
+                "subjectActorId": actor_id.as_str(),
+                "allowedCapabilities": [
+                    "capability::execute",
+                    "state::get",
+                    "state::set",
+                    "state::list"
+                ],
+                "allowedNamespaces": ["__no_namespace_authority__"],
+                "allowedAuthorityScopes": [
+                    "capability.execute",
+                    "state.read",
+                    "state.write"
+                ],
+                "allowedResourceKinds": ["agent_state"],
+                "resourceSelectors": ["kind:agent_state"],
+                "fileRoots": [root],
+                "networkPolicy": network_policy,
+                "maxRisk": "medium",
+                "budget": {
+                    "remainingInvocations": 2,
+                    "remainingProcessMs": 120000
+                },
+                "canDelegate": false,
+                "provenance": {
+                    "source": "primitive_trace_execution_test",
+                    "sessionId": session_id,
+                    "workspaceId": workspace_id,
+                    "providerInvocationId": provider_invocation_id,
+                    "networkPolicy": network_policy,
+                    "workingDirectory": root
+                }
+            }),
+            CausalContext::new(
+                ActorId::new("system:primitive-trace-test").unwrap(),
+                ActorKind::System,
+                AuthorityGrantId::new("grant").unwrap(),
+                trace_id,
+            )
+            .with_scope("grant.write")
+            .with_session_id(session_id.to_owned())
+            .with_idempotency_key(format!(
+                "derive-capability-grant-{provider_invocation_id}-{network_policy}"
+            )),
+        ))
+        .await;
+    assert_eq!(
+        result.error, None,
+        "grant derivation failed: {:?}",
+        result.error
+    );
+    AuthorityGrantId::new(
+        result.value.unwrap()["grant"]["grantId"]
+            .as_str()
+            .unwrap()
+            .to_owned(),
+    )
+    .unwrap()
 }
 
 async fn invoke_execute(
@@ -145,6 +235,22 @@ async fn invoke_execute(
         .await;
     assert_eq!(result.error, None);
     result.value.expect("capability result value")
+}
+
+async fn invoke_execute_error(
+    ctx: &ServerRuntimeContext,
+    payload: Value,
+    causal: CausalContext,
+) -> String {
+    let result = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("capability::execute").unwrap(),
+            payload,
+            causal,
+        ))
+        .await;
+    result.error.expect("capability error").to_string()
 }
 
 #[tokio::test]
@@ -166,13 +272,15 @@ async fn execute_replay_manifest_is_read_only_and_does_not_create_trace_record()
         &runtime.ctx,
         json!({"operation": "replay_manifest"}),
         causal_context(
+            &runtime.ctx,
             TraceId::generate(),
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
             "provider-call-replay-1",
             "trace-replay-1",
-        ),
+        )
+        .await,
     )
     .await;
     let result: CapabilityResult = serde_json::from_value(value).unwrap();
@@ -227,13 +335,15 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
             "reason": "prove primitive trace capture"
         }),
         causal_context(
+            &runtime.ctx,
             trace_id.clone(),
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
             "provider-call-write-1",
             "trace-write-1",
-        ),
+        )
+        .await,
     )
     .await;
     let write_result: CapabilityResult = serde_json::from_value(write_value).unwrap();
@@ -250,13 +360,15 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
             "limit": 10
         }),
         causal_context(
+            &runtime.ctx,
             trace_id.clone(),
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
             "provider-call-list-1",
             "trace-list-1",
-        ),
+        )
+        .await,
     )
     .await;
     let list_result: CapabilityResult = serde_json::from_value(list_value).unwrap();
@@ -280,13 +392,15 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
             "traceRecordId": write_record_id
         }),
         causal_context(
+            &runtime.ctx,
             trace_id.clone(),
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
             "provider-call-get-1",
             "trace-get-1",
-        ),
+        )
+        .await,
     )
     .await;
     let get_result: CapabilityResult = serde_json::from_value(get_value).unwrap();
@@ -343,30 +457,53 @@ async fn execute_process_run_expands_home_alias_in_trace_working_directory() {
         .display()
         .to_string();
 
-    let run_value = invoke_execute(
-        &runtime.ctx,
-        json!({
-            "operation": "process_run",
-            "command": "pwd",
-            "timeoutMs": 5000,
-            "maxOutputBytes": 2000,
-            "reason": "prove working directory trace capture"
-        }),
-        causal_context_raw(
-            trace_id.clone(),
-            &created.session.id,
-            &created.session.workspace_id,
-            "~",
-            "provider-call-pwd-1",
-            "trace-pwd-1",
-        ),
-    )
-    .await;
-    let run_result: CapabilityResult = serde_json::from_value(run_value).unwrap();
-    let details = run_result.details.as_ref().unwrap();
-    assert_eq!(details["primitiveOperation"], "process_run");
-    assert_eq!(details["status"], "ok");
-    assert_eq!(details["stdout"].as_str().unwrap().trim(), expected_home);
+    let result = runtime
+        .ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("capability::execute").unwrap(),
+            json!({
+                "operation": "process_run",
+                "command": "pwd",
+                "timeoutMs": 5000,
+                "maxOutputBytes": 2000,
+                "reason": "prove working directory trace capture"
+            }),
+            causal_context_raw(
+                &runtime.ctx,
+                trace_id.clone(),
+                &created.session.id,
+                &created.session.workspace_id,
+                "~",
+                "provider-call-pwd-1",
+                "trace-pwd-1",
+            )
+            .await,
+        ))
+        .await;
+
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(result.error, None);
+        let run_result: CapabilityResult =
+            serde_json::from_value(result.value.expect("capability result value")).unwrap();
+        let details = run_result.details.as_ref().unwrap();
+        assert_eq!(details["primitiveOperation"], "process_run");
+        assert_eq!(details["status"], "ok");
+        assert_eq!(details["stdout"].as_str().unwrap().trim(), expected_home);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let error = result
+            .error
+            .expect("process_run should fail closed without a no-network sandbox")
+            .to_string();
+        assert!(
+            error.contains("process_run cannot enforce networkPolicy none on this platform"),
+            "process_run must fail closed without platform sandbox support, got: {error}"
+        );
+    }
 
     let records = runtime
         .ctx
@@ -439,13 +576,15 @@ async fn execute_log_recent_exposes_bounded_session_trace_logs() {
             "limit": 10
         }),
         causal_context(
+            &runtime.ctx,
             trace_id.clone(),
             &created.session.id,
             &created.session.workspace_id,
             workspace.path(),
             "provider-call-logs-1",
             "trace-logs-1",
-        ),
+        )
+        .await,
     )
     .await;
     let logs_result: CapabilityResult = serde_json::from_value(logs_value).unwrap();
@@ -473,7 +612,7 @@ async fn execute_log_recent_exposes_bounded_session_trace_logs() {
             .any(|entry| entry["message"] == "other session evidence")
     );
 
-    let global_only_value = invoke_execute(
+    let sessionless_error = invoke_execute_error(
         &runtime.ctx,
         json!({
             "operation": "log_recent",
@@ -496,13 +635,184 @@ async fn execute_log_recent_exposes_bounded_session_trace_logs() {
         .with_runtime_metadata(RUNTIME_METADATA_TURN, "1"),
     )
     .await;
-    let global_only_result: CapabilityResult = serde_json::from_value(global_only_value).unwrap();
-    let global_only_entries = global_only_result.details.as_ref().unwrap()["entries"]
-        .as_array()
-        .expect("global-only log entries array");
-    assert_eq!(global_only_entries.len(), 1);
-    assert_eq!(
-        global_only_entries[0]["message"], "global trace evidence",
-        "sessionless log_recent calls must not broaden to other sessions"
+    assert!(
+        sessionless_error.contains("agent context requires session id"),
+        "sessionless log_recent must fail closed, got: {sessionless_error}"
+    );
+}
+
+#[tokio::test]
+async fn execute_rejects_public_client_context() {
+    let runtime = test_runtime();
+    let workspace = tempfile::tempdir().unwrap();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "gpt-5.5",
+            workspace.path().to_str().unwrap(),
+            Some("public denial"),
+            Some("openai"),
+        )
+        .unwrap();
+    let error = invoke_execute_error(
+        &runtime.ctx,
+        json!({"operation": "observe", "input": "public should not execute"}),
+        CausalContext::new(
+            ActorId::new("client:ios").unwrap(),
+            ActorKind::Client,
+            AuthorityGrantId::new("engine-transport").unwrap(),
+            TraceId::generate(),
+        )
+        .with_scope("capability.execute")
+        .with_session_id(created.session.id)
+        .with_workspace_id(created.session.workspace_id)
+        .with_runtime_metadata(
+            RUNTIME_METADATA_WORKING_DIRECTORY,
+            workspace.path().display().to_string(),
+        ),
+    )
+    .await;
+    assert!(
+        error.contains("trusted agent or system runtime context"),
+        "public client execute must fail closed, got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn execute_rejects_bootstrap_authority_grants() {
+    let runtime = test_runtime();
+    let workspace = tempfile::tempdir().unwrap();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "gpt-5.5",
+            workspace.path().to_str().unwrap(),
+            Some("bootstrap denial"),
+            Some("openai"),
+        )
+        .unwrap();
+    let error = invoke_execute_error(
+        &runtime.ctx,
+        json!({"operation": "observe", "input": "bootstrap should not execute"}),
+        CausalContext::new(
+            ActorId::new(format!("agent:{}", created.session.id)).unwrap(),
+            ActorKind::Agent,
+            AuthorityGrantId::new("agent-capability-runtime").unwrap(),
+            TraceId::generate(),
+        )
+        .with_scope("capability.execute")
+        .with_session_id(created.session.id)
+        .with_workspace_id(created.session.workspace_id)
+        .with_runtime_metadata(
+            RUNTIME_METADATA_WORKING_DIRECTORY,
+            workspace.path().display().to_string(),
+        ),
+    )
+    .await;
+    assert!(
+        error.contains("derived least-privilege authority grant"),
+        "bootstrap execute must fail closed, got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn execute_rejects_system_scoped_state() {
+    let runtime = test_runtime();
+    let workspace = tempfile::tempdir().unwrap();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "gpt-5.5",
+            workspace.path().to_str().unwrap(),
+            Some("state denial"),
+            Some("openai"),
+        )
+        .unwrap();
+    let error = invoke_execute_error(
+        &runtime.ctx,
+        json!({
+            "operation": "state_set",
+            "scope": "system",
+            "namespace": "proof",
+            "key": "denied",
+            "value": true
+        }),
+        causal_context(
+            &runtime.ctx,
+            TraceId::generate(),
+            &created.session.id,
+            &created.session.workspace_id,
+            workspace.path(),
+            "provider-call-state-denied-1",
+            "trace-state-denied-1",
+        )
+        .await,
+    )
+    .await;
+    assert!(
+        error.contains("system-scoped state"),
+        "system state must fail closed, got: {error}"
+    );
+}
+
+#[tokio::test]
+async fn execute_process_run_requires_none_network_policy() {
+    let runtime = test_runtime();
+    let workspace = tempfile::tempdir().unwrap();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "gpt-5.5",
+            workspace.path().to_str().unwrap(),
+            Some("process network denial"),
+            Some("openai"),
+        )
+        .unwrap();
+    let trace_id = TraceId::generate();
+    let actor_id = ActorId::new(format!("agent:{}", created.session.id)).unwrap();
+    let grant_id = derive_capability_execute_grant(
+        &runtime.ctx,
+        &actor_id,
+        trace_id.clone(),
+        &created.session.id,
+        &created.session.workspace_id,
+        workspace.path().to_str().unwrap(),
+        "provider-call-process-loopback-1",
+        "loopback",
+    )
+    .await;
+    let error = invoke_execute_error(
+        &runtime.ctx,
+        json!({
+            "operation": "process_run",
+            "command": "pwd",
+            "timeoutMs": 5000
+        }),
+        CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
+            .with_scope("capability.execute")
+            .with_session_id(created.session.id)
+            .with_workspace_id(created.session.workspace_id)
+            .with_idempotency_key("trace-process-network-denied-1")
+            .with_runtime_metadata(
+                RUNTIME_METADATA_WORKING_DIRECTORY,
+                workspace.path().display().to_string(),
+            )
+            .with_runtime_metadata(
+                RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+                "provider-call-process-loopback-1",
+            )
+            .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
+            .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
+            .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, "run_trace_test")
+            .with_runtime_metadata(RUNTIME_METADATA_TURN, "1"),
+    )
+    .await;
+    assert!(
+        error.contains("networkPolicy none"),
+        "process_run without none network policy must fail closed, got: {error}"
     );
 }
