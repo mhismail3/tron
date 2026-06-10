@@ -110,11 +110,6 @@ fn initial_red_findings_are_recorded_until_resolved() {
             750,
         ),
         (
-            "packages/agent/src/engine/tests/runtime/external_worker.rs",
-            839,
-            800,
-        ),
-        (
             "packages/agent/src/domains/model/providers/openai/message_converter.rs",
             836,
             750,

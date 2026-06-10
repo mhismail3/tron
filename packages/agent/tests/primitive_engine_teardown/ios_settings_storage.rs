@@ -329,6 +329,10 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "external worker tests",
         ),
         (
+            "packages/agent/src/engine/tests/runtime/external_worker_delivery.rs",
+            "external worker delivery tests",
+        ),
+        (
             "packages/agent/src/engine/tests/generated_ui.rs",
             "generated ui tests",
         ),

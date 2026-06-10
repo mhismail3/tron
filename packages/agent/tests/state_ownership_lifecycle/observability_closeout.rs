@@ -129,8 +129,8 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
     for required in [
         "optional_u64(&invocation.payload, \"limit\")?",
         ".clamp(1, 500)",
-        "LogSessionFilter::SessionAndGlobal(session_id)",
-        "LogSessionFilter::OnlyGlobal",
+        "log_recent requires trusted current session context",
+        "LogSessionFilter::SessionAndGlobal(&session_id)",
         "list_recent_logs",
         "\"primitiveOperation\": \"log_recent\"",
     ] {
@@ -285,7 +285,7 @@ fn sol_observability_recovery_lifecycle_is_source_backed() {
         "execute_replay_manifest_is_read_only_and_does_not_create_trace_record",
         "replay_manifest must not mutate trace records",
         "execute_log_recent_exposes_bounded_session_trace_logs",
-        "sessionless log_recent calls must not broaden to other sessions",
+        "sessionless log_recent must fail closed",
     ] {
         assert!(
             primitive_trace_tests.contains(required),

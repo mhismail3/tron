@@ -184,14 +184,14 @@ Current living entry points:
 - `packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`:
   machine-readable CSD scheduling inventory used by static gates.
 - `packages/agent/docs/security-authority-capability-boundaries-scorecard.md`:
-  active Security Authority Capability Boundaries scorecard for public
+  completed Security Authority Capability Boundaries scorecard for public
   transport auth, authority grants, capability execution, worker isolation,
   secrets, redaction, and pairing lifecycle proof.
 - `packages/agent/docs/security-authority-capability-boundaries-evidence-manifest.md`:
   companion evidence manifest for SACB row checkpoints, verification logs, and
   security boundary findings.
 - `packages/agent/docs/security-authority-capability-boundaries-inventory.md`:
-  active SACB boundary taxonomy and security-surface proof notes.
+  completed SACB boundary taxonomy and security-surface proof notes.
 - `packages/agent/docs/security-authority-capability-boundaries-inventory.tsv`:
   machine-readable SACB security boundary inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
@@ -264,7 +264,7 @@ Current living entry points:
   cancellation, timer/deadline, blocking-isolation, and closeout gates, with
   focused modules under `packages/agent/tests/concurrency_scheduling_discipline/`.
 - `packages/agent/tests/security_authority_capability_boundaries_invariants.rs`:
-  active SACB scorecard, inventory, CI wiring, and security boundary gates, with
+  completed SACB scorecard, inventory, CI wiring, and security boundary gates, with
   focused modules under
   `packages/agent/tests/security_authority_capability_boundaries/`.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
@@ -272,8 +272,7 @@ Current living entry points:
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD scorecards plus the active
-SACB scorecard.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -620,15 +619,12 @@ Engine protocol messages are JSON objects with a `type`, optional correlation
 `agent::prompt`, or `settings::get`. Mutating calls must include an explicit
 idempotency key. Message ids are correlation ids only.
 
-When test clients invoke `capability::execute` directly, the transport dispatches
-it as the agent actor and passes only server-derived session, workspace, trace,
-parent invocation, target-derived authority scopes, and explicit idempotency
-through to the engine. Tests and trusted agent runtime paths must use a derived
-least-privilege grant and trusted working-directory runtime metadata; bootstrap
-grants are rejected by the primitive worker. Public wire context does not accept
-`authorityScopes` or `runtimeMetadata`; runtime metadata is reserved for trusted
-engine and agent-owned execution paths. `execute` is the primitive operation
-boundary.
+Public clients cannot become the agent actor by invoking `capability::execute`
+directly. Trusted agent runtime paths must use a derived least-privilege grant
+and trusted working-directory runtime metadata; bootstrap grants are rejected by
+the primitive worker. Public wire context does not accept `authorityScopes` or
+`runtimeMetadata`; runtime metadata is reserved for trusted engine and
+agent-owned execution paths. `execute` is the primitive operation boundary.
 
 Hidden functions remain in the engine catalog for internal runtime effects such
 as agent apply/run-turn and prompt-history capture. Normal discovery excludes

@@ -1,5 +1,9 @@
 use super::*;
 
+pub(super) fn session_hello(worker: WorkerDefinition, session_id: &str) -> super::WorkerHello {
+    super::WorkerHello::loopback(worker).with_session_scope(session_id)
+}
+
 pub(super) struct EchoExternalInvoker;
 
 #[async_trait]

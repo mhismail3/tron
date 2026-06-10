@@ -103,6 +103,7 @@ fn sacb_public_engine_context_rejects_authority_and_runtime_metadata() {
         "input.context.runtime_metadata",
         "with_runtime_metadata(key.clone(), value.clone())",
         "remove(\"authorityScopes\")",
+        "\"engine-agent\"",
     ] {
         assert!(
             !transport.contains(forbidden),
@@ -186,9 +187,15 @@ fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots()
 
 #[test]
 fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
-    let executor = read_repo_file(
-        "packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs",
-    );
+    let executor = [
+        read_repo_file(
+            "packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs",
+        ),
+        read_repo_file(
+            "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs",
+        ),
+    ]
+    .join("\n");
     for required in [
         "derive_capability_runtime_grant",
         "FunctionId::new(\"grant::derive\")",
@@ -381,7 +388,11 @@ fn sacb_external_worker_protocol_is_scoped_and_worker_owned() {
         );
     }
 
-    let tests = read_repo_file("packages/agent/src/engine/tests/runtime/external_worker.rs");
+    let tests = [
+        read_repo_file("packages/agent/src/engine/tests/runtime/external_worker.rs"),
+        read_repo_file("packages/agent/src/engine/tests/runtime/external_worker_delivery.rs"),
+    ]
+    .join("\n");
     for required in [
         "local_external_worker_hello_requires_session_scoped_token_binding",
         "local_external_worker_hello_rejects_wildcard_resource_selectors",

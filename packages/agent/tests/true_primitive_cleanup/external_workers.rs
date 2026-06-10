@@ -11,6 +11,10 @@ fn external_worker_runtime_is_loopback_split_and_proven() {
             "packages/agent/src/engine/tests/runtime/external_worker.rs",
             800,
         ),
+        (
+            "packages/agent/src/engine/tests/runtime/external_worker_delivery.rs",
+            500,
+        ),
     ] {
         let lines = line_count(&repo_path(path));
         assert!(
@@ -23,6 +27,7 @@ fn external_worker_runtime_is_loopback_split_and_proven() {
         "packages/agent/src/engine/runtime/external_workers/lifecycle.rs",
         "packages/agent/src/engine/runtime/external_workers/registration.rs",
         "packages/agent/src/engine/runtime/external_workers/validation.rs",
+        "packages/agent/src/engine/tests/runtime/external_worker_delivery.rs",
         "packages/agent/src/engine/tests/runtime/external_worker_helpers.rs",
         "packages/agent/src/engine/tests/runtime/external_worker_protocol.rs",
     ] {

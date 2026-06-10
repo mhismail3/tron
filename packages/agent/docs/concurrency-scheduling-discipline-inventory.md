@@ -1,6 +1,6 @@
 # Concurrency Scheduling Discipline Inventory
 
-Status: CSD-10 `passed_after_fix`; 112 scheduling-surface rows inventoried and classified.
+Status: CSD-10 `passed_after_fix`; 113 scheduling-surface rows inventoried and classified.
 
 This inventory classifies production scheduling surfaces by owner, scheduler
 class, start site, cancellation or stop path, backpressure or capacity policy,
@@ -44,7 +44,7 @@ Scheduler class distribution:
 | Scheduler class | Rows |
 |---|---:|
 | `timer_loop` | 37 |
-| `scoped_request_task` | 15 |
+| `scoped_request_task` | 16 |
 | `debounce_or_coalescer` | 13 |
 | `tracked_background_task` | 11 |
 | `main_actor_ui` | 11 |

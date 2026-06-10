@@ -5,8 +5,8 @@ use crate::domains::agent::r#loop::primitive_surface::{
     PrimitiveExecutionTarget, ResolvedPrimitiveSurface, resolve_provider_primitive_surface,
 };
 use crate::engine::{
-    AuthorityRequirement, EffectClass, FunctionDefinition, FunctionId, RiskLevel, VisibilityScope,
-    WorkerDefinition, WorkerId, WorkerKind,
+    AuthorityGrantId, AuthorityRequirement, EffectClass, FunctionDefinition, FunctionId, RiskLevel,
+    VisibilityScope, WorkerDefinition, WorkerId, WorkerKind,
 };
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};

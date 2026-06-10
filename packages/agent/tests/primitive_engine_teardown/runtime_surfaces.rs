@@ -301,6 +301,7 @@ fn engine_invocation_and_transport_do_not_require_expected_revision_tokens() {
         read_repo_file("packages/agent/src/engine/tests/invocation/host_invocation.rs"),
         read_repo_file("packages/agent/src/engine/tests/invocation/meta_primitives.rs"),
         read_repo_file("packages/agent/src/engine/tests/runtime/external_worker.rs"),
+        read_repo_file("packages/agent/src/engine/tests/runtime/external_worker_delivery.rs"),
         read_repo_file("packages/ios-app/Sources/Engine/Protocol/Core/EngineProtocolTypes.swift"),
         read_repo_file("packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection.swift"),
         read_repo_file(

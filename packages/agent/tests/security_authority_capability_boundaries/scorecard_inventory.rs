@@ -15,8 +15,8 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Scorecard",
-        "Current score: **95/100**",
-        "Status: **active**",
+        "Current score: **100/100**",
+        "Status: **complete**",
         "| SACB-0 | Campaign harness, red gates, README/CI links, evidence/inventory scaffolding | 5 | passed_after_fix |",
         "| SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix |",
         "| SACB-2 | Public transport auth, route exposure, bearer handling, loopback worker boundary | 10 | passed_after_fix |",
@@ -27,7 +27,7 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
         "| SACB-7 | External worker protocol isolation: scoped token, namespace, trigger, stream, result ownership | 8 | passed_after_fix |",
         "| SACB-8 | Secrets, token storage, redaction, auth.json permissions, provider credential custody | 7 | passed_after_fix |",
         "| SACB-9 | iOS/Mac pairing lifecycle: Keychain, QR/deep-link parsing, forget/re-pair/unauthorized flow | 7 | passed_after_fix |",
-        "| SACB-10 | Final closeout, static gates, full verification, clean status | 5 | pending |",
+        "| SACB-10 | Final closeout, static gates, full verification, clean status | 5 | passed_after_fix |",
         "`../tests/security_authority_capability_boundaries_invariants.rs`",
     ] {
         assert!(
@@ -38,8 +38,8 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Evidence Manifest",
-        "Status: **active**",
-        "Current score: **95/100**",
+        "Status: **complete**",
+        "Current score: **100/100**",
         "| SACB-0 | passed_after_fix |",
         "| SACB-1 | passed_after_fix |",
         "| SACB-2 | passed_after_fix |",
@@ -50,7 +50,7 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
         "| SACB-7 | passed_after_fix |",
         "| SACB-8 | passed_after_fix |",
         "| SACB-9 | passed_after_fix |",
-        "| SACB-10 | pending |",
+        "| SACB-10 | passed_after_fix |",
         "## Baseline Evidence",
     ] {
         assert!(
@@ -61,13 +61,13 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Inventory",
-        "Status: SACB-1 `passed_after_fix`; 603 security boundary rows inventoried and",
+        "Status: SACB campaign `complete`; 607 security boundary rows inventoried and",
         "## Boundary Classes",
         "`public_transport`",
         "`authority_grant`",
         "`execute_primitive`",
         "## Coverage Policy",
-        "## Open Loops",
+        "## Closeout Notes",
     ] {
         assert!(
             inventory.contains(required),
@@ -133,7 +133,7 @@ fn sacb_invariant_target_is_in_closeout_ci_lists() {
 #[test]
 fn sacb_inventory_rows_are_structured_and_reference_tracked_paths() {
     let rows = parse_inventory();
-    assert!(rows.len() >= 603, "SACB inventory row count regressed");
+    assert!(rows.len() >= 607, "SACB inventory row count regressed");
     let tracked: BTreeSet<_> = git_ls_files().into_iter().collect();
     let mut paths = BTreeSet::new();
     for row in &rows {
@@ -211,11 +211,11 @@ fn sacb_inventory_covers_all_tracked_security_marker_files() {
 #[test]
 fn sacb_closeout_artifacts_reject_stale_state_after_completion() {
     let scorecard = read_repo_file(SCORECARD_PATH);
-    if !scorecard.contains("Current score: **100/100**")
-        || !scorecard.contains("Status: **complete**")
-    {
-        return;
-    }
+    assert!(
+        scorecard.contains("Current score: **100/100**")
+            && scorecard.contains("Status: **complete**"),
+        "SACB closeout must remain complete after SACB-10"
+    );
 
     let files = [
         ("scorecard", scorecard),

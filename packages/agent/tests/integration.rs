@@ -19,7 +19,6 @@ use tron::app::bootstrap::config::ServerConfig;
 use tron::app::bootstrap::server::TronServer;
 use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
 use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
-use tron::shared::protocol::model_capabilities::CapabilityResult;
 use tron::shared::server::context::ServerRuntimeContext;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
@@ -200,7 +199,7 @@ async fn engine_hello_and_ping_use_current_minimal_transport() {
 }
 
 #[tokio::test]
-async fn session_create_reconstruct_and_execute_observe_stay_on_primitive_surface() {
+async fn session_create_reconstruct_and_public_execute_fails_closed() {
     let runtime = boot_server().await;
     let mut ws = connect(&runtime.url, &runtime.auth_path).await;
     let working_directory = runtime._temp.path().join("workspace");
@@ -233,30 +232,30 @@ async fn session_create_reconstruct_and_execute_observe_stay_on_primitive_surfac
     let events = reconstructed["events"].as_array().unwrap();
     assert!(events.iter().any(|event| event["type"] == "session.start"));
 
-    let observed = unwrap_invoke_value(
-        invoke_with_context(
-            &mut ws,
-            "execute-observe",
-            "capability::execute",
-            json!({
-                "operation": "observe",
-                "input": "primitive integration observation"
-            }),
-            Some(json!({
-                "sessionId": session_id,
-            })),
-        )
-        .await,
-    );
-    let result: CapabilityResult = serde_json::from_value(observed).unwrap();
+    let rejected = invoke_with_context(
+        &mut ws,
+        "execute-observe",
+        "capability::execute",
+        json!({
+            "operation": "observe",
+            "input": "primitive integration observation"
+        }),
+        Some(json!({
+            "sessionId": session_id,
+        })),
+    )
+    .await;
     assert_eq!(
-        result.details.as_ref().unwrap()["primitiveOperation"],
-        "observe"
+        rejected["ok"], true,
+        "engine invoke wrapper failed: {rejected}"
     );
+    let child_error = rejected
+        .pointer("/result/child/error/details/message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     assert!(
-        serde_json::to_string(&result.content)
-            .unwrap()
-            .contains("primitive integration observation")
+        child_error.contains("trusted agent or system runtime context"),
+        "public capability::execute must fail closed, got: {rejected}"
     );
 
     runtime.server.shutdown().shutdown();

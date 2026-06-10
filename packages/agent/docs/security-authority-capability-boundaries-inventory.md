@@ -1,6 +1,6 @@
 # Security Authority Capability Boundaries Inventory
 
-Status: SACB-1 `passed_after_fix`; 603 security boundary rows inventoried and
+Status: SACB campaign `complete`; 607 security boundary rows inventoried and
 classified across tracked Rust, Swift, scripts, workflows, docs, and tests.
 
 Machine-readable inventory:
@@ -39,6 +39,7 @@ surfaces where the word "token" describes model usage or pricing rather than
 auth/custody. Any future tracked security-marker file must be added to the TSV
 or the SACB invariant target fails.
 
-## Open Loops
+## Closeout Notes
 
-- SACB-10: run final closeout and remove stale active-state wording.
+- SACB-10 closed the campaign after final static gates, broad verification, and
+  README/doc state cleanup.

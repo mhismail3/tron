@@ -42,13 +42,13 @@ through `packages/agent/src/transport/runtime/setup.rs`. Individual
 |---|---:|
 | `adapter` | 134 |
 | `composition-root` | 11 |
-| `contract` | 90 |
-| `facade` | 86 |
+| `contract` | 95 |
+| `facade` | 87 |
 | `generated-wire-dto` | 22 |
-| `implementation` | 469 |
-| `test-support` | 119 |
+| `implementation` | 476 |
+| `test-support` | 120 |
 
-Total tracked source rows: **931**.
+Total tracked source rows: **945**.
 
 ## Verification
 

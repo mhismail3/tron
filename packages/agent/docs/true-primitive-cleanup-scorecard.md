@@ -64,7 +64,6 @@ current over-budget files. Rows TPC-2 through TPC-8 own the splits or deletions.
 | 862 | 750 | `packages/agent/src/engine/durability/ledger/mod.rs` | TPC-2 |
 | 861 | 750 | `packages/agent/src/engine/durability/queue/mod.rs` | TPC-2 |
 | 855 | 750 | `packages/agent/src/engine/runtime/external_workers/mod.rs` | TPC-4 |
-| 839 | 800 | `packages/agent/src/engine/tests/runtime/external_worker.rs` | TPC-4 |
 | 836 | 750 | `packages/agent/src/domains/model/providers/openai/message_converter.rs` | TPC-5 |
 | 832 | 800 | `packages/agent/src/app/bootstrap/tests.rs` | TPC-9 |
 | 830 | 750 | `packages/agent/src/engine/primitives/mod.rs` | TPC-3 |

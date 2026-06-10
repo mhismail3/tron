@@ -38,6 +38,7 @@ packages/agent/src/domains/agent/contract.rs	rust	contract	rust:domain-agent	may
 packages/agent/src/domains/agent/deps.rs	rust	contract	rust:domain-agent	may be shared across the owning boundary without concrete implementation imports
 packages/agent/src/domains/agent/handlers.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
 packages/agent/src/domains/agent/loop/compaction_handler/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/agent/loop/compaction_handler/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
@@ -463,6 +464,7 @@ packages/agent/src/engine/tests/kernel/ids_types.rs	rust	test-support	rust:engin
 packages/agent/src/engine/tests/kernel/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/engine/tests/mod.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/engine/tests/runtime/external_worker.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
+packages/agent/src/engine/tests/runtime/external_worker_delivery.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/engine/tests/runtime/external_worker_helpers.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/engine/tests/runtime/external_worker_protocol.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/engine/tests/runtime/external_worker_soak.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it

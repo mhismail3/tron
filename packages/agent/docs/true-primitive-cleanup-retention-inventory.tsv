@@ -64,6 +64,7 @@ packages/agent/src/domains/agent/contract.rs	implementation	agent_runtime	TPC-6	
 packages/agent/src/domains/agent/deps.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/handlers.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs	implementation	agent_runtime	SACB-10	capability-runtime grant derivation helper split from executor root
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/compaction_handler/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/compaction_handler/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -490,6 +491,7 @@ packages/agent/src/engine/tests/kernel/ids_types.rs	test	test_harness	TPC-10	con
 packages/agent/src/engine/tests/kernel/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/external_worker.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/src/engine/tests/runtime/external_worker_delivery.rs	test	test_harness	SACB-10	concern-owned external-worker delivery verification split from the broad runtime test bucket
 packages/agent/src/engine/tests/runtime/external_worker_helpers.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/external_worker_protocol.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/runtime/external_worker_soak.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -622,6 +624,7 @@ packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs	test	test_
 packages/agent/tests/primitive_engine_teardown/support.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/primitive_trace_execution.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
+packages/agent/tests/primitive_trace_execution_support/mod.rs	test	test_harness	SACB-10	shared primitive trace execution fixture split from the integration test target
 packages/agent/tests/true_primitive_cleanup/engine_durability.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/external_workers.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/tests/true_primitive_cleanup/final_closeout.rs	test	test_harness	TPC-11	static gate coverage for final closeout verification evidence

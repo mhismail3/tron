@@ -78,6 +78,7 @@ packages/agent/src/domains/agent/contract.rs	retain	rust agent	PCC-10/AHA-9	Curr
 packages/agent/src/domains/agent/deps.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/handlers.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs	retain	rust agent	SACB-10	Current capability-runtime grant helper split retained after SACB-10 closeout.
 packages/agent/src/domains/agent/loop/capability_invocation_executor/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/compaction_handler/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/compaction_handler/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -480,6 +481,7 @@ packages/agent/src/engine/tests/kernel/ids_types.rs	retain	rust agent	PCC-10/AHA
 packages/agent/src/engine/tests/kernel/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/runtime/external_worker.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/engine/tests/runtime/external_worker_delivery.rs	retain	rust agent	SACB-10	Current external worker delivery test split retained after SACB-10 closeout.
 packages/agent/src/engine/tests/runtime/external_worker_soak.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/runtime/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/runtime/restart_chaos.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -602,6 +604,7 @@ packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs	retain	rus
 packages/agent/tests/primitive_engine_teardown/support.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/tests/primitive_engine_teardown_plan_invariants.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/tests/primitive_trace_execution.rs	retain	rust test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/tests/primitive_trace_execution_support/mod.rs	retain	rust test	SACB-10	Current primitive trace execution support split retained after SACB-10 closeout.
 packages/ios-app/Configuration/Base.xcconfig	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Configuration/Beta.xcconfig	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Configuration/Prod.xcconfig	retain	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.

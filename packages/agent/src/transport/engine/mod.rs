@@ -93,7 +93,6 @@ pub fn build_engine_transport_request(
     let mut causal_context = transport_causal_context_for_method(
         spec.operation_key.as_str(),
         domain_authority_scope,
-        &input.params_payload,
         &input.context,
     )?;
     if spec.operation_key.as_str() == "promote" {
@@ -173,10 +172,9 @@ pub async fn dispatch_engine_transport_request(
 fn transport_causal_context_for_method(
     method: &str,
     scope: &str,
-    payload: &Value,
     context: &EngineTransportContext,
 ) -> Result<CausalContext, CapabilityError> {
-    let (actor_kind, actor_id) = transport_actor_for_method(method, payload);
+    let (actor_kind, actor_id) = transport_actor_for_method(method);
     let trace_id = match context.trace_id.as_deref() {
         Some(id) if !id.trim().is_empty() => {
             TraceId::new(id).map_err(engine_error_to_capability_error)?
@@ -217,14 +215,9 @@ fn transport_causal_context_for_method(
     Ok(causal_context)
 }
 
-fn transport_actor_for_method(method: &str, payload: &Value) -> (ActorKind, &'static str) {
+fn transport_actor_for_method(method: &str) -> (ActorKind, &'static str) {
     if method == "promote" {
         return (ActorKind::User, "engine-user");
-    }
-    if method == "invoke"
-        && extract_string(payload, "functionId").as_deref() == Some("capability::execute")
-    {
-        return (ActorKind::Agent, "engine-agent");
     }
     (ActorKind::Client, "engine-client")
 }
@@ -340,11 +333,11 @@ mod tests {
     }
 
     #[test]
-    fn capability_execute_invoke_uses_agent_actor() {
+    fn capability_execute_invoke_remains_public_client_actor() {
         let envelope = build_invoke("capability::execute");
 
-        assert_eq!(envelope.causal_context.actor_kind, ActorKind::Agent);
-        assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-agent");
+        assert_eq!(envelope.causal_context.actor_kind, ActorKind::Client);
+        assert_eq!(envelope.causal_context.actor_id.as_str(), "engine-client");
     }
 
     #[test]

@@ -20,8 +20,8 @@ use crate::domains::agent::r#loop::primitive_surface::{
 };
 use crate::domains::agent::r#loop::types::CapabilityInvocationExecutionResult;
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, FunctionId, Invocation,
-    InvocationId, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+    ActorId, ActorKind, CausalContext, EngineHostHandle, Invocation, InvocationId,
+    RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
     RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
     RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
 };
@@ -35,9 +35,13 @@ use crate::shared::server::failure::{
     FailureCategory, FailureEnvelope, FailureOrigin, RUNTIME_CANCELLED,
 };
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, instrument};
+
+mod grant;
+use grant::{derive_capability_runtime_grant, model_capability_invocation_idempotency_key};
+#[cfg(test)]
+use grant::{sha256_hex, stable_capability_invocation_material};
 
 fn duration_ceil_ms(d: Duration) -> u64 {
     let micros = d.as_micros();
@@ -579,189 +583,6 @@ async fn execute_capability_primitive_via_engine(
             })),
         )
     })
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn derive_capability_runtime_grant(
-    engine_host: &EngineHostHandle,
-    actor_id: &ActorId,
-    target_function_id: &FunctionId,
-    target_authority_scopes: &[String],
-    session_id: &str,
-    workspace_id: Option<&str>,
-    working_directory: &str,
-    trace_id: &TraceId,
-    invocation_id: &str,
-    model_primitive_name: &str,
-    turn: i64,
-    run_id: Option<&str>,
-) -> Result<AuthorityGrantId, FailureEnvelope> {
-    let mut allowed_capabilities = vec![
-        target_function_id.as_str().to_owned(),
-        "state::get".to_owned(),
-        "state::set".to_owned(),
-        "state::list".to_owned(),
-    ];
-    allowed_capabilities.sort();
-    allowed_capabilities.dedup();
-    let mut allowed_authority_scopes = target_authority_scopes.to_vec();
-    allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
-    allowed_authority_scopes.sort();
-    allowed_authority_scopes.dedup();
-    let idempotency_material = json!({
-        "version": 1,
-        "sessionId": session_id,
-        "workspaceId": workspace_id,
-        "workingDirectory": working_directory,
-        "actorId": actor_id.as_str(),
-        "targetFunctionId": target_function_id.as_str(),
-        "targetAuthorityScopes": target_authority_scopes,
-        "providerInvocationId": invocation_id,
-        "modelPrimitiveName": model_primitive_name,
-        "turn": turn,
-        "runId": run_id
-    });
-    let idempotency_key = format!(
-        "capability-runtime-grant:v1:{}",
-        sha256_hex(
-            serde_json::to_string(&idempotency_material)
-                .unwrap_or_else(|_| "{}".to_owned())
-                .as_bytes()
-        )
-    );
-    let derive_context = CausalContext::new(
-        ActorId::new("system:capability-runtime")
-            .map_err(|error| engine_error_to_failure(&error))?,
-        ActorKind::System,
-        AuthorityGrantId::new("grant").map_err(|error| engine_error_to_failure(&error))?,
-        trace_id.clone(),
-    )
-    .with_scope("grant.write")
-    .with_session_id(session_id.to_owned())
-    .with_idempotency_key(idempotency_key);
-    let payload = json!({
-        "parentGrantId": "agent-capability-runtime",
-        "subjectActorId": actor_id.as_str(),
-        "allowedCapabilities": allowed_capabilities,
-        "allowedNamespaces": ["__no_namespace_authority__"],
-        "allowedAuthorityScopes": allowed_authority_scopes,
-        "allowedResourceKinds": ["agent_state"],
-        "resourceSelectors": ["kind:agent_state"],
-        "fileRoots": [working_directory],
-        "networkPolicy": "none",
-        "maxRisk": "medium",
-        "budget": {
-            "remainingInvocations": 2,
-            "remainingProcessMs": 120000
-        },
-        "canDelegate": false,
-        "provenance": {
-            "source": "agent.capability_runtime",
-            "sessionId": session_id,
-            "workspaceId": workspace_id,
-            "targetFunctionId": target_function_id.as_str(),
-            "providerInvocationId": invocation_id,
-            "modelPrimitiveName": model_primitive_name,
-            "turn": turn,
-            "runId": run_id,
-            "workingDirectory": working_directory
-        }
-    });
-    let result = engine_host
-        .invoke(Invocation::new_sync(
-            FunctionId::new("grant::derive").map_err(|error| engine_error_to_failure(&error))?,
-            payload,
-            derive_context,
-        ))
-        .await;
-    if let Some(error) = result.error {
-        return Err(engine_error_to_failure(&error));
-    }
-    let value = result.value.ok_or_else(|| {
-        FailureEnvelope::new(
-            ENGINE_POLICY_VIOLATION,
-            FailureCategory::Engine,
-            "Capability runtime grant derivation returned no value",
-            false,
-            false,
-            FailureOrigin::Engine,
-        )
-    })?;
-    let grant_id = value
-        .get("grant")
-        .and_then(|grant| grant.get("grantId"))
-        .and_then(Value::as_str)
-        .ok_or_else(|| {
-            FailureEnvelope::new(
-                CAPABILITY_RESULT_INVALID,
-                FailureCategory::Parse,
-                "Capability runtime grant derivation returned an invalid grant payload",
-                false,
-                false,
-                FailureOrigin::Engine,
-            )
-        })?;
-    AuthorityGrantId::new(grant_id.to_owned()).map_err(|error| engine_error_to_failure(&error))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn stable_capability_invocation_material(
-    run_id: Option<&str>,
-    session_id: &str,
-    turn: i64,
-    invocation_id: &str,
-    model_primitive_name: &str,
-    working_directory: &str,
-    workspace_id: Option<&str>,
-    effective_args: &Value,
-) -> String {
-    let payload = json!({
-        "runId": run_id,
-        "sessionId": session_id,
-        "turn": turn,
-        "providerCallId": invocation_id,
-        "modelPrimitiveName": model_primitive_name,
-        "workingDirectory": working_directory,
-        "workspaceId": workspace_id,
-        "arguments": effective_args
-    });
-    serde_json::to_string(&payload).unwrap_or_else(|_| {
-        format!(
-            "{run_id:?}:{session_id}:{turn}:{invocation_id}:{model_primitive_name}:{working_directory}:{workspace_id:?}:{effective_args}",
-        )
-    })
-}
-
-fn model_capability_invocation_idempotency_key(
-    run_id: Option<&str>,
-    session_id: &str,
-    turn: i64,
-    invocation_id: &str,
-    model_primitive_name: &str,
-    working_directory: &str,
-    workspace_id: Option<&str>,
-    effective_args: &Value,
-) -> String {
-    let material = stable_capability_invocation_material(
-        run_id,
-        session_id,
-        turn,
-        invocation_id,
-        model_primitive_name,
-        working_directory,
-        workspace_id,
-        effective_args,
-    );
-    format!(
-        "model-capability-invocation:v1:{}",
-        sha256_hex(material.as_bytes())
-    )
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    format!("{:x}", hasher.finalize())
 }
 
 #[cfg(test)]

@@ -12,6 +12,7 @@ packages/agent/src/domains/agent/loop/turn_runner/mod.rs	Rust	turn_failure_emitt
 packages/agent/src/domains/agent/loop/stream_processor/mod.rs	Rust	stream_failure_mapping	agent_runtime	model_response_errors_preserve_failure_envelope	FSC-4,FSC-7,FSC-1
 packages/agent/src/domains/agent/loop/stream_state.rs	Rust	stream_event_error_mapping	agent_runtime	defensive_stream_error_branch_uses_stable_internal_message	FSC-4,FSC-7,FSC-1
 packages/agent/src/domains/agent/loop/capability_invocation_executor/mod.rs	Rust	capability_invocation_errors	agent_runtime	uses_failure_result_with_details_failure	FSC-5
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs	Rust	capability_runtime_grant_errors	agent_runtime	grant_derivation_failures_map_to_failure_envelope	FSC-5
 packages/agent/src/shared/protocol/model_capabilities.rs	Rust	capability_result_contract	shared_protocol	failure_result_embeds_canonical_envelope	FSC-5,FSC-8
 packages/agent/src/shared/protocol/events/tron/catalog.rs	Rust	live_tron_error_events	shared_protocol	canonical_fields_present_but_optional_for_historical_rows	FSC-4,FSC-8
 packages/agent/src/domains/session/event_store/types/payloads/error.rs	Rust	durable_error_payloads	event_store	accepts_canonical_failure_fields_and_details_failure	FSC-4,FSC-9
