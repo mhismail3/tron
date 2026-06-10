@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **79/100**
+Current score: **93/100**
 
 Scorecard:
 [`state-ownership-lifecycle-scorecard.md`](state-ownership-lifecycle-scorecard.md)
@@ -17,14 +17,14 @@ and
 | Row | Status | Evidence | Verification | Open loops | Checkpoint |
 |---|---|---|---|---|---|
 | SOL-0 | passed_after_fix | Added the campaign scorecard, evidence manifest, inventory scaffolding, machine-readable TSV header, invariant target, and README living-doc links. The invariant target is intentionally red for later rows until inventory coverage and closeout are complete. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` expected to fail on final-state gates at SOL-0. | SOL-1 through SOL-10 remain open by design. | SOL-0 campaign harness checkpoint |
-| SOL-1 | passed_after_fix | Generated `state-ownership-lifecycle-inventory.tsv` with an initial 476 rows covering every tracked production Rust/Swift file containing SOL lifecycle markers plus README, SOL docs, scripts, and CI workflow state surfaces. Owner pass removed all `unclassified_owner` rows. SOL-4 added two narrower runtime service rows and SOL-6 added the session lifecycle module contract row, bringing the active TSV to 479 rows. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory -- --nocapture` -> exit 0, 3 passed. | Later rows refine lifecycle proof for engine substrate, session/event store, settings/auth, iOS local state, and observability. | SOL-1 state inventory checkpoint |
+| SOL-1 | passed_after_fix | Generated `state-ownership-lifecycle-inventory.tsv` with an initial 476 rows covering every tracked production Rust/Swift file containing SOL lifecycle markers plus README, SOL docs, scripts, and CI workflow state surfaces. Owner pass removed all `unclassified_owner` rows. SOL-4 added two narrower runtime service rows, SOL-6 added the session lifecycle module contract row, and SOL-8 added the iOS architecture state-ownership doc row, bringing the active TSV to 480 rows. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory -- --nocapture` -> exit 0, 3 passed. | Later rows refine lifecycle proof for engine substrate, session/event store, settings/auth, iOS local state, and observability. | SOL-1 state inventory checkpoint |
 | SOL-2 | passed_after_fix | Added and passed owner-scoped truth taxonomy guards over the TSV: allowed classes are documented; `unclassified_owner` is rejected; iOS/script/CI/docs rows cannot claim canonical server truth; canonical truth is restricted to session event-store, settings profile, and shared profile owners; secret rows are restricted to auth/Keychain/token owners; local device preferences remain iOS-local. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_truth_taxonomy -- --nocapture` -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory_rows_are_structured_and_classified -- --nocapture` -> exit 0. | Later rows prove lifecycle behavior behind each classified owner. | SOL-2 truth taxonomy checkpoint |
 | SOL-3 | passed_after_fix | Source-backed bootstrap lifecycle proof now covers directories, bearer-token materialization, canonical DB policy, generation archive, process flock, integrity check, migrations, shared storage schema, logging, startup retention/size-budget maintenance, engine host durable catalog hydration, domain/worker registration, crash-journal recovery, background task registration, bind, graceful shutdown, log flush, and final checkpoint. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_server_bootstrap_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation targets listed in the SOL-3 evidence section passed. | Later rows prove steady-state runtime tasks, engine substrate, sessions, settings/auth, iOS state, and observability. | SOL-3 server bootstrap lifecycle checkpoint |
 | SOL-4 | passed_after_fix | Deleted dead `SessionManager::plan_mode` state and added source-backed runtime lifecycle proof for active-session cache flags, run/retain RAII guards, sequence/compaction cleanup, invocation abort guards, capability pending cleanup, shutdown task registry, blocking supervisor drain, runtime service cancellation, and app bootstrap task registration. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_runtime_task_memory_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-4 evidence passed. | No SOL-4 open loops; later rows prove durable engine substrate, sessions, settings/auth, iOS local state, observability, and final closeout. | SOL-4 runtime task and memory lifecycle checkpoint |
 | SOL-5 | passed_after_fix | Added source-backed durable substrate proof for the engine ledger, idempotency rows, queues, streams, resource versions, grants, leases, audit-only compensation records, state store revisions, payload refs, retention, checkpoint, export, and SQLite/in-memory primitive store bundles. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_engine_durable_substrate_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-5 evidence passed. | No SOL-5 open loops; later rows prove session/event-store lifecycle, settings/auth/secrets, iOS local/projection state, observability, and final closeout. | SOL-5 engine durable substrate lifecycle checkpoint |
 | SOL-6 | passed_after_fix | Removed dead single-event physical deletion and added source-backed session/event-store lifecycle proof for create, resume, append, fork, end, archive, unarchive, delete, query, reconstruction, export, and session-scoped cleanup. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_session_event_store_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-6 evidence passed. | No SOL-6 open loops; later rows prove settings/auth/secrets, iOS projection/local state, observability, and final closeout. | SOL-6 session event-store lifecycle checkpoint |
 | SOL-7 | passed_after_fix | Fixed Google credential refresh so persisted tokens are updated only after the refresh path acquires the process-local refresh mutex, auth file lock, and fresh disk snapshot; tightened all OAuth refresh paths so persistence failures fail refresh instead of falling back to stale durable truth; added source-backed proof for sparse settings writes/rollback, profile runtime snapshots, auth.json materialization, bearer-token lifecycle, OAuth pending-flow TTL, canonical auth write boundaries, provider refresh persistence, and ephemeral model-provider auth copies. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_settings_auth_secrets_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-7 evidence passed. | No SOL-7 open loops; later rows prove iOS projection/local state, observability/recovery, and final closeout. | SOL-7 settings auth secrets checkpoint |
-| SOL-8 | pending | Not started. | Not run. | iOS projection/local state lifecycle proof remains. | pending |
+| SOL-8 | passed_after_fix | Removed production temporary event-database and MetricKit temporary-directory paths; added source-backed proof for iOS projection/local owners, including Documents-backed event cache, server-sync reconstruction, ACK-only stream cursors, connection task cleanup, settings snapshots, paired-server preferences, Keychain tokens, drafts/history/share handoff, bounded diagnostics, SourceGuard/TPC regression gates, and architecture docs. | Focused Rust SOL gates, TPC guard, XcodeGen, and the combined iOS SOL-8 target pass; see SOL-8 verification log below for exact commands. | No SOL-8 open loops; later rows prove observability/recovery and final closeout. | SOL-8 iOS projection/local state checkpoint |
 | SOL-9 | pending | Not started. | Not run. | Observability/recovery evidence remains. | pending |
 | SOL-10 | pending | Not started. | Not run. | Final verification and clean worktree proof remain. | pending |
 
@@ -55,10 +55,11 @@ Initial red findings captured in the scorecard:
 
 Inventory coverage:
 
-- Total TSV rows: 479. SOL-1 generated 476 initial rows; SOL-4 added explicit
+- Total TSV rows: 480. SOL-1 generated 476 initial rows; SOL-4 added explicit
   runtime-service rows for queue-drainer and worker-heartbeat cancellation
-  ownership, and SOL-6 added the session lifecycle module contract row.
-- State class counts: `ephemeral_runtime` 262, `projection_cache` 72,
+  ownership, SOL-6 added the session lifecycle module contract row, and SOL-8
+  added the iOS architecture state-ownership doc row.
+- State class counts: `ephemeral_runtime` 262, `projection_cache` 73,
   `durable_substrate` 68, `canonical_truth` 41, `secret` 16,
   `diagnostic_buffer` 11, `local_device_preference` 9.
 - Required non-Rust/Swift surfaces are covered: `README.md`,
@@ -246,6 +247,57 @@ Settings/auth/secrets lifecycle proof:
   mutex, auth-file lock, disk re-read, persistence-error propagation, and
   model-provider ephemeral-token boundary.
 
+## SOL-8 Evidence
+
+iOS projection and local-state lifecycle proof:
+
+- `EventDatabase` now has one production substrate: the Documents-backed
+  `.tron/database/prod.db` projection cache. The production composition root
+  fails at the owner boundary if Documents is unavailable instead of silently
+  switching to another database path. Tests and diagnostics harnesses use an
+  explicit `init(databasePath:)` isolated-store initializer.
+- The old production temporary event database mode, storage-mode diagnostics
+  field, and MetricKit temporary-directory path were removed. SourceGuard and
+  the True Primitive Cleanup static gate now reject those removed substrate
+  markers.
+- `EventStoreManager.refreshSessionList` reconstructs local session rows from
+  the server session list, preserves local-only projection fields such as
+  `rootEventId`/`headEventId`, tags rows with the active server origin, and
+  removes stale local sessions/events that the active server no longer reports.
+- `SessionSynchronizer` owns session event sync cursors, fetches server events
+  after the last synced event id, writes the sync state after insertion, clears
+  and refetches rows for full sync, and fetches fork ancestors without copying
+  source-session truth into a new canonical client owner.
+- Engine stream cursors are keyed by server origin, topic, optional
+  session/workspace, and filter hash. `EngineClient` stores them for ACK
+  coalescing and diagnostics only; session history is reconstructed from server
+  APIs, not replayed from cursor storage.
+- `EngineConnection`, `EngineClient`, and `ConnectionManager` have explicit
+  task cleanup for receive loops, heartbeat loops, open timeouts, reconnect
+  tasks, request timeouts, stream ACK tasks, connection observations, and
+  reconnect hooks.
+- `SettingsState` is a render snapshot of server-authoritative settings. It
+  loads via `settings::get`, resets via `settings::reset`, clears snapshots on
+  active-server change, and rolls failed edits back to the last loaded server
+  snapshot.
+- Pairing and secrets are separated: `PairedServerStore` owns the device-local
+  paired-server list and active selection in `UserDefaults`, while
+  `PairedServerTokenStore` owns per-server bearer tokens in Keychain and
+  removes them by paired-server id.
+- Drafts, input history, and pending share content are local workflow state.
+  Draft saves are debounced and flushed/cleared by session lifecycle; input
+  history is bounded to 100 entries and now removes its `UserDefaults` key on
+  clear; pending share content is App Group handoff state with save/load/clear
+  boundaries.
+- `MetricKitDiagnosticsStore` stores bounded Application Support diagnostic
+  payloads behind an `NSLock`, prunes by age, file count, and total bytes, and
+  exposes bounded diagnostics bundle snapshots without raw event payloads or
+  file paths.
+- `packages/ios-app/docs/architecture.md` now has a State Ownership section
+  documenting that iOS owns projections, local device preferences, Keychain
+  secrets, and diagnostic buffers, not canonical server truth. The SOL
+  inventory includes the doc-owned state claim as a SOL-8 row.
+
 ## Verification Log
 
 - SOL-0 harness proof:
@@ -349,6 +401,29 @@ Settings/auth/secrets lifecycle proof:
 - SOL-7 current full-target status:
   `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
   -> exit 101, with 16 passing gates and 1 expected remaining failure:
+  `final_closeout_is_complete`.
+- SOL-8 static source-backed verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants ios_local_state_is_documented_as_projection_or_local_state -- --nocapture`
+  -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_ios_projection_local_state_lifecycle_is_source_backed -- --nocapture`
+  -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants ios_engine_protocol_roots_are_split_and_event_database_has_one_substrate -- --nocapture`
+  -> exit 0.
+- SOL-8 iOS project and implementation verification:
+  `cd packages/ios-app && xcodegen generate` -> exit 0.
+  The first combined iOS test run exposed a stale `SettingsStateTests`
+  hardcoded-home fixture and an exact near-budget row drift for
+  `EventDatabaseTests.swift`; both were fixed before final verification.
+  Final command:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EventDatabaseTests -only-testing:TronMobileTests/DraftRepositoryTests -only-testing:TronMobileTests/DiagnosticsBundleBuilderTests -only-testing:TronMobileTests/MetricKitDiagnosticsStoreTests -only-testing:TronMobileTests/InputHistoryStoreTests -only-testing:TronMobileTests/SourceGuardTests -only-testing:TronMobileTests/CachedSessionTests -only-testing:TronMobileTests/SyncStateTests -only-testing:TronMobileTests/SessionEventTests -only-testing:TronMobileTests/EngineConnectionReconnectTests -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/PairedServerStoreTests -only-testing:TronMobileTests/PairedServerTokenStoreTests -only-testing:TronMobileTests/DraftStoreTests`
+  -> exit 0, 94 XCTest tests and 68 Swift Testing tests passed.
+- SOL-8 formatting, whitespace, and residue verification:
+  `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  -> exit 0; `git diff --check` -> exit 0; removed-substrate marker scan
+  for `temporaryCache`, `temporaryCachePath`, `EventDatabaseStorageMode`,
+  `eventDatabaseStorageMode`, and the old temporary event DB path returned only
+  negative-test/static-guard string references.
+- SOL-8 current full-target status:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
+  -> exit 101, with 17 passing gates and 1 expected remaining failure:
   `final_closeout_is_complete`.
 
 ## Residual Risk Log

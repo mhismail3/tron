@@ -1,17 +1,6 @@
 import Foundation
 import SQLite3
 
-// MARK: - Event Database
-
-enum EventDatabaseStorageMode: String, Equatable, Sendable {
-    case primaryDocuments
-    case temporaryCache
-
-    var isTemporaryCache: Bool {
-        self == .temporaryCache
-    }
-}
-
 // NOTE: Uses global `logger` from TronLogger.swift (TronLogger.shared)
 // Do NOT define a local logger property - it would shadow the global one
 
@@ -23,7 +12,6 @@ final class EventDatabase: DatabaseTransport {
 
     private let dbActor: DatabaseActor
     let dbPath: String
-    let storageMode: EventDatabaseStorageMode
 
     private(set) var isInitialized = false
 
@@ -55,18 +43,16 @@ final class EventDatabase: DatabaseTransport {
         try? fileManager.createDirectory(at: dbDir, withIntermediateDirectories: true)
 
         self.dbPath = dbDir.appendingPathComponent("prod.db").path
-        self.storageMode = .primaryDocuments
         self.dbActor = DatabaseActor(dbPath: self.dbPath)
     }
 
-    /// Temporary-cache initializer for when Documents is unavailable (e.g., device restore).
-    /// Data in this path may be lost when the temp directory is cleaned.
-    init(temporaryCachePath: String) {
-        let dir = (temporaryCachePath as NSString).deletingLastPathComponent
+    /// Explicit database-path initializer for isolated tests and diagnostics harnesses.
+    /// Production composition uses the Documents-backed initializer above.
+    init(databasePath: String) {
+        let dir = (databasePath as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        self.dbPath = temporaryCachePath
-        self.storageMode = .temporaryCache
-        self.dbActor = DatabaseActor(dbPath: temporaryCachePath)
+        self.dbPath = databasePath
+        self.dbActor = DatabaseActor(dbPath: databasePath)
     }
 
     func initialize() async throws {
@@ -75,15 +61,7 @@ final class EventDatabase: DatabaseTransport {
         try await dbActor.open()
 
         isInitialized = true
-        switch storageMode {
-        case .primaryDocuments:
-            logger.info("Event database initialized at \(self.dbPath)", category: .session)
-        case .temporaryCache:
-            logger.warning(
-                "Event database initialized in temporary cache mode at \(self.dbPath); local projections may be lost and server substrate remains authoritative",
-                category: .session
-            )
-        }
+        logger.info("Event database initialized at \(self.dbPath)", category: .session)
     }
 
     func close() async {

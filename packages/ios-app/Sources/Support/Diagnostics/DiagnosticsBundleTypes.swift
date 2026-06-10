@@ -43,7 +43,6 @@ struct DiagnosticsEnvironment: Encodable, Sendable {
     let osVersion: String
     let deviceModelClass: String
     let connectionState: String
-    let eventDatabaseStorageMode: String
     let activeServer: DiagnosticsActiveServer?
 }
 

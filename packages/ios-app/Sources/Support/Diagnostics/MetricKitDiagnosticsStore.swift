@@ -60,8 +60,7 @@ final class MetricKitDiagnosticsStore: NSObject, MXMetricManagerSubscriber, @unc
                 .appendingPathComponent("Tron", isDirectory: true)
                 .appendingPathComponent("MetricKitDiagnostics", isDirectory: true)
         } else {
-            self.directoryURL = URL(fileURLWithPath: NSTemporaryDirectory())
-                .appendingPathComponent("MetricKitDiagnostics", isDirectory: true)
+            preconditionFailure("Application Support directory unavailable; cannot initialize MetricKit diagnostics store")
         }
         super.init()
     }

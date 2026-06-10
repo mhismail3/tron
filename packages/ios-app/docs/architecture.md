@@ -129,6 +129,31 @@ Replay exports remain server-owned: `session::replay_manifest` and the
 not live or persisted iOS events. The only replay-specific persisted event iOS
 decodes is the metadata-only `model.provider_request` audit event.
 
+## State Ownership
+
+The iOS app owns no canonical server truth. `EventDatabase` is a Documents-backed SQLite projection cache
+for session lists, delivered events, sync state, and draft metadata. The
+production composition root does not switch to a temporary event database when
+Documents is unavailable; startup fails at the composition boundary instead of silently changing the projection substrate.
+Tests and diagnostics harnesses may create explicit isolated database paths, but
+those paths are not production recovery modes.
+
+`EventStoreManager` and `SessionSynchronizer` rebuild local session/event
+projections from server session lists and event-sync APIs. Server-missing
+sessions are removed from the local cache, full session sync clears and
+refetches event rows, and fork ancestor rows remain source-session history
+rather than copied client truth. Engine stream cursors are stored per server
+origin/topic/filter for ACK coalescing and diagnostics only; session history is
+reconstructed through server APIs, not replayed from cursor storage.
+
+Server settings shown in the iOS settings UI are snapshots from
+`settings::get`/`settings::reset`; local state exists only to render the active
+server and roll back a failed in-flight edit to the last loaded snapshot.
+Pairing is device-local `UserDefaults` state, bearer tokens are per-server
+Keychain secrets, drafts and input history are local workflow state, pending
+share content is App Group handoff state cleared after consumption, and
+MetricKit payloads are bounded Application Support diagnostics buffers.
+
 ## Event Handling
 
 Live events use self-dispatching plugins registered in

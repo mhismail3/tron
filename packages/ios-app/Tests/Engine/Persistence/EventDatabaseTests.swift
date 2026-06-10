@@ -87,20 +87,16 @@ final class EventDatabaseTests: XCTestCase {
 
     // MARK: - Event Operations
 
-    func testStorageModeDistinguishesPrimaryAndTemporaryCache() async throws {
-        XCTAssertEqual(database.storageMode, .primaryDocuments)
-        XCTAssertFalse(database.storageMode.isTemporaryCache)
-
-        let temporaryCacheURL = FileManager.default.temporaryDirectory
+    func testExplicitDatabasePathInitializesIsolatedStore() async throws {
+        let isolatedURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
             .appendingPathComponent("events.db")
-        let temporaryCache = EventDatabase(temporaryCachePath: temporaryCacheURL.path)
-        XCTAssertEqual(temporaryCache.storageMode, .temporaryCache)
-        XCTAssertTrue(temporaryCache.storageMode.isTemporaryCache)
+        let isolatedDatabase = EventDatabase(databasePath: isolatedURL.path)
+        XCTAssertEqual(isolatedDatabase.dbPath, isolatedURL.path)
 
-        try await temporaryCache.initialize()
-        await temporaryCache.close()
-        try? FileManager.default.removeItem(at: temporaryCacheURL.deletingLastPathComponent())
+        try await isolatedDatabase.initialize()
+        await isolatedDatabase.close()
+        try? FileManager.default.removeItem(at: isolatedURL.deletingLastPathComponent())
     }
 
     func testInsertAndGetEvent() async throws {

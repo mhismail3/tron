@@ -112,6 +112,6 @@ final class InputHistoryStore {
         history = []
         currentIndex = -1
         tempInput = ""
-        saveHistory()
+        UserDefaults.standard.removeObject(forKey: storageKey)
     }
 }

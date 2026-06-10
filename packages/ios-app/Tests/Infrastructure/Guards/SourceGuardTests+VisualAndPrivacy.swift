@@ -174,9 +174,13 @@ extension SourceGuardTests {
     }
 
 
-    @Test("Temporary event cache remains projection-only")
-    func testFallbackEventCacheRemainsProjectionOnly() throws {
+    @Test("Event database has one production substrate")
+    func testEventDatabaseHasOneProductionSubstrate() throws {
         let forbidden: [(String, String)] = [
+            ("temporary" + "Cache", "temporary event database mode"),
+            ("Event" + "Database" + "Storage" + "Mode", "database storage-mode branch"),
+            ("event" + "Database" + "." + "storage" + "Mode", "diagnostics storage-mode reporting"),
+            ("NSTemporary" + "Directory" + "()" + " + " + "\".tron/database/events.db\"", "temporary database path"),
             ("target" + "Function" + "Id", "generated UI target construction"),
             ("payload" + "Template", "generated UI payload construction"),
             ("required" + "Grant", "grant construction"),
@@ -194,16 +198,10 @@ extension SourceGuardTests {
 
         for url in checkedFiles {
             let content = try String(contentsOf: url, encoding: .utf8)
-            #expect(
-                content.contains("temporary" + "Cache")
-                    || content.contains("Event" + "Database" + "Storage" + "Mode")
-                    || content.contains("eventDatabase.storageMode"),
-                "\(url.path) should keep temporary cache mode explicit"
-            )
             for (needle, reason) in forbidden {
                 #expect(
                     !content.contains(needle),
-                    "\(url.path) couples temporary event cache mode to \(reason): `\(needle)`"
+                    "\(url.path) contains removed event-database substrate marker for \(reason): `\(needle)`"
                 )
             }
         }

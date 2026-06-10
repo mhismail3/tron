@@ -164,7 +164,6 @@ struct DiagnosticsBundleBuilder {
                 osVersion: ProcessInfo.processInfo.operatingSystemVersionString,
                 deviceModelClass: UIDevice.current.model,
                 connectionState: engineEndpoint.connectionStateName(),
-                eventDatabaseStorageMode: eventDatabase.storageMode.rawValue,
                 activeServer: DiagnosticsActiveServer(server: activeServer)
             ),
             logs: DiagnosticsLogs(ios: iosLogs, server: serverLogs),

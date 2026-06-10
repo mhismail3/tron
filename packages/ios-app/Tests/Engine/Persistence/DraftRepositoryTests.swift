@@ -245,7 +245,7 @@ final class DraftRepositoryTests: XCTestCase {
     private func withFreshDatabase<T>(_ body: (EventDatabase) async throws -> T) async throws -> T {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        let freshDatabase = EventDatabase(temporaryCachePath: directory.appendingPathComponent("drafts.db").path)
+        let freshDatabase = EventDatabase(databasePath: directory.appendingPathComponent("drafts.db").path)
         try await freshDatabase.initialize()
 
         do {

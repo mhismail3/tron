@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-7 `passed_after_fix`; 479 state-surface rows inventoried and classified.
+Status: SOL-8 `passed_after_fix`; 480 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -28,15 +28,15 @@ The machine-readable inventory now covers every tracked production Rust/Swift
 file containing one of the SOL lifecycle markers, plus the required script/CI
 and docs-owned state claim rows. SOL-1 generated 476 initial rows; SOL-4 added
 two narrower runtime-service rows for queue-drainer and worker-heartbeat
-cancellation ownership, and SOL-6 added the session lifecycle module contract
-row.
+cancellation ownership, SOL-6 added the session lifecycle module contract row,
+and SOL-8 added the iOS architecture state-ownership doc row.
 
 State class distribution:
 
 | State class | Rows |
 |---|---:|
 | `ephemeral_runtime` | 262 |
-| `projection_cache` | 72 |
+| `projection_cache` | 73 |
 | `durable_substrate` | 68 |
 | `canonical_truth` | 41 |
 | `secret` | 16 |
@@ -128,6 +128,21 @@ The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
 | Pending OAuth flows | `auth_credentials` | Pending flow entries live in the auth domain map, are pruned on begin, removed on completion, and expire after the explicit 600-second TTL before token exchange persistence. |
 | Provider OAuth refresh | `auth_credentials` | Anthropic, OpenAI, and Google refresh paths use a process-local refresh mutex, auth-file `flock`, disk re-read after lock acquisition, under-lock persistence with persistence-error propagation, and stale `invalid_grant` retry from the latest disk snapshot. Google was fixed in SOL-7 to match this protocol. |
 | Model provider auth copies | `model_domain` | Provider factory re-reads auth snapshots on provider creation; Google provider stores only an ephemeral in-memory token mutex for mid-session continuity and does not persist durable auth truth. |
+
+## SOL-8 iOS Projection And Local-State Lifecycle Proof
+
+| Surface | Owner | Lifecycle proof |
+|---|---|---|
+| iOS event projection DB | `ios_engine_persistence` / `support_composition` | `EventDatabase` has one production storage root: Documents `.tron/database/prod.db`. Production composition fails at the owner boundary when Documents is unavailable instead of switching substrates. Test and diagnostics harnesses use explicit isolated database paths. |
+| Session list projection | `ios_engine_persistence` | `EventStoreManager.refreshSessionList` fetches server sessions, merges or creates local `CachedSession` rows, tags them with server origin, removes server-missing local rows/events, reloads in-memory sessions, and seeds processing state from server data. |
+| Session event sync | `ios_engine_persistence` | `SessionSynchronizer` fetches events after the stored sync cursor, inserts server events, records the new cursor, clears and refetches rows on full sync, and fetches fork ancestors from the server without making iOS canonical truth. |
+| Stream cursors and ACKs | `ios_engine_persistence` / `engine_transport` | `EngineStreamCursorStore` keys cursors by origin/topic/session/workspace/filter hash. `EngineClient` stores cursors for ACK coalescing and diagnostics only; session history is reconstructed through server APIs. |
+| Connection runtime state | `engine_transport` | `EngineConnection`, `EngineClient`, and `ConnectionManager` cancel or clear receive, heartbeat, reconnect, open-timeout, request-timeout, stream-ACK, observation, and hook state on disconnect, cleanup, backgrounding, or deinit. |
+| Settings snapshot UI | `ios_session` | `SettingsState` loads and resets through server repositories, clears snapshots when the active server changes, overwrites every field from the active server, and rolls failed edits back to the last loaded snapshot. |
+| Paired servers and bearer tokens | `ios_pairing` / `ios_token_storage` | `PairedServerStore` owns the device-local paired-server list and active selection in `UserDefaults`; `PairedServerTokenStore` owns per-server bearer tokens in Keychain and removes them by paired-server id. |
+| Drafts, history, and share handoff | `ios_storage` / `ios_share` | Draft saves are debounced and flushed/cleared by session lifecycle; input history is bounded and removes its `UserDefaults` key on clear; pending share content is App Group handoff state with save/load/clear boundaries. |
+| MetricKit diagnostics | `ios_diagnostics` | MetricKit payloads live in Application Support behind an `NSLock`, are written atomically, and are pruned by age, file count, and total bytes before diagnostics bundle inclusion. |
+| iOS architecture docs | `project_docs` | `packages/ios-app/docs/architecture.md` records that iOS owns projections, local device preferences, Keychain secrets, and diagnostic buffers, never canonical server truth. |
 
 Non-source state surfaces covered by SOL-1:
 

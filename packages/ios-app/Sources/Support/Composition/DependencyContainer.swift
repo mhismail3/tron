@@ -38,10 +38,6 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Local SQLite event database - persists across server changes
     private(set) var eventDatabase: EventDatabase
 
-    var eventDatabaseStorageMode: EventDatabaseStorageMode {
-        eventDatabase.storageMode
-    }
-
     /// Deep link router - persists across server changes
     private(set) var deepLinkRouter: DeepLinkRouter
 
@@ -170,20 +166,14 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
 
     init() {
         // Initialize core services that persist across server changes.
-        // Uses the temp directory if Documents is unavailable (e.g., device migration).
-        let documentsURL: URL
-        if let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-            documentsURL = url
-        } else {
-            TronLogger.shared.error("Documents directory unavailable, using temporary directory", category: .session)
-            documentsURL = URL(fileURLWithPath: NSTemporaryDirectory())
+        guard let documentsURL = FileManager.default.urls(
+            for: .documentDirectory,
+            in: .userDomainMask
+        ).first else {
+            preconditionFailure("Documents directory unavailable; cannot initialize iOS local projection stores")
         }
-
-        let db: EventDatabase
-        if let primaryDB = EventDatabase() {
-            db = primaryDB
-        } else {
-            db = EventDatabase(temporaryCachePath: NSTemporaryDirectory() + ".tron/database/events.db")
+        guard let db = EventDatabase() else {
+            preconditionFailure("Documents directory unavailable; cannot initialize EventDatabase")
         }
         eventDatabase = db
         draftStore = DraftStore(eventDatabase: db, documentsURL: documentsURL)

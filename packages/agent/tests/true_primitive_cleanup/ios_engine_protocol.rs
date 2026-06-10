@@ -1,7 +1,7 @@
 use super::support::*;
 
 #[test]
-fn ios_engine_protocol_roots_are_split_and_cache_mode_explicit() {
+fn ios_engine_protocol_roots_are_split_and_event_database_has_one_substrate() {
     for (path, limit) in [
         (
             "packages/ios-app/Sources/UI/Onboarding/Steps/SetupSteps.swift",
@@ -61,8 +61,18 @@ fn ios_engine_protocol_roots_are_split_and_cache_mode_explicit() {
     let event_database =
         read_repo_file("packages/ios-app/Sources/Engine/Persistence/SQLite/EventDatabase.swift");
     assert!(
-        event_database.contains("storageMode = .temporaryCache")
-            && event_database.contains("server substrate remains authoritative"),
-        "temporary event cache mode must remain explicit and projection-only"
+        event_database.contains("init(databasePath: String)")
+            && !event_database.contains("temporaryCache")
+            && !event_database.contains("EventDatabaseStorageMode"),
+        "EventDatabase must expose only Documents-backed production storage plus explicit isolated test paths"
+    );
+
+    let container =
+        read_repo_file("packages/ios-app/Sources/Support/Composition/DependencyContainer.swift");
+    assert!(
+        container.contains("preconditionFailure(\"Documents directory unavailable")
+            && !container.contains("NSTemporaryDirectory() + \".tron/database/events.db\"")
+            && !container.contains("EventDatabase(temporaryCachePath:"),
+        "DependencyContainer must not silently switch the production event database substrate"
     );
 }
