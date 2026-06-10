@@ -159,15 +159,15 @@ Current living entry points:
   surfaces.
 - `packages/agent/docs/failure-semantics-inventory.tsv`: machine-readable FSC
   failure-surface inventory used by static gates.
-- `packages/agent/docs/state-ownership-lifecycle-scorecard.md`: active State
-  Ownership And Lifecycle campaign scorecard for proving every stateful server,
+- `packages/agent/docs/state-ownership-lifecycle-scorecard.md`: completed State
+  Ownership And Lifecycle campaign scorecard proving every stateful server,
   engine, iOS, script/CI, and docs-owned state claim has one owner, lifecycle
   class, mutation boundary, hydration path, retirement path, and concurrency or
   task guard.
 - `packages/agent/docs/state-ownership-lifecycle-evidence-manifest.md`:
   companion evidence manifest for SOL row checkpoints, verification logs, and
   residual lifecycle risks.
-- `packages/agent/docs/state-ownership-lifecycle-inventory.md`: active SOL
+- `packages/agent/docs/state-ownership-lifecycle-inventory.md`: completed SOL
   state-surface lifecycle taxonomy and inventory notes.
 - `packages/agent/docs/state-ownership-lifecycle-inventory.tsv`:
   machine-readable SOL state ownership inventory used by static gates.
@@ -230,16 +230,17 @@ Current living entry points:
 - `packages/agent/tests/failure_semantics_invariants.rs`: completed FSC scorecard,
   inventory, failure-surface, canonical-envelope, event-emission, transport,
   provider, iOS parity, replay, and closeout gates.
-- `packages/agent/tests/state_ownership_lifecycle_invariants.rs`: active SOL
+- `packages/agent/tests/state_ownership_lifecycle_invariants.rs`: completed SOL
   scorecard, inventory, stateful-marker coverage, runtime task lifecycle,
   iOS local-state classification, owner-private settings/auth writes, and final
-  closeout gates.
+  closeout gates, with focused modules under
+  `packages/agent/tests/state_ownership_lifecycle/`.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
-guidance is owned by the current README, package docs, source module docs, the
-completed HRA/AHA/PCC/TPC/TMB/DRC/FSC scorecards, and the active SOL scorecard.
+guidance is owned by the current README, package docs, source module docs, and
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or

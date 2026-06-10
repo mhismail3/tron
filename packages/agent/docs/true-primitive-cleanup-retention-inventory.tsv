@@ -1463,3 +1463,17 @@ packages/agent/src/shared/server/error_mapping/tests.rs	test	test_harness	FSC-10
 packages/agent/src/shared/server/failure.rs	implementation	server_errors	FSC-10	Canonical server failure envelope retained after final failure-semantics closeout.
 packages/agent/tests/failure_semantics_invariants.rs	test	test_harness	FSC-10	Failure Semantics Campaign invariant target retained after final closeout.
 packages/ios-app/Sources/Engine/Protocol/Core/FailurePayload.swift	implementation	ios_engine	FSC-10	Canonical Swift failure payload decoder retained after final failure-semantics closeout.
+packages/agent/docs/state-ownership-lifecycle-evidence-manifest.md	docs	docs/static gates	SOL-10	State Ownership Lifecycle evidence artifact retained after final closeout.
+packages/agent/docs/state-ownership-lifecycle-inventory.md	docs	docs/static gates	SOL-10	State Ownership Lifecycle inventory retained after final closeout.
+packages/agent/docs/state-ownership-lifecycle-inventory.tsv	docs	docs/static gates	SOL-10	State Ownership Lifecycle machine-readable inventory retained after final closeout.
+packages/agent/docs/state-ownership-lifecycle-scorecard.md	docs	docs/static gates	SOL-10	State Ownership Lifecycle scorecard retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle_invariants.rs	test	test_harness	SOL-10	State Ownership Lifecycle invariant target retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/bootstrap_runtime.rs	test	test_harness	SOL-10	State Ownership Lifecycle bootstrap/runtime invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/engine_substrate.rs	test	test_harness	SOL-10	State Ownership Lifecycle engine-substrate invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/ios_projection.rs	test	test_harness	SOL-10	State Ownership Lifecycle iOS projection invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/mod.rs	test	test_harness	SOL-10	State Ownership Lifecycle invariant module registry retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/observability_closeout.rs	test	test_harness	SOL-10	State Ownership Lifecycle observability/closeout invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/scorecard_inventory.rs	test	test_harness	SOL-10	State Ownership Lifecycle scorecard/inventory invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/session_event_store.rs	test	test_harness	SOL-10	State Ownership Lifecycle session event-store invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/settings_auth.rs	test	test_harness	SOL-10	State Ownership Lifecycle settings/auth invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/support.rs	test	test_harness	SOL-10	State Ownership Lifecycle invariant test support retained after final closeout.

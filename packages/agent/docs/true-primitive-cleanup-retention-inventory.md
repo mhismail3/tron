@@ -44,8 +44,8 @@ The TSV covers tracked and newly introduced files under:
 | primitive | 105 |
 | implementation | 496 |
 | support | 380 |
-| test | 439 |
-| docs | 44 |
+| test | 449 |
+| docs | 48 |
 | delete | 0 |
 
 ## Owner Summary
@@ -57,7 +57,7 @@ The TSV covers tracked and newly introduced files under:
 | `auth` | 19 |
 | `capability` | 1 |
 | `capability_execute` | 8 |
-| `docs/static gates` | 44 |
+| `docs/static gates` | 48 |
 | `domain_worker` | 6 |
 | `engine` | 99 |
 | `ios` | 95 |
@@ -77,7 +77,7 @@ The TSV covers tracked and newly introduced files under:
 | `session_store` | 3 |
 | `settings` | 16 |
 | `shared_foundation` | 44 |
-| `test_harness` | 439 |
+| `test_harness` | 449 |
 | `transport` | 25 |
 
 ## Delete Candidates

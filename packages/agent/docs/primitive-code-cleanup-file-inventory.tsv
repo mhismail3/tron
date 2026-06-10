@@ -1515,3 +1515,17 @@ packages/agent/src/shared/server/error_mapping/tests.rs	retain	fsc rust test	FSC
 packages/agent/src/shared/server/failure.rs	retain	fsc rust source	FSC-10	Canonical Failure Semantics Campaign server envelope retained after final closeout.
 packages/agent/tests/failure_semantics_invariants.rs	retain	fsc rust test	FSC-10	Current Failure Semantics Campaign invariant target retained after final closeout.
 packages/ios-app/Sources/Engine/Protocol/Core/FailurePayload.swift	retain	fsc ios source	FSC-10	Canonical Failure Semantics Campaign Swift envelope decoder retained after final closeout.
+packages/agent/docs/state-ownership-lifecycle-evidence-manifest.md	retain	sol docs	SOL-10	Current State Ownership Lifecycle evidence artifact retained after final closeout.
+packages/agent/docs/state-ownership-lifecycle-inventory.md	retain	sol docs	SOL-10	Current State Ownership Lifecycle inventory retained after final closeout.
+packages/agent/docs/state-ownership-lifecycle-inventory.tsv	retain	sol docs	SOL-10	Current State Ownership Lifecycle machine-readable inventory retained after final closeout.
+packages/agent/docs/state-ownership-lifecycle-scorecard.md	retain	sol docs	SOL-10	Current State Ownership Lifecycle scorecard retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle_invariants.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle invariant target retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/bootstrap_runtime.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle bootstrap/runtime invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/engine_substrate.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle engine-substrate invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/ios_projection.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle iOS projection invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/mod.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle invariant module registry retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/observability_closeout.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle observability/closeout invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/scorecard_inventory.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle scorecard/inventory invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/session_event_store.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle session event-store invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/settings_auth.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle settings/auth invariant module retained after final closeout.
+packages/agent/tests/state_ownership_lifecycle/support.rs	retain	sol rust test	SOL-10	Current State Ownership Lifecycle invariant test support retained after final closeout.
