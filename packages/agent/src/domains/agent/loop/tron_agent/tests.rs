@@ -239,7 +239,7 @@ fn agent_uses_empty_initial_capability_snapshot() {
     let agent = TronAgent::new(
         AgentConfig::default(),
         make_deps(MockResponder),
-        "s1".into(),
+        "empty-capability-snapshot-session".into(),
     );
     assert!(agent.context_manager().model_capability_names().is_empty());
 }
@@ -252,7 +252,7 @@ async fn text_only_run_succeeds_without_frozen_capabilities() {
             ..AgentConfig::default()
         },
         make_deps(MockResponder),
-        "s1".into(),
+        "text-only-run-session".into(),
     );
     let result = agent
         .run(
@@ -323,7 +323,7 @@ async fn resumed_session_offset_is_used_for_turn_events_and_token_record() {
             ..AgentConfig::default()
         },
         make_deps(TokenUsageResponder),
-        "s1".into(),
+        "resumed-offset-session".into(),
     );
     agent.set_completed_turn_offset(4);
     let mut events = agent.subscribe();
