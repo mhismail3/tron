@@ -20,7 +20,8 @@
 //! ## Entry Points
 //!
 //! - [`core::Orchestrator`] coordinates sessions, runs, and stream broadcast.
-//! - [`session_manager::SessionManager`] owns durable session lifecycle state.
+//! - [`session_manager::SessionManager`] owns the active-session cache and
+//!   delegates durable session lifecycle truth to the event store.
 //! - [`recovery::recover_incomplete_turns`] replays orphaned streaming journals
 //!   during startup.
 //!

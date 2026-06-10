@@ -1,4 +1,8 @@
-//! Session manager — create, resume, end, fork, archive, list sessions.
+//! Session manager — session lifecycle facade and active-session cache owner.
+//!
+//! Durable session truth lives in the session event store. This module owns the
+//! reconstructable in-process cache, idle eviction timestamps, and processing
+//! flags that protect active turns from eviction.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -77,7 +81,6 @@ pub struct SessionFilter {
 pub struct SessionManager {
     event_store: Arc<EventStore>,
     active_sessions: DashMap<String, CachedSession>,
-    plan_mode: DashMap<String, bool>,
 }
 
 impl SessionManager {
@@ -86,7 +89,6 @@ impl SessionManager {
         Self {
             event_store,
             active_sessions: DashMap::new(),
-            plan_mode: DashMap::new(),
         }
     }
 
@@ -290,18 +292,6 @@ impl SessionManager {
     /// Get the event store.
     pub fn event_store(&self) -> &Arc<EventStore> {
         &self.event_store
-    }
-
-    // ── Plan mode ──────────────────────────────────────────────────────
-
-    /// Set plan mode for a session.
-    pub fn set_plan_mode(&self, session_id: &str, enabled: bool) {
-        let _ = self.plan_mode.insert(session_id.to_owned(), enabled);
-    }
-
-    /// Check if a session is in plan mode.
-    pub fn is_plan_mode(&self, session_id: &str) -> bool {
-        self.plan_mode.get(session_id).is_some_and(|v| *v)
     }
 
     // ── Cache eviction ────────────────────────────────────────────────

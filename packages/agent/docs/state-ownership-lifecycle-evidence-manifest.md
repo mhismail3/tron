@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **33/100**
+Current score: **45/100**
 
 Scorecard:
 [`state-ownership-lifecycle-scorecard.md`](state-ownership-lifecycle-scorecard.md)
@@ -17,10 +17,10 @@ and
 | Row | Status | Evidence | Verification | Open loops | Checkpoint |
 |---|---|---|---|---|---|
 | SOL-0 | passed_after_fix | Added the campaign scorecard, evidence manifest, inventory scaffolding, machine-readable TSV header, invariant target, and README living-doc links. The invariant target is intentionally red for later rows until inventory coverage and closeout are complete. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture` expected to fail on final-state gates at SOL-0. | SOL-1 through SOL-10 remain open by design. | SOL-0 campaign harness checkpoint |
-| SOL-1 | passed_after_fix | Generated `state-ownership-lifecycle-inventory.tsv` with 476 rows covering every tracked production Rust/Swift file containing SOL lifecycle markers plus README, SOL docs, scripts, and CI workflow state surfaces. Owner pass removed all `unclassified_owner` rows. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory -- --nocapture` -> exit 0, 3 passed. | Later rows refine lifecycle proof for bootstrap, runtime tasks, engine substrate, session/event store, settings/auth, iOS local state, and observability. | SOL-1 state inventory checkpoint |
-| SOL-2 | passed_after_fix | Added and passed owner-scoped truth taxonomy guards over the 476-row TSV: allowed classes are documented; `unclassified_owner` is rejected; iOS/script/CI/docs rows cannot claim canonical server truth; canonical truth is restricted to session event-store, settings profile, and shared profile owners; secret rows are restricted to auth/Keychain/token owners; local device preferences remain iOS-local. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_truth_taxonomy -- --nocapture` -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory_rows_are_structured_and_classified -- --nocapture` -> exit 0. | Later rows prove lifecycle behavior behind each classified owner. | SOL-2 truth taxonomy checkpoint |
+| SOL-1 | passed_after_fix | Generated `state-ownership-lifecycle-inventory.tsv` with an initial 476 rows covering every tracked production Rust/Swift file containing SOL lifecycle markers plus README, SOL docs, scripts, and CI workflow state surfaces. Owner pass removed all `unclassified_owner` rows. SOL-4 added two narrower runtime service rows, bringing the active TSV to 478 rows. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory -- --nocapture` -> exit 0, 3 passed. | Later rows refine lifecycle proof for engine substrate, session/event store, settings/auth, iOS local state, and observability. | SOL-1 state inventory checkpoint |
+| SOL-2 | passed_after_fix | Added and passed owner-scoped truth taxonomy guards over the TSV: allowed classes are documented; `unclassified_owner` is rejected; iOS/script/CI/docs rows cannot claim canonical server truth; canonical truth is restricted to session event-store, settings profile, and shared profile owners; secret rows are restricted to auth/Keychain/token owners; local device preferences remain iOS-local. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_truth_taxonomy -- --nocapture` -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_inventory_rows_are_structured_and_classified -- --nocapture` -> exit 0. | Later rows prove lifecycle behavior behind each classified owner. | SOL-2 truth taxonomy checkpoint |
 | SOL-3 | passed_after_fix | Source-backed bootstrap lifecycle proof now covers directories, bearer-token materialization, canonical DB policy, generation archive, process flock, integrity check, migrations, shared storage schema, logging, startup retention/size-budget maintenance, engine host durable catalog hydration, domain/worker registration, crash-journal recovery, background task registration, bind, graceful shutdown, log flush, and final checkpoint. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_server_bootstrap_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation targets listed in the SOL-3 evidence section passed. | Later rows prove steady-state runtime tasks, engine substrate, sessions, settings/auth, iOS state, and observability. | SOL-3 server bootstrap lifecycle checkpoint |
-| SOL-4 | pending | Not started. | Not run. | Runtime task/memory lifecycle proof and dead `plan_mode` cleanup remain. | pending |
+| SOL-4 | passed_after_fix | Deleted dead `SessionManager::plan_mode` state and added source-backed runtime lifecycle proof for active-session cache flags, run/retain RAII guards, sequence/compaction cleanup, invocation abort guards, capability pending cleanup, shutdown task registry, blocking supervisor drain, runtime service cancellation, and app bootstrap task registration. | `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_runtime_task_memory_lifecycle_is_source_backed -- --nocapture` -> exit 0; implementation filters listed in SOL-4 evidence passed. | No SOL-4 open loops; later rows prove durable engine substrate, sessions, settings/auth, iOS local state, observability, and final closeout. | SOL-4 runtime task and memory lifecycle checkpoint |
 | SOL-5 | pending | Not started. | Not run. | Engine durable substrate lifecycle proof remains. | pending |
 | SOL-6 | pending | Not started. | Not run. | Session/event-store lifecycle proof remains. | pending |
 | SOL-7 | pending | Not started. | Not run. | Settings/auth/secrets lifecycle proof remains. | pending |
@@ -41,7 +41,8 @@ Artifacts added:
 
 Initial red findings captured in the scorecard:
 
-- Unowned/dead `SessionManager::plan_mode`.
+- Unowned/dead `SessionManager::plan_mode`, deleted in SOL-4 after source scan
+  confirmed only local setter/getter references.
 - Audit-only compensation status requires proof or terminal lifecycle.
 - iOS event-store session metadata merges local projections with server
   session info and needs server-truth proof.
@@ -52,8 +53,10 @@ Initial red findings captured in the scorecard:
 
 Inventory coverage:
 
-- Total TSV rows: 476.
-- State class counts: `ephemeral_runtime` 260, `projection_cache` 71,
+- Total TSV rows: 478. SOL-1 generated 476 initial rows; SOL-4 added explicit
+  runtime-service rows for queue-drainer and worker-heartbeat cancellation
+  ownership.
+- State class counts: `ephemeral_runtime` 262, `projection_cache` 71,
   `durable_substrate` 68, `canonical_truth` 41, `secret` 16,
   `diagnostic_buffer` 11, `local_device_preference` 9.
 - Required non-Rust/Swift surfaces are covered: `README.md`,
@@ -102,6 +105,33 @@ Bootstrap lifecycle proof:
   a persisted worker definition hydrates as non-runnable until the worker
   reconnects.
 
+## SOL-4 Evidence
+
+Runtime task and memory lifecycle proof:
+
+- `SessionManager::plan_mode`, `set_plan_mode`, and `is_plan_mode` were deleted;
+  session manager state is now the reconstructable active-session cache plus
+  explicit processing flags.
+- Active sessions have cache insert/remove/retain paths, idle eviction, and
+  processing flags that are set for active work and cleared afterward.
+- Orchestrator active runs are guarded by `StartedRun` drop cleanup; retained
+  sessions are guarded by `RetainGuard` drop cleanup; sequence counters,
+  compaction handlers, invocation abort tokens, and capability pending calls
+  have explicit remove/clear/cancel paths.
+- `InvocationAbortRegistry` uses scoped guards and cancellation tokens so child
+  tool invocations unregister on drop and can be cancelled by session/id.
+- `CapabilityInvocationTracker` owns pending response senders behind a mutex and
+  removes or clears them on resolve/cancel-all.
+- `ShutdownCoordinator` owns registered task abort handles, phase callbacks,
+  timeout-based drain, and self-pruning task completion.
+- `BlockingTaskSupervisor` bounds detached blocking work, tracks active guards,
+  and registers a shutdown phase callback plus task handles with the shutdown
+  coordinator.
+- `EngineRuntimeServices` registers queue drainer and worker-heartbeat tasks
+  with shutdown and passes cancellation tokens that break each run loop.
+- `spawn_background_tasks` registers cache eviction and profile watcher tasks,
+  and bootstrap registers blocking-supervisor shutdown before service bind.
+
 ## Verification Log
 
 - SOL-0 harness proof:
@@ -138,6 +168,25 @@ Bootstrap lifecycle proof:
   -> exit 0, 6 passed; `cargo test --manifest-path packages/agent/Cargo.toml sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect --lib -- --nocapture`
   -> exit 0, 1 passed; `cargo test --manifest-path packages/agent/Cargo.toml process_lock --lib -- --nocapture`
   -> exit 0, 11 passed.
+- SOL-4 static source-backed verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants sol_runtime_task_memory_lifecycle_is_source_backed -- --nocapture`
+  -> exit 0; `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants dead_plan_mode_state_is_removed -- --nocapture`
+  -> exit 0.
+- SOL-4 current full-target status:
+  `cargo test --manifest-path packages/agent/Cargo.toml --test state_ownership_lifecycle_invariants -- --nocapture`
+  -> exit 101, with 13 passing gates and 1 expected remaining failure:
+  `final_closeout_is_complete`.
+- SOL-4 implementation verification:
+  `cargo test --manifest-path packages/agent/Cargo.toml session_manager --lib -- --nocapture`
+  -> exit 0, 26 passed; `cargo test --manifest-path packages/agent/Cargo.toml begin_run --lib -- --nocapture`
+  -> exit 0, 3 passed; `cargo test --manifest-path packages/agent/Cargo.toml retain --lib -- --nocapture`
+  -> exit 0, 5 passed; `cargo test --manifest-path packages/agent/Cargo.toml invocation_abort_registry --lib -- --nocapture`
+  -> exit 0, 9 passed; `cargo test --manifest-path packages/agent/Cargo.toml capability_invocation_tracker --lib -- --nocapture`
+  -> exit 0, 10 passed; `cargo test --manifest-path packages/agent/Cargo.toml app::lifecycle::shutdown --lib -- --nocapture`
+  -> exit 0, 21 passed; `cargo test --manifest-path packages/agent/Cargo.toml shared::server::context --lib -- --nocapture`
+  -> exit 0, 24 passed; `cargo test --manifest-path packages/agent/Cargo.toml transport::runtime --lib -- --nocapture`
+  -> exit 0, 12 passed; `cargo test --manifest-path packages/agent/Cargo.toml app::bootstrap --lib -- --nocapture`
+  -> exit 0, 80 passed.
 
 ## Residual Risk Log
 

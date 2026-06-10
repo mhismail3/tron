@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-3 `passed_after_fix`; 476 state-surface rows inventoried and classified.
+Status: SOL-4 `passed_after_fix`; 478 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -26,13 +26,15 @@ Machine-readable rows live in
 
 The machine-readable inventory now covers every tracked production Rust/Swift
 file containing one of the SOL lifecycle markers, plus the required script/CI
-and docs-owned state claim rows.
+and docs-owned state claim rows. SOL-1 generated 476 initial rows; SOL-4 added
+two narrower runtime-service rows for queue-drainer and worker-heartbeat
+cancellation ownership.
 
 State class distribution:
 
 | State class | Rows |
 |---|---:|
-| `ephemeral_runtime` | 260 |
+| `ephemeral_runtime` | 262 |
 | `projection_cache` | 71 |
 | `durable_substrate` | 68 |
 | `canonical_truth` | 41 |
@@ -69,6 +71,20 @@ The inventory is guarded by `sol_truth_taxonomy_is_owner_scoped`:
 | Crash journal recovery | `agent_runtime` / `app_bootstrap` | `init_services` calls `recover_incomplete_turns` before server bind and logs whether orphaned journals were recovered. |
 | Bind and shutdown | `app_bootstrap` / `app_lifecycle` | Domain workers, stream pump, runtime services, cache eviction, and profile watcher are registered before `server.listen`; shutdown drains server/pump handles, registered tasks, log flush, and storage checkpoint. |
 
+## SOL-4 Runtime Task And Memory Lifecycle Proof
+
+| Surface | Owner | Lifecycle proof |
+|---|---|---|
+| Session manager active cache | `agent_orchestrator` | `SessionManager` owns only reconstructable active-session cache state: insert on create/resume, remove on end/delete, idle eviction through `retain`, and processing flags set/cleared around active turns. Dead `SessionManager::plan_mode` state was deleted. |
+| Orchestrator active runs | `agent_orchestrator` | `StartedRun` owns active-run registration and semaphore permit release through `Drop`; retained sessions use `RetainGuard` drop cleanup. |
+| Sequence and compaction runtime state | `agent_orchestrator` | Sequence counters and compaction handlers are owner-private maps with remove/clear paths on session cleanup and orchestrator shutdown. |
+| Invocation abort registry | `agent_orchestrator` | `InvocationAbortRegistry` owns session/id cancellation tokens; `InvocationAbortGuard` unregisters entries on drop and abort paths cancel matching tokens. |
+| Capability invocation tracker | `agent_orchestrator` | Pending capability responders live behind the tracker mutex and are inserted, removed on resolve, or cleared on cancel-all. |
+| Shutdown coordinator | `app_lifecycle` | Registered tasks are tracked by abort handles, self-prune on completion, run phase callbacks in order, time out slow drains, and abort slow tasks. |
+| Blocking task supervisor | `shared_server` | Detached blocking work is bounded by semaphore guards, decremented on guard drop, registered as shutdown tasks, and drained by a shutdown phase callback. |
+| Runtime service loops | `runtime_transport` | Queue drainer and worker-heartbeat tasks are registered with shutdown and receive cancellation tokens that break their select loops. |
+| App background tasks | `app_bootstrap` | Cache eviction, blocking-supervisor shutdown, runtime services, and profile watcher are registered during bootstrap before the server binds. |
+
 Non-source state surfaces covered by SOL-1:
 
 - `README.md`
@@ -86,7 +102,7 @@ Non-source state surfaces covered by SOL-1:
 
 | Surface | Current classification | Owner | Lifecycle note | SOL rows |
 |---|---|---|---|---|
-| `SessionManager::plan_mode` | unowned dead state candidate | none accepted | `DashMap<String, bool>` has only local setter/getter references; delete unless SOL-4 finds a real owner. | SOL-4 |
+| `SessionManager::plan_mode` | deleted dead state | none accepted | `DashMap<String, bool>` had only local setter/getter references and was removed in SOL-4. | SOL-4 |
 | Engine compensation records | durable audit substrate | engine authority | Records are appended during invocation and inspectable through the engine host; SOL-5 must prove audit-only status is intentional or add terminal transitions. | SOL-5 |
 | iOS `EventStoreManager` session metadata | projection cache | iOS event persistence | Local counts/head/root are reconstructable local projections and must not override canonical server truth. | SOL-8 |
 | iOS pairing/token stores | local device preference / secret | iOS support composition | Pairing list is device-local; bearer tokens are Keychain secrets keyed by paired server id. | SOL-8 |
