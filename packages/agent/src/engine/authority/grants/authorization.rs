@@ -92,11 +92,7 @@ pub(super) fn authorize_with_grant(
 }
 
 fn ensure_budget_available(grant: &EngineGrant) -> Result<()> {
-    for field in [
-        "remainingInvocations",
-        "remainingTokens",
-        "remainingProcessMs",
-    ] {
+    for field in ["remainingTokens", "remainingProcessMs"] {
         if grant
             .budget
             .get(field)

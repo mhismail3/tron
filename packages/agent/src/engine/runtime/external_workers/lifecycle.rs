@@ -5,6 +5,7 @@ use std::time::Duration;
 use super::validation::{namespace_claims_value, validate_worker_token};
 use super::*;
 use crate::engine::EngineGrantLifecycle;
+use crate::engine::authority::grants::grant_policy_hash;
 
 impl EngineExternalWorkerRuntime {
     /// Accept a worker hello and return a catalog snapshot visible to the
@@ -310,6 +311,13 @@ impl EngineExternalWorkerRuntime {
             return Err(EngineError::PolicyViolation(format!(
                 "worker scoped token grant revision {} does not match active revision {}",
                 token.authority_grant_revision, grant.revision
+            )));
+        }
+        let active_hash = grant_policy_hash(&grant);
+        if token.authority_grant_hash != active_hash {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker scoped token grant hash does not match active grant {}",
+                token.authority_grant_id
             )));
         }
         if let Some(subject_worker_id) = grant.subject_worker_id.as_ref()

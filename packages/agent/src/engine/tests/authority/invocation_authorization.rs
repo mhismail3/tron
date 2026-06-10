@@ -1,4 +1,7 @@
 use super::*;
+use crate::engine::authority::grants::{
+    ConsumeGrantInvocationBudget, DeriveGrant, SqliteEngineGrantStore,
+};
 
 #[tokio::test]
 async fn rejected_grants_fail_before_handler_execution_or_successful_resource_refs() {
@@ -419,6 +422,166 @@ async fn invocation_authorization_uses_grant_not_raw_scope_strings() {
                 || message.contains("does not allow required authority")
                 || message.contains("exceeds grant")
     ));
+}
+
+#[tokio::test]
+async fn remaining_invocation_budget_is_consumed_before_handler_execution_and_replay_is_free() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("budget-demo", "budget_demo"), false)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handler = Arc::new(CountingResourceHandler {
+        calls: calls.clone(),
+    });
+    let write = FunctionDefinition::new(
+        fid("budget_demo::write"),
+        wid("budget-demo"),
+        "budgeted write",
+        VisibilityScope::Agent,
+        EffectClass::IdempotentWrite,
+    )
+    .with_required_authority(AuthorityRequirement::scope("budget.write"))
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger());
+    handle
+        .register_function_for_setup(write, Some(handler), false)
+        .unwrap();
+
+    let derived = derive_bootstrap_grant(
+        &handle,
+        "one-shot-budget",
+        json!({
+            "allowedCapabilities": ["budget_demo::write"],
+            "allowedNamespaces": ["budget_demo"],
+            "allowedAuthorityScopes": ["budget.write"],
+            "allowedResourceKinds": ["artifact"],
+            "resourceSelectors": ["kind:artifact"],
+            "fileRoots": ["*"],
+            "networkPolicy": "none",
+            "maxRisk": "medium",
+            "budget": {"remainingInvocations": 1},
+            "provenance": {"source": "grant-budget-consumption-test"}
+        }),
+    )
+    .await;
+    assert_eq!(derived.error, None);
+
+    let context = |trace_id: &str, key: &str| {
+        CausalContext::new(
+            actor("agent"),
+            ActorKind::Agent,
+            grant("one-shot-budget"),
+            trace(trace_id),
+        )
+        .with_session_id("session-budget")
+        .with_scope("budget.write")
+        .with_idempotency_key(key)
+    };
+    let payload = json!({"kind": "artifact"});
+    let first = handle
+        .invoke(host_invocation(
+            "budget_demo::write",
+            payload.clone(),
+            context("budget-first", "budget-key-1"),
+        ))
+        .await;
+    assert_eq!(first.error, None);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let consumed = handle
+        .inspect_authority_grant(&grant("one-shot-budget"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(consumed.budget["remainingInvocations"], json!(0));
+    assert_eq!(consumed.revision, 2);
+
+    let replay = handle
+        .invoke(host_invocation(
+            "budget_demo::write",
+            payload.clone(),
+            context("budget-replay", "budget-key-1"),
+        ))
+        .await;
+    assert_eq!(replay.error, None);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "completed idempotency replay must not execute or consume budget"
+    );
+    let after_replay = handle
+        .inspect_authority_grant(&grant("one-shot-budget"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(after_replay.budget["remainingInvocations"], json!(0));
+    assert_eq!(after_replay.revision, 2);
+
+    let denied = handle
+        .invoke(host_invocation(
+            "budget_demo::write",
+            payload,
+            context("budget-second", "budget-key-2"),
+        ))
+        .await;
+    assert!(matches!(
+        denied.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("budget remainingInvocations is exhausted")
+    ));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "exhausted budget must fail before handler execution"
+    );
+}
+
+#[test]
+fn sqlite_grant_store_consumes_remaining_invocations_durably() {
+    let dir = tempfile::tempdir().unwrap();
+    let db_path = dir.path().join("grant-budget.sqlite");
+    let mut store = SqliteEngineGrantStore::open(&db_path).unwrap();
+    let grant_id = grant("sqlite-budget-grant");
+    let grant = store
+        .derive(DeriveGrant {
+            grant_id: Some(grant_id.clone()),
+            parent_grant_id: grant("grant"),
+            subject_actor_id: None,
+            subject_worker_id: None,
+            subject_invocation_id: None,
+            allowed_capabilities: vec!["demo::write".to_owned()],
+            allowed_namespaces: vec!["demo".to_owned()],
+            allowed_authority_scopes: vec!["demo.write".to_owned()],
+            allowed_resource_kinds: vec!["artifact".to_owned()],
+            resource_selectors: vec!["kind:artifact".to_owned()],
+            file_roots: vec!["*".to_owned()],
+            network_policy: "none".to_owned(),
+            max_risk: RiskLevel::Medium,
+            budget: json!({"remainingInvocations": 1}),
+            expires_at: None,
+            can_delegate: false,
+            provenance: json!({"source": "sqlite-grant-budget-test"}),
+            trace_id: trace("sqlite-budget-derive"),
+        })
+        .unwrap();
+    assert_eq!(grant.revision, 1);
+
+    let consumed = store
+        .consume_invocation_budget(ConsumeGrantInvocationBudget {
+            grant_id: grant_id.clone(),
+            invocation_id: InvocationId::new("sqlite-budget-invocation").unwrap(),
+            function_id: fid("demo::write"),
+            trace_id: trace("sqlite-budget-consume"),
+        })
+        .unwrap();
+    assert_eq!(consumed.budget["remainingInvocations"], json!(0));
+    assert_eq!(consumed.revision, 2);
+    drop(store);
+
+    let reopened = SqliteEngineGrantStore::open(&db_path).unwrap();
+    let persisted = reopened.inspect(&grant_id).unwrap().unwrap();
+    assert_eq!(persisted.budget["remainingInvocations"], json!(0));
+    assert_eq!(persisted.revision, 2);
+    assert!(persisted.updated_at > persisted.created_at);
 }
 
 #[tokio::test]

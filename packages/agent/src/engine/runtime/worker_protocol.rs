@@ -7,13 +7,14 @@
 //! Visible external/session workers also present a scoped worker token in
 //! `hello`; the token is the protocol-level plugin lifecycle boundary for
 //! namespace claims, grant identity, resource selectors, visibility, trust,
-//! scope binding, and signature state. Session/workspace-visible workers must
-//! bind that scope in the token, and stream resource selectors are namespace
-//! scoped (`stream:<claim>:*`) rather than wildcarded.
+//! scope binding, grant policy hashing, and signature state. Session/workspace
+//! visible workers must bind that scope in the token, and stream resource
+//! selectors are namespace scoped (`stream:<claim>:*`) rather than wildcarded.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::engine::authority::grants::bootstrap_grant_policy_hash;
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::kernel::ids::{
     AuthorityGrantId, FunctionId, InvocationId, TraceId, TriggerId, WorkerId,
@@ -188,7 +189,8 @@ impl ScopedWorkerToken {
             namespace_claims,
             authority_grant_id: worker.authority_grant.clone(),
             authority_grant_revision: 1,
-            authority_grant_hash: "loopback-bootstrap".to_owned(),
+            authority_grant_hash: bootstrap_grant_policy_hash(&worker.authority_grant)
+                .expect("loopback worker token must use a known bootstrap authority grant"),
             resource_selectors,
             visibility_ceiling: WorkerVisibility::Session,
             trust_tier: "session_generated".to_owned(),

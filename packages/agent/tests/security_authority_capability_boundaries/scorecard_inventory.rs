@@ -28,6 +28,7 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
         "| SACB-8 | Secrets, token storage, redaction, auth.json permissions, provider credential custody | 7 | passed_after_fix |",
         "| SACB-9 | iOS/Mac pairing lifecycle: Keychain, QR/deep-link parsing, forget/re-pair/unauthorized flow | 7 | passed_after_fix |",
         "| SACB-10 | Final closeout, static gates, full verification, clean status | 5 | passed_after_fix |",
+        "| POST-1 | Durable grant invocation budgets and scoped worker token grant hashes | passed_after_fix |",
         "`../tests/security_authority_capability_boundaries_invariants.rs`",
     ] {
         assert!(
@@ -51,7 +52,9 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
         "| SACB-8 | passed_after_fix |",
         "| SACB-9 | passed_after_fix |",
         "| SACB-10 | passed_after_fix |",
+        "| SACB-POST-1 | passed_after_fix |",
         "## Baseline Evidence",
+        "## Post-Audit Evidence",
     ] {
         assert!(
             evidence.contains(required),
@@ -61,7 +64,7 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Inventory",
-        "Status: SACB campaign `complete`; 607 security boundary rows inventoried and",
+        "Status: SACB campaign `complete`; 610 security boundary rows inventoried and",
         "## Boundary Classes",
         "`public_transport`",
         "`authority_grant`",
@@ -133,7 +136,7 @@ fn sacb_invariant_target_is_in_closeout_ci_lists() {
 #[test]
 fn sacb_inventory_rows_are_structured_and_reference_tracked_paths() {
     let rows = parse_inventory();
-    assert!(rows.len() >= 607, "SACB inventory row count regressed");
+    assert!(rows.len() >= 610, "SACB inventory row count regressed");
     let tracked: BTreeSet<_> = git_ls_files().into_iter().collect();
     let mut paths = BTreeSet::new();
     for row in &rows {
@@ -185,6 +188,7 @@ fn sacb_inventory_rows_are_structured_and_reference_tracked_paths() {
         "packages/agent/src/transport/engine/socket/wire.rs",
         "packages/agent/src/transport/engine/mod.rs",
         "packages/agent/src/engine/authority/grants/derivation.rs",
+        "packages/agent/src/engine/authority/grants/policy_hash.rs",
         "packages/agent/src/domains/capability/operations/filesystem.rs",
     ] {
         assert!(

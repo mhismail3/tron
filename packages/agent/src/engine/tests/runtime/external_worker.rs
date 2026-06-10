@@ -262,6 +262,65 @@ async fn local_external_worker_hello_rejects_wildcard_resource_selectors() {
 }
 
 #[tokio::test]
+async fn local_external_worker_hello_accepts_matching_grant_revision_and_hash() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker = WorkerDefinition::new(
+        wid("local-grant-hash-worker"),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("grant_hash");
+    let hello = session_hello(worker, "session-a");
+    assert!(!hello.worker_token.authority_grant_hash.trim().is_empty());
+
+    runtime.hello(hello).await.unwrap();
+}
+
+#[tokio::test]
+async fn local_external_worker_hello_rejects_stale_grant_revision() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker = WorkerDefinition::new(
+        wid("local-stale-grant-worker"),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("stale_grant");
+    let mut hello = session_hello(worker, "session-a");
+    hello.worker_token.authority_grant_revision += 1;
+
+    let error = runtime.hello(hello).await.unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message) if message.contains("grant revision")
+    ));
+}
+
+#[tokio::test]
+async fn local_external_worker_hello_rejects_tampered_grant_hash() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker = WorkerDefinition::new(
+        wid("local-tampered-grant-worker"),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("tampered_grant");
+    let mut hello = session_hello(worker, "session-a");
+    hello.worker_token.authority_grant_hash = "tampered-policy-hash".to_owned();
+
+    let error = runtime.hello(hello).await.unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message) if message.contains("grant hash")
+    ));
+}
+
+#[tokio::test]
 async fn local_external_worker_stamps_capability_policy_metadata_from_scoped_token() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());

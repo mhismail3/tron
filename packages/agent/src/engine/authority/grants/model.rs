@@ -6,7 +6,9 @@ use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, InvocationId, TraceId, WorkerId};
+use crate::engine::kernel::ids::{
+    ActorId, AuthorityGrantId, FunctionId, InvocationId, TraceId, WorkerId,
+};
 use crate::engine::kernel::types::RiskLevel;
 
 /// Active or revoked grant state.
@@ -139,6 +141,19 @@ pub struct ListGrants {
     pub lifecycle: Option<EngineGrantLifecycle>,
     /// Limit.
     pub limit: usize,
+}
+
+/// Request to consume one invocation unit from a grant budget.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConsumeGrantInvocationBudget {
+    /// Grant whose budget authorizes the invocation.
+    pub grant_id: AuthorityGrantId,
+    /// Invocation that is about to execute.
+    pub invocation_id: InvocationId,
+    /// Function about to execute.
+    pub function_id: FunctionId,
+    /// Trace for the consuming invocation.
+    pub trace_id: TraceId,
 }
 
 /// Grant event.

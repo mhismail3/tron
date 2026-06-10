@@ -134,7 +134,8 @@ pub(crate) mod runtime;
 
 pub use authority::compensation::{EngineCompensationRecord, EngineCompensationStatus};
 pub use authority::grants::{
-    DeriveGrant, EngineGrant, EngineGrantEvent, EngineGrantLifecycle, ListGrants,
+    ConsumeGrantInvocationBudget, DeriveGrant, EngineGrant, EngineGrantEvent, EngineGrantLifecycle,
+    ListGrants,
 };
 pub use authority::leases::{AcquireResourceLease, EngineResourceLease, EngineResourceLeaseStatus};
 pub use catalog::capabilities::AgentCapabilityClient;

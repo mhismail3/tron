@@ -24,6 +24,9 @@ impl EngineHost {
                     .record_invocation_result(&invocation, result, scope);
             }
         };
+        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
+            return self.finish_meta_invocation(invocation, function, Err(err), idempotency);
+        }
 
         let compensation_contract = function.compensation.clone();
         let lease_result = self.acquire_resource_lease_for_invocation(&function, &invocation);
@@ -65,6 +68,9 @@ impl EngineHost {
                     .record_invocation_result(&invocation, result, scope);
             }
         };
+        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
+            return self.finish_meta_invocation(invocation, function, Err(err), idempotency);
+        }
 
         let compensation_contract = function.compensation.clone();
         let lease_result = self.acquire_resource_lease_for_invocation(&function, &invocation);
@@ -115,6 +121,9 @@ impl EngineHost {
             Err(err) => return self.meta_error(&invocation, err),
         };
 
+        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
+            return self.finish_meta_invocation(invocation, function, Err(err), None);
+        }
         let value = match self.meta_invoke_child(&invocation).await {
             Ok(value) => Ok(value),
             Err(err) => Err(err),
@@ -150,6 +159,11 @@ impl EngineHost {
         } else {
             PreparedDelegatedChild::Sync(self.catalog.prepare_sync_invocation(child))
         };
+        if let Err(err) = self.consume_invocation_budget_sync(&function, &invocation) {
+            return PreparedDelegatedInvocationDecision::Finished(Box::new(
+                self.finish_meta_invocation(invocation, function, Err(err), None),
+            ));
+        }
         PreparedDelegatedInvocationDecision::Execute(Box::new(PreparedDelegatedInvocation {
             meta_invocation: invocation,
             meta_function: function,
@@ -178,6 +192,24 @@ impl EngineHost {
             schema::validate_payload(&function.id, "request", schema, &invocation.payload)?;
         }
         Ok(function)
+    }
+
+    fn consume_invocation_budget_sync(
+        &mut self,
+        function: &FunctionDefinition,
+        invocation: &Invocation,
+    ) -> Result<()> {
+        self.primitives
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .consume_invocation_budget(ConsumeGrantInvocationBudget {
+                grant_id: invocation.causal_context.authority_grant_id.clone(),
+                invocation_id: invocation.id.clone(),
+                function_id: function.id.clone(),
+                trace_id: invocation.causal_context.trace_id.clone(),
+            })
+            .map(|_| ())
     }
 
     pub(super) fn finish_meta_invocation(

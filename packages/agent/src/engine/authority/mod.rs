@@ -23,6 +23,9 @@
 //!
 //! - Caller-supplied authority scopes are audit context, not permission truth.
 //! - Grants are resolved from the engine-owned store before execution.
+//! - Grants with `remainingInvocations` consume one durable budget unit after
+//!   idempotency replay/schema checks and before handler dispatch; replayed
+//!   idempotency results do not consume again.
 //! - Lease state has active/released/expired transitions enforced by the store.
 //! - Compensation is audit-only durable state in this branch: the only accepted
 //!   status is `recorded`, and future automated rollback must add a new owner,

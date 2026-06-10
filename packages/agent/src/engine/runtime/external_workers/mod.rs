@@ -4,8 +4,8 @@
 //! scoped functions/triggers, receive catalog snapshots, publish stream events
 //! through the engine stream primitive, and are cleaned up by heartbeat and
 //! disconnect policy. Accepted hellos must present an external worker, loopback
-//! bearer policy, an active grant at the token revision, non-wildcard stream
-//! selectors, and session/workspace bindings for visible workers. Function
+//! bearer policy, an active grant at the token revision/hash, non-wildcard
+//! stream selectors, and session/workspace bindings for visible workers. Function
 //! metadata, trigger ids/targets, and stream topics are matched by strict
 //! namespace segments/prefixes, never substring containment. Volatile
 //! registrations disappear on disconnect or missed heartbeat. Durable local

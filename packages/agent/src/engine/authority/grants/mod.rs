@@ -11,17 +11,20 @@
 //! | `derivation` | Parent-to-child narrowing validation before grant persistence. |
 //! | `model` | Durable grant/request/event records and bootstrap root grants. |
 //! | `paths` | Shared canonical containment helpers for file-root policy. |
+//! | `policy_hash` | Deterministic policy hashes for scoped worker tokens. |
 //! | `sqlite_codec` | SQLite row encoding and decoding for durable grants. |
 //!
 //! INVARIANT: derivation and invocation authorization use canonical path
 //! containment for file roots. Raw string-prefix checks are not authority.
+//! INVARIANT: when `remainingInvocations` is present, invocation execution
+//! consumes one durable grant budget unit before the handler runs.
 
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::engine::invocation::model::Invocation;
 use crate::engine::kernel::errors::{EngineError, Result};
@@ -32,12 +35,14 @@ mod authorization;
 mod derivation;
 mod model;
 mod paths;
+mod policy_hash;
 mod sqlite_codec;
 
 pub use model::{
-    BOOTSTRAP_GRANT_IDS, DeriveGrant, EngineGrant, EngineGrantEvent, EngineGrantLifecycle,
-    ListGrants,
+    BOOTSTRAP_GRANT_IDS, ConsumeGrantInvocationBudget, DeriveGrant, EngineGrant, EngineGrantEvent,
+    EngineGrantLifecycle, ListGrants,
 };
+pub(crate) use policy_hash::{bootstrap_grant_policy_hash, grant_policy_hash};
 
 use authorization::authorize_with_grant;
 use derivation::{ensure_child_narrows_parent, ensure_parent_can_derive, validate_derive_request};
@@ -143,6 +148,42 @@ impl InMemoryEngineGrantStore {
     ) -> Result<EngineGrant> {
         let grant = self.require_grant(&invocation.causal_context.authority_grant_id)?;
         authorize_with_grant(&grant, function, invocation)?;
+        Ok(grant)
+    }
+
+    /// Consume one invocation unit from a grant budget immediately before
+    /// handler execution. Grants without `remainingInvocations` are unlimited.
+    pub fn consume_invocation_budget(
+        &mut self,
+        request: ConsumeGrantInvocationBudget,
+    ) -> Result<EngineGrant> {
+        let mut grant = self.require_grant(&request.grant_id)?;
+        ensure_grant_can_consume(&grant)?;
+        let Some(remaining) = remaining_invocations(&grant.budget) else {
+            return Ok(grant);
+        };
+        if remaining == 0 {
+            return Err(exhausted_invocation_budget(&grant));
+        }
+        set_remaining_invocations(&mut grant.budget, remaining - 1)?;
+        let previous_revision = grant.revision;
+        grant.revision += 1;
+        grant.updated_at = Utc::now();
+        self.grants.insert(request.grant_id.clone(), grant.clone());
+        self.record_event(grant_event(
+            &request.grant_id,
+            "grant.budget_consumed",
+            json!({
+                "invocationId": request.invocation_id.as_str(),
+                "functionId": request.function_id.as_str(),
+                "budgetField": "remainingInvocations",
+                "consumed": 1,
+                "remainingInvocations": remaining - 1,
+                "previousRevision": previous_revision,
+                "revision": grant.revision
+            }),
+            request.trace_id,
+        ));
         Ok(grant)
     }
 
@@ -336,6 +377,91 @@ impl SqliteEngineGrantStore {
         Ok(grant)
     }
 
+    /// Consume one invocation unit from a grant budget immediately before
+    /// handler execution. Grants without `remainingInvocations` are unlimited.
+    pub fn consume_invocation_budget(
+        &mut self,
+        request: ConsumeGrantInvocationBudget,
+    ) -> Result<EngineGrant> {
+        let mut grant = self.require_grant(&request.grant_id)?;
+        ensure_grant_can_consume(&grant)?;
+        let Some(remaining) = remaining_invocations(&grant.budget) else {
+            return Ok(grant);
+        };
+        if remaining == 0 {
+            return Err(exhausted_invocation_budget(&grant));
+        }
+
+        let previous_revision = grant.revision;
+        let mut budget = grant.budget.clone();
+        set_remaining_invocations(&mut budget, remaining - 1)?;
+        let now = Utc::now();
+        let next_revision = previous_revision + 1;
+        let budget_json = json_string(&budget, "grant.budget.consume")?;
+        let event = grant_event(
+            &request.grant_id,
+            "grant.budget_consumed",
+            json!({
+                "invocationId": request.invocation_id.as_str(),
+                "functionId": request.function_id.as_str(),
+                "budgetField": "remainingInvocations",
+                "consumed": 1,
+                "remainingInvocations": remaining - 1,
+                "previousRevision": previous_revision,
+                "revision": next_revision
+            }),
+            request.trace_id,
+        );
+        let payload_json = json_string(&event.payload, "grant.event.payload")?;
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .map_err(|err| sqlite_err("grant.consume.transaction", err.to_string()))?;
+        let updated = tx
+            .execute(
+                "UPDATE engine_grants SET
+                    budget_json = ?2, revision = ?3, updated_at = ?4
+                 WHERE grant_id = ?1
+                   AND lifecycle = 'active'
+                   AND revision = ?5",
+                params![
+                    request.grant_id.as_str(),
+                    budget_json,
+                    next_revision as i64,
+                    now.to_rfc3339(),
+                    previous_revision as i64,
+                ],
+            )
+            .map_err(|err| sqlite_err("grant.consume.update", err.to_string()))?;
+        if updated != 1 {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} budget could not be consumed",
+                request.grant_id
+            )));
+        }
+        tx.execute(
+            "INSERT INTO engine_grant_events
+             (event_id, grant_id, event_type, payload_json, trace_id, occurred_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                event.event_id,
+                event.grant_id.as_str(),
+                event.event_type,
+                payload_json,
+                event.trace_id.as_str(),
+                event.occurred_at.to_rfc3339(),
+            ],
+        )
+        .map_err(|err| sqlite_err("grant.consume.event", err.to_string()))?;
+        tx.commit()
+            .map_err(|err| sqlite_err("grant.consume.commit", err.to_string()))?;
+
+        grant.budget = budget;
+        grant.revision = next_revision;
+        grant.updated_at = now;
+        Ok(grant)
+    }
+
     fn require_grant(&self, grant_id: &AuthorityGrantId) -> Result<EngineGrant> {
         self.inspect(grant_id)?.ok_or_else(|| {
             EngineError::PolicyViolation(format!("authority grant {grant_id} not found"))
@@ -511,6 +637,17 @@ impl EngineGrantStoreBackend {
             Self::Sqlite(store) => store.authorize_invocation(function, invocation),
         }
     }
+
+    /// Consume one invocation budget unit.
+    pub fn consume_invocation_budget(
+        &mut self,
+        request: ConsumeGrantInvocationBudget,
+    ) -> Result<EngineGrant> {
+        match self {
+            Self::InMemory(store) => store.consume_invocation_budget(request),
+            Self::Sqlite(store) => store.consume_invocation_budget(request),
+        }
+    }
 }
 
 fn validate_list_limit(limit: usize) -> Result<()> {
@@ -520,4 +657,43 @@ fn validate_list_limit(limit: usize) -> Result<()> {
         ));
     }
     Ok(())
+}
+
+fn ensure_grant_can_consume(grant: &EngineGrant) -> Result<()> {
+    if grant.lifecycle != EngineGrantLifecycle::Active {
+        return Err(EngineError::PolicyViolation(format!(
+            "authority grant {} is not active",
+            grant.grant_id
+        )));
+    }
+    if let Some(expires_at) = grant.expires_at
+        && expires_at <= Utc::now()
+    {
+        return Err(EngineError::PolicyViolation(format!(
+            "authority grant {} is expired",
+            grant.grant_id
+        )));
+    }
+    Ok(())
+}
+
+fn remaining_invocations(budget: &Value) -> Option<u64> {
+    budget.get("remainingInvocations").and_then(Value::as_u64)
+}
+
+fn set_remaining_invocations(budget: &mut Value, remaining: u64) -> Result<()> {
+    let Some(object) = budget.as_object_mut() else {
+        return Err(EngineError::PolicyViolation(
+            "grant budget must be an object".to_owned(),
+        ));
+    };
+    object.insert("remainingInvocations".to_owned(), json!(remaining));
+    Ok(())
+}
+
+fn exhausted_invocation_budget(grant: &EngineGrant) -> EngineError {
+    EngineError::PolicyViolation(format!(
+        "authority grant {} budget remainingInvocations is exhausted",
+        grant.grant_id
+    ))
 }

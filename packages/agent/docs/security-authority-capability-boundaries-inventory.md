@@ -1,6 +1,6 @@
 # Security Authority Capability Boundaries Inventory
 
-Status: SACB campaign `complete`; 607 security boundary rows inventoried and
+Status: SACB campaign `complete`; 610 security boundary rows inventoried and
 classified across tracked Rust, Swift, scripts, workflows, docs, and tests.
 
 Machine-readable inventory:
@@ -43,3 +43,5 @@ or the SACB invariant target fails.
 
 - SACB-10 closed the campaign after final static gates, broad verification, and
   README/doc state cleanup.
+- SACB post-audit remediation added durable grant invocation-budget consumption
+  and scoped worker token grant-policy hashing to the completed inventory.

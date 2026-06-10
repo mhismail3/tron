@@ -6,6 +6,7 @@ use serde_json::Value;
 
 use super::LiveCatalog;
 use super::output_contract::validate_output_contract;
+use crate::engine::authority::grants::ConsumeGrantInvocationBudget;
 use crate::engine::durability::ledger::{
     IdempotencyReservation, IdempotencyReservationOutcome, StoredInvocationOutcome,
 };
@@ -225,6 +226,32 @@ impl LiveCatalog {
             )));
         };
 
+        if let Err(err) = self.consume_invocation_budget(&function, &invocation) {
+            let mut result = InvocationResult::error(
+                &invocation,
+                function.owner_worker.clone(),
+                function.revision,
+                self.revision,
+                err,
+            );
+            if let Some(reservation) = &idempotency
+                && let Some(completion_error) = self.complete_invocation_idempotency(
+                    reservation,
+                    &invocation,
+                    &function,
+                    &result,
+                )
+            {
+                result = completion_error;
+            }
+            let idempotency_scope = idempotency.map(|reservation| reservation.key.scope);
+            return PreparedSyncInvocationDecision::Finished(Box::new(self.finish_invocation(
+                &invocation,
+                result,
+                idempotency_scope,
+            )));
+        }
+
         PreparedSyncInvocationDecision::Execute(Box::new(PreparedSyncInvocation {
             invocation,
             function,
@@ -242,6 +269,23 @@ impl LiveCatalog {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
             .authorize_invocation(function, invocation)
+            .map(|_| ())
+    }
+
+    fn consume_invocation_budget(
+        &mut self,
+        function: &FunctionDefinition,
+        invocation: &Invocation,
+    ) -> Result<()> {
+        self.grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .consume_invocation_budget(ConsumeGrantInvocationBudget {
+                grant_id: invocation.causal_context.authority_grant_id.clone(),
+                invocation_id: invocation.id.clone(),
+                function_id: function.id.clone(),
+                trace_id: invocation.causal_context.trace_id.clone(),
+            })
             .map(|_| ())
     }
 

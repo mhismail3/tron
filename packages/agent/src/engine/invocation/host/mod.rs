@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
 
 use crate::engine::authority::compensation::{EngineCompensationRecord, compensation_record};
-use crate::engine::authority::grants::EngineGrant;
+use crate::engine::authority::grants::{ConsumeGrantInvocationBudget, EngineGrant};
 use crate::engine::authority::leases::{AcquireResourceLease, EngineResourceLease};
 use crate::engine::catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
 use crate::engine::catalog::registry::{

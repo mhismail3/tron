@@ -166,6 +166,7 @@ fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots()
 
     let model = read_repo_file("packages/agent/src/engine/authority/grants/model.rs");
     for required in [
+        "pub struct ConsumeGrantInvocationBudget",
         "pub const BOOTSTRAP_GRANT_IDS: &[&str]",
         "allowed_capabilities: vec![\"*\".to_owned()]",
         "allowed_namespaces: vec![\"*\".to_owned()]",
@@ -181,6 +182,52 @@ fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots()
         assert!(
             model.contains(required),
             "bootstrap grant boundary missing required text: {required}"
+        );
+    }
+
+    let grants = read_repo_file("packages/agent/src/engine/authority/grants/mod.rs");
+    for required in [
+        "consume_invocation_budget",
+        "ConsumeGrantInvocationBudget",
+        "\"grant.budget_consumed\"",
+        "\"budgetField\": \"remainingInvocations\"",
+        "set_remaining_invocations(&mut grant.budget, remaining - 1)?",
+        "budget_json = ?2",
+        "revision = ?3",
+        "updated_at = ?4",
+        "updated != 1",
+    ] {
+        assert!(
+            grants.contains(required),
+            "grant budget consumption boundary missing required text: {required}"
+        );
+    }
+
+    let registry = read_repo_file("packages/agent/src/engine/catalog/registry/invocation.rs");
+    for required in [
+        "consume_invocation_budget(&function, &invocation)",
+        "complete_invocation_idempotency(",
+        "PreparedSyncInvocationDecision::Execute",
+    ] {
+        assert!(
+            registry.contains(required),
+            "invocation registry missing budget consume/replay boundary text: {required}"
+        );
+    }
+
+    let policy_hash = read_repo_file("packages/agent/src/engine/authority/grants/policy_hash.rs");
+    for required in [
+        "pub(crate) fn grant_policy_hash(grant: &EngineGrant)",
+        "\"allowedCapabilities\": sorted_strings(&grant.allowed_capabilities)",
+        "\"resourceSelectors\": sorted_strings(&grant.resource_selectors)",
+        "\"budget\": grant.budget",
+        "\"revision\": grant.revision",
+        "write_canonical_json(&policy, &mut canonical)",
+        "Sha256::digest(canonical.as_bytes())",
+    ] {
+        assert!(
+            policy_hash.contains(required),
+            "grant policy hash boundary missing required text: {required}"
         );
     }
 }
@@ -309,6 +356,8 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
 fn sacb_external_worker_protocol_is_scoped_and_worker_owned() {
     let protocol = read_repo_file("packages/agent/src/engine/runtime/worker_protocol.rs");
     for required in [
+        "bootstrap_grant_policy_hash(&worker.authority_grant)",
+        "expect(\"loopback worker token must use a known bootstrap authority grant\")",
         "format!(\"stream:{claim}:*\")",
         "with_session_scope",
         "self.worker_token.session_id = Some(session_id)",
@@ -320,6 +369,14 @@ fn sacb_external_worker_protocol_is_scoped_and_worker_owned() {
             "worker protocol missing scoped token text: {required}"
         );
     }
+    assert!(
+        !protocol.contains("loopback-bootstrap"),
+        "worker protocol must not issue placeholder grant hashes"
+    );
+    assert!(
+        !protocol.contains("unwrap_or_default()"),
+        "worker protocol must fail loudly instead of defaulting scoped token grant hashes"
+    );
 
     let validation =
         read_repo_file("packages/agent/src/engine/runtime/external_workers/validation.rs");
@@ -343,6 +400,8 @@ fn sacb_external_worker_protocol_is_scoped_and_worker_owned() {
     let lifecycle =
         read_repo_file("packages/agent/src/engine/runtime/external_workers/lifecycle.rs");
     for required in [
+        "grant_policy_hash(&grant)",
+        "token.authority_grant_hash != active_hash",
         "WorkerAuthPolicy::LoopbackBearer",
         "WorkerKind::External",
         "validate_worker_grant(&hello).await?",
@@ -356,6 +415,10 @@ fn sacb_external_worker_protocol_is_scoped_and_worker_owned() {
             "external worker lifecycle missing grant/token guard text: {required}"
         );
     }
+    assert!(
+        !lifecycle.contains("authority_grant_hash.trim().is_empty()"),
+        "worker lifecycle must compare the token hash to the active grant hash"
+    );
 
     let registration =
         read_repo_file("packages/agent/src/engine/runtime/external_workers/registration.rs");
@@ -394,6 +457,9 @@ fn sacb_external_worker_protocol_is_scoped_and_worker_owned() {
     ]
     .join("\n");
     for required in [
+        "local_external_worker_hello_accepts_matching_grant_revision_and_hash",
+        "local_external_worker_hello_rejects_stale_grant_revision",
+        "local_external_worker_hello_rejects_tampered_grant_hash",
         "local_external_worker_hello_requires_session_scoped_token_binding",
         "local_external_worker_hello_rejects_wildcard_resource_selectors",
         "local_external_worker_rejects_namespace_substring_claim_escape",
