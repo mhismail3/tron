@@ -1,11 +1,11 @@
 # True Modularity Boundary Inventory
 
-Status: **active**
+Status: **completed**
 Scorecard row: `TMB-1`
 Last verified: 2026-06-09 (TMB-9 docs/inventory audit)
 Machine-readable inventory: `packages/agent/docs/true-modularity-boundary-inventory.tsv`
 
-This inventory classifies every tracked Rust and Swift source file in the active boundary scope. The TSV is the source of truth for static coverage; this Markdown file records the dependency rules and composition-root exceptions used by the campaign.
+This inventory classifies every tracked Rust and Swift source file in the current TMB boundary scope. The TSV remains the source of truth for static coverage; this Markdown file records the dependency rules and approved composition-root exceptions preserved after campaign closeout.
 
 ## Dependency Direction Rules
 
@@ -21,7 +21,7 @@ This inventory classifies every tracked Rust and Swift source file in the active
 
 ## Composition Roots
 
-The active composition roots are:
+The approved composition roots are:
 
 - Rust server bootstrap under `packages/agent/src/app/bootstrap/`.
 - Rust binary entry point `packages/agent/src/main.rs`.

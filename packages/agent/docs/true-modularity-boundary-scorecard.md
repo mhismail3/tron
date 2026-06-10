@@ -53,6 +53,7 @@ The campaign is enforced by
 guards:
 
 - `true_modularity_scorecard_stays_formalized`
+- `tmb_inventory_status_matches_completed_scorecard`
 - `boundary_inventory_covers_tracked_sources`
 - `agent_loop_uses_model_responder_boundary`
 - `provider_internals_do_not_escape_model_domain`

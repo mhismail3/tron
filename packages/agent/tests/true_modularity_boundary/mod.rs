@@ -40,6 +40,7 @@ fn true_modularity_scorecard_stays_formalized() {
         "| TMB-9 | Update docs and README | 6 | passed_after_fix |",
         "| TMB-10 | Final adversarial closeout | 6 | passed_after_fix |",
         "`true_modularity_scorecard_stays_formalized`",
+        "`tmb_inventory_status_matches_completed_scorecard`",
         "`boundary_inventory_covers_tracked_sources`",
         "`agent_loop_uses_model_responder_boundary`",
         "`provider_internals_do_not_escape_model_domain`",
@@ -100,6 +101,35 @@ fn true_modularity_scorecard_stays_formalized() {
             && readme.contains("packages/agent/tests/true_modularity_boundary_invariants.rs"),
         "README living-doc map must link the active TMB scorecard, evidence manifest, and invariant target"
     );
+}
+
+#[test]
+fn tmb_inventory_status_matches_completed_scorecard() {
+    let scorecard = read_repo_file("packages/agent/docs/true-modularity-boundary-scorecard.md");
+    let inventory = read_repo_file("packages/agent/docs/true-modularity-boundary-inventory.md");
+
+    let scorecard_status = first_markdown_status(&scorecard, "TMB scorecard");
+    let inventory_status = first_markdown_status(&inventory, "TMB inventory");
+
+    assert_eq!(
+        scorecard_status, "completed",
+        "TMB scorecard must stay closed before comparing inventory status"
+    );
+    assert_eq!(
+        inventory_status, scorecard_status,
+        "TMB inventory status must not contradict the completed scorecard"
+    );
+
+    for forbidden in [
+        "Status: **active**",
+        "active boundary scope",
+        "active composition roots",
+    ] {
+        assert!(
+            !inventory.contains(forbidden),
+            "TMB inventory contains stale active-campaign wording: {forbidden}"
+        );
+    }
 }
 
 #[test]
@@ -497,6 +527,16 @@ fn line_has_identifier(line: &str, identifier: &str) -> bool {
 
 fn is_identifier_byte(byte: u8) -> bool {
     byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+fn first_markdown_status<'a>(content: &'a str, document_name: &str) -> &'a str {
+    content
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("Status: **")
+                .and_then(|status| status.strip_suffix("**"))
+        })
+        .unwrap_or_else(|| panic!("{document_name} must declare a top-level markdown status"))
 }
 
 fn rust_source_lines(root: &str) -> Vec<String> {
