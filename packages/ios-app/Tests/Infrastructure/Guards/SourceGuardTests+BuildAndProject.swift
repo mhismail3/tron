@@ -113,6 +113,78 @@ extension SourceGuardTests {
     }
 
 
+    @Test("paired-server tokens stay in Keychain and diagnostics redact auth fields")
+    func testSecretStorageAndRedactionBoundaries() throws {
+        let iosRoot = iosAppRoot()
+
+        let pairedServerStore = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Pairing/PairedServerStore.swift"),
+            encoding: .utf8
+        )
+        let pairedServerTokenStore = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Storage/PairedServerTokenStore.swift"),
+            encoding: .utf8
+        )
+        let keychainItem = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Storage/KeychainItem.swift"),
+            encoding: .utf8
+        )
+        let dependencyContainer = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Composition/DependencyContainer.swift"),
+            encoding: .utf8
+        )
+        let redactor = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Diagnostics/DiagnosticsRedactor.swift"),
+            encoding: .utf8
+        )
+        let logger = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Support/Diagnostics/TronLogger.swift"),
+            encoding: .utf8
+        )
+        let networkFormatter = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/Engine/Transport/Retry/NetworkDiagnosticsFormatter.swift"),
+            encoding: .utf8
+        )
+
+        let serverStructStart = try #require(pairedServerStore.range(of: "struct PairedServer"))
+        let serverStructEnd = try #require(pairedServerStore.range(of: "/// iOS-local source of truth"))
+        let serverStruct = pairedServerStore[serverStructStart.lowerBound..<serverStructEnd.lowerBound]
+        #expect(!serverStruct.contains("token"))
+        #expect(!serverStruct.contains("authorization"))
+        #expect(!serverStruct.contains("apiKey"))
+        #expect(pairedServerStore.contains("defaults.set(data, forKey: Self.serversKey)"))
+        #expect(pairedServerStore.contains("defaults.set(activeServerId, forKey: Self.activeIdKey)"))
+
+        #expect(pairedServerTokenStore.contains("KeychainItem("))
+        #expect(pairedServerTokenStore.contains("static let keychainServicePrefix = \"com.tron.mobile.bearer\""))
+        #expect(!pairedServerTokenStore.contains("UserDefaults"))
+        #expect(keychainItem.contains("kSecClassGenericPassword"))
+        #expect(keychainItem.contains("kSecAttrAccessibleAfterFirstUnlock"))
+        #expect(keychainItem.contains("**Access group:** intentionally unset"))
+
+        #expect(dependencyContainer.contains("Self.resolveBearerToken(tokenStore: tokenStore)"))
+        #expect(dependencyContainer.contains("UserDefaults.standard.string(forKey: PairedServerStore.activeIdKey)"))
+        #expect(dependencyContainer.contains("UserDefaults.standard.data(forKey: PairedServerStore.serversKey)"))
+        #expect(dependencyContainer.contains("return tokenStore.token(forServerId: activeId)"))
+        #expect(!dependencyContainer.contains(#"UserDefaults.standard.string(forKey: "bearer"#))
+        #expect(!dependencyContainer.contains(#"UserDefaults.standard.string(forKey: "token"#))
+
+        for required in [
+            "accessToken",
+            "refreshToken",
+            "clientSecret",
+            "authorizationCode",
+            "swiftDescriptionTokenRegex",
+        ] {
+            #expect(redactor.contains(required), "DiagnosticsRedactor missing auth redaction marker: \(required)")
+        }
+        #expect(logger.contains("DiagnosticsRedactor().redactMessage(message())"))
+        #expect(networkFormatter.contains(#"authorization=\(authState)"#))
+        #expect(!networkFormatter.contains(#"value(forHTTPHeaderField: "Authorization") ??"#))
+        #expect(!networkFormatter.contains("Bearer \\("))
+    }
+
+
     @Test("DependencyProviding stays concrete-engine-client free")
     func testDependencyProvidingDoesNotExposeEngineClient() throws {
         let iosRoot = iosAppRoot()

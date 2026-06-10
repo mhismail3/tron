@@ -1,4 +1,5 @@
 use crate::domains::session::event_store::errors::{EventStoreError, Result};
+use crate::domains::session::event_store::redaction::redact_sensitive_content;
 use crate::domains::session::event_store::sqlite::connection::PooledConnection;
 use crate::shared::observability::LogLevel;
 
@@ -172,7 +173,7 @@ fn insert_client_logs(
             let level = map_client_log_level(&entry.level);
             let component = format!("ios.{}", entry.category);
             let level_str = level.to_string();
-            let message = truncate_client_log_message(&entry.message);
+            let message = redact_and_truncate_client_log_message(&entry.message);
 
             count += stmt.execute(rusqlite::params![
                 entry.timestamp,
@@ -277,6 +278,15 @@ fn truncate_client_log_message(message: &str) -> std::borrow::Cow<'_, str> {
         cut -= 1;
     }
     std::borrow::Cow::Owned(format!("{} [truncated {} bytes]", &message[..cut], dropped))
+}
+
+fn redact_and_truncate_client_log_message(message: &str) -> std::borrow::Cow<'_, str> {
+    let redacted = redact_sensitive_content(message);
+    if redacted == message {
+        truncate_client_log_message(message)
+    } else {
+        std::borrow::Cow::Owned(truncate_client_log_message(&redacted).into_owned())
+    }
 }
 
 #[cfg(test)]
@@ -412,6 +422,54 @@ mod tests {
             .unwrap();
         assert!(stored.contains("[truncated 100 bytes]"));
         assert!(stored.len() <= MAX_CLIENT_LOG_MESSAGE_BYTES + 64);
+    }
+
+    #[test]
+    fn ingest_redacts_sensitive_client_log_messages_before_storage() {
+        let store = make_store();
+        let entries = vec![ClientLogEntry::new(
+            "2026-03-03T14:30:05.000Z",
+            "warn",
+            "Engine",
+            r#"Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789 {"apiKey":"sk-live-abcdefghijklmnopqrstuvwxyz","accessToken":"access-token-1234567890"} OAuth(code: "oauth-code-1234567890")"#,
+        )];
+
+        let result = store.ingest_client_logs(&entries).unwrap();
+        assert_eq!(result.inserted, 1);
+
+        let conn = store.conn().unwrap();
+        let stored: String = conn
+            .query_row(
+                "SELECT message FROM logs WHERE component = 'ios.Engine'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        for secret in [
+            "abcdefghijklmnopqrstuvwxyz0123456789",
+            "sk-live-abcdefghijklmnopqrstuvwxyz",
+            "access-token-1234567890",
+            "oauth-code-1234567890",
+        ] {
+            assert!(!stored.contains(secret), "secret leaked to logs: {secret}");
+        }
+        assert!(stored.contains("Bearer ****"));
+        assert!(stored.contains(r#""apiKey":"****""#));
+        assert!(stored.contains(r#"code: "****""#));
+    }
+
+    #[test]
+    fn redact_and_truncate_redacts_before_cutting_secret_tail() {
+        let mut message = "x".repeat(MAX_CLIENT_LOG_MESSAGE_BYTES - 48);
+        message.push_str(" access_token=access-token-1234567890");
+        message.push(' ');
+        message.push_str(&"y".repeat(128));
+
+        let stored = redact_and_truncate_client_log_message(&message);
+
+        assert!(!stored.contains("access-token-1234567890"));
+        assert!(stored.contains("access_token=****"));
+        assert!(stored.contains("[truncated"));
     }
 
     #[test]

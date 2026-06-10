@@ -398,6 +398,156 @@ fn sacb_external_worker_protocol_is_scoped_and_worker_owned() {
 }
 
 #[test]
+fn sacb_secret_storage_and_redaction_boundaries_are_hardened() {
+    let auth_storage = read_repo_file("packages/agent/src/domains/auth/credentials/storage/mod.rs");
+    for required in [
+        "load_or_init_for_write(path)?",
+        "save_auth_storage(path, &mut storage)",
+        "atomic_write_0600(parent, path, &json)",
+        "tempfile_in(parent)",
+        "tmp.as_file().sync_all()?",
+        "persist(final_path)",
+        "Permissions::from_mode(0o600)",
+    ] {
+        assert!(
+            auth_storage.contains(required),
+            "auth storage missing secure custody text: {required}"
+        );
+    }
+
+    let onboarding = read_repo_file("packages/agent/src/app/lifecycle/onboarding/mod.rs");
+    for required in [
+        "const TOKEN_BYTE_LEN: usize = 32",
+        "general_purpose::URL_SAFE_NO_PAD.encode(bytes)",
+        "storage.bearer_token = Some(token.clone())",
+        "save_auth_storage(path, &mut storage)",
+        "load_or_create_refuses_and_preserves_malformed_non_empty_file",
+        "write_token_sets_mode_0o600",
+    ] {
+        assert!(
+            onboarding.contains(required),
+            "bearer token lifecycle missing secure custody text: {required}"
+        );
+    }
+
+    let redaction = read_repo_file("packages/agent/src/domains/session/event_store/redaction.rs");
+    for required in [
+        "redact_sensitive_content",
+        "access_?token",
+        "refresh_?token",
+        "client_?secret",
+        "authorization_?code",
+        "redacts_json_auth_fields",
+        "redacts_debug_description_auth_fields",
+        "redacts_unquoted_secret_key_values",
+    ] {
+        assert!(
+            redaction.contains(required),
+            "server redactor missing auth-secret coverage: {required}"
+        );
+    }
+
+    let logs =
+        read_repo_file("packages/agent/src/domains/session/event_store/store/event_store/logs.rs");
+    for required in [
+        "redact_sensitive_content(message)",
+        "redact_and_truncate_client_log_message(&entry.message)",
+        "ingest_redacts_sensitive_client_log_messages_before_storage",
+        "redact_and_truncate_redacts_before_cutting_secret_tail",
+    ] {
+        assert!(
+            logs.contains(required),
+            "client log ingestion missing server-side redaction proof: {required}"
+        );
+    }
+
+    let ios_store =
+        read_repo_file("packages/ios-app/Sources/Support/Pairing/PairedServerStore.swift");
+    let paired_server_decl = ios_store
+        .split("struct PairedServer")
+        .nth(1)
+        .and_then(|tail| tail.split("/// iOS-local source of truth").next())
+        .unwrap_or("");
+    for forbidden in ["token", "authorization", "apiKey"] {
+        assert!(
+            !paired_server_decl.contains(forbidden),
+            "PairedServer metadata must not contain secret field `{forbidden}`"
+        );
+    }
+
+    let ios_token_store =
+        read_repo_file("packages/ios-app/Sources/Support/Storage/PairedServerTokenStore.swift");
+    assert!(
+        ios_token_store.contains("KeychainItem(")
+            && ios_token_store
+                .contains("static let keychainServicePrefix = \"com.tron.mobile.bearer\"")
+            && !ios_token_store.contains("UserDefaults"),
+        "paired server bearer tokens must stay in Keychain and out of UserDefaults"
+    );
+
+    let keychain = read_repo_file("packages/ios-app/Sources/Support/Storage/KeychainItem.swift");
+    for required in [
+        "kSecClassGenericPassword",
+        "kSecAttrAccessibleAfterFirstUnlock",
+        "**Access group:** intentionally unset",
+    ] {
+        assert!(
+            keychain.contains(required),
+            "Keychain item missing custody marker: {required}"
+        );
+    }
+
+    for path in [
+        "packages/ios-app/Sources/Support/Diagnostics/DiagnosticsRedactor.swift",
+        "packages/mac-app/Sources/Support/Diagnostics/DiagnosticsRedactor.swift",
+    ] {
+        let source = read_repo_file(path);
+        for required in [
+            "accessToken",
+            "refreshToken",
+            "clientSecret",
+            "authorizationCode",
+            "swiftDescriptionTokenRegex",
+            "redactSwiftDescriptionTokenValues",
+        ] {
+            assert!(
+                source.contains(required),
+                "{path} missing diagnostics auth redaction marker: {required}"
+            );
+        }
+    }
+
+    let ios_logger =
+        read_repo_file("packages/ios-app/Sources/Support/Diagnostics/TronLogger.swift");
+    assert!(
+        ios_logger.contains("DiagnosticsRedactor().redactMessage(message())"),
+        "iOS logger must redact before buffering or OS logging"
+    );
+    let network_formatter = read_repo_file(
+        "packages/ios-app/Sources/Engine/Transport/Retry/NetworkDiagnosticsFormatter.swift",
+    );
+    assert!(
+        network_formatter.contains("authorization=\\(authState)")
+            && !network_formatter.contains("Bearer \\("),
+        "network diagnostics must log auth presence, not bearer value"
+    );
+
+    let ios_source_guard = read_repo_file(
+        "packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+BuildAndProject.swift",
+    );
+    assert!(
+        ios_source_guard.contains("testSecretStorageAndRedactionBoundaries"),
+        "iOS source guards must pin token custody and redaction boundaries"
+    );
+    let mac_source_guard =
+        read_repo_file("packages/mac-app/Tests/Infrastructure/Guards/MacSourceGuardTests.swift");
+    assert!(
+        mac_source_guard.contains("diagnosticsRedactorKeepsAuthFieldParity"),
+        "Mac source guards must pin diagnostics redaction parity"
+    );
+}
+
+#[test]
 fn sacb_internal_invoke_scope_is_trusted_runtime_only() {
     let policy = read_repo_file("packages/agent/src/engine/kernel/policy.rs");
     for required in [

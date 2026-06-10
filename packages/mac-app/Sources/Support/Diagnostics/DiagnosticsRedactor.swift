@@ -8,9 +8,13 @@ import Foundation
 /// drifts, update both files or extract a common SPM package.
 ///
 /// Redactions applied:
-/// - `Bearer <token>` → `Bearer [redacted:len=N]`.
-/// - `"token":"..."` / `"authorization":"Bearer ..."` / `"access_token":"..."`
-///   / `"api_key":"..."` → value replaced with `[redacted:len=N]`.
+/// - `Authorization: Bearer <token>` and bare `Bearer <token>` →
+///   `Bearer [redacted:len=N]`.
+/// - JSON-shaped auth keys such as `"token":"..."`, `"apiKey":"..."`,
+///   `"accessToken":"..."`, and `"clientSecret":"..."` → value
+///   replaced with `[redacted:len=N]`.
+/// - Swift `String(describing:)` auth fields such as
+///   `apiKey: "..."` → value replaced with `[redacted:len=N]`.
 /// - Local filesystem paths such as `/Users/<username>/...`,
 ///   `/private/var/...`, `/tmp/...`, and `~/...` →
 ///   `[redacted:path]`.
@@ -29,6 +33,7 @@ struct DiagnosticsRedactor {
         var out = input
         out = Self.redactBearerRuns(out)
         out = Self.redactJSONTokenValues(out)
+        out = Self.redactSwiftDescriptionTokenValues(out)
         out = Self.redactLocalPaths(out)
         return out
     }
@@ -77,7 +82,15 @@ struct DiagnosticsRedactor {
     private static let jsonTokenRegex: NSRegularExpression = {
         // swiftlint:disable:next force_try
         try! NSRegularExpression(
-            pattern: #""(token|authorization|bearer|access_token|api_key)"\s*:\s*"([^"]{8,})""#,
+            pattern: #""(token|authorization|bearer|access_token|api_key|apiKey|accessToken|refreshToken|clientSecret|authorizationCode|authCode|oauthCode|code)"\s*:\s*"([^"]{8,})""#,
+            options: [.caseInsensitive]
+        )
+    }()
+
+    private static let swiftDescriptionTokenRegex: NSRegularExpression = {
+        // swiftlint:disable:next force_try
+        try! NSRegularExpression(
+            pattern: #"\b(token|authorization|bearer|apiKey|accessToken|refreshToken|clientSecret|authorizationCode|authCode|oauthCode|code)\s*:\s*"([^"]{8,})""#,
             options: [.caseInsensitive]
         )
     }()
@@ -108,6 +121,21 @@ struct DiagnosticsRedactor {
     private static func redactJSONTokenValues(_ input: String) -> String {
         let ns = input as NSString
         let matches = jsonTokenRegex.matches(in: input, range: NSRange(location: 0, length: ns.length))
+        guard !matches.isEmpty else { return input }
+
+        var out = input
+        for match in matches.reversed() where match.numberOfRanges >= 3 {
+            let valueRange = match.range(at: 2)
+            guard let swiftRange = Range(valueRange, in: out) else { continue }
+            let original = String(out[swiftRange])
+            out.replaceSubrange(swiftRange, with: "[redacted:len=\(original.count)]")
+        }
+        return out
+    }
+
+    private static func redactSwiftDescriptionTokenValues(_ input: String) -> String {
+        let ns = input as NSString
+        let matches = swiftDescriptionTokenRegex.matches(in: input, range: NSRange(location: 0, length: ns.length))
         guard !matches.isEmpty else { return input }
 
         var out = input

@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-06-08 (HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
+> Last verified: 2026-06-10 (SACB-8 diagnostics redaction parity; HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
 
 ## Overview
 
@@ -45,7 +45,7 @@ packages/mac-app/
 │   │   └── ProcessControl/         # dev stopper, process probe, wrapper lock, uninstall
 │   ├── Support/
 │   │   ├── Diagnostics/
-│   │   │   └── DiagnosticsRedactor.swift   # strip paths, mask tokens, drop chat content
+│   │   │   └── DiagnosticsRedactor.swift   # strip paths, mask bearer/API/OAuth fields, drop chat content
 │   │   ├── Feedback/
 │   │   │   └── FeedbackComposer.swift      # pure GitHub issue composer with redacted log context
 │   │   ├── Foundation/

@@ -70,6 +70,35 @@ struct MacSourceGuardTests {
         #expect(subprocess.contains("ProcessResult"))
     }
 
+    @Test("diagnostics redactor keeps iOS auth-field parity")
+    func diagnosticsRedactorKeepsAuthFieldParity() throws {
+        let macRoot = try Self.macAppRoot()
+        let redactor = try Self.read(macRoot, "Sources/Support/Diagnostics/DiagnosticsRedactor.swift")
+        let tests = try Self.read(macRoot, "Tests/Support/Diagnostics/DiagnosticsRedactorTests.swift")
+
+        for required in [
+            "accessToken",
+            "refreshToken",
+            "clientSecret",
+            "authorizationCode",
+            "authCode",
+            "oauthCode",
+            "swiftDescriptionTokenRegex",
+            "redactSwiftDescriptionTokenValues",
+        ] {
+            #expect(redactor.contains(required), "Mac DiagnosticsRedactor missing auth redaction marker: \(required)")
+        }
+
+        for required in [
+            "redactsCamelCaseAuthJSONValues",
+            "redactsSwiftDescriptionAuthFields",
+            "sk-live-abcdefghijklmnopqrstuvwxyz",
+            "oauth-code-1234567890",
+        ] {
+            #expect(tests.contains(required), "Mac DiagnosticsRedactorTests missing coverage marker: \(required)")
+        }
+    }
+
     @Test("helper-resource layout preserves tracked helper skeletons")
     func helperResourceLayoutPreservesTrackedHelperSkeletons() throws {
         let macRoot = try Self.macAppRoot()

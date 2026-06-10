@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-10 (CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-10 (SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -211,8 +211,10 @@ live in `TronThemeTokens.swift`.
 
 The settings toolbar exposes Logs in every build configuration. The client log
 ingestion service mirrors bounded client logs into the server `logs` table while
-connected, creating a self-feeding diagnostics loop that the runtime can inspect
-without relying on a debug-only export button.
+connected. iOS redacts before buffering and again at the send boundary, and the
+server redacts bearer/API/OAuth fields again before durable `logs` storage, so
+diagnostics do not rely on one client-only scrubber. Successful ingest transport
+chatter is filtered to prevent a self-feeding diagnostics loop.
 `DiagnosticsBundleBuilder.swift` owns bundle assembly; DTOs, event sanitization,
 hashing, and host classification live in `DiagnosticsBundleTypes.swift`.
 Diagnostics support consumes `DiagnosticsEngineEndpoint` and

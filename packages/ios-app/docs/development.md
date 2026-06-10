@@ -266,10 +266,11 @@ event summaries, and MetricKit payloads.
 When the app is connected to a paired server,
 `ClientLogIngestionService` automatically mirrors the bounded, redacted
 `TronLogger` buffer into the server `logs` table through `logs::ingest`.
-The upload redacts messages again at the send boundary, tracks entry
-fingerprints for the active server endpoint, uses deterministic batch
-idempotency, and still relies on the server's client-log dedupe index as
-durable truth. Endpoint changes cancel stale scheduled uploads, and repeated
+The upload redacts messages again at the send boundary; the server then applies
+its bearer/API/OAuth redactor before durable `logs` storage. Uploads track entry
+fingerprints for the active server endpoint, use deterministic batch
+idempotency, and still rely on the server's client-log dedupe index as durable
+truth. Endpoint changes cancel stale scheduled uploads, and repeated
 reconnects or foreground transitions do not resend unchanged local buffers or
 create duplicate DB rows. Successful `logs::ingest` transport/debug plumbing is
 filtered before upload so automatic syncing cannot create a self-feeding log

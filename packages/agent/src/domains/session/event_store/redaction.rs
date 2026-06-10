@@ -15,6 +15,32 @@ use regex::Regex;
 pub fn redact_sensitive_content(text: &str) -> String {
     static PATTERNS: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
         vec![
+            // JSON-shaped auth fields, preserving the key and JSON quoting.
+            (
+                Regex::new(
+                    r#"(?i)("(?:(?:api_?key)|token|authorization|bearer|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code|code)"\s*:\s*")([^"]{8,})(")"#,
+                )
+                .unwrap(),
+                "${1}****${3}",
+            ),
+            // Swift/Rust debug-description fields like `apiKey: "..."`.
+            (
+                Regex::new(
+                    r#"(?i)(\b(?:(?:api_?key)|token|authorization|bearer|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code|code)\s*:\s*")([^"]{8,})(")"#,
+                )
+                .unwrap(),
+                "${1}****${3}",
+            ),
+            // Common unquoted key/value forms. Keep this narrower than the
+            // JSON/debug-description patterns so generic error `code=` fields
+            // do not get masked.
+            (
+                Regex::new(
+                    r"(?i)\b(api_?key|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code|password|secret)\s*[:=]\s*[A-Za-z0-9._~+/=-]{8,}",
+                )
+                .unwrap(),
+                "${1}=****",
+            ),
             // Anthropic API keys (sk-ant-api03-...)
             (
                 Regex::new(r"sk-ant-api\d{2}-[A-Za-z0-9_-]{10,}").unwrap(),
@@ -122,6 +148,44 @@ mod tests {
         let result = redact_sensitive_content(text);
         assert!(result.contains("AIzaSy****"));
         assert!(!result.contains("ABCDEFGHIJKLMNO"));
+    }
+
+    #[test]
+    fn redacts_json_auth_fields() {
+        let text = r#"{"apiKey":"sk-live-abcdefghijklmnopqrstuvwxyz","accessToken":"access-token-1234567890","refreshToken":"refresh-token-1234567890","clientSecret":"client-secret-1234567890","authorizationCode":"oauth-code-1234567890"}"#;
+        let result = redact_sensitive_content(text);
+        for secret in [
+            "sk-live-abcdefghijklmnopqrstuvwxyz",
+            "access-token-1234567890",
+            "refresh-token-1234567890",
+            "client-secret-1234567890",
+            "oauth-code-1234567890",
+        ] {
+            assert!(!result.contains(secret), "secret leaked: {secret}");
+        }
+        assert!(result.contains(r#""apiKey":"****""#));
+        assert!(result.contains(r#""accessToken":"****""#));
+    }
+
+    #[test]
+    fn redacts_debug_description_auth_fields() {
+        let text = r#"AddNamedApiKeyParams(provider: "openai", apiKey: "sk-test-abcdefghijklmnopqrstuvwxyz") OAuth(code: "oauth-code-1234567890")"#;
+        let result = redact_sensitive_content(text);
+        assert!(!result.contains("sk-test-abcdefghijklmnopqrstuvwxyz"));
+        assert!(!result.contains("oauth-code-1234567890"));
+        assert!(result.contains(r#"apiKey: "****""#));
+        assert!(result.contains(r#"code: "****""#));
+        assert!(result.contains(r#"provider: "openai""#));
+    }
+
+    #[test]
+    fn redacts_unquoted_secret_key_values() {
+        let text = "access_token=access-token-1234567890 client_secret:client-secret-1234567890";
+        let result = redact_sensitive_content(text);
+        assert!(!result.contains("access-token-1234567890"));
+        assert!(!result.contains("client-secret-1234567890"));
+        assert!(result.contains("access_token=****"));
+        assert!(result.contains("client_secret=****"));
     }
 
     #[test]

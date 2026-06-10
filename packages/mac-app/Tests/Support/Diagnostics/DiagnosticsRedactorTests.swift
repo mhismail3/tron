@@ -14,6 +14,34 @@ struct DiagnosticsRedactorTests {
         #expect(out.contains("Bearer [redacted:len=20]"))
     }
 
+    @Test("redacts camelCase auth keys in JSON payloads")
+    func redactsCamelCaseAuthJSONValues() {
+        let r = DiagnosticsRedactor()
+        let input = #"{"apiKey":"sk-live-abcdefghijklmnopqrstuvwxyz","accessToken":"access-token-1234567890","refreshToken":"refresh-token-1234567890","clientSecret":"client-secret-1234567890","authorizationCode":"oauth-code-1234567890"}"#
+        let out = r.redactMessage(input)
+
+        #expect(!out.contains("sk-live-abcdefghijklmnopqrstuvwxyz"))
+        #expect(!out.contains("access-token-1234567890"))
+        #expect(!out.contains("refresh-token-1234567890"))
+        #expect(!out.contains("client-secret-1234567890"))
+        #expect(!out.contains("oauth-code-1234567890"))
+        #expect(out.contains(#""apiKey":"[redacted:len=34]""#))
+        #expect(out.contains(#""accessToken":"[redacted:len=23]""#))
+    }
+
+    @Test("redacts Swift description auth fields")
+    func redactsSwiftDescriptionAuthFields() {
+        let r = DiagnosticsRedactor()
+        let input = #"AddNamedApiKeyParams(provider: "openai", apiKey: "sk-test-abcdefghijklmnopqrstuvwxyz", apiKeyLabel: "Project") OAuth(code: "oauth-code-1234567890")"#
+        let out = r.redactMessage(input)
+
+        #expect(!out.contains("sk-test-abcdefghijklmnopqrstuvwxyz"))
+        #expect(!out.contains("oauth-code-1234567890"))
+        #expect(out.contains(#"apiKey: "[redacted:len=34]""#))
+        #expect(out.contains(#"code: "[redacted:len=21]""#))
+        #expect(out.contains("Project"))
+    }
+
     @Test("redacts local paths to placeholders")
     func redactsHomePath() {
         let r = DiagnosticsRedactor()
