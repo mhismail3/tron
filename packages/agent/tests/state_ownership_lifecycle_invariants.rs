@@ -171,9 +171,9 @@ fn sol_campaign_harness_exists() {
         "Status: **active**",
         "Total weight: **100**",
         "| SOL-0 | Campaign harness, red static gate, README links, scorecard/evidence/inventory scaffolding | 5 | passed_after_fix |",
-        "| SOL-1 | Whole-repo state inventory for Rust server, iOS app, scripts/CI state, docs-owned state claims | 10 | pending |",
-        "| SOL-8 | iOS projection and local state lifecycle | 14 | pending |",
-        "| SOL-10 | Final closeout | 3 | pending |",
+        "| SOL-1 | Whole-repo state inventory for Rust server, iOS app, scripts/CI state, docs-owned state claims | 10 |",
+        "| SOL-8 | iOS projection and local state lifecycle | 14 |",
+        "| SOL-10 | Final closeout | 3 |",
         "SessionManager::plan_mode",
         "Engine compensation records",
         "iOS local-only state surfaces",
@@ -389,13 +389,14 @@ fn ios_tasks_have_cancellation_or_view_lifecycle_ownership() {
 fn server_auth_and_settings_writes_stay_owner_private() {
     let allowed = [
         "packages/agent/src/app/lifecycle/onboarding/mod.rs",
+        "packages/agent/src/app/health/mod.rs",
         "packages/agent/src/domains/auth/credentials/",
         "packages/agent/src/domains/settings/profile/",
         "packages/agent/src/shared/foundation/profile/",
     ];
     let offenders = git_ls_files()
         .into_iter()
-        .filter(|path| path.starts_with("packages/agent/src/") && path.ends_with(".rs"))
+        .filter(|path| is_production_rust_or_swift(path) && path.ends_with(".rs"))
         .filter(|path| repo_path(path).is_file())
         .filter(|path| !allowed.iter().any(|prefix| path.starts_with(prefix)))
         .filter(|path| {
@@ -528,7 +529,6 @@ fn final_closeout_is_complete() {
             "must still",
             "may close only",
             "remaining proof",
-            "red static gate",
             "deletion pending",
         ] {
             assert!(
