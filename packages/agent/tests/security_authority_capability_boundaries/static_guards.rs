@@ -183,3 +183,39 @@ fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots()
         );
     }
 }
+
+#[test]
+fn sacb_internal_invoke_scope_is_trusted_runtime_only() {
+    let policy = read_repo_file("packages/agent/src/engine/kernel/policy.rs");
+    for required in [
+        "has_trusted_internal_invoke_scope(ctx)",
+        "ctx.has_scope(ENGINE_INTERNAL_INVOKE_SCOPE)",
+        "ActorKind::System | ActorKind::Worker | ActorKind::Queue | ActorKind::Cron",
+        "public clients, users, and agent contexts remain denied",
+    ] {
+        assert!(
+            policy.contains(required),
+            "internal invoke policy missing trusted-runtime guard text: {required}"
+        );
+    }
+
+    let transport = read_repo_file("packages/agent/src/transport/engine/mod.rs");
+    assert!(
+        !transport.contains("ENGINE_INTERNAL_INVOKE_SCOPE")
+            && !transport.contains("\"engine.internal.invoke\""),
+        "public engine transport must not mint engine.internal.invoke"
+    );
+
+    let prompt = read_repo_file("packages/agent/src/domains/agent/prompt/prompt.rs");
+    for required in [
+        "trusted_agent_internal_child_context",
+        "system:agent-runtime",
+        "AuthorityGrantId::new(\"engine-system\")",
+        "ENGINE_INTERNAL_INVOKE_SCOPE.to_owned()",
+    ] {
+        assert!(
+            prompt.contains(required),
+            "agent hidden prompt delegation must use engine-owned internal context: {required}"
+        );
+    }
+}

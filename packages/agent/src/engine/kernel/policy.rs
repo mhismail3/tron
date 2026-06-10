@@ -3,6 +3,11 @@
 //! This layer protects primitive runtime integrity: idempotency, schemas,
 //! resource leases, compensation metadata, delivery modes, visibility, and
 //! routability. It does not encode product prompt policy.
+//!
+//! INVARIANT: `engine.internal.invoke` is a trusted runtime scope, not public
+//! authority. It can unlock internal catalog visibility only for engine-owned
+//! runtime actor kinds; public clients, users, and agent contexts remain denied
+//! even if they carry the raw string.
 
 use crate::engine::catalog::discovery::{ActorContext, ActorKind};
 use crate::engine::invocation::model::{
@@ -237,13 +242,7 @@ fn is_trigger_void_invocation(invocation: &Invocation) -> bool {
 pub fn is_visible_to_actor(function: &FunctionDefinition, actor: Option<&ActorContext>) -> bool {
     match function.visibility {
         VisibilityScope::Internal => actor
-            .map(|ctx| {
-                ctx.actor_kind.is_admin_like()
-                    || ctx
-                        .authority_scopes
-                        .iter()
-                        .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
-            })
+            .map(|ctx| ctx.actor_kind.is_admin_like() || has_trusted_internal_invoke_scope(ctx))
             .unwrap_or(false),
         VisibilityScope::Session => actor
             .map(|ctx| {
@@ -291,6 +290,14 @@ pub fn is_visible_to_actor(function: &FunctionDefinition, actor: Option<&ActorCo
     }
 }
 
+fn has_trusted_internal_invoke_scope(ctx: &ActorContext) -> bool {
+    ctx.has_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
+        && matches!(
+            ctx.actor_kind,
+            ActorKind::System | ActorKind::Worker | ActorKind::Queue | ActorKind::Cron
+        )
+}
+
 fn actor_from_causal_context(context: &CausalContext) -> ActorContext {
     ActorContext {
         actor_id: context.actor_id.clone(),
@@ -306,8 +313,9 @@ fn actor_from_causal_context(context: &CausalContext) -> ActorContext {
 mod tests {
     use super::*;
     use crate::engine::{
-        AuthorityRequirement, CompensationContract, CompensationKind, EffectClass, FunctionId,
-        IdempotencyContract, Provenance, ResourceLeaseRequirement, WorkerId,
+        ActorId, AuthorityGrantId, AuthorityRequirement, CompensationContract, CompensationKind,
+        EffectClass, FunctionId, IdempotencyContract, Provenance, ResourceLeaseRequirement,
+        WorkerId,
     };
 
     fn high_risk_execute_function() -> FunctionDefinition {
@@ -339,5 +347,45 @@ mod tests {
 
         validate_function_registration(&function)
             .expect("high-risk registration relies on idempotency, lease, and compensation");
+    }
+
+    #[test]
+    fn internal_visibility_scope_requires_trusted_runtime_actor() {
+        let function = FunctionDefinition::new(
+            FunctionId::new("alpha::hidden").expect("function id"),
+            WorkerId::new("alpha").expect("worker id"),
+            "hidden function",
+            VisibilityScope::Internal,
+            EffectClass::PureRead,
+        );
+        let scoped_actor = |kind| {
+            ActorContext::new(
+                ActorId::new("actor").expect("actor id"),
+                kind,
+                AuthorityGrantId::new("grant").expect("grant id"),
+            )
+            .with_scope(ENGINE_INTERNAL_INVOKE_SCOPE)
+        };
+
+        assert!(!is_visible_to_actor(
+            &function,
+            Some(&scoped_actor(ActorKind::Client))
+        ));
+        assert!(!is_visible_to_actor(
+            &function,
+            Some(&scoped_actor(ActorKind::User))
+        ));
+        assert!(!is_visible_to_actor(
+            &function,
+            Some(&scoped_actor(ActorKind::Agent))
+        ));
+        assert!(is_visible_to_actor(
+            &function,
+            Some(&scoped_actor(ActorKind::Worker))
+        ));
+        assert!(is_visible_to_actor(
+            &function,
+            Some(&scoped_actor(ActorKind::System))
+        ));
     }
 }

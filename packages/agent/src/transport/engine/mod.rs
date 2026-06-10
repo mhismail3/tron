@@ -363,4 +363,23 @@ mod tests {
 
         assert!(envelope.causal_context.runtime_metadata.is_empty());
     }
+
+    #[test]
+    fn public_engine_invoke_never_mints_internal_invoke_scope() {
+        let envelope = build_invoke("agent::prompt_apply");
+        let forbidden_scope = ["engine", "internal", "invoke"].join(".");
+
+        assert!(
+            !envelope
+                .causal_context
+                .authority_scopes
+                .iter()
+                .any(|scope| scope == &forbidden_scope)
+        );
+        assert_eq!(envelope.causal_context.actor_kind, ActorKind::Client);
+        assert_eq!(
+            envelope.causal_context.authority_grant_id.as_str(),
+            catalog::SYSTEM_AUTHORITY_GRANT
+        );
+    }
 }

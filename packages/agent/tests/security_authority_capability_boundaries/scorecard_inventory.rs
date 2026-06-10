@@ -15,13 +15,14 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Scorecard",
-        "Current score: **51/100**",
+        "Current score: **61/100**",
         "Status: **active**",
         "| SACB-0 | Campaign harness, red gates, README/CI links, evidence/inventory scaffolding | 5 | passed_after_fix |",
         "| SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix |",
         "| SACB-2 | Public transport auth, route exposure, bearer handling, loopback worker boundary | 10 | passed_after_fix |",
         "| SACB-3 | Transport context trust: remove/deny untrusted authority scope and runtime metadata injection | 14 | passed_after_fix |",
         "| SACB-4 | Authority grant model: derivation, file roots, network policy, budgets, bootstrap grants | 12 | passed_after_fix |",
+        "| SACB-5 | Catalog visibility and direct invocation boundaries, including `engine::invoke` delegation | 10 | passed_after_fix |",
         "| SACB-10 | Final closeout, static gates, full verification, clean status | 5 | pending |",
         "`../tests/security_authority_capability_boundaries_invariants.rs`",
     ] {
@@ -34,12 +35,13 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
     for required in [
         "# Security Authority Capability Boundaries Evidence Manifest",
         "Status: **active**",
-        "Current score: **51/100**",
+        "Current score: **61/100**",
         "| SACB-0 | passed_after_fix |",
         "| SACB-1 | passed_after_fix |",
         "| SACB-2 | passed_after_fix |",
         "| SACB-3 | passed_after_fix |",
         "| SACB-4 | passed_after_fix |",
+        "| SACB-5 | passed_after_fix |",
         "| SACB-10 | pending |",
         "## Baseline Evidence",
     ] {

@@ -197,18 +197,7 @@ pub(crate) async fn invoke_agent_function_sync(
     let function_id = FunctionId::new(function_id).map_err(|e| CapabilityError::Internal {
         message: e.to_string(),
     })?;
-    let mut authority_scopes = invocation.causal_context.authority_scopes.clone();
-    if !authority_scopes
-        .iter()
-        .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
-    {
-        authority_scopes.push(ENGINE_INTERNAL_INVOKE_SCOPE.to_owned());
-    }
-    let mut context = invocation.causal_context.clone();
-    context.parent_invocation_id = Some(invocation.id.clone());
-    context.authority_scopes = authority_scopes;
-    context.idempotency_key = Some(format!("{idempotency_prefix}:{}", invocation.id));
-    context.delivery_mode = crate::engine::DeliveryMode::Sync;
+    let context = trusted_agent_internal_child_context(invocation, idempotency_prefix);
     let child = Invocation::new_sync(function_id.clone(), payload, context);
     publish_prompt_stream(
         invocation,
@@ -246,6 +235,30 @@ pub(crate) async fn invoke_agent_function_sync(
     crate::shared::server::error_mapping::result_to_capability_value(result)
 }
 
+fn trusted_agent_internal_child_context(
+    invocation: &Invocation,
+    idempotency_prefix: &str,
+) -> crate::engine::CausalContext {
+    let mut context = invocation.causal_context.clone();
+    context.actor_id = crate::engine::ActorId::new("system:agent-runtime").expect("valid actor id");
+    context.actor_kind = crate::engine::ActorKind::System;
+    context.authority_grant_id =
+        crate::engine::AuthorityGrantId::new("engine-system").expect("valid grant id");
+    context.parent_invocation_id = Some(invocation.id.clone());
+    if !context
+        .authority_scopes
+        .iter()
+        .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
+    {
+        context
+            .authority_scopes
+            .push(ENGINE_INTERNAL_INVOKE_SCOPE.to_owned());
+    }
+    context.idempotency_key = Some(format!("{idempotency_prefix}:{}", invocation.id));
+    context.delivery_mode = crate::engine::DeliveryMode::Sync;
+    context
+}
+
 pub(crate) async fn publish_prompt_stream(
     invocation: &Invocation,
     deps: &Deps,
@@ -256,4 +269,48 @@ pub(crate) async fn publish_prompt_stream(
     crate::domains::agent::stream::AgentStreamPublisher::new(&deps.engine_host)
         .prompt(invocation, session_id, action, payload)
         .await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::{ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, TraceId};
+
+    #[test]
+    fn hidden_prompt_child_context_is_engine_owned_not_public_caller() {
+        let parent = Invocation::new_sync(
+            FunctionId::new("agent::prompt").expect("function id"),
+            json!({"sessionId": "session-a", "prompt": "hello"}),
+            CausalContext::new(
+                ActorId::new("engine-client").expect("actor id"),
+                ActorKind::Client,
+                AuthorityGrantId::new("engine-transport").expect("grant id"),
+                TraceId::new("prompt-parent").expect("trace id"),
+            )
+            .with_scope("agent.write")
+            .with_session_id("session-a")
+            .with_workspace_id("workspace-a"),
+        );
+
+        let child = trusted_agent_internal_child_context(&parent, "agent::prompt_apply");
+
+        assert_eq!(child.actor_id.as_str(), "system:agent-runtime");
+        assert_eq!(child.actor_kind, ActorKind::System);
+        assert_eq!(child.authority_grant_id.as_str(), "engine-system");
+        assert_eq!(child.parent_invocation_id, Some(parent.id));
+        assert_eq!(child.session_id.as_deref(), Some("session-a"));
+        assert_eq!(child.workspace_id.as_deref(), Some("workspace-a"));
+        assert!(
+            child
+                .authority_scopes
+                .iter()
+                .any(|scope| scope == ENGINE_INTERNAL_INVOKE_SCOPE)
+        );
+        assert!(
+            child
+                .idempotency_key
+                .as_deref()
+                .is_some_and(|key| key.starts_with("agent::prompt_apply:"))
+        );
+    }
 }

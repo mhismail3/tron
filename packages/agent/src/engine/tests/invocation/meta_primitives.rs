@@ -427,6 +427,134 @@ async fn engine_invoke_delegates_with_parent_causality_and_target_policy() {
 }
 
 #[tokio::test]
+async fn public_engine_invoke_cannot_reach_hidden_visibility_targets() {
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    for (id, visibility) in [
+        ("alpha::internal", VisibilityScope::Internal),
+        ("alpha::admin", VisibilityScope::Admin),
+        ("alpha::worker_only", VisibilityScope::Worker),
+    ] {
+        host.catalog_mut()
+            .register_function(
+                FunctionDefinition::new(
+                    fid(id),
+                    wid("w1"),
+                    "hidden function",
+                    visibility,
+                    EffectClass::PureRead,
+                ),
+                Some(Arc::new(CountingHandler {
+                    calls: calls.clone(),
+                })),
+                true,
+            )
+            .unwrap();
+    }
+
+    let public_context = || {
+        CausalContext::new(
+            actor("engine-client"),
+            ActorKind::Client,
+            grant("engine-transport"),
+            trace("public-engine-invoke-hidden"),
+        )
+        .with_scope("alpha.read")
+        .with_scope("alpha.write")
+    };
+
+    for target in ["alpha::internal", "alpha::admin", "alpha::worker_only"] {
+        let result = host
+            .invoke(host_invocation(
+                "engine::invoke",
+                json!({"functionId": target, "payload": {}}),
+                public_context(),
+            ))
+            .await;
+        assert_eq!(result.error, None, "engine::invoke wraps child failures");
+        assert!(
+            result.value.unwrap()["child"]["error"]["message"]
+                .as_str()
+                .is_some_and(|message| message.contains("not visible")),
+            "{target} should be hidden from public engine::invoke"
+        );
+    }
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        0,
+        "hidden target handlers must not run"
+    );
+}
+
+#[tokio::test]
+async fn engine_internal_invoke_scope_does_not_make_public_context_trusted() {
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    host.catalog_mut()
+        .register_function(
+            FunctionDefinition::new(
+                fid("alpha::internal"),
+                wid("w1"),
+                "hidden function",
+                VisibilityScope::Internal,
+                EffectClass::PureRead,
+            ),
+            Some(Arc::new(CountingHandler {
+                calls: calls.clone(),
+            })),
+            true,
+        )
+        .unwrap();
+
+    let public_raw_scope = host
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({"functionId": "alpha::internal", "payload": {}}),
+            CausalContext::new(
+                actor("engine-client"),
+                ActorKind::Client,
+                grant("engine-transport"),
+                trace("public-engine-invoke-raw-internal"),
+            )
+            .with_scope(crate::engine::ENGINE_INTERNAL_INVOKE_SCOPE),
+        ))
+        .await;
+    assert_eq!(public_raw_scope.error, None);
+    assert!(
+        public_raw_scope.value.unwrap()["child"]["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("not visible"))
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+
+    let trusted_runtime = host
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({"functionId": "alpha::internal", "payload": {}}),
+            CausalContext::new(
+                actor("system"),
+                ActorKind::System,
+                grant("engine-system"),
+                trace("trusted-engine-invoke-internal"),
+            )
+            .with_scope(crate::engine::ENGINE_INTERNAL_INVOKE_SCOPE),
+        ))
+        .await;
+    assert_eq!(trusted_runtime.error, None);
+    assert_eq!(
+        trusted_runtime.value.as_ref().unwrap()["child"]["value"]["call"],
+        1
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn engine_invoke_reports_target_errors_in_child_envelope() {
     let mut host = EngineHost::new().unwrap();
     host.catalog_mut()
