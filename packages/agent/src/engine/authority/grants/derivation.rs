@@ -1,8 +1,10 @@
 use chrono::Utc;
 use serde_json::Value;
 
-use crate::engine::authority::grants::model::{DeriveGrant, EngineGrant, EngineGrantLifecycle};
 use crate::engine::kernel::errors::{EngineError, Result};
+
+use super::model::{DeriveGrant, EngineGrant, EngineGrantLifecycle};
+use super::paths::{canonical_payload_path, root_allows_path};
 
 pub(super) fn ensure_parent_can_derive(parent: &EngineGrant) -> Result<()> {
     authorize_active(parent)?;
@@ -150,7 +152,11 @@ fn ensure_file_roots_narrow(parent: &[String], child: &[String]) -> Result<()> {
                 "child grant file roots exceed parent".to_owned(),
             ));
         }
-        if !parent.iter().any(|parent| root.starts_with(parent)) {
+        let canonical_root = canonical_payload_path(root)?;
+        if !parent
+            .iter()
+            .any(|parent| root_allows_path(parent, &canonical_root).unwrap_or(false))
+        {
             return Err(EngineError::PolicyViolation(
                 "child grant file roots exceed parent".to_owned(),
             ));

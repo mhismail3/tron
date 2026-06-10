@@ -4,6 +4,17 @@
 //! carry a grant id, but the engine resolves that id to stored policy before a
 //! handler runs. Raw caller-supplied authority scope strings are audit context,
 //! not permission truth.
+//!
+//! | Submodule | Role |
+//! |---|---|
+//! | `authorization` | Runtime invocation checks against resolved durable grants. |
+//! | `derivation` | Parent-to-child narrowing validation before grant persistence. |
+//! | `model` | Durable grant/request/event records and bootstrap root grants. |
+//! | `paths` | Shared canonical containment helpers for file-root policy. |
+//! | `sqlite_codec` | SQLite row encoding and decoding for durable grants. |
+//!
+//! INVARIANT: derivation and invocation authorization use canonical path
+//! containment for file roots. Raw string-prefix checks are not authority.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -20,6 +31,7 @@ use crate::engine::kernel::types::FunctionDefinition;
 mod authorization;
 mod derivation;
 mod model;
+mod paths;
 mod sqlite_codec;
 
 pub use model::{

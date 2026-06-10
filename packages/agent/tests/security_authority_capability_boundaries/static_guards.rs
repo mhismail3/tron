@@ -123,3 +123,63 @@ fn sacb_public_engine_context_rejects_authority_and_runtime_metadata() {
         );
     }
 }
+
+#[test]
+fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots() {
+    let derivation = read_repo_file("packages/agent/src/engine/authority/grants/derivation.rs");
+    assert!(
+        !derivation.contains("root.starts_with(parent)"),
+        "grant derivation must not use raw string-prefix file-root narrowing"
+    );
+    for required in [
+        "canonical_payload_path(root)?",
+        "root_allows_path(parent, &canonical_root).unwrap_or(false)",
+        "network_rank(&child.network_policy)? > network_rank(&parent.network_policy)?",
+        "ensure_budget_narrows(&parent.budget, &child.budget)?",
+        "\"remainingInvocations\"",
+        "\"remainingTokens\"",
+        "\"remainingProcessMs\"",
+        "\"maxInvocations\"",
+        "\"maxTokens\"",
+        "\"maxProcessMs\"",
+    ] {
+        assert!(
+            derivation.contains(required),
+            "grant derivation boundary missing required text: {required}"
+        );
+    }
+
+    let paths = read_repo_file("packages/agent/src/engine/authority/grants/paths.rs");
+    for required in [
+        "pub(super) fn canonical_payload_path(path: &str)",
+        "pub(super) fn root_allows_path(root: &str, path: &Path)",
+        "Component::ParentDir",
+        "path.starts_with(canonical_root)",
+        "file path {path} has no existing ancestor",
+    ] {
+        assert!(
+            paths.contains(required),
+            "grant path helper missing canonical containment text: {required}"
+        );
+    }
+
+    let model = read_repo_file("packages/agent/src/engine/authority/grants/model.rs");
+    for required in [
+        "pub const BOOTSTRAP_GRANT_IDS: &[&str]",
+        "allowed_capabilities: vec![\"*\".to_owned()]",
+        "allowed_namespaces: vec![\"*\".to_owned()]",
+        "allowed_authority_scopes: vec![\"*\".to_owned()]",
+        "allowed_resource_kinds: vec![\"*\".to_owned()]",
+        "resource_selectors: vec![\"*\".to_owned()]",
+        "file_roots: vec![\"*\".to_owned()]",
+        "network_policy: \"unrestricted\".to_owned()",
+        "max_risk: RiskLevel::Critical",
+        "budget: json!({\"class\": \"bootstrap\"})",
+        "provenance: json!({\"source\": \"engine.bootstrap\"})",
+    ] {
+        assert!(
+            model.contains(required),
+            "bootstrap grant boundary missing required text: {required}"
+        );
+    }
+}

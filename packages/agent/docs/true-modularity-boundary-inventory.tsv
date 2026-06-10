@@ -343,6 +343,7 @@ packages/agent/src/engine/authority/grants/authorization.rs	rust	implementation	
 packages/agent/src/engine/authority/grants/derivation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/authority/grants/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
 packages/agent/src/engine/authority/grants/model.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/authority/grants/paths.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/authority/grants/sqlite_codec.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/authority/leases.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/authority/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only

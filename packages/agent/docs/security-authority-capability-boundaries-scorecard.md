@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **39/100**
+Current score: **51/100**
 
 Status: **active**
 
@@ -56,7 +56,7 @@ file roots, worker identity, or credential custody.
 | SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix | inventory/static gates | Expanded the inventory to 601 marker-derived rows across server, iOS, Mac, scripts, workflows, active docs, historical scorecards, TSV evidence, and tests. Static gates now recompute tracked security-marker files and require every one to have a structured inventory row. | Closed. | SACB-1 boundary inventory checkpoint |
 | SACB-2 | Public transport auth, route exposure, bearer handling, loopback worker boundary | 10 | passed_after_fix | transport/http/runtime | Added focused server tests proving `/engine/workers` requires bearer auth, allows bearer-authenticated loopback upgrades, and rejects non-loopback worker peers with `403` through the extracted peer guard. Added static guards proving `/engine` and `/engine/workers` stay wired through `ws_auth_gate`, bearer parsing stays strict, and the worker handler keeps `ConnectInfo<SocketAddr>` plus `is_loopback()`. | Closed. | SACB-2 public transport boundary checkpoint |
 | SACB-3 | Transport context trust: remove/deny untrusted authority scope and runtime metadata injection | 14 | passed_after_fix | transport/engine | Deleted public `authorityScopes` and `runtimeMetadata` fields from `WireContext` and `EngineTransportContext`, removed the transport copy loops into `CausalContext`, removed silent top-level `authorityScopes` stripping, inverted the socket DTO tests to reject those fields, and added static guards against field/copy-loop reintroduction. README now documents that public wire context carries only identity and correlation scope. | Closed. | SACB-3 public context trust checkpoint |
-| SACB-4 | Authority grant model: derivation, file roots, network policy, budgets, bootstrap grants | 12 | pending | engine/authority | Not started in this checkpoint. | Open: canonical file-root derivation and network-policy proof. | pending |
+| SACB-4 | Authority grant model: derivation, file roots, network policy, budgets, bootstrap grants | 12 | passed_after_fix | engine/authority | Added shared canonical grant file-root helpers, changed child grant derivation from raw string-prefix checks to canonical path containment with unresolved suffix normalization, added prefix-sibling and parent-component escape regression tests, proved network policy and budget narrowing through existing derivation cases, and added explicit bootstrap root-grant proof plus static guards for wildcard bootstrap provenance. Updated ownership/cleanup/modularity/SOL/SACB inventories for the new helper. | Closed. | SACB-4 authority grant boundary checkpoint |
 | SACB-5 | Catalog visibility and direct invocation boundaries, including `engine::invoke` delegation | 10 | pending | engine/catalog/invocation | Not started in this checkpoint. | Open: direct invocation and internal visibility proof. | pending |
 | SACB-6 | `capability::execute` least privilege for file/process/state/trace/log/replay operations | 12 | pending | domains/capability | Not started in this checkpoint. | Open: execute root, process, state, trace, log, replay least-privilege proof. | pending |
 | SACB-7 | External worker protocol isolation: scoped token, namespace, trigger, stream, result ownership | 8 | pending | engine/runtime/transport | Not started in this checkpoint. | Open: worker token, namespace, trigger, stream, and result ownership proof. | pending |
@@ -72,11 +72,12 @@ Total weight: **100**
   `authorityScopes` and `runtimeMetadata`; the closed checkpoint deletes those
   fields and rejects them through `deny_unknown_fields`.
 - `RUNTIME_METADATA_WORKING_DIRECTORY` affects primitive file and process roots.
-- Grant derivation currently narrows child file roots with string-prefix
-  comparison; invocation authorization uses canonical path containment.
-- Bootstrap grants include wildcard capabilities, namespaces, scopes, resources,
-  file roots, network policy, and delegation. Each use must be inventoried and
-  proved as engine-owned rather than public-callable permission data.
+- SACB-4 baseline found grant derivation narrowing child file roots with raw
+  string-prefix comparison; the closed checkpoint uses shared canonical path
+  containment plus unresolved suffix normalization for derivation and invocation
+  authorization.
+- SACB-4 explicitly proves bootstrap grants are engine-owned wildcard roots
+  with `engine.bootstrap` provenance, not public-callable permission data.
 
 ## Static Gates
 

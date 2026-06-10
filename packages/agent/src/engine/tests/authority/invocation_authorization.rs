@@ -43,6 +43,14 @@ async fn rejected_grants_fail_before_handler_execution_or_successful_resource_re
     let denied_root = tmp.path().join("denied");
     std::fs::create_dir_all(&allowed_root).unwrap();
     std::fs::create_dir_all(&denied_root).unwrap();
+    let escaping_denied_path = allowed_root
+        .join("missing")
+        .join("..")
+        .join("..")
+        .join("denied")
+        .join("escape.txt")
+        .to_string_lossy()
+        .to_string();
     let allowed_root = allowed_root.to_string_lossy().to_string();
     let denied_path = denied_root
         .join("outside.txt")
@@ -263,6 +271,13 @@ async fn rejected_grants_fail_before_handler_execution_or_successful_resource_re
             "demo::write",
             "grant-authority-valid",
             json!({"targetResourceId": "allowed-artifact", "path": denied_path}),
+            "does not allow file path",
+        ),
+        (
+            "file-root-parent-component-escape",
+            "demo::write",
+            "grant-authority-valid",
+            json!({"targetResourceId": "allowed-artifact", "path": escaping_denied_path}),
             "does not allow file path",
         ),
         (

@@ -1,5 +1,3 @@
-use std::path::Path;
-
 use chrono::Utc;
 use serde_json::Value;
 
@@ -8,6 +6,8 @@ use crate::engine::invocation::model::Invocation;
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::FunctionId;
 use crate::engine::kernel::types::FunctionDefinition;
+
+use super::paths::{canonical_payload_path, root_allows_path};
 
 pub(super) fn authorize_with_grant(
     grant: &EngineGrant,
@@ -179,7 +179,7 @@ fn ensure_file_roots(grant: &EngineGrant, invocation: &Invocation) -> Result<()>
             .file_roots
             .iter()
             .filter(|root| root.as_str() != "*")
-            .any(|root| root_allows_path(root, &canonical))
+            .any(|root| root_allows_path(root, &canonical).unwrap_or(false))
         {
             return Err(EngineError::PolicyViolation(format!(
                 "authority grant {} does not allow file path {}",
@@ -204,41 +204,6 @@ fn paths_from_invocation(payload: &Value) -> Vec<String> {
     .filter_map(|field| payload.get(field).and_then(Value::as_str))
     .map(str::to_owned)
     .collect()
-}
-
-fn root_allows_path(root: &str, path: &Path) -> bool {
-    canonical_payload_path(root)
-        .map(|canonical_root| path.starts_with(canonical_root))
-        .unwrap_or(false)
-}
-
-fn canonical_payload_path(path: &str) -> Result<std::path::PathBuf> {
-    let candidate = Path::new(path);
-    if candidate.exists() {
-        return candidate.canonicalize().map_err(|error| {
-            EngineError::PolicyViolation(format!("canonicalize file path {path}: {error}"))
-        });
-    }
-    let absolute = if candidate.is_absolute() {
-        candidate.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map_err(|error| EngineError::HandlerFailed(format!("read current dir: {error}")))?
-            .join(candidate)
-    };
-    let mut ancestor = absolute.as_path();
-    while !ancestor.exists() {
-        ancestor = ancestor.parent().ok_or_else(|| {
-            EngineError::PolicyViolation(format!("file path {path} has no existing ancestor"))
-        })?;
-    }
-    let canonical_ancestor = ancestor.canonicalize().map_err(|error| {
-        EngineError::PolicyViolation(format!("canonicalize file path ancestor: {error}"))
-    })?;
-    let suffix = absolute
-        .strip_prefix(ancestor)
-        .unwrap_or_else(|_| Path::new(""));
-    Ok(canonical_ancestor.join(suffix))
 }
 
 fn wrapper_resource_kind(function_id: &str) -> Option<&'static str> {
