@@ -197,6 +197,7 @@ class CameraModel: NSObject {
     private var currentCameraPosition: AVCaptureDevice.Position = .back
     private var photoCaptureCompletion: ((UIImage?) -> Void)?
     private var currentDevice: AVCaptureDevice?
+    private let sessionQueue = DispatchQueue(label: "app.tron.camera.capture.session", qos: .userInitiated)
 
     func requestPermissionAndSetup() async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -252,18 +253,16 @@ class CameraModel: NSObject {
 
     func startSession() {
         guard !session.isRunning else { return }
-        // Capture session reference before dispatching to avoid actor isolation warning
         let captureSession = session
-        DispatchQueue.global(qos: .userInitiated).async {
+        sessionQueue.async {
             captureSession.startRunning()
         }
     }
 
     func stopSession() {
         guard session.isRunning else { return }
-        // Capture session reference before dispatching to avoid actor isolation warning
         let captureSession = session
-        DispatchQueue.global(qos: .userInitiated).async {
+        sessionQueue.async {
             captureSession.stopRunning()
         }
     }

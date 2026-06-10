@@ -171,6 +171,18 @@ Current living entry points:
   state-surface lifecycle taxonomy and inventory notes.
 - `packages/agent/docs/state-ownership-lifecycle-inventory.tsv`:
   machine-readable SOL state ownership inventory used by static gates.
+- `packages/agent/docs/concurrency-scheduling-discipline-scorecard.md`: completed
+  Concurrency Scheduling Discipline scorecard proving task ownership, bounded
+  queues/streams, timer fairness, blocking isolation, agent/session concurrency,
+  engine worker scheduling, iOS transport/update scheduling, and deterministic
+  scheduling tests.
+- `packages/agent/docs/concurrency-scheduling-discipline-evidence-manifest.md`:
+  companion evidence manifest for CSD row checkpoints, verification logs, and
+  closed scheduling findings.
+- `packages/agent/docs/concurrency-scheduling-discipline-inventory.md`: completed
+  CSD taxonomy and scheduling-surface proof notes.
+- `packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`:
+  machine-readable CSD scheduling inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -235,12 +247,17 @@ Current living entry points:
   iOS local-state classification, owner-private settings/auth writes, and final
   closeout gates, with focused modules under
   `packages/agent/tests/state_ownership_lifecycle/`.
+- `packages/agent/tests/concurrency_scheduling_discipline_invariants.rs`:
+  completed CSD scorecard, inventory, scheduling-marker coverage, spawn/task
+  ownership, bounded channel/stream, Swift banned-pattern, stored-task
+  cancellation, timer/deadline, blocking-isolation, and closeout gates, with
+  focused modules under `packages/agent/tests/concurrency_scheduling_discipline/`.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL scorecards.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1316,9 +1333,10 @@ tron ci clippy test          # Subset: linting + tests
 ```
 
 `tron ci test` runs Rust lib/bin tests first, then the named closeout targets
-(`db_path_guard`, PET/PCC/HRA/AHA/PAC invariants, `primitive_trace_execution`,
-and serial `integration`). GitHub's Rust static-gates job runs the same named
-target set for docs, template, iOS, Mac, script, and CI changes.
+(`db_path_guard`, PET/PCC/HRA/AHA/PAC/CSD invariants,
+`primitive_trace_execution`, and serial `integration`). GitHub's Rust
+static-gates job runs the same named target set for docs, template, iOS, Mac,
+script, and CI changes.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

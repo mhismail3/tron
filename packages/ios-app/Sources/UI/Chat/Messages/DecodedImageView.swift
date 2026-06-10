@@ -34,20 +34,26 @@ struct DecodedImageView: View {
         }
     }
 
-    /// Decode on a detached task to avoid blocking the main thread.
+    /// Decode through a serial actor to avoid blocking the main thread.
     /// Uses `preparingThumbnail(of:)` to downscale large images during decode.
     /// Returns cached result on repeat calls for the same data.
     static func decodeImage(_ data: Data, fitting size: CGSize, scale: CGFloat = 2.0) async -> UIImage? {
         let key = data as NSData
         if let cached = cache.object(forKey: key) { return cached }
 
-        let result = await Task.detached(priority: .userInitiated) {
-            guard let image = UIImage(data: data) else { return nil as UIImage? }
-            let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
-            return image.preparingThumbnail(of: targetSize) ?? image
-        }.value
+        let result = await ImageDecodeWorker.shared.decode(data, fitting: size, scale: scale)
 
         if let result { cache.setObject(result, forKey: key) }
         return result
+    }
+}
+
+private actor ImageDecodeWorker {
+    static let shared = ImageDecodeWorker()
+
+    func decode(_ data: Data, fitting size: CGSize, scale: CGFloat) -> UIImage? {
+        guard let image = UIImage(data: data) else { return nil }
+        let targetSize = CGSize(width: size.width * scale, height: size.height * scale)
+        return image.preparingThumbnail(of: targetSize) ?? image
     }
 }

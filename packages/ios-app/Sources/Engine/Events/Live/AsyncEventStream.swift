@@ -21,8 +21,11 @@ final class AsyncEventStream<T: Sendable>: @unchecked Sendable {
     /// Internal continuation management with thread-safe access
     private var continuations: [UUID: AsyncStream<T>.Continuation] = [:]
     private let lock = NSLock()
+    private let bufferingPolicy: AsyncStream<T>.Continuation.BufferingPolicy
 
-    init() {}
+    init(bufferingPolicy: AsyncStream<T>.Continuation.BufferingPolicy = .bufferingNewest(256)) {
+        self.bufferingPolicy = bufferingPolicy
+    }
 
     /// Send a value to all active subscribers.
     /// Thread-safe and can be called from any context.
@@ -40,7 +43,7 @@ final class AsyncEventStream<T: Sendable>: @unchecked Sendable {
     /// Each call creates a new subscription.
     var events: AsyncStream<T> {
         let id = UUID()
-        return AsyncStream { [weak self] continuation in
+        return AsyncStream(bufferingPolicy: bufferingPolicy) { [weak self] continuation in
             guard let self else {
                 continuation.finish()
                 return
@@ -63,7 +66,7 @@ final class AsyncEventStream<T: Sendable>: @unchecked Sendable {
     /// - Parameter predicate: Filter predicate to apply
     /// - Returns: Filtered async stream
     func filtered(where predicate: @escaping @Sendable (T) -> Bool) -> AsyncStream<T> {
-        AsyncStream { [weak self] continuation in
+        AsyncStream(bufferingPolicy: bufferingPolicy) { [weak self] continuation in
             guard let self else {
                 continuation.finish()
                 return
@@ -115,7 +118,7 @@ extension AsyncEventStream where T == ParsedEventV2 {
     /// - Returns: Async stream of events for that session
     func events(for sessionId: String?) -> AsyncStream<ParsedEventV2> {
         guard let sessionId else {
-            return AsyncStream { $0.finish() }
+            return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { $0.finish() }
         }
         return filtered { event in
             event.matchesSession(sessionId)

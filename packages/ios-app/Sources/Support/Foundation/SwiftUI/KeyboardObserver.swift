@@ -22,6 +22,11 @@ final class KeyboardObserver {
         setupNotifications()
     }
 
+    func stopObserving() {
+        notificationTasks.forEach { $0.cancel() }
+        notificationTasks.removeAll()
+    }
+
     private func setupNotifications() {
         notificationTasks.append(Task { [weak self] in
             for await notification in NotificationCenter.default.notifications(named: UIResponder.keyboardWillShowNotification) {

@@ -25,13 +25,17 @@ use crate::engine::{
     WorkerInvocationResult, WorkerInvoke, WorkerProtocolMessage,
 };
 
+const EXTERNAL_WORKER_OUTBOUND_CAPACITY: usize = 128;
+const EXTERNAL_WORKER_OUTBOUND_SEND_TIMEOUT: Duration = Duration::from_secs(5);
+
 /// Shared server-owned external-worker runtime.
 pub type SharedExternalWorkerRuntime = Arc<Mutex<EngineExternalWorkerRuntime>>;
 
 /// Run one authenticated loopback worker WebSocket session.
 pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExternalWorkerRuntime) {
     let (mut sender, mut receiver) = socket.split();
-    let (outgoing_tx, mut outgoing_rx) = mpsc::unbounded_channel::<Message>();
+    let (outgoing_tx, mut outgoing_rx) =
+        mpsc::channel::<Message>(EXTERNAL_WORKER_OUTBOUND_CAPACITY);
     let pending = Arc::new(Mutex::new(std::collections::HashMap::<
         String,
         oneshot::Sender<WorkerInvocationResult>,
@@ -53,7 +57,7 @@ pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExtern
             Ok(Message::Text(text)) => text,
             Ok(Message::Close(_)) => break,
             Ok(Message::Ping(bytes)) => {
-                let _ = outgoing_tx.send(Message::Pong(bytes));
+                let _ = outgoing_tx.send(Message::Pong(bytes)).await;
                 continue;
             }
             Ok(Message::Pong(_)) | Ok(Message::Binary(_)) => continue,
@@ -65,14 +69,16 @@ pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExtern
         let parsed = match serde_json::from_str::<WorkerProtocolMessage>(&message) {
             Ok(parsed) => parsed,
             Err(error) => {
-                let _ = outgoing_tx.send(Message::Text(
-                    serde_json::json!({
-                        "type": "error",
-                        "message": format!("invalid worker protocol message: {error}")
-                    })
-                    .to_string()
-                    .into(),
-                ));
+                let _ = outgoing_tx
+                    .send(Message::Text(
+                        serde_json::json!({
+                            "type": "error",
+                            "message": format!("invalid worker protocol message: {error}")
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .await;
                 continue;
             }
         };
@@ -99,19 +105,21 @@ pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExtern
         match response {
             Ok(Some(response)) => {
                 if let Ok(text) = serde_json::to_string(&response) {
-                    let _ = outgoing_tx.send(Message::Text(text.into()));
+                    let _ = outgoing_tx.send(Message::Text(text.into())).await;
                 }
             }
             Ok(None) => {}
             Err(error) => {
-                let _ = outgoing_tx.send(Message::Text(
-                    serde_json::json!({
-                        "type": "error",
-                        "message": error.to_string()
-                    })
-                    .to_string()
-                    .into(),
-                ));
+                let _ = outgoing_tx
+                    .send(Message::Text(
+                        serde_json::json!({
+                            "type": "error",
+                            "message": error.to_string()
+                        })
+                        .to_string()
+                        .into(),
+                    ))
+                    .await;
             }
         }
     }
@@ -150,7 +158,7 @@ async fn fail_pending_invocations(
 }
 
 struct SocketWorkerInvoker {
-    outgoing: mpsc::UnboundedSender<Message>,
+    outgoing: mpsc::Sender<Message>,
     pending: Arc<Mutex<std::collections::HashMap<String, oneshot::Sender<WorkerInvocationResult>>>>,
 }
 
@@ -166,12 +174,27 @@ impl crate::engine::ExternalWorkerInvoker for SocketWorkerInvoker {
                 "failed to serialize external worker invocation: {error}"
             ))
         })?;
-        if self.outgoing.send(Message::Text(text.into())).is_err() {
-            let _ = self.pending.lock().await.remove(&invocation_id);
-            return Err(EngineError::WorkerTransportFailure {
-                code: "WORKER_CONNECTION_CLOSED".to_owned(),
-                message: "external worker connection is closed".to_owned(),
-            });
+        match tokio::time::timeout(
+            EXTERNAL_WORKER_OUTBOUND_SEND_TIMEOUT,
+            self.outgoing.send(Message::Text(text.into())),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => {
+                let _ = self.pending.lock().await.remove(&invocation_id);
+                return Err(EngineError::WorkerTransportFailure {
+                    code: "WORKER_CONNECTION_CLOSED".to_owned(),
+                    message: "external worker connection is closed".to_owned(),
+                });
+            }
+            Err(_) => {
+                let _ = self.pending.lock().await.remove(&invocation_id);
+                return Err(EngineError::WorkerTransportFailure {
+                    code: "WORKER_OUTBOUND_BACKPRESSURE_TIMEOUT".to_owned(),
+                    message: "external worker outbound queue stayed full".to_owned(),
+                });
+            }
         }
         match tokio::time::timeout(Duration::from_secs(30), rx).await {
             Ok(Ok(result)) => Ok(result),
@@ -222,7 +245,7 @@ mod tests {
 
     #[tokio::test]
     async fn websocket_disconnect_fails_pending_worker_invocations() {
-        let (outgoing, mut outgoing_rx) = mpsc::unbounded_channel();
+        let (outgoing, mut outgoing_rx) = mpsc::channel(EXTERNAL_WORKER_OUTBOUND_CAPACITY);
         let pending = Arc::new(Mutex::new(std::collections::HashMap::new()));
         let invoker = SocketWorkerInvoker {
             outgoing,
@@ -250,6 +273,40 @@ mod tests {
         assert!(
             pending.lock().await.is_empty(),
             "disconnect must drain pending invocation waiters"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn worker_invocation_fails_when_outbound_queue_stays_full() {
+        let (outgoing, _outgoing_rx) = mpsc::channel(1);
+        outgoing
+            .send(Message::Text("already queued".into()))
+            .await
+            .expect("test queue should accept the first message");
+        let pending = Arc::new(Mutex::new(std::collections::HashMap::new()));
+        let invoker = SocketWorkerInvoker {
+            outgoing,
+            pending: Arc::clone(&pending),
+        };
+        let invocation_id = InvocationId::generate();
+
+        let running =
+            tokio::spawn(async move { invoker.invoke(worker_invoke(invocation_id)).await });
+        tokio::task::yield_now().await;
+        tokio::time::advance(EXTERNAL_WORKER_OUTBOUND_SEND_TIMEOUT).await;
+
+        let error = running
+            .await
+            .expect("invoke task should finish")
+            .expect_err("full outbound queue should fail invocation send");
+        assert!(matches!(
+            error,
+            EngineError::WorkerTransportFailure { ref code, .. }
+                if code == "WORKER_OUTBOUND_BACKPRESSURE_TIMEOUT"
+        ));
+        assert!(
+            pending.lock().await.is_empty(),
+            "backpressure failure must remove the pending waiter"
         );
     }
 }

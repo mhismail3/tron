@@ -83,12 +83,10 @@ struct ModelPickerSheet: View {
                     .padding(.horizontal)
                     .padding(.vertical)
                 }
-                .onAppear {
-                    // Defer scroll until after expansion layout settles
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                        withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
-                            proxy.scrollTo(currentModelId, anchor: .center)
-                        }
+                .task(id: currentModelId) {
+                    await Task.yield()
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                        proxy.scrollTo(currentModelId, anchor: .center)
                     }
                 }
             }

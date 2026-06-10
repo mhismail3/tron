@@ -164,6 +164,7 @@ final class QRCodeScannerModel: NSObject {
     private let metadataOutput = AVCaptureMetadataOutput()
     private var currentDevice: AVCaptureDevice?
     private var didScan = false
+    private let sessionQueue = DispatchQueue(label: "app.tron.pairing.qr.session", qos: .userInitiated)
 
     func requestPermissionAndSetup() async {
         let status = AVCaptureDevice.authorizationStatus(for: .video)
@@ -226,7 +227,7 @@ final class QRCodeScannerModel: NSObject {
     func startSession() {
         guard !session.isRunning else { return }
         let captureSession = session
-        DispatchQueue.global(qos: .userInitiated).async {
+        sessionQueue.async {
             captureSession.startRunning()
         }
     }
@@ -234,7 +235,7 @@ final class QRCodeScannerModel: NSObject {
     func stopSession() {
         guard session.isRunning else { return }
         let captureSession = session
-        DispatchQueue.global(qos: .userInitiated).async {
+        sessionQueue.async {
             captureSession.stopRunning()
         }
     }

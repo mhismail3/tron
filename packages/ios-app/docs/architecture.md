@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-09 (DRC-9 replay manifest/event parity).
+> Last verified: 2026-06-10 (CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -114,6 +114,21 @@ protocols to engine-owned clients.
 Transport tests mirror the production owners: retry policy tests live under
 `Tests/Engine/Transport/Retry`, and WebSocket/request-response tests live under
 `Tests/Engine/Transport/WebSocket`.
+
+DRC-9 replay manifest/event parity remains a server/iOS boundary rule. Replay
+exports remain server-owned capability results, not live or persisted iOS
+events. iOS decodes the metadata-only `model.provider_request` audit event for
+stored-event parity, but replay manifests stay outside the iOS event plugin and
+database event-case surface.
+
+Transport and UI scheduling follows the CSD inventory in
+`packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`.
+Long-lived `Task` handles are stored and cancelled by their owner, SwiftUI
+`.task` work is view-scoped, stream ACKs coalesce to the latest cursor, and
+callback bridges use bounded stream buffering or owner queues. Production code
+must not use `Task.detached`, `DispatchQueue.global`, or
+`DispatchQueue.main.asyncAfter`; capture sessions use owner serial queues and
+UI delays use cancellation-aware Swift concurrency tasks.
 
 `Engine/Protocol` groups DTOs by server domain instead of one broad DTO bucket.
 `Engine/Persistence` owns the local SQLite cache, repositories, and sync cursor

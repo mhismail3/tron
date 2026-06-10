@@ -185,6 +185,26 @@ final class AsyncEventStreamTests: XCTestCase {
 
         XCTAssertEqual(received, testEvent)
     }
+
+    func test_boundedBuffering_keepsNewestEvents() async {
+        let stream = AsyncEventStream<Int>(bufferingPolicy: .bufferingNewest(2))
+        let events = stream.events
+
+        stream.send(1)
+        stream.send(2)
+        stream.send(3)
+        stream.send(4)
+        stream.finish()
+
+        var iterator = events.makeAsyncIterator()
+        let first = await iterator.next()
+        let second = await iterator.next()
+        let third = await iterator.next()
+
+        XCTAssertEqual(first, 3)
+        XCTAssertEqual(second, 4)
+        XCTAssertNil(third)
+    }
 }
 
 // MARK: - Test Helper

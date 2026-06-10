@@ -58,7 +58,7 @@ extension ChatView {
         if let messageId = await viewModel.resolveMessageIdForDeepLink(target) {
             foundTarget = true
             for delay in [75, 150, 300] {
-                await layoutDelay(milliseconds: delay)
+                guard await layoutDelay(milliseconds: delay) else { return }
                 scrollCoordinator.scrollToTarget(messageId: messageId, using: scrollProxy)
             }
             logger.info("Deep link scroll to message: \(messageId)", category: .notification)
@@ -79,9 +79,9 @@ extension ChatView {
     /// `scrollTo("bottom")` reveals new cells whose true heights push "bottom" further
     /// away. We iterate until the content height stabilizes.
     ///
-    /// Uses GCD-based delays instead of `Task.sleep` because `.task` can inherit
-    /// cancellation context during rapid navigation, causing `Task.sleep` to throw
-    /// immediately (the `try?` swallows it → zero delay → all iterations in 0ms).
+    /// Uses Swift concurrency sleeps so view cancellation during rapid
+    /// navigation cancels the remaining settling work instead of scheduling
+    /// stale scrolls back onto the main queue.
     func handleInitialMessageVisibility() async {
         let msgCount = viewModel.messages.count
         logger.debug("[INIT] handleInitialMessageVisibility: messages=\(msgCount) scrollProxy=\(scrollProxy != nil) hasMore=\(viewModel.hasMoreMessages)", category: .ui)
@@ -99,7 +99,7 @@ extension ChatView {
             initialLoadComplete = true
 
             scrollProxy?.scrollTo("bottom", anchor: .bottom)
-            await layoutDelay(milliseconds: 100)
+            guard await layoutDelay(milliseconds: 100) else { return }
             await performDeepLinkScroll(to: target)
             return
         }
@@ -111,7 +111,7 @@ extension ChatView {
         for i in 0..<8 {
             let heightBefore = initContentHeight
             scrollProxy?.scrollTo("bottom", anchor: .bottom)
-            await layoutDelay(milliseconds: 30)
+            guard await layoutDelay(milliseconds: 30) else { return }
             let heightAfter = initContentHeight
 
             logger.debug("[INIT] scroll \(i): contentH \(heightBefore)→\(heightAfter)", category: .ui)
@@ -140,15 +140,12 @@ extension ChatView {
 
     // MARK: - Layout Delay
 
-    /// Non-cancellable delay for layout settling. Uses GCD scheduling which is
-    /// independent of Swift concurrency Task cancellation. `Task.sleep` throws
-    /// `CancellationError` when the parent Task is cancelled (common during rapid
-    /// navigation between sessions), and `try?` silently swallows it → zero delay.
-    private func layoutDelay(milliseconds: Int) async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(milliseconds)) {
-                continuation.resume()
-            }
+    private func layoutDelay(milliseconds: Int) async -> Bool {
+        do {
+            try await Task.sleep(for: .milliseconds(milliseconds))
+            return !Task.isCancelled
+        } catch {
+            return false
         }
     }
 }

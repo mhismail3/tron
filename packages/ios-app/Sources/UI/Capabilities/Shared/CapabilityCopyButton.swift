@@ -8,12 +8,20 @@ struct CapabilityCopyButton: View {
     let content: String
     let accent: Color
     @State private var copied = false
+    @State private var clearCopiedTask: Task<Void, Never>?
 
     var body: some View {
         Button {
             UIPasteboard.general.string = content
             withAnimation(.easeInOut(duration: 0.2)) { copied = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            clearCopiedTask?.cancel()
+            clearCopiedTask = Task { @MainActor in
+                do {
+                    try await Task.sleep(for: .seconds(1.5))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
                 withAnimation(.easeInOut(duration: 0.2)) { copied = false }
             }
         } label: {
@@ -33,6 +41,10 @@ struct CapabilityCopyButton: View {
                     .fill(accent.opacity(copied ? 0.15 : 0.08))
             }
             .contentShape(Capsule())
+        }
+        .onDisappear {
+            clearCopiedTask?.cancel()
+            clearCopiedTask = nil
         }
     }
 }
