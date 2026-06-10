@@ -1,6 +1,6 @@
 # Failure Semantics Inventory
 
-Status: **active**
+Status: **closed/verified**
 
 This inventory tracks every current failure surface in scope for the Failure
 Semantics Campaign. The TSV companion is the machine-readable version used by
@@ -57,10 +57,10 @@ replay boundary.
 ## Allowed Direct Construction Sites
 
 - Production live `TurnFailed` constructors are now centralized in
-  `shared::protocol::events::turn_failed_event`; remaining
+  `shared::protocol::events::turn_failed_event`; allowed
   `TronEvent::TurnFailed` patterns are projections or tests.
 - Production live `Error` constructors are now centralized in
-  `shared::protocol::events::error_event`; remaining `TronEvent::Error`
+  `shared::protocol::events::error_event`; allowed `TronEvent::Error`
   patterns are projections or tests.
 - Text-only model capability `error_result` has been removed. Capability
   executor failures use `failure_result` with `details.failure`.

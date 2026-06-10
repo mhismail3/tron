@@ -1,6 +1,6 @@
 # Failure Semantics Campaign Scorecard
 
-Status: **active**
+Status: **closed/verified**
 
 Current score: **100/100**
 
@@ -30,11 +30,11 @@ projections.
 
 | Artifact | Status | Purpose |
 |---|---|---|
-| `packages/agent/docs/failure-semantics-scorecard.md` | active | Weighted campaign rows, open-loop ledger, and current score. |
-| `packages/agent/docs/failure-semantics-inventory.md` | active | Human-readable failure surface inventory and mapping notes. |
-| `packages/agent/docs/failure-semantics-inventory.tsv` | active | Machine-readable surface inventory used by static gates. |
-| `packages/agent/docs/failure-semantics-evidence-manifest.md` | active | Checkpoint evidence, verification commands, and residual risks. |
-| `packages/agent/tests/failure_semantics_invariants.rs` | active | Static campaign gates and closeout guards. |
+| `packages/agent/docs/failure-semantics-scorecard.md` | verified | Weighted campaign rows, closeout ledger, and current score. |
+| `packages/agent/docs/failure-semantics-inventory.md` | verified | Human-readable failure surface inventory and mapping notes. |
+| `packages/agent/docs/failure-semantics-inventory.tsv` | verified | Machine-readable surface inventory used by static gates. |
+| `packages/agent/docs/failure-semantics-evidence-manifest.md` | verified | Checkpoint evidence, verification commands, and residual risks. |
+| `packages/agent/tests/failure_semantics_invariants.rs` | enforcing | Static campaign gates and closeout guards. |
 
 ## Scorecard
 

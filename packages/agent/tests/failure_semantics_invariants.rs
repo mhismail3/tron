@@ -49,7 +49,7 @@ fn failure_semantics_campaign_harness_exists() {
 
     for required in [
         "# Failure Semantics Campaign Scorecard",
-        "Status: **active**",
+        "Status: **closed/verified**",
         "Current score: **100/100**",
         "| FSC-0 | Campaign harness | 6 | passed_after_fix |",
         "| FSC-1 | Failure inventory | 8 | passed_after_fix |",
@@ -70,7 +70,7 @@ fn failure_semantics_campaign_harness_exists() {
 
     for required in [
         "# Failure Semantics Inventory",
-        "Status: **active**",
+        "Status: **closed/verified**",
         "## Canonical Vocabulary",
         "## Surface Inventory",
         "`shared::server::failure::FailureEnvelope`",
@@ -90,7 +90,7 @@ fn failure_semantics_campaign_harness_exists() {
 
     for required in [
         "# Failure Semantics Evidence Manifest",
-        "Status: **active**",
+        "Status: **closed/verified**",
         "Current score: **100/100**",
         "| FSC-0 | passed_after_fix |",
         "| FSC-1 | passed_after_fix |",
@@ -138,6 +138,9 @@ fn failure_semantics_closeout_artifacts_have_no_stale_status() {
 
     assert!(scorecard.contains("Current score: **100/100**"));
     assert!(manifest.contains("Current score: **100/100**"));
+    assert!(scorecard.contains("Status: **closed/verified**"));
+    assert!(inventory.contains("Status: **closed/verified**"));
+    assert!(manifest.contains("Status: **closed/verified**"));
     assert!(scorecard.contains("| FSC-10 | Closeout gates | 10 | passed_after_fix |"));
     assert!(manifest.contains("| FSC-10 | passed_after_fix |"));
     assert!(inventory.contains("## Closeout Notes"));
@@ -151,6 +154,14 @@ fn failure_semantics_closeout_artifacts_have_no_stale_status() {
     ] {
         for forbidden in [
             "Current score: **90/100**",
+            "Status: **active**",
+            "open-loop ledger",
+            "| `packages/agent/docs/failure-semantics-scorecard.md` | active |",
+            "| `packages/agent/docs/failure-semantics-inventory.md` | active |",
+            "| `packages/agent/docs/failure-semantics-inventory.tsv` | active |",
+            "| `packages/agent/docs/failure-semantics-evidence-manifest.md` | active |",
+            "remaining\n  `TronEvent::TurnFailed`",
+            "remaining `TronEvent::Error`",
             "| FSC-10 | pending |",
             "Not started.",
             "Implementation rows remain",

@@ -1,6 +1,6 @@
 # Failure Semantics Evidence Manifest
 
-Status: **active**
+Status: **closed/verified**
 
 Current score: **100/100**
 
@@ -32,7 +32,7 @@ for the Failure Semantics Campaign.
 | FSAR-1 | passed_after_fix | `CapabilityError::to_failure` now reuses a valid embedded canonical `details.failure` envelope exactly instead of reclassifying it through the capability-code table. Malformed embedded failures continue down the plain capability classification path. | `cargo test --manifest-path packages/agent/Cargo.toml shared::server::errors --lib -- --nocapture`; `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | Preserves original engine/provider/auth/event-store origin and category when crossing `/engine` or capability boundaries. | FSAR-1/2 checkpoint |
 | FSAR-2 | passed_after_fix | Added a socket-level regression that maps `EngineError::SchemaViolation` and asserts the public outer `/engine` `error` object carries `ENGINE_SCHEMA_VIOLATION`, `invalid_request`, `retryable=false`, `recoverable=true`, `origin=engine`, and the trace id. | `cargo test --manifest-path packages/agent/Cargo.toml transport::engine::socket --lib -- --nocapture`; `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | The regression fails if the outer envelope falls back to `unknown` or `transport` classification. | FSAR-1/2 checkpoint |
 | FSAR-3 | passed_after_fix | Replaced shared `"s1"` session ids in `TronAgent::run` coverage with per-test session ids so text-only and resumed-session runs do not touch the same streaming journal path. | `rg -n '"s1"' packages/agent/src/domains/agent/loop/tron_agent/tests.rs`; `cargo test --manifest-path packages/agent/Cargo.toml domains::agent::r#loop::tron_agent --lib -- --nocapture`; `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | Runtime journal failure semantics remain strict; only test fixture session identity changed. | FSAR-3 checkpoint |
-| FSAR-4 | not_started | Closed wording and static guard hardening for FSC artifacts. | Pending. | Pending. | Pending. |
+| FSAR-4 | passed_after_fix | Updated FSC scorecard, inventory, and evidence status to closed/verified wording; replaced the stale open-loop and ambiguous remaining-pattern wording; hardened the invariant guard against those stale closeout phrases. | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture`; `git diff --check` | Closed FSC artifacts now read as verified closeout artifacts rather than active/open campaign artifacts. | FSAR-4 checkpoint |
 | FSAR-5 | not_started | Required focused and closeout verification. | Pending. | Pending. | Pending. |
 
 ## FSC-0 Findings
