@@ -2,7 +2,7 @@
 
 Status: **active**
 
-Current score: **15/100**
+Current score: **25/100**
 
 Scorecard:
 [`security-authority-capability-boundaries-scorecard.md`](security-authority-capability-boundaries-scorecard.md)
@@ -18,7 +18,7 @@ and
 |---|---|---|---|---|---|
 | SACB-0 | passed_after_fix | Added scorecard, evidence manifest, inventory summary, machine-readable TSV header/seed rows, invariant target, README links, local/GitHub CI closeout wiring, and cross-campaign PCC/HRA rows for new SACB artifacts. Initial findings record the public transport context trust gap and grant derivation file-root narrowing gap discovered during baseline source inspection. | SACB target passed with 6 tests; PCC inventory target passed with 16 tests; HRA inventory target passed with 35 tests; rustfmt check and whitespace checks passed. | Closed for harness. Open rows SACB-1 through SACB-10 remain explicitly pending in the scorecard. | SACB-0 campaign harness checkpoint |
 | SACB-1 | passed_after_fix | Replaced the SACB-0 seed TSV with a 601-row marker-derived inventory covering tracked server, iOS, Mac, script, workflow, docs, tests, and TSV evidence surfaces for public transport, authority grants, runtime metadata, primitive execution, external workers, secret storage, pairing lifecycle, and static gates. Added static marker coverage so every tracked security-marker file must have a SACB row. | SACB target passed with the marker coverage and boundary-class guards. | Closed for whole-repo inventory. Later rows must keep the inventory current as they delete unsafe fields or add focused tests. | SACB-1 boundary inventory checkpoint |
-| SACB-2 | pending | Not started. | Not run. | Open: public route/auth/loopback proof. | pending |
+| SACB-2 | passed_after_fix | Added worker route tests in `packages/agent/src/app/bootstrap/server.rs` for missing bearer and loopback bearer upgrade, plus a direct worker peer guard test for non-loopback `403` rejection. Added SACB static route/auth guards for `/engine`, `/engine/workers`, `ws_auth_gate`, strict bearer parsing, and loopback worker `ConnectInfo<SocketAddr>` enforcement. Existing auth tests already cover missing, wrong, rotated, wrong-scheme, trailing-whitespace, malformed, and constant-time bearer behavior. | Server bootstrap target passed with 24 tests; SACB invariant target passed with 9 tests. | Closed for public route/auth/loopback boundary. Later SACB-3 owns public context trust. | SACB-2 public transport boundary checkpoint |
 | SACB-3 | pending | Not started. | Not run. | Open: public context trust hardening. | pending |
 | SACB-4 | pending | Not started. | Not run. | Open: grants, file roots, network policy, bootstrap proof. | pending |
 | SACB-5 | pending | Not started. | Not run. | Open: catalog visibility and direct invocation proof. | pending |
@@ -51,3 +51,5 @@ and
 | `git diff --check --cached && git diff --check` | exit 0 | Staged and unstaged whitespace checks passed. |
 | `node` marker inventory generator | exit 0 | Generated 601 SACB inventory rows from tracked security-marker files after excluding non-security token-accounting/model-catalog surfaces. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB-1 inventory coverage target passed after adding marker coverage and boundary-class guards: 8 tests. |
+| `cargo test --manifest-path packages/agent/Cargo.toml app::bootstrap::server --lib -- --nocapture` | exit 0 | SACB-2 focused server route/auth/loopback verification passed: 24 tests. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | SACB-2 static route/auth guard verification passed: 9 tests. |

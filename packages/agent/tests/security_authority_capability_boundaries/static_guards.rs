@@ -46,3 +46,37 @@ fn sacb_inventory_covers_required_boundary_classes() {
         );
     }
 }
+
+#[test]
+fn sacb_public_engine_routes_stay_bearer_gated_and_workers_loopback_only() {
+    let server = read_repo_file("packages/agent/src/app/bootstrap/server.rs");
+    for required in [
+        "\"/engine\"",
+        "\"/engine/workers\"",
+        "middleware::from_fn_with_state(state.clone(), ws_auth_gate)",
+        "verify_bearer_header(&headers, &state.auth_store)?;",
+        "ConnectInfo(addr): ConnectInfo<SocketAddr>",
+        "ensure_worker_peer_is_loopback(addr)?;",
+        "fn ensure_worker_peer_is_loopback(addr: SocketAddr) -> Result<(), StatusCode>",
+        "if !addr.ip().is_loopback()",
+        "return Err(StatusCode::FORBIDDEN);",
+    ] {
+        assert!(
+            server.contains(required),
+            "server route/auth boundary missing required text: {required}"
+        );
+    }
+
+    let auth = read_repo_file("packages/agent/src/transport/http/auth.rs");
+    for required in [
+        "header::AUTHORIZATION",
+        "strip_prefix(\"Bearer \")",
+        "tokens_eq(presented.as_bytes(), canonical.as_bytes())",
+        "Err(StatusCode::UNAUTHORIZED)",
+    ] {
+        assert!(
+            auth.contains(required),
+            "bearer auth boundary missing required text: {required}"
+        );
+    }
+}

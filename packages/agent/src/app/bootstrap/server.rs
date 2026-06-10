@@ -230,14 +230,19 @@ async fn engine_worker_upgrade_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    if !addr.ip().is_loopback() {
-        tracing::warn!(%addr, "rejected non-loopback engine worker connection");
-        return Err(StatusCode::FORBIDDEN);
-    }
+    ensure_worker_peer_is_loopback(addr)?;
     let runtime = state.external_workers;
     Ok(ws.on_upgrade(move |socket| async move {
         run_external_worker_socket(socket, runtime).await;
     }))
+}
+
+fn ensure_worker_peer_is_loopback(addr: SocketAddr) -> Result<(), StatusCode> {
+    if !addr.ip().is_loopback() {
+        tracing::warn!(%addr, "rejected non-loopback engine worker connection");
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(())
 }
 
 /// GET /health
@@ -346,6 +351,12 @@ mod tests {
         ws_upgrade_request_to("/engine", auth)
     }
 
+    fn worker_ws_upgrade_request(auth: Option<String>, addr: SocketAddr) -> Request<Body> {
+        let mut request = ws_upgrade_request_to("/engine/workers", auth);
+        request.extensions_mut().insert(ConnectInfo(addr));
+        request
+    }
+
     #[tokio::test]
     async fn server_with_default_config() {
         let server = make_server();
@@ -436,6 +447,36 @@ mod tests {
         let authorized = ws_upgrade_request_to("/engine", Some(format!("Bearer {token}")));
         let authorized_resp = app.oneshot(authorized).await.unwrap();
         assert_ne!(authorized_resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn engine_worker_endpoint_requires_bearer_before_loopback_upgrade() {
+        let (server, _dir, token) = make_server_with_auth();
+        let app = server.router();
+        let loopback: SocketAddr = "127.0.0.1:41000".parse().unwrap();
+
+        let missing = worker_ws_upgrade_request(None, loopback);
+        let missing_resp = app.clone().oneshot(missing).await.unwrap();
+        assert_eq!(missing_resp.status(), StatusCode::UNAUTHORIZED);
+
+        let authorized = worker_ws_upgrade_request(Some(format!("Bearer {token}")), loopback);
+        let authorized_resp = app.oneshot(authorized).await.unwrap();
+        assert_ne!(authorized_resp.status(), StatusCode::UNAUTHORIZED);
+        assert_ne!(authorized_resp.status(), StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn engine_worker_loopback_guard_rejects_non_loopback_peer() {
+        let non_loopback: SocketAddr = "203.0.113.7:41000".parse().unwrap();
+        let loopback_v4: SocketAddr = "127.0.0.1:41000".parse().unwrap();
+        let loopback_v6: SocketAddr = "[::1]:41000".parse().unwrap();
+
+        assert_eq!(
+            ensure_worker_peer_is_loopback(non_loopback).unwrap_err(),
+            StatusCode::FORBIDDEN
+        );
+        assert!(ensure_worker_peer_is_loopback(loopback_v4).is_ok());
+        assert!(ensure_worker_peer_is_loopback(loopback_v6).is_ok());
     }
 
     #[tokio::test]

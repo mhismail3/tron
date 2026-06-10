@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **15/100**
+Current score: **25/100**
 
 Status: **active**
 
@@ -54,7 +54,7 @@ file roots, worker identity, or credential custody.
 |---|---|---:|---|---|---|---|---|
 | SACB-0 | Campaign harness, red gates, README/CI links, evidence/inventory scaffolding | 5 | passed_after_fix | docs/static gates | Added SACB scorecard, evidence manifest, inventory docs/TSV, invariant target, README links, CI/static-gate wiring, and prior-campaign inventory rows for the new artifacts. | Closed. | SACB-0 campaign harness checkpoint |
 | SACB-1 | Whole-repo security boundary inventory for Rust, iOS, Mac, scripts, docs | 10 | passed_after_fix | inventory/static gates | Expanded the inventory to 601 marker-derived rows across server, iOS, Mac, scripts, workflows, active docs, historical scorecards, TSV evidence, and tests. Static gates now recompute tracked security-marker files and require every one to have a structured inventory row. | Closed. | SACB-1 boundary inventory checkpoint |
-| SACB-2 | Public transport auth, route exposure, bearer handling, loopback worker boundary | 10 | pending | transport/http/runtime | Not started in this checkpoint. | Open: route, auth, bearer, and worker loopback proof. | pending |
+| SACB-2 | Public transport auth, route exposure, bearer handling, loopback worker boundary | 10 | passed_after_fix | transport/http/runtime | Added focused server tests proving `/engine/workers` requires bearer auth, allows bearer-authenticated loopback upgrades, and rejects non-loopback worker peers with `403` through the extracted peer guard. Added static guards proving `/engine` and `/engine/workers` stay wired through `ws_auth_gate`, bearer parsing stays strict, and the worker handler keeps `ConnectInfo<SocketAddr>` plus `is_loopback()`. | Closed. | SACB-2 public transport boundary checkpoint |
 | SACB-3 | Transport context trust: remove/deny untrusted authority scope and runtime metadata injection | 14 | pending | transport/engine | Not started in this checkpoint. | Open: public wire DTOs still require hardening against authority/runtime metadata injection. | pending |
 | SACB-4 | Authority grant model: derivation, file roots, network policy, budgets, bootstrap grants | 12 | pending | engine/authority | Not started in this checkpoint. | Open: canonical file-root derivation and network-policy proof. | pending |
 | SACB-5 | Catalog visibility and direct invocation boundaries, including `engine::invoke` delegation | 10 | pending | engine/catalog/invocation | Not started in this checkpoint. | Open: direct invocation and internal visibility proof. | pending |
