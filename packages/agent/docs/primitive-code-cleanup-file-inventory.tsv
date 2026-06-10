@@ -527,7 +527,7 @@ packages/agent/src/shared/protocol/messages/tests.rs	retain	rust agent	PCC-10/AH
 packages/agent/src/shared/protocol/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/shared/protocol/model_capabilities.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/shared/server/context.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/shared/server/error_mapping.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/shared/server/error_mapping/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/shared/server/errors.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/shared/server/events.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/shared/server/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1422,7 +1422,7 @@ packages/agent/src/engine/catalog/registry/cleanup.rs	retain	tpc rust source	TPC
 packages/agent/src/engine/catalog/registry/idempotency.rs	retain	tpc rust source	TPC-11	Current TPC engine catalog registry split retained after final closeout.
 packages/agent/src/engine/catalog/registry/registration.rs	retain	tpc rust source	TPC-11	Current TPC engine catalog registry split retained after final closeout.
 packages/agent/src/engine/catalog/registry/search.rs	retain	tpc rust source	TPC-11	Current TPC engine catalog registry split retained after final closeout.
-packages/agent/src/engine/durability/ledger/sqlite_store.rs	retain	tpc rust source	TPC-11	Current TPC durability ledger split retained after final closeout.
+packages/agent/src/engine/durability/ledger/sqlite_store/mod.rs	retain	tpc rust source	TPC-11	Current TPC durability ledger split retained after final closeout.
 packages/agent/src/engine/durability/queue/memory.rs	retain	tpc rust source	TPC-11	Current TPC durability queue split retained after final closeout.
 packages/agent/src/engine/durability/queue/sqlite_store.rs	retain	tpc rust source	TPC-11	Current TPC durability queue split retained after final closeout.
 packages/agent/src/engine/durability/streams/memory.rs	retain	tpc rust source	TPC-11	Current TPC durability stream split retained after final closeout.
@@ -1505,3 +1505,13 @@ packages/agent/tests/determinism_replayability/replay_references.rs	retain	drc r
 packages/agent/tests/determinism_replayability/scorecard_inventory.rs	retain	drc rust test	DRC-10	DRC scorecard and inventory invariant retained after final replayability closeout.
 packages/agent/tests/determinism_replayability/support.rs	retain	drc rust test	DRC-10	DRC test support retained after final replayability closeout.
 packages/agent/tests/determinism_replayability_invariants.rs	retain	drc rust test	DRC-10	DRC invariant target retained after final replayability closeout.
+packages/agent/docs/failure-semantics-evidence-manifest.md	retain	fsc docs	FSC-10	Current Failure Semantics Campaign evidence artifact retained after final closeout.
+packages/agent/docs/failure-semantics-inventory.md	retain	fsc docs	FSC-10	Current Failure Semantics Campaign inventory retained after final closeout.
+packages/agent/docs/failure-semantics-inventory.tsv	retain	fsc docs	FSC-10	Current Failure Semantics Campaign machine-readable inventory retained after final closeout.
+packages/agent/docs/failure-semantics-scorecard.md	retain	fsc docs	FSC-10	Current Failure Semantics Campaign scorecard retained after final closeout.
+packages/agent/src/engine/durability/ledger/sqlite_store/rows.rs	retain	fsc rust source	FSC-10	Engine ledger SQLite row decoders split and retained after final failure-semantics closeout.
+packages/agent/src/domains/model/responder/tests.rs	retain	fsc rust test	FSC-10	Model responder boundary tests extracted and retained after final failure-semantics closeout.
+packages/agent/src/shared/server/error_mapping/tests.rs	retain	fsc rust test	FSC-10	Server error mapping tests extracted and retained after final failure-semantics closeout.
+packages/agent/src/shared/server/failure.rs	retain	fsc rust source	FSC-10	Canonical Failure Semantics Campaign server envelope retained after final closeout.
+packages/agent/tests/failure_semantics_invariants.rs	retain	fsc rust test	FSC-10	Current Failure Semantics Campaign invariant target retained after final closeout.
+packages/ios-app/Sources/Engine/Protocol/Core/FailurePayload.swift	retain	fsc ios source	FSC-10	Canonical Failure Semantics Campaign Swift envelope decoder retained after final closeout.

@@ -18,15 +18,11 @@ use crate::domains::session::event_store::types::EventType;
 use crate::domains::session::event_store::{
     AgentTraceRecord, EventRow, EventStore, ListEventsOptions, SessionRow,
 };
-use crate::engine::EngineHostHandle;
-use crate::engine::durability::ledger::{
-    IdempotencyEntry, IdempotencyStatus, StoredInvocationOutcome,
+use crate::engine::{
+    EngineError, EngineHostHandle, EngineQueueItem, EngineReplaySnapshot, EngineStreamEvent,
+    IdempotencyEntry, IdempotencyScope, IdempotencyStatus, InvocationRecord, ReplayBehavior,
+    StoredInvocationOutcome,
 };
-use crate::engine::durability::queue::EngineQueueItem;
-use crate::engine::durability::replay::EngineReplaySnapshot;
-use crate::engine::durability::streams::EngineStreamEvent;
-use crate::engine::invocation::model::InvocationRecord;
-use crate::engine::kernel::types::ReplayBehavior;
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::error_mapping::engine_error_to_failure;
 use crate::shared::server::errors::{self, CapabilityError};
@@ -477,7 +473,7 @@ struct ReplayIdempotencyScope {
 }
 
 impl ReplayIdempotencyScope {
-    fn from_scope(scope: &crate::engine::kernel::types::IdempotencyScope) -> Self {
+    fn from_scope(scope: &IdempotencyScope) -> Self {
         Self {
             kind: scope.kind.clone(),
             value: scope.value.clone(),
@@ -513,24 +509,24 @@ fn invocation_result_hash(
     }
 }
 
-fn engine_error_value(error: &crate::engine::EngineError) -> Value {
+fn engine_error_value(error: &EngineError) -> Value {
     engine_error_to_failure(error)
         .with_details(Some(engine_error_replay_details(error)))
         .details_with_failure()
 }
 
-fn engine_error_replay_details(error: &crate::engine::EngineError) -> Value {
+fn engine_error_replay_details(error: &EngineError) -> Value {
     match error {
-        crate::engine::EngineError::InvalidId { kind, value } => {
+        EngineError::InvalidId { kind, value } => {
             json!({"kind": "invalid_id", "idKind": kind, "value": value})
         }
-        crate::engine::EngineError::InvalidFunctionId(value) => {
+        EngineError::InvalidFunctionId(value) => {
             json!({"kind": "invalid_function_id", "value": value})
         }
-        crate::engine::EngineError::NotFound { kind, id } => {
+        EngineError::NotFound { kind, id } => {
             json!({"kind": "not_found", "itemKind": kind, "id": id})
         }
-        crate::engine::EngineError::OwnerMismatch {
+        EngineError::OwnerMismatch {
             kind,
             id,
             owner,
@@ -542,7 +538,7 @@ fn engine_error_replay_details(error: &crate::engine::EngineError) -> Value {
             "owner": owner,
             "attemptedOwner": attempted_owner
         }),
-        crate::engine::EngineError::NamespaceDenied {
+        EngineError::NamespaceDenied {
             worker_id,
             function_id,
         } => json!({
@@ -550,13 +546,13 @@ fn engine_error_replay_details(error: &crate::engine::EngineError) -> Value {
             "workerId": worker_id,
             "functionId": function_id
         }),
-        crate::engine::EngineError::UnsupportedDeliveryMode { mode } => {
+        EngineError::UnsupportedDeliveryMode { mode } => {
             json!({"kind": "unsupported_delivery_mode", "mode": mode})
         }
-        crate::engine::EngineError::DeliveryModeNotAllowed { function_id, mode } => {
+        EngineError::DeliveryModeNotAllowed { function_id, mode } => {
             json!({"kind": "delivery_mode_not_allowed", "functionId": function_id, "mode": mode})
         }
-        crate::engine::EngineError::IdempotencyConflict {
+        EngineError::IdempotencyConflict {
             function_id,
             key,
             reason,
@@ -566,13 +562,13 @@ fn engine_error_replay_details(error: &crate::engine::EngineError) -> Value {
             "key": key,
             "reason": reason
         }),
-        crate::engine::EngineError::LedgerFailure { operation, message } => {
+        EngineError::LedgerFailure { operation, message } => {
             json!({"kind": "ledger_failure", "operation": operation, "message": message})
         }
-        crate::engine::EngineError::StoredInvocationError { kind, message } => {
+        EngineError::StoredInvocationError { kind, message } => {
             json!({"kind": "stored_invocation_error", "storedKind": kind, "message": message})
         }
-        crate::engine::EngineError::InvalidSchema {
+        EngineError::InvalidSchema {
             function_id,
             direction,
             message,
@@ -582,7 +578,7 @@ fn engine_error_replay_details(error: &crate::engine::EngineError) -> Value {
             "direction": direction,
             "message": message
         }),
-        crate::engine::EngineError::SchemaViolation {
+        EngineError::SchemaViolation {
             function_id,
             direction,
             path,
@@ -594,7 +590,7 @@ fn engine_error_replay_details(error: &crate::engine::EngineError) -> Value {
             "path": path,
             "message": message
         }),
-        crate::engine::EngineError::InvalidVisibilityPromotion {
+        EngineError::InvalidVisibilityPromotion {
             function_id,
             target,
             reason,
@@ -604,14 +600,14 @@ fn engine_error_replay_details(error: &crate::engine::EngineError) -> Value {
             "target": target,
             "reason": reason
         }),
-        crate::engine::EngineError::PolicyViolation(message) => {
+        EngineError::PolicyViolation(message) => {
             json!({"kind": "policy_violation", "message": message})
         }
-        crate::engine::EngineError::NotRoutable {
+        EngineError::NotRoutable {
             function_id,
             reason,
         } => json!({"kind": "not_routable", "functionId": function_id, "reason": reason}),
-        crate::engine::EngineError::DomainFailure {
+        EngineError::DomainFailure {
             domain,
             code,
             message,
@@ -623,10 +619,10 @@ fn engine_error_replay_details(error: &crate::engine::EngineError) -> Value {
             "message": message,
             "details": details
         }),
-        crate::engine::EngineError::WorkerTransportFailure { code, message } => {
+        EngineError::WorkerTransportFailure { code, message } => {
             json!({"kind": "worker_transport_failure", "code": code, "message": message})
         }
-        crate::engine::EngineError::HandlerFailed(message) => {
+        EngineError::HandlerFailed(message) => {
             json!({"kind": "handler_failed", "message": message})
         }
     }

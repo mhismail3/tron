@@ -480,7 +480,7 @@ async fn execute_capability_primitive_via_engine(
             session_id,
             result_trace_id.as_ref(),
             parent_invocation_id,
-            Some(json!({ "functionId": function_id.to_string() })),
+            Some(json!({ "primitiveTargetId": function_id.to_string() })),
         );
     }
     let Some(value) = result.value else {
@@ -503,7 +503,7 @@ async fn execute_capability_primitive_via_engine(
             session_id,
             result_trace_id.as_ref(),
             parent_invocation_id,
-            Some(json!({ "functionId": function_id.to_string() })),
+            Some(json!({ "primitiveTargetId": function_id.to_string() })),
         );
     };
     serde_json::from_value(value).unwrap_or_else(|error| {
@@ -529,7 +529,7 @@ async fn execute_capability_primitive_via_engine(
             result_trace_id.as_ref(),
             parent_invocation_id,
             Some(json!({
-                "functionId": function_id.to_string(),
+                "primitiveTargetId": function_id.to_string(),
                 "serdeError": error.to_string(),
             })),
         )

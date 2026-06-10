@@ -50,7 +50,7 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Campaign Scorecard",
         "Status: **active**",
-        "Current score: **90/100**",
+        "Current score: **100/100**",
         "| FSC-0 | Campaign harness | 6 | passed_after_fix |",
         "| FSC-1 | Failure inventory | 8 | passed_after_fix |",
         "| FSC-2 | Canonical envelope | 12 | passed_after_fix |",
@@ -58,7 +58,7 @@ fn failure_semantics_campaign_harness_exists() {
         "| FSC-7 | Provider retry semantics | 8 | passed_after_fix |",
         "| FSC-8 | iOS parity | 8 | passed_after_fix |",
         "| FSC-9 | Observability and replay | 6 | passed_after_fix |",
-        "| FSC-10 | Closeout gates | 10 | pending |",
+        "| FSC-10 | Closeout gates | 10 | passed_after_fix |",
         "`packages/agent/docs/failure-semantics-inventory.tsv`",
         "`packages/agent/tests/failure_semantics_invariants.rs`",
     ] {
@@ -80,7 +80,7 @@ fn failure_semantics_campaign_harness_exists() {
         "`TronEvent::TurnFailed`",
         "`capability.invocation.completed`",
         "`/engine` WebSocket response errors",
-        "## Open Loops",
+        "## Closeout Notes",
     ] {
         assert!(
             inventory.contains(required),
@@ -91,7 +91,7 @@ fn failure_semantics_campaign_harness_exists() {
     for required in [
         "# Failure Semantics Evidence Manifest",
         "Status: **active**",
-        "Current score: **90/100**",
+        "Current score: **100/100**",
         "| FSC-0 | passed_after_fix |",
         "| FSC-1 | passed_after_fix |",
         "| FSC-2 | passed_after_fix |",
@@ -99,13 +99,14 @@ fn failure_semantics_campaign_harness_exists() {
         "| FSC-7 | passed_after_fix |",
         "| FSC-8 | passed_after_fix |",
         "| FSC-9 | passed_after_fix |",
-        "| FSC-10 | pending |",
+        "| FSC-10 | passed_after_fix |",
         "## FSC-0 Findings",
         "## Server Core Checkpoint Findings",
         "## Error Mapping Closeout Findings",
         "## Inventory Closeout Findings",
         "## Durable Replay Checkpoint Findings",
         "## iOS Parity Checkpoint Findings",
+        "## Closeout Gate Findings",
         "## Verification Log",
     ] {
         assert!(
@@ -129,6 +130,46 @@ fn failure_semantics_campaign_harness_exists() {
 }
 
 #[test]
+fn failure_semantics_closeout_artifacts_have_no_stale_status() {
+    let scorecard = read_repo_file("packages/agent/docs/failure-semantics-scorecard.md");
+    let inventory = read_repo_file("packages/agent/docs/failure-semantics-inventory.md");
+    let manifest = read_repo_file("packages/agent/docs/failure-semantics-evidence-manifest.md");
+    let tsv = read_repo_file("packages/agent/docs/failure-semantics-inventory.tsv");
+
+    assert!(scorecard.contains("Current score: **100/100**"));
+    assert!(manifest.contains("Current score: **100/100**"));
+    assert!(scorecard.contains("| FSC-10 | Closeout gates | 10 | passed_after_fix |"));
+    assert!(manifest.contains("| FSC-10 | passed_after_fix |"));
+    assert!(inventory.contains("## Closeout Notes"));
+    assert!(tsv.starts_with("path\tlanguage\tsurface\towner\tcurrent_state\tfsc_rows\n"));
+
+    for (name, content) in [
+        ("scorecard", scorecard.as_str()),
+        ("inventory", inventory.as_str()),
+        ("manifest", manifest.as_str()),
+        ("inventory_tsv", tsv.as_str()),
+    ] {
+        for forbidden in [
+            "Current score: **90/100**",
+            "| FSC-10 | pending |",
+            "Not started.",
+            "Implementation rows remain",
+            "final stale-doc enforcement moves",
+            "Add final static",
+            "Durable payload enrichment remains",
+            "Durable replay/export enrichment remains",
+            "## Open Loops",
+            "current_gap",
+        ] {
+            assert!(
+                !content.contains(forbidden),
+                "{name} contains stale failure-semantics closeout marker: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
 fn failure_semantics_inventory_tsv_covers_initial_surfaces() {
     let inventory = read_repo_file("packages/agent/docs/failure-semantics-inventory.tsv");
     let mut rows = BTreeSet::new();
@@ -137,7 +178,7 @@ fn failure_semantics_inventory_tsv_covers_initial_surfaces() {
         let columns: Vec<&str> = line.split('\t').collect();
         assert!(
             columns.len() == 6,
-            "inventory row must have path, language, surface, owner, current_gap, and fsc_rows columns: {line}"
+            "inventory row must have path, language, surface, owner, current_state, and fsc_rows columns: {line}"
         );
         assert!(
             repo_path(columns[0]).exists(),
@@ -158,7 +199,7 @@ fn failure_semantics_inventory_tsv_covers_initial_surfaces() {
     for required in [
         "packages/agent/src/shared/server/errors.rs",
         "packages/agent/src/shared/server/failure.rs",
-        "packages/agent/src/shared/server/error_mapping.rs",
+        "packages/agent/src/shared/server/error_mapping/mod.rs",
         "packages/agent/src/engine/kernel/errors.rs",
         "packages/agent/src/domains/model/providers/shared/provider.rs",
         "packages/agent/src/domains/model/responder/mod.rs",
@@ -245,6 +286,12 @@ fn failure_semantics_server_core_uses_canonical_envelope() {
         socket.contains(".to_failure(FailureOrigin::Transport)"),
         "engine socket errors must serialize canonical failure envelopes"
     );
+    assert!(
+        socket.contains(".with_trace_id(trace_id.clone())")
+            && socket.contains("\"error\": failure.to_value()")
+            && socket.contains("\"traceId\": trace_id"),
+        "engine socket error frames must expose the canonical envelope and trace id"
+    );
 
     let responder = read_repo_file("packages/agent/src/domains/model/responder/mod.rs");
     assert!(
@@ -272,6 +319,42 @@ fn failure_semantics_server_core_uses_canonical_envelope() {
 }
 
 #[test]
+fn failure_semantics_closeout_rejects_unapproved_runtime_failure_construction() {
+    let allowed_turn_failed: BTreeSet<&str> = BTreeSet::from([
+        "packages/agent/src/shared/protocol/events/factory.rs",
+        "packages/agent/src/transport/runtime/streams/turn.rs",
+    ]);
+    let allowed_error: BTreeSet<&str> = BTreeSet::from([
+        "packages/agent/src/shared/protocol/events/factory.rs",
+        "packages/agent/src/transport/runtime/streams/session/agent.rs",
+    ]);
+
+    for path in tracked_files().into_iter().filter(|path| {
+        path.starts_with("packages/agent/src/")
+            && path.ends_with(".rs")
+            && !path.contains("/tests/")
+    }) {
+        let source = read_repo_file(&path);
+        assert!(
+            !source.contains("error_result"),
+            "production Rust source must not reintroduce text-only capability errors: {path}"
+        );
+        if source.contains("TronEvent::TurnFailed") {
+            assert!(
+                allowed_turn_failed.contains(path.as_str()),
+                "unapproved direct TronEvent::TurnFailed construction: {path}"
+            );
+        }
+        if source.contains("TronEvent::Error") {
+            assert!(
+                allowed_error.contains(path.as_str()),
+                "unapproved direct TronEvent::Error construction: {path}"
+            );
+        }
+    }
+}
+
+#[test]
 fn failure_semantics_error_mapping_matrix_covers_auth_session_event_store() {
     let errors = read_repo_file("packages/agent/src/shared/server/errors.rs");
     for required in [
@@ -296,7 +379,36 @@ fn failure_semantics_error_mapping_matrix_covers_auth_session_event_store() {
         );
     }
 
-    let mapping = read_repo_file("packages/agent/src/shared/server/error_mapping.rs");
+    let mapping = read_repo_file("packages/agent/src/shared/server/error_mapping/mod.rs");
+    let mapping_tests = read_repo_file("packages/agent/src/shared/server/error_mapping/tests.rs");
+    let mapping_with_tests = format!("{mapping}\n{mapping_tests}");
+    let engine_errors = read_repo_file("packages/agent/src/engine/kernel/errors.rs");
+    for variant in [
+        "InvalidId",
+        "InvalidFunctionId",
+        "NotFound",
+        "OwnerMismatch",
+        "NamespaceDenied",
+        "UnsupportedDeliveryMode",
+        "DeliveryModeNotAllowed",
+        "IdempotencyConflict",
+        "LedgerFailure",
+        "StoredInvocationError",
+        "InvalidSchema",
+        "SchemaViolation",
+        "InvalidVisibilityPromotion",
+        "PolicyViolation",
+        "NotRoutable",
+        "DomainFailure",
+        "WorkerTransportFailure",
+        "HandlerFailed",
+    ] {
+        assert!(
+            engine_errors.contains(variant) && mapping.contains(&format!("EngineError::{variant}")),
+            "EngineError variant must be represented in engine_error_to_failure: {variant}"
+        );
+    }
+
     for required in [
         "E::SessionNotFound(id) => CapabilityError::from_failure",
         "E::EventNotFound(id) => CapabilityError::from_failure",
@@ -334,7 +446,7 @@ fn failure_semantics_error_mapping_matrix_covers_auth_session_event_store() {
         "auth_malformed_auth_file_is_sanitized_storage_error",
     ] {
         assert!(
-            mapping.contains(required_test),
+            mapping_with_tests.contains(required_test),
             "error mapping tests missing coverage marker: {required_test}"
         );
     }
@@ -365,6 +477,17 @@ fn failure_semantics_ios_uses_canonical_failure_payload() {
             && protocol_types.contains("let origin: String"),
         "iOS engine protocol errors must decode the canonical envelope"
     );
+    for required_code in [
+        "case eventStoreBusy = \"EVENT_STORE_BUSY\"",
+        "case eventStoreFailure = \"EVENT_STORE_FAILURE\"",
+        "case authStorageError = \"AUTH_STORAGE_ERROR\"",
+        "case authTransportError = \"AUTH_TRANSPORT_ERROR\"",
+    ] {
+        assert!(
+            protocol_types.contains(required_code),
+            "iOS engine error-code enum missing server mapping code: {required_code}"
+        );
+    }
 
     let requests = read_repo_file(
         "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Requests.swift",
@@ -400,6 +523,15 @@ fn failure_semantics_ios_uses_canonical_failure_payload() {
             && !turn_failed.contains("?? 0")
             && !turn_failed.contains("?? false"),
         "live iOS turn failure plugin must not invent turn or recoverability defaults"
+    );
+
+    let error_classification =
+        read_repo_file("packages/ios-app/Sources/UI/Capabilities/Shared/ErrorClassification.swift");
+    assert!(
+        error_classification.contains("server-provided")
+            && !error_classification.contains("enum ")
+            && !error_classification.contains("switch "),
+        "iOS capability error display must not define a separate failure taxonomy"
     );
 }
 

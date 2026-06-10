@@ -471,6 +471,28 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
         XCTAssertEqual(error.errorDescription, "Session not found")
     }
 
+    func testEngineErrorCodeCoversFailureSemanticsMatrixCodes() {
+        let requiredCodes: [EngineErrorCode] = [
+            .sessionNotFound,
+            .eventNotFound,
+            .workspaceNotFound,
+            .blobNotFound,
+            .eventStoreBusy,
+            .eventStoreFailure,
+            .authNotConfigured,
+            .authTokenExpired,
+            .authOauthError,
+            .authStorageError,
+            .authTransportError,
+        ]
+
+        let rawValues = Set(EngineErrorCode.allCases.map(\.rawValue))
+
+        for code in requiredCodes {
+            XCTAssertTrue(rawValues.contains(code.rawValue), "missing \(code.rawValue)")
+        }
+    }
+
     func testEngineErrorDiagnosticSummaryIncludesContractContextAndRedactsPayload() throws {
         let error = EngineProtocolError(
             code: "INVALID_PARAMS",

@@ -192,11 +192,15 @@ enum EngineErrorCode: String, CaseIterable, Sendable {
     case eventNotFound = "EVENT_NOT_FOUND"
     case workspaceNotFound = "WORKSPACE_NOT_FOUND"
     case blobNotFound = "BLOB_NOT_FOUND"
+    case eventStoreBusy = "EVENT_STORE_BUSY"
+    case eventStoreFailure = "EVENT_STORE_FAILURE"
 
     // Typed auth errors — mirror the server's auth error mapping.
     case authNotConfigured = "AUTH_NOT_CONFIGURED"
     case authTokenExpired = "AUTH_TOKEN_EXPIRED"
     case authOauthError = "AUTH_OAUTH_ERROR"
+    case authStorageError = "AUTH_STORAGE_ERROR"
+    case authTransportError = "AUTH_TRANSPORT_ERROR"
 }
 
 /// Structured engine protocol error details.

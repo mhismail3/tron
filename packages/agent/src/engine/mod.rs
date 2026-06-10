@@ -145,6 +145,7 @@ pub use durability::queue::{
     EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime,
     EnqueueInvocation, QueueAttemptOutcome, QueueItemStatus,
 };
+pub(crate) use durability::replay::EngineReplaySnapshot;
 pub use durability::resources::{
     CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
     EngineResourceLink, EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,

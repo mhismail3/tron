@@ -362,7 +362,7 @@ packages/agent/src/engine/durability/ledger/memory.rs	rust	implementation	rust:e
 packages/agent/src/engine/durability/ledger/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
 packages/agent/src/engine/durability/ledger/outcome.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/durability/ledger/sqlite_codec.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
-packages/agent/src/engine/durability/ledger/sqlite_store.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/ledger/sqlite_store/mod.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/durability/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
 packages/agent/src/engine/durability/queue/memory.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/durability/queue/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
@@ -514,7 +514,7 @@ packages/agent/src/shared/protocol/messages/tests.rs	rust	test-support	rust:shar
 packages/agent/src/shared/protocol/mod.rs	rust	facade	rust:shared-protocol	callers may depend on this narrow owner-approved surface only
 packages/agent/src/shared/protocol/model_capabilities.rs	rust	implementation	rust:shared-protocol	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/shared/server/context.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
-packages/agent/src/shared/server/error_mapping.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/shared/server/error_mapping/mod.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/shared/server/errors.rs	rust	contract	rust:shared-server	may be shared across the owning boundary without concrete implementation imports
 packages/agent/src/shared/server/events.rs	rust	implementation	rust:shared-server	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/shared/server/mod.rs	rust	facade	rust:shared-server	callers may depend on this narrow owner-approved surface only
@@ -937,4 +937,7 @@ packages/agent/src/domains/session/replay/mod.rs	rust	facade	agent:session-repla
 packages/agent/src/domains/session/replay/roundtrip.rs	rust	implementation	agent:session-replay	test-only offline replay verifier
 packages/agent/src/domains/session/replay/tests.rs	rust	implementation	agent:session-replay	test-only replay manifest tests
 packages/agent/src/engine/durability/replay.rs	rust	contract	agent:engine-durability	engine replay snapshot DTO contract
+packages/agent/src/engine/durability/ledger/sqlite_store/rows.rs	rust	implementation	agent:engine-durability	owner-private row decoder helpers for the SQLite ledger store
 packages/agent/src/shared/protocol/model_audit.rs	rust	contract	agent:shared-protocol	provider request audit DTO contract
+packages/agent/src/shared/server/failure.rs	rust	contract	agent:shared-server	canonical server failure envelope contract used by transport, capability, and replay surfaces
+packages/ios-app/Sources/Engine/Protocol/Core/FailurePayload.swift	swift	contract	ios:engine-protocol	server-authored failure payload DTO decoded by protocol and event projection surfaces

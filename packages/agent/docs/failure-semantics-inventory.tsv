@@ -1,7 +1,7 @@
-path	language	surface	owner	current_gap	fsc_rows
+path	language	surface	owner	current_state	fsc_rows
 packages/agent/src/shared/server/failure.rs	Rust	canonical_failure_envelope	shared_server	canonical_envelope_owner	FSC-2,FSC-3,FSC-4,FSC-5,FSC-6,FSC-7,FSC-9
 packages/agent/src/shared/server/errors.rs	Rust	capability_error_contract	shared_server	converts_to_from_failure_envelope	FSC-2,FSC-3,FSC-5,FSC-6
-packages/agent/src/shared/server/error_mapping.rs	Rust	error_mapping_matrix	shared_server	engine_auth_session_event_store_mapping_complete	FSC-3,FSC-5,FSC-6
+packages/agent/src/shared/server/error_mapping/mod.rs	Rust	error_mapping_matrix	shared_server	engine_auth_session_event_store_mapping_complete	FSC-3,FSC-5,FSC-6
 packages/agent/src/shared/server/validation.rs	Rust	sanitization_boundary	shared_server	used_before_public_transport_failure_message	FSC-2,FSC-6
 packages/agent/src/engine/kernel/errors.rs	Rust	engine_error_source	engine	mapped_by_engine_error_to_failure	FSC-3,FSC-5,FSC-9
 packages/agent/src/engine/durability/ledger/outcome.rs	Rust	stored_engine_error	engine_durability	replay_projection_exports_canonical_failure_envelope	FSC-5,FSC-9

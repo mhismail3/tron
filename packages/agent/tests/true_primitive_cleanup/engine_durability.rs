@@ -22,7 +22,7 @@ fn engine_catalog_and_durability_roots_are_split_and_explicit() {
     for path in [
         "packages/agent/src/engine/catalog/registry/registration.rs",
         "packages/agent/src/engine/catalog/registry/idempotency.rs",
-        "packages/agent/src/engine/durability/ledger/sqlite_store.rs",
+        "packages/agent/src/engine/durability/ledger/sqlite_store/mod.rs",
         "packages/agent/src/engine/durability/queue/memory.rs",
         "packages/agent/src/engine/durability/queue/sqlite_store.rs",
         "packages/agent/src/engine/durability/streams/memory.rs",

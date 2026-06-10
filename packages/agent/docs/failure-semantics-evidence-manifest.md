@@ -2,28 +2,28 @@
 
 Status: **active**
 
-Current score: **90/100**
+Current score: **100/100**
 
 Branch: `codex/primitive-engine-teardown`
 
-This manifest records row checkpoints, commands, findings, and open loops for
-the Failure Semantics Campaign.
+This manifest records row checkpoints, commands, findings, and closeout evidence
+for the Failure Semantics Campaign.
 
 ## Row Evidence
 
-| Row | Status | Change | Verification | Open loops | Commit |
+| Row | Status | Change | Verification | Closeout note | Commit |
 |---|---|---|---|---|---|
-| FSC-0 | passed_after_fix | Added the campaign scorecard, inventory, TSV, evidence manifest, invariant target, and README living-doc links. | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | FSC-1 through FSC-10 remain open implementation rows. | `e9b180fa1` |
-| FSC-1 | passed_after_fix | Re-audited the inventory and TSV after server, durable replay, iOS, and mapping work. Removed stale gap text, documented provider stream error canonicalization, and aligned replay/capability/turn projection rows with current source. | `rg` stale-marker scan across failure-semantics docs, Rust sources, iOS sources, and iOS event docs; `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | None; final stale-doc/static enforcement moves to FSC-10. | inventory closeout checkpoint |
+| FSC-0 | passed_after_fix | Added the campaign scorecard, inventory, TSV, evidence manifest, invariant target, and README living-doc links. | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | Superseded by completed implementation rows and FSC-10 gates. | `e9b180fa1` |
+| FSC-1 | passed_after_fix | Re-audited the inventory and TSV after server, durable replay, iOS, and mapping work. Removed stale gap text, documented provider stream error canonicalization, and aligned replay/capability/turn projection rows with current source. | `rg` stale-marker scan across failure-semantics docs, Rust sources, iOS sources, and iOS event docs; `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | Enforced by FSC-10 stale-state guards. | `97be04ea1` |
 | FSC-2 | passed_after_fix | Added `shared::server::failure::FailureEnvelope`, canonical category/origin vocabulary, stable failure codes, references, and `details_with_failure`. | `cargo test --manifest-path packages/agent/Cargo.toml shared::server::failure --lib`; `cargo test --manifest-path packages/agent/Cargo.toml shared::protocol::model_capabilities --lib` | None for server-side envelope; consumers remain covered by later rows. | server core checkpoint |
 | FSC-3 | passed_after_fix | Added canonical conversions for `CapabilityError`, `EngineError`, `ProviderError`, `ModelResponseError`, `RuntimeError`, auth errors, session not-found codes, and event-store errors. Event-store busy/failure and auth storage/transport/OAuth cases now embed `details.failure` with stable code/category/retryability/origin and safe details. | `cargo test --manifest-path packages/agent/Cargo.toml shared::server::error_mapping --lib -- --nocapture`; `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`; `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | None for current mapped error sources. | error mapping closeout checkpoint |
-| FSC-4 | passed_after_fix | Replaced production live `TurnFailed` and `Error` construction with canonical event builders and projected origin/retryable/recoverable/details. | `cargo test --manifest-path packages/agent/Cargo.toml shared::protocol::events --lib` | Durable payload enrichment remains FSC-9. | server core checkpoint |
-| FSC-5 | passed_after_fix | Replaced text-only capability failures with canonical `failure_result` details and preserved engine invocation failures in `capability.invocation.completed`. | `cargo test --manifest-path packages/agent/Cargo.toml capability_invocation_executor::tests --lib` | Durable replay/export enrichment remains FSC-9. | server core checkpoint |
-| FSC-6 | passed_after_fix | Extended `/engine` WebSocket error frames to serialize canonical failure envelopes with sanitized messages and trace ids. | `cargo test --manifest-path packages/agent/Cargo.toml transport::engine::socket --lib` | Add final static transport guard in FSC-10. | server core checkpoint |
+| FSC-4 | passed_after_fix | Replaced production live `TurnFailed` and `Error` construction with canonical event builders and projected origin/retryable/recoverable/details. | `cargo test --manifest-path packages/agent/Cargo.toml shared::protocol::events --lib` | Enforced by FSC-10 direct-construction guards. | server core checkpoint |
+| FSC-5 | passed_after_fix | Replaced text-only capability failures with canonical `failure_result` details and preserved engine invocation failures in `capability.invocation.completed`. | `cargo test --manifest-path packages/agent/Cargo.toml capability_invocation_executor::tests --lib` | Enforced by FSC-10 source guards. | server core checkpoint |
+| FSC-6 | passed_after_fix | Extended `/engine` WebSocket error frames to serialize canonical failure envelopes with sanitized messages and trace ids. | `cargo test --manifest-path packages/agent/Cargo.toml transport::engine::socket --lib` | Enforced by FSC-10 transport-frame guard. | server core checkpoint |
 | FSC-7 | passed_after_fix | Preserved provider retryability, recoverability, status, retry-after, provider code, provider/model identity, cancellation, and category through responder/runtime envelopes. | `cargo test --manifest-path packages/agent/Cargo.toml domains::model --lib` | None for current provider consumers. | server core checkpoint |
 | FSC-8 | passed_after_fix | Added Swift `CanonicalFailurePayload`; made `/engine` protocol errors decode the full envelope; required child engine errors to carry `details.failure`; changed live `error`/`agent.turn_failed` plugins to require `details.failure` and avoid local placeholder/default classification; made persisted error projections, provider pills, session summaries, and capability error rows prefer the server envelope. | `xcodegen generate`; `xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EventPluginTests -only-testing:TronMobileTests/ErrorEventProjectionTests -only-testing:TronMobileTests/EventDispatchCoordinatorTests -only-testing:TronMobileTests/CapabilityInvocationCompletedPluginTests -only-testing:TronMobileTests/EngineProtocolBaseTypesTests`; `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`; `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture`; `git diff --check` | None for current server-authored iOS failure surfaces. | iOS parity checkpoint |
 | FSC-9 | passed_after_fix | Added canonical optional fields to durable error/turn-failed payloads, wrote interrupted durable `turn.failed` rows from `FailureEnvelope`, and exported replay engine invocation errors as `error.failure` plus replay diagnostics. | `cargo test --manifest-path packages/agent/Cargo.toml domains::session::event_store::types::payloads --lib`; `cargo test --manifest-path packages/agent/Cargo.toml domains::session::replay --lib` | None for current durable/replay surfaces. | durable replay checkpoint |
-| FSC-10 | pending | Not started. | pending | Add final static guards and full verification evidence. | pending |
+| FSC-10 | passed_after_fix | Added closeout guards for campaign artifact status, runtime failure construction sites, removed text-only capability helpers, canonical transport error fields, iOS canonical failure decoding, server auth/event-store code coverage, category vocabulary, and TSV source coverage. | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture`; full closeout commands listed below. | No known failure-semantics closeout item remains. | closeout gates checkpoint |
 
 ## FSC-0 Findings
 
@@ -50,8 +50,8 @@ the Failure Semantics Campaign.
   `ModelResponseError` and `RuntimeError` instead of being reparsed from strings.
 - `/engine` error frames now serialize the canonical envelope under `error`
   while retaining the outer trace id.
-- Remaining open loops are auth/session/event-store mapping tests, inventory
-  closeout, and final static gates.
+- Follow-up rows completed auth/session/event-store mapping tests, inventory
+  closeout, durable replay parity, iOS parity, and final static gates.
 
 ## Error Mapping Closeout Findings
 
@@ -107,6 +107,20 @@ the Failure Semantics Campaign.
   reconstructed UI paths, and capability detail sheets populate code/category
   rows from the envelope.
 
+## Closeout Gate Findings
+
+- The campaign invariant suite now requires scorecard/evidence status
+  `100/100` and `FSC-10` marked `passed_after_fix`.
+- Production Rust source may construct `TronEvent::TurnFailed` and
+  `TronEvent::Error` only in canonical factories and transport projections.
+- The removed text-only capability helper is guarded across production Rust
+  source, while capability failures must continue to use `failure_result`.
+- `/engine` socket errors are guarded to serialize `FailureEnvelope::to_value()`
+  with trace ids, and Swift protocol types now include the auth/event-store
+  codes added by the mapping matrix.
+- iOS live failure plugins must require server-authored failure envelopes, and
+  `ErrorClassification` remains a display DTO rather than a separate taxonomy.
+
 ## Verification Log
 
 Focused commands run during completed checkpoints:
@@ -125,13 +139,24 @@ cargo test --manifest-path packages/agent/Cargo.toml domains::session::replay --
 cargo test --manifest-path packages/agent/Cargo.toml domains::model::responder --lib
 xcodegen generate
 xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ErrorEventProjectionTests -only-testing:TronMobileTests/EventPluginTests -only-testing:TronMobileTests/EventDispatchCoordinatorTests
-xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineProtocolBaseTypesTests
+cd packages/ios-app && xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineProtocolBaseTypesTests
 xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/CapabilityInvocationCompletedPluginTests
+```
+
+Closeout commands:
+
+```bash
+scripts/tron ci fmt check clippy test
+scripts/personal-info-guard.sh
+cd packages/ios-app && xcodegen generate
+git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj
+xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/EngineProtocolBaseTypesTests
+git diff --check
+git ls-files -ci --exclude-standard
+git status --short
 ```
 
 ## Residual Risk
 
-The server, durable/replay, iOS, mapping, and inventory surfaces are materially
-improved but not a campaign closeout. FSC-10 must add final static guards that
-make stale docs, direct ad hoc failure emission, category drift, uncovered
-variants, and stale wording regressions fail loudly.
+No known failure-semantics residual risk remains after the FSC-10 closeout
+guards and full verification pass.

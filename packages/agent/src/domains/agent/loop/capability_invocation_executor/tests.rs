@@ -325,7 +325,7 @@ async fn engine_handler_failure_returns_canonical_capability_result() {
     let details = result.result.details.as_ref().unwrap();
     assert_eq!(details["failure"]["category"], "capability");
     assert_eq!(details["failure"]["origin"], "capability");
-    assert_eq!(details["functionId"], "capability::fail");
+    assert_eq!(details["primitiveTargetId"], "capability::fail");
 }
 
 #[tokio::test]

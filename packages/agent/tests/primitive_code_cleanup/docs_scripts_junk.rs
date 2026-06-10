@@ -181,7 +181,7 @@ fn final_retired_product_residue_stays_deleted_from_runtime_surfaces() {
             &["IMPORT_ALREADY_IMPORTED", "import_codes_are_distinct"],
         ),
         (
-            "packages/agent/src/shared/server/error_mapping.rs",
+            "packages/agent/src/shared/server/error_mapping/mod.rs",
             &["DuplicateImport", "IMPORT_ALREADY_IMPORTED"],
         ),
     ];

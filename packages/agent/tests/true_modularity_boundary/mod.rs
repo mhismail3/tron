@@ -314,7 +314,7 @@ fn state_stores_are_owner_private() {
         "packages/agent/src/engine/invocation/host/",
         "packages/agent/src/engine/primitives/",
         "packages/agent/src/shared/observability/",
-        "packages/agent/src/shared/server/error_mapping.rs",
+        "packages/agent/src/shared/server/error_mapping/mod.rs",
         "packages/agent/src/shared/storage/",
     ];
     let leaks = rust_source_lines("packages/agent/src")
@@ -435,7 +435,7 @@ fn boundary_errors_do_not_leak_impl_errors() {
                     "packages/agent/src/domains/model/",
                     "packages/agent/src/domains/session/event_store/",
                     "packages/agent/src/shared/observability/transport.rs",
-                    "packages/agent/src/shared/server/error_mapping.rs",
+                    "packages/agent/src/shared/server/error_mapping/mod.rs",
                     "packages/agent/src/transport/",
                 ],
             )

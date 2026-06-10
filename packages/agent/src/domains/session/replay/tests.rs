@@ -11,12 +11,10 @@ use crate::domains::session::event_store::{AGENT_TRACE_VERSION, AgentTraceRecord
 use crate::domains::session::event_store::{
     AppendOptions, ConnectionConfig, EventStore, EventType, new_file, run_migrations,
 };
-use crate::engine::catalog::discovery::ActorKind;
-use crate::engine::durability::queue::EnqueueInvocation;
-use crate::engine::durability::streams::PublishStreamEvent;
-use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, FunctionId, TraceId};
-use crate::engine::kernel::types::VisibilityScope;
-use crate::engine::{CausalContext, EngineHostHandle, Invocation};
+use crate::engine::{
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineHostHandle, EnqueueInvocation,
+    FunctionId, Invocation, PublishStreamEvent, TraceId, VisibilityScope,
+};
 
 struct ReplayHarness {
     _temp: tempfile::TempDir,

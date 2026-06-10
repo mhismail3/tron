@@ -389,7 +389,7 @@ packages/agent/src/engine/durability/ledger/memory.rs	primitive	engine	TPC-2	pri
 packages/agent/src/engine/durability/ledger/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/ledger/outcome.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/ledger/sqlite_codec.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
-packages/agent/src/engine/durability/ledger/sqlite_store.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/durability/ledger/sqlite_store/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/queue/memory.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/queue/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
@@ -541,7 +541,7 @@ packages/agent/src/shared/protocol/messages/tests.rs	test	test_harness	TPC-10	co
 packages/agent/src/shared/protocol/mod.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
 packages/agent/src/shared/protocol/model_capabilities.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
 packages/agent/src/shared/server/context.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
-packages/agent/src/shared/server/error_mapping.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
+packages/agent/src/shared/server/error_mapping/mod.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
 packages/agent/src/shared/server/errors.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
 packages/agent/src/shared/server/events.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
 packages/agent/src/shared/server/mod.rs	support	shared_foundation	TPC-6	shared protocol, observability, storage, foundation, or server support
@@ -1453,3 +1453,13 @@ packages/agent/tests/determinism_replayability/replay_references.rs	test	test_ha
 packages/agent/tests/determinism_replayability/scorecard_inventory.rs	test	test_harness	DRC-10	DRC scorecard inventory invariant retained after final replayability closeout.
 packages/agent/tests/determinism_replayability/support.rs	test	test_harness	DRC-10	DRC test support retained after final replayability closeout.
 packages/agent/tests/determinism_replayability_invariants.rs	test	test_harness	DRC-10	DRC invariant target retained after final replayability closeout.
+packages/agent/docs/failure-semantics-evidence-manifest.md	docs	docs/static gates	FSC-10	Failure Semantics Campaign evidence artifact retained after final closeout.
+packages/agent/docs/failure-semantics-inventory.md	docs	docs/static gates	FSC-10	Failure Semantics Campaign inventory retained after final closeout.
+packages/agent/docs/failure-semantics-inventory.tsv	docs	docs/static gates	FSC-10	Failure Semantics Campaign machine-readable inventory retained after final closeout.
+packages/agent/docs/failure-semantics-scorecard.md	docs	docs/static gates	FSC-10	Failure Semantics Campaign scorecard retained after final closeout.
+packages/agent/src/engine/durability/ledger/sqlite_store/rows.rs	implementation	engine	FSC-10	Engine ledger SQLite row decoders split and retained after final failure-semantics closeout.
+packages/agent/src/domains/model/responder/tests.rs	test	test_harness	FSC-10	Model responder boundary tests retained after final failure-semantics closeout.
+packages/agent/src/shared/server/error_mapping/tests.rs	test	test_harness	FSC-10	Server error mapping tests retained after final failure-semantics closeout.
+packages/agent/src/shared/server/failure.rs	implementation	server_errors	FSC-10	Canonical server failure envelope retained after final failure-semantics closeout.
+packages/agent/tests/failure_semantics_invariants.rs	test	test_harness	FSC-10	Failure Semantics Campaign invariant target retained after final closeout.
+packages/ios-app/Sources/Engine/Protocol/Core/FailurePayload.swift	implementation	ios_engine	FSC-10	Canonical Swift failure payload decoder retained after final failure-semantics closeout.

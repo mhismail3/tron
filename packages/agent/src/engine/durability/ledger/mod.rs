@@ -7,6 +7,10 @@
 //! sockets still have executable handlers. Session replay reads invocation rows
 //! and idempotency entries through this ledger boundary so replay does not query
 //! SQLite internals from domain code.
+//!
+//! The SQLite implementation keeps schema and query operations in
+//! `sqlite_store`, with row decoding helpers split into `sqlite_store::rows` so
+//! persistence behavior remains owned by this module without oversized files.
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;

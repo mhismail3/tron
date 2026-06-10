@@ -212,7 +212,7 @@ Files updated:
 - `packages/agent/src/domains/session/event_store/store/event_store/trace_log.rs`
 - `packages/agent/src/engine/durability/ledger/mod.rs`
 - `packages/agent/src/engine/durability/ledger/memory.rs`
-- `packages/agent/src/engine/durability/ledger/sqlite_store.rs`
+- `packages/agent/src/engine/durability/ledger/sqlite_store/mod.rs`
 - `packages/agent/src/engine/durability/queue/memory.rs`
 - `packages/agent/src/engine/durability/queue/sqlite_store.rs`
 - `packages/agent/src/engine/durability/streams/memory.rs`
@@ -250,7 +250,7 @@ Files updated:
 - `packages/agent/src/engine/catalog/registry/mod.rs`
 - `packages/agent/src/engine/durability/ledger/mod.rs`
 - `packages/agent/src/engine/durability/ledger/memory.rs`
-- `packages/agent/src/engine/durability/ledger/sqlite_store.rs`
+- `packages/agent/src/engine/durability/ledger/sqlite_store/mod.rs`
 - `packages/agent/src/engine/durability/replay.rs`
 - `packages/agent/src/engine/invocation/host/substrate_handle.rs`
 - `packages/agent/src/engine/tests/fixtures/mod.rs`
