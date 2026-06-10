@@ -10,7 +10,9 @@
 //! primitive on `worker.lifecycle`. If a socket drops while target invocations
 //! are pending, those waiters complete immediately with `WORKER_DISCONNECTED`
 //! so the queue runtime can record retry/dead-letter truth without waiting for
-//! the per-invocation timeout.
+//! the per-invocation timeout. Worker result frames are consumed only by the
+//! pending invocation map owned by that socket connection; they are not routed
+//! through the runtime message handler as standalone commands.
 
 use std::sync::Arc;
 use std::time::Duration;

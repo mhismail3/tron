@@ -14,9 +14,8 @@ async fn sqlite_restart_marks_durable_worker_unhealthy_without_socket_reconnect(
         grant("external-grant"),
     )
     .with_namespace_claim("restart_chaos");
-    let mut hello = WorkerHello::loopback(worker);
+    let mut hello = WorkerHello::loopback(worker).with_session_scope("hmh-f7-session");
     hello.registration_mode = WorkerRegistrationMode::Durable;
-    hello.session_id = Some("hmh-f7-session".to_owned());
     runtime.hello(hello).await.unwrap();
     runtime
         .register_function(RegisterFunction {

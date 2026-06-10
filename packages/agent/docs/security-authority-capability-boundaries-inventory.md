@@ -41,7 +41,6 @@ or the SACB invariant target fails.
 
 ## Open Loops
 
-- SACB-7: prove external worker protocol isolation.
 - SACB-8: prove secrets, redaction, auth.json permissions, and provider custody.
 - SACB-9: prove pairing lifecycle and unauthorized flow.
 - SACB-10: run final closeout and remove stale active-state wording.

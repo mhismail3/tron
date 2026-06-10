@@ -2,6 +2,10 @@ use super::external_worker_helpers::*;
 use super::*;
 use crate::engine::{EnqueueInvocation, QueueItemStatus};
 
+fn session_hello(worker: WorkerDefinition, session_id: &str) -> super::WorkerHello {
+    super::WorkerHello::loopback(worker).with_session_scope(session_id)
+}
+
 #[tokio::test]
 async fn local_external_worker_runtime_registers_session_functions_and_disconnects_cleanly() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
@@ -24,7 +28,7 @@ async fn local_external_worker_runtime_registers_session_functions_and_disconnec
     )
     .with_namespace_claim("local");
     let snapshot = runtime
-        .hello(super::WorkerHello::loopback(worker))
+        .hello(session_hello(worker, "session-a"))
         .await
         .unwrap();
     assert_eq!(runtime.connections(), vec![wid("local-worker")]);
@@ -88,8 +92,7 @@ async fn local_external_worker_rejects_visible_functions_without_capability_meta
         grant("external-grant"),
     )
     .with_namespace_claim("invalid_local");
-    let mut hello = super::WorkerHello::loopback(worker);
-    hello.session_id = Some("session-a".to_owned());
+    let hello = session_hello(worker, "session-a");
     runtime.hello(hello).await.unwrap();
     let error = runtime
         .register_function(super::RegisterFunction {
@@ -123,7 +126,7 @@ async fn local_external_worker_rejects_metadata_outside_scoped_token() {
         grant("external-grant"),
     )
     .with_namespace_claim("token_local");
-    let mut hello = super::WorkerHello::loopback(worker);
+    let mut hello = session_hello(worker, "session-a");
     hello.worker_token.plugin_id = "session_generated.allowed-plugin".to_owned();
     runtime.hello(hello).await.unwrap();
     let error = runtime
@@ -147,6 +150,43 @@ async fn local_external_worker_rejects_metadata_outside_scoped_token() {
 }
 
 #[tokio::test]
+async fn local_external_worker_rejects_namespace_substring_claim_escape() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker_id = wid("local-namespace-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("git");
+    runtime
+        .hello(session_hello(worker, "session-a"))
+        .await
+        .unwrap();
+
+    let error = runtime
+        .register_function(super::RegisterFunction {
+            definition: external_visible_function(FunctionDefinition::new(
+                fid("legit::echo"),
+                worker_id,
+                "substring namespace escape",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("metadata must stay within namespace claims")
+    ));
+}
+
+#[tokio::test]
 async fn local_external_worker_rejects_trust_tier_outside_scoped_token() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let mut runtime = EngineExternalWorkerRuntime::new(handle);
@@ -158,8 +198,7 @@ async fn local_external_worker_rejects_trust_tier_outside_scoped_token() {
         grant("external-grant"),
     )
     .with_namespace_claim("trust_local");
-    let mut hello = super::WorkerHello::loopback(worker);
-    hello.session_id = Some("session-a".to_owned());
+    let hello = session_hello(worker, "session-a");
     runtime.hello(hello).await.unwrap();
     let mut function = external_visible_function(FunctionDefinition::new(
         fid("trust_local::echo"),
@@ -184,6 +223,50 @@ async fn local_external_worker_rejects_trust_tier_outside_scoped_token() {
 }
 
 #[tokio::test]
+async fn local_external_worker_hello_requires_session_scoped_token_binding() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker = WorkerDefinition::new(
+        wid("local-unbound-session-worker"),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("unbound_session");
+    let mut hello = super::WorkerHello::loopback(worker);
+    hello.session_id = Some("session-a".to_owned());
+
+    let error = runtime.hello(hello).await.unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("workerToken.sessionId binding")
+    ));
+}
+
+#[tokio::test]
+async fn local_external_worker_hello_rejects_wildcard_resource_selectors() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker = WorkerDefinition::new(
+        wid("local-wildcard-selector-worker"),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("wildcard_selector");
+    let mut hello = session_hello(worker, "session-a");
+    hello.worker_token.resource_selectors = vec!["*".to_owned()];
+
+    let error = runtime.hello(hello).await.unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("wildcard selectors are not allowed")
+    ));
+}
+
+#[tokio::test]
 async fn local_external_worker_stamps_capability_policy_metadata_from_scoped_token() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
@@ -195,8 +278,7 @@ async fn local_external_worker_stamps_capability_policy_metadata_from_scoped_tok
         grant("external-grant"),
     )
     .with_namespace_claim("policy_local");
-    let mut hello = super::WorkerHello::loopback(worker);
-    hello.session_id = Some("session-a".to_owned());
+    let hello = session_hello(worker, "session-a");
     runtime.hello(hello).await.unwrap();
     let mut function = external_visible_function(FunctionDefinition::new(
         fid("policy_local::echo"),
@@ -246,8 +328,7 @@ async fn local_external_worker_engine_issued_token_is_binding_selectable() {
         grant("external-grant"),
     )
     .with_namespace_claim("engine_issued");
-    let mut hello = super::WorkerHello::loopback(worker);
-    hello.session_id = Some("session-a".to_owned());
+    let mut hello = session_hello(worker, "session-a");
     hello.worker_token.signature_status = "engine_issued".to_owned();
     runtime.hello(hello).await.unwrap();
     runtime
@@ -279,6 +360,80 @@ async fn local_external_worker_engine_issued_token_is_binding_selectable() {
 }
 
 #[tokio::test]
+async fn local_external_worker_rejects_trigger_target_owned_by_another_worker() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_trigger_type_for_setup(
+            TriggerTypeDefinition::new(
+                TriggerTypeId::new("manual").unwrap(),
+                wid("engine"),
+                "manual test trigger",
+            ),
+            false,
+        )
+        .unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let victim_worker_id = wid("local-trigger-victim");
+    let victim = WorkerDefinition::new(
+        victim_worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("shared_trigger");
+    runtime
+        .hello(session_hello(victim, "session-a"))
+        .await
+        .unwrap();
+    runtime
+        .register_function(super::RegisterFunction {
+            definition: external_visible_function(FunctionDefinition::new(
+                fid("shared_trigger::echo"),
+                victim_worker_id,
+                "victim external function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )),
+            default_visibility: VisibilityScope::Session,
+        })
+        .await
+        .unwrap();
+
+    let attacker_worker_id = wid("local-trigger-attacker");
+    let attacker = WorkerDefinition::new(
+        attacker_worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("shared_trigger");
+    runtime
+        .hello(session_hello(attacker, "session-a"))
+        .await
+        .unwrap();
+    let mut trigger = TriggerDefinition::new(
+        TriggerId::new("manual:shared_trigger.echo").unwrap(),
+        attacker_worker_id,
+        TriggerTypeId::new("manual").unwrap(),
+        fid("shared_trigger::echo"),
+        grant("external-grant"),
+    );
+    trigger.visibility = VisibilityScope::Session;
+
+    let error = runtime
+        .register_trigger(super::RegisterTrigger {
+            definition: trigger,
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("cannot target function")
+    ));
+}
+
+#[tokio::test]
 async fn local_external_worker_lifecycle_events_publish_through_streams_and_traces() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let subscribe = handle
@@ -303,8 +458,7 @@ async fn local_external_worker_lifecycle_events_publish_through_streams_and_trac
         grant("external-grant"),
     )
     .with_namespace_claim("lifecycle_local");
-    let mut hello = super::WorkerHello::loopback(worker);
-    hello.session_id = Some("session-a".to_owned());
+    let hello = session_hello(worker, "session-a");
     runtime.hello(hello).await.unwrap();
     runtime
         .register_function(super::RegisterFunction {
@@ -371,7 +525,7 @@ async fn local_external_worker_runtime_registers_executable_proxy_handler() {
     )
     .with_namespace_claim("local_exec");
     runtime
-        .hello(super::WorkerHello::loopback(worker))
+        .hello(session_hello(worker, "session-a"))
         .await
         .unwrap();
     runtime
@@ -423,7 +577,7 @@ async fn queued_external_worker_disconnect_records_queue_retry_not_failed_target
     )
     .with_namespace_claim("local_queue");
     runtime
-        .hello(super::WorkerHello::loopback(worker))
+        .hello(session_hello(worker, "session-a"))
         .await
         .unwrap();
     runtime
@@ -574,9 +728,8 @@ async fn local_external_worker_durable_disconnect_marks_functions_unhealthy() {
         grant("external-grant"),
     )
     .with_namespace_claim("durable_local");
-    let mut hello = super::WorkerHello::loopback(worker);
+    let mut hello = session_hello(worker, "session-a");
     hello.registration_mode = super::WorkerRegistrationMode::Durable;
-    hello.session_id = Some("session-a".to_owned());
     runtime.hello(hello).await.unwrap();
     runtime
         .attach_invoker(worker_id.clone(), Arc::new(EchoExternalInvoker))
@@ -636,7 +789,7 @@ async fn local_external_worker_publish_stream_routes_through_stream_primitive() 
             "stream::subscribe",
             json!({
                 "subscriptionId": "worker-sub-a",
-                "topic": "worker.events",
+                "topic": "stream_local.events",
                 "sessionId": "session-a"
             }),
             mutating_causal("worker-stream-subscribe").with_scope("stream.write"),
@@ -653,14 +806,13 @@ async fn local_external_worker_publish_stream_routes_through_stream_primitive() 
         grant("external-grant"),
     )
     .with_namespace_claim("stream_local");
-    let mut hello = super::WorkerHello::loopback(worker);
-    hello.session_id = Some("session-a".to_owned());
+    let hello = session_hello(worker, "session-a");
     runtime.hello(hello).await.unwrap();
     let response = runtime
         .handle_message(super::WorkerProtocolMessage::PublishStream(
             super::WorkerStreamPublish {
                 worker_id: worker_id.clone(),
-                topic: "worker.events".to_owned(),
+                topic: "stream_local.events".to_owned(),
                 payload: json!({"from": "worker"}),
                 visibility: VisibilityScope::Session,
                 session_id: Some("session-a".to_owned()),
@@ -695,6 +847,82 @@ async fn local_external_worker_publish_stream_routes_through_stream_primitive() 
 }
 
 #[tokio::test]
+async fn local_external_worker_rejects_stream_publish_outside_scoped_session() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker_id = wid("local-stream-session-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("stream_session");
+    runtime
+        .hello(session_hello(worker, "session-a"))
+        .await
+        .unwrap();
+
+    let error = runtime
+        .publish_stream(super::WorkerStreamPublish {
+            worker_id,
+            topic: "stream_session.events".to_owned(),
+            payload: json!({"from": "worker"}),
+            visibility: VisibilityScope::Session,
+            session_id: Some("session-b".to_owned()),
+            workspace_id: None,
+            trace_id: Some(trace("worker-stream-scope-trace")),
+            parent_invocation_id: None,
+            idempotency_key: "worker-stream-scope-event-1".to_owned(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("sessionId must match the scoped worker session")
+    ));
+}
+
+#[tokio::test]
+async fn local_external_worker_rejects_stream_publish_outside_token_selectors() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let mut runtime = EngineExternalWorkerRuntime::new(handle);
+    let worker_id = wid("local-stream-topic-worker");
+    let worker = WorkerDefinition::new(
+        worker_id.clone(),
+        WorkerKind::External,
+        actor("owner"),
+        grant("external-grant"),
+    )
+    .with_namespace_claim("stream_topic");
+    runtime
+        .hello(session_hello(worker, "session-a"))
+        .await
+        .unwrap();
+
+    let error = runtime
+        .publish_stream(super::WorkerStreamPublish {
+            worker_id,
+            topic: "other_topic.events".to_owned(),
+            payload: json!({"from": "worker"}),
+            visibility: VisibilityScope::Session,
+            session_id: Some("session-a".to_owned()),
+            workspace_id: None,
+            trace_id: Some(trace("worker-stream-topic-trace")),
+            parent_invocation_id: None,
+            idempotency_key: "worker-stream-topic-event-1".to_owned(),
+        })
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("not allowed by scoped token selectors")
+    ));
+}
+
+#[tokio::test]
 async fn local_external_worker_heartbeat_timeout_unregisters_volatile_capabilities() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let mut runtime = EngineExternalWorkerRuntime::new(handle.clone());
@@ -707,7 +935,7 @@ async fn local_external_worker_heartbeat_timeout_unregisters_volatile_capabiliti
     )
     .with_namespace_claim("timeout_local");
     runtime
-        .hello(super::WorkerHello::loopback(worker))
+        .hello(session_hello(worker, "session-a"))
         .await
         .unwrap();
     runtime

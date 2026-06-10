@@ -3,11 +3,16 @@
 //! This is deliberately loopback-only and protocol-bound. Local workers register
 //! scoped functions/triggers, receive catalog snapshots, publish stream events
 //! through the engine stream primitive, and are cleaned up by heartbeat and
-//! disconnect policy. Volatile registrations disappear on disconnect or missed
-//! heartbeat. Durable local registrations stay in the catalog but are marked
-//! unhealthy until the worker reconnects and re-registers, so agents never
-//! discover stale capabilities as runnable. Submodules own lifecycle state,
-//! registration/stream publication, validation, and invocation proxying.
+//! disconnect policy. Accepted hellos must present an external worker, loopback
+//! bearer policy, an active grant at the token revision, non-wildcard stream
+//! selectors, and session/workspace bindings for visible workers. Function
+//! metadata, trigger ids/targets, and stream topics are matched by strict
+//! namespace segments/prefixes, never substring containment. Volatile
+//! registrations disappear on disconnect or missed heartbeat. Durable local
+//! registrations stay in the catalog but are marked unhealthy until the worker
+//! reconnects and re-registers, so agents never discover stale capabilities as
+//! runnable. Submodules own lifecycle state, registration/stream publication,
+//! validation, and invocation proxying.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -25,12 +30,13 @@ use crate::engine::kernel::ids::{
 };
 use crate::engine::kernel::policy::ENGINE_INTERNAL_INVOKE_SCOPE;
 use crate::engine::kernel::types::{
-    DeliveryMode, FunctionDefinition, FunctionHealth, VisibilityScope, WorkerLifecycleState,
+    DeliveryMode, FunctionDefinition, FunctionHealth, TriggerDefinition, VisibilityScope,
+    WorkerKind, WorkerLifecycleState,
 };
 use crate::engine::runtime::worker_protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, ScopedWorkerToken, WORKER_PROTOCOL_VERSION,
-    WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
-    WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent, WorkerProtocolMessage,
+    WorkerAuthPolicy, WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat,
+    WorkerHello, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent, WorkerProtocolMessage,
     WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
 

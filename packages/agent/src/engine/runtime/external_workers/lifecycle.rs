@@ -2,8 +2,9 @@
 
 use std::time::Duration;
 
-use super::validation::validate_worker_token;
+use super::validation::{namespace_claims_value, validate_worker_token};
 use super::*;
+use crate::engine::EngineGrantLifecycle;
 
 impl EngineExternalWorkerRuntime {
     /// Accept a worker hello and return a catalog snapshot visible to the
@@ -19,6 +20,16 @@ impl EngineExternalWorkerRuntime {
         if !hello.loopback_only {
             return Err(EngineError::PolicyViolation(
                 "external workers are loopback-only in this package".to_owned(),
+            ));
+        }
+        if hello.auth_policy != WorkerAuthPolicy::LoopbackBearer {
+            return Err(EngineError::PolicyViolation(
+                "external workers currently require loopback bearer authentication".to_owned(),
+            ));
+        }
+        if hello.worker.kind != WorkerKind::External {
+            return Err(EngineError::PolicyViolation(
+                "worker protocol can only register external workers".to_owned(),
             ));
         }
         let worker_id = hello.worker.id.clone();
@@ -39,6 +50,7 @@ impl EngineExternalWorkerRuntime {
             ));
         }
         validate_worker_token(&hello)?;
+        self.validate_worker_grant(&hello).await?;
         let owner_actor = hello.worker.owner_actor.clone();
         let volatile = hello.registration_mode == WorkerRegistrationMode::Volatile;
         self.host.register_worker(hello.worker, volatile).await?;
@@ -274,6 +286,63 @@ impl EngineExternalWorkerRuntime {
             functions,
             triggers: Vec::new(),
         }
+    }
+
+    async fn validate_worker_grant(&self, hello: &WorkerHello) -> Result<()> {
+        let token = &hello.worker_token;
+        let grant = self
+            .host
+            .inspect_authority_grant(&token.authority_grant_id)
+            .await?
+            .ok_or_else(|| {
+                EngineError::PolicyViolation(format!(
+                    "worker scoped token references unknown authority grant {}",
+                    token.authority_grant_id
+                ))
+            })?;
+        if grant.lifecycle != EngineGrantLifecycle::Active {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker scoped token grant {} is not active",
+                token.authority_grant_id
+            )));
+        }
+        if grant.revision != token.authority_grant_revision {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker scoped token grant revision {} does not match active revision {}",
+                token.authority_grant_revision, grant.revision
+            )));
+        }
+        if let Some(subject_worker_id) = grant.subject_worker_id.as_ref()
+            && subject_worker_id != &hello.worker.id
+        {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker scoped token grant subject worker {subject_worker_id} does not match {}",
+                hello.worker.id
+            )));
+        }
+        if let Some(subject_actor_id) = grant.subject_actor_id.as_ref() {
+            let expected = ActorId::new(format!("worker:{}", hello.worker.id))?;
+            if subject_actor_id != &expected {
+                return Err(EngineError::PolicyViolation(format!(
+                    "worker scoped token grant subject actor {subject_actor_id} does not match {expected}"
+                )));
+            }
+        }
+        if !grant
+            .allowed_namespaces
+            .iter()
+            .any(|namespace| namespace == "*")
+        {
+            for claim in &hello.worker.namespace_claims {
+                if !namespace_claims_value(&grant.allowed_namespaces, claim) {
+                    return Err(EngineError::PolicyViolation(format!(
+                        "worker namespace claim {claim} is not allowed by scoped token grant namespaces {:?}",
+                        grant.allowed_namespaces
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn connection_mut(

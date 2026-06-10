@@ -2,7 +2,8 @@
 
 use super::proxy::ExternalFunctionProxyHandler;
 use super::validation::{
-    stamp_external_capability_metadata, validate_external_capability_metadata,
+    namespace_claims_value, stamp_external_capability_metadata, stream_topic_allowed_by_token,
+    validate_external_capability_metadata,
 };
 use super::*;
 
@@ -37,6 +38,11 @@ impl EngineExternalWorkerRuntime {
             });
         }
         let connection = self.connection_mut(&worker_id)?.clone();
+        if connection.health != WorkerHealth::Healthy {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker {worker_id} is not healthy"
+            )));
+        }
         let expected_visibility = connection.default_visibility.as_visibility_scope();
         if message.default_visibility != expected_visibility
             || message.definition.visibility != expected_visibility
@@ -103,6 +109,12 @@ impl EngineExternalWorkerRuntime {
     ) -> Result<WorkerCatalogChange> {
         let worker_id = message.definition.owner_worker.clone();
         let connection = self.connection_mut(&worker_id)?.clone();
+        if connection.health != WorkerHealth::Healthy {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker {worker_id} is not healthy"
+            )));
+        }
+        validate_worker_trigger(&self.host, &connection, &message.definition).await?;
         let id = message.definition.id.to_string();
         self.host
             .register_trigger(
@@ -139,6 +151,7 @@ impl EngineExternalWorkerRuntime {
                 message.worker_id
             )));
         }
+        validate_worker_stream_publish(&connection, &message)?;
         let mut context = CausalContext::new(
             ActorId::new(format!("worker:{}", message.worker_id))?,
             ActorKind::Worker,
@@ -190,4 +203,127 @@ impl EngineExternalWorkerRuntime {
             catalog_revision: result.catalog_revision.0,
         })
     }
+}
+
+async fn validate_worker_trigger(
+    host: &EngineHostHandle,
+    connection: &ExternalWorkerConnection,
+    trigger: &TriggerDefinition,
+) -> Result<()> {
+    let expected_visibility = connection.default_visibility.as_visibility_scope();
+    if trigger.visibility != expected_visibility {
+        return Err(EngineError::PolicyViolation(
+            "external worker trigger visibility must match the worker default visibility"
+                .to_owned(),
+        ));
+    }
+    if trigger.authority_grant != connection.worker_token.authority_grant_id {
+        return Err(EngineError::PolicyViolation(
+            "external worker trigger authority grant must match the scoped token".to_owned(),
+        ));
+    }
+    if !namespace_claims_value(
+        &connection.worker_token.namespace_claims,
+        trigger.id.as_str(),
+    ) {
+        return Err(EngineError::PolicyViolation(format!(
+            "external worker trigger {} must stay within scoped token namespace claims {:?}",
+            trigger.id, connection.worker_token.namespace_claims
+        )));
+    }
+    if !namespace_claims_value(
+        &connection.worker_token.namespace_claims,
+        trigger.target_function.namespace(),
+    ) {
+        return Err(EngineError::PolicyViolation(format!(
+            "external worker trigger target {} must stay within scoped token namespace claims {:?}",
+            trigger.target_function, connection.worker_token.namespace_claims
+        )));
+    }
+    let admin_actor = ActorContext::new(
+        ActorId::new("worker-runtime")?,
+        ActorKind::System,
+        AuthorityGrantId::new("worker-runtime")?,
+    );
+    let target = host
+        .inspect_function(&trigger.target_function, Some(&admin_actor))
+        .await?;
+    if target.owner_worker != connection.worker_id {
+        return Err(EngineError::PolicyViolation(format!(
+            "external worker trigger {} cannot target function {} owned by {}",
+            trigger.id, trigger.target_function, target.owner_worker
+        )));
+    }
+    Ok(())
+}
+
+fn validate_worker_stream_publish(
+    connection: &ExternalWorkerConnection,
+    message: &WorkerStreamPublish,
+) -> Result<()> {
+    let expected_visibility = connection.default_visibility.as_visibility_scope();
+    if message.visibility != expected_visibility {
+        return Err(EngineError::PolicyViolation(
+            "external worker stream visibility must match the worker default visibility".to_owned(),
+        ));
+    }
+    if !stream_topic_allowed_by_token(&connection.worker_token, &message.topic) {
+        return Err(EngineError::PolicyViolation(format!(
+            "external worker stream topic {} is not allowed by scoped token selectors {:?}",
+            message.topic, connection.worker_token.resource_selectors
+        )));
+    }
+    match connection.default_visibility {
+        WorkerVisibility::Session => {
+            let expected = connection.session_id.as_deref().ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "session-visible worker stream requires connection sessionId".to_owned(),
+                )
+            })?;
+            if message.session_id.as_deref() != Some(expected) {
+                return Err(EngineError::PolicyViolation(
+                    "external worker stream sessionId must match the scoped worker session"
+                        .to_owned(),
+                ));
+            }
+            if message.workspace_id.is_some()
+                && message.workspace_id.as_deref() != connection.workspace_id.as_deref()
+            {
+                return Err(EngineError::PolicyViolation(
+                    "external worker stream workspaceId must match the scoped worker workspace"
+                        .to_owned(),
+                ));
+            }
+        }
+        WorkerVisibility::Workspace => {
+            let expected = connection.workspace_id.as_deref().ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "workspace-visible worker stream requires connection workspaceId".to_owned(),
+                )
+            })?;
+            if message.workspace_id.as_deref() != Some(expected) {
+                return Err(EngineError::PolicyViolation(
+                    "external worker stream workspaceId must match the scoped worker workspace"
+                        .to_owned(),
+                ));
+            }
+            if message.session_id.is_some()
+                && message.session_id.as_deref() != connection.session_id.as_deref()
+            {
+                return Err(EngineError::PolicyViolation(
+                    "external worker stream sessionId must match the scoped worker session"
+                        .to_owned(),
+                ));
+            }
+        }
+        WorkerVisibility::System => {
+            if message.session_id.is_some() || message.workspace_id.is_some() {
+                return Err(EngineError::PolicyViolation(
+                    "system-visible worker streams must not claim session or workspace scope"
+                        .to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }

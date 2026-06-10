@@ -299,6 +299,105 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
 }
 
 #[test]
+fn sacb_external_worker_protocol_is_scoped_and_worker_owned() {
+    let protocol = read_repo_file("packages/agent/src/engine/runtime/worker_protocol.rs");
+    for required in [
+        "format!(\"stream:{claim}:*\")",
+        "with_session_scope",
+        "self.worker_token.session_id = Some(session_id)",
+        "with_workspace_scope",
+        "self.worker_token.workspace_id = Some(workspace_id)",
+    ] {
+        assert!(
+            protocol.contains(required),
+            "worker protocol missing scoped token text: {required}"
+        );
+    }
+
+    let validation =
+        read_repo_file("packages/agent/src/engine/runtime/external_workers/validation.rs");
+    for required in [
+        "workerToken.resourceSelectors must be scoped; wildcard selectors are not allowed",
+        "session-visible workers require workerToken.sessionId binding",
+        "namespace_claim_matches_value",
+        "stream_topic_allowed_by_token",
+        "stream_selector_matches_topic",
+    ] {
+        assert!(
+            validation.contains(required),
+            "external worker validation missing scoped-token guard text: {required}"
+        );
+    }
+    assert!(
+        !validation.contains("value.contains(claim)"),
+        "external worker namespace validation must not use substring matching"
+    );
+
+    let lifecycle =
+        read_repo_file("packages/agent/src/engine/runtime/external_workers/lifecycle.rs");
+    for required in [
+        "WorkerAuthPolicy::LoopbackBearer",
+        "WorkerKind::External",
+        "validate_worker_grant(&hello).await?",
+        "inspect_authority_grant(&token.authority_grant_id)",
+        "EngineGrantLifecycle::Active",
+        "subject_worker_id",
+        "allowed_namespaces",
+    ] {
+        assert!(
+            lifecycle.contains(required),
+            "external worker lifecycle missing grant/token guard text: {required}"
+        );
+    }
+
+    let registration =
+        read_repo_file("packages/agent/src/engine/runtime/external_workers/registration.rs");
+    for required in [
+        "validate_worker_trigger",
+        "validate_worker_stream_publish",
+        "external worker trigger authority grant must match the scoped token",
+        "cannot target function",
+        "external worker stream visibility must match the worker default visibility",
+        "external worker stream sessionId must match the scoped worker session",
+        "stream_topic_allowed_by_token(&connection.worker_token, &message.topic)",
+    ] {
+        assert!(
+            registration.contains(required),
+            "external worker registration missing ownership guard text: {required}"
+        );
+    }
+
+    let transport = read_repo_file("packages/agent/src/transport/runtime/external_workers.rs");
+    for required in [
+        "pending: Arc<Mutex<std::collections::HashMap<String, oneshot::Sender<WorkerInvocationResult>>>>",
+        "pending.lock().await.remove(result.invocation_id.as_str())",
+        "fail_pending_invocations(&pending, \"external worker websocket disconnected\").await",
+        "\"WORKER_DISCONNECTED\"",
+        "WORKER_OUTBOUND_BACKPRESSURE_TIMEOUT",
+    ] {
+        assert!(
+            transport.contains(required),
+            "external worker transport missing result ownership text: {required}"
+        );
+    }
+
+    let tests = read_repo_file("packages/agent/src/engine/tests/runtime/external_worker.rs");
+    for required in [
+        "local_external_worker_hello_requires_session_scoped_token_binding",
+        "local_external_worker_hello_rejects_wildcard_resource_selectors",
+        "local_external_worker_rejects_namespace_substring_claim_escape",
+        "local_external_worker_rejects_trigger_target_owned_by_another_worker",
+        "local_external_worker_rejects_stream_publish_outside_scoped_session",
+        "local_external_worker_rejects_stream_publish_outside_token_selectors",
+    ] {
+        assert!(
+            tests.contains(required),
+            "external worker tests missing SACB-7 regression: {required}"
+        );
+    }
+}
+
+#[test]
 fn sacb_internal_invoke_scope_is_trusted_runtime_only() {
     let policy = read_repo_file("packages/agent/src/engine/kernel/policy.rs");
     for required in [

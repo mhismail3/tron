@@ -4,7 +4,7 @@ Created: 2026-06-10
 
 Initial score: **0/100**
 
-Current score: **73/100**
+Current score: **81/100**
 
 Status: **active**
 
@@ -59,7 +59,7 @@ file roots, worker identity, or credential custody.
 | SACB-4 | Authority grant model: derivation, file roots, network policy, budgets, bootstrap grants | 12 | passed_after_fix | engine/authority | Added shared canonical grant file-root helpers, changed child grant derivation from raw string-prefix checks to canonical path containment with unresolved suffix normalization, added prefix-sibling and parent-component escape regression tests, proved network policy and budget narrowing through existing derivation cases, and added explicit bootstrap root-grant proof plus static guards for wildcard bootstrap provenance. Updated ownership/cleanup/modularity/SOL/SACB inventories for the new helper. | Closed. | SACB-4 authority grant boundary checkpoint |
 | SACB-5 | Catalog visibility and direct invocation boundaries, including `engine::invoke` delegation | 10 | passed_after_fix | engine/catalog/invocation | Tightened `engine.internal.invoke` so raw scope strings unlock internal visibility only for trusted runtime actor kinds, made hidden agent prompt/apply delegation reset to an engine-owned system causal context, added public `engine::invoke` regressions for internal/admin/worker-only targets and raw internal-scope denial, and added transport/static guards proving public `/engine` never mints the internal scope. | Closed. | SACB-5 catalog visibility/direct invocation checkpoint |
 | SACB-6 | `capability::execute` least privilege for file/process/state/trace/log/replay operations | 12 | passed_after_fix | domains/capability | Agent-launched primitive calls derive a per-call child grant from `agent-capability-runtime` with the exact target function, canonical working-directory file root, no namespace authority, state read/write support, and `networkPolicy: none`; the execute worker rejects bootstrap grants and non-agent/non-system callers, resolves file roots from trusted runtime metadata only, denies system state scope, requires current-session context for trace/log/replay reads, and runs `process_run` only under a grant inspected as `networkPolicy none` with a fail-closed network-denial sandbox. | Closed. | SACB-6 capability execute least-privilege checkpoint |
-| SACB-7 | External worker protocol isolation: scoped token, namespace, trigger, stream, result ownership | 8 | pending | engine/runtime/transport | Not started in this checkpoint. | Open: worker token, namespace, trigger, stream, and result ownership proof. | pending |
+| SACB-7 | External worker protocol isolation: scoped token, namespace, trigger, stream, result ownership | 8 | passed_after_fix | engine/runtime/transport | External worker hellos now require loopback bearer auth, `WorkerKind::External`, active grant/revision validation, matching grant subjects, session/workspace token bindings for visible workers, non-wildcard stream selectors, and strict namespace segment matching instead of substring matching. Function metadata, trigger ids/targets, trigger authority grants, stream visibility, stream session/workspace scope, and stream topics are all checked against the accepted connection and token. Socket invocation results remain owned by the per-connection pending map and disconnect/backpressure paths fail pending calls with worker transport failures. | Closed. | SACB-7 external worker protocol isolation checkpoint |
 | SACB-8 | Secrets, token storage, redaction, auth.json permissions, provider credential custody | 7 | pending | auth/iOS/Mac diagnostics | Not started in this checkpoint. | Open: redaction, auth.json mode, provider custody proof. | pending |
 | SACB-9 | iOS/Mac pairing lifecycle: Keychain, QR/deep-link parsing, forget/re-pair/unauthorized flow | 7 | pending | iOS/Mac pairing | Not started in this checkpoint. | Open: pairing lifecycle and unauthorized flow proof. | pending |
 | SACB-10 | Final closeout, static gates, full verification, clean status | 5 | pending | static gates/verification | Not started in this checkpoint. | Open: final full verification and no stale open-loop wording. | pending |
@@ -87,6 +87,11 @@ Total weight: **100**
   trusted runtime metadata, denying system-scoped state, requiring current
   session context for trace/log/replay reads, and fail-closing `process_run`
   unless its inspected grant has `networkPolicy none`.
+- SACB-7 closed external-worker isolation gaps by requiring accepted worker
+  tokens to bind visible workers to session/workspace scope, validating active
+  grant revision and subject bindings, replacing substring namespace matching
+  with segment/prefix matching, and denying trigger/stream registrations that
+  target another worker or publish outside the scoped token selectors.
 
 ## Static Gates
 
@@ -109,6 +114,9 @@ now, and will own row-specific guards as later rows close:
 - `capability::execute` static guards require per-call grant derivation,
   trusted working-directory metadata, bootstrap-grant rejection, process
   network denial, and state/trace/log/replay scope checks.
+- External-worker static guards require active scoped-token grant checks,
+  strict namespace matching, trigger target ownership, scoped stream publishing,
+  and per-socket pending result ownership.
 - Final closeout rejects stale active/open-loop wording once the scorecard is
   complete.
 

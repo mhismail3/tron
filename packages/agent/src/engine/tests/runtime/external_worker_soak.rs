@@ -40,8 +40,7 @@ async fn external_worker_soak_registers_invokes_disconnects_and_reopens() {
             grant("external-grant"),
         )
         .with_namespace_claim(&namespace);
-        let mut hello = WorkerHello::loopback(worker);
-        hello.session_id = Some(session_id.clone());
+        let hello = WorkerHello::loopback(worker).with_session_scope(session_id.clone());
         runtime.hello(hello).await.unwrap();
         runtime
             .attach_invoker(worker_id.clone(), Arc::new(ExternalWorkerSoakInvoker))

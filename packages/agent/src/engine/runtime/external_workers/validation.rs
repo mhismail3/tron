@@ -38,11 +38,46 @@ pub(super) fn validate_worker_token(hello: &WorkerHello) -> Result<()> {
             "workerToken.resourceSelectors must not be empty".to_owned(),
         ));
     }
+    if token
+        .resource_selectors
+        .iter()
+        .any(|selector| selector.trim() == "*")
+    {
+        return Err(EngineError::PolicyViolation(
+            "workerToken.resourceSelectors must be scoped; wildcard selectors are not allowed"
+                .to_owned(),
+        ));
+    }
     if visibility_rank(&hello.default_visibility) > visibility_rank(&token.visibility_ceiling) {
         return Err(EngineError::PolicyViolation(format!(
             "worker visibility {:?} exceeds token visibility ceiling {:?}",
             hello.default_visibility, token.visibility_ceiling
         )));
+    }
+    match hello.default_visibility {
+        WorkerVisibility::Session => {
+            let session_id = hello.session_id.as_deref().ok_or_else(|| {
+                EngineError::PolicyViolation("session-visible workers require sessionId".to_owned())
+            })?;
+            if token.session_id.as_deref() != Some(session_id) {
+                return Err(EngineError::PolicyViolation(
+                    "session-visible workers require workerToken.sessionId binding".to_owned(),
+                ));
+            }
+        }
+        WorkerVisibility::Workspace => {
+            let workspace_id = hello.workspace_id.as_deref().ok_or_else(|| {
+                EngineError::PolicyViolation(
+                    "workspace-visible workers require workspaceId".to_owned(),
+                )
+            })?;
+            if token.workspace_id.as_deref() != Some(workspace_id) {
+                return Err(EngineError::PolicyViolation(
+                    "workspace-visible workers require workerToken.workspaceId binding".to_owned(),
+                ));
+            }
+        }
+        WorkerVisibility::System => {}
     }
     if let Some(expected) = token.session_id.as_deref()
         && hello.session_id.as_deref() != Some(expected)
@@ -139,14 +174,9 @@ pub(super) fn validate_external_capability_metadata(
         .split_once("::")
         .map(|(namespace, _)| namespace)
         .unwrap_or(contract_id);
-    let claims_match = |value: &str| {
-        namespace_claims.iter().any(|claim| {
-            value == claim || value.starts_with(&format!("{claim}::")) || value.contains(claim)
-        })
-    };
-    if !claims_match(definition.id.namespace())
-        || !claims_match(contract_namespace)
-        || !claims_match(implementation_id)
+    if !namespace_claims_value(namespace_claims, definition.id.namespace())
+        || !namespace_claims_value(namespace_claims, contract_namespace)
+        || !namespace_claims_value(namespace_claims, implementation_id)
     {
         return Err(EngineError::PolicyViolation(format!(
             "external visible function {} metadata must stay within namespace claims {:?}",
@@ -202,10 +232,46 @@ fn external_health_state(
     }
 }
 
+pub(super) fn namespace_claims_value(claims: &[String], value: &str) -> bool {
+    claims
+        .iter()
+        .any(|claim| namespace_claim_matches_value(claim, value))
+}
+
+pub(super) fn stream_topic_allowed_by_token(token: &ScopedWorkerToken, topic: &str) -> bool {
+    token
+        .resource_selectors
+        .iter()
+        .any(|selector| stream_selector_matches_topic(selector, topic))
+}
+
 fn token_claims_namespace(claims: &[String], value: &str) -> bool {
-    claims.iter().any(|claim| {
-        value == claim || value.starts_with(&format!("{claim}::")) || value.contains(claim)
-    })
+    namespace_claims_value(claims, value)
+}
+
+fn namespace_claim_matches_value(claim: &str, value: &str) -> bool {
+    let claim = claim.trim();
+    let value = value.trim();
+    if claim.is_empty() || value.is_empty() {
+        return false;
+    }
+    value == claim
+        || value.starts_with(&format!("{claim}::"))
+        || value.starts_with(&format!("{claim}."))
+        || value.starts_with(&format!("{claim}/"))
+        || value
+            .split(|ch| matches!(ch, ':' | '.' | '/' | '#'))
+            .any(|segment| segment == claim)
+}
+
+fn stream_selector_matches_topic(selector: &str, topic: &str) -> bool {
+    let Some(selector) = selector.trim().strip_prefix("stream:") else {
+        return false;
+    };
+    if let Some(prefix) = selector.strip_suffix(":*") {
+        return namespace_claim_matches_value(prefix, topic);
+    }
+    selector == topic
 }
 
 fn visibility_rank(visibility: &WorkerVisibility) -> u8 {

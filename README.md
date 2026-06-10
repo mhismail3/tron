@@ -659,17 +659,28 @@ versioned hello with `WorkerIdentity`, auth policy, registration mode, visibilit
 scope, heartbeat interval, and supported capability labels; then it registers
 canonical function and trigger definitions with the same schema, authority,
 effect/risk, idempotency, lease, compensation, visibility, and provenance
-metadata as in-process domain workers. Volatile worker entries are
-removed on disconnect or missed heartbeat. Durable local worker entries stay in
-the catalog but are marked unhealthy when the worker disconnects, so invocation
-fails closed until the worker reconnects and re-registers. On SQLite-backed
-server restart, durable external worker/function definitions hydrate as
-stopped/unhealthy with no handler, so an unclean socket loss cannot become an
-optimistic callable function. Workers publish events by asking the engine to
-invoke `stream::publish`; there is no direct socket event bypass. Worker
+metadata as in-process domain workers. The hello must be loopback bearer
+authenticated, register `WorkerKind::External`, bind session/workspace-visible
+workers through the scoped token, and reference an active grant at the token
+revision. Namespace checks use exact segment/prefix matching, not substring
+matching. Triggers must use the worker token grant and target functions owned by
+the same accepted worker. Workers publish events by asking the engine to invoke
+`stream::publish`; stream visibility, topic selectors, and session/workspace
+scope are checked against the accepted token and connection. There is no direct
+socket event bypass.
+
+Volatile worker entries are removed on disconnect or missed heartbeat. Durable
+local worker entries stay in the catalog but are marked unhealthy when the
+worker disconnects, so invocation fails closed until the worker reconnects and
+re-registers. On SQLite-backed server restart, durable external worker/function
+definitions hydrate as stopped/unhealthy with no handler, so an unclean socket
+loss cannot become an optimistic callable function. Worker
 connect/register/disconnect/heartbeat-timeout events are stored on
 `worker.lifecycle` through the stream primitive and are visible through retained
-ledger/log records while PET-10 finishes primitive substrate cleanup.
+ledger/log records while PET-10 finishes primitive substrate cleanup. Invocation
+results are owned by the socket connection's pending invocation map; disconnects
+and outbound backpressure drain or fail pending calls as worker transport
+failures.
 
 Agents do not receive a server-authored helper-launch loop. The retained
 `/engine/workers` protocol is host infrastructure for already-running external

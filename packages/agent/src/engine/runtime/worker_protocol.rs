@@ -7,7 +7,9 @@
 //! Visible external/session workers also present a scoped worker token in
 //! `hello`; the token is the protocol-level plugin lifecycle boundary for
 //! namespace claims, grant identity, resource selectors, visibility, trust,
-//! scope binding, and signature state.
+//! scope binding, and signature state. Session/workspace-visible workers must
+//! bind that scope in the token, and stream resource selectors are namespace
+//! scoped (`stream:<claim>:*`) rather than wildcarded.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -177,13 +179,17 @@ impl ScopedWorkerToken {
         } else {
             worker.namespace_claims.clone()
         };
+        let resource_selectors = namespace_claims
+            .iter()
+            .map(|claim| format!("stream:{claim}:*"))
+            .collect();
         Self {
             plugin_id: format!("session_generated.{}", worker.id.as_str()),
             namespace_claims,
             authority_grant_id: worker.authority_grant.clone(),
             authority_grant_revision: 1,
             authority_grant_hash: "loopback-bootstrap".to_owned(),
-            resource_selectors: vec!["*".to_owned()],
+            resource_selectors,
             visibility_ceiling: WorkerVisibility::Session,
             trust_tier: "session_generated".to_owned(),
             session_id: None,
@@ -301,6 +307,24 @@ impl WorkerHello {
             supported_capabilities: Vec::new(),
             worker_token,
         }
+    }
+
+    /// Bind a loopback worker hello and its scoped token to one session.
+    #[must_use]
+    pub fn with_session_scope(mut self, session_id: impl Into<String>) -> Self {
+        let session_id = session_id.into();
+        self.session_id = Some(session_id.clone());
+        self.worker_token.session_id = Some(session_id);
+        self
+    }
+
+    /// Bind a loopback worker hello and its scoped token to one workspace.
+    #[must_use]
+    pub fn with_workspace_scope(mut self, workspace_id: impl Into<String>) -> Self {
+        let workspace_id = workspace_id.into();
+        self.workspace_id = Some(workspace_id.clone());
+        self.worker_token.workspace_id = Some(workspace_id);
+        self
     }
 }
 

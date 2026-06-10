@@ -9,8 +9,9 @@ fn external_worker_protocol_roundtrips_local_session_default_messages() {
         grant("external-grant"),
     )
     .with_namespace_claim("local");
-    let hello =
-        super::WorkerProtocolMessage::Hello(Box::new(super::WorkerHello::loopback(worker.clone())));
+    let hello = super::WorkerProtocolMessage::Hello(Box::new(
+        super::WorkerHello::loopback(worker.clone()).with_session_scope("session-a"),
+    ));
     let function = FunctionDefinition::new(
         fid("local::echo"),
         wid("local-worker"),

@@ -23,6 +23,9 @@
 //! ## Invariants
 //!
 //! - External workers are loopback/local and scoped by accepted worker tokens.
+//! - Visible external workers must bind session/workspace scope in the scoped
+//!   token, present an active grant at the token revision, and keep namespace,
+//!   trigger, stream, and result ownership inside the accepted connection.
 //! - Disconnected durable workers remain catalog truth but fail closed as
 //!   unhealthy until reconnect.
 //! - Trigger cascades carry explicit depth/path budgets.
