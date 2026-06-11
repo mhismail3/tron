@@ -145,6 +145,17 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   trigger test now performs direct catalog promotion only inside setup under a
   local host lock, and the SAASTC static gate rejects reintroducing the host
   shortcut.
+- Tightened and source-proved the primitive surface. Source inspection retained
+  `primitives/mod.rs` as the internal primitive module root, `runtime.rs` as
+  the host-dispatched catalog/worker/UI/storage adapter, `stores.rs` as the
+  engine-owned backend bundle with built-in resource type installation,
+  `workers.rs` as the namespace/function registration assembly, and
+  `worker_activation_governance.rs` as the reviewed capability-definition
+  decision/evidence/candidate gate. The only source change narrows activation
+  governance so system-scoped decision/evidence/candidate resources require an
+  admin-like actor, matching the earlier promotion-governance fix. The focused
+  worker activation regression creates system-scoped governance refs and proves
+  an ordinary agent with `worker.activate` cannot issue the session activation.
 
 ## Phase 2 Focused Commands
 
@@ -178,6 +189,11 @@ cargo test --manifest-path packages/agent/Cargo.toml capability::contract --lib 
 cargo test --manifest-path packages/agent/Cargo.toml capability::operations --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml openai::message_converter --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_activation --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_activation_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
+git diff --check
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 ```
 

@@ -256,6 +256,26 @@ async fn worker_activation_rejects_invalid_governance_chain_inputs() {
         Some(EngineError::PolicyViolation(message)) if message.contains("must be verified")
     ));
 
+    let mut system_scoped = WorkerActivationGovernanceConfig::session(
+        "system-scope",
+        "activated_invalid::system_scope",
+    );
+    system_scoped.resource_scope = Some(VisibilityScope::System);
+    let system_scoped = create_worker_activation_governance(&handle, system_scoped).await;
+    let system_scoped_result = handle
+        .invoke(host_invocation(
+            "worker::issue_activation",
+            worker_activation_issue_payload(&system_scoped, "saawa-system-governance"),
+            mutating_causal("saawa-system-governance").with_scope("worker.activate"),
+        ))
+        .await;
+    assert!(matches!(
+        system_scoped_result.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("not visible")
+                || message.contains("scope is incompatible with activation target")
+    ));
+
     let mut non_final =
         WorkerActivationGovernanceConfig::session("non-final", "activated_invalid::non_final");
     non_final.decision_lifecycle = "draft".to_owned();

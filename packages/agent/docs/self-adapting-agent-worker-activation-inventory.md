@@ -11,7 +11,8 @@ Machine-readable inventory:
 - `activation_contract`: primitive contract, request/response schema, authority,
   visibility, idempotency, and admin-only activation surface.
 - `governance_chain`: decision/evidence/candidate validation that mirrors SAPG
-  promotion governance semantics for activation.
+  promotion governance semantics for activation, including admin-only use of
+  system-scoped governance refs.
 - `resource_contract`: built-in `worker_activation` kind, lifecycle states,
   payload schema, redacted token storage, and resource namespace claims.
 - `grant_token`: scoped grant derivation and `ScopedWorkerToken` activation

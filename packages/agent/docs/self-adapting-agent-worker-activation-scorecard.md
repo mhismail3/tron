@@ -22,7 +22,7 @@ Tracked test path:
 | SAAWA-0 | Harness and Baseline | 6 | passed_after_fix | Started from SAPG closeout commit `4b530e014`, added SAAWA scorecard/evidence/inventory artifacts, README links, and local/GitHub CI wiring. |
 | SAAWA-1 | Activation Source Inventory | 7 | passed_after_fix | Inventory covers worker primitive contracts, activation implementation, SAPG-derived governance checks, resource definitions, scoped tokens, grant derivation, external-worker runtime, lifecycle streams, transport boundaries, and static gates. |
 | SAAWA-2 | Activation Resource Contract | 10 | passed_after_fix | Added built-in `worker_activation` resource kind with issued/connected/registered/disconnected/expired/revoked/failed/archived lifecycle states, strict refs, scope fields, expected function contract, loopback/volatile policy, and redacted token fingerprint storage. |
-| SAAWA-3 | Governance Chain Validation | 13 | passed_after_fix | Activation requires a reviewed `capability_definition`, final accepted decision, accepted verified evidence, matching function/visibility/scope, and linked decision/evidence/candidate chain before issuing material. |
+| SAAWA-3 | Governance Chain Validation | 13 | passed_after_fix | Activation requires a reviewed `capability_definition`, final accepted decision, accepted verified evidence, matching function/visibility/scope, admin authority for system-scoped governance refs, and linked decision/evidence/candidate chain before issuing material. |
 | SAAWA-4 | Scoped Grant and Token Issuance | 13 | passed_after_fix | Derived grants are children of `worker-runtime`, bound to `worker:<workerId>` and subject worker, non-delegating, loopback-only, expiring within 24h, non-wildcard for worker selectors, and limited to the target function plus `stream::publish`. |
 | SAAWA-5 | Worker Hello and Registration Binding | 12 | passed_after_fix | `ScopedWorkerToken` carries activation metadata; runtime validates token fingerprint, governance fingerprint, grant hash/lifecycle/expiry, activation resource status, volatile mode, exact namespace/scope, expected function contract, metadata, and one-function limit. |
 | SAAWA-6 | Lifecycle and Revocation Audit | 10 | passed_after_fix | Activation resources move through connected, registered, disconnected, expired, and revoked states alongside existing `worker.lifecycle` events; revoked/expired grants fail closed before registration. |
@@ -50,3 +50,10 @@ optional shorter expiry. The response contains the activation resource id,
 worker id, expiry, worker hello template, scoped worker token, and expected
 function definition. Durable state stores only redacted token fingerprint and
 governance references.
+
+## Successor Cleanup Note
+
+SAASTC tightened activation governance after closeout: system-scoped
+decision/evidence/candidate resources now require an admin-like actor before
+`worker::issue_activation` can use them. This preserves the SAAWA contract while
+matching the later promotion-governance authority boundary.

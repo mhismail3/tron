@@ -377,6 +377,7 @@ fn saawa_activation_contract_resource_and_governance_are_strict() {
         "ensure_evidence_verified",
         "ensure_activation_chain",
         "ensure_resource_scope_compatible",
+        "EngineResourceScope::System => actor.actor_kind.is_admin_like()",
         "expected_function.visibility != request.target_visibility",
         "governance_fingerprint",
     ] {

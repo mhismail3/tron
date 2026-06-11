@@ -678,6 +678,140 @@ fn saastc_invocation_host_keeps_single_governed_promotion_path() {
 }
 
 #[test]
+fn saastc_primitive_surface_keeps_internal_source_proven_contracts() {
+    let primitives = read_repo_file("packages/agent/src/engine/primitives/mod.rs");
+    let runtime = read_repo_file("packages/agent/src/engine/primitives/runtime.rs");
+    let stores = read_repo_file("packages/agent/src/engine/primitives/stores.rs");
+    let activation_governance =
+        read_repo_file("packages/agent/src/engine/primitives/worker_activation_governance.rs");
+    let workers = read_repo_file("packages/agent/src/engine/primitives/workers.rs");
+    let activation_fixture =
+        read_repo_file("packages/agent/src/engine/tests/fixtures/worker_activation.rs");
+    let activation_tests =
+        read_repo_file("packages/agent/src/engine/tests/invocation/worker_activation.rs");
+
+    for required in [
+        "pub(in crate::engine) mod runtime;",
+        "mod stores;",
+        "mod worker_activation_governance;",
+        "pub(in crate::engine) use stores::{",
+        "pub(in crate::engine) use workers::{primitive_function_definitions, primitive_workers};",
+        "worker::issue_activation",
+        "`storage::*` is the",
+    ] {
+        assert!(
+            primitives.contains(required),
+            "primitive module root missing retained internal contract marker {required}"
+        );
+    }
+
+    for required in [
+        "pub(in crate::engine) trait PrimitiveRuntimeHost",
+        "fn discover_functions(",
+        "fn inspect_resource(",
+        "fn derive_authority_grant(",
+        "fn store_worker_activation_bundle(",
+        "match invocation.function_id.as_str()",
+        "worker::ISSUE_ACTIVATION_FUNCTION => worker_issue_activation(host, invocation)",
+        "storage::RETENTION_RUN_FUNCTION => storage_retention_run(host, invocation)",
+    ] {
+        assert!(
+            runtime.contains(required),
+            "primitive runtime missing retained dispatch/store boundary {required}"
+        );
+    }
+    for forbidden in [
+        "tokio::spawn",
+        "launchd",
+        "SMAppService",
+        "tron deploy",
+        "providerMetadata",
+        "postReadyPayload",
+        "retryLoop",
+        "restartLoop",
+    ] {
+        assert!(
+            !runtime.contains(forbidden),
+            "primitive runtime must not expose autonomous/provider/deploy surface {forbidden}"
+        );
+    }
+
+    for required in [
+        "pub(in crate::engine) enum ResourceStoreBackend",
+        "fn register_type(",
+        "fn create(",
+        "fn update(",
+        "fn link(",
+        "fn inspect(",
+        "fn list_page(",
+        "builtin_resource_type_definitions()",
+        "WorkerActivationBundleVault::new()",
+        "WorkerProcessSupervisorRegistry::production()",
+        "OnceLock<Weak<AsyncMutex<EngineHost>>>",
+    ] {
+        assert!(
+            stores.contains(required),
+            "primitive stores missing retained backend/host marker {required}"
+        );
+    }
+
+    for required in [
+        "candidate.resource.kind != \"capability_definition\"",
+        "candidate.resource.lifecycle != \"reviewed\"",
+        "ensure_candidate_scope_matches_request",
+        "ensure_decision_approves_activation",
+        "ensure_evidence_verified",
+        "ensure_activation_chain",
+        "EngineResourceScope::System => actor.actor_kind.is_admin_like()",
+        "governance_fingerprint",
+    ] {
+        assert!(
+            activation_governance.contains(required),
+            "worker activation governance missing retained primitive guard {required}"
+        );
+    }
+
+    for required in [
+        ".with_namespace_claim(\"worker_activation\")",
+        ".with_namespace_claim(\"worker_launch_plan\")",
+        ".with_namespace_claim(\"worker_autostart_plan\")",
+        ".with_namespace_claim(\"worker_trigger_launch_attempt\")",
+        ".with_namespace_claim(\"worker_schedule_plan\")",
+        ".with_namespace_claim(\"worker_schedule_tick\")",
+        ".with_namespace_claim(\"worker_schedule_scan_state\")",
+        ".with_namespace_claim(\"worker_process\")",
+        "registrations.extend(worker::registrations(stores)?);",
+        "registrations.extend(storage::registrations()?);",
+    ] {
+        assert!(
+            workers.contains(required),
+            "primitive worker assembly missing retained namespace/registration {required}"
+        );
+    }
+
+    for required in [
+        "pub resource_scope: Option<VisibilityScope>",
+        "unwrap_or(&config.target_visibility)",
+        "\"scope\": resource_scope.as_str()",
+    ] {
+        assert!(
+            activation_fixture.contains(required),
+            "worker activation fixture missing scoped governance regression support {required}"
+        );
+    }
+    for required in [
+        "system_scoped.resource_scope = Some(VisibilityScope::System)",
+        "mutating_causal(\"saawa-system-governance\").with_scope(\"worker.activate\")",
+        "scope is incompatible with activation target",
+    ] {
+        assert!(
+            activation_tests.contains(required),
+            "worker activation tests missing system-governance authority regression {required}"
+        );
+    }
+}
+
+#[test]
 fn saastc_resource_substrate_keeps_only_retained_safe_resource_contracts() {
     let sqlite_store =
         read_repo_file("packages/agent/src/engine/durability/resources/store/mod.rs");

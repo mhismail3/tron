@@ -15,6 +15,7 @@ pub(in crate::engine::tests) struct WorkerActivationGovernanceConfig {
     pub evidence_lifecycle: String,
     pub evidence_verified: bool,
     pub link_chain: bool,
+    pub resource_scope: Option<VisibilityScope>,
 }
 
 impl WorkerActivationGovernanceConfig {
@@ -33,6 +34,7 @@ impl WorkerActivationGovernanceConfig {
             evidence_lifecycle: "accepted".to_owned(),
             evidence_verified: true,
             link_chain: true,
+            resource_scope: None,
         }
     }
 
@@ -246,17 +248,21 @@ async fn create_worker_activation_resource(
     config: &WorkerActivationGovernanceConfig,
     suffix: &str,
 ) {
+    let resource_scope = config
+        .resource_scope
+        .as_ref()
+        .unwrap_or(&config.target_visibility);
     let mut request = json!({
         "resourceId": resource_id,
         "kind": kind,
-        "scope": config.target_visibility.as_str(),
+        "scope": resource_scope.as_str(),
         "lifecycle": lifecycle,
         "payload": payload
     });
-    if config.target_visibility == VisibilityScope::Session {
+    if *resource_scope == VisibilityScope::Session {
         request["sessionId"] = json!("session-a");
     }
-    if config.target_visibility == VisibilityScope::Workspace {
+    if *resource_scope == VisibilityScope::Workspace {
         request["workspaceId"] = json!(config.workspace_id.as_deref().unwrap_or("workspace-a"));
     }
     let key = format!("saawa-{}-{suffix}", config.suffix);

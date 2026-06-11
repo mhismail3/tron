@@ -137,3 +137,11 @@ harness and full initial diff inventory.
   candidate chains before catalog visibility mutation. The one runtime test
   that needed a promoted target performs direct catalog setup under its local
   test host lock instead of preserving a runtime host API.
+- Tightened and source-proved the primitive surface. The retained primitive
+  contract is internal module wiring, host-dispatched catalog/worker/UI/storage
+  dispatch, resource/state/queue/stream/grant/lease/compensation store adapters,
+  built-in resource type installation, and worker activation governance. Worker
+  activation now matches promotion governance by requiring admin-like actors for
+  system-scoped decision/evidence/candidate resources, so an ordinary agent with
+  `worker.activate` cannot borrow parent system governance refs to issue a
+  session activation.
