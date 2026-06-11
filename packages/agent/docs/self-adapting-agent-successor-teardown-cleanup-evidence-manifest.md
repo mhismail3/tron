@@ -109,6 +109,19 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   resources, activation/launch function ids, schedule autostart, deploy,
   launchd/SMAppService, post-ready replay, and repo-skill surfaces in the
   retained transport files.
+- Simplified and source-proved the durability resource substrate. Source search
+  showed `list_types` had no callers in source, tests, README, or docs, so the
+  in-memory and SQLite resource stores no longer expose that unused type-catalog
+  listing API. Retained access remains `register_type`, create, update, link,
+  inspect, list, and list_page through `ResourceStoreBackend`, while built-in
+  resource types are loaded once from `builtin_resource_type_definitions`.
+  Static SAASTC evidence now checks agent memory/rule schemas require
+  provenance and evidence refs, worker activation/process/launch/schedule
+  schemas are closed where they carry successor state, worker activation stores
+  fingerprints and redacted token storage rather than scoped worker tokens,
+  schedule scan state is bounded, resource validation runs schema validation
+  before persistence, CAS/version/pagination types remain present, and resource
+  store tests retain payload validation plus memory/SQLite pagination parity.
 
 ## Phase 2 Focused Commands
 
@@ -131,6 +144,8 @@ cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_schedule_capacity_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml engine::transport --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml transport::engine --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml resource --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability::resource_contracts --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 ```

@@ -113,3 +113,12 @@ harness and full initial diff inventory.
   activation, schedule, provider, deploy, launchd, retry, or repo-skill public
   surface. This moves the transport-boundary rows out of `simplify` but leaves
   SAASTC rows pending until all successor clusters are audited.
+- Simplified and source-proved the durability resource substrate. Removed the
+  unused in-memory and SQLite `list_types` API, leaving registered resource
+  type access owned by `builtin_resource_type_definitions` and the
+  `PrimitiveStores` resource backend create/update/link/inspect/list/list_page
+  contract. Retained definitions cover agent records, worker activation,
+  worker process, trigger launch attempts, schedule records, schema payload
+  validation, CAS/version state, deterministic pagination, and memory/SQLite
+  parity tests without adding a public type-catalog or secret-bearing store
+  API.
