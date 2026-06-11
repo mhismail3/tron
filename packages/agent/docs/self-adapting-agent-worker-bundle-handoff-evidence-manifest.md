@@ -57,3 +57,7 @@ Notes:
 
 - `worker_bundle_handoff` is a required lib-test filter and currently matches no lib tests; the dedicated integration invariant target carries the SAAWBH static gates.
 - The broad Rust commands still emit pre-existing dead-code warnings in provider and durability modules; no new failure was introduced.
+- SAAWTL reuses SAAWBH custody for trigger-created launch. The trigger bridge
+  issues a fresh activation, leaves the live bundle in the in-memory vault, and
+  launches only through `stdin_activation_bundle_v1`; attempt audit records keep
+  ids, fingerprints, statuses, and redacted errors only.

@@ -2,9 +2,10 @@
 //!
 //! This runtime owns the local process-supervision boundary only. It does not
 //! create schedules, provider-visible tools, public `/engine` launch methods, or
-//! restart loops. A launched process remains non-routable until the existing
-//! external-worker runtime accepts its SAAWA hello and exact function
-//! registration.
+//! restart loops. Trigger-created launch is a thin internal bridge over reviewed
+//! autostart plans, fresh activation issue, and the same stdin launch path. A
+//! launched process remains non-routable until the existing external-worker
+//! runtime accepts its SAAWA hello and exact function registration.
 
 use std::path::PathBuf;
 use std::time::Duration as StdDuration;
@@ -26,6 +27,7 @@ use crate::engine::runtime::worker_protocol::WorkerRegistrationMode;
 mod contracts;
 mod process_resource;
 mod supervisor;
+mod trigger_launch;
 
 use contracts::{
     ActivationResource, LaunchActivationRequest, LaunchPlan, StopProcessRequest,
@@ -54,6 +56,15 @@ pub const WORKER_LAUNCH_PLAN_SCHEMA_ID: &str = "tron.resource.worker_launch_plan
 pub const WORKER_PROCESS_KIND: &str = "worker_process";
 /// Schema id for process lifecycle audit.
 pub const WORKER_PROCESS_SCHEMA_ID: &str = "tron.resource.worker_process.v1";
+/// Built-in resource kind for trigger-created worker launch attempts.
+pub const WORKER_TRIGGER_LAUNCH_ATTEMPT_KIND: &str = "worker_trigger_launch_attempt";
+/// Schema id for trigger-created worker launch attempts.
+pub const WORKER_TRIGGER_LAUNCH_ATTEMPT_SCHEMA_ID: &str =
+    "tron.resource.worker_trigger_launch_attempt.v1";
+/// Built-in resource kind for reviewed trigger autostart plans.
+pub const WORKER_AUTOSTART_PLAN_KIND: &str = "worker_autostart_plan";
+/// Schema id for reviewed trigger autostart plans.
+pub const WORKER_AUTOSTART_PLAN_SCHEMA_ID: &str = "tron.resource.worker_autostart_plan.v1";
 
 const WORKER_ACTIVATION_KIND: &str = "worker_activation";
 const PREISSUED_BUNDLE_DELIVERY_MODE: &str = "preissued_bundle";

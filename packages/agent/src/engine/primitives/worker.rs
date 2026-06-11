@@ -24,6 +24,7 @@ pub(crate) const DISCONNECT_FUNCTION: &str = "worker::disconnect";
 pub(crate) const HEALTH_FUNCTION: &str = "worker::health";
 pub(crate) const ISSUE_ACTIVATION_FUNCTION: &str = "worker::issue_activation";
 pub(crate) const LAUNCH_ACTIVATION_FUNCTION: &str = "worker::launch_activation";
+pub(crate) const LAUNCH_FROM_TRIGGER_FUNCTION: &str = "worker::launch_from_trigger";
 pub(crate) const STOP_PROCESS_FUNCTION: &str = "worker::stop_process";
 
 pub(super) fn registrations(
@@ -107,6 +108,49 @@ pub(super) fn registrations(
         }
     }));
     launch_activation.visibility = VisibilityScope::Admin;
+
+    let mut launch_from_trigger = primitive_function(
+        LAUNCH_FROM_TRIGGER_FUNCTION,
+        WORKER_WORKER_ID,
+        "launch a reviewed local worker process from trusted trigger causal context",
+        EffectClass::IdempotentWrite,
+        "worker.launch",
+    )
+    .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+    .with_required_authority(AuthorityRequirement {
+        scopes: vec!["worker.activate".to_owned(), "worker.launch".to_owned()],
+    })
+    .with_risk(RiskLevel::High)
+    .with_compensation(primitive_compensation(
+        CompensationKind::ManualOnly,
+        "trigger launch issues a fresh activation and consumes it through the reviewed stdin launch path; duplicate trigger delivery replays the recorded attempt by idempotency key",
+    ))
+    .with_request_schema(launch_from_trigger_schema())
+    .with_response_schema(json!({
+        "type": "object",
+        "required": [
+            "triggerLaunchAttemptResourceId",
+            "triggerId",
+            "autostartPlanResourceId",
+            "activationResourceId",
+            "workerProcessResourceId",
+            "status",
+            "processState"
+        ],
+        "additionalProperties": true,
+        "properties": {
+            "triggerLaunchAttemptResourceId": {"type": "string"},
+            "triggerId": {"type": "string"},
+            "autostartPlanResourceId": {"type": "string"},
+            "activationResourceId": {"type": ["string", "null"]},
+            "workerProcessResourceId": {"type": ["string", "null"]},
+            "status": {"type": "string"},
+            "processState": {"type": "string"},
+            "launch": {"type": "object"},
+            "replayed": {"type": "boolean"}
+        }
+    }));
+    launch_from_trigger.visibility = VisibilityScope::Admin;
 
     let mut stop_process = primitive_function(
         STOP_PROCESS_FUNCTION,
@@ -206,6 +250,7 @@ pub(super) fn registrations(
         ),
         host_dispatched_registration(issue_activation),
         handled_registration(launch_activation, orchestration_handler.clone()),
+        handled_registration(launch_from_trigger, orchestration_handler.clone()),
         handled_registration(stop_process, orchestration_handler),
     ])
 }
@@ -224,6 +269,7 @@ impl InProcessFunctionHandler for WorkerOrchestrationPrimitiveHandler {
         );
         match invocation.function_id.as_str() {
             LAUNCH_ACTIVATION_FUNCTION => runtime.launch_activation(invocation).await,
+            LAUNCH_FROM_TRIGGER_FUNCTION => runtime.launch_from_trigger(invocation).await,
             STOP_PROCESS_FUNCTION => runtime.stop_process(invocation).await,
             other => Err(EngineError::NotFound {
                 kind: "function",
@@ -276,6 +322,19 @@ fn launch_activation_schema() -> Value {
             "startupTimeoutMs": {"type": "integer", "minimum": 1},
             "launchReason": {"type": "string"},
             "idempotencyKey": {"type": "string", "minLength": 1}
+        }
+    })
+}
+
+fn launch_from_trigger_schema() -> Value {
+    json!({
+        "type": "object",
+        "required": ["autostartPlanResourceId"],
+        "additionalProperties": false,
+        "properties": {
+            "autostartPlanResourceId": {"type": "string", "minLength": 1},
+            "startupTimeoutMs": {"type": "integer", "minimum": 1},
+            "launchReason": {"type": "string"}
         }
     })
 }

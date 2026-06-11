@@ -7,7 +7,7 @@
 //! | `external_workers` | Loopback external-worker lifecycle, governed activation binding, registration, invocation proxying, and health. |
 //! | `triggers` | Trigger dispatch runtime, cascade bounds, and trigger metadata recording. |
 //! | `worker_activation_bundle_vault` | Process-memory custody for one-shot activation bundle stdin handoff. |
-//! | `worker_orchestration` | Governed direct-exec process supervision for already issued worker activations. |
+//! | `worker_orchestration` | Governed direct-exec process supervision for already issued worker activations and trigger-created reviewed autostart launch. |
 //! | `worker_protocol` | `/engine/workers` protocol DTOs and scoped worker token model. |
 //!
 //! ## Entry Points
@@ -18,8 +18,10 @@
 //! volatile worker connection. Activation bundles may be held only in the
 //! in-memory vault until a reviewed launch consumes them into child stdin.
 //! Worker orchestration may start a reviewed local process for an already issued
-//! activation, but readiness still comes only from the external-worker
-//! hello/register path. Protocol DTOs are consumed by transport runtime code.
+//! activation, or compose trusted trigger dispatch into a fresh activation plus
+//! reviewed stdin launch through `worker::launch_from_trigger`. Readiness still
+//! comes only from the external-worker hello/register path. Protocol DTOs are
+//! consumed by transport runtime code.
 //!
 //! ## Dependency Direction
 //!
@@ -41,6 +43,8 @@
 //!   resources before any readiness is trusted.
 //! - Activation bundles are never durable runtime state; the vault is
 //!   process-memory only, TTL-bound, and one-shot.
+//! - Trigger-created launches require reviewed autostart and launch plans,
+//!   target idempotency, no restart policy, and `stdin_activation_bundle_v1`.
 //! - Disconnected durable workers remain catalog truth but fail closed as
 //!   unhealthy until reconnect.
 //! - Trigger cascades carry explicit depth/path budgets.

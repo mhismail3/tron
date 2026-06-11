@@ -65,3 +65,7 @@ git status --short
 - `preissued_bundle` remains supported. SAAWBH closes the prior residual
   non-persisted handoff gap for new launches with `stdin_activation_bundle_v1`,
   backed by an in-memory one-shot vault and supervisor stdin boundary.
+- SAAWTL composes trigger-created launch over SAAWO rather than adding a second
+  supervisor. `worker::launch_from_trigger` calls `worker::launch_activation`
+  with a derived launch idempotency key and inherits direct-exec, no-restart,
+  redacted process audit, and SAAWA readiness semantics.

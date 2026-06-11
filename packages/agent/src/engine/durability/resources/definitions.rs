@@ -456,6 +456,125 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             json!({"read": ["resource.read"], "write": ["worker.launch", "resource.write"], "delete": ["worker.launch", "resource.write"]}),
         ),
         builtin_type(
+            "worker_autostart_plan",
+            "tron.resource.worker_autostart_plan.v1",
+            json!({
+                "type": "object",
+                "required": [
+                    "status",
+                    "triggerId",
+                    "launchPlanResourceId",
+                    "functionId",
+                    "candidateResourceId",
+                    "decisionResourceId",
+                    "evidenceResourceIds",
+                    "targetVisibility",
+                    "activationReason",
+                    "policy"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "status": {"type": "string", "enum": ["reviewed"]},
+                    "triggerId": {"type": "string"},
+                    "launchPlanResourceId": {"type": "string"},
+                    "functionId": {"type": "string"},
+                    "candidateResourceId": {"type": "string"},
+                    "decisionResourceId": {"type": "string"},
+                    "evidenceResourceIds": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                    "targetVisibility": {"type": "string", "enum": ["session", "workspace"]},
+                    "workspaceId": {"type": ["string", "null"]},
+                    "expiresAt": {"type": "string"},
+                    "activationReason": {"type": "string"},
+                    "policy": {
+                        "type": "object",
+                        "required": ["deliveryMode", "restartPolicy", "duplicatePolicy"],
+                        "additionalProperties": false,
+                        "properties": {
+                            "deliveryMode": {"type": "string", "enum": ["stdin_activation_bundle_v1"]},
+                            "restartPolicy": {"type": "string", "enum": ["none"]},
+                            "duplicatePolicy": {"type": "string", "enum": ["idempotency_key_replay_v1"]}
+                        }
+                    }
+                }
+            }),
+            vec!["draft", "reviewed", "revoked", "archived"],
+            vec![
+                "launches",
+                "activates",
+                "uses_plan",
+                "caused_by",
+                "decided_by",
+                "supported_by",
+                "evidence_for",
+                "derived_from",
+                "revokes",
+                "supersedes",
+            ],
+            json!({"read": ["resource.read"], "write": ["worker.launch", "worker.activate", "resource.write"], "delete": ["worker.launch", "resource.write"]}),
+        ),
+        builtin_type(
+            "worker_trigger_launch_attempt",
+            "tron.resource.worker_trigger_launch_attempt.v1",
+            json!({
+                "type": "object",
+                "required": [
+                    "status",
+                    "attemptId",
+                    "triggerId",
+                    "autostartPlanResourceId",
+                    "launchPlanResourceId",
+                    "functionId",
+                    "targetVisibility",
+                    "scope",
+                    "idempotency",
+                    "trace",
+                    "policy",
+                    "metadata"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "status": {"type": "string", "enum": [
+                        "requested",
+                        "activation_issued",
+                        "launch_starting",
+                        "ready_pending",
+                        "failed"
+                    ]},
+                    "attemptId": {"type": "string"},
+                    "triggerId": {"type": "string"},
+                    "autostartPlanResourceId": {"type": "string"},
+                    "launchPlanResourceId": {"type": "string"},
+                    "activationResourceId": {"type": ["string", "null"]},
+                    "workerProcessResourceId": {"type": ["string", "null"]},
+                    "functionId": {"type": "string"},
+                    "targetVisibility": {"type": "string", "enum": ["session", "workspace"]},
+                    "scope": {"type": "object"},
+                    "idempotency": {"type": "object"},
+                    "trace": {"type": "object"},
+                    "policy": {"type": "object"},
+                    "error": {"type": ["object", "null"]},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec![
+                "requested",
+                "activation_issued",
+                "launch_starting",
+                "ready_pending",
+                "failed",
+                "archived",
+            ],
+            vec![
+                "caused_by",
+                "activates",
+                "launches",
+                "uses_plan",
+                "audits",
+                "derived_from",
+            ],
+            json!({"read": ["resource.read"], "write": ["worker.launch", "worker.activate", "resource.write"], "delete": ["worker.launch", "resource.write"]}),
+        ),
+        builtin_type(
             "worker_process",
             "tron.resource.worker_process.v1",
             json!({

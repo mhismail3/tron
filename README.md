@@ -358,12 +358,28 @@ Current living entry points:
   completed SAAWBH gates for docs/CI parity, vault-only custody, durable
   redaction, stdin handoff, no scheduler/provider/public handoff surface, and
   README parity.
+- `packages/agent/docs/self-adapting-agent-worker-trigger-launch-scorecard.md`:
+  completed SAAWTL scorecard for governed trigger-created worker launch through
+  reviewed autostart plans, fresh activation issue, and stdin handoff.
+- `packages/agent/docs/self-adapting-agent-worker-trigger-launch-evidence-manifest.md`:
+  companion evidence manifest for trigger-causal launch, idempotent attempt
+  replay, attempt audit redaction, and closeout validation.
+- `packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.md`:
+  SAAWTL source inventory taxonomy and trigger/worker boundary notes.
+- `packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.tsv`:
+  machine-readable SAAWTL inventory covering trigger dispatch, autostart plans,
+  activation issue, vault custody, stdin launch, attempt audit, replay, and
+  forbidden surfaces.
+- `packages/agent/tests/self_adapting_agent_worker_trigger_launch_invariants.rs`:
+  completed SAAWTL gates for docs/CI parity, trigger-only primitive contract,
+  reviewed autostart schemas, attempt audit, no provider/public/scheduler
+  surface, and README parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH/SAAWTL
 scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -811,6 +827,26 @@ consume requires issuing a new activation. There is no scheduler launch,
 automatic restart loop, trigger creation,
 provider-visible launch tool, public `/engine` launch message, deploy flow,
 launchd/SMAppService integration, or repo-managed skill surface.
+
+Trigger-created worker launch is an internal composition layer over the same
+activation and launch primitives. A trusted `trigger::dispatch` may target
+admin/internal `worker::launch_from_trigger` only with trigger causal context,
+target idempotency, and both `worker.activate` and `worker.launch`. The bridge
+loads a reviewed `worker_autostart_plan` (`tron.resource.worker_autostart_plan.v1`)
+whose policy is exactly `stdin_activation_bundle_v1`, `restartPolicy: none`,
+and `duplicatePolicy: idempotency_key_replay_v1`; verifies the registered
+trigger target is `worker::launch_from_trigger`; issues activation through
+`worker::issue_activation`; and launches the reviewed `worker_launch_plan`
+through `worker::launch_activation`. Each deterministic
+`worker_trigger_launch_attempt` records only safe ids, status, trace refs,
+idempotency fingerprints, policy, and redacted errors. Duplicate delivery with
+the same target idempotency key replays the attempt/process without another
+activation issue, vault consume, or process start. Trigger launch does not imply
+callable readiness; the SAAWA hello/register path remains authoritative. There
+is still no wall-clock scheduler, activation-worker trigger registration,
+automatic restart loop, provider-visible launch tool, public `/engine` launch
+message, deploy flow, launchd/SMAppService integration, or repo-managed skill
+surface.
 
 Volatile worker entries are removed on disconnect or missed heartbeat. Durable
 local worker entries stay in the catalog but are marked unhealthy when the

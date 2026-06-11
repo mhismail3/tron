@@ -13,7 +13,7 @@ use super::{
 use crate::engine::durability::resources::EngineResource;
 use crate::engine::invocation::model::Invocation;
 use crate::engine::kernel::errors::{EngineError, Result};
-use crate::engine::kernel::ids::{FunctionId, WorkerId};
+use crate::engine::kernel::ids::{FunctionId, TriggerId, WorkerId};
 use crate::engine::kernel::types::VisibilityScope;
 use crate::engine::runtime::worker_protocol::WorkerRegistrationMode;
 
@@ -239,6 +239,75 @@ pub(super) struct StopProcessRequest {
     pub(super) reason: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct AutostartPlan {
+    pub(super) resource_id: String,
+    pub(super) trigger_id: TriggerId,
+    pub(super) launch_plan_resource_id: String,
+    pub(super) function_id: FunctionId,
+    pub(super) candidate_resource_id: String,
+    pub(super) decision_resource_id: String,
+    pub(super) evidence_resource_ids: Vec<String>,
+    pub(super) target_visibility: VisibilityScope,
+    pub(super) workspace_id: Option<String>,
+    pub(super) expires_at: Option<String>,
+    pub(super) activation_reason: String,
+}
+
+impl AutostartPlan {
+    pub(super) fn from_payload(resource_id: &str, payload: &Value) -> Result<Self> {
+        reject_secret_material_in_value("worker autostart plan", payload)?;
+        if payload_str(payload, "status")? != "reviewed" {
+            return Err(EngineError::PolicyViolation(
+                "worker autostart plan payload status must be reviewed".to_owned(),
+            ));
+        }
+        let policy = value_object(payload, "policy")?;
+        require_policy(policy, "deliveryMode", "stdin_activation_bundle_v1")?;
+        require_policy(policy, "restartPolicy", "none")?;
+        require_policy(policy, "duplicatePolicy", "idempotency_key_replay_v1")?;
+        let evidence_resource_ids = string_array(payload, "evidenceResourceIds")?;
+        if evidence_resource_ids.is_empty() {
+            return Err(EngineError::PolicyViolation(
+                "worker autostart plan requires evidenceResourceIds".to_owned(),
+            ));
+        }
+        let function_id = FunctionId::new(payload_str(payload, "functionId")?)?;
+        Ok(Self {
+            resource_id: resource_id.to_owned(),
+            trigger_id: TriggerId::new(payload_str(payload, "triggerId")?)?,
+            launch_plan_resource_id: non_empty_payload_string(payload, "launchPlanResourceId")?,
+            function_id,
+            candidate_resource_id: non_empty_payload_string(payload, "candidateResourceId")?,
+            decision_resource_id: non_empty_payload_string(payload, "decisionResourceId")?,
+            evidence_resource_ids,
+            target_visibility: parse_target_visibility(payload_str(payload, "targetVisibility")?)?,
+            workspace_id: optional_payload_string(payload, "workspaceId")?,
+            expires_at: optional_payload_string(payload, "expiresAt")?,
+            activation_reason: non_empty_payload_string(payload, "activationReason")?,
+        })
+    }
+
+    pub(super) fn issue_payload(&self, idempotency_key: &str) -> Value {
+        let mut payload = serde_json::json!({
+            "functionId": self.function_id.as_str(),
+            "candidateResourceId": self.candidate_resource_id,
+            "decisionResourceId": self.decision_resource_id,
+            "evidenceResourceIds": self.evidence_resource_ids,
+            "targetVisibility": self.target_visibility.as_str(),
+            "activationReason": self.activation_reason,
+            "idempotencyKey": idempotency_key,
+        });
+        if let Some(workspace_id) = self.workspace_id.as_deref() {
+            payload["workspaceId"] = Value::String(workspace_id.to_owned());
+        }
+        if let Some(expires_at) = self.expires_at.as_deref() {
+            payload["expiresAt"] = Value::String(expires_at.to_owned());
+        }
+        payload
+    }
+}
+
 impl StopProcessRequest {
     pub(super) fn from_invocation(invocation: &Invocation) -> Result<Self> {
         Ok(Self {
@@ -322,6 +391,36 @@ fn reject_secret_material(label: &str, value: &str) -> Result<()> {
     if contains_secret_material(value) {
         return Err(EngineError::PolicyViolation(format!(
             "worker launch {label} appears secret-bearing"
+        )));
+    }
+    Ok(())
+}
+
+fn reject_secret_material_in_value(label: &str, value: &Value) -> Result<()> {
+    match value {
+        Value::String(value) => reject_secret_material(label, value),
+        Value::Array(items) => {
+            for item in items {
+                reject_secret_material_in_value(label, item)?;
+            }
+            Ok(())
+        }
+        Value::Object(object) => {
+            for (key, value) in object {
+                reject_secret_material(label, key)?;
+                reject_secret_material_in_value(key, value)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn require_policy(policy: &Value, field: &str, expected: &str) -> Result<()> {
+    let actual = object_str(policy, field)?;
+    if actual != expected {
+        return Err(EngineError::PolicyViolation(format!(
+            "worker autostart plan policy {field} must be {expected}"
         )));
     }
     Ok(())

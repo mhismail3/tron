@@ -64,3 +64,8 @@ activation message on `/engine`, or manage skills from the repo.
 SAAWBH preserves SAAWA activation issuance and hello/register readiness as the
 authority for callable worker state, while adding process-memory bundle custody
 and durable redaction for idempotency replay.
+
+SAAWTL preserves the same activation boundary for trigger-created launch:
+`worker::launch_from_trigger` invokes `worker::issue_activation` with a derived
+idempotency key and does not mint tokens through any parallel path. Callable
+readiness still requires the SAAWA hello/register flow.
