@@ -8,7 +8,8 @@ use super::contracts::{
     is_terminal_process_status, target_idempotency_key, trigger_launch_attempt_id,
 };
 use super::{
-    EngineWorkerScheduleRuntime, SCHEDULE_LIST_LIMIT, WORKER_SCHEDULE_TICK_KIND, WorkerSchedulePlan,
+    EngineWorkerScheduleRuntime, SCHEDULE_SCAN_MAX_PER_POLL, WORKER_SCHEDULE_TICK_KIND,
+    WorkerSchedulePlan,
 };
 use crate::engine::durability::queue::QueueItemStatus;
 use crate::engine::durability::resources::ListResources;
@@ -125,7 +126,7 @@ impl EngineWorkerScheduleRuntime {
             .host
             .list_resources(ListResources {
                 kind: Some(WORKER_SCHEDULE_TICK_KIND.to_owned()),
-                limit: SCHEDULE_LIST_LIMIT,
+                limit: SCHEDULE_SCAN_MAX_PER_POLL,
                 ..ListResources::default()
             })
             .await?;

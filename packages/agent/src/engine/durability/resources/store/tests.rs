@@ -274,3 +274,168 @@ fn resource_list_is_filtered_by_kind_scope_and_lifecycle() {
         .unwrap();
     assert_eq!(resources.len(), 2);
 }
+
+#[test]
+fn in_memory_resource_pages_resume_without_duplicates() {
+    let mut store = InMemoryEngineResourceStore::new();
+    store.register_type(artifact_type()).unwrap();
+    for index in 0..7 {
+        store
+            .create(create_artifact(&format!("res_page_{index}")))
+            .unwrap();
+    }
+
+    let first = store
+        .list_page(ListResourcesPageRequest {
+            filter: ListResources {
+                kind: Some("artifact".to_owned()),
+                limit: 3,
+                ..ListResources::default()
+            },
+            cursor: None,
+        })
+        .unwrap();
+    assert_eq!(first.resources.len(), 3);
+    assert!(first.has_more);
+    assert_eq!(
+        first.next_cursor,
+        first
+            .resources
+            .last()
+            .map(ResourceListCursor::from_resource)
+    );
+
+    let second = store
+        .list_page(ListResourcesPageRequest {
+            filter: ListResources {
+                kind: Some("artifact".to_owned()),
+                limit: 3,
+                ..ListResources::default()
+            },
+            cursor: first.next_cursor.clone(),
+        })
+        .unwrap();
+    assert_eq!(second.resources.len(), 3);
+    assert!(second.has_more);
+
+    let third = store
+        .list_page(ListResourcesPageRequest {
+            filter: ListResources {
+                kind: Some("artifact".to_owned()),
+                limit: 3,
+                ..ListResources::default()
+            },
+            cursor: second.next_cursor.clone(),
+        })
+        .unwrap();
+    assert_eq!(third.resources.len(), 1);
+    assert!(!third.has_more);
+
+    let paged_ids = first
+        .resources
+        .iter()
+        .chain(second.resources.iter())
+        .chain(third.resources.iter())
+        .map(|resource| resource.resource_id.clone())
+        .collect::<Vec<_>>();
+    let listed_ids = store
+        .list(ListResources {
+            kind: Some("artifact".to_owned()),
+            limit: 10,
+            ..ListResources::default()
+        })
+        .unwrap()
+        .iter()
+        .map(|resource| resource.resource_id.clone())
+        .collect::<Vec<_>>();
+
+    assert_eq!(paged_ids, listed_ids);
+    let unique = paged_ids.iter().collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        unique.len(),
+        paged_ids.len(),
+        "pagination must not duplicate resources"
+    );
+}
+
+#[test]
+fn sqlite_resource_pages_match_in_memory_cursor_semantics() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("resources.sqlite");
+    let mut sqlite = SqliteEngineResourceStore::open(&path).unwrap();
+    let mut memory = InMemoryEngineResourceStore::new();
+    sqlite.register_type(artifact_type()).unwrap();
+    memory.register_type(artifact_type()).unwrap();
+    for index in 0..7 {
+        let id = format!("res_page_{index}");
+        sqlite.create(create_artifact(&id)).unwrap();
+        memory.create(create_artifact(&id)).unwrap();
+    }
+
+    let mut sqlite_ids = Vec::new();
+    let mut sqlite_cursor = None;
+    loop {
+        let page = sqlite
+            .list_page(ListResourcesPageRequest {
+                filter: ListResources {
+                    kind: Some("artifact".to_owned()),
+                    limit: 2,
+                    ..ListResources::default()
+                },
+                cursor: sqlite_cursor,
+            })
+            .unwrap();
+        sqlite_ids.extend(
+            page.resources
+                .iter()
+                .map(|resource| resource.resource_id.clone()),
+        );
+        if !page.has_more {
+            break;
+        }
+        sqlite_cursor = page.next_cursor;
+    }
+
+    let mut memory_ids = Vec::new();
+    let mut memory_cursor = None;
+    loop {
+        let page = memory
+            .list_page(ListResourcesPageRequest {
+                filter: ListResources {
+                    kind: Some("artifact".to_owned()),
+                    limit: 2,
+                    ..ListResources::default()
+                },
+                cursor: memory_cursor,
+            })
+            .unwrap();
+        memory_ids.extend(
+            page.resources
+                .iter()
+                .map(|resource| resource.resource_id.clone()),
+        );
+        if !page.has_more {
+            break;
+        }
+        memory_cursor = page.next_cursor;
+    }
+
+    assert_eq!(sqlite_ids.len(), 7);
+    assert_eq!(memory_ids.len(), 7);
+    assert_eq!(
+        sqlite_ids
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        sqlite_ids.len(),
+        "sqlite pagination must not duplicate resources"
+    );
+    assert_eq!(
+        memory_ids
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        memory_ids.len(),
+        "memory pagination must not duplicate resources"
+    );
+}

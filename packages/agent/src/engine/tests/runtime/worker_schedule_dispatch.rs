@@ -10,7 +10,9 @@ use crate::engine::runtime::worker_orchestration::{
     WorkerProcessHandle, WorkerProcessStartRequest, WorkerProcessStartResult,
     WorkerProcessStopResult, WorkerProcessSupervisor,
 };
-use crate::engine::runtime::worker_schedule::EngineWorkerScheduleRuntime;
+use crate::engine::runtime::worker_schedule::{
+    EngineWorkerScheduleRuntime, WORKER_SCHEDULE_SCAN_STATE_ID,
+};
 
 #[tokio::test]
 async fn worker_schedule_dispatch_enqueues_and_drains_trigger_launch_once() {
@@ -301,6 +303,82 @@ async fn worker_schedule_dispatch_rejects_invalid_plans_before_enqueue() {
         "secret-bearing",
     )
     .await;
+}
+
+#[tokio::test]
+async fn worker_schedule_dispatch_resumes_beyond_first_scan_budget() {
+    let anchor = base_time();
+    let fixture = ScheduleFixture::new("capacity", anchor, ScheduleOptions::default()).await;
+    let future_anchor = anchor + ChronoDuration::days(1);
+    for index in 0..500 {
+        let schedule_id = format!("saawsz-future-{index:03}-schedule");
+        create_schedule_plan(
+            &fixture.handle,
+            &schedule_id,
+            schedule_payload(
+                &schedule_id,
+                &fixture.trigger_id,
+                &fixture.autostart_id,
+                future_anchor,
+            ),
+            "reviewed",
+        )
+        .await;
+    }
+    let runtime = EngineWorkerScheduleRuntime::new(fixture.handle.clone());
+
+    let first = runtime.dispatch_due_once(anchor).await.unwrap();
+    assert_eq!(first.reviewed, 500);
+    assert_eq!(first.due, 0);
+    assert_eq!(first.enqueued, 0);
+    assert_eq!(queue_count(&fixture.handle).await, 0);
+    let first_scan = resource_payload(&fixture.handle, WORKER_SCHEDULE_SCAN_STATE_ID).await;
+    assert_eq!(first_scan["status"], "completed");
+    assert_eq!(first_scan["lastScannedCount"], 500);
+    assert_eq!(first_scan["budgetExhausted"], true);
+    assert_eq!(first_scan["wrapped"], false);
+    assert!(first_scan["cursor"].is_object());
+    assert_safe_scan_state_payload(&first_scan);
+
+    let restarted_runtime = EngineWorkerScheduleRuntime::new(fixture.handle.clone());
+    let second = restarted_runtime.dispatch_due_once(anchor).await.unwrap();
+    assert_eq!(second.reviewed, 1);
+    assert_eq!(second.due, 1);
+    assert_eq!(second.enqueued, 1);
+    assert_eq!(queue_count(&fixture.handle).await, 1);
+    let second_scan = resource_payload(&fixture.handle, WORKER_SCHEDULE_SCAN_STATE_ID).await;
+    assert_eq!(second_scan["status"], "completed");
+    assert_eq!(second_scan["lastScannedCount"], 1);
+    assert_eq!(second_scan["budgetExhausted"], false);
+    assert_eq!(second_scan["wrapped"], true);
+    assert!(second_scan["cursor"].is_null());
+    assert_safe_scan_state_payload(&second_scan);
+}
+
+#[tokio::test]
+async fn worker_schedule_dispatch_persists_cancelled_scan_without_enqueue() {
+    let anchor = base_time();
+    let fixture = ScheduleFixture::new("cancelled_scan", anchor, ScheduleOptions::default()).await;
+    let runtime = EngineWorkerScheduleRuntime::new(fixture.handle.clone());
+    let mut cancellation_checks = 0usize;
+
+    let summary = runtime
+        .dispatch_due_once_with_cancellation(anchor, || {
+            cancellation_checks += 1;
+            cancellation_checks > 1
+        })
+        .await
+        .unwrap();
+
+    assert_eq!(summary.reviewed, 0);
+    assert_eq!(summary.enqueued, 0);
+    assert_eq!(queue_count(&fixture.handle).await, 0);
+    let scan = resource_payload(&fixture.handle, WORKER_SCHEDULE_SCAN_STATE_ID).await;
+    assert_eq!(scan["status"], "cancelled");
+    assert_eq!(scan["lastScannedCount"], 0);
+    assert_eq!(scan["budgetExhausted"], false);
+    assert_eq!(scan["cursor"], Value::Null);
+    assert_safe_scan_state_payload(&scan);
 }
 
 #[derive(Default)]

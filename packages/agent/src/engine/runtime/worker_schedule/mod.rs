@@ -1,8 +1,9 @@
 //! Governed worker schedule dispatch runtime module.
 //!
-//! Schedules do not launch workers. They compute due UTC fixed-interval ticks,
-//! persist a safe tick audit resource, and invoke the trusted `trigger::dispatch`
-//! primitive with enqueue delivery and deterministic target idempotency.
+//! Schedules do not launch workers. They scan reviewed UTC fixed-interval plans
+//! through bounded internal resource pages, persist safe scan-state and tick
+//! audit resources, and invoke the trusted `trigger::dispatch` primitive with
+//! enqueue delivery and deterministic target idempotency.
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
@@ -11,7 +12,8 @@ use super::worker_orchestration::WORKER_AUTOSTART_PLAN_SCHEMA_ID;
 use super::worker_orchestration::contracts::{AutostartPlan, LaunchPlan};
 use crate::engine::catalog::discovery::ActorKind;
 use crate::engine::durability::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion, ListResources,
+    CreateResource, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineResourceVersion, ListResources, ListResourcesPageRequest, ResourceListCursor,
     UpdateResource,
 };
 use crate::engine::invocation::host::EngineHostHandle;
@@ -30,9 +32,13 @@ use crate::engine::{AcquireResourceLease, EngineGrantLifecycle, EngineResourceLe
 
 mod contracts;
 mod overlap;
+mod scan_state;
 
 pub use contracts::WorkerScheduleDispatchSummary;
 use contracts::*;
+use scan_state::{
+    ScanStatePersist, scan_cursor_from_payload, scan_state_payload, schedule_scan_trace_id,
+};
 
 /// Built-in resource kind for reviewed worker schedule plans.
 pub const WORKER_SCHEDULE_PLAN_KIND: &str = "worker_schedule_plan";
@@ -42,13 +48,21 @@ pub const WORKER_SCHEDULE_PLAN_SCHEMA_ID: &str = "tron.resource.worker_schedule_
 pub const WORKER_SCHEDULE_TICK_KIND: &str = "worker_schedule_tick";
 /// Schema id for schedule tick audit records.
 pub const WORKER_SCHEDULE_TICK_SCHEMA_ID: &str = "tron.resource.worker_schedule_tick.v1";
+/// Built-in resource kind for schedule scanner state.
+pub const WORKER_SCHEDULE_SCAN_STATE_KIND: &str = "worker_schedule_scan_state";
+/// Schema id for schedule scanner state.
+pub const WORKER_SCHEDULE_SCAN_STATE_SCHEMA_ID: &str =
+    "tron.resource.worker_schedule_scan_state.v1";
+/// Deterministic singleton resource id for the v1 schedule scanner.
+pub const WORKER_SCHEDULE_SCAN_STATE_ID: &str = "worker_schedule_scan_state:default";
 
 const LAUNCH_FROM_TRIGGER_FUNCTION: &str = "worker::launch_from_trigger";
 const TRIGGER_DISPATCH_FUNCTION: &str = "trigger::dispatch";
 const STDIN_BUNDLE_DELIVERY_MODE: &str = "stdin_activation_bundle_v1";
 const MIN_INTERVAL_MS: u64 = 60_000;
 const MAX_INTERVAL_MS: u64 = 86_400_000;
-const SCHEDULE_LIST_LIMIT: usize = 500;
+const SCHEDULE_SCAN_PAGE_SIZE: usize = 100;
+const SCHEDULE_SCAN_MAX_PER_POLL: usize = 500;
 const SCHEDULER_LEASE_TTL_MS: i64 = 55_000;
 
 /// Engine-owned schedule dispatcher.
@@ -69,42 +83,200 @@ impl EngineWorkerScheduleRuntime {
         &self,
         now: DateTime<Utc>,
     ) -> Result<WorkerScheduleDispatchSummary> {
-        let resources = self
-            .host
-            .list_resources(ListResources {
-                kind: Some(WORKER_SCHEDULE_PLAN_KIND.to_owned()),
-                lifecycle: Some("reviewed".to_owned()),
-                limit: SCHEDULE_LIST_LIMIT,
-                ..ListResources::default()
-            })
-            .await?;
+        self.dispatch_due_once_with_cancellation(now, || false)
+            .await
+    }
+
+    /// Dispatch due schedules under the bounded scanner, observing cancellation between items.
+    pub async fn dispatch_due_once_with_cancellation<F>(
+        &self,
+        now: DateTime<Utc>,
+        mut is_cancelled: F,
+    ) -> Result<WorkerScheduleDispatchSummary>
+    where
+        F: FnMut() -> bool,
+    {
+        let started_at = Utc::now();
+        let trace_id = schedule_scan_trace_id(started_at)?;
+        let mut cursor = self.load_scan_cursor().await?;
         let mut summary = WorkerScheduleDispatchSummary::default();
-        for resource in resources {
-            summary.reviewed += 1;
-            match self.dispatch_resource_due_tick(&resource, now).await {
-                Ok(Some(outcome)) => {
-                    summary.due += 1;
-                    match outcome {
-                        "enqueued" => summary.enqueued += 1,
-                        "replayed" => summary.replayed += 1,
-                        "skipped_missed" => summary.skipped_missed += 1,
-                        "skipped_overlap" => summary.skipped_overlap += 1,
-                        "failed" => summary.failed += 1,
-                        _ => {}
+        let mut scanned = 0usize;
+        let mut wrapped = false;
+        let mut budget_exhausted = false;
+        let mut cancelled = false;
+
+        while scanned < SCHEDULE_SCAN_MAX_PER_POLL {
+            if is_cancelled() {
+                cancelled = true;
+                break;
+            }
+            let remaining = SCHEDULE_SCAN_MAX_PER_POLL - scanned;
+            let limit = SCHEDULE_SCAN_PAGE_SIZE.min(remaining);
+            let page = self
+                .host
+                .list_resources_page(ListResourcesPageRequest {
+                    filter: ListResources {
+                        kind: Some(WORKER_SCHEDULE_PLAN_KIND.to_owned()),
+                        lifecycle: Some("reviewed".to_owned()),
+                        limit,
+                        ..ListResources::default()
+                    },
+                    cursor: cursor.clone(),
+                })
+                .await?;
+            if page.resources.is_empty() {
+                if cursor.is_some() && !wrapped {
+                    cursor = None;
+                    wrapped = true;
+                    continue;
+                }
+                break;
+            }
+
+            let page_has_more = page.has_more;
+            for resource in page.resources {
+                if is_cancelled() {
+                    cancelled = true;
+                    break;
+                }
+                summary.reviewed += 1;
+                scanned += 1;
+                cursor = Some(ResourceListCursor::from_resource(&resource));
+                match self.dispatch_resource_due_tick(&resource, now).await {
+                    Ok(Some(outcome)) => {
+                        summary.due += 1;
+                        match outcome {
+                            "enqueued" => summary.enqueued += 1,
+                            "replayed" => summary.replayed += 1,
+                            "skipped_missed" => summary.skipped_missed += 1,
+                            "skipped_overlap" => summary.skipped_overlap += 1,
+                            "failed" => summary.failed += 1,
+                            _ => {}
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        summary.failed += 1;
+                        tracing::warn!(
+                            schedule_resource_id = %resource.resource_id,
+                            error = %error,
+                            "worker schedule dispatch failed closed"
+                        );
                     }
                 }
-                Ok(None) => {}
-                Err(error) => {
-                    summary.failed += 1;
-                    tracing::warn!(
-                        schedule_resource_id = %resource.resource_id,
-                        error = %error,
-                        "worker schedule dispatch failed closed"
-                    );
+                if scanned >= SCHEDULE_SCAN_MAX_PER_POLL {
+                    budget_exhausted = true;
+                    break;
                 }
             }
+
+            self.persist_scan_state(ScanStatePersist {
+                cursor: cursor.clone(),
+                started_at,
+                finished_at: Utc::now(),
+                scanned_count: scanned,
+                wrapped,
+                budget_exhausted,
+                cancelled,
+                summary: &summary,
+                trace_id: &trace_id,
+                error: None,
+            })
+            .await?;
+
+            if cancelled || budget_exhausted {
+                break;
+            }
+            if !page_has_more {
+                cursor = None;
+                wrapped = true;
+                break;
+            }
         }
+        self.persist_scan_state(ScanStatePersist {
+            cursor,
+            started_at,
+            finished_at: Utc::now(),
+            scanned_count: scanned,
+            wrapped,
+            budget_exhausted,
+            cancelled,
+            summary: &summary,
+            trace_id: &trace_id,
+            error: None,
+        })
+        .await?;
         Ok(summary)
+    }
+
+    async fn load_scan_cursor(&self) -> Result<Option<ResourceListCursor>> {
+        let Some(inspection) = self
+            .host
+            .inspect_resource(WORKER_SCHEDULE_SCAN_STATE_ID)
+            .await?
+        else {
+            return Ok(None);
+        };
+        ensure_resource_kind(&inspection, WORKER_SCHEDULE_SCAN_STATE_KIND)?;
+        if inspection.resource.schema_id != WORKER_SCHEDULE_SCAN_STATE_SCHEMA_ID {
+            return Err(EngineError::PolicyViolation(format!(
+                "worker schedule scan state must use schema {WORKER_SCHEDULE_SCAN_STATE_SCHEMA_ID}"
+            )));
+        }
+        scan_cursor_from_payload(current_payload(&inspection)?)
+    }
+
+    async fn persist_scan_state(&self, input: ScanStatePersist<'_>) -> Result<()> {
+        let payload = scan_state_payload(&input);
+        let lifecycle = if input.error.is_some() {
+            "failed"
+        } else {
+            "active"
+        };
+        match self
+            .host
+            .inspect_resource(WORKER_SCHEDULE_SCAN_STATE_ID)
+            .await?
+        {
+            Some(inspection) => {
+                ensure_resource_kind(&inspection, WORKER_SCHEDULE_SCAN_STATE_KIND)?;
+                self.host
+                    .update_resource(UpdateResource {
+                        resource_id: WORKER_SCHEDULE_SCAN_STATE_ID.to_owned(),
+                        expected_current_version_id: inspection.resource.current_version_id,
+                        lifecycle: Some(lifecycle.to_owned()),
+                        payload,
+                        state: None,
+                        locations: Vec::new(),
+                        trace_id: input.trace_id.clone(),
+                        invocation_id: None,
+                    })
+                    .await?;
+            }
+            None => {
+                self.host
+                    .create_resource(CreateResource {
+                        resource_id: Some(WORKER_SCHEDULE_SCAN_STATE_ID.to_owned()),
+                        kind: WORKER_SCHEDULE_SCAN_STATE_KIND.to_owned(),
+                        schema_id: Some(WORKER_SCHEDULE_SCAN_STATE_SCHEMA_ID.to_owned()),
+                        scope: EngineResourceScope::System,
+                        owner_worker_id: WorkerId::new(WORKER_WORKER_ID)?,
+                        owner_actor_id: ActorId::new("worker-scheduler")?,
+                        lifecycle: Some(lifecycle.to_owned()),
+                        policy: json!({
+                            "scanner": "worker_schedule_capacity",
+                            "secretStorage": "scanner_metadata_only",
+                            "cursorOrder": "updated_at_desc_resource_id_desc"
+                        }),
+                        initial_payload: Some(payload),
+                        locations: Vec::new(),
+                        trace_id: input.trace_id.clone(),
+                        invocation_id: None,
+                    })
+                    .await?;
+            }
+        }
+        Ok(())
     }
 
     /// Dispatch one schedule resource if it has a due tick at `now`.

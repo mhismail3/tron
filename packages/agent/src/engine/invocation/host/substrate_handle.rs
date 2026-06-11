@@ -86,6 +86,18 @@ impl EngineHostHandle {
             .list(filter)
     }
 
+    /// List one internal durable resource page through the engine-owned store.
+    pub(crate) async fn list_resources_page(
+        &self,
+        request: ListResourcesPageRequest,
+    ) -> Result<ListResourcesPage> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .list_page(request)
+    }
+
     /// Return the worker-process supervisor registry installed with this host.
     pub fn worker_process_supervisor_registry_for_setup(
         &self,

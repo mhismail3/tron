@@ -390,12 +390,28 @@ Current living entry points:
   completed SAAWSD gates for docs/CI parity, reviewed schedule contracts,
   trigger-dispatch-only composition, cadence ownership, no provider/public
   schedule surface, and README parity.
+- `packages/agent/docs/self-adapting-agent-worker-schedule-capacity-scorecard.md`:
+  completed SAAWSC scorecard for bounded, resumable worker schedule scanning
+  over large reviewed schedule sets.
+- `packages/agent/docs/self-adapting-agent-worker-schedule-capacity-evidence-manifest.md`:
+  companion evidence manifest for schedule pagination, scan-state persistence,
+  cancellation, resume/wrap behavior, and closeout validation.
+- `packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.md`:
+  SAAWSC source inventory taxonomy and capacity boundary notes.
+- `packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.tsv`:
+  machine-readable SAAWSC inventory covering resource pagination, memory/SQLite
+  stores, host substrate forwarding, scan state, service cancellation, and
+  forbidden surfaces.
+- `packages/agent/tests/self_adapting_agent_worker_schedule_capacity_invariants.rs`:
+  completed SAAWSC gates for docs/CI parity, internal paged resource listing,
+  deterministic cursor ordering, safe scan-state contracts, bounded scheduler
+  resume/wrap behavior, cancellation propagation, and README parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH/SAAWTL/SAAWSD
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH/SAAWTL/SAAWSD/SAAWSC
 scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -880,6 +896,19 @@ not issue activations, consume vault bundles, call supervisors, start processes,
 expose provider/public schedule APIs, change deploy/iOS settings, add
 launchd/SMAppService integration, add restart/retry loops, add repo-managed
 skills, or replay post-ready payloads.
+
+Schedule scanning is bounded and resumable. The scheduler lists reviewed
+`worker_schedule_plan` resources through an internal paged resource substrate
+ordered by `updated_at DESC, resource_id DESC`, scans pages of 100 and at most
+500 plans per poll, persists the last cursor and aggregate summary in the safe
+system-scoped `worker_schedule_scan_state:default` resource, resumes from that
+cursor across later polls or runtime recreation, and clears the cursor when the
+filtered tail is reached so the next pass wraps back to the head. Cancellation is
+cooperative between pages and schedule items and persists `cancelled` scan state
+without enqueueing when it fires before item dispatch. Scan state records cursor,
+budget flags, poll timestamps, summary, trace id, and generic redacted errors
+only; it never stores activation bundles, stdin payloads, provider prompts,
+process environments, launch secrets, or post-ready payloads.
 
 Volatile worker entries are removed on disconnect or missed heartbeat. Durable
 local worker entries stay in the catalog but are marked unhealthy when the
@@ -1596,6 +1625,9 @@ tron ci clippy test          # Subset: linting + tests
 `self_adapting_agent_worker_activation_invariants`,
 `self_adapting_agent_worker_orchestration_invariants`,
 `self_adapting_agent_worker_bundle_handoff_invariants`,
+`self_adapting_agent_worker_trigger_launch_invariants`,
+`self_adapting_agent_worker_schedule_dispatch_invariants`,
+`self_adapting_agent_worker_schedule_capacity_invariants`,
 `primitive_trace_execution`, and serial `integration`. GitHub's Rust
 static-gates job runs the same named target set for docs, template, iOS, Mac,
 script, and CI changes.

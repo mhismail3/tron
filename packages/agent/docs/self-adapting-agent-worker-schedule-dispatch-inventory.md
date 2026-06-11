@@ -27,6 +27,8 @@ The scheduler never calls `worker::issue_activation`, activation bundle vault co
 
 ## Residual Risks
 
-- The scheduler polls reviewed plans in bounded batches. Large schedule sets need a future ownership/capacity scorecard before broader rollout.
+- Large schedule-set scan capacity is owned by the successor SAAWSC scorecard.
+  This SAAWSD inventory remains focused on the schedule-to-trigger dispatch
+  contract.
 - Overlap evidence uses persisted queue/process state. If a future process terminal-state writer changes lifecycles, this inventory and tests must change together.
 - The TSV is a static inventory. New source files touching these surfaces must add rows and keep the invariant gate current.

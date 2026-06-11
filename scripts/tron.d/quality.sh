@@ -45,6 +45,7 @@ run_tests() {
         self_adapting_agent_worker_bundle_handoff_invariants
         self_adapting_agent_worker_trigger_launch_invariants
         self_adapting_agent_worker_schedule_dispatch_invariants
+        self_adapting_agent_worker_schedule_capacity_invariants
         primitive_trace_execution
         integration
     )

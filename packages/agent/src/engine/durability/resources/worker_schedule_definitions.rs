@@ -110,5 +110,49 @@ pub(super) fn worker_schedule_resource_type_definitions() -> Vec<RegisterResourc
             ],
             json!({"read": ["resource.read"], "write": ["worker.schedule", "trigger.dispatch", "resource.write"], "delete": ["worker.schedule", "resource.write"]}),
         ),
+        builtin_type(
+            "worker_schedule_scan_state",
+            "tron.resource.worker_schedule_scan_state.v1",
+            json!({
+                "type": "object",
+                "required": [
+                    "scannerId",
+                    "status",
+                    "cursor",
+                    "pageSize",
+                    "maxPerPoll",
+                    "lastScannedCount",
+                    "wrapped",
+                    "budgetExhausted",
+                    "lastPoll",
+                    "summary",
+                    "metadata"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "scannerId": {"type": "string", "enum": ["default"]},
+                    "status": {"type": "string", "enum": [
+                        "idle",
+                        "completed",
+                        "cancelled",
+                        "failed"
+                    ]},
+                    "cursor": {"type": ["object", "null"]},
+                    "pageSize": {"type": "integer", "minimum": 1, "maximum": 500},
+                    "maxPerPoll": {"type": "integer", "minimum": 1, "maximum": 500},
+                    "lastScannedCount": {"type": "integer", "minimum": 0},
+                    "wrapped": {"type": "boolean"},
+                    "budgetExhausted": {"type": "boolean"},
+                    "lastPoll": {"type": "object"},
+                    "summary": {"type": "object"},
+                    "trace": {"type": ["object", "null"]},
+                    "error": {"type": ["object", "null"]},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["active", "failed", "archived"],
+            vec!["audits", "derived_from"],
+            json!({"read": ["resource.read"], "write": ["worker.schedule", "resource.write"], "delete": ["worker.schedule", "resource.write"]}),
+        ),
     ]
 }

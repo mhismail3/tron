@@ -206,7 +206,9 @@ pub use runtime::worker_protocol::{
 };
 pub use runtime::worker_schedule::{
     EngineWorkerScheduleRuntime, WORKER_SCHEDULE_PLAN_KIND, WORKER_SCHEDULE_PLAN_SCHEMA_ID,
-    WORKER_SCHEDULE_TICK_KIND, WORKER_SCHEDULE_TICK_SCHEMA_ID, WorkerScheduleDispatchSummary,
+    WORKER_SCHEDULE_SCAN_STATE_ID, WORKER_SCHEDULE_SCAN_STATE_KIND,
+    WORKER_SCHEDULE_SCAN_STATE_SCHEMA_ID, WORKER_SCHEDULE_TICK_KIND,
+    WORKER_SCHEDULE_TICK_SCHEMA_ID, WorkerScheduleDispatchSummary,
 };
 
 /// Return whether a grant id is one of the engine-owned bootstrap roots.

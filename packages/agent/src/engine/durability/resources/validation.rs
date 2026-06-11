@@ -4,7 +4,7 @@ use serde_json::Value;
 
 use super::types::{
     CreateResource, EngineResourceLocation, EngineResourceTypeDefinition, LinkResources,
-    ListResources, RegisterResourceType, UI_SURFACE_KIND, UpdateResource,
+    ListResources, ListResourcesPageRequest, RegisterResourceType, UI_SURFACE_KIND, UpdateResource,
 };
 use super::ui_surface::validate_ui_surface_payload;
 use crate::engine::kernel::errors::{EngineError, Result};
@@ -72,6 +72,14 @@ pub(crate) fn validate_list_filter(filter: &ListResources) -> Result<()> {
     }
     if let Some(lifecycle) = &filter.lifecycle {
         validate_token("lifecycle state", lifecycle)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_list_page_request(request: &ListResourcesPageRequest) -> Result<()> {
+    validate_list_filter(&request.filter)?;
+    if let Some(cursor) = &request.cursor {
+        validate_token("resource list cursor resource id", &cursor.resource_id)?;
     }
     Ok(())
 }

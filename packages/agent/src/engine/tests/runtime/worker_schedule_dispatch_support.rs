@@ -45,7 +45,7 @@ pub(super) async fn predicted_worker_id(
     format!("worker-activation:{}", short_test_hash(&seed))
 }
 
-async fn resource_payload(handle: &EngineHostHandle, resource_id: &str) -> Value {
+pub(super) async fn resource_payload(handle: &EngineHostHandle, resource_id: &str) -> Value {
     let inspection = handle
         .inspect_resource(resource_id)
         .await
@@ -155,6 +155,25 @@ pub(super) fn assert_safe_tick_payload(payload: &Value) {
         assert!(
             !text.contains(forbidden),
             "tick audit persisted forbidden material {forbidden}: {text}"
+        );
+    }
+}
+
+pub(super) fn assert_safe_scan_state_payload(payload: &Value) {
+    let text = payload.to_string();
+    for forbidden in [
+        "activationBundle",
+        "workerHello",
+        "stdinPayload",
+        "processEnv",
+        "api_key",
+        "bearer",
+        "password",
+        "saawsd:target:",
+    ] {
+        assert!(
+            !text.contains(forbidden),
+            "scan state persisted forbidden material {forbidden}: {text}"
         );
     }
 }

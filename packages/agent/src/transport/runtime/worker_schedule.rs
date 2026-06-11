@@ -27,7 +27,11 @@ impl EngineWorkerScheduleService {
             tokio::select! {
                 () = self.cancel.cancelled() => break,
                 () = async {
-                    if let Err(error) = self.runtime.dispatch_due_once(Utc::now()).await {
+                    if let Err(error) = self
+                        .runtime
+                        .dispatch_due_once_with_cancellation(Utc::now(), || self.cancel.is_cancelled())
+                        .await
+                    {
                         tracing::warn!(error = %error, "worker schedule dispatch poll failed");
                     }
                     tokio::time::sleep(WORKER_SCHEDULE_POLL_CADENCE).await;

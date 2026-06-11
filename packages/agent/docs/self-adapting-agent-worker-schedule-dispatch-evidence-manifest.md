@@ -35,3 +35,5 @@ Baseline: `d701655306bc0ac42ce12a8142ad2a62b6ea0d1b`
 - SAAWBH remains the only live activation-bundle custody and stdin handoff contract.
 - SAAWTL remains the only trigger-created worker launch path.
 - SAAWSD adds reviewed wall-clock schedule-to-trigger dispatch over those paths; it does not duplicate activation, vault, process, or readiness behavior.
+- SAAWSC is the successor capacity slice for bounded, resumable scanning of
+  reviewed schedule plans; it does not change this dispatch contract.

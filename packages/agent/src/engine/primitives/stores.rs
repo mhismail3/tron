@@ -454,6 +454,16 @@ impl ResourceStoreBackend {
             Self::Sqlite(store) => store.list(filter),
         }
     }
+
+    pub(in crate::engine) fn list_page(
+        &self,
+        request: crate::engine::durability::resources::ListResourcesPageRequest,
+    ) -> Result<crate::engine::durability::resources::ListResourcesPage> {
+        match self {
+            Self::InMemory(store) => store.list_page(request),
+            Self::Sqlite(store) => store.list_page(request),
+        }
+    }
 }
 
 /// Engine primitive store bundle.

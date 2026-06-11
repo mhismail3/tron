@@ -25,6 +25,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         .with_namespace_claim("worker_trigger_launch_attempt")
         .with_namespace_claim("worker_schedule_plan")
         .with_namespace_claim("worker_schedule_tick")
+        .with_namespace_claim("worker_schedule_scan_state")
         .with_namespace_claim("worker_process");
     Ok(vec![
         primitive_worker(STREAM_WORKER_ID, WorkerKind::Stream)?,

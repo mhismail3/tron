@@ -11,7 +11,7 @@ use super::definitions::type_definition_from_request;
 use super::types::*;
 use super::validation::{
     ensure_lifecycle, ensure_relation, validate_create_request, validate_link_request,
-    validate_list_filter, validate_resource_payload, validate_token, validate_type_request,
+    validate_list_page_request, validate_resource_payload, validate_token, validate_type_request,
     validate_update_request,
 };
 use super::versions::payload_hash;
@@ -354,7 +354,19 @@ impl SqliteEngineResourceStore {
 
     /// List resources.
     pub fn list(&self, filter: ListResources) -> Result<Vec<EngineResource>> {
-        validate_list_filter(&filter)?;
+        Ok(self
+            .list_page(ListResourcesPageRequest {
+                filter,
+                cursor: None,
+            })?
+            .resources)
+    }
+
+    /// List one deterministic resource page.
+    pub fn list_page(&self, request: ListResourcesPageRequest) -> Result<ListResourcesPage> {
+        validate_list_page_request(&request)?;
+        let filter = &request.filter;
+        let limit = filter.limit.min(500);
         let mut resources = Vec::new();
         let mut stmt = self
             .conn
@@ -363,7 +375,7 @@ impl SqliteEngineResourceStore {
                         owner_actor_id, lifecycle, policy_json, current_version_id, trace_id,
                         created_by_invocation_id, created_at, updated_at
                  FROM engine_resources
-                 ORDER BY updated_at DESC",
+                 ORDER BY updated_at DESC, resource_id DESC",
             )
             .map_err(|err| sqlite_err("resource.list.prepare", err.to_string()))?;
         let rows = stmt
@@ -383,14 +395,26 @@ impl SqliteEngineResourceStore {
                     .lifecycle
                     .as_ref()
                     .is_none_or(|lifecycle| &resource.lifecycle == lifecycle)
+                && request.cursor.as_ref().is_none_or(|cursor| {
+                    resource.updated_at < cursor.updated_at
+                        || (resource.updated_at == cursor.updated_at
+                            && resource.resource_id < cursor.resource_id)
+                })
             {
                 resources.push(resource);
-                if resources.len() >= filter.limit.min(500) {
+                if resources.len() > limit {
                     break;
                 }
             }
         }
-        Ok(resources)
+        let has_more = resources.len() > limit;
+        resources.truncate(limit);
+        let next_cursor = resources.last().map(ResourceListCursor::from_resource);
+        Ok(ListResourcesPage {
+            resources,
+            next_cursor,
+            has_more,
+        })
     }
 
     fn append_version_inner(
