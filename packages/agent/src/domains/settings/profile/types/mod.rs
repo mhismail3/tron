@@ -123,7 +123,7 @@ impl TronSettings {
 
 /// Retry configuration for API calls.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct RetrySettings {
     /// Maximum number of retry attempts.
     pub max_retries: u32,

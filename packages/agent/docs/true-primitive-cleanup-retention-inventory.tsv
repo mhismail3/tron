@@ -84,7 +84,7 @@ packages/agent/src/domains/agent/loop/orchestrator/session_context.rs	implementa
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/orchestrator/session_reconstructor.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
-packages/agent/src/domains/agent/loop/orchestrator/streaming_journal.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
+packages/agent/src/domains/agent/loop/orchestrator/streaming_journal/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/orchestrator/turn_accumulator/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/orchestrator/turn_accumulator/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/pipeline/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
@@ -194,7 +194,7 @@ packages/agent/src/domains/model/providers/google/message_converter.rs	implement
 packages/agent/src/domains/model/providers/google/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/google/provider/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/google/provider/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
-packages/agent/src/domains/model/providers/google/stream_handler.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
+packages/agent/src/domains/model/providers/google/stream_handler/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/google/types/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/google/types/models.rs	implementation	model_provider	TPC-5	provider model registry implementation owned outside broad type DTOs
 packages/agent/src/domains/model/providers/google/types/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
@@ -240,7 +240,7 @@ packages/agent/src/domains/model/providers/shared/mod.rs	implementation	model_pr
 packages/agent/src/domains/model/providers/shared/provider.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/shared/retry.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/shared/sse.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
-packages/agent/src/domains/model/providers/shared/stream_common.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
+packages/agent/src/domains/model/providers/shared/stream_common/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/tokens/errors.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/tokens/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
@@ -1532,3 +1532,28 @@ packages/agent/tests/self_adapting_agent_authorship/scorecard_inventory.rs	test	
 packages/agent/tests/self_adapting_agent_authorship/source_guards.rs	test	test_harness	SAA-2/SAA-9	Self-Adapting Agent Authorship source guard invariant retained for primitive authorship verification.
 packages/agent/tests/self_adapting_agent_authorship/support.rs	test	test_harness	SAA-0	Self-Adapting Agent Authorship invariant support retained for primitive authorship verification.
 packages/agent/tests/self_adapting_agent_authorship_invariants.rs	test	test_harness	SAA-0	Self-Adapting Agent Authorship invariant target retained for primitive authorship verification.
+packages/agent/docs/performance-resource-governance-evidence-manifest.md	docs	docs/static gates	PRG-10	Performance Resource Governance evidence artifact retained after closeout verification.
+packages/agent/docs/performance-resource-governance-inventory.md	docs	docs/static gates	PRG-1	Performance Resource Governance inventory retained after closeout verification.
+packages/agent/docs/performance-resource-governance-inventory.tsv	docs	docs/static gates	PRG-1	Performance Resource Governance machine-readable inventory retained after closeout verification.
+packages/agent/docs/performance-resource-governance-scorecard.md	docs	docs/static gates	PRG-10	Performance Resource Governance scorecard retained after closeout verification.
+packages/agent/tests/performance_resource_governance_invariants.rs	test	test_harness	PRG-0	Performance Resource Governance invariant target retained after closeout verification.
+packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md	docs	docs/static gates	CPE-10	Configuration Profile Environment Discipline evidence artifact retained after closeout verification.
+packages/agent/docs/configuration-profile-environment-discipline-inventory.md	docs	docs/static gates	CPE-1	Configuration Profile Environment Discipline inventory retained after closeout verification.
+packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv	docs	docs/static gates	CPE-1	Configuration Profile Environment Discipline machine-readable inventory retained after closeout verification.
+packages/agent/docs/configuration-profile-environment-discipline-scorecard.md	docs	docs/static gates	CPE-10	Configuration Profile Environment Discipline scorecard retained after closeout verification.
+packages/agent/tests/configuration_profile_environment_discipline_invariants.rs	test	test_harness	CPE-0	Configuration Profile Environment Discipline invariant target retained after closeout verification.
+packages/agent/docs/public-protocol-api-contract-discipline-evidence-manifest.md	docs	docs/static gates	PPACD-9	Public Protocol API Contract Discipline evidence artifact retained after closeout verification.
+packages/agent/docs/public-protocol-api-contract-discipline-inventory.md	docs	docs/static gates	PPACD-9	Public Protocol API Contract Discipline inventory retained after closeout verification.
+packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv	docs	docs/static gates	PPACD-9	Public Protocol API Contract Discipline machine-readable inventory retained after closeout verification.
+packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md	docs	docs/static gates	PPACD-9	Public Protocol API Contract Discipline scorecard retained after closeout verification.
+packages/agent/src/shared/protocol/settings.rs	support	protocol	PPACD-6	Public settings DTO boundary retained after public protocol closeout.
+packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs	test	test_harness	PPACD-9	Public Protocol API Contract Discipline invariant target retained after closeout verification.
+packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md	docs	docs/static gates	PMBD-0	Provider Model Boundary Discipline evidence artifact retained after closeout verification.
+packages/agent/docs/provider-model-boundary-discipline-inventory.md	docs	docs/static gates	PMBD-0	Provider Model Boundary Discipline inventory retained after closeout verification.
+packages/agent/docs/provider-model-boundary-discipline-inventory.tsv	docs	docs/static gates	PMBD-0	Provider Model Boundary Discipline machine-readable inventory retained after closeout verification.
+packages/agent/docs/provider-model-boundary-discipline-scorecard.md	docs	docs/static gates	PMBD-0	Provider Model Boundary Discipline scorecard retained after closeout verification.
+packages/agent/src/shared/foundation/redaction.rs	support	shared_foundation	PMBD-6	Shared redaction primitive retained for provider audit retry failure and log secret safety.
+packages/agent/tests/provider_model_boundary_discipline_invariants.rs	test	test_harness	PMBD-0	Provider Model Boundary Discipline invariant target retained after closeout verification.
+packages/agent/src/domains/agent/loop/orchestrator/streaming_journal/tests.rs	test	test_harness	TPC-10	Streaming journal test submodule retained to keep runtime source files below hard budget.
+packages/agent/src/domains/model/providers/google/stream_handler/tests.rs	test	test_harness	TPC-10	Google stream handler test submodule retained to keep provider source files below hard budget.
+packages/agent/src/domains/model/providers/shared/stream_common/tests.rs	test	test_harness	TPC-10	Shared stream accumulator test submodule retained to keep provider source files below hard budget.

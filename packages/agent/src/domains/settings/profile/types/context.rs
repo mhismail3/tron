@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Container for all context management settings.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ContextSettings {
     /// Context compaction settings.
     pub compactor: CompactorSettings,
@@ -14,7 +14,7 @@ pub struct ContextSettings {
 
 /// Context compaction settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct CompactorSettings {
     /// Maximum token budget for summarized context.
     pub max_tokens: usize,

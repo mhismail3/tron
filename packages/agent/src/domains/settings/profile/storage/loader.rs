@@ -70,7 +70,7 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
         SettingsError::InvalidValue(format!("failed to load settings: {error}"))
     })?;
     settings.validate_strict()?;
-    apply_env_overrides(&mut settings);
+    apply_env_overrides(&mut settings)?;
     settings.validate();
     settings.validate_strict()?;
     Ok(settings)
@@ -166,75 +166,78 @@ pub fn deep_merge(target: Value, source: Value) -> Value {
 
 /// Apply environment variable overrides to loaded settings.
 ///
-/// Each env var has strict parsing rules:
-/// - Integers must be valid and within the specified range
-/// - Booleans accept: `true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off`
-/// - Invalid values are silently ignored (use file/default)
-pub fn apply_env_overrides(settings: &mut TronSettings) {
-    // ── Server settings ─────────────────────────────────────────────
-    if let Some(v) = read_env_string("TRON_DEFAULT_MODEL") {
-        settings.server.default_model = v;
+/// INVARIANT: CPE environment overrides are a closed, typed allowlist. Every
+/// present override is parsed into a temporary snapshot first, so one malformed
+/// `TRON_*` value fails the whole load instead of partially applying higher
+/// precedence settings and silently falling back for the invalid field.
+pub fn apply_env_overrides(settings: &mut TronSettings) -> Result<()> {
+    apply_env_overrides_from(settings, |name| {
+        std::env::var(name).ok().filter(|value| !value.is_empty())
+    })
+}
+
+fn apply_env_overrides_from(
+    settings: &mut TronSettings,
+    read_env: impl Fn(&str) -> Option<String>,
+) -> Result<()> {
+    let mut candidate = settings.clone();
+    if let Some(v) = read_env_string(&read_env, "TRON_DEFAULT_MODEL") {
+        candidate.server.default_model = v;
     }
-    if let Some(v) = read_env_string("TRON_DEFAULT_PROVIDER") {
-        settings.server.default_provider = v;
+    if let Some(v) = read_env_string(&read_env, "TRON_DEFAULT_PROVIDER") {
+        candidate.server.default_provider = v;
     }
-    if let Some(v) = read_env_u64("TRON_HEARTBEAT_INTERVAL", 1000, 600_000) {
-        settings.server.heartbeat_interval_ms = v;
+    if let Some(v) = read_env_u64(
+        &read_env,
+        "TRON_HEARTBEAT_INTERVAL",
+        crate::domains::settings::types::ServerSettings::MIN_HEARTBEAT_INTERVAL_MS,
+        crate::domains::settings::types::ServerSettings::MAX_HEARTBEAT_INTERVAL_MS,
+    )? {
+        candidate.server.heartbeat_interval_ms = v;
     }
-    // ── API settings ────────────────────────────────────────────────
-    if let Some(v) = read_env_string("ANTHROPIC_CLIENT_ID") {
-        settings.api.anthropic.client_id = v;
+    if let Some(v) = read_env_string(&read_env, "ANTHROPIC_CLIENT_ID") {
+        candidate.api.anthropic.client_id = v;
     }
+
+    candidate.validate_strict()?;
+    *settings = candidate;
+    Ok(())
 }
 
 // ── Pure parsing functions (testable without env vars) ──────────────────────
 
-/// Parse a string as a boolean.
-///
-/// Accepts (case-insensitive): `true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off`.
-pub fn parse_bool(val: &str) -> Option<bool> {
-    if val.eq_ignore_ascii_case("true")
-        || val == "1"
-        || val.eq_ignore_ascii_case("yes")
-        || val.eq_ignore_ascii_case("on")
-    {
-        Some(true)
-    } else if val.eq_ignore_ascii_case("false")
-        || val == "0"
-        || val.eq_ignore_ascii_case("no")
-        || val.eq_ignore_ascii_case("off")
-    {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// Parse a string as a `u16` within a range.
-pub fn parse_u16_range(val: &str, min: u16, max: u16) -> Option<u16> {
-    let n: u16 = val.parse().ok()?;
-    (n >= min && n <= max).then_some(n)
-}
-
 /// Parse a string as a `u64` within a range.
-pub fn parse_u64_range(val: &str, min: u64, max: u64) -> Option<u64> {
-    let n: u64 = val.parse().ok()?;
-    (n >= min && n <= max).then_some(n)
+pub fn parse_u64_range(name: &str, val: &str, min: u64, max: u64) -> Result<u64> {
+    let n: u64 = val.parse().map_err(|error| {
+        SettingsError::InvalidValue(format!(
+            "{name} must be an integer between {min} and {max}: {error}"
+        ))
+    })?;
+    if (min..=max).contains(&n) {
+        Ok(n)
+    } else {
+        Err(SettingsError::InvalidValue(format!(
+            "{name} must be between {min} and {max}; got {n}"
+        )))
+    }
 }
 
 // ── Env var readers (thin wrappers) ─────────────────────────────────────────
 
-fn read_env_string(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.is_empty())
+fn read_env_string(read_env: &impl Fn(&str) -> Option<String>, name: &str) -> Option<String> {
+    read_env(name).filter(|v| !v.is_empty())
 }
 
-fn read_env_u64(name: &str, min: u64, max: u64) -> Option<u64> {
-    let val = std::env::var(name).ok()?;
-    let result = parse_u64_range(&val, min, max);
-    if result.is_none() {
-        tracing::warn!(key = name, value = %val, "invalid u64 env var, ignoring");
-    }
-    result
+fn read_env_u64(
+    read_env: &impl Fn(&str) -> Option<String>,
+    name: &str,
+    min: u64,
+    max: u64,
+) -> Result<Option<u64>> {
+    let Some(val) = read_env(name) else {
+        return Ok(None);
+    };
+    parse_u64_range(name, &val, min, max).map(Some)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -637,70 +640,84 @@ jitterFactor = 5.0
         assert!((settings.retry.jitter_factor - 1.0).abs() < f64::EPSILON);
     }
 
-    // ── parse_bool ──────────────────────────────────────────────────
-
-    #[test]
-    fn parse_bool_true_variants() {
-        for val in &["true", "1", "yes", "on", "TRUE", "Yes", "ON"] {
-            assert_eq!(parse_bool(val), Some(true), "failed for {val}");
-        }
-    }
-
-    #[test]
-    fn parse_bool_false_variants() {
-        for val in &["false", "0", "no", "off", "FALSE", "No", "OFF"] {
-            assert_eq!(parse_bool(val), Some(false), "failed for {val}");
-        }
-    }
-
-    #[test]
-    fn parse_bool_invalid() {
-        assert_eq!(parse_bool("maybe"), None);
-        assert_eq!(parse_bool(""), None);
-        assert_eq!(parse_bool("2"), None);
-    }
-
-    // ── parse_u16_range ─────────────────────────────────────────────
-
-    #[test]
-    fn parse_u16_valid() {
-        assert_eq!(parse_u16_range("9090", 1, 65535), Some(9090));
-        assert_eq!(parse_u16_range("1", 1, 65535), Some(1));
-        assert_eq!(parse_u16_range("65535", 1, 65535), Some(65535));
-    }
-
-    #[test]
-    fn parse_u16_out_of_range() {
-        assert_eq!(parse_u16_range("0", 1, 65535), None);
-    }
-
-    #[test]
-    fn parse_u16_invalid() {
-        assert_eq!(parse_u16_range("not_a_number", 1, 65535), None);
-        assert_eq!(parse_u16_range("", 1, 65535), None);
-        assert_eq!(parse_u16_range("99999", 1, 65535), None);
-    }
-
     // ── parse_u64_range ─────────────────────────────────────────────
 
     #[test]
     fn parse_u64_valid() {
-        assert_eq!(parse_u64_range("30000", 1000, 600_000), Some(30_000));
-        assert_eq!(parse_u64_range("1000", 1000, 600_000), Some(1000));
+        assert_eq!(
+            parse_u64_range("TRON_HEARTBEAT_INTERVAL", "30000", 1000, 600_000).unwrap(),
+            30_000
+        );
+        assert_eq!(
+            parse_u64_range("TRON_HEARTBEAT_INTERVAL", "1000", 1000, 600_000).unwrap(),
+            1000
+        );
     }
 
     #[test]
     fn parse_u64_below_min() {
-        assert_eq!(parse_u64_range("500", 1000, 600_000), None);
+        let err = parse_u64_range("TRON_HEARTBEAT_INTERVAL", "500", 1000, 600_000).unwrap_err();
+        assert!(err.to_string().contains("TRON_HEARTBEAT_INTERVAL"));
     }
 
     #[test]
     fn parse_u64_above_max() {
-        assert_eq!(parse_u64_range("700000", 1000, 600_000), None);
+        let err = parse_u64_range("TRON_HEARTBEAT_INTERVAL", "700000", 1000, 600_000).unwrap_err();
+        assert!(err.to_string().contains("600000"));
     }
 
     #[test]
     fn parse_u64_invalid() {
-        assert_eq!(parse_u64_range("abc", 1000, 600_000), None);
+        let err = parse_u64_range("TRON_HEARTBEAT_INTERVAL", "abc", 1000, 600_000).unwrap_err();
+        assert!(err.to_string().contains("integer"));
+    }
+
+    #[test]
+    fn malformed_env_override_fails_without_partial_application() {
+        use crate::domains::settings::types::ServerSettings;
+
+        let mut settings = TronSettings::default();
+        let original = settings.clone();
+        let err = apply_env_overrides_from(&mut settings, |name| match name {
+            "TRON_DEFAULT_MODEL" => Some("env-model".to_string()),
+            "TRON_DEFAULT_PROVIDER" => Some("env-provider".to_string()),
+            "TRON_HEARTBEAT_INTERVAL" => Some("not-a-number".to_string()),
+            "ANTHROPIC_CLIENT_ID" => Some("env-client".to_string()),
+            _ => None,
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("TRON_HEARTBEAT_INTERVAL"));
+        assert_eq!(settings.server.default_model, original.server.default_model);
+        assert_eq!(
+            settings.server.default_provider,
+            original.server.default_provider
+        );
+        assert_eq!(
+            settings.server.heartbeat_interval_ms,
+            ServerSettings::default().heartbeat_interval_ms
+        );
+        assert_eq!(
+            settings.api.anthropic.client_id,
+            original.api.anthropic.client_id
+        );
+    }
+
+    #[test]
+    fn valid_env_overrides_apply_transactionally() {
+        let mut settings = TronSettings::default();
+        apply_env_overrides_from(&mut settings, |name| match name {
+            "TRON_DEFAULT_MODEL" => Some("env-model".to_string()),
+            "TRON_DEFAULT_PROVIDER" => Some("env-provider".to_string()),
+            "TRON_HEARTBEAT_INTERVAL" => Some("45000".to_string()),
+            "ANTHROPIC_CLIENT_ID" => Some("env-client".to_string()),
+            _ => None,
+        })
+        .unwrap();
+
+        assert_eq!(settings.server.default_model, "env-model");
+        assert_eq!(settings.server.default_provider, "env-provider");
+        assert_eq!(settings.server.heartbeat_interval_ms, 45_000);
+        assert_eq!(settings.api.anthropic.client_id, "env-client");
     }
 }

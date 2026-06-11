@@ -98,7 +98,7 @@ packages/agent/src/domains/agent/loop/orchestrator/session_context.rs	retain	rus
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/orchestrator/session_manager/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/orchestrator/session_reconstructor.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/agent/loop/orchestrator/streaming_journal.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/agent/loop/orchestrator/streaming_journal/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/orchestrator/turn_accumulator/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/orchestrator/turn_accumulator/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/pipeline/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -203,7 +203,7 @@ packages/agent/src/domains/model/providers/google/message_converter.rs	retain	ru
 packages/agent/src/domains/model/providers/google/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/google/provider/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/google/provider/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/google/stream_handler.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/model/providers/google/stream_handler/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/google/types/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/google/types/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/kimi/message_converter.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -245,7 +245,7 @@ packages/agent/src/domains/model/providers/shared/mod.rs	retain	rust agent	PCC-1
 packages/agent/src/domains/model/providers/shared/provider.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/shared/retry.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/shared/sse.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/shared/stream_common.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/model/providers/shared/stream_common/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/catalog.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1589,3 +1589,16 @@ packages/agent/docs/provider-model-boundary-discipline-inventory.tsv	retain	pmbd
 packages/agent/docs/provider-model-boundary-discipline-scorecard.md	retain	pmbd docs	PMBD-0	Current Provider Model Boundary Discipline scorecard retained after final closeout.
 packages/agent/src/shared/foundation/redaction.rs	retain	pmbd rust source	PMBD-6	Shared redaction primitive retained for provider audit retry failure and log secret safety.
 packages/agent/tests/provider_model_boundary_discipline_invariants.rs	retain	pmbd rust test	PMBD-0	Current Provider Model Boundary Discipline invariant target retained after final closeout.
+packages/agent/docs/performance-resource-governance-evidence-manifest.md	retain	prg docs	PRG-10	Current Performance Resource Governance evidence manifest retained after final closeout.
+packages/agent/docs/performance-resource-governance-inventory.md	retain	prg docs	PRG-1	Current Performance Resource Governance inventory retained after final closeout.
+packages/agent/docs/performance-resource-governance-inventory.tsv	retain	prg docs	PRG-1	Current Performance Resource Governance machine-readable inventory retained after final closeout.
+packages/agent/docs/performance-resource-governance-scorecard.md	retain	prg docs	PRG-10	Current Performance Resource Governance scorecard retained after final closeout.
+packages/agent/tests/performance_resource_governance_invariants.rs	retain	prg rust test	PRG-0	Current Performance Resource Governance invariant target retained after final closeout.
+packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md	retain	cpe docs	CPE-10	Current Configuration Profile Environment Discipline evidence manifest retained after final closeout.
+packages/agent/docs/configuration-profile-environment-discipline-inventory.md	retain	cpe docs	CPE-1	Current Configuration Profile Environment Discipline inventory retained after final closeout.
+packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv	retain	cpe docs	CPE-1	Current Configuration Profile Environment Discipline machine-readable inventory retained after final closeout.
+packages/agent/docs/configuration-profile-environment-discipline-scorecard.md	retain	cpe docs	CPE-10	Current Configuration Profile Environment Discipline scorecard retained after final closeout.
+packages/agent/tests/configuration_profile_environment_discipline_invariants.rs	retain	cpe rust test	CPE-0	Current Configuration Profile Environment Discipline invariant target retained after final closeout.
+packages/agent/src/domains/agent/loop/orchestrator/streaming_journal/tests.rs	retain	agent runtime test	TPC-10	Streaming journal tests split into a tracked submodule to preserve hard file budgets.
+packages/agent/src/domains/model/providers/google/stream_handler/tests.rs	retain	model provider test	TPC-10	Google stream handler tests split into a tracked submodule to preserve hard file budgets.
+packages/agent/src/domains/model/providers/shared/stream_common/tests.rs	retain	model provider test	TPC-10	Shared stream accumulator tests split into a tracked submodule to preserve hard file budgets.

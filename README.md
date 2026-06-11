@@ -369,6 +369,19 @@ Current living entry points:
   PRG guard for artifact wiring, inventory coverage, provider/agent stream
   bounds, journal limits, `/engine` slow-consumer closure, log/read retention
   ceilings, predecessor target preservation, and successor cleanup invariants.
+- `packages/agent/docs/configuration-profile-environment-discipline-scorecard.md`,
+  `packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md`,
+  `packages/agent/docs/configuration-profile-environment-discipline-inventory.md`, and
+  `packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv`:
+  active Configuration / Profile / Environment Discipline artifacts covering
+  canonical settings schemas, managed profile defaults, sparse user overrides,
+  fail-closed environment overrides, malformed config rejection, README/profile
+  drift, and iOS public settings parity.
+- `packages/agent/tests/configuration_profile_environment_discipline_invariants.rs`:
+  CPE guard for artifact wiring, scorecard/evidence closure, inventory shape,
+  local/CI gate wiring, HRA ownership rows, strict settings decode, transactional
+  env overrides, default-profile drift, README settings docs, and Rust/Swift
+  public settings parity.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -942,7 +955,9 @@ Settings are loaded from three layers (highest priority last):
 
 1. **Active profile settings** (`[settings]` in the resolved `profiles/<name>/profile.toml` chain)
 2. **User overlay** (`~/.tron/profiles/user/profile.toml` `[settings]`, deep-merged over the active profile)
-3. **Environment variables** (`TRON_*` overrides)
+3. **Environment variables** (closed allowlist overrides:
+   `TRON_DEFAULT_MODEL`, `TRON_DEFAULT_PROVIDER`, `TRON_HEARTBEAT_INTERVAL`,
+   and `ANTHROPIC_CLIENT_ID`)
 
 Settings are server-authoritative. Engine-native clients read a versioned public
 settings snapshot by invoking `settings::get` and write sparse public overrides
@@ -957,7 +972,7 @@ validated, written atomically, and then swapped into the cached
 rejects the result, the sparse overlay is rolled back and the last valid runtime
 snapshot remains active.
 
-The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If a managed profile default is missing, corrupt, or stale against the current strict profile schema, startup restores it from compiled defaults; malformed user settings fail fast. iOS device-only preferences live in iOS storage/Keychain, not in the server settings profile.
+The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If a managed profile default is missing, corrupt, or stale against the current strict profile schema, startup restores it from compiled defaults; malformed user settings fail fast. Unknown settings keys fail during strict schema decode instead of being tolerated as inert residue. Environment overrides are parsed transactionally after profile merge: one malformed higher-priority value fails the load rather than applying some env values and silently falling back for the invalid one. iOS device-only preferences live in iOS storage/Keychain, not in the server settings profile.
 
 The schema is defined in `packages/agent/src/domains/settings/profile/types/`. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
 

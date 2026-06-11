@@ -266,7 +266,7 @@ fn prg_inventory_has_expected_header_and_resource_rows() {
         "PRG-INV-007\tpackages/agent/src/domains/model/providers/kimi/stream_handler/mod.rs\tkimi_stream_handler",
         "PRG-INV-008\tpackages/agent/src/domains/model/providers/ollama/provider.rs\tollama_ndjson_parser",
         "PRG-INV-011\tpackages/agent/src/domains/agent/loop/stream_state.rs\tagent_stream_state",
-        "PRG-INV-012\tpackages/agent/src/domains/agent/loop/orchestrator/streaming_journal.rs\tstreaming_journal",
+        "PRG-INV-012\tpackages/agent/src/domains/agent/loop/orchestrator/streaming_journal/mod.rs\tstreaming_journal",
         "PRG-INV-015\tpackages/agent/src/transport/engine/socket/outbound.rs\tengine_ws_outbound",
         "PRG-INV-019\tscripts/tron-lib.d/logs.sh\tcli_logs_reader",
         "PRG-INV-030\tpackages/agent/tests/performance_resource_governance_invariants.rs\tprg_static_harness",
@@ -303,7 +303,7 @@ fn provider_stream_memory_limits_are_source_guarded() {
         assert_contains_all(path, &["max_line_bytes", "DEFAULT_MAX_SSE_LINE_BYTES"]);
     }
     assert_contains_all(
-        "packages/agent/src/domains/model/providers/shared/stream_common.rs",
+        "packages/agent/src/domains/model/providers/shared/stream_common/mod.rs",
         &[
             "MAX_PROVIDER_STREAM_TEXT_BYTES",
             "MAX_PROVIDER_STREAM_THINKING_BYTES",
@@ -335,7 +335,7 @@ fn provider_stream_memory_limits_are_source_guarded() {
         ],
     );
     assert_contains_all(
-        "packages/agent/src/domains/model/providers/google/stream_handler.rs",
+        "packages/agent/src/domains/model/providers/google/stream_handler/mod.rs",
         &[
             "MAX_PROVIDER_STREAM_TOOL_INVOCATIONS",
             "MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES",
@@ -387,7 +387,7 @@ fn agent_journal_and_engine_backpressure_limits_are_source_guarded() {
         ],
     );
     assert_contains_all(
-        "packages/agent/src/domains/agent/loop/orchestrator/streaming_journal.rs",
+        "packages/agent/src/domains/agent/loop/orchestrator/streaming_journal/mod.rs",
         &[
             "MAX_STREAMING_JOURNAL_BYTES",
             "ensure_journal_size_budget",
