@@ -2,11 +2,10 @@
 //!
 //! Each model-launched primitive call first derives a non-delegable child grant
 //! from `agent-capability-runtime` with the current canonical working directory
-//! as its only file root, `networkPolicy none`, no namespace authority, the
-//! exact target function being invoked, and only the nested state/resource
-//! primitives required by the selected `capability::execute` operation. The
-//! derived grant id, not the bootstrap runtime grant, is then placed in the
-//! engine causal context for `capability::execute`.
+//! as its only file root, `networkPolicy none`, no namespace authority, and the
+//! exact target function being invoked. The derived grant id, not the bootstrap
+//! runtime grant, is then placed in the engine causal context for
+//! `capability::execute`.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicI64;
@@ -456,7 +455,6 @@ async fn execute_capability_primitive_via_engine(
         &actor_id,
         &function_id,
         &target.function.required_authority.scopes,
-        &effective_args,
         session_id,
         workspace_id,
         &working_directory,

@@ -4,27 +4,15 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `external_workers` | Loopback external-worker lifecycle, governed activation binding, registration, invocation proxying, and health. |
+//! | `external_workers` | Loopback external-worker lifecycle, registration, invocation proxying, and health. |
 //! | `triggers` | Trigger dispatch runtime, cascade bounds, and trigger metadata recording. |
-//! | `worker_activation_bundle_vault` | Process-memory custody for one-shot activation bundle stdin handoff. |
-//! | `worker_orchestration` | Governed direct-exec process supervision for already issued worker activations and trigger-created reviewed autostart launch. |
-//! | `worker_schedule` | Reviewed UTC fixed-interval schedule dispatch into `trigger::dispatch` enqueue delivery. |
 //! | `worker_protocol` | `/engine/workers` protocol DTOs and scoped worker token model. |
 //!
 //! ## Entry Points
 //!
 //! `EngineExternalWorkerRuntime` manages connected local workers.
 //! `EngineTriggerRuntime` dispatches registered triggers through the engine
-//! host. Activation tokens bind reviewed capability-definition governance to a
-//! volatile worker connection. Activation bundles may be held only in the
-//! in-memory vault until a reviewed launch consumes them into child stdin.
-//! Worker orchestration may start a reviewed local process for an already issued
-//! activation, or compose trusted trigger dispatch into a fresh activation plus
-//! reviewed stdin launch through `worker::launch_from_trigger`. Readiness still
-//! comes only from the external-worker hello/register path. Worker schedules
-//! create auditable ticks and enqueue trusted trigger dispatch; they never issue
-//! activation bundles or start processes directly. Protocol DTOs are consumed
-//! by transport runtime code.
+//! host. Protocol DTOs are consumed by transport runtime code.
 //!
 //! ## Dependency Direction
 //!
@@ -38,19 +26,6 @@
 //! - Visible external workers must bind session/workspace scope in the scoped
 //!   token, present an active grant at the token revision, and keep namespace,
 //!   trigger, stream, and result ownership inside the accepted connection.
-//! - Governed activation workers must match the activation resource, token
-//!   fingerprint, governance fingerprint, expected function, exact namespace,
-//!   volatile mode, and session/workspace scope before registration.
-//! - Orchestrated workers use direct executable invocation only, have no
-//!   scheduler/restart ownership, and record redacted `worker_process` audit
-//!   resources before any readiness is trusted.
-//! - Activation bundles are never durable runtime state; the vault is
-//!   process-memory only, TTL-bound, and one-shot.
-//! - Trigger-created launches require reviewed autostart and launch plans,
-//!   target idempotency, no restart policy, and `stdin_activation_bundle_v1`.
-//! - Schedule-created ticks require reviewed schedule plans, UTC fixed intervals,
-//!   enqueue-only trigger delivery, deterministic tick and target idempotency,
-//!   one active tick per schedule, and no durable activation/stdin payload state.
 //! - Disconnected durable workers remain catalog truth but fail closed as
 //!   unhealthy until reconnect.
 //! - Trigger cascades carry explicit depth/path budgets.
@@ -62,7 +37,4 @@
 
 pub mod external_workers;
 pub mod triggers;
-pub mod worker_activation_bundle_vault;
-pub mod worker_orchestration;
 pub mod worker_protocol;
-pub mod worker_schedule;

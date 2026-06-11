@@ -78,41 +78,6 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             .update(request)
     }
 
-    fn derive_authority_grant(
-        &mut self,
-        request: crate::engine::authority::grants::DeriveGrant,
-    ) -> Result<crate::engine::authority::grants::EngineGrant> {
-        self.primitives
-            .grants
-            .lock()
-            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
-            .derive(request)
-    }
-
-    fn store_worker_activation_bundle(
-        &mut self,
-        request: primitives::runtime::StoreWorkerActivationBundle,
-    ) -> Result<
-        crate::engine::runtime::worker_activation_bundle_vault::WorkerActivationBundleMetadata,
-    > {
-        self.primitives
-            .worker_activation_bundles
-            .lock()
-            .map_err(|_| {
-                EngineError::HandlerFailed("activation bundle vault lock poisoned".to_owned())
-            })?
-            .store(
-                request.activation_resource_id,
-                request.worker_id,
-                request.function_id,
-                request.expires_at,
-                request.token_fingerprint,
-                &request.activation_bundle,
-                request.issued_trace_id,
-                request.issued_invocation_id,
-            )
-    }
-
     fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport> {
         self.storage_runtime()?.stats().map_err(storage_error)
     }

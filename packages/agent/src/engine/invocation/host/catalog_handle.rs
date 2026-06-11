@@ -237,4 +237,19 @@ impl EngineHostHandle {
     pub async fn catalog_revision(&self) -> CatalogRevision {
         self.inner.lock().await.catalog.revision()
     }
+
+    /// Promote function visibility through the host boundary.
+    pub async fn promote_function_visibility(
+        &self,
+        id: &FunctionId,
+        owner: &WorkerId,
+        target: VisibilityScope,
+        workspace_id: Option<String>,
+    ) -> Result<FunctionRevision> {
+        self.inner
+            .lock()
+            .await
+            .catalog
+            .promote_function_visibility(id, owner, target, workspace_id)
+    }
 }

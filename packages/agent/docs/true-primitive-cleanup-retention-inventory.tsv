@@ -398,7 +398,6 @@ packages/agent/src/engine/durability/queue/mod.rs	primitive	engine	TPC-2	primiti
 packages/agent/src/engine/durability/queue/runtime.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/queue/sqlite_codec.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/queue/sqlite_store.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
-packages/agent/src/engine/durability/resources/agent_record_definitions.rs	primitive	engine	SAAWSD-11	Primitive engine retained agent record schema helper split for file-budget compliance.
 packages/agent/src/engine/durability/resources/definitions.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/resources/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/resources/store/memory.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
@@ -1502,88 +1501,34 @@ packages/agent/tests/security_authority_capability_boundaries/scorecard_inventor
 packages/agent/tests/security_authority_capability_boundaries/static_guards.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries static guard invariant retained for active campaign verification.
 packages/agent/tests/security_authority_capability_boundaries/support.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries invariant test support retained for active campaign verification.
 packages/agent/tests/security_authority_capability_boundaries_invariants.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries invariant target retained for active campaign verification.
-packages/agent/docs/observability-diagnostics-auditability-evidence-manifest.md	docs	docs/static gates	ODA-10	Observability Diagnostics Auditability evidence manifest retained after final closeout.
-packages/agent/docs/observability-diagnostics-auditability-inventory.md	docs	docs/static gates	ODA-10	Observability Diagnostics Auditability inventory retained after final closeout.
-packages/agent/docs/observability-diagnostics-auditability-inventory.tsv	docs	docs/static gates	ODA-10	Observability Diagnostics Auditability machine-readable inventory retained after final closeout.
-packages/agent/docs/observability-diagnostics-auditability-scorecard.md	docs	docs/static gates	ODA-10	Observability Diagnostics Auditability scorecard retained after final closeout.
-packages/agent/tests/observability_diagnostics_auditability/mod.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability invariant module registry retained after final closeout.
-packages/agent/tests/observability_diagnostics_auditability/scorecard_inventory.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability scorecard/inventory invariant retained after final closeout.
-packages/agent/tests/observability_diagnostics_auditability/source_guards.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability source guard invariant retained after final closeout.
-packages/agent/tests/observability_diagnostics_auditability/support.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability invariant test support retained after final closeout.
-packages/agent/tests/observability_diagnostics_auditability_invariants.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability invariant target retained after final closeout.
-packages/agent/docs/self-adapting-agent-authorship-evidence-manifest.md	docs	docs/static gates	SAA-10	Self-Adapting Agent Authorship evidence manifest retained after final closeout.
-packages/agent/docs/self-adapting-agent-authorship-inventory.md	docs	docs/static gates	SAA-10	Self-Adapting Agent Authorship inventory retained after final closeout.
-packages/agent/docs/self-adapting-agent-authorship-inventory.tsv	docs	docs/static gates	SAA-10	Self-Adapting Agent Authorship machine-readable inventory retained after final closeout.
-packages/agent/docs/self-adapting-agent-authorship-scorecard.md	docs	docs/static gates	SAA-10	Self-Adapting Agent Authorship scorecard retained after final closeout.
-packages/agent/src/domains/capability/operations/resource.rs	implementation	capability_execute	SAA-2	Resource operation adapter retained for self-adapting resource authorship through execute.
-packages/agent/src/engine/authority/grants/policy_hash.rs	support	engine	SACB-POST-1	Authority grant policy hash support retained for scoped worker token grant binding.
-packages/agent/tests/self_adapting_agent_authorship/mod.rs	test	test_harness	SAA-10	Self-Adapting Agent Authorship invariant module registry retained after final closeout.
-packages/agent/tests/self_adapting_agent_authorship/resource_fixtures.rs	test	test_harness	SAA-10	Self-Adapting Agent Authorship resource fixture invariant retained after final closeout.
-packages/agent/tests/self_adapting_agent_authorship/scorecard_inventory.rs	test	test_harness	SAA-10	Self-Adapting Agent Authorship scorecard/inventory invariant retained after final closeout.
-packages/agent/tests/self_adapting_agent_authorship/source_guards.rs	test	test_harness	SAA-10	Self-Adapting Agent Authorship source guard invariant retained after final closeout.
-packages/agent/tests/self_adapting_agent_authorship/support.rs	test	test_harness	SAA-10	Self-Adapting Agent Authorship invariant test support retained after final closeout.
-packages/agent/tests/self_adapting_agent_authorship_invariants.rs	test	test_harness	SAA-10	Self-Adapting Agent Authorship invariant target retained after final closeout.
-packages/agent/docs/self-adapting-agent-promotion-governance-evidence-manifest.md	docs	docs/static gates	SAPG-10	Self-Adapting Agent Promotion Governance evidence manifest retained after final closeout.
-packages/agent/docs/self-adapting-agent-promotion-governance-scorecard.md	docs	docs/static gates	SAPG-10	Self-Adapting Agent Promotion Governance scorecard retained after final closeout.
-packages/agent/src/engine/invocation/host/promotion_governance.rs	implementation	engine	SAPG-3	Promotion governance validator retained for accepted decision and evidence-chain checks.
-packages/agent/src/engine/tests/invocation/promotion_governance.rs	test	test_harness	SAPG-4	Promotion governance invocation tests retained after final closeout.
-packages/agent/src/engine/tests/invocation/promotion_governance_support.rs	test	test_harness	SAPG-4	Promotion governance fixture support retained after final closeout.
-packages/agent/tests/self_adapting_agent_promotion_governance_invariants.rs	test	test_harness	SAPG-10	Self-Adapting Agent Promotion Governance invariant target retained after final closeout.
-packages/agent/docs/self-adapting-agent-worker-activation-evidence-manifest.md	docs	docs/static gates	SAAWA-10	Self-Adapting Agent Worker Activation evidence manifest retained after final closeout.
-packages/agent/docs/self-adapting-agent-worker-activation-inventory.md	docs	docs/static gates	SAAWA-1	Self-Adapting Agent Worker Activation inventory retained after final closeout.
-packages/agent/docs/self-adapting-agent-worker-activation-inventory.tsv	docs	docs/static gates	SAAWA-1	Self-Adapting Agent Worker Activation machine-readable inventory retained after final closeout.
-packages/agent/docs/self-adapting-agent-worker-activation-scorecard.md	docs	docs/static gates	SAAWA-10	Self-Adapting Agent Worker Activation scorecard retained after final closeout.
-packages/agent/src/engine/primitives/worker_activation.rs	primitive	engine	SAAWA-4	Worker activation issue primitive retained for governed activation bundle issuance.
-packages/agent/src/engine/primitives/worker_activation_governance.rs	implementation	engine	SAAWA-3	Worker activation governance validator retained for decision/evidence/candidate linkage.
-packages/agent/src/engine/runtime/external_workers/activation.rs	implementation	engine	SAAWA-5	External-worker activation binding retained for hello, registration, lifecycle, and revocation checks.
-packages/agent/src/engine/tests/invocation/worker_activation.rs	test	test_harness	SAAWA-4	Worker activation invocation tests retained after final closeout.
-packages/agent/src/engine/tests/runtime/worker_activation.rs	test	test_harness	SAAWA-5	Worker activation runtime tests retained after final closeout.
-packages/agent/tests/self_adapting_agent_worker_activation_invariants.rs	test	test_harness	SAAWA-10	Self-Adapting Agent Worker Activation invariant target retained after final closeout.
-packages/agent/src/engine/tests/fixtures/worker_activation.rs	test	test_harness	SAAWA-10	Worker activation fixture support retained after final closeout file-budget split.
-packages/agent/tests/security_authority_capability_boundaries/lifecycle_guards.rs	test	test_harness	SACB-10	SACB lifecycle and internal-invoke static guards retained after file-budget split.
-packages/agent/docs/self-adapting-agent-worker-orchestration-scorecard.md	docs	docs/static gates	SAAWO-0	Worker orchestration scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-orchestration-evidence-manifest.md	docs	docs/static gates	SAAWO-0	Worker orchestration evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.md	docs	docs/static gates	SAAWO-1	Worker orchestration inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.tsv	docs	docs/static gates	SAAWO-1	Worker orchestration machine-readable inventory retained for static gates.
-packages/agent/tests/self_adapting_agent_worker_orchestration_invariants.rs	test	test_harness	SAAWO-10	Worker orchestration invariant target retained for closeout verification.
-packages/agent/src/engine/runtime/worker_orchestration/mod.rs	implementation	engine	SAAWO-6	Worker orchestration facade retained as the launch, stop, and readiness callback owner.
-packages/agent/src/engine/runtime/worker_orchestration/contracts.rs	implementation	engine	SAAWO-2	Launch plan and activation request contract validation retained in the split orchestration module.
-packages/agent/src/engine/runtime/worker_orchestration/process_resource.rs	implementation	engine	SAAWO-3	Worker process payload, redaction, and readiness matching retained in the split orchestration module.
-packages/agent/src/engine/runtime/worker_orchestration/supervisor.rs	implementation	engine	SAAWO-6	Direct-exec worker process supervisor retained as the process boundary owner.
-packages/agent/src/engine/tests/runtime/worker_orchestration.rs	test	test_harness	SAAWO-7	Worker orchestration runtime tests retained for fake supervisor and readiness binding coverage.
-packages/agent/docs/self-adapting-agent-worker-bundle-handoff-scorecard.md	docs	docs/static gates	SAAWBH-0	Worker bundle handoff scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-bundle-handoff-evidence-manifest.md	docs	docs/static gates	SAAWBH-0	Worker bundle handoff evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.md	docs	docs/static gates	SAAWBH-1	Worker bundle handoff inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.tsv	docs	docs/static gates	SAAWBH-1	Worker bundle handoff machine-readable inventory retained for static gates.
-packages/agent/tests/self_adapting_agent_worker_bundle_handoff_invariants.rs	test	test_harness	SAAWBH-10	Worker bundle handoff invariant target retained for closeout verification.
-packages/agent/src/engine/runtime/worker_activation_bundle_vault.rs	implementation	engine	SAAWBH-3	Process-memory activation bundle vault retained as the ephemeral custody boundary.
-packages/agent/docs/self-adapting-agent-worker-trigger-launch-scorecard.md	docs	docs/static gates	SAAWTL-0	Worker trigger launch scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-trigger-launch-evidence-manifest.md	docs	docs/static gates	SAAWTL-0	Worker trigger launch evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.md	docs	docs/static gates	SAAWTL-1	Worker trigger launch inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.tsv	docs	docs/static gates	SAAWTL-1	Worker trigger launch machine-readable inventory retained for static gates.
-packages/agent/tests/self_adapting_agent_worker_trigger_launch_invariants.rs	test	test_harness	SAAWTL-0	Worker trigger launch invariant target retained for closeout verification.
-packages/agent/src/engine/runtime/worker_orchestration/trigger_launch.rs	implementation	engine	SAAWTL-4	Trigger-created worker launch runtime retained as the trusted SAAWTL composition path.
-packages/agent/src/engine/tests/runtime/worker_trigger_launch.rs	test	test_harness	SAAWTL-5	Worker trigger launch runtime tests retained for enqueue drain and idempotency coverage.
-packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-scorecard.md	docs	docs/static gates	SAAWSD-0	Worker schedule dispatch scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-evidence-manifest.md	docs	docs/static gates	SAAWSD-0	Worker schedule dispatch evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.md	docs	docs/static gates	SAAWSD-1	Worker schedule dispatch inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.tsv	docs	docs/static gates	SAAWSD-1	Worker schedule dispatch machine-readable inventory retained for static gates.
-packages/agent/src/engine/durability/resources/worker_schedule_definitions.rs	support	engine	SAAWSD-2	Worker schedule plan and tick resource schema helper retained for governed schedule dispatch.
-packages/agent/src/engine/runtime/worker_schedule/mod.rs	implementation	engine	SAAWSD-3	Worker schedule runtime retained for due tick calculation, lease ownership, and trigger dispatch composition.
-packages/agent/src/engine/runtime/worker_schedule/contracts.rs	implementation	engine	SAAWSD-2	Worker schedule contract parser retained for UTC interval, fixed policy, and safe tick payload validation.
-packages/agent/src/engine/runtime/worker_schedule/tick_dispatch.rs	implementation	engine	SAASTC-3	Worker schedule trigger enqueue and tick mutation helper retained after source teardown split.
-packages/agent/src/engine/runtime/worker_schedule/overlap.rs	implementation	engine	SAAWSD-6	Worker schedule overlap evidence helper retained for one-active-tick replay and process-state checks.
-packages/agent/src/engine/tests/runtime/worker_schedule_dispatch.rs	test	test_harness	SAAWSD-11	Worker schedule dispatch runtime tests retained for due, replay, missed, overlap, and negative validation coverage.
-packages/agent/src/engine/tests/runtime/worker_schedule_dispatch_support.rs	test	test_harness	SAAWSD-11	Worker schedule dispatch test support retained for synthetic launch and resource fixtures.
-packages/agent/tests/self_adapting_agent_worker_schedule_dispatch_invariants.rs	test	test_harness	SAAWSD-11	Worker schedule dispatch invariant target retained for closeout static gates.
-packages/agent/docs/self-adapting-agent-worker-schedule-capacity-scorecard.md	docs	docs	SAAWSC-0	Worker schedule capacity scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-schedule-capacity-evidence-manifest.md	docs	docs	SAAWSC-0	Worker schedule capacity evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.md	docs	docs	SAAWSC-1	Worker schedule capacity inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.tsv	docs	docs	SAAWSC-1	Worker schedule capacity machine-readable inventory retained for static gates.
-packages/agent/src/engine/runtime/worker_schedule/scan_state.rs	implementation	engine	SAAWSC-4	Worker schedule scan-state helper retained for explicit bounded schedule scans.
-packages/agent/tests/self_adapting_agent_worker_schedule_capacity_invariants.rs	test	test_harness	SAAWSC-11	Worker schedule capacity invariant target retained for closeout static gates.
-packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-scorecard.md	docs	docs	SAASTC-0	Successor teardown cleanup scorecard retained as active cleanup control.
-packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-evidence-manifest.md	docs	docs	SAASTC-0	Successor teardown cleanup evidence manifest retained for cleanup provenance.
-packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.md	docs	docs	SAASTC-1	Successor teardown cleanup inventory summary retained for diff classification.
-packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.tsv	docs	docs	SAASTC-1	Successor teardown cleanup machine inventory retained for static gates.
-packages/agent/tests/self_adapting_agent_successor_teardown_cleanup_invariants.rs	test	test_harness	SAASTC-0	Successor teardown cleanup invariant target retained for cleanup static gates.
+packages/agent/docs/data-integrity-storage-evolution-migration-discipline-evidence-manifest.md	docs	docs/static gates	DISEMD-0	Data Integrity Storage Evolution Migration Discipline evidence artifact retained for closeout verification.
+packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md	docs	docs/static gates	DISEMD-0	Data Integrity Storage Evolution Migration Discipline inventory retained for closeout verification.
+packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv	docs	docs/static gates	DISEMD-0	Data Integrity Storage Evolution Migration Discipline machine-readable inventory retained for closeout verification.
+packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md	docs	docs/static gates	DISEMD-0	Data Integrity Storage Evolution Migration Discipline scorecard retained for closeout verification.
+packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs	test	test_harness	DISEMD-0	Data Integrity Storage Evolution Migration Discipline invariant target retained for closeout verification.
+packages/agent/docs/off-plan-successor-teardown-cleanup-evidence-manifest.md	docs	docs/static gates	OPSTC-0	Off-Plan Successor Teardown Cleanup evidence artifact retained for closeout verification.
+packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.md	docs	docs/static gates	OPSTC-0	Off-Plan Successor Teardown Cleanup inventory retained for closeout verification.
+packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.tsv	docs	docs/static gates	OPSTC-0	Off-Plan Successor Teardown Cleanup machine-readable inventory retained for closeout verification.
+packages/agent/docs/off-plan-successor-teardown-cleanup-scorecard.md	docs	docs/static gates	OPSTC-0	Off-Plan Successor Teardown Cleanup scorecard retained for closeout verification.
+packages/agent/tests/off_plan_successor_teardown_cleanup_invariants.rs	test	test_harness	OPSTC-0	Off-Plan Successor Teardown Cleanup invariant target retained for closeout verification.
+packages/agent/docs/observability-diagnostics-auditability-evidence-manifest.md	docs	docs/static gates	ODA-10	Observability Diagnostics Auditability evidence artifact retained after closeout verification.
+packages/agent/docs/observability-diagnostics-auditability-inventory.md	docs	docs/static gates	ODA-10	Observability Diagnostics Auditability inventory retained after closeout verification.
+packages/agent/docs/observability-diagnostics-auditability-inventory.tsv	docs	docs/static gates	ODA-10	Observability Diagnostics Auditability machine-readable inventory retained after closeout verification.
+packages/agent/docs/observability-diagnostics-auditability-scorecard.md	docs	docs/static gates	ODA-10	Observability Diagnostics Auditability scorecard retained after closeout verification.
+packages/agent/docs/self-adapting-agent-authorship-evidence-manifest.md	docs	docs/static gates	SAA-10	Self-Adapting Agent Authorship evidence artifact retained for primitive authorship verification.
+packages/agent/docs/self-adapting-agent-authorship-inventory.md	docs	docs/static gates	SAA-10	Self-Adapting Agent Authorship inventory retained for primitive authorship verification.
+packages/agent/docs/self-adapting-agent-authorship-inventory.tsv	docs	docs/static gates	SAA-10	Self-Adapting Agent Authorship machine-readable inventory retained for primitive authorship verification.
+packages/agent/docs/self-adapting-agent-authorship-scorecard.md	docs	docs/static gates	SAA-10	Self-Adapting Agent Authorship scorecard retained for primitive authorship verification.
+packages/agent/src/domains/capability/operations/resource.rs	implementation	capability	SAA-2	Capability resource operation adapter retained for primitive self-authorship through execute-owned resource operations.
+packages/agent/src/engine/authority/grants/policy_hash.rs	support	engine	SACB-4	Grant policy hash helper retained as authority-boundary support for scoped worker and grant verification.
+packages/agent/tests/observability_diagnostics_auditability/mod.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability invariant module retained after closeout verification.
+packages/agent/tests/observability_diagnostics_auditability/scorecard_inventory.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability scorecard and inventory invariant retained after closeout verification.
+packages/agent/tests/observability_diagnostics_auditability/source_guards.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability source guard invariant retained after closeout verification.
+packages/agent/tests/observability_diagnostics_auditability/support.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability invariant support retained after closeout verification.
+packages/agent/tests/observability_diagnostics_auditability_invariants.rs	test	test_harness	ODA-10	Observability Diagnostics Auditability invariant target retained after closeout verification.
+packages/agent/tests/self_adapting_agent_authorship/mod.rs	test	test_harness	SAA-0	Self-Adapting Agent Authorship invariant module retained for primitive authorship verification.
+packages/agent/tests/self_adapting_agent_authorship/resource_fixtures.rs	test	test_harness	SAA-3/SAA-6	Self-Adapting Agent Authorship resource fixture invariant retained for primitive authorship verification.
+packages/agent/tests/self_adapting_agent_authorship/scorecard_inventory.rs	test	test_harness	SAA-0/SAA-1	Self-Adapting Agent Authorship scorecard and inventory invariant retained for primitive authorship verification.
+packages/agent/tests/self_adapting_agent_authorship/source_guards.rs	test	test_harness	SAA-2/SAA-9	Self-Adapting Agent Authorship source guard invariant retained for primitive authorship verification.
+packages/agent/tests/self_adapting_agent_authorship/support.rs	test	test_harness	SAA-0	Self-Adapting Agent Authorship invariant support retained for primitive authorship verification.
+packages/agent/tests/self_adapting_agent_authorship_invariants.rs	test	test_harness	SAA-0	Self-Adapting Agent Authorship invariant target retained for primitive authorship verification.

@@ -7,7 +7,7 @@ use super::super::definitions::type_definition_from_request;
 use super::super::types::*;
 use super::super::validation::{
     ensure_lifecycle, ensure_relation, validate_create_request, validate_link_request,
-    validate_list_page_request, validate_resource_payload, validate_token, validate_type_request,
+    validate_list_filter, validate_resource_payload, validate_token, validate_type_request,
     validate_update_request,
 };
 use super::super::versions::payload_hash;
@@ -59,6 +59,11 @@ impl InMemoryEngineResourceStore {
     pub fn get_type(&self, kind: &str) -> Result<Option<EngineResourceTypeDefinition>> {
         validate_token("resource kind", kind)?;
         Ok(self.type_definitions.get(kind).cloned())
+    }
+
+    /// List registered resource type definitions.
+    pub fn list_types(&self) -> Result<Vec<EngineResourceTypeDefinition>> {
+        Ok(self.type_definitions.values().cloned().collect())
     }
 
     /// Create a resource.
@@ -232,19 +237,7 @@ impl InMemoryEngineResourceStore {
 
     /// List resources.
     pub fn list(&self, filter: ListResources) -> Result<Vec<EngineResource>> {
-        Ok(self
-            .list_page(ListResourcesPageRequest {
-                filter,
-                cursor: None,
-            })?
-            .resources)
-    }
-
-    /// List one deterministic resource page.
-    pub fn list_page(&self, request: ListResourcesPageRequest) -> Result<ListResourcesPage> {
-        validate_list_page_request(&request)?;
-        let filter = &request.filter;
-        let limit = filter.limit.min(500);
+        validate_list_filter(&filter)?;
         let mut resources = self
             .resources
             .values()
@@ -264,27 +257,10 @@ impl InMemoryEngineResourceStore {
             })
             .cloned()
             .collect::<Vec<_>>();
-        resources.sort_by(|left, right| {
-            right
-                .updated_at
-                .cmp(&left.updated_at)
-                .then_with(|| right.resource_id.cmp(&left.resource_id))
-        });
-        if let Some(cursor) = &request.cursor {
-            resources.retain(|resource| {
-                resource.updated_at < cursor.updated_at
-                    || (resource.updated_at == cursor.updated_at
-                        && resource.resource_id < cursor.resource_id)
-            });
-        }
-        let has_more = resources.len() > limit;
-        resources.truncate(limit);
-        let next_cursor = resources.last().map(ResourceListCursor::from_resource);
-        Ok(ListResourcesPage {
-            resources,
-            next_cursor,
-            has_more,
-        })
+        resources.sort_by_key(|resource| resource.updated_at);
+        resources.reverse();
+        resources.truncate(filter.limit.min(500));
+        Ok(resources)
     }
 
     fn append_version_inner(

@@ -39,15 +39,8 @@ run_tests() {
         security_authority_capability_boundaries_invariants
         observability_diagnostics_auditability_invariants
         data_integrity_storage_evolution_migration_discipline_invariants
+        off_plan_successor_teardown_cleanup_invariants
         self_adapting_agent_authorship_invariants
-        self_adapting_agent_promotion_governance_invariants
-        self_adapting_agent_worker_activation_invariants
-        self_adapting_agent_worker_orchestration_invariants
-        self_adapting_agent_worker_bundle_handoff_invariants
-        self_adapting_agent_worker_trigger_launch_invariants
-        self_adapting_agent_worker_schedule_dispatch_invariants
-        self_adapting_agent_worker_schedule_capacity_invariants
-        self_adapting_agent_successor_teardown_cleanup_invariants
         primitive_trace_execution
         integration
     )

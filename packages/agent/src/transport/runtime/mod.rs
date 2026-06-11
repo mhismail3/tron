@@ -8,8 +8,7 @@
 //! local external-worker capabilities so the live catalog reflects what can
 //! actually run. External-worker WebSocket writers use bounded outbound queues;
 //! callers see transport failures instead of unbounded buffering when a worker
-//! stops draining messages. Worker schedule dispatch remains an explicit engine
-//! runtime contract; server startup does not spawn an autonomous schedule poller.
+//! stops draining messages.
 
 use std::time::Duration;
 

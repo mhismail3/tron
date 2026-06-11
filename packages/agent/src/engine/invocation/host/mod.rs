@@ -34,10 +34,6 @@ use crate::engine::durability::ledger::{
 use crate::engine::durability::queue::{
     EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation,
 };
-use crate::engine::durability::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceVersion, ListResources,
-    ListResourcesPage, ListResourcesPageRequest, UpdateResource,
-};
 use crate::engine::durability::streams::{
     EngineStreamPage, EngineStreamSubscription, PublishStreamEvent, StreamActorScope, StreamCursor,
 };
@@ -68,14 +64,12 @@ mod invocation_handle;
 mod invocation_support;
 mod meta;
 mod meta_invocation;
-mod promotion_governance;
 mod runtime_host;
 mod substrate_handle;
 
 use invocation_support::*;
 use meta::*;
 pub use meta::{CatalogWatchRequest, CatalogWatchResponse};
-use promotion_governance::*;
 
 struct PreparedDelegatedInvocation {
     meta_invocation: Invocation,

@@ -219,6 +219,19 @@ Current living entry points:
   DISEMD storage-surface taxonomy and proof notes.
 - `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv`:
   machine-readable DISEMD storage inventory used by static gates.
+- `packages/agent/docs/off-plan-successor-teardown-cleanup-scorecard.md`:
+  completed cleanup scorecard for removing or constraining off-plan successor
+  worker activation, launch, schedule, and retention surfaces before resuming
+  the original primitive-engine hardening list.
+- `packages/agent/docs/off-plan-successor-teardown-cleanup-evidence-manifest.md`:
+  companion evidence manifest for OPSTC row checkpoints, source/history audit,
+  removals, retained primitive boundaries, and verification results.
+- `packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.md`:
+  OPSTC original-list alignment, off-plan history classification, and retained
+  primitive-boundary notes.
+- `packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.tsv`:
+  machine-readable inventory for every file changed in the off-plan
+  `e781a6aef..2da96a848` range.
 - `packages/agent/docs/self-adapting-agent-authorship-scorecard.md`:
   completed Self-Adapting Agent Authorship scorecard for proving durable
   goals, evidence, decisions, memories/rules, patch proposals, materialized
@@ -306,6 +319,10 @@ Current living entry points:
   archive/schema/retention source contracts, engine durability storage pragmas,
   event-store SQLite ownership, iOS projection boundaries, and predecessor
   bookkeeping.
+- `packages/agent/tests/off_plan_successor_teardown_cleanup_invariants.rs`:
+  completed cleanup guard proving the off-plan successor worker activation,
+  launch, schedule, and old SAASTC harness surfaces stay removed while retained
+  primitive worker/external-worker substrate remains bounded.
 - `packages/agent/tests/concurrency_scheduling_discipline_invariants.rs`:
   completed CSD scorecard, inventory, scheduling-marker coverage, spawn/task
   ownership, bounded channel/stream, Swift banned-pattern, stored-task
@@ -320,134 +337,12 @@ Current living entry points:
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
   safety, observability, and closeout gates, with focused modules under
   `packages/agent/tests/self_adapting_agent_authorship/`.
-- `packages/agent/docs/self-adapting-agent-promotion-governance-scorecard.md`:
-  completed SAPG scorecard for evidence-backed `engine::promote` governance.
-- `packages/agent/docs/self-adapting-agent-promotion-governance-evidence-manifest.md`:
-  companion evidence manifest for promotion governance validation and closeout.
-- `packages/agent/tests/self_adapting_agent_promotion_governance_invariants.rs`:
-  completed SAPG gates for promote contract schemas, decision/evidence/candidate
-  validation, authority boundaries, non-launch worker policy, CI wiring, and
-  README parity.
-- `packages/agent/docs/self-adapting-agent-worker-activation-scorecard.md`:
-  completed SAAWA scorecard for governed, loopback-only worker activation
-  bundles from reviewed capability definitions.
-- `packages/agent/docs/self-adapting-agent-worker-activation-evidence-manifest.md`:
-  companion evidence manifest for activation issuance, runtime binding, audit,
-  regression, and closeout validation.
-- `packages/agent/docs/self-adapting-agent-worker-activation-inventory.md`:
-  SAAWA activation source inventory taxonomy and boundary notes.
-- `packages/agent/docs/self-adapting-agent-worker-activation-inventory.tsv`:
-  machine-readable SAAWA inventory covering worker primitives, governance,
-  scoped tokens, grants, runtime binding, lifecycle audit, and transport
-  boundaries.
-- `packages/agent/tests/self_adapting_agent_worker_activation_invariants.rs`:
-  completed SAAWA gates for activation resource contracts, governance chain
-  validation, scoped grants/tokens, worker hello/registration binding,
-  lifecycle audit, no-launch boundaries, provider/public transport absence, CI
-  wiring, and README parity.
-- `packages/agent/docs/self-adapting-agent-worker-orchestration-scorecard.md`:
-  completed SAAWO scorecard for governed direct-exec process supervision of
-  already issued worker activation bundles.
-- `packages/agent/docs/self-adapting-agent-worker-orchestration-evidence-manifest.md`:
-  companion evidence manifest for launch-plan validation, process audit,
-  supervisor behavior, readiness binding, and closeout validation.
-- `packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.md`:
-  SAAWO source inventory taxonomy and launch/process boundary notes.
-- `packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.tsv`:
-  machine-readable SAAWO inventory covering activation binding, launch plans,
-  process resources, supervisor, readiness cleanup, transport boundaries, and
-  regression gates.
-- `packages/agent/tests/self_adapting_agent_worker_orchestration_invariants.rs`:
-  completed SAAWO gates for resource contracts, admin launch/stop governance,
-  direct-exec supervision, redaction, readiness binding, no scheduler/provider/
-  public transport surface, CI wiring, and README parity.
-- `packages/agent/docs/self-adapting-agent-worker-bundle-handoff-scorecard.md`:
-  completed SAAWBH scorecard for ephemeral activation-bundle custody, durable
-  result redaction, and stdin handoff for governed worker launches.
-- `packages/agent/docs/self-adapting-agent-worker-bundle-handoff-evidence-manifest.md`:
-  companion evidence manifest for bundle vault, stdin supervisor boundary,
-  non-persistence audit, and closeout validation.
-- `packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.md`:
-  SAAWBH source inventory taxonomy and handoff boundary notes.
-- `packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.tsv`:
-  machine-readable SAAWBH inventory covering activation issue, durable
-  redaction, vault custody, launch plans, supervisor stdin, process resources,
-  replay, and transport boundaries.
-- `packages/agent/tests/self_adapting_agent_worker_bundle_handoff_invariants.rs`:
-  completed SAAWBH gates for docs/CI parity, vault-only custody, durable
-  redaction, stdin handoff, no scheduler/provider/public handoff surface, and
-  README parity.
-- `packages/agent/docs/self-adapting-agent-worker-trigger-launch-scorecard.md`:
-  completed SAAWTL scorecard for governed trigger-created worker launch through
-  reviewed autostart plans, fresh activation issue, and stdin handoff.
-- `packages/agent/docs/self-adapting-agent-worker-trigger-launch-evidence-manifest.md`:
-  companion evidence manifest for trigger-causal launch, idempotent attempt
-  replay, attempt audit redaction, and closeout validation.
-- `packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.md`:
-  SAAWTL source inventory taxonomy and trigger/worker boundary notes.
-- `packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.tsv`:
-  machine-readable SAAWTL inventory covering trigger dispatch, autostart plans,
-  activation issue, vault custody, stdin launch, attempt audit, replay, and
-  forbidden surfaces.
-- `packages/agent/tests/self_adapting_agent_worker_trigger_launch_invariants.rs`:
-  completed SAAWTL gates for docs/CI parity, trigger-only primitive contract,
-  reviewed autostart schemas, attempt audit, no provider/public/scheduler
-  surface, and README parity.
-- `packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-scorecard.md`:
-  completed SAAWSD scorecard for governed wall-clock schedule ticks that
-  enqueue trusted trigger dispatch into the existing worker launch path.
-- `packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-evidence-manifest.md`:
-  companion evidence manifest for reviewed schedule plans, tick replay,
-  overlap/missed policies, and closeout validation.
-- `packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.md`:
-  SAAWSD source inventory taxonomy and schedule/trigger boundary notes.
-- `packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.tsv`:
-  machine-readable SAAWSD inventory covering scheduler ownership, trigger
-  dispatch, autostart validation, queues, leases, tick audit, and forbidden
-  surfaces.
-- `packages/agent/tests/self_adapting_agent_worker_schedule_dispatch_invariants.rs`:
-  completed SAAWSD gates for docs/CI parity, reviewed schedule contracts,
-  trigger-dispatch-only composition, cadence ownership, no provider/public
-  schedule surface, and README parity.
-- `packages/agent/docs/self-adapting-agent-worker-schedule-capacity-scorecard.md`:
-  completed SAAWSC scorecard for bounded, resumable worker schedule scanning
-  over large reviewed schedule sets.
-- `packages/agent/docs/self-adapting-agent-worker-schedule-capacity-evidence-manifest.md`:
-  companion evidence manifest for schedule pagination, scan-state persistence,
-  cancellation, resume/wrap behavior, and closeout validation.
-- `packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.md`:
-  SAAWSC source inventory taxonomy and capacity boundary notes.
-- `packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.tsv`:
-  machine-readable SAAWSC inventory covering resource pagination, memory/SQLite
-  stores, host substrate forwarding, scan state, service cancellation, and
-  forbidden surfaces.
-- `packages/agent/tests/self_adapting_agent_worker_schedule_capacity_invariants.rs`:
-  completed SAAWSC gates for docs/CI parity, internal paged resource listing,
-  deterministic cursor ordering, safe scan-state contracts, bounded scheduler
-  resume/wrap behavior, cancellation propagation, and README parity.
-- `packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-scorecard.md`:
-  active SAASTC cleanup scorecard for auditing every successor self-adapting-agent
-  addition since the ODA baseline and reducing retained behavior to source-proven
-  primitive-engine contracts.
-- `packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-evidence-manifest.md`:
-  companion evidence manifest for cleanup harness, inventory, teardown,
-  regression, and closeout validation.
-- `packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.md`:
-  SAASTC inventory taxonomy for initial diff classification and later teardown
-  outcomes.
-- `packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.tsv`:
-  machine-readable SAASTC inventory covering every file changed since the ODA
-  baseline plus cleanup harness files.
-- `packages/agent/tests/self_adapting_agent_successor_teardown_cleanup_invariants.rs`:
-  active SAASTC gates for scorecard formalization, README/CI wiring, full
-  baseline diff inventory coverage, and cleanup boundary recording.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH/SAAWTL/SAAWSD/SAAWSC
-scorecards plus the active SAASTC cleanup scorecard.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -802,12 +697,6 @@ Engine protocol messages are JSON objects with a `type`, optional correlation
 `agent::prompt`, or `settings::get`. Mutating calls must include an explicit
 idempotency key. Message ids are correlation ids only.
 
-Worker activation is not a public `/engine` message. Reviewed
-`capability_definition` resources can be manually activated only through the
-admin/internal `worker::issue_activation` primitive, which validates accepted
-decision/evidence/candidate governance and issues a session/workspace-scoped
-loopback bundle for the worker protocol.
-
 Public clients cannot become the agent actor by invoking `capability::execute`
 directly. Trusted agent runtime paths must use a derived least-privilege grant
 and trusted working-directory runtime metadata; bootstrap grants are rejected by
@@ -828,13 +717,10 @@ persist delivered cursors locally and ACK the latest delivered cursor per
 subscription, not every event in a burst; ACK responses use normal engine
 backpressure so catch-up traffic does not become a socket-fatal overload.
 Public `promote` is a user-owned `engine::promote` path, not a client-side
-catalog edit: it requires a non-empty `idempotencyKey`, `decisionResourceId`,
-one or more accepted verified `evidenceResourceIds`, one or more linked
-`candidateResourceIds`, a non-empty `promotionReason`, workspace/system
-authority, and workspace context for workspace promotion. The decision resource
-must be final/accepted and approve the requested function and target visibility.
-Owner mismatch, idempotency, governance, and invalid visibility promotion
-failures return typed public error codes with structured details.
+catalog edit: it requires a non-empty `idempotencyKey`, workspace/system
+authority, and workspace context for workspace promotion. Owner mismatch,
+idempotency, and invalid visibility promotion failures return typed public
+error codes with structured details.
 Failed `/engine` responses expose the same canonical failure envelope used by
 runtime events: stable `code`, `category`, sanitized `message`, `retryable`,
 `recoverable`, `origin`, optional provider/model/status/error-type/retry-after
@@ -856,95 +742,6 @@ functions owned by the same accepted worker. Workers publish events by asking
 the engine to invoke `stream::publish`; stream visibility, topic selectors, and
 session/workspace scope are checked against the accepted token and connection.
 There is no direct socket event bypass.
-
-Governed activation tokens add a stricter binding on top of the base scoped
-token: the hello must match the `worker_activation` resource, governance
-fingerprint, token fingerprint, grant hash, expected grant id, session/workspace
-scope, exact namespace claims, volatile registration mode, and non-system
-visibility. Function registration accepts only the expected function definition
-and rejects trigger registration, extra function ids, metadata mismatches,
-namespace expansion, durable registration, revoked or expired grants, and scope
-mismatch. Activation resources move through `issued`, `connected`,
-`registered`, `disconnected`, `expired`, or `revoked` alongside the existing
-`worker.lifecycle` stream audit.
-
-Worker orchestration is a separate admin/internal layer over already issued
-activation bundles. `worker::launch_activation` requires `worker.launch`,
-explicit system-ledger idempotency, an active unexpired session/workspace
-`worker_activation`, and a reviewed `worker_launch_plan` whose expected worker,
-function, namespace, scope, executable path policy, executable SHA-256 digest,
-argv allowlist, env allowlist, cwd policy, startup timeout, stop timeout, log
-capture bound, and either `preissued_bundle` or `stdin_activation_bundle_v1`
-delivery mode all match before any process starts. In stdin mode the engine
-consumes the in-memory `WorkerActivationBundleVault` entry exactly once,
-writes the activation bundle to piped child stdin, and closes stdin. It invokes
-the executable directly with no shell and creates a redacted `worker_process`
-resource in `requested`/`starting`; readiness is not trusted until the existing
-`/engine/workers` SAAWA hello moves the process to `hello_seen` and exact
-function registration moves it to `ready`.
-`worker::stop_process` is also admin/internal under `worker.launch`; it is
-idempotent for terminal or missing processes, stops through the supervisor,
-updates process/activation audit, and unregisters volatile catalog entries.
-Process resources persist only redacted handles, pid fingerprints, env keys,
-argv, executable digest/path policy, bounded log snippets, exit state, readiness
-markers, and stdin handoff fingerprints/byte counts. Activation bundles are not
-persisted or reconstructed; idempotent activation replay returns the redacted
-durable shape rather than the original bundle, and a failed stdin launch after
-consume requires issuing a new activation. There is no direct scheduler launch,
-automatic restart loop, trigger creation,
-provider-visible launch tool, public `/engine` launch message, deploy flow,
-launchd/SMAppService integration, or repo-managed skill surface.
-
-Trigger-created worker launch is an internal composition layer over the same
-activation and launch primitives. A trusted `trigger::dispatch` may target
-admin/internal `worker::launch_from_trigger` only with trigger causal context,
-target idempotency, and both `worker.activate` and `worker.launch`. The bridge
-loads a reviewed `worker_autostart_plan` (`tron.resource.worker_autostart_plan.v1`)
-whose policy is exactly `stdin_activation_bundle_v1`, `restartPolicy: none`,
-and `duplicatePolicy: idempotency_key_replay_v1`; verifies the registered
-trigger target is `worker::launch_from_trigger`; issues activation through
-`worker::issue_activation`; and launches the reviewed `worker_launch_plan`
-through `worker::launch_activation`. Each deterministic
-`worker_trigger_launch_attempt` records only safe ids, status, trace refs,
-idempotency fingerprints, policy, and redacted errors. Duplicate delivery with
-the same target idempotency key replays the attempt/process without another
-activation issue, vault consume, or process start. Trigger launch does not imply
-callable readiness; the SAAWA hello/register path remains authoritative. There
-is still no activation-worker trigger registration, automatic restart loop,
-provider-visible launch tool, public `/engine` launch message, deploy flow,
-launchd/SMAppService integration, or repo-managed skill surface.
-
-Reviewed wall-clock worker schedules are a separate explicit internal runtime
-layer over trigger-created launch. A `worker_schedule_plan`
-(`tron.resource.worker_schedule_plan.v1`) is UTC-only, fixed interval, reviewed,
-and bound to a registered enqueue-capable trigger whose target is exactly
-`worker::launch_from_trigger` and a reviewed matching `worker_autostart_plan`.
-The retained runtime does not start with the server; callers must invoke schedule
-dispatch explicitly. It computes the latest due
-nominal tick, records a safe `worker_schedule_tick`
-(`requested`, `enqueued`, `skipped_missed`, `skipped_overlap`, or `failed`),
-acquires a narrow schedule dispatch lease, and calls `trigger::dispatch` with
-enqueue delivery plus deterministic target idempotency derived from schedule id
-and nominal UTC tick. Duplicate polls or restarts replay the existing tick/queue
-state, missed offline intervals collapse to the latest due tick, and an active
-prior tick records overlap evidence without another enqueue. Scheduler code does
-not issue activations, consume vault bundles, call supervisors, start processes,
-expose provider/public schedule APIs, change deploy/iOS settings, add
-launchd/SMAppService integration, add restart/retry loops, add repo-managed
-skills, or replay post-ready payloads.
-
-Schedule scanning is bounded and resumable. The explicit runtime lists reviewed
-`worker_schedule_plan` resources through an internal paged resource substrate
-ordered by `updated_at DESC, resource_id DESC`, scans pages of 100 and at most
-500 plans per call, persists the last cursor and aggregate summary in the safe
-system-scoped `worker_schedule_scan_state:default` resource, resumes from that
-cursor across later calls or runtime recreation, and clears the cursor when the
-filtered tail is reached so the next pass wraps back to the head. Cancellation is
-cooperative between pages and schedule items and persists `cancelled` scan state
-without enqueueing when it fires before item dispatch. Scan state records cursor,
-budget flags, poll timestamps, summary, trace id, and generic redacted errors
-only; it never stores activation bundles, stdin payloads, provider prompts,
-process environments, launch secrets, or post-ready payloads.
 
 Volatile worker entries are removed on disconnect or missed heartbeat. Durable
 local worker entries stay in the catalog but are marked unhealthy when the
@@ -1657,18 +1454,10 @@ tron ci clippy test          # Subset: linting + tests
 `security_authority_capability_boundaries_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
-`self_adapting_agent_authorship_invariants`,
-`self_adapting_agent_promotion_governance_invariants`,
-`self_adapting_agent_worker_activation_invariants`,
-`self_adapting_agent_worker_orchestration_invariants`,
-`self_adapting_agent_worker_bundle_handoff_invariants`,
-`self_adapting_agent_worker_trigger_launch_invariants`,
-`self_adapting_agent_worker_schedule_dispatch_invariants`,
-`self_adapting_agent_worker_schedule_capacity_invariants`,
-`self_adapting_agent_successor_teardown_cleanup_invariants`,
-`primitive_trace_execution`, and serial `integration`. GitHub's Rust
-static-gates job runs the same named target set for docs, template, iOS, Mac,
-script, and CI changes.
+`off_plan_successor_teardown_cleanup_invariants`,
+`self_adapting_agent_authorship_invariants`, `primitive_trace_execution`, and
+serial `integration`. GitHub's Rust static-gates job runs the same named target
+set for docs, template, iOS, Mac, script, and CI changes.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

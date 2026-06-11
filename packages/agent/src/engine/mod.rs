@@ -28,8 +28,6 @@
 //!   startup, and domain services.
 //! - [`EngineTriggerRuntime`] dispatches trigger-originated work through the
 //!   same canonical invocation lifecycle as direct requests.
-//! - [`EngineWorkerScheduleRuntime`] computes reviewed fixed-interval schedule
-//!   ticks and dispatches them through `trigger::dispatch` enqueue delivery.
 //! - [`EngineExternalWorkerRuntime`] owns loopback external-worker connection,
 //!   registration, health, and invocation proxy state.
 //!
@@ -48,9 +46,7 @@
 //!   into a pluggable engine ledger; invocation prepare resolves that grant from
 //!   the engine-owned grant store before any handler runs;
 //! - declared request/response schemas are enforced before/after handlers;
-//! - session capabilities can be explicitly promoted to workspace/system scope
-//!   only through `engine::promote` with validated decision, evidence, and
-//!   candidate resource refs plus target-specific authority;
+//! - session capabilities can be explicitly promoted to workspace/system scope;
 //! - `EngineHost` exposes privileged `engine::*` transport functions for live
 //!   worker/client discovery, inspection, cursor watch, delegated invocation,
 //!   and promotion;
@@ -102,11 +98,6 @@
 //!   on the queue item instead of living only in stream logs; queued
 //!   non-mutating worker transport failures retry through queue lifecycle truth
 //!   without committing a failed target invocation row.
-//! - worker schedule dispatch is wall-clock owned but launch-safe: reviewed
-//!   schedule plans create deterministic `worker_schedule_tick` audit resources,
-//!   use a narrow resource lease, enqueue `trigger::dispatch`, and rely on
-//!   `worker::launch_from_trigger` plus worker launch idempotency for activation
-//!   and process start.
 //!
 //! # INVARIANT: one production execution shape
 //!
@@ -199,16 +190,10 @@ pub use runtime::external_workers::{
 };
 pub use runtime::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 pub use runtime::worker_protocol::{
-    CatalogSnapshot, RegisterFunction, RegisterTrigger, ScopedWorkerToken, WORKER_PROTOCOL_VERSION,
-    WorkerAuthPolicy, WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat,
-    WorkerHello, WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
+    CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy,
+    WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
+    WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
     WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
-};
-pub use runtime::worker_schedule::{
-    EngineWorkerScheduleRuntime, WORKER_SCHEDULE_PLAN_KIND, WORKER_SCHEDULE_PLAN_SCHEMA_ID,
-    WORKER_SCHEDULE_SCAN_STATE_ID, WORKER_SCHEDULE_SCAN_STATE_KIND,
-    WORKER_SCHEDULE_SCAN_STATE_SCHEMA_ID, WORKER_SCHEDULE_TICK_KIND,
-    WORKER_SCHEDULE_TICK_SCHEMA_ID, WorkerScheduleDispatchSummary,
 };
 
 /// Return whether a grant id is one of the engine-owned bootstrap roots.

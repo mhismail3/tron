@@ -84,47 +84,6 @@ fn invoke_message_rejects_authority_and_runtime_metadata_context() {
 }
 
 #[test]
-fn promote_message_requires_governance_references() {
-    let value = json!({
-        "type": "promote",
-        "id": "p1",
-        "functionId": "alpha::candidate",
-        "targetVisibility": "workspace",
-        "workspaceId": "workspace-a",
-        "idempotencyKey": "promote-idem",
-        "decisionResourceId": "decision-1",
-        "evidenceResourceIds": ["evidence-1"],
-        "candidateResourceIds": ["candidate-1"],
-        "promotionReason": "accepted decision",
-        "context": {
-            "sessionId": "s1",
-            "workspaceId": "workspace-a"
-        }
-    });
-    let message: PromoteMessage = serde_json::from_value(value).unwrap();
-    assert_eq!(message.function_id, "alpha::candidate");
-    assert_eq!(message.decision_resource_id, "decision-1");
-    assert_eq!(message.evidence_resource_ids, vec!["evidence-1"]);
-    assert_eq!(message.candidate_resource_ids, vec!["candidate-1"]);
-    assert_eq!(message.promotion_reason, "accepted decision");
-
-    let missing_governance = json!({
-        "type": "promote",
-        "id": "p1",
-        "functionId": "alpha::candidate",
-        "targetVisibility": "workspace",
-        "workspaceId": "workspace-a",
-        "idempotencyKey": "promote-idem"
-    });
-    let error = serde_json::from_value::<PromoteMessage>(missing_governance)
-        .expect_err("promote without governance refs must be rejected");
-    assert!(
-        error.to_string().contains("missing field"),
-        "unexpected promote rejection error: {error}"
-    );
-}
-
-#[test]
 fn stream_filters_match_neutral_server_event_scope() {
     let event = crate::engine::EngineStreamEvent {
         cursor: StreamCursor(7),

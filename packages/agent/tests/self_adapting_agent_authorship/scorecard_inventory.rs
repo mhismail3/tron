@@ -187,7 +187,6 @@ fn saa_inventory_rows_are_structured_and_reference_tracked_paths() {
         "packages/agent/src/domains/capability/contract.rs",
         "packages/agent/src/domains/capability/operations/resource.rs",
         "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs",
-        "packages/agent/src/engine/durability/resources/agent_record_definitions.rs",
         "packages/agent/src/engine/durability/resources/definitions.rs",
         "packages/agent/src/engine/durability/resources/ui_surface.rs",
         "packages/agent/src/engine/runtime/external_workers/validation.rs",

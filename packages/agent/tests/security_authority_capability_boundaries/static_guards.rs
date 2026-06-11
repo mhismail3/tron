@@ -13,7 +13,6 @@ fn sacb_static_guard_module_is_active() {
     let module =
         read_repo_file("packages/agent/tests/security_authority_capability_boundaries/mod.rs");
     for required in [
-        "mod lifecycle_guards;",
         "mod scorecard_inventory;",
         "mod static_guards;",
         "mod support;",
@@ -136,8 +135,6 @@ fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots()
     for required in [
         "canonical_payload_path(root)?",
         "root_allows_path(parent, &canonical_root).unwrap_or(false)",
-        "validate_allow_empty_list(\"fileRoots\", &request.file_roots)?",
-        "if child.is_empty()",
         "network_rank(&child.network_policy)? > network_rank(&parent.network_policy)?",
         "ensure_budget_narrows(&parent.budget, &child.budget)?",
         "\"remainingInvocations\"",
@@ -236,50 +233,6 @@ fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots()
 }
 
 #[test]
-fn sacb_delegated_engine_invoke_consumes_parent_budget_before_child_prepare() {
-    let source = read_repo_file("packages/agent/src/engine/invocation/host/meta_invocation.rs");
-    let start = source
-        .find("pub(super) fn prepare_delegated_invocation")
-        .expect("prepare_delegated_invocation must exist");
-    let tail = &source[start..];
-    let end = tail
-        .find("\n    fn prepare_meta_invocation")
-        .expect("prepare_meta_invocation should follow prepare_delegated_invocation");
-    let body = &tail[..end];
-
-    let delegated_child = body
-        .find("delegated_child_invocation(&invocation)")
-        .expect("delegated child must be parsed before budget consumption");
-    let parent_budget = body
-        .find("self.consume_invocation_budget_sync(&function, &invocation)")
-        .expect("parent wrapper budget must be consumed");
-    let child_host_dispatch = body
-        .find("is_host_dispatched_primitive_function(&child.function_id)")
-        .expect("host-dispatched child branch must remain explicit");
-    let child_host_invoke = body
-        .find("self.invoke_sync_host_dispatched_primitive(child)")
-        .expect("host-dispatched child invocation must remain explicit");
-    let child_regular_prepare = body
-        .find("self.catalog.prepare_sync_invocation(child)")
-        .expect("regular child preparation must remain explicit");
-
-    assert!(
-        delegated_child < parent_budget,
-        "malformed engine::invoke payloads must fail before budget consumption"
-    );
-    for (label, child_index) in [
-        ("host-dispatched child branch", child_host_dispatch),
-        ("host-dispatched child invocation", child_host_invoke),
-        ("regular child preparation", child_regular_prepare),
-    ] {
-        assert!(
-            parent_budget < child_index,
-            "parent engine::invoke budget must be consumed before {label}"
-        );
-    }
-}
-
-#[test]
 fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
     let executor = [
         read_repo_file(
@@ -296,13 +249,7 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         "\"parentGrantId\": \"agent-capability-runtime\"",
         "target.function_id.clone()",
         "target_function_id.as_str().to_owned()",
-        "runtime_grant_shape(target_function_id, target_authority_scopes, effective_args)",
-        "target_function_id.as_str() == \"capability::execute\"",
-        "Some(\"resource_link\")",
-        "remaining_invocations = 4",
-        "remaining_invocations = 3",
-        "\"executeOperation\": execute_operation(effective_args)",
-        "\"allowedCapabilities\": grant_shape.allowed_capabilities",
+        "\"allowedCapabilities\": allowed_capabilities",
         "\"allowedNamespaces\": [\"__no_namespace_authority__\"]",
         "\"networkPolicy\": \"none\"",
         "normalize_working_directory(working_directory)",
@@ -675,4 +622,157 @@ fn sacb_secret_storage_and_redaction_boundaries_are_hardened() {
         mac_source_guard.contains("diagnosticsRedactorKeepsAuthFieldParity"),
         "Mac source guards must pin diagnostics redaction parity"
     );
+}
+
+#[test]
+fn sacb_pairing_lifecycle_boundaries_are_hardened() {
+    let ios_parser =
+        read_repo_file("packages/ios-app/Sources/Support/Pairing/PairingURLParser.swift");
+    for required in [
+        "enum PairingHostValidator",
+        "case invalidHost(String)",
+        "PairingHostValidator.canonicalHost(host)",
+        "!trimmed.contains(\"://\")",
+        "CharacterSet(charactersIn: \"/\\\\?#@[]\")",
+        "isValidIPv6",
+        "UInt8($0) != nil",
+    ] {
+        assert!(
+            ios_parser.contains(required),
+            "iOS pairing parser missing host lifecycle guard: {required}"
+        );
+    }
+
+    let ios_validator = read_repo_file(
+        "packages/ios-app/Sources/Support/Pairing/Onboarding/PairingStepValidator.swift",
+    );
+    for required in [
+        "case invalidHost(String)",
+        "PairingHostValidator.canonicalHost(trimmedHost)",
+        "Host must be a Tailscale IP or hostname, not a full URL.",
+    ] {
+        assert!(
+            ios_validator.contains(required),
+            "iOS pairing validator missing manual-host guard: {required}"
+        );
+    }
+
+    let ios_persistor = read_repo_file(
+        "packages/ios-app/Sources/Support/Pairing/Onboarding/PairingPersistor.swift",
+    );
+    for required in [
+        "enum RollbackTokenAction",
+        "struct RollbackPlan",
+        "static func rollbackPlan(",
+        "PairingHostValidator.canonicalHost(payload.host)",
+        "preconditionFailure(\"PairingPersistor requires a validated pairing host\")",
+        "previousToken.map(RollbackTokenAction.restore) ?? .remove",
+    ] {
+        assert!(
+            ios_persistor.contains(required),
+            "iOS pairing persistor missing commit/rollback guard: {required}"
+        );
+    }
+
+    let pairing_step =
+        read_repo_file("packages/ios-app/Sources/UI/Onboarding/Steps/PairingStep.swift");
+    assert!(
+        pairing_step.contains("PairingPersistor.rollbackPlan(")
+            && !pairing_step.contains("try? dependencies.pairedServerTokenStore"),
+        "PairingStep must use explicit rollback planning without swallowing token-store failures"
+    );
+
+    let dependency_container =
+        read_repo_file("packages/ios-app/Sources/Support/Composition/DependencyContainer.swift");
+    assert!(
+        dependency_container.contains("func forgetPairedServer(_ server: PairedServer) throws")
+            && dependency_container
+                .contains("try pairedServerTokenStore.remove(serverId: server.id)")
+            && !dependency_container
+                .contains("try? pairedServerTokenStore.remove(serverId: server.id)"),
+        "forgetting a paired server must remove the Keychain token first and fail closed"
+    );
+
+    let mac_builder =
+        read_repo_file("packages/mac-app/Sources/Support/Pairing/PairingURLBuilder.swift");
+    for required in [
+        "enum PairingHostValidator",
+        "PairingHostValidator.canonicalHost(payload.host)",
+        "PairingHostValidator.canonicalHost(host)",
+        "(1...65_535).contains(payload.port)",
+        "(1...65_535).contains(port)",
+        "!trimmed.contains(\"://\")",
+        "CharacterSet(charactersIn: \"/\\\\?#@[]\")",
+    ] {
+        assert!(
+            mac_builder.contains(required),
+            "Mac pairing URL builder missing iOS-parity guard: {required}"
+        );
+    }
+
+    let ios_source_guard = read_repo_file(
+        "packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+BuildAndProject.swift",
+    );
+    assert!(
+        ios_source_guard.contains("testPairingLifecycleBoundaries"),
+        "iOS source guards must pin pairing lifecycle boundaries"
+    );
+
+    let ios_parser_tests =
+        read_repo_file("packages/ios-app/Tests/Support/Pairing/PairingURLParserTests.swift");
+    for required in [
+        "rejectsURLShapedHostValue",
+        "rejectsHostFragments",
+        "rejectsInvalidIPAndDNSHosts",
+        "makeURLRejectsMalformedRequiredFields",
+    ] {
+        assert!(
+            ios_parser_tests.contains(required),
+            "iOS parser tests missing pairing regression: {required}"
+        );
+    }
+
+    let ios_validator_tests =
+        read_repo_file("packages/ios-app/Tests/Support/Pairing/PairingValidationTests.swift");
+    for required in ["urlShapedHost", "pathOrQueryHost"] {
+        assert!(
+            ios_validator_tests.contains(required),
+            "iOS validator tests missing pairing regression: {required}"
+        );
+    }
+
+    let ios_persistor_tests =
+        read_repo_file("packages/ios-app/Tests/Support/Pairing/PairingPersistorTests.swift");
+    for required in [
+        "directPayloadValuesCanonicalized",
+        "rollbackNewServerRemovesCandidateToken",
+        "rollbackExistingServerRestoresPreviousToken",
+    ] {
+        assert!(
+            ios_persistor_tests.contains(required),
+            "iOS persistor tests missing pairing regression: {required}"
+        );
+    }
+
+    let dependency_tests =
+        read_repo_file("packages/ios-app/Tests/Support/Composition/DependencyContainerTests.swift");
+    assert!(
+        dependency_tests.contains("test_forgetPairedServer_removesTokenBeforeMetadataCompletes"),
+        "DependencyContainer tests must prove forget removes Keychain token and metadata"
+    );
+
+    let mac_builder_tests =
+        read_repo_file("packages/mac-app/Tests/Support/Pairing/PairingURLBuilderTests.swift");
+    for required in [
+        "portBoundaries",
+        "parseRejectsOutOfRangePort",
+        "ipv6HostAccepted",
+        "malformedHostsRejected",
+        "parseRejectsURLShapedHost",
+    ] {
+        assert!(
+            mac_builder_tests.contains(required),
+            "Mac pairing URL builder tests missing regression: {required}"
+        );
+    }
 }

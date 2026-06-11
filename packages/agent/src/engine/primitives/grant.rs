@@ -232,7 +232,7 @@ fn derive_schema() -> Value {
             "allowedAuthorityScopes": string_array_schema(),
             "allowedResourceKinds": string_array_schema(),
             "resourceSelectors": string_array_schema(),
-            "fileRoots": file_roots_array_schema(),
+            "fileRoots": string_array_schema(),
             "networkPolicy": {"type": "string", "enum": ["none", "loopback", "declared", "unrestricted"]},
             "maxRisk": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
             "budget": {"type": "object"},
@@ -257,10 +257,6 @@ fn list_schema() -> Value {
 
 fn string_array_schema() -> Value {
     json!({"type": "array", "items": {"type": "string"}, "minItems": 1})
-}
-
-fn file_roots_array_schema() -> Value {
-    json!({"type": "array", "items": {"type": "string"}})
 }
 
 fn string_array(payload: &Value, field: &str) -> Result<Vec<String>> {

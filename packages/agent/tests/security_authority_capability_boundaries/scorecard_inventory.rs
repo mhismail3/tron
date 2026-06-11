@@ -66,7 +66,7 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Inventory",
-        "Status: SACB campaign `complete`; 695 security boundary rows inventoried and",
+        "Status: SACB campaign `complete`; 637 security boundary rows inventoried and",
         "## Boundary Classes",
         "`public_transport`",
         "`authority_grant`",
@@ -245,5 +245,85 @@ fn sacb_closeout_artifacts_reject_stale_state_after_completion() {
                 "{name} contains stale SACB closeout marker: {forbidden}"
             );
         }
+    }
+}
+
+#[test]
+fn sacb_delegated_engine_invoke_consumes_parent_budget_before_child_prepare() {
+    let source = read_repo_file("packages/agent/src/engine/invocation/host/meta_invocation.rs");
+    let start = source
+        .find("pub(super) fn prepare_delegated_invocation")
+        .expect("prepare_delegated_invocation must exist");
+    let tail = &source[start..];
+    let end = tail
+        .find("\n    fn prepare_meta_invocation")
+        .expect("prepare_meta_invocation should follow prepare_delegated_invocation");
+    let body = &tail[..end];
+
+    let delegated_child = body
+        .find("delegated_child_invocation(&invocation)")
+        .expect("delegated child must be parsed before budget consumption");
+    let parent_budget = body
+        .find("self.consume_invocation_budget_sync(&function, &invocation)")
+        .expect("parent wrapper budget must be consumed");
+    let child_host_dispatch = body
+        .find("is_host_dispatched_primitive_function(&child.function_id)")
+        .expect("host-dispatched child branch must remain explicit");
+    let child_host_invoke = body
+        .find("self.invoke_sync_host_dispatched_primitive(child)")
+        .expect("host-dispatched child invocation must remain explicit");
+    let child_regular_prepare = body
+        .find("self.catalog.prepare_sync_invocation(child)")
+        .expect("regular child preparation must remain explicit");
+
+    assert!(
+        delegated_child < parent_budget,
+        "malformed engine::invoke payloads must fail before budget consumption"
+    );
+    for (label, child_index) in [
+        ("host-dispatched child branch", child_host_dispatch),
+        ("host-dispatched child invocation", child_host_invoke),
+        ("regular child preparation", child_regular_prepare),
+    ] {
+        assert!(
+            parent_budget < child_index,
+            "parent engine::invoke budget must be consumed before {label}"
+        );
+    }
+}
+
+#[test]
+fn sacb_internal_invoke_scope_is_trusted_runtime_only() {
+    let policy = read_repo_file("packages/agent/src/engine/kernel/policy.rs");
+    for required in [
+        "has_trusted_internal_invoke_scope(ctx)",
+        "ctx.has_scope(ENGINE_INTERNAL_INVOKE_SCOPE)",
+        "ActorKind::System | ActorKind::Worker | ActorKind::Queue | ActorKind::Cron",
+        "public clients, users, and agent contexts remain denied",
+    ] {
+        assert!(
+            policy.contains(required),
+            "internal invoke policy missing trusted-runtime guard text: {required}"
+        );
+    }
+
+    let transport = read_repo_file("packages/agent/src/transport/engine/mod.rs");
+    assert!(
+        !transport.contains("ENGINE_INTERNAL_INVOKE_SCOPE")
+            && !transport.contains("\"engine.internal.invoke\""),
+        "public engine transport must not mint engine.internal.invoke"
+    );
+
+    let prompt = read_repo_file("packages/agent/src/domains/agent/prompt/prompt.rs");
+    for required in [
+        "trusted_agent_internal_child_context",
+        "system:agent-runtime",
+        "AuthorityGrantId::new(\"engine-system\")",
+        "ENGINE_INTERNAL_INVOKE_SCOPE.to_owned()",
+    ] {
+        assert!(
+            prompt.contains(required),
+            "agent hidden prompt delegation must use engine-owned internal context: {required}"
+        );
     }
 }

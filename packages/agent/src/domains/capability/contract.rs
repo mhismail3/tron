@@ -76,7 +76,7 @@ fn execute_model_request_schema() -> serde_json::Value {
             "namespace": {"type": "string", "description": "Agent-owned state namespace."},
             "key": {"type": "string", "description": "Agent-owned state key."},
             "value": {"description": "JSON value for state_set."},
-            "kind": {"type": "string", "description": "Allowed typed resource kind required for resource_create/resource_list."},
+            "kind": {"type": "string", "description": "Typed resource kind for resource_create/resource_list."},
             "resourceId": {"type": "string", "description": "Resource id for resource operations."},
             "resourcePayload": {"description": "JSON payload for resource_create/resource_update."},
             "schemaId": {"type": "string", "description": "Optional resource schema id."},

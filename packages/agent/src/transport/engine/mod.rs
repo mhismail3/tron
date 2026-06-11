@@ -282,11 +282,12 @@ fn strip_transport_only_fields(method: &str, mut payload: Value) -> Value {
             let _ = object.remove("parentInvocationId");
         }
     }
-    if method == "promote"
-        && let Some(object) = payload.as_object_mut()
-    {
-        let _ = object.remove("traceId");
-        let _ = object.remove("parentInvocationId");
+    if method == "promote" {
+        if let Some(object) = payload.as_object_mut() {
+            let _ = object.remove("idempotencyKey");
+            let _ = object.remove("traceId");
+            let _ = object.remove("parentInvocationId");
+        }
     }
     payload
 }
@@ -372,54 +373,6 @@ mod tests {
         assert_eq!(
             envelope.causal_context.authority_grant_id.as_str(),
             catalog::SYSTEM_AUTHORITY_GRANT
-        );
-    }
-
-    #[test]
-    fn public_promote_keeps_governance_refs_in_engine_payload() {
-        let envelope = build_engine_transport_request(EngineTransportBuildRequest {
-            correlation_id: "request-1".to_owned(),
-            public_method: "promote".to_owned(),
-            params_payload: json!({
-                "functionId": "alpha::candidate",
-                "targetVisibility": "workspace",
-                "workspaceId": "workspace-a",
-                "idempotencyKey": "promote-idem",
-                "decisionResourceId": "decision-1",
-                "evidenceResourceIds": ["evidence-1"],
-                "candidateResourceIds": ["candidate-1"],
-                "promotionReason": "accepted decision"
-            }),
-            context: EngineTransportContext {
-                session_id: Some("session-a".to_owned()),
-                workspace_id: Some("workspace-a".to_owned()),
-                ..EngineTransportContext::default()
-            },
-        })
-        .expect("transport envelope builds")
-        .expect("promote maps to engine transport");
-
-        assert_eq!(envelope.causal_context.actor_kind, ActorKind::User);
-        assert_eq!(
-            envelope.causal_context.idempotency_key.as_deref(),
-            Some("promote-idem")
-        );
-        assert_eq!(envelope.payload["idempotencyKey"], "promote-idem");
-        assert_eq!(envelope.payload["decisionResourceId"], "decision-1");
-        assert_eq!(
-            envelope.payload["evidenceResourceIds"],
-            json!(["evidence-1"])
-        );
-        assert_eq!(
-            envelope.payload["candidateResourceIds"],
-            json!(["candidate-1"])
-        );
-        assert!(
-            envelope
-                .causal_context
-                .authority_scopes
-                .iter()
-                .any(|scope| scope == "engine.promote.workspace")
         );
     }
 }

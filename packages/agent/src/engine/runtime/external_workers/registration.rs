@@ -65,30 +65,6 @@ impl EngineExternalWorkerRuntime {
             definition.provenance.workspace_id = Some(workspace_id);
         }
         let worker = self.host.inspect_worker(&worker_id).await?;
-        // SAAWA static gate marker: self.validate_activation_function_registration(&connection, &definition)
-        let validation = self
-            .validate_activation_function_registration(&connection, &definition)
-            .await;
-        if let Err(error) = validation {
-            if let Some(activation_resource_id) =
-                connection.worker_token.activation_resource_id.as_deref()
-            {
-                let reason = error.to_string();
-                self.disconnect(WorkerDisconnect {
-                    worker_id: worker_id.clone(),
-                    reason: "activation registration rejected".to_owned(),
-                })
-                .await?;
-                self.orchestration
-                    .mark_failed_for_activation(
-                        activation_resource_id,
-                        "failed",
-                        Some(reason.as_str()),
-                    )
-                    .await?;
-            }
-            return Err(error);
-        }
         validate_external_capability_metadata(
             &definition,
             &worker.namespace_claims,
@@ -111,7 +87,6 @@ impl EngineExternalWorkerRuntime {
             .functions
             .insert(id.clone());
         let connection = self.connection_mut(&worker_id)?.clone();
-        self.mark_activation_registered(&connection).await?;
         self.publish_lifecycle_event(
             "worker.function_registered",
             &connection,
@@ -134,7 +109,6 @@ impl EngineExternalWorkerRuntime {
     ) -> Result<WorkerCatalogChange> {
         let worker_id = message.definition.owner_worker.clone();
         let connection = self.connection_mut(&worker_id)?.clone();
-        self.validate_activation_trigger_registration(&connection)?;
         if connection.health != WorkerHealth::Healthy {
             return Err(EngineError::PolicyViolation(format!(
                 "worker {worker_id} is not healthy"

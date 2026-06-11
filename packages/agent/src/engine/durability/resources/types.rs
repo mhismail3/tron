@@ -386,46 +386,6 @@ pub struct ListResources {
     pub limit: usize,
 }
 
-/// Opaque cursor for internal deterministic resource pagination.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ResourceListCursor {
-    /// Last returned resource update timestamp.
-    pub updated_at: DateTime<Utc>,
-    /// Last returned resource id, used as the stable tie-break.
-    pub resource_id: String,
-}
-
-impl ResourceListCursor {
-    /// Build a cursor from a returned resource.
-    #[must_use]
-    pub fn from_resource(resource: &EngineResource) -> Self {
-        Self {
-            updated_at: resource.updated_at,
-            resource_id: resource.resource_id.clone(),
-        }
-    }
-}
-
-/// Internal resource list page request.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ListResourcesPageRequest {
-    /// Existing list filter contract.
-    pub filter: ListResources,
-    /// Cursor after which to resume in descending update-time order.
-    pub cursor: Option<ResourceListCursor>,
-}
-
-/// Internal resource list page.
-#[derive(Clone, Debug, PartialEq)]
-pub struct ListResourcesPage {
-    /// Returned resources in deterministic page order.
-    pub resources: Vec<EngineResource>,
-    /// Cursor for the final returned resource.
-    pub next_cursor: Option<ResourceListCursor>,
-    /// Whether more resources remain after this page.
-    pub has_more: bool,
-}
-
 /// Full inspect payload for one resource.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

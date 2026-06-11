@@ -16,8 +16,3 @@ mod external_worker_soak;
 mod restart_chaos;
 mod trigger_helpers;
 mod triggers;
-mod worker_activation;
-mod worker_orchestration;
-mod worker_schedule_dispatch;
-mod worker_schedule_dispatch_support;
-mod worker_trigger_launch;

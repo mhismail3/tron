@@ -69,9 +69,6 @@ fn saa_resource_authorship_uses_execute_operations_without_catalog_routing() {
         "resource_update requires resourcePayload",
         "workspace resource requires trusted workspace context",
         "resource operation requires trusted current session context",
-        "EXECUTE_RESOURCE_KINDS",
-        "required_allowed_kind",
-        "ensure_resource_accessible",
         "\"resource::create\"",
         "\"resource::update\"",
         "\"resource::link\"",
@@ -93,9 +90,8 @@ fn saa_resource_authorship_uses_execute_operations_without_catalog_routing() {
 
 #[test]
 fn saa_durable_memory_and_rules_are_typed_resources_with_lineage_fields() {
-    let definitions = read_repo_file(
-        "packages/agent/src/engine/durability/resources/agent_record_definitions.rs",
-    );
+    let definitions =
+        read_repo_file("packages/agent/src/engine/durability/resources/definitions.rs");
     for required in [
         "\"agent_memory\"",
         "\"tron.resource.agent_memory.v1\"",
@@ -128,18 +124,11 @@ fn saa_durable_memory_and_rules_are_typed_resources_with_lineage_fields() {
 }
 
 #[test]
-fn saa_runtime_grant_scopes_nested_execute_operations_only() {
+fn saa_runtime_grant_allows_only_execute_plus_internal_resource_substrate() {
     let grant = read_repo_file(
         "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs",
     );
     for required in [
-        "fn runtime_grant_shape(",
-        "target_function_id.as_str() == \"capability::execute\"",
-        "Some(\"resource_link\")",
-        "remaining_invocations = 4",
-        "remaining_invocations = 3",
-        "let mut allowed_capabilities = vec![target_function_id.as_str().to_owned()];",
-        "\"executeOperation\": execute_operation(effective_args)",
         "\"resource::create\".to_owned()",
         "\"resource::inspect\".to_owned()",
         "\"resource::link\".to_owned()",
@@ -154,8 +143,6 @@ fn saa_runtime_grant_scopes_nested_execute_operations_only() {
         "\"patch_proposal\"",
         "\"networkPolicy\": \"none\"",
         "\"canDelegate\": false",
-        "direct_model_target_gets_target_only_child_grant_shape",
-        "execute_resource_link_gets_only_nested_resource_link_shape",
     ] {
         assert!(
             grant.contains(required),

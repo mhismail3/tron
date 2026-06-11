@@ -370,11 +370,10 @@ impl LiveCatalog {
         };
 
         if let Some(reservation) = &idempotency {
-            let durable_result = super::durable_result_for_invocation(&invocation, &result);
             if let Err(err) = self.ledger.complete_idempotency(
                 &reservation.key,
                 &invocation.id,
-                StoredInvocationOutcome::from_result(&durable_result),
+                StoredInvocationOutcome::from_result(&result),
             ) {
                 let result = InvocationResult::error(
                     &invocation,
@@ -453,8 +452,7 @@ impl LiveCatalog {
         resource_lease_ids: Vec<String>,
         compensation_status: Option<String>,
     ) -> InvocationResult {
-        let durable_result = super::durable_result_for_invocation(invocation, &result);
-        let record = InvocationRecord::from_result(invocation, &durable_result, idempotency_scope)
+        let record = InvocationRecord::from_result(invocation, &result, idempotency_scope)
             .with_contracts(resource_lease_ids, compensation_status);
         if let Err(err) = self.ledger.append_invocation(&record) {
             return InvocationResult::error(

@@ -10,13 +10,10 @@ use super::types::{
 use super::ui_surface::ui_surface_schema;
 use crate::engine::kernel::ids::WorkerId;
 
-use super::agent_record_definitions::agent_record_resource_type_definitions;
-use super::worker_schedule_definitions::worker_schedule_resource_type_definitions;
-
 /// Built-in resource kinds for the collapsed modular substrate.
 #[must_use]
 pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
-    let mut definitions = vec![
+    vec![
         builtin_type(
             "artifact",
             "tron.resource.artifact.v1",
@@ -272,396 +269,132 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             json!({"read": ["resource.read"], "write": ["resource.write"], "apply": ["resource.write"]}),
         ),
         builtin_type(
-            "capability_definition",
-            "tron.resource.capability_definition.v1",
+            "execution_output",
+            "tron.resource.execution_output.v1",
             json!({
                 "type": "object",
-                "required": ["functionId", "definition"],
+                "required": ["exitCode", "durationMs", "timedOut", "outputTruncated"],
                 "additionalProperties": true,
                 "properties": {
-                    "functionId": {"type": "string"},
-                    "definition": {"type": "object"},
-                    "generatedBy": {"type": "string"},
+                    "stdoutPreview": {"type": "string"},
+                    "stderrPreview": {"type": "string"},
+                    "logPreview": {"type": "string"},
+                    "exitCode": {"type": "integer"},
+                    "durationMs": {"type": "integer"},
+                    "timedOut": {"type": "boolean"},
+                    "outputTruncated": {"type": "boolean"},
+                    "redactionPolicy": {"type": "object"},
                     "metadata": {"type": "object"}
                 }
             }),
-            vec!["draft", "reviewed", "promoted", "discarded", "archived"],
-            vec![
-                "candidate_output",
-                "derived_from",
-                "promoted_output",
-                "supported_by",
-                "evidence_for",
-            ],
-            json!({"read": ["resource.read"], "write": ["resource.write"], "promote": ["resource.write"], "delete": ["resource.write"]}),
+            vec!["retained", "discarded", "archived"],
+            vec!["produced_by", "produced", "derived_from"],
+            json!({"read": ["resource.read"], "write": ["resource.write"]}),
         ),
         builtin_type(
-            "worker_activation",
-            "tron.resource.worker_activation.v1",
+            "agent_memory",
+            "tron.resource.agent_memory.v1",
             json!({
                 "type": "object",
-                "required": [
-                    "status",
-                    "functionId",
-                    "workerId",
-                    "candidateResourceId",
-                    "decisionResourceId",
-                    "evidenceResourceIds",
-                    "targetVisibility",
-                    "scope",
-                    "activationReason",
-                    "expiresAt",
-                    "grantId",
-                    "tokenFingerprint",
-                    "governanceFingerprint",
-                    "expectedFunctionDefinition",
-                    "registrationMode",
-                    "networkPolicy"
-                ],
+                "required": ["statement", "status", "scope", "provenance", "evidenceRefs"],
                 "additionalProperties": false,
                 "properties": {
+                    "statement": {"type": "string"},
                     "status": {"type": "string"},
-                    "functionId": {"type": "string"},
-                    "workerId": {"type": "string"},
-                    "candidateResourceId": {"type": "string"},
-                    "decisionResourceId": {"type": "string"},
-                    "evidenceResourceIds": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-                    "targetVisibility": {"type": "string", "enum": ["session", "workspace"]},
-                    "scope": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "properties": {
-                            "sessionId": {"type": ["string", "null"]},
-                            "workspaceId": {"type": ["string", "null"]}
-                        }
-                    },
-                    "activationReason": {"type": "string"},
-                    "expiresAt": {"type": "string"},
-                    "grantId": {"type": "string"},
-                    "tokenFingerprint": {"type": "string"},
-                    "governanceFingerprint": {"type": "string"},
-                    "workerProcessResourceId": {"type": "string"},
-                    "expectedFunctionDefinition": {"type": "object"},
-                    "registrationMode": {"type": "string", "enum": ["volatile"]},
-                    "networkPolicy": {"type": "string", "enum": ["loopback"]},
-                    "tokenStorage": {"type": "object"},
-                    "metadata": {"type": "object"}
-                }
-            }),
-            vec![
-                "issued",
-                "connected",
-                "registered",
-                "disconnected",
-                "expired",
-                "revoked",
-                "failed",
-                "archived",
-            ],
-            vec![
-                "activates",
-                "decided_by",
-                "supported_by",
-                "evidence_for",
-                "derived_from",
-                "revokes",
-                "supersedes",
-            ],
-            json!({"read": ["resource.read"], "write": ["worker.activate", "resource.write"], "delete": ["worker.activate", "resource.write"]}),
-        ),
-        builtin_type(
-            "worker_launch_plan",
-            "tron.resource.worker_launch_plan.v1",
-            json!({
-                "type": "object",
-                "required": [
-                    "status",
-                    "expectedWorkerId",
-                    "expectedFunctionId",
-                    "targetVisibility",
-                    "scope",
-                    "namespace",
-                    "executable",
-                    "argv",
-                    "argvAllowlist",
-                    "envAllowlist",
-                    "cwdPolicy",
-                    "startupTimeoutMs",
-                    "stopTimeoutMs",
-                    "maxLogCaptureBytes",
-                    "activationDeliveryMode",
-                    "governance"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                    "status": {"type": "string", "enum": ["reviewed"]},
-                    "expectedWorkerId": {"type": "string"},
-                    "expectedFunctionId": {"type": "string"},
-                    "targetVisibility": {"type": "string", "enum": ["session", "workspace"]},
-                    "scope": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "properties": {
-                            "sessionId": {"type": ["string", "null"]},
-                            "workspaceId": {"type": ["string", "null"]}
-                        }
-                    },
-                    "namespace": {"type": "string"},
-                    "executable": {
-                        "type": "object",
-                        "required": ["path", "sha256", "pathPolicy"],
-                        "additionalProperties": false,
-                        "properties": {
-                            "path": {"type": "string"},
-                            "sha256": {"type": "string"},
-                            "pathPolicy": {"type": "string", "enum": ["absolute_file"]}
-                        }
-                    },
-                    "argv": {"type": "array", "items": {"type": "string"}},
-                    "argvAllowlist": {"type": "array", "items": {"type": "string"}},
-                    "env": {
-                        "type": "object",
-                        "additionalProperties": true
-                    },
-                    "envAllowlist": {"type": "array", "items": {"type": "string"}},
-                    "cwd": {"type": ["string", "null"]},
-                    "cwdPolicy": {"type": "string", "enum": ["none", "exact"]},
-                    "startupTimeoutMs": {"type": "integer"},
-                    "stopTimeoutMs": {"type": "integer"},
-                    "maxLogCaptureBytes": {"type": "integer"},
-                    "activationDeliveryMode": {
-                        "type": "string",
-                        "enum": ["preissued_bundle", "stdin_activation_bundle_v1"]
-                    },
-                    "governance": {
-                        "type": "object",
-                        "required": ["reviewed", "decisionResourceId", "evidenceResourceIds"],
-                        "additionalProperties": true,
-                        "properties": {
-                            "reviewed": {"type": "boolean"},
-                            "decisionResourceId": {"type": "string"},
-                            "evidenceResourceIds": {"type": "array", "items": {"type": "string"}}
-                        }
-                    }
-                }
-            }),
-            vec!["draft", "reviewed", "revoked", "archived"],
-            vec![
-                "launches",
-                "activates",
-                "decided_by",
-                "supported_by",
-                "evidence_for",
-                "derived_from",
-                "revokes",
-                "supersedes",
-            ],
-            json!({"read": ["resource.read"], "write": ["worker.launch", "resource.write"], "delete": ["worker.launch", "resource.write"]}),
-        ),
-        builtin_type(
-            "worker_autostart_plan",
-            "tron.resource.worker_autostart_plan.v1",
-            json!({
-                "type": "object",
-                "required": [
-                    "status",
-                    "triggerId",
-                    "launchPlanResourceId",
-                    "functionId",
-                    "candidateResourceId",
-                    "decisionResourceId",
-                    "evidenceResourceIds",
-                    "targetVisibility",
-                    "activationReason",
-                    "policy"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                    "status": {"type": "string", "enum": ["reviewed"]},
-                    "triggerId": {"type": "string"},
-                    "launchPlanResourceId": {"type": "string"},
-                    "functionId": {"type": "string"},
-                    "candidateResourceId": {"type": "string"},
-                    "decisionResourceId": {"type": "string"},
-                    "evidenceResourceIds": {"type": "array", "minItems": 1, "items": {"type": "string"}},
-                    "targetVisibility": {"type": "string", "enum": ["session", "workspace"]},
-                    "workspaceId": {"type": ["string", "null"]},
-                    "expiresAt": {"type": "string"},
-                    "activationReason": {"type": "string"},
-                    "policy": {
-                        "type": "object",
-                        "required": ["deliveryMode", "restartPolicy", "duplicatePolicy"],
-                        "additionalProperties": false,
-                        "properties": {
-                            "deliveryMode": {"type": "string", "enum": ["stdin_activation_bundle_v1"]},
-                            "restartPolicy": {"type": "string", "enum": ["none"]},
-                            "duplicatePolicy": {"type": "string", "enum": ["idempotency_key_replay_v1"]}
-                        }
-                    }
-                }
-            }),
-            vec!["draft", "reviewed", "revoked", "archived"],
-            vec![
-                "launches",
-                "activates",
-                "uses_plan",
-                "caused_by",
-                "decided_by",
-                "supported_by",
-                "evidence_for",
-                "derived_from",
-                "revokes",
-                "supersedes",
-            ],
-            json!({"read": ["resource.read"], "write": ["worker.launch", "worker.activate", "resource.write"], "delete": ["worker.launch", "resource.write"]}),
-        ),
-        builtin_type(
-            "worker_trigger_launch_attempt",
-            "tron.resource.worker_trigger_launch_attempt.v1",
-            json!({
-                "type": "object",
-                "required": [
-                    "status",
-                    "attemptId",
-                    "triggerId",
-                    "autostartPlanResourceId",
-                    "launchPlanResourceId",
-                    "functionId",
-                    "targetVisibility",
-                    "scope",
-                    "idempotency",
-                    "trace",
-                    "policy",
-                    "metadata"
-                ],
-                "additionalProperties": false,
-                "properties": {
-                    "status": {"type": "string", "enum": [
-                        "requested",
-                        "activation_issued",
-                        "launch_starting",
-                        "ready_pending",
-                        "failed"
-                    ]},
-                    "attemptId": {"type": "string"},
-                    "triggerId": {"type": "string"},
-                    "autostartPlanResourceId": {"type": "string"},
-                    "launchPlanResourceId": {"type": "string"},
-                    "activationResourceId": {"type": ["string", "null"]},
-                    "workerProcessResourceId": {"type": ["string", "null"]},
-                    "functionId": {"type": "string"},
-                    "targetVisibility": {"type": "string", "enum": ["session", "workspace"]},
                     "scope": {"type": "object"},
-                    "idempotency": {"type": "object"},
-                    "trace": {"type": "object"},
-                    "policy": {"type": "object"},
-                    "error": {"type": ["object", "null"]},
+                    "confidence": {"type": "number"},
+                    "provenance": {"type": "object"},
+                    "evidenceRefs": {"type": "array", "items": {"type": "string"}},
+                    "supersedesResourceId": {"type": "string"},
+                    "supersededByResourceId": {"type": "string"},
+                    "revokedByResourceId": {"type": "string"},
                     "metadata": {"type": "object"}
                 }
             }),
+            vec!["draft", "active", "superseded", "revoked", "archived"],
             vec![
-                "requested",
-                "activation_issued",
-                "launch_starting",
-                "ready_pending",
-                "failed",
-                "archived",
-            ],
-            vec![
-                "caused_by",
-                "activates",
-                "launches",
-                "uses_plan",
-                "audits",
+                "supported_by",
+                "contradicted_by",
+                "evidence_for",
                 "derived_from",
+                "supersedes",
+                "superseded_by",
+                "revoked_by",
+                "decided_by",
             ],
-            json!({"read": ["resource.read"], "write": ["worker.launch", "worker.activate", "resource.write"], "delete": ["worker.launch", "resource.write"]}),
+            json!({"read": ["resource.read"], "write": ["resource.write"], "delete": ["resource.write"]}),
         ),
         builtin_type(
-            "worker_process",
-            "tron.resource.worker_process.v1",
+            "agent_rule",
+            "tron.resource.agent_rule.v1",
             json!({
                 "type": "object",
-                "required": [
-                    "status",
-                    "activationResourceId",
-                    "launchPlanResourceId",
-                    "workerProcessResourceId",
-                    "workerId",
-                    "functionId",
-                    "targetVisibility",
-                    "namespace",
-                    "scope",
-                    "launch",
-                    "activationHandoff",
-                    "process",
-                    "readiness",
-                    "logs",
-                    "exit",
-                    "metadata"
-                ],
+                "required": ["rule", "status", "scope", "provenance", "evidenceRefs"],
                 "additionalProperties": false,
                 "properties": {
-                    "status": {"type": "string", "enum": [
-                        "requested",
-                        "starting",
-                        "hello_seen",
-                        "ready",
-                        "unhealthy",
-                        "stopping",
-                        "stopped",
-                        "failed",
-                        "killed",
-                        "expired",
-                        "revoked",
-                        "archived"
-                    ]},
-                    "activationResourceId": {"type": "string"},
-                    "launchPlanResourceId": {"type": "string"},
-                    "workerProcessResourceId": {"type": "string"},
-                    "workerId": {"type": "string"},
-                    "functionId": {"type": "string"},
-                    "targetVisibility": {"type": "string", "enum": ["session", "workspace"]},
-                    "namespace": {"type": "string"},
+                    "rule": {"type": "string"},
+                    "status": {"type": "string"},
                     "scope": {"type": "object"},
-                    "launch": {"type": "object"},
-                    "activationHandoff": {"type": "object"},
-                    "process": {"type": "object"},
-                    "readiness": {"type": "object"},
-                    "logs": {"type": "object"},
-                    "exit": {"type": "object"},
+                    "rationale": {"type": "string"},
+                    "provenance": {"type": "object"},
+                    "evidenceRefs": {"type": "array", "items": {"type": "string"}},
+                    "decisionRefs": {"type": "array", "items": {"type": "string"}},
+                    "supersedesResourceId": {"type": "string"},
+                    "supersededByResourceId": {"type": "string"},
+                    "revokedByResourceId": {"type": "string"},
                     "metadata": {"type": "object"}
                 }
             }),
             vec![
-                "requested",
-                "starting",
-                "hello_seen",
-                "ready",
-                "unhealthy",
-                "stopping",
-                "stopped",
-                "failed",
-                "killed",
-                "expired",
+                "draft",
+                "proposed",
+                "active",
+                "superseded",
                 "revoked",
                 "archived",
             ],
             vec![
-                "launched_by",
-                "activates",
-                "uses_plan",
-                "audits",
+                "supported_by",
+                "contradicted_by",
+                "evidence_for",
                 "derived_from",
-                "revokes",
                 "supersedes",
+                "superseded_by",
+                "revoked_by",
+                "decided_by",
+                "promoted_by",
             ],
-            json!({"read": ["resource.read"], "write": ["worker.launch", "resource.write"], "delete": ["worker.launch", "resource.write"]}),
+            json!({"read": ["resource.read"], "write": ["resource.write"], "delete": ["resource.write"]}),
         ),
-    ];
-    definitions.extend(agent_record_resource_type_definitions());
-    definitions.extend(worker_schedule_resource_type_definitions());
-    definitions
+        builtin_type(
+            "agent_result",
+            "tron.resource.agent_result.v1",
+            json!({
+                "type": "object",
+                "required": ["message", "stopReason"],
+                "additionalProperties": true,
+                "properties": {
+                    "message": {"type": "string"},
+                    "promotedRefs": {"type": "array"},
+                    "decisionRefs": {"type": "array"},
+                    "subgoalRefs": {"type": "array"},
+                    "stopReason": {"type": "string"},
+                    "tokenUsage": {"type": "object"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec!["final", "interrupted", "discarded", "archived"],
+            vec![
+                "answers",
+                "decides",
+                "promotes",
+                "supports",
+                "produced",
+                "derived_from",
+            ],
+            json!({"read": ["resource.read"], "write": ["resource.write"]}),
+        ),
+    ]
 }
 
 pub(crate) fn type_definition_from_request(
@@ -688,7 +421,7 @@ pub(crate) fn type_definition_from_request(
     }
 }
 
-pub(super) fn builtin_type(
+fn builtin_type(
     kind: &str,
     schema_id: &str,
     schema: Value,

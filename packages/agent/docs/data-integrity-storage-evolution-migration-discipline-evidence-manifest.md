@@ -20,7 +20,7 @@ Invariant target:
 
 | Row | Status | Evidence |
 | --- | --- | --- |
-| DISEMD-0 | passed_after_fix | Added DISEMD scorecard, evidence manifest, inventory docs/TSV, invariant target, README living-doc links, local closeout target wiring, GitHub static-gate target wiring, and SAASTC predecessor inventory rows. |
+| DISEMD-0 | passed_after_fix | Added DISEMD scorecard, evidence manifest, inventory docs/TSV, invariant target, README living-doc links, local closeout target wiring, GitHub static-gate target wiring, and predecessor cleanup guard bookkeeping. |
 | DISEMD-1 | passed_after_fix | Built the DISEMD TSV inventory covering shared storage, startup, event-store SQLite, session store/reconstruction, engine durability, authority storage, iOS projection persistence, scripts, README, and static gates. |
 | DISEMD-2 | passed_after_fix | Hardened `packages/agent/src/shared/storage/archive.rs`; unit tests cover stale active DB archival, malformed marker fail-closed behavior, orphaned WAL/SHM archival, and archive manifest proof. |
 | DISEMD-3 | passed_after_fix | Hardened `packages/agent/src/shared/storage/schema.rs`; schema work uses `SAVEPOINT tron_storage_schema`, verifies required storage columns, verifies payload-ref blob ownership, and keeps migrations transactional with `PRAGMA foreign_key_check`. |
@@ -49,7 +49,7 @@ Invariant target:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture` | pass | 9 failure-semantics predecessor tests passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture` | pass | 11 ODA predecessor tests passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | pass | 17 SACB predecessor tests passed after security marker inventory bookkeeping sync. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture` | pass | 12 SAASTC successor-cleanup tests passed after predecessor inventory bookkeeping sync. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_successor_teardown_cleanup_invariants -- --nocapture` | pass | OPSTC cleanup guard passed after the off-plan successor harness was replaced. |
 | `scripts/tron ci fmt check clippy test` | pass | Full local CI passed after DISEMD closure. |
 | `scripts/personal-info-guard.sh` | pass | Personal-info guard passed. |
 | `cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj` | pass | XcodeGen produced no tracked project drift. |

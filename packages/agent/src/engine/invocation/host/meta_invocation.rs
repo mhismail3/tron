@@ -430,7 +430,6 @@ impl EngineHost {
         let function_id = function_id(required_str(&invocation.payload, "functionId")?)?;
         let target = required_visibility(&invocation.payload, "targetVisibility")?;
         let workspace_id = optional_string(invocation.payload.get("workspaceId"))?;
-        let governance_refs = PromotionGovernanceRefs::from_payload(&invocation.payload)?;
 
         let function = self
             .catalog
@@ -440,7 +439,10 @@ impl EngineHost {
                 kind: "function",
                 id: function_id.to_string(),
             })?;
-        let owner_worker = function.owner_worker.clone();
+        let owner_worker = match optional_string(invocation.payload.get("ownerWorker"))? {
+            Some(owner) => worker_id(&owner)?,
+            None => function.owner_worker.clone(),
+        };
         if function.visibility != VisibilityScope::Session {
             return Err(EngineError::InvalidVisibilityPromotion {
                 function_id: function_id.to_string(),
@@ -467,34 +469,18 @@ impl EngineHost {
                 });
             }
         }
-        self.validate_promotion_governance(
-            invocation,
-            &function,
-            &target,
-            workspace_id.as_deref(),
-            &governance_refs,
-        )?;
 
         let revision = self.catalog.promote_function_visibility(
             &function_id,
             &owner_worker,
             target.clone(),
             workspace_id,
-            Some(governance_refs.redacted_catalog_metadata(&target)),
         )?;
-        let mut response = json!({
+        Ok(json!({
             "functionId": function_id.as_str(),
             "revision": revision.0,
             "visibility": target.as_str(),
-        });
-        if let Some(object) = response.as_object_mut() {
-            if let Some(governance) = governance_refs.response_value().as_object() {
-                for (key, value) in governance {
-                    object.insert(key.clone(), value.clone());
-                }
-            }
-        }
-        Ok(response)
+        }))
     }
 
     pub(super) fn visible_workers(&self, actor: &ActorContext) -> Vec<WorkerDefinition> {

@@ -18,15 +18,7 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         .with_namespace_claim("agent_memory")
         .with_namespace_claim("agent_rule")
         .with_namespace_claim("materialized_file")
-        .with_namespace_claim("patch")
-        .with_namespace_claim("worker_activation")
-        .with_namespace_claim("worker_launch_plan")
-        .with_namespace_claim("worker_autostart_plan")
-        .with_namespace_claim("worker_trigger_launch_attempt")
-        .with_namespace_claim("worker_schedule_plan")
-        .with_namespace_claim("worker_schedule_tick")
-        .with_namespace_claim("worker_schedule_scan_state")
-        .with_namespace_claim("worker_process");
+        .with_namespace_claim("patch");
     Ok(vec![
         primitive_worker(STREAM_WORKER_ID, WorkerKind::Stream)?,
         primitive_worker(STATE_WORKER_ID, WorkerKind::State)?,
@@ -53,7 +45,7 @@ pub(in crate::engine) fn primitive_function_definitions(
     registrations.extend(grant::registrations(stores)?);
     registrations.extend(catalog::registrations()?);
     registrations.extend(ui::registrations()?);
-    registrations.extend(worker::registrations(stores)?);
+    registrations.extend(worker::registrations()?);
     registrations.extend(storage::registrations()?);
     Ok(registrations)
 }

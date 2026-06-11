@@ -51,7 +51,6 @@ impl EngineExternalWorkerRuntime {
             ));
         }
         validate_worker_token(&hello)?;
-        self.validate_activation_hello(&hello).await?;
         self.validate_worker_grant(&hello).await?;
         let owner_actor = hello.worker.owner_actor.clone();
         let volatile = hello.registration_mode == WorkerRegistrationMode::Volatile;
@@ -76,7 +75,6 @@ impl EngineExternalWorkerRuntime {
         );
         let snapshot = self.catalog_snapshot_for(&worker_id).await;
         let connection = self.connection_mut(&worker_id)?.clone();
-        self.mark_activation_connected(&connection).await?;
         self.publish_lifecycle_event(
             "worker.connected",
             &connection,
@@ -142,8 +140,6 @@ impl EngineExternalWorkerRuntime {
             self.host
                 .unregister_worker(&connection.worker_id, connection.owner_actor.as_str())
                 .await?;
-            self.mark_activation_disconnected(&connection, Some(disconnect.reason.as_str()))
-                .await?;
             let event_type = if disconnect.reason == "heartbeat timeout" {
                 "worker.heartbeat_timeout"
             } else {
@@ -165,8 +161,6 @@ impl EngineExternalWorkerRuntime {
             .await?;
         } else {
             self.mark_durable_worker_disconnected(&connection).await?;
-            self.mark_activation_disconnected(&connection, Some(disconnect.reason.as_str()))
-                .await?;
             self.publish_lifecycle_event(
                 "worker.disconnected",
                 &connection,
@@ -310,14 +304,6 @@ impl EngineExternalWorkerRuntime {
         if grant.lifecycle != EngineGrantLifecycle::Active {
             return Err(EngineError::PolicyViolation(format!(
                 "worker scoped token grant {} is not active",
-                token.authority_grant_id
-            )));
-        }
-        if let Some(expires_at) = grant.expires_at
-            && expires_at <= Utc::now()
-        {
-            return Err(EngineError::PolicyViolation(format!(
-                "worker scoped token grant {} is expired",
                 token.authority_grant_id
             )));
         }

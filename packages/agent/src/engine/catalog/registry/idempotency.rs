@@ -208,9 +208,7 @@ impl LiveCatalog {
             .complete_idempotency(
                 &reservation.key,
                 &invocation.id,
-                StoredInvocationOutcome::from_result(&super::durable_result_for_invocation(
-                    invocation, result,
-                )),
+                StoredInvocationOutcome::from_result(result),
             )
             .err()
             .map(|err| {

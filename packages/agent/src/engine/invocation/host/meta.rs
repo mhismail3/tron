@@ -210,25 +210,13 @@ fn invoke_schema() -> Value {
 fn promote_schema() -> Value {
     json!({
         "type": "object",
-        "required": [
-            "functionId",
-            "targetVisibility",
-            "idempotencyKey",
-            "decisionResourceId",
-            "evidenceResourceIds",
-            "candidateResourceIds",
-            "promotionReason"
-        ],
+        "required": ["functionId", "targetVisibility"],
         "additionalProperties": false,
         "properties": {
-            "functionId": {"type": "string", "minLength": 1},
+            "functionId": {"type": "string"},
+            "ownerWorker": {"type": "string"},
             "targetVisibility": {"type": "string", "enum": ["workspace", "system"]},
-            "idempotencyKey": {"type": "string", "minLength": 1},
-            "workspaceId": {"type": "string", "minLength": 1},
-            "decisionResourceId": {"type": "string", "minLength": 1},
-            "evidenceResourceIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
-            "candidateResourceIds": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
-            "promotionReason": {"type": "string", "minLength": 1}
+            "workspaceId": {"type": "string"}
         }
     })
 }
@@ -650,11 +638,5 @@ pub(super) fn is_host_dispatched_primitive_namespace(namespace: &str) -> bool {
 }
 
 pub(super) fn is_host_dispatched_primitive_function(function_id: &FunctionId) -> bool {
-    if matches!(
-        function_id.as_str(),
-        "worker::launch_activation" | "worker::launch_from_trigger" | "worker::stop_process"
-    ) {
-        return false;
-    }
     is_host_dispatched_primitive_namespace(function_id.namespace())
 }

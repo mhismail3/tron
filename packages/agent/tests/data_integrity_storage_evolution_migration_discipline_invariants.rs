@@ -132,7 +132,7 @@ fn disemd_evidence_manifest_records_passed_matrix_without_forward_claims() {
         "cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture",
-        "cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_successor_teardown_cleanup_invariants -- --nocapture",
         "scripts/tron ci fmt check clippy test",
         "scripts/personal-info-guard.sh",
         "git diff --check",
@@ -293,9 +293,8 @@ fn disemd_readme_ci_and_predecessor_wiring_are_present() {
         "GitHub static gates must include DISEMD invariant"
     );
 
-    let saastc_inventory = read_repo_file(
-        "packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.tsv",
-    );
+    let saastc_inventory =
+        read_repo_file("packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.tsv");
     for required_path in [
         SCORECARD_PATH,
         EVIDENCE_PATH,
@@ -305,7 +304,7 @@ fn disemd_readme_ci_and_predecessor_wiring_are_present() {
     ] {
         assert!(
             saastc_inventory.contains(required_path),
-            "SAASTC inventory must account for DISEMD artifact {required_path}"
+            "OPSTC inventory must account for DISEMD artifact {required_path}"
         );
     }
 }

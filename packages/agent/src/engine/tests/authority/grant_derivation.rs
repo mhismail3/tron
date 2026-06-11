@@ -131,21 +131,6 @@ async fn grant_derive_rejects_child_expansion_by_authority_dimension() {
             "rejected child grant {grant_id} must not be persisted"
         );
     }
-
-    let mut no_file_payload = base_child_grant_payload(
-        "grant-authority-child-no-file",
-        "grant-authority-parent",
-        &allowed_root,
-    );
-    no_file_payload
-        .as_object_mut()
-        .unwrap()
-        .insert("fileRoots".to_owned(), json!([]));
-    let no_file_grant =
-        derive_grant(&handle, no_file_payload, "grant-authority-child-no-file").await;
-    assert_eq!(no_file_grant.error, None);
-    let inspected = no_file_grant.value.as_ref().unwrap();
-    assert_eq!(inspected["grant"]["fileRoots"], json!([]));
 }
 
 #[tokio::test]

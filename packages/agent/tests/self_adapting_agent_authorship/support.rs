@@ -208,7 +208,6 @@ pub(super) async fn execute_causal_context(
     workspace_id: &str,
     working_directory: &Path,
     provider_invocation_id: &str,
-    operation: &str,
     idempotency_key: &str,
 ) -> CausalContext {
     let actor_id = ActorId::new(format!("agent:{session_id}")).unwrap();
@@ -220,7 +219,6 @@ pub(super) async fn execute_causal_context(
         workspace_id,
         working_directory,
         provider_invocation_id,
-        operation,
     )
     .await;
     CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
@@ -250,7 +248,6 @@ async fn derive_execute_grant(
     workspace_id: &str,
     working_directory: &Path,
     provider_invocation_id: &str,
-    operation: &str,
 ) -> AuthorityGrantId {
     let root = tron::shared::foundation::paths::normalize_working_directory(
         &working_directory.display().to_string(),
@@ -258,7 +255,6 @@ async fn derive_execute_grant(
     .unwrap()
     .display()
     .to_string();
-    let grant_shape = execute_grant_shape(operation);
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
@@ -266,15 +262,30 @@ async fn derive_execute_grant(
             json!({
                 "parentGrantId": "agent-capability-runtime",
                 "subjectActorId": actor_id.as_str(),
-                "allowedCapabilities": grant_shape.allowed_capabilities,
+                "allowedCapabilities": [
+                    "capability::execute",
+                    "resource::create",
+                    "resource::inspect",
+                    "resource::link",
+                    "resource::list",
+                    "resource::update",
+                    "state::get",
+                    "state::set",
+                    "state::list"
+                ],
                 "allowedNamespaces": ["__no_namespace_authority__"],
-                "allowedAuthorityScopes": grant_shape.allowed_authority_scopes,
+                "allowedAuthorityScopes": [
+                    "capability.execute",
+                    "resource.read",
+                    "resource.write",
+                    "state.read",
+                    "state.write"
+                ],
                 "allowedResourceKinds": [
                     "agent_memory",
                     "agent_result",
                     "agent_rule",
                     "artifact",
-                    "capability_definition",
                     "claim",
                     "decision",
                     "evidence",
@@ -289,7 +300,7 @@ async fn derive_execute_grant(
                 "networkPolicy": "none",
                 "maxRisk": "medium",
                 "budget": {
-                    "remainingInvocations": grant_shape.remaining_invocations,
+                    "remainingInvocations": 2,
                     "remainingProcessMs": 120000
                 },
                 "canDelegate": false,
@@ -298,7 +309,6 @@ async fn derive_execute_grant(
                     "sessionId": session_id,
                     "workspaceId": workspace_id,
                     "providerInvocationId": provider_invocation_id,
-                    "operation": operation,
                     "workingDirectory": root
                 }
             }),
@@ -325,37 +335,6 @@ async fn derive_execute_grant(
             .to_owned(),
     )
     .unwrap()
-}
-
-struct ExecuteGrantShape {
-    allowed_capabilities: Vec<&'static str>,
-    allowed_authority_scopes: Vec<&'static str>,
-    remaining_invocations: u64,
-}
-
-fn execute_grant_shape(operation: &str) -> ExecuteGrantShape {
-    match operation {
-        "resource_create" => ExecuteGrantShape {
-            allowed_capabilities: vec!["capability::execute", "resource::create"],
-            allowed_authority_scopes: vec!["capability.execute", "resource.write"],
-            remaining_invocations: 2,
-        },
-        "resource_link" => ExecuteGrantShape {
-            allowed_capabilities: vec![
-                "capability::execute",
-                "resource::inspect",
-                "resource::link",
-            ],
-            allowed_authority_scopes: vec!["capability.execute", "resource.read", "resource.write"],
-            remaining_invocations: 4,
-        },
-        "resource_inspect" => ExecuteGrantShape {
-            allowed_capabilities: vec!["capability::execute", "resource::inspect"],
-            allowed_authority_scopes: vec!["capability.execute", "resource.read"],
-            remaining_invocations: 2,
-        },
-        _ => panic!("unsupported SAA execute fixture operation: {operation}"),
-    }
 }
 
 pub(super) async fn invoke_execute(

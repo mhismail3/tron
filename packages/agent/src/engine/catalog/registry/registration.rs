@@ -285,7 +285,6 @@ impl LiveCatalog {
         owner: &WorkerId,
         target: VisibilityScope,
         workspace_id: Option<String>,
-        governance_refs: Option<serde_json::Value>,
     ) -> Result<FunctionRevision> {
         let Some(entry) = self.functions.get(id) else {
             return Err(EngineError::NotFound {
@@ -328,11 +327,6 @@ impl LiveCatalog {
                     reason: "only workspace and system promotion are supported".to_owned(),
                 });
             }
-        }
-        if let Some(governance_refs) = governance_refs {
-            let mut metadata = updated.metadata.as_object().cloned().unwrap_or_default();
-            metadata.insert("promotionGovernance".to_owned(), governance_refs);
-            updated.metadata = serde_json::Value::Object(metadata);
         }
 
         updated.revision = updated.revision.next();

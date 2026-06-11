@@ -6,6 +6,3 @@ mod host_invocation;
 mod host_invocation_delegated_budget_ordering;
 mod idempotency;
 mod meta_primitives;
-mod promotion_governance;
-mod promotion_governance_support;
-mod worker_activation;

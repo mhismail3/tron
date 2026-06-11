@@ -88,7 +88,7 @@ cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayab
 cargo test --manifest-path packages/agent/Cargo.toml --test failure_semantics_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
-cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_successor_teardown_cleanup_invariants -- --nocapture
 ```
 
 The DISEMD invariant target and broad closeout commands are recorded in the

@@ -391,7 +391,6 @@ packages/agent/src/engine/durability/mod.rs	retain	rust agent	PCC-10/AHA-9	Curre
 packages/agent/src/engine/durability/queue/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/queue/runtime.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/queue/sqlite_codec.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/engine/durability/resources/agent_record_definitions.rs	retain	rust agent	SAAWSD-11	Retained agent record schema helper split from resource definitions for file-budget compliance.
 packages/agent/src/engine/durability/resources/definitions.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/resources/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/resources/store/memory.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1568,72 +1567,13 @@ packages/agent/tests/self_adapting_agent_authorship/scorecard_inventory.rs	retai
 packages/agent/tests/self_adapting_agent_authorship/source_guards.rs	retain	saa rust test	SAA-2/SAA-9	Current Self-Adapting Agent Authorship source guard invariant retained for closeout verification.
 packages/agent/tests/self_adapting_agent_authorship/support.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant support retained for closeout verification.
 packages/agent/tests/self_adapting_agent_authorship_invariants.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant target retained for closeout verification.
-packages/agent/docs/self-adapting-agent-promotion-governance-evidence-manifest.md	retain	sapg docs	SAPG-10	Current Self-Adapting Agent Promotion Governance evidence manifest retained for promotion closeout.
-packages/agent/docs/self-adapting-agent-promotion-governance-scorecard.md	retain	sapg docs	SAPG-10	Current Self-Adapting Agent Promotion Governance scorecard retained for promotion closeout.
-packages/agent/src/engine/invocation/host/promotion_governance.rs	retain	sapg rust source	SAPG-3/SAPG-4	Promotion governance validator retained as the accepted-decision and evidence-chain boundary.
-packages/agent/src/engine/tests/invocation/promotion_governance.rs	retain	sapg rust test	SAPG-3/SAPG-4	Promotion governance tests retained for accepted/rejected governance chain coverage.
-packages/agent/src/engine/tests/invocation/promotion_governance_support.rs	retain	sapg rust test	SAPG-3/SAPG-4	Promotion governance fixture support retained for synthetic resource-chain tests.
-packages/agent/tests/self_adapting_agent_promotion_governance_invariants.rs	retain	sapg rust test	SAPG-10	Current Self-Adapting Agent Promotion Governance invariant target retained for closeout verification.
-packages/agent/docs/self-adapting-agent-worker-activation-evidence-manifest.md	retain	saawa docs	SAAWA-10	Current Self-Adapting Agent Worker Activation evidence manifest retained for activation closeout.
-packages/agent/docs/self-adapting-agent-worker-activation-inventory.md	retain	saawa docs	SAAWA-1	Current Self-Adapting Agent Worker Activation source inventory retained for activation closeout.
-packages/agent/docs/self-adapting-agent-worker-activation-inventory.tsv	retain	saawa docs	SAAWA-1	Current Self-Adapting Agent Worker Activation machine-readable inventory retained for activation closeout.
-packages/agent/docs/self-adapting-agent-worker-activation-scorecard.md	retain	saawa docs	SAAWA-10	Current Self-Adapting Agent Worker Activation scorecard retained for activation closeout.
-packages/agent/src/engine/primitives/worker_activation.rs	retain	saawa rust source	SAAWA-2/SAAWA-4	Worker activation issue primitive retained as the governed activation bundle issuance boundary.
-packages/agent/src/engine/primitives/worker_activation_governance.rs	retain	saawa rust source	SAAWA-3	Governance chain validator retained for capability-definition decision/evidence/candidate linkage.
-packages/agent/src/engine/runtime/external_workers/activation.rs	retain	saawa rust source	SAAWA-5/SAAWA-6	External-worker activation binding retained for hello, registration, lifecycle, and revocation validation.
-packages/agent/src/engine/tests/invocation/worker_activation.rs	retain	saawa rust test	SAAWA-3/SAAWA-4	Worker activation invocation tests retained for governance rejection and idempotent issuance coverage.
-packages/agent/src/engine/tests/runtime/worker_activation.rs	retain	saawa rust test	SAAWA-5/SAAWA-7	Worker activation runtime tests retained for hello, registration, proxy invocation, and disconnect coverage.
-packages/agent/tests/self_adapting_agent_worker_activation_invariants.rs	retain	saawa rust test	SAAWA-10	Current Self-Adapting Agent Worker Activation invariant target retained for closeout verification.
-packages/agent/src/engine/tests/fixtures/worker_activation.rs	retain	saawa rust test	SAAWA-3/SAAWA-4	Worker activation fixture support retained after split from shared engine fixtures.
-packages/agent/tests/security_authority_capability_boundaries/lifecycle_guards.rs	retain	sacb rust test	SACB-9/SACB-10	SACB lifecycle and internal-invoke static guards retained after file-budget split.
-packages/agent/docs/self-adapting-agent-worker-orchestration-scorecard.md	retain	saawo docs	SAAWO-0	Worker orchestration scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-orchestration-evidence-manifest.md	retain	saawo docs	SAAWO-0	Worker orchestration evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.md	retain	saawo docs	SAAWO-1	Worker orchestration inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.tsv	retain	saawo docs	SAAWO-1	Worker orchestration machine-readable inventory retained for static gates.
-packages/agent/tests/self_adapting_agent_worker_orchestration_invariants.rs	retain	saawo rust test	SAAWO-10	Worker orchestration invariant target retained for closeout verification.
-packages/agent/src/engine/runtime/worker_orchestration/mod.rs	retain	saawo rust source	SAAWO-6	Worker orchestration facade retained as the launch, stop, and readiness callback owner.
-packages/agent/src/engine/runtime/worker_orchestration/contracts.rs	retain	saawo rust source	SAAWO-2	Launch plan and activation request contract validation retained in the split orchestration module.
-packages/agent/src/engine/runtime/worker_orchestration/process_resource.rs	retain	saawo rust source	SAAWO-3	Worker process payload, redaction, and readiness matching retained in the split orchestration module.
-packages/agent/src/engine/runtime/worker_orchestration/supervisor.rs	retain	saawo rust source	SAAWO-6	Direct-exec worker process supervisor retained as the process boundary owner.
-packages/agent/src/engine/tests/runtime/worker_orchestration.rs	retain	saawo rust test	SAAWO-7	Worker orchestration runtime tests retained for fake supervisor and readiness binding coverage.
-packages/agent/docs/self-adapting-agent-worker-bundle-handoff-scorecard.md	retain	saawbh docs	SAAWBH-0	Worker bundle handoff scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-bundle-handoff-evidence-manifest.md	retain	saawbh docs	SAAWBH-0	Worker bundle handoff evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.md	retain	saawbh docs	SAAWBH-1	Worker bundle handoff inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.tsv	retain	saawbh docs	SAAWBH-1	Worker bundle handoff machine-readable inventory retained for static gates.
-packages/agent/tests/self_adapting_agent_worker_bundle_handoff_invariants.rs	retain	saawbh rust test	SAAWBH-10	Worker bundle handoff invariant target retained for closeout verification.
-packages/agent/src/engine/runtime/worker_activation_bundle_vault.rs	retain	saawbh rust source	SAAWBH-3	Process-memory activation bundle vault retained as the ephemeral custody boundary.
-packages/agent/docs/self-adapting-agent-worker-trigger-launch-scorecard.md	retain	saawtl docs	SAAWTL-0	Worker trigger launch scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-trigger-launch-evidence-manifest.md	retain	saawtl docs	SAAWTL-0	Worker trigger launch evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.md	retain	saawtl docs	SAAWTL-1	Worker trigger launch inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.tsv	retain	saawtl docs	SAAWTL-1	Worker trigger launch machine-readable inventory retained for static gates.
-packages/agent/tests/self_adapting_agent_worker_trigger_launch_invariants.rs	retain	saawtl rust test	SAAWTL-0	Worker trigger launch invariant target retained for closeout verification.
-packages/agent/src/engine/runtime/worker_orchestration/trigger_launch.rs	retain	saawtl rust source	SAAWTL-4	Trigger-created worker launch runtime retained as the trusted SAAWTL composition path.
-packages/agent/src/engine/tests/runtime/worker_trigger_launch.rs	retain	saawtl rust test	SAAWTL-5	Worker trigger launch runtime tests retained for enqueue drain and idempotency coverage.
-packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-scorecard.md	retain	saawsd docs	SAAWSD-0	Worker schedule dispatch scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-evidence-manifest.md	retain	saawsd docs	SAAWSD-0	Worker schedule dispatch evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.md	retain	saawsd docs	SAAWSD-1	Worker schedule dispatch inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.tsv	retain	saawsd docs	SAAWSD-1	Worker schedule dispatch machine-readable inventory retained for static gates.
-packages/agent/src/engine/durability/resources/worker_schedule_definitions.rs	retain	saawsd rust source	SAAWSD-2	Worker schedule plan and tick resource schemas retained for governed schedule dispatch.
-packages/agent/src/engine/runtime/worker_schedule/mod.rs	retain	saawsd rust source	SAAWSD-3	Worker schedule runtime retained for due tick calculation, lease ownership, and trigger dispatch composition.
-packages/agent/src/engine/runtime/worker_schedule/contracts.rs	retain	saawsd rust source	SAAWSD-2	Worker schedule contract parser retained for UTC interval, fixed policy, and safe tick payload validation.
-packages/agent/src/engine/runtime/worker_schedule/tick_dispatch.rs	retain	saawsd rust source	SAASTC-3	Worker schedule trigger enqueue and tick mutation helper retained after source teardown split.
-packages/agent/src/engine/runtime/worker_schedule/overlap.rs	retain	saawsd rust source	SAAWSD-6	Worker schedule overlap evidence helper retained for one-active-tick replay and process-state checks.
-packages/agent/src/engine/tests/runtime/worker_schedule_dispatch.rs	retain	saawsd rust test	SAAWSD-11	Worker schedule dispatch runtime tests retained for due, replay, missed, overlap, and negative validation coverage.
-packages/agent/src/engine/tests/runtime/worker_schedule_dispatch_support.rs	retain	saawsd rust test	SAAWSD-11	Worker schedule dispatch test support retained for synthetic launch and resource fixtures.
-packages/agent/tests/self_adapting_agent_worker_schedule_dispatch_invariants.rs	retain	saawsd rust test	SAAWSD-11	Worker schedule dispatch invariant target retained for closeout static gates.
-packages/agent/docs/self-adapting-agent-worker-schedule-capacity-scorecard.md	retain	saawsc docs	SAAWSC-0	Worker schedule capacity scorecard retained as completed closeout evidence.
-packages/agent/docs/self-adapting-agent-worker-schedule-capacity-evidence-manifest.md	retain	saawsc docs	SAAWSC-0	Worker schedule capacity evidence manifest retained for verification provenance.
-packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.md	retain	saawsc docs	SAAWSC-1	Worker schedule capacity inventory summary retained for source taxonomy.
-packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.tsv	retain	saawsc docs	SAAWSC-1	Worker schedule capacity machine-readable inventory retained for static gates.
-packages/agent/src/engine/runtime/worker_schedule/scan_state.rs	retain	saawsc rust source	SAAWSC-4	Worker schedule scan-state helper retained for explicit bounded schedule scans.
-packages/agent/tests/self_adapting_agent_worker_schedule_capacity_invariants.rs	retain	saawsc rust test	SAAWSC-11	Worker schedule capacity invariant target retained for closeout static gates.
-packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-scorecard.md	retain	saastc docs	SAASTC-0	Successor teardown cleanup scorecard retained as active cleanup control.
-packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-evidence-manifest.md	retain	saastc docs	SAASTC-0	Successor teardown cleanup evidence manifest retained for cleanup provenance.
-packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.md	retain	saastc docs	SAASTC-1	Successor teardown cleanup inventory summary retained for diff classification.
-packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.tsv	retain	saastc docs	SAASTC-1	Successor teardown cleanup machine inventory retained for static gates.
-packages/agent/tests/self_adapting_agent_successor_teardown_cleanup_invariants.rs	retain	saastc rust test	SAASTC-0	Successor teardown cleanup invariant target retained for cleanup static gates.
-packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/support.rs	retain	saastc rust test	SAASTC-11	Shared support for the decomposed successor teardown cleanup invariant target.
-packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/scorecard_inventory.rs	retain	saastc rust test	SAASTC-11	Scorecard inventory guards split from the successor teardown cleanup invariant target.
-packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/boundaries.rs	retain	saastc rust test	SAASTC-11	Transport provider and invocation-host boundary guards split from the successor teardown cleanup invariant target.
-packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/primitive_resources.rs	retain	saastc rust test	SAASTC-11	Primitive-surface and resource-substrate guards split from the successor teardown cleanup invariant target.
-packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/runtime_catalog_tests.rs	retain	saastc rust test	SAASTC-11	Runtime lifecycle catalog export and test-quality guards split from the successor teardown cleanup invariant target.
+packages/agent/docs/data-integrity-storage-evolution-migration-discipline-evidence-manifest.md	retain	disemd docs	DISEMD-0	Current Data Integrity Storage Evolution Migration Discipline evidence manifest retained for closeout verification.
+packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md	retain	disemd docs	DISEMD-0	Current Data Integrity Storage Evolution Migration Discipline inventory retained for closeout verification.
+packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv	retain	disemd docs	DISEMD-0	Current Data Integrity Storage Evolution Migration Discipline machine-readable inventory retained for closeout verification.
+packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md	retain	disemd docs	DISEMD-0	Current Data Integrity Storage Evolution Migration Discipline scorecard retained for closeout verification.
+packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs	retain	disemd rust test	DISEMD-0	Current Data Integrity Storage Evolution Migration Discipline invariant target retained for closeout verification.
+packages/agent/docs/off-plan-successor-teardown-cleanup-evidence-manifest.md	retain	opstc docs	OPSTC-0	Current Off-Plan Successor Teardown Cleanup evidence manifest retained for closeout verification.
+packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.md	retain	opstc docs	OPSTC-0	Current Off-Plan Successor Teardown Cleanup inventory retained for closeout verification.
+packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.tsv	retain	opstc docs	OPSTC-0	Current Off-Plan Successor Teardown Cleanup machine-readable inventory retained for closeout verification.
+packages/agent/docs/off-plan-successor-teardown-cleanup-scorecard.md	retain	opstc docs	OPSTC-0	Current Off-Plan Successor Teardown Cleanup scorecard retained for closeout verification.
+packages/agent/tests/off_plan_successor_teardown_cleanup_invariants.rs	retain	opstc rust test	OPSTC-0	Current Off-Plan Successor Teardown Cleanup invariant target retained for closeout verification.

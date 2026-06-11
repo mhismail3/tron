@@ -35,8 +35,6 @@ use crate::engine::durability::streams::{
 use crate::engine::invocation::host::{EngineHost, EngineHostHandle};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::types::VisibilityScope;
-use crate::engine::runtime::worker_activation_bundle_vault::WorkerActivationBundleVault;
-use crate::engine::runtime::worker_orchestration::WorkerProcessSupervisorRegistry;
 
 pub(in crate::engine) enum StreamStoreBackend {
     InMemory(InMemoryEngineStreamStore),
@@ -454,16 +452,6 @@ impl ResourceStoreBackend {
             Self::Sqlite(store) => store.list(filter),
         }
     }
-
-    pub(in crate::engine) fn list_page(
-        &self,
-        request: crate::engine::durability::resources::ListResourcesPageRequest,
-    ) -> Result<crate::engine::durability::resources::ListResourcesPage> {
-        match self {
-            Self::InMemory(store) => store.list_page(request),
-            Self::Sqlite(store) => store.list_page(request),
-        }
-    }
 }
 
 /// Engine primitive store bundle.
@@ -476,8 +464,6 @@ pub(in crate::engine) struct PrimitiveStores {
     pub(in crate::engine) resources: Arc<StdMutex<ResourceStoreBackend>>,
     pub(in crate::engine) grants: Arc<StdMutex<EngineGrantStoreBackend>>,
     pub(in crate::engine) compensation: Arc<StdMutex<CompensationStoreBackend>>,
-    pub(in crate::engine) worker_process_supervisors: WorkerProcessSupervisorRegistry,
-    pub(in crate::engine) worker_activation_bundles: Arc<StdMutex<WorkerActivationBundleVault>>,
     engine_host: Arc<OnceLock<Weak<AsyncMutex<EngineHost>>>>,
 }
 
@@ -505,8 +491,6 @@ impl PrimitiveStores {
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::InMemory(
                 InMemoryEngineCompensationStore::new(),
             ))),
-            worker_process_supervisors: WorkerProcessSupervisorRegistry::production(),
-            worker_activation_bundles: Arc::new(StdMutex::new(WorkerActivationBundleVault::new())),
             engine_host: Arc::new(OnceLock::new()),
         };
         stores
@@ -538,8 +522,6 @@ impl PrimitiveStores {
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::Sqlite(
                 SqliteEngineCompensationStore::open(path)?,
             ))),
-            worker_process_supervisors: WorkerProcessSupervisorRegistry::production(),
-            worker_activation_bundles: Arc::new(StdMutex::new(WorkerActivationBundleVault::new())),
             engine_host: Arc::new(OnceLock::new()),
         };
         stores.install_builtin_resource_types()?;

@@ -65,10 +65,6 @@ pub(super) struct PromoteMessage {
     #[serde(default)]
     pub(super) workspace_id: Option<String>,
     pub(super) idempotency_key: String,
-    pub(super) decision_resource_id: String,
-    pub(super) evidence_resource_ids: Vec<String>,
-    pub(super) candidate_resource_ids: Vec<String>,
-    pub(super) promotion_reason: String,
     #[serde(default)]
     pub(super) context: Option<WireContext>,
 }
