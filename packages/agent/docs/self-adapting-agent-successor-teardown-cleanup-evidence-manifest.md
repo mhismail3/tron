@@ -1,11 +1,11 @@
 # Self-Adapting Agent Successor Teardown Cleanup Evidence Manifest
 
-Status: **source_teardown_in_progress**
+Status: **complete**
 
 Branch: `codex/self-adapting-agent-successor-teardown-cleanup`
 Baseline commit: `b331f2b1d58f14aa3392a866e8f008e6fd8a0fb7`
 Integration head under audit: `9e8ccb1cf129ba8ef1dc14d9050e84da5ee7e3b3`
-Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5-57839c35bfee/pasted-text.txt`
+Original operator plan: `/Users/<USER>/.codex/attachments/fdc4e780-354b-4da4-8fb5-57839c35bfee/pasted-text.txt`
 
 ## Baseline Evidence
 
@@ -22,18 +22,18 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
 
 | Row | Status | Evidence | Residual risk |
 | --- | --- | --- | --- |
-| SAASTC-0 | passed_after_fix | Added the cleanup scorecard, evidence manifest, inventory docs/TSV, invariant target, README links, local `scripts/tron.d/quality.sh` target, and GitHub Rust static-gates target. | Later source teardown must keep these artifacts synchronized as files are simplified or removed. |
-| SAASTC-1 | passed_after_fix | `self_adapting_agent_successor_teardown_cleanup_invariants` validates every file in the ODA-baseline-to-current-HEAD diff has a TSV row with classification, owner, action, and rationale. | Initial classifications are not final retention decisions; SAASTC-2 through SAASTC-8 must replace conservative `simplify` rows with source-proven outcomes. |
-| SAASTC-2 | pending_source_teardown | Not yet closed in Phase 1. | Retained primitive contracts still need source mapping. |
-| SAASTC-3 | pending_source_teardown | Not yet closed in Phase 1. | Dead code and test cruft still need removal or reduction. |
-| SAASTC-4 | pending_source_teardown | Not yet closed in Phase 1. | Boundary guards still need adversarial source audit after teardown edits. |
-| SAASTC-5 | pending_source_teardown | Not yet closed in Phase 1. | Authority and governance paths may still contain duplicate policy planes. |
-| SAASTC-6 | pending_source_teardown | Not yet closed in Phase 1. | Durable state/resource schemas still need field-level justification. |
-| SAASTC-7 | pending_source_teardown | Not yet closed in Phase 1. | Runtime lifecycle and concurrency ownership still need boundedness proof. |
-| SAASTC-8 | pending_source_teardown | Not yet closed in Phase 1. | Tests may still preserve removable successor behavior. |
-| SAASTC-9 | pending_source_teardown | Not yet closed in Phase 1. | Successor docs may still contain stale future-slice wording. |
-| SAASTC-10 | pending_source_teardown | Not yet closed in Phase 1. | Cross-campaign regression remains for closeout. |
-| SAASTC-11 | pending_source_teardown | Not yet closed in Phase 1. | Full verification and adversarial closeout remain for final cleanup. |
+| SAASTC-0 | passed_after_fix | Cleanup scorecard, evidence manifest, inventory docs/TSV, invariant target, README links, local `scripts/tron.d/quality.sh` target, and GitHub Rust static-gates target are present and covered by `self_adapting_agent_successor_teardown_cleanup_invariants`. | None. |
+| SAASTC-1 | passed_after_fix | The SAASTC invariant validates every file in the ODA-baseline-to-current-HEAD diff has a TSV row with classification, owner, action, and rationale. The final TSV has `simplify 0`. | None. |
+| SAASTC-2 | passed_after_fix | Source teardown log maps retained SAA/SAPG/SAAW behavior to primitive-engine contracts: execute-only provider surface, governed promotion/activation, explicit schedule runtime, loopback external-worker lifecycle, durable resource substrate, and catalog/runtime fabric. | None. |
+| SAASTC-3 | passed_after_fix | Removed schedule autostart, trigger timeout override, host promotion shortcut, unused resource `list_types`, broad grants, stale provider test expectation, and over-budget invariant monolith; remaining rows are retained/docs/predecessor only. | None. |
+| SAASTC-4 | passed_after_fix | Static/source guards and focused tests prove no provider/public/deploy/iOS/launchd/repo-skill/restart/retry/post-ready replay surface remains; broad closeout and personal-info guard passed. | None. |
+| SAASTC-5 | passed_after_fix | Promotion, activation, trigger, schedule, execute, and worker authority paths are parent-first where applicable, operation-scoped, admin-gated for system refs, and fail closed without duplicate host shortcuts. | None. |
+| SAASTC-6 | passed_after_fix | Resource schemas, schedule scan/tick state, activation/process records, lifecycle state, and vault custody retain only necessary safe/redacted metadata; no scoped tokens, stdin secrets, or secret-looking fields persist. | None. |
+| SAASTC-7 | passed_after_fix | Worker/scheduler/orchestration runtime paths are explicit, bounded, cancellable/idempotent where retained, use loopback protocol ownership, and exclude autonomous production mutation loops. | None. |
+| SAASTC-8 | passed_after_fix | Test-quality pass split and retained focused engine/SAA tests for primitive contracts only, simplified broad SAA authorship fixture grants, and decomposed the SAASTC invariant under HRA/PCC file budgets. | None. |
+| SAASTC-9 | passed_after_fix | Scorecard, evidence, inventory, README/CI wiring, predecessor inventories, and progressive docs are synchronized with the final source state and reject stale pending/simplify wording. | None. |
+| SAASTC-10 | passed_after_fix | Required predecessor hardening invariants and retained SAA/SAPG/SAAW invariants passed in focused verification and `scripts/tron ci fmt check clippy test`. | None. |
+| SAASTC-11 | passed_after_fix | Full focused verification, broad CI, personal-info guard, XcodeGen drift check, diff check, ignored-files check, clean-status check, and final commit evidence are recorded. | Residual risk is limited to ordinary future drift; static gates now cover the retained boundaries. |
 
 ## Source Teardown Log
 
@@ -222,6 +222,61 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   the four-invocation call-graph budget. Unsupported fixture operations now fail
   closed. The SAASTC static gate rejects the removed fixture state authority and
   the reintroduction of a generic operation fallback.
+- Broad closeout reproduced a stale provider request test in
+  `build_request_serializes_capabilities_as_provider_tools`: the OpenAI
+  converter correctly filtered non-`execute` capabilities, but the request test
+  still created an `echo` capability and expected it to serialize. The
+  root-cause fix changes the provider request helper and assertion to the
+  retained `execute` primitive and records both
+  `packages/agent/src/domains/model/providers/openai/provider/tests/mod.rs` and
+  `packages/agent/src/domains/model/providers/openai/provider/tests/request.rs`
+  as retained provider-boundary rows in the SAASTC inventory.
+- Broad closeout then reproduced predecessor file-budget drift:
+  `primitive_code_cleanup::budgets_generated_dependencies::large_source_files_have_explicit_cleanup_budget_rows`
+  rejected
+  `packages/agent/tests/self_adapting_agent_successor_teardown_cleanup_invariants.rs`
+  at 1579 LOC, then HRA rejected the same file because Rust test files have a
+  hard 900 LOC limit. The root-cause fix splits the invariant target into a
+  small module root plus focused support, scorecard/inventory, boundary,
+  primitive resource, runtime/catalog, and test-quality modules, with HRA/PCC
+  and SAASTC inventory rows added for the new tracked files.
+
+## Closeout Command Matrix
+
+All commands below passed during the SAASTC closeout run after the provider
+request, HRA/PCC file-budget, and personal-info findings were fixed:
+
+```bash
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+cargo check --manifest-path packages/agent/Cargo.toml
+cargo test --manifest-path packages/agent/Cargo.toml worker_schedule --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_schedule_dispatch --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_trigger_launch --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_orchestration --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_activation --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml external_worker --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml idempotency --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_schedule_capacity_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_schedule_dispatch_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_trigger_launch_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_bundle_handoff_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_orchestration_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_activation_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_promotion_governance_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_authorship_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test integration -- --nocapture
+scripts/tron ci fmt check clippy test
+scripts/personal-info-guard.sh
+cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj
+git diff --check
+git ls-files -ci --exclude-standard
+git status --short
+```
 
 ## Phase 2 Focused Commands
 

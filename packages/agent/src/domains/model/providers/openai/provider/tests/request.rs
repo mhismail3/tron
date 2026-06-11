@@ -90,7 +90,7 @@ fn build_request_serializes_capabilities_as_provider_tools() {
 
     assert!(body.get("tools").is_some());
     assert!(body.get("capabilities").is_none());
-    assert_eq!(body["tools"][0]["name"], "echo");
+    assert_eq!(body["tools"][0]["name"], "execute");
 }
 
 #[test]

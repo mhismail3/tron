@@ -1632,3 +1632,8 @@ packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-evidence-mani
 packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.md	retain	saastc docs	SAASTC-1	Successor teardown cleanup inventory summary retained for diff classification.
 packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.tsv	retain	saastc docs	SAASTC-1	Successor teardown cleanup machine inventory retained for static gates.
 packages/agent/tests/self_adapting_agent_successor_teardown_cleanup_invariants.rs	retain	saastc rust test	SAASTC-0	Successor teardown cleanup invariant target retained for cleanup static gates.
+packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/support.rs	retain	saastc rust test	SAASTC-11	Shared support for the decomposed successor teardown cleanup invariant target.
+packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/scorecard_inventory.rs	retain	saastc rust test	SAASTC-11	Scorecard inventory guards split from the successor teardown cleanup invariant target.
+packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/boundaries.rs	retain	saastc rust test	SAASTC-11	Transport provider and invocation-host boundary guards split from the successor teardown cleanup invariant target.
+packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/primitive_resources.rs	retain	saastc rust test	SAASTC-11	Primitive-surface and resource-substrate guards split from the successor teardown cleanup invariant target.
+packages/agent/tests/self_adapting_agent_successor_teardown_cleanup/runtime_catalog_tests.rs	retain	saastc rust test	SAASTC-11	Runtime lifecycle catalog export and test-quality guards split from the successor teardown cleanup invariant target.

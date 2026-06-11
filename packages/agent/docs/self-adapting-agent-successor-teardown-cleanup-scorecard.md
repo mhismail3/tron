@@ -1,7 +1,7 @@
 # Self-Adapting Agent Successor Teardown Cleanup Scorecard
 
-Status: **source_teardown_in_progress**
-Current score: **15/100**
+Status: **complete**
+Current score: **100/100**
 Passing threshold: **100/100**
 
 Branch: `codex/self-adapting-agent-successor-teardown-cleanup`
@@ -15,8 +15,8 @@ This cleanup scorecard audits the successor self-adapting-agent work added after
 the ODA baseline. The cleanup must reduce SAA authorship, promotion governance,
 worker activation, orchestration, bundle handoff, trigger launch, schedule
 dispatch, and schedule capacity to source-proven primitive-engine content only.
-Rows not closed here remain pending source teardown; Phase 1 closes only the
-harness and full initial diff inventory.
+All rows are closed by source inspection, focused verification, broad closeout,
+and committed evidence.
 
 ## Hard Boundaries
 
@@ -31,27 +31,30 @@ harness and full initial diff inventory.
 | --- | --- | ---: | --- | --- |
 | SAASTC-0 | Harness and baseline | 5 | passed_after_fix | Clean worktree at start, correct branch/base/head recorded, cleanup scorecard/evidence/inventory/invariant target created and wired into README/local/GitHub gates. |
 | SAASTC-1 | Full successor diff inventory | 10 | passed_after_fix | Every tracked file changed in `b331f2b1d58f14aa3392a866e8f008e6fd8a0fb7..HEAD` has an initial classification, owner, action, and rationale in the cleanup inventory TSV. |
-| SAASTC-2 | Primitive-contract retention | 10 | pending_source_teardown | Retained SAA/SAPG/SAAW behavior must map to explicit primitive-engine contracts, not product aspirations or future-slice placeholders. |
-| SAASTC-3 | Dead-code and cruft removal | 12 | pending_source_teardown | Unused helpers, wrappers, duplicate docs, speculative fields, unreachable branches, excessive fixtures, and stale open-loop docs must be removed or reduced. |
-| SAASTC-4 | Boundary preservation | 10 | pending_source_teardown | Static/source guards must prove no provider/public/deploy/iOS/launchd/repo-skill/restart/retry/payload-replay surface remains. |
-| SAASTC-5 | Authority and governance simplification | 8 | pending_source_teardown | Promotion, activation, trigger, schedule, and worker authority paths must be minimal, parent-first where applicable, and fail closed without duplicate policy planes. |
-| SAASTC-6 | Durable state/resource hygiene | 8 | pending_source_teardown | Retained resources, schedule scan state, activation/process/tick records, lifecycle state, and vault custody must store only necessary safe metadata and no secrets. |
-| SAASTC-7 | Runtime lifecycle and concurrency hygiene | 8 | pending_source_teardown | Retained worker/scheduler/orchestration tasks must have bounded ownership, cancellation, idempotency, no unbounded production channels, and no hidden autonomous mutation loops. |
-| SAASTC-8 | Test suite quality | 8 | pending_source_teardown | Focused tests must prove retained behavior with low fixture duplication; tests that only preserve removed cruft must be deleted or rewritten. |
-| SAASTC-9 | Documentation/evidence integrity | 8 | pending_source_teardown | Scorecards, inventories, README, evidence manifests, and progressive-disclosure docs must be truthful after cleanup and reject stale wording. |
-| SAASTC-10 | Cross-campaign regression | 6 | pending_source_teardown | Predecessor hardening invariants and retained SAA/SAPG/SAAW invariants must still pass. |
-| SAASTC-11 | Closeout and adversarial audit | 7 | pending_source_teardown | Full verification, personal-info guard, XcodeGen drift check, ignored-files check, clean status, committed cleanup, and residual-risk note must be recorded. |
+| SAASTC-2 | Primitive-contract retention | 10 | passed_after_fix | Retained SAA/SAPG/SAAW behavior must map to explicit primitive-engine contracts, not product aspirations or future-slice placeholders. |
+| SAASTC-3 | Dead-code and cruft removal | 12 | passed_after_fix | Unused helpers, wrappers, duplicate docs, speculative fields, unreachable branches, excessive fixtures, and stale open-loop docs must be removed or reduced. |
+| SAASTC-4 | Boundary preservation | 10 | passed_after_fix | Static/source guards must prove no provider/public/deploy/iOS/launchd/repo-skill/restart/retry/payload-replay surface remains. |
+| SAASTC-5 | Authority and governance simplification | 8 | passed_after_fix | Promotion, activation, trigger, schedule, and worker authority paths must be minimal, parent-first where applicable, and fail closed without duplicate policy planes. |
+| SAASTC-6 | Durable state/resource hygiene | 8 | passed_after_fix | Retained resources, schedule scan state, activation/process/tick records, lifecycle state, and vault custody must store only necessary safe metadata and no secrets. |
+| SAASTC-7 | Runtime lifecycle and concurrency hygiene | 8 | passed_after_fix | Retained worker/scheduler/orchestration tasks must have bounded ownership, cancellation, idempotency, no unbounded production channels, and no hidden autonomous mutation loops. |
+| SAASTC-8 | Test suite quality | 8 | passed_after_fix | Focused tests must prove retained behavior with low fixture duplication; tests that only preserve removed cruft must be deleted or rewritten. |
+| SAASTC-9 | Documentation/evidence integrity | 8 | passed_after_fix | Scorecards, inventories, README, evidence manifests, and progressive-disclosure docs must be truthful after cleanup and reject stale wording. |
+| SAASTC-10 | Cross-campaign regression | 6 | passed_after_fix | Predecessor hardening invariants and retained SAA/SAPG/SAAW invariants must still pass. |
+| SAASTC-11 | Closeout and adversarial audit | 7 | passed_after_fix | Full verification, personal-info guard, XcodeGen drift check, ignored-files check, clean status, committed cleanup, and residual-risk note must be recorded. |
 
-## Phase 1 Notes
+## Closeout Notes
 
-- The cleanup inventory is intentionally conservative. `simplify` means source
-  teardown must prove a minimal retained contract or remove the row's code/tests.
+- The cleanup inventory now has no `simplify` rows. Every retained source or
+  test row has source-backed primitive-engine rationale.
 - `docs-only` means the file is evidence or README mapping, not a live runtime
   contract.
 - `predecessor-bookkeeping` means an older hardening artifact changed because of
   successor work and must stay synchronized without preserving successor cruft.
-- No source retention decision is final until SAASTC-2 through SAASTC-8 are
-  closed by source inspection and focused verification.
+- Hard boundaries remain guarded after closeout: provider-visible tools stay
+  execute-only, public `/engine` does not expose successor worker launch,
+  schedule, or activation routes, repo-managed first-party skills stay absent,
+  and deploy/launchd/iOS-settings/restart/retry/post-ready replay surfaces stay
+  absent.
 
 ## Source Teardown Log
 
@@ -115,8 +118,8 @@ harness and full initial diff inventory.
   undeclared authority/runtime metadata; and server runtime starts queue
   draining plus external-worker heartbeat only, with no worker launch, worker
   activation, schedule, provider, deploy, launchd, retry, or repo-skill public
-  surface. This moves the transport-boundary rows out of `simplify` but leaves
-  SAASTC rows pending until all successor clusters are audited.
+  surface. This moves the transport-boundary rows out of `simplify`; final
+  closeout keeps the boundary guarded with focused and broad regression tests.
 - Simplified and source-proved the durability resource substrate. Removed the
   unused in-memory and SQLite `list_types` API, leaving registered resource
   type access owned by `builtin_resource_type_definitions` and the
@@ -178,5 +181,16 @@ harness and full initial diff inventory.
   derives operation-scoped grants for `resource_create`, `resource_inspect`, and
   `resource_link`, failing closed for any other operation instead of preserving
   the previous broad resource/state fixture grant. This removes the last
-  `simplify` classifications from the cleanup inventory, while SAASTC rows stay
-  pending until the full focused and closeout verification suite passes.
+  `simplify` classifications from the cleanup inventory, and final focused plus
+  broad closeout verification passed with these retained tests in place.
+- Broad closeout exposed one stale provider request test that still expected an
+  `echo` tool. The provider source was already execute-only; the root-cause fix
+  updates the request test helper and assertion to the retained `execute`
+  primitive and adds the file to the cleanup inventory so provider-visible tool
+  serialization cannot drift back to a non-`execute` surface.
+- Broad closeout also exposed predecessor file-budget drift: the SAASTC static
+  guard target exceeded both PCC's large-file budget and HRA's hard 900 LOC
+  Rust limit. The root-cause fix decomposes that invariant target into a tiny
+  module root plus focused support, scorecard/inventory, boundary, primitive
+  resource, runtime/catalog, and test-quality modules. No HRA/PCC guard was
+  weakened.

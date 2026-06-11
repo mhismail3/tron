@@ -1,7 +1,8 @@
 # Self-Adapting Agent Successor Teardown Cleanup Inventory
 
-Status: Source teardown in progress; current checkpoints tighten
-provider-visible resource authorship, activation bundle metadata naming, worker
+Status: Complete; closeout checkpoints tighten
+provider-visible resource authorship, provider request tool serialization,
+SAASTC invariant decomposition, activation bundle metadata naming, worker
 activation grant filesystem authority, trigger launch timing, and source-prove
 bundle handoff, orchestration process-record retention, and schedule state/tick
 retention, the public transport boundary, and the durability resource
@@ -12,8 +13,7 @@ direct model targets keep target-only authority, and only the retained
 `capability::execute` resource/state operations receive nested substrate
 capabilities. The final test-quality cluster is source-proved and the SAA
 authorship fixture grant no longer preserves broad state authority; the TSV now
-has no remaining `simplify` classifications. Later SAASTC rows remain open
-until full closeout verification runs.
+has no remaining `simplify` classifications and all SAASTC rows are closed.
 
 Scorecard: [`self-adapting-agent-successor-teardown-cleanup-scorecard.md`](self-adapting-agent-successor-teardown-cleanup-scorecard.md)
 
@@ -25,17 +25,18 @@ Machine-readable inventory: [`self-adapting-agent-successor-teardown-cleanup-inv
 
 This inventory covers every tracked file changed by
 `git diff --name-status b331f2b1d58f14aa3392a866e8f008e6fd8a0fb7..HEAD`, plus
-the cleanup harness files added for this pass. The initial classification is a
-triage decision for teardown work, not final proof of retention.
+the cleanup harness files added for this pass. The final classification records
+the retained, docs-only, and predecessor-bookkeeping ownership state after
+source teardown and closeout verification.
 
 ## Classification Values
 
-- `retained`: required cleanup harness or closeout wiring that remains valid in
-  Phase 1.
-- `simplify`: source, tests, or docs that require source inspection before a
-  retained primitive contract can be claimed.
+- `retained`: required cleanup harness, source, test, or closeout wiring that
+  remains valid after source inspection.
+- `simplify`: source, tests, or docs that still require source inspection before
+  a retained primitive contract can be claimed. No row remains in this state.
 - `remove`: code or docs expected to disappear unless source inspection proves a
-  real retained primitive invariant. No Phase 1 row uses this final action yet.
+  real retained primitive invariant. No current row uses this action.
 - `docs-only`: evidence or README material that must stay truthful but is not a
   runtime contract.
 - `predecessor-bookkeeping`: older campaign artifacts changed by successor work;
@@ -43,14 +44,13 @@ triage decision for teardown work, not final proof of retention.
 
 ## Current Classification Counts
 
-- `retained`: 100
+- `retained`: 107
 - `docs-only`: 31
 - `predecessor-bookkeeping`: 23
 - `simplify`: 0
 
-## Phase 1 Boundaries
+## Closeout Boundaries
 
-The TSV must have no missing owner, action, or rationale fields. Source teardown
-must update it whenever a file is removed, simplified, or promoted from
-`simplify` to `retained`. Final closeout must leave no row whose action still
-defers source proof.
+The TSV has no missing owner, action, or rationale fields. Source teardown
+removed or reduced removable successor cruft, and final closeout leaves no row
+whose action still defers source proof.

@@ -58,8 +58,8 @@ fn api_key_config(model: &str) -> OpenAIConfig {
 
 fn test_tool() -> ModelCapability {
     ModelCapability {
-        name: "echo".into(),
-        description: "Echo input".into(),
+        name: "execute".into(),
+        description: "Run primitive host operations".into(),
         parameters: CapabilityParameterSchema {
             schema_type: "object".into(),
             properties: Some(serde_json::Map::new()),
