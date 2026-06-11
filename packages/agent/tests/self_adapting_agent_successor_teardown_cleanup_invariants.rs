@@ -975,6 +975,197 @@ fn saastc_resource_substrate_keeps_only_retained_safe_resource_contracts() {
 }
 
 #[test]
+fn saastc_external_worker_runtime_lifecycle_is_loopback_bounded() {
+    let runtime_root = read_repo_file("packages/agent/src/engine/runtime/mod.rs");
+    let external_mod = read_repo_file("packages/agent/src/engine/runtime/external_workers/mod.rs");
+    let lifecycle =
+        read_repo_file("packages/agent/src/engine/runtime/external_workers/lifecycle.rs");
+    let activation =
+        read_repo_file("packages/agent/src/engine/runtime/external_workers/activation.rs");
+    let registration =
+        read_repo_file("packages/agent/src/engine/runtime/external_workers/registration.rs");
+
+    for required in [
+        "pub mod external_workers;",
+        "`EngineExternalWorkerRuntime` manages connected local workers.",
+        "Activation tokens bind reviewed capability-definition governance",
+        "volatile worker connection",
+        "does not depend on HTTP handlers, domains, app\n//! bootstrap, or provider-specific model clients",
+    ] {
+        assert!(
+            runtime_root.contains(required),
+            "runtime module docs missing retained external-worker boundary {required}"
+        );
+    }
+
+    for required in [
+        "pub trait ExternalWorkerInvoker",
+        "pub struct ExternalWorkerConnection",
+        "pub struct EngineExternalWorkerRuntime",
+        "connections: BTreeMap<WorkerId, ExternalWorkerConnection>",
+        "invokers: BTreeMap<WorkerId, Arc<dyn ExternalWorkerInvoker>>",
+        "WorkerProtocolMessage::Hello(hello)",
+        "WorkerProtocolMessage::RegisterFunction(message)",
+        "WorkerProtocolMessage::RegisterTrigger(message)",
+        "WorkerProtocolMessage::PublishStream(message)",
+        "WorkerProtocolMessage::Heartbeat(message)",
+        "WorkerProtocolMessage::Disconnect(message)",
+        "Ok(None)",
+    ] {
+        assert!(
+            external_mod.contains(required),
+            "external worker runtime root missing bounded protocol marker {required}"
+        );
+    }
+
+    for required in [
+        "if !hello.loopback_only",
+        "WorkerAuthPolicy::LoopbackBearer",
+        "hello.worker.kind != WorkerKind::External",
+        "hello.identity.worker_id != worker_id",
+        "validate_worker_token(&hello)?",
+        "self.validate_activation_hello(&hello).await?",
+        "self.validate_worker_grant(&hello).await?",
+        "let volatile = hello.registration_mode == WorkerRegistrationMode::Volatile;",
+        "self.host.register_worker(hello.worker, volatile).await?",
+        "heartbeat.sequence <= connection.heartbeat_sequence",
+        "pub async fn disconnect_timed_out(&mut self, timeout: Duration)",
+        "reason: \"heartbeat timeout\".to_owned()",
+        "self.invokers.remove(&disconnect.worker_id)",
+        ".unregister_worker(&connection.worker_id, connection.owner_actor.as_str())",
+        "self.mark_durable_worker_disconnected(&connection).await?",
+        "CatalogSnapshot {\n            functions,\n            triggers: Vec::new(),\n        }",
+        "grant.lifecycle != EngineGrantLifecycle::Active",
+        "grant_policy_hash(&grant)",
+        "connection.worker_token.authority_grant_id.clone()",
+    ] {
+        assert!(
+            lifecycle.contains(required),
+            "external worker lifecycle missing retained boundedness marker {required}"
+        );
+    }
+
+    for required in [
+        "validate_activation_hello",
+        "validate_activation_function_registration",
+        "validate_activation_trigger_registration",
+        "activation workers must use volatile registration",
+        "activation workers cannot request system visibility",
+        "activation workers may register only the expected function",
+        "activation workers cannot register triggers",
+        "mark_activation_connected",
+        "mark_activation_registered",
+        "mark_activation_disconnected",
+        "expected_current_version_id",
+        "mark_failed_for_activation",
+    ] {
+        assert!(
+            activation.contains(required),
+            "external worker activation binding missing retained marker {required}"
+        );
+    }
+
+    for required in [
+        "pub fn attach_invoker(",
+        "if !self.connections.contains_key(&worker_id)",
+        "validate_activation_function_registration(&connection, &definition)",
+        "validate_external_capability_metadata(",
+        "stamp_external_capability_metadata(&mut definition, &connection.worker_token)",
+        "connection.registration_mode == WorkerRegistrationMode::Volatile",
+        "self.validate_activation_trigger_registration(&connection)?",
+        "validate_worker_trigger(&self.host, &connection, &message.definition).await?",
+        "publish_stream",
+        "stream_topic_allowed_by_token(&connection.worker_token, &message.topic)",
+        "external worker trigger authority grant must match the scoped token",
+        "external worker trigger target",
+        "external worker stream sessionId must match the scoped worker session",
+    ] {
+        assert!(
+            registration.contains(required),
+            "external worker registration missing retained scoped marker {required}"
+        );
+    }
+
+    for (path, source) in [
+        (
+            "packages/agent/src/engine/runtime/external_workers/mod.rs",
+            external_mod.as_str(),
+        ),
+        (
+            "packages/agent/src/engine/runtime/external_workers/lifecycle.rs",
+            lifecycle.as_str(),
+        ),
+        (
+            "packages/agent/src/engine/runtime/external_workers/activation.rs",
+            activation.as_str(),
+        ),
+        (
+            "packages/agent/src/engine/runtime/external_workers/registration.rs",
+            registration.as_str(),
+        ),
+    ] {
+        for forbidden in [
+            "tokio::spawn",
+            "std::process::Command",
+            "launchd",
+            "SMAppService",
+            "tron deploy",
+            "packages/agent/skills",
+            "providerMetadata",
+            "postReadyPayload",
+            "restartLoop",
+            "retryLoop",
+            "worker_schedule",
+            "scheduler.run",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must not own autonomous launch/deploy/provider/schedule surface: {forbidden}"
+            );
+        }
+    }
+
+    let external_worker_tests =
+        read_repo_file("packages/agent/src/engine/tests/runtime/external_worker.rs");
+    let delivery_tests =
+        read_repo_file("packages/agent/src/engine/tests/runtime/external_worker_delivery.rs");
+    let activation_tests =
+        read_repo_file("packages/agent/src/engine/tests/runtime/worker_activation.rs");
+    for required in [
+        "local_external_worker_runtime_registers_session_functions_and_disconnects_cleanly",
+        "local_external_worker_hello_requires_session_scoped_token_binding",
+        "local_external_worker_hello_rejects_stale_grant_revision",
+        "local_external_worker_hello_rejects_tampered_grant_hash",
+        "local_external_worker_lifecycle_events_publish_through_streams_and_traces",
+    ] {
+        assert!(
+            external_worker_tests.contains(required),
+            "external worker runtime tests missing retained lifecycle regression {required}"
+        );
+    }
+    for required in [
+        "local_external_worker_durable_disconnect_marks_functions_unhealthy",
+        "local_external_worker_heartbeat_timeout_unregisters_volatile_capabilities",
+        ".disconnect_timed_out(std::time::Duration::from_secs(30))",
+    ] {
+        assert!(
+            delivery_tests.contains(required),
+            "external worker delivery tests missing retained boundedness regression {required}"
+        );
+    }
+    for required in [
+        "worker_activation_runtime_connects_registers_invokes_and_disconnects_volatile_function",
+        "worker_activation_hello_rejects_token_scope_expansion_durable_and_revoked_grant",
+        "worker_activation_registration_rejects_function_metadata_and_trigger_expansion",
+    ] {
+        assert!(
+            activation_tests.contains(required),
+            "worker activation runtime tests missing retained activation regression {required}"
+        );
+    }
+}
+
+#[test]
 fn saastc_phase1_records_hard_cleanup_boundaries() {
     let joined = format!(
         "{}\n{}\n{}",

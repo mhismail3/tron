@@ -156,6 +156,25 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   admin-like actor, matching the earlier promotion-governance fix. The focused
   worker activation regression creates system-scoped governance refs and proves
   an ordinary agent with `worker.activate` cannot issue the session activation.
+- Source-proved the external-worker runtime lifecycle cluster as retained
+  bounded runtime surface. `external_workers/lifecycle.rs` rejects non-loopback
+  and non-loopback-bearer hellos, requires `WorkerKind::External`, validates the
+  worker token, activation binding, and active scoped grant revision/hash before
+  accepting a connection, stores connection state in a local `BTreeMap`, rejects
+  stale heartbeats, and bounds cleanup through explicit disconnect or
+  `disconnect_timed_out`. Volatile workers unregister their catalog entries on
+  disconnect or heartbeat timeout; durable local workers are marked unhealthy
+  and stopped rather than treated as ready. `activation.rs` keeps activation
+  workers volatile, non-system-visible, exactly scoped to the token and expected
+  function, triggerless, and CAS-updated through the activation resource.
+  `registration.rs` requires a live connection, scoped metadata stamping,
+  volatile registration flags where applicable, trigger target ownership, and
+  stream topic/session/workspace checks. The SAASTC static guard now rejects
+  autonomous launch, provider, schedule, deploy, launchd, repo-skill, restart,
+  retry, and post-ready replay markers in the external-worker runtime files and
+  requires the focused runtime tests for scoped hello, grant hash/revision,
+  lifecycle events, heartbeat timeout cleanup, durable unhealthy disconnect, and
+  activation registration rejection.
 
 ## Phase 2 Focused Commands
 
@@ -195,6 +214,13 @@ cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 git diff --check
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+cargo test --manifest-path packages/agent/Cargo.toml external_worker --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_activation --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_activation_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
+git diff --check
 ```
 
 ## Phase 1 Commands

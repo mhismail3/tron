@@ -145,3 +145,11 @@ harness and full initial diff inventory.
   system-scoped decision/evidence/candidate resources, so an ordinary agent with
   `worker.activate` cannot borrow parent system governance refs to issue a
   session activation.
+- Source-proved the external-worker runtime lifecycle cluster as retained
+  bounded primitive runtime surface. `EngineExternalWorkerRuntime` owns only
+  loopback bearer hello/register/heartbeat/disconnect protocol state, validates
+  active scoped-token grants before connection acceptance, unregisters volatile
+  catalog entries on disconnect or heartbeat timeout, marks durable entries
+  unhealthy instead of replaying readiness, updates activation lifecycle through
+  the existing resource CAS path, and does not own launch, schedule, deploy,
+  provider, restart, retry, or post-ready replay behavior.
