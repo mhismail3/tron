@@ -301,7 +301,7 @@ async fn derive_execute_grant(
                 "networkPolicy": "none",
                 "maxRisk": "medium",
                 "budget": {
-                    "remainingInvocations": 2,
+                    "remainingInvocations": 4,
                     "remainingProcessMs": 120000
                 },
                 "canDelegate": false,

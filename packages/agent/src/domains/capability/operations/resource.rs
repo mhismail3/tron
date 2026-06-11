@@ -9,6 +9,22 @@ use crate::engine::{CausalContext, FunctionId, Invocation};
 use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
 
+const EXECUTE_RESOURCE_KINDS: &[&str] = &[
+    "agent_memory",
+    "agent_result",
+    "agent_rule",
+    "artifact",
+    "capability_definition",
+    "claim",
+    "decision",
+    "evidence",
+    "execution_output",
+    "goal",
+    "materialized_file",
+    "patch_proposal",
+    "ui_surface",
+];
+
 pub(super) async fn resource_create(
     invocation: &Invocation,
     deps: &Deps,
@@ -19,10 +35,8 @@ pub(super) async fn resource_create(
     insert_optional_string(&mut payload, &invocation.payload, "lifecycle")?;
     insert_optional_value(&mut payload, &invocation.payload, "policy")?;
     insert_optional_value(&mut payload, &invocation.payload, "locations")?;
-    payload.insert(
-        "kind".to_owned(),
-        json!(required_str(&invocation.payload, "kind")?),
-    );
+    let kind = required_allowed_kind(&invocation.payload, "kind")?;
+    payload.insert("kind".to_owned(), json!(kind));
     payload.insert(
         "payload".to_owned(),
         invocation
@@ -52,11 +66,10 @@ pub(super) async fn resource_update(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
+    let resource_id = required_str(&invocation.payload, "resourceId")?;
+    ensure_resource_accessible(deps, &invocation.causal_context, resource_id).await?;
     let mut payload = Map::new();
-    payload.insert(
-        "resourceId".to_owned(),
-        json!(required_str(&invocation.payload, "resourceId")?),
-    );
+    payload.insert("resourceId".to_owned(), json!(resource_id));
     insert_optional_string(
         &mut payload,
         &invocation.payload,
@@ -100,6 +113,18 @@ pub(super) async fn resource_link(
             json!(required_str(&invocation.payload, field)?),
         );
     }
+    ensure_resource_accessible(
+        deps,
+        &invocation.causal_context,
+        required_str(&invocation.payload, "sourceResourceId")?,
+    )
+    .await?;
+    ensure_resource_accessible(
+        deps,
+        &invocation.causal_context,
+        required_str(&invocation.payload, "targetResourceId")?,
+    )
+    .await?;
     insert_optional_value(&mut payload, &invocation.payload, "metadata")?;
     let value = invoke_engine_value(
         deps,
@@ -122,13 +147,15 @@ pub(super) async fn resource_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let value = invoke_engine_value(
+    let value = inspect_resource_value(
         deps,
-        "resource::inspect",
-        json!({"resourceId": required_str(&invocation.payload, "resourceId")?}),
-        invocation.causal_context.clone(),
+        &invocation.causal_context,
+        required_str(&invocation.payload, "resourceId")?,
     )
     .await?;
+    if !value["inspection"].is_null() {
+        ensure_inspection_allowed(&value["inspection"], &invocation.causal_context)?;
+    }
     Ok(ok_result(
         format!(
             "Resource inspection: {}",
@@ -147,7 +174,8 @@ pub(super) async fn resource_list(
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
     let mut payload = scoped_resource_payload(invocation)?;
-    insert_optional_string(&mut payload, &invocation.payload, "kind")?;
+    let kind = required_allowed_kind(&invocation.payload, "kind")?;
+    payload.insert("kind".to_owned(), json!(kind));
     insert_optional_string(&mut payload, &invocation.payload, "lifecycle")?;
     if let Some(limit) = optional_u64(&invocation.payload, "limit")? {
         payload.insert("limit".to_owned(), json!(limit.clamp(1, 500)));
@@ -204,6 +232,86 @@ fn scoped_resource_payload(invocation: &Invocation) -> Result<Map<String, Value>
         }
     }
     Ok(payload)
+}
+
+async fn ensure_resource_accessible(
+    deps: &Deps,
+    context: &CausalContext,
+    resource_id: &str,
+) -> Result<(), CapabilityError> {
+    let value = inspect_resource_value(deps, context, resource_id).await?;
+    if value["inspection"].is_null() {
+        return Err(invalid("resource operation target is not accessible"));
+    }
+    ensure_inspection_allowed(&value["inspection"], context)
+}
+
+async fn inspect_resource_value(
+    deps: &Deps,
+    context: &CausalContext,
+    resource_id: &str,
+) -> Result<Value, CapabilityError> {
+    invoke_engine_value(
+        deps,
+        "resource::inspect",
+        json!({"resourceId": resource_id}),
+        context.clone(),
+    )
+    .await
+}
+
+fn ensure_inspection_allowed(
+    inspection: &Value,
+    context: &CausalContext,
+) -> Result<(), CapabilityError> {
+    let kind = inspection
+        .pointer("/resource/kind")
+        .and_then(Value::as_str)
+        .ok_or_else(|| internal("resource inspection omitted kind"))?;
+    ensure_allowed_kind(kind)?;
+    let scope = inspection
+        .pointer("/resource/scope")
+        .ok_or_else(|| internal("resource inspection omitted scope"))?;
+    match scope {
+        Value::Object(object) => {
+            if let Some(session_id) = object.get("session").and_then(Value::as_str) {
+                if context.session_id.as_deref() == Some(session_id) {
+                    return Ok(());
+                }
+            }
+            if let Some(workspace_id) = object.get("workspace").and_then(Value::as_str) {
+                if context.workspace_id.as_deref() == Some(workspace_id) {
+                    return Ok(());
+                }
+            }
+            Err(invalid("resource operation target is not accessible"))
+        }
+        Value::String(scope) if scope == "system" => Err(invalid(
+            "capability::execute cannot read or write system-scoped resources",
+        )),
+        _ => Err(internal(
+            "resource inspection has unsupported scope encoding",
+        )),
+    }
+}
+
+fn required_allowed_kind<'a>(payload: &'a Value, field: &str) -> Result<&'a str, CapabilityError> {
+    let kind = required_str(payload, field)?;
+    ensure_allowed_kind(kind)?;
+    Ok(kind)
+}
+
+fn ensure_allowed_kind(kind: &str) -> Result<(), CapabilityError> {
+    if EXECUTE_RESOURCE_KINDS
+        .iter()
+        .any(|allowed| allowed == &kind)
+    {
+        Ok(())
+    } else {
+        Err(invalid(format!(
+            "capability::execute cannot operate on resource kind {kind}"
+        )))
+    }
 }
 
 fn insert_optional_string(

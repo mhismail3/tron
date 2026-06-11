@@ -116,7 +116,7 @@ impl EngineHostHandle {
     }
 
     /// Inspect safe in-memory activation bundle metadata.
-    pub async fn worker_activation_bundle_metadata_for_test(
+    pub async fn worker_activation_bundle_metadata(
         &self,
         activation_resource_id: &str,
     ) -> Result<

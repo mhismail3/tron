@@ -167,7 +167,7 @@ impl EngineWorkerOrchestrationRuntime {
         let secret_stdin = if plan.activation_delivery_mode == STDIN_BUNDLE_DELIVERY_MODE {
             let metadata = self
                 .host
-                .worker_activation_bundle_metadata_for_test(&request.activation_resource_id)
+                .worker_activation_bundle_metadata(&request.activation_resource_id)
                 .await?
                 .ok_or_else(|| {
                     EngineError::PolicyViolation(format!(

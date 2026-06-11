@@ -142,7 +142,7 @@ async fn worker_orchestration_stdin_activation_bundle_consumes_vault_once() {
     let (activation_id, _hello, expected_function) =
         issued_activation_bundle(&handle, "orch-stdin", "orchestrated_stdin::echo").await;
     let vault_before = handle
-        .worker_activation_bundle_metadata_for_test(&activation_id)
+        .worker_activation_bundle_metadata(&activation_id)
         .await
         .unwrap()
         .expect("activation bundle should be in the in-memory vault");
@@ -172,7 +172,7 @@ async fn worker_orchestration_stdin_activation_bundle_consumes_vault_once() {
     );
     assert!(
         handle
-            .worker_activation_bundle_metadata_for_test(&activation_id)
+            .worker_activation_bundle_metadata(&activation_id)
             .await
             .unwrap()
             .is_none(),

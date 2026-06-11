@@ -58,7 +58,7 @@ async fn worker_activation_issues_scoped_resource_grant_token_and_replays_idempo
     assert!(payload["tokenFingerprint"].as_str().unwrap().len() >= 32);
     assert!(payload["governanceFingerprint"].as_str().unwrap().len() >= 32);
     let vault_metadata = handle
-        .worker_activation_bundle_metadata_for_test(activation_resource_id)
+        .worker_activation_bundle_metadata(activation_resource_id)
         .await
         .unwrap()
         .expect("live activation bundle should be held in memory");

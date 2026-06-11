@@ -1,6 +1,6 @@
 # Self-Adapting Agent Successor Teardown Cleanup Evidence Manifest
 
-Status: **phase1_inventory_complete**
+Status: **source_teardown_in_progress**
 
 Branch: `codex/self-adapting-agent-successor-teardown-cleanup`
 Baseline commit: `b331f2b1d58f14aa3392a866e8f008e6fd8a0fb7`
@@ -45,6 +45,28 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
 - Split `packages/agent/src/engine/runtime/worker_schedule/tick_dispatch.rs`
   from `worker_schedule/mod.rs` to keep trigger enqueue and tick resource
   mutation owner-private while closing the TPC hard file-budget guard.
+- Tightened `capability::execute` resource authorship:
+  `packages/agent/src/domains/capability/operations/resource.rs` now enforces
+  an explicit retained authorship kind allowlist, requires `kind` for
+  `resource_list`, denies system resources, and preflights inspect/update/link
+  targets against the current session/workspace before mutation. This keeps
+  worker activation/process/schedule resources out of the provider-visible
+  primitive while retaining typed resource authorship.
+- Updated the capability runtime child grant from two to four remaining
+  invocations, matching the guarded `resource_link` call graph without opening
+  an unbounded authority path. The failing intermediate authorship test exposed
+  the old budget mismatch; rerun passed after the bounded budget fix.
+- Renamed `worker_activation_bundle_metadata_for_test` to
+  `worker_activation_bundle_metadata` in the host handle and call sites because
+  production orchestration uses that safe metadata for stdin bundle preflight.
+
+## Phase 2 Focused Commands
+
+```bash
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_authorship_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+```
 
 ## Phase 1 Commands
 

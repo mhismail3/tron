@@ -1,6 +1,6 @@
 # Self-Adapting Agent Successor Teardown Cleanup Scorecard
 
-Status: **phase1_inventory_complete**
+Status: **source_teardown_in_progress**
 Current score: **15/100**
 Passing threshold: **100/100**
 
@@ -63,3 +63,15 @@ harness and full initial diff inventory.
   out of the schedule runtime facade so trigger enqueue and tick mutation stay
   owner-private while `worker_schedule/mod.rs` remains below the TPC hard file
   budget.
+- Tightened `capability::execute` resource operations so provider-visible
+  authorship remains inside the existing `execute` contract but can operate
+  only on retained authorship resource kinds and only on current
+  session/workspace resources. `resource_list` now requires an allowed kind,
+  and inspect/update/link preflight resource scope and kind before mutation.
+- Bounded the per-call capability runtime child grant at four invocations to
+  cover the retained guarded `resource_link` call graph:
+  `capability::execute`, source inspect, target inspect, and link.
+- Renamed the activation bundle metadata host accessor from
+  `worker_activation_bundle_metadata_for_test` to
+  `worker_activation_bundle_metadata`; the accessor is safe metadata used by
+  production launch preflight, not a test-only hook.

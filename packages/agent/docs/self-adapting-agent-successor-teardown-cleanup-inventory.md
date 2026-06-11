@@ -1,6 +1,8 @@
 # Self-Adapting Agent Successor Teardown Cleanup Inventory
 
-Status: Phase 1 inventory complete; source teardown pending.
+Status: Source teardown in progress; current checkpoint tightens provider-visible
+resource authorship and activation bundle metadata naming while later SAASTC
+rows remain open.
 
 Scorecard: [`self-adapting-agent-successor-teardown-cleanup-scorecard.md`](self-adapting-agent-successor-teardown-cleanup-scorecard.md)
 

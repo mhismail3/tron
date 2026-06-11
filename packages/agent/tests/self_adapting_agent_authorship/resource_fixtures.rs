@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use tron::engine::TraceId;
+use tron::engine::{FunctionId, Invocation, TraceId};
 
 use super::support::{execute_causal_context, invoke_execute, test_runtime, trace_operations};
 
@@ -400,6 +400,105 @@ async fn saa_execute_can_author_patch_materialized_file_and_ui_surface_without_l
     }
 }
 
+#[tokio::test]
+async fn saa_execute_resource_ops_reject_worker_kinds_and_cross_session_refs() {
+    let runtime = test_runtime();
+    let workspace = tempfile::tempdir().unwrap();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "gpt-5.5",
+            workspace.path().to_str().unwrap(),
+            Some("saa resource guard"),
+            Some("openai"),
+        )
+        .unwrap();
+    let trace_id = TraceId::generate();
+    let session_id = created.session.id.as_str();
+    let workspace_id = created.session.workspace_id.as_str();
+
+    execute_resource(
+        &runtime.ctx,
+        &trace_id,
+        session_id,
+        workspace_id,
+        workspace.path(),
+        "agent_memory",
+        "saa-session-private-memory",
+        "active",
+        json!({
+            "statement": "Session-scoped SAA memory cannot be inspected from another session.",
+            "status": "active",
+            "scope": {"kind": "session", "sessionId": session_id},
+            "provenance": {"source": "saa_resource_guard"},
+            "evidenceRefs": ["saa-evidence"],
+            "metadata": {"guard": "cross-session"}
+        }),
+        "saa-provider-private-memory",
+    )
+    .await;
+
+    let worker_kind_error = invoke_execute_error(
+        &runtime.ctx,
+        json!({
+            "operation": "resource_create",
+            "kind": "worker_activation",
+            "resourceId": "saa-forbidden-activation",
+            "scope": "session",
+            "resourcePayload": {},
+        }),
+        execute_causal_context(
+            &runtime.ctx,
+            trace_id.clone(),
+            session_id,
+            workspace_id,
+            workspace.path(),
+            "saa-provider-forbidden-worker-kind",
+            "saa-forbidden-worker-kind",
+        )
+        .await,
+    )
+    .await;
+    assert!(
+        worker_kind_error.contains("cannot operate on resource kind worker_activation"),
+        "unexpected disallowed kind error: {worker_kind_error}"
+    );
+
+    let second = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "gpt-5.5",
+            workspace.path().to_str().unwrap(),
+            Some("saa resource guard second session"),
+            Some("openai"),
+        )
+        .unwrap();
+    let cross_session_error = invoke_execute_error(
+        &runtime.ctx,
+        json!({
+            "operation": "resource_inspect",
+            "resourceId": "saa-session-private-memory",
+        }),
+        execute_causal_context(
+            &runtime.ctx,
+            trace_id,
+            second.session.id.as_str(),
+            second.session.workspace_id.as_str(),
+            workspace.path(),
+            "saa-provider-cross-session-inspect",
+            "saa-cross-session-inspect",
+        )
+        .await,
+    )
+    .await;
+    assert!(
+        cross_session_error.contains("resource operation target is not accessible"),
+        "unexpected cross-session resource error: {cross_session_error}"
+    );
+}
+
 async fn execute_resource(
     ctx: &tron::shared::server::context::ServerRuntimeContext,
     trace_id: &TraceId,
@@ -477,6 +576,22 @@ async fn execute_link(
     let details = result.details.as_ref().unwrap();
     assert_eq!(details["primitiveOperation"], "resource_link");
     assert_eq!(details["resource"]["link"]["relation"], relation);
+}
+
+async fn invoke_execute_error(
+    ctx: &tron::shared::server::context::ServerRuntimeContext,
+    payload: Value,
+    causal: tron::engine::CausalContext,
+) -> String {
+    let result = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("capability::execute").unwrap(),
+            payload,
+            causal,
+        ))
+        .await;
+    result.error.expect("execute should fail").to_string()
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

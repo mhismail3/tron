@@ -161,7 +161,7 @@ fn saastc_harness_docs_readme_and_ci_are_wired() {
 
     for required in [
         "# Self-Adapting Agent Successor Teardown Cleanup Scorecard",
-        "Status: **phase1_inventory_complete**",
+        "Status: **source_teardown_in_progress**",
         "Current score: **15/100**",
         "Passing threshold: **100/100**",
         BRANCH_NAME,
@@ -173,7 +173,7 @@ fn saastc_harness_docs_readme_and_ci_are_wired() {
     }
     for required in [
         "# Self-Adapting Agent Successor Teardown Cleanup Evidence Manifest",
-        "Status: **phase1_inventory_complete**",
+        "Status: **source_teardown_in_progress**",
         "| SAASTC-0 | passed_after_fix |",
         "| SAASTC-1 | passed_after_fix |",
         "git diff --name-status b331f2b1d58f14aa3392a866e8f008e6fd8a0fb7..HEAD",
@@ -182,6 +182,7 @@ fn saastc_harness_docs_readme_and_ci_are_wired() {
     }
     for required in [
         "# Self-Adapting Agent Successor Teardown Cleanup Inventory",
+        "Source teardown in progress",
         "`retained`",
         "`simplify`",
         "`remove`",
