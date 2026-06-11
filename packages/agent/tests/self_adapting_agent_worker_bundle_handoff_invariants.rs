@@ -204,6 +204,11 @@ fn saawbh_source_enforces_secret_custody_and_stdin_boundary() {
         "CreateResource",
         "PublishStreamEvent",
         "EnqueueInvocation",
+        "std::fs",
+        "tokio::fs",
+        "File::",
+        "OpenOptions",
+        "Command::",
     ] {
         assert!(
             !vault.contains(forbidden),
@@ -262,6 +267,7 @@ fn saawbh_launch_and_transport_boundaries_remain_closed() {
     assert!(orchestration.contains("preissued_bundle"));
     assert!(orchestration.contains("consume_worker_activation_bundle"));
     assert!(orchestration.contains("validate_vault_metadata_matches_activation"));
+    assert!(orchestration.contains("metadata.token_fingerprint != activation_fingerprint"));
     assert!(orchestration.contains("WorkerProcessSecretStdin"));
     assert!(!orchestration.contains("restartPolicy\": \"always\""));
 

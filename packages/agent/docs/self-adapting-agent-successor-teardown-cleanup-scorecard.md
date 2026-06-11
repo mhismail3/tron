@@ -88,3 +88,11 @@ harness and full initial diff inventory.
 - Removed the trigger-launch timeout override. `worker::launch_from_trigger`
   now accepts only reviewed autostart input plus optional launch reason; startup
   timing comes from the reviewed launch plan, not trigger dispatch payload.
+- Source-proved the bundle handoff and orchestration process-record cluster as
+  retained primitive-engine surface. The retained contract is the process-memory
+  one-shot activation bundle vault, reviewed direct-exec launch contracts,
+  redacted worker_process audit payloads, byte-limited direct-exec supervisor
+  capture, and scoped hello/register protocol binding. This moves the cluster's
+  cleanup inventory rows out of `simplify` but does not close broader SAASTC
+  rows until every successor cluster receives the same teardown treatment and
+  full closeout runs.

@@ -75,6 +75,16 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   startup timing only from the reviewed launch plan; focused runtime tests assert
   the supervisor sees the reviewed timeout, and SAAWTL static gates reject a
   trigger-payload timeout surface.
+- Source-proved the bundle handoff and orchestration process-record cluster as
+  retained primitive-engine surface. `worker_activation_bundle_vault.rs` is
+  process-memory-only one-shot custody with safe metadata and no durable,
+  filesystem, process, stream, or queue backing; orchestration contracts retain
+  reviewed direct-exec launch validation; process resources persist redacted
+  lifecycle/audit fields and fingerprints instead of tokens or stdin bytes; the
+  supervisor uses direct `Command::new`, `env_clear`, optional piped stdin,
+  byte-limited capture, bounded capture joins, and stop-timeout kill without
+  shell, restart, retry, launchd, deploy, or scheduler ownership; and
+  `worker_protocol.rs` remains DTO-only scoped hello/register binding.
 
 ## Phase 2 Focused Commands
 
@@ -88,7 +98,11 @@ cargo test --manifest-path packages/agent/Cargo.toml promotion_governance --lib 
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_promotion_governance_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml worker_trigger_launch --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_trigger_launch_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_orchestration --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_bundle_handoff_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_orchestration_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 ```
 
 ## Phase 1 Commands

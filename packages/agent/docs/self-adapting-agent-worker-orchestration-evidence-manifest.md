@@ -21,7 +21,7 @@ Scorecard: [`self-adapting-agent-worker-orchestration-scorecard.md`](self-adapti
 | SAAWO-3 | passed_after_fix | Added `worker_process` resource kind and redacted lifecycle payloads. | `worker_orchestration_launch_replay_ready_invoke_and_stop_are_governed`; static lifecycle checks. | Process exit without protocol traffic is not a restart mechanism in this slice. |
 | SAAWO-4 | passed_after_fix | Added admin `worker::launch_activation` with `worker.launch`, high risk, idempotency, active activation and plan matching checks. | Focused launch tests and static primitive-contract checks. | `worker.stop` is deferred; stop remains under `worker.launch`. |
 | SAAWO-5 | passed_after_fix | Preserved token non-persistence and added log/env redaction. | Fake supervisor tests inject token-like stdout/stop output and assert no persisted secret. | Redaction is conservative line elision; binary/process-specific redaction can be expanded later. |
-| SAAWO-6 | passed_after_fix | Added `WorkerProcessSupervisor`, production direct-exec supervisor, fake supervisor, bounded stop/kill, no shell path. | Fake supervisor counts; static no-shell/no-deploy/no-launchd/no-restart gates. | Production stdout/stderr capture is bounded; no long-running monitor loop is introduced. |
+| SAAWO-6 | passed_after_fix | Added `WorkerProcessSupervisor`, production direct-exec supervisor, fake supervisor, bounded stop/kill, no shell path. | Fake supervisor counts; static no-shell/no-deploy/no-launchd/no-restart gates plus byte-limited capture and bounded capture-join markers. | Production stdout/stderr capture is bounded; no long-running monitor loop is introduced. |
 | SAAWO-7 | passed_after_fix | Bound process readiness to existing external-worker hello/register callbacks. | Happy-path test proves `starting` -> `hello_seen` -> `ready`, and pre-ready function lookup fails. | Socket-level integration remains covered by existing external-worker tests. |
 | SAAWO-8 | passed_after_fix | Added stop process behavior and fail-closed registration mismatch cleanup. | Stop test unregisters volatile function; wrong registration marks process `failed`. | Grant revocation terminates audit on hello rejection; proactive grant-store watch is future work. |
 | SAAWO-9 | passed_after_fix | Published worker lifecycle events for requested/starting and updated activation/process resources for readiness and stop. | Focused tests inspect resource state; SAAWA lifecycle tests still cover worker stream behavior. | The stream record is supplemental; resource state is the primary process audit. |
@@ -61,7 +61,9 @@ git status --short
 ## Residual Risks
 
 - Proactive termination on grant revocation without a subsequent worker protocol event is not implemented as a scheduler/watch loop in this slice. The runtime fails closed on revoked/expired hello and stop is manual/admin.
-- Production process supervision starts and stops direct child processes, captures bounded output, and records audit state; it intentionally does not restart or relaunch.
+- Production process supervision starts and stops direct child processes,
+  captures byte-limited output, uses bounded capture-task joins during stop, and
+  records audit state; it intentionally does not restart or relaunch.
 - `preissued_bundle` remains supported. SAAWBH closes the prior residual
   non-persisted handoff gap for new launches with `stdin_activation_bundle_v1`,
   backed by an in-memory one-shot vault and supervisor stdin boundary.

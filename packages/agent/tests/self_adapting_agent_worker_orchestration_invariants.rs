@@ -351,6 +351,10 @@ fn saawo_supervisor_and_readiness_binding_are_direct_exec_and_redacted() {
         "preissued_bundle",
         "validate_direct_path",
         "ensure_file_digest",
+        "max_log_capture_bytes",
+        "let remaining = max - bytes.len()",
+        "join_capture(",
+        "Duration::from_millis(250)",
         "WorkerProcessSupervisorRegistry",
     ] {
         assert!(
