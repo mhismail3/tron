@@ -352,6 +352,7 @@ fn saawa_activation_contract_resource_and_governance_are_strict() {
         "worker-runtime",
         "subject_actor_id: Some(worker_actor.clone())",
         "subject_worker_id: Some(worker_id.clone())",
+        "file_roots: Vec::new()",
         "\"stream::publish\"",
         "network_policy: \"loopback\".to_owned()",
         "can_delegate: false",

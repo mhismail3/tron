@@ -1,8 +1,9 @@
 # Self-Adapting Agent Successor Teardown Cleanup Inventory
 
-Status: Source teardown in progress; current checkpoint tightens provider-visible
-resource authorship and activation bundle metadata naming while later SAASTC
-rows remain open.
+Status: Source teardown in progress; current checkpoints tighten
+provider-visible resource authorship, activation bundle metadata naming, and
+worker activation grant filesystem authority while later SAASTC rows remain
+open.
 
 Scorecard: [`self-adapting-agent-successor-teardown-cleanup-scorecard.md`](self-adapting-agent-successor-teardown-cleanup-scorecard.md)
 

@@ -104,6 +104,10 @@ async fn worker_activation_issues_scoped_resource_grant_token_and_replays_idempo
         vec!["activated_demo::echo", "stream::publish"]
     );
     assert_eq!(grant_record.allowed_namespaces, vec!["activated_demo"]);
+    assert!(
+        grant_record.file_roots.is_empty(),
+        "activation grant must not inherit broad filesystem authority"
+    );
     assert!(!grant_record.can_delegate);
     assert_eq!(grant_record.network_policy, "loopback");
     assert!(

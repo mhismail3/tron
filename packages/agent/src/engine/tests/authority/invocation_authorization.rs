@@ -425,6 +425,93 @@ async fn invocation_authorization_uses_grant_not_raw_scope_strings() {
 }
 
 #[tokio::test]
+async fn empty_file_roots_authorize_no_file_paths() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    handle
+        .register_worker_for_setup(worker("no-file-demo", "no_file_demo"), false)
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let handler = Arc::new(CountingResourceHandler {
+        calls: calls.clone(),
+    });
+    let write = FunctionDefinition::new(
+        fid("no_file_demo::write"),
+        wid("no-file-demo"),
+        "no file write",
+        VisibilityScope::Agent,
+        EffectClass::IdempotentWrite,
+    )
+    .with_required_authority(AuthorityRequirement::scope("no_file.write"))
+    .with_idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .with_output_contract(DurableOutputContract::resource_backed(["artifact"]));
+    handle
+        .register_function_for_setup(write, Some(handler), false)
+        .unwrap();
+
+    let derived = derive_bootstrap_grant(
+        &handle,
+        "grant-authority-no-file-roots",
+        json!({
+            "allowedCapabilities": ["no_file_demo::write"],
+            "allowedNamespaces": ["no_file_demo"],
+            "allowedAuthorityScopes": ["no_file.write"],
+            "allowedResourceKinds": ["artifact"],
+            "resourceSelectors": ["resource:allowed-artifact"],
+            "fileRoots": [],
+            "networkPolicy": "none",
+            "maxRisk": "medium",
+            "budget": {"remainingInvocations": 5},
+            "provenance": {"source": "grant-authority-no-file-test"}
+        }),
+    )
+    .await;
+    assert_eq!(derived.error, None);
+
+    let context = |trace_id: &str, key: &str| {
+        CausalContext::new(
+            actor("agent"),
+            ActorKind::Agent,
+            grant("grant-authority-no-file-roots"),
+            trace(trace_id),
+        )
+        .with_session_id("session-no-file")
+        .with_workspace_id("workspace-no-file")
+        .with_scope("no_file.write")
+        .with_idempotency_key(key)
+    };
+
+    let pathless = handle
+        .invoke(host_invocation(
+            "no_file_demo::write",
+            json!({"targetResourceId": "allowed-artifact"}),
+            context("grant-no-file-pathless", "grant-no-file-pathless"),
+        ))
+        .await;
+    assert_eq!(pathless.error, None);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let denied = handle
+        .invoke(host_invocation(
+            "no_file_demo::write",
+            json!({
+                "targetResourceId": "allowed-artifact",
+                "path": std::env::current_dir().unwrap().join("Cargo.toml").to_string_lossy()
+            }),
+            context("grant-no-file-path-denied", "grant-no-file-path-denied"),
+        ))
+        .await;
+    assert!(matches!(
+        denied.error,
+        Some(EngineError::PolicyViolation(message)) if message.contains("does not allow file path")
+    ));
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "path-bearing invocation must fail before handler execution"
+    );
+}
+
+#[tokio::test]
 async fn remaining_invocation_budget_is_consumed_before_handler_execution_and_replay_is_free() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     handle

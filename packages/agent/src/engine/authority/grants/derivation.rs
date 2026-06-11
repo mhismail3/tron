@@ -139,9 +139,7 @@ fn ensure_list_narrows(label: &str, parent: &[String], child: &[String]) -> Resu
 
 fn ensure_file_roots_narrow(parent: &[String], child: &[String]) -> Result<()> {
     if child.is_empty() {
-        return Err(EngineError::PolicyViolation(
-            "child grant file roots must not be empty".to_owned(),
-        ));
+        return Ok(());
     }
     if parent.iter().any(|item| item == "*") {
         return Ok(());
@@ -183,7 +181,7 @@ pub(super) fn validate_derive_request(request: &DeriveGrant) -> Result<()> {
     validate_non_empty_list("allowedAuthorityScopes", &request.allowed_authority_scopes)?;
     validate_non_empty_list("allowedResourceKinds", &request.allowed_resource_kinds)?;
     validate_non_empty_list("resourceSelectors", &request.resource_selectors)?;
-    validate_non_empty_list("fileRoots", &request.file_roots)?;
+    validate_allow_empty_list("fileRoots", &request.file_roots)?;
     let _ = network_rank(&request.network_policy)?;
     if let Some(expires_at) = request.expires_at
         && expires_at <= Utc::now()
@@ -196,7 +194,16 @@ pub(super) fn validate_derive_request(request: &DeriveGrant) -> Result<()> {
 }
 
 fn validate_non_empty_list(field: &str, values: &[String]) -> Result<()> {
-    if values.is_empty() || values.iter().any(|value| value.trim().is_empty()) {
+    if values.is_empty() {
+        return Err(EngineError::PolicyViolation(format!(
+            "{field} must contain non-empty values"
+        )));
+    }
+    validate_allow_empty_list(field, values)
+}
+
+fn validate_allow_empty_list(field: &str, values: &[String]) -> Result<()> {
+    if values.iter().any(|value| value.trim().is_empty()) {
         return Err(EngineError::PolicyViolation(format!(
             "{field} must contain non-empty values"
         )));

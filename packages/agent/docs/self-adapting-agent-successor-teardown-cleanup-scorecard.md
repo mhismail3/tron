@@ -75,3 +75,9 @@ harness and full initial diff inventory.
   `worker_activation_bundle_metadata_for_test` to
   `worker_activation_bundle_metadata`; the accessor is safe metadata used by
   production launch preflight, not a test-only hook.
+- Narrowed worker activation filesystem authority. Grant derivation now accepts
+  an empty `fileRoots` list as explicit no-file-access authority, while all
+  other grant axes still require non-empty values and canonical file-root
+  narrowing remains intact. `worker::issue_activation` uses empty file roots
+  instead of inheriting `/`, and authority tests prove path-bearing invocations
+  fail before handler execution under that grant.

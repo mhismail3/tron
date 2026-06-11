@@ -81,7 +81,7 @@ pub(in crate::engine::primitives) fn issue_activation(
         allowed_authority_scopes: activation_authority_scopes(&governance.expected_function),
         allowed_resource_kinds: vec![WORKER_ACTIVATION_KIND.to_owned()],
         resource_selectors: vec![format!("stream:{}:*", request.function_id.namespace())],
-        file_roots: vec!["/".to_owned()],
+        file_roots: Vec::new(),
         network_policy: "loopback".to_owned(),
         max_risk: std::cmp::max(governance.expected_function.risk_level, RiskLevel::Medium),
         budget: json!({"class": "worker_activation"}),

@@ -136,6 +136,8 @@ fn sacb_authority_grants_use_canonical_file_roots_and_explicit_bootstrap_roots()
     for required in [
         "canonical_payload_path(root)?",
         "root_allows_path(parent, &canonical_root).unwrap_or(false)",
+        "validate_allow_empty_list(\"fileRoots\", &request.file_roots)?",
+        "if child.is_empty()",
         "network_rank(&child.network_policy)? > network_rank(&parent.network_policy)?",
         "ensure_budget_narrows(&parent.budget, &child.budget)?",
         "\"remainingInvocations\"",

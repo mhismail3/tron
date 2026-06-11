@@ -59,11 +59,19 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
 - Renamed `worker_activation_bundle_metadata_for_test` to
   `worker_activation_bundle_metadata` in the host handle and call sites because
   production orchestration uses that safe metadata for stdin bundle preflight.
+- Reduced worker activation grant authority by changing the grant substrate to
+  allow empty `fileRoots` as a no-file-access child grant, then issuing worker
+  activation grants with empty file roots instead of `/`. Focused authority
+  tests prove empty file roots persist, pathless invocations still run, and
+  path-bearing invocations fail before handler execution.
 
 ## Phase 2 Focused Commands
 
 ```bash
 cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::authority --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_activation --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_authorship_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
 ```
