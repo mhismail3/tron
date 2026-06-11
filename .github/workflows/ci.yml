@@ -151,6 +151,7 @@ jobs:
           cargo test --test self_adapting_agent_worker_trigger_launch_invariants -- --quiet
           cargo test --test self_adapting_agent_worker_schedule_dispatch_invariants -- --quiet
           cargo test --test self_adapting_agent_worker_schedule_capacity_invariants -- --quiet
+          cargo test --test self_adapting_agent_successor_teardown_cleanup_invariants -- --quiet
           cargo test --test primitive_trace_execution -- --quiet
           cargo test --test integration -- --test-threads=1 --quiet
 

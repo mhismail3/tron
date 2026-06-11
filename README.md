@@ -406,13 +406,29 @@ Current living entry points:
   completed SAAWSC gates for docs/CI parity, internal paged resource listing,
   deterministic cursor ordering, safe scan-state contracts, bounded scheduler
   resume/wrap behavior, cancellation propagation, and README parity.
+- `packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-scorecard.md`:
+  active SAASTC cleanup scorecard for auditing every successor self-adapting-agent
+  addition since the ODA baseline and reducing retained behavior to source-proven
+  primitive-engine contracts.
+- `packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-evidence-manifest.md`:
+  companion evidence manifest for cleanup harness, inventory, teardown,
+  regression, and closeout validation.
+- `packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.md`:
+  SAASTC inventory taxonomy for initial diff classification and later teardown
+  outcomes.
+- `packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.tsv`:
+  machine-readable SAASTC inventory covering every file changed since the ODA
+  baseline plus cleanup harness files.
+- `packages/agent/tests/self_adapting_agent_successor_teardown_cleanup_invariants.rs`:
+  active SAASTC gates for scorecard formalization, README/CI wiring, full
+  baseline diff inventory coverage, and cleanup boundary recording.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
 the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH/SAAWTL/SAAWSD/SAAWSC
-scorecards.
+scorecards plus the active SAASTC cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1628,6 +1644,7 @@ tron ci clippy test          # Subset: linting + tests
 `self_adapting_agent_worker_trigger_launch_invariants`,
 `self_adapting_agent_worker_schedule_dispatch_invariants`,
 `self_adapting_agent_worker_schedule_capacity_invariants`,
+`self_adapting_agent_successor_teardown_cleanup_invariants`,
 `primitive_trace_execution`, and serial `integration`. GitHub's Rust
 static-gates job runs the same named target set for docs, template, iOS, Mac,
 script, and CI changes.

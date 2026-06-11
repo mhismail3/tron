@@ -46,6 +46,7 @@ run_tests() {
         self_adapting_agent_worker_trigger_launch_invariants
         self_adapting_agent_worker_schedule_dispatch_invariants
         self_adapting_agent_worker_schedule_capacity_invariants
+        self_adapting_agent_successor_teardown_cleanup_invariants
         primitive_trace_execution
         integration
     )
