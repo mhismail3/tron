@@ -5,10 +5,13 @@
 //! safe concurrent reads/writes; checkpoints and exports create compact
 //! single-file artifacts when the operator needs one. The `modular-engine-v4`
 //! generation is a clean break for the collapsed substrate: startup accepts only
-//! the canonical active DB path and moves a non-current `tron.sqlite` generation
-//! aside before creating the grant, resource, ledger, stream, state, queue,
-//! lease, compensation, storage, and session-harness tables from the current
-//! schema only.
+//! the canonical active DB path, fails closed on malformed generation markers,
+//! and moves non-current `tron.sqlite` files plus WAL/SHM sidecars into a
+//! manifest-backed archive before creating the grant, resource, ledger, stream,
+//! state, queue, lease, compensation, storage, and session-harness tables from
+//! the current schema only. Schema setup is savepoint-guarded and verifies
+//! storage column ownership plus payload-ref/blob integrity before maintenance
+//! jobs can delete rows.
 
 use std::fs;
 use std::path::{Path, PathBuf};

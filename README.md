@@ -206,6 +206,19 @@ Current living entry points:
   completed ODA source inventory taxonomy and proof notes.
 - `packages/agent/docs/observability-diagnostics-auditability-inventory.tsv`:
   machine-readable ODA source inventory used by static gates.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md`:
+  completed Data Integrity Storage Evolution Migration Discipline (DISEMD)
+  scorecard for proving unified SQLite storage, archives, generation markers,
+  schema ownership, locks, WAL/checkpoint behavior, payload retention, engine
+  durability rows, event-store integrity, and CLI/iOS storage boundaries cannot
+  silently corrupt or mask server truth.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-evidence-manifest.md`:
+  companion evidence manifest for DISEMD row checkpoints, verification logs,
+  and residual storage risks.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md`:
+  DISEMD storage-surface taxonomy and proof notes.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv`:
+  machine-readable DISEMD storage inventory used by static gates.
 - `packages/agent/docs/self-adapting-agent-authorship-scorecard.md`:
   completed Self-Adapting Agent Authorship scorecard for proving durable
   goals, evidence, decisions, memories/rules, patch proposals, materialized
@@ -287,6 +300,12 @@ Current living entry points:
   diagnostics bundle, provider audit, runtime decision, CLI/dev UX, and final
   closeout gates, with focused modules under
   `packages/agent/tests/observability_diagnostics_auditability/`.
+- `packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs`:
+  completed Data Integrity Storage Evolution Migration Discipline gates for
+  scorecard/evidence/inventory consistency, README/CI wiring, startup
+  archive/schema/retention source contracts, engine durability storage pragmas,
+  event-store SQLite ownership, iOS projection boundaries, and predecessor
+  bookkeeping.
 - `packages/agent/tests/concurrency_scheduling_discipline_invariants.rs`:
   completed CSD scorecard, inventory, scheduling-marker coverage, spawn/task
   ownership, bounded channel/stream, Swift banned-pattern, stored-task
@@ -1637,6 +1656,7 @@ tron ci clippy test          # Subset: linting + tests
 `concurrency_scheduling_discipline_invariants`,
 `security_authority_capability_boundaries_invariants`,
 `observability_diagnostics_auditability_invariants`,
+`data_integrity_storage_evolution_migration_discipline_invariants`,
 `self_adapting_agent_authorship_invariants`,
 `self_adapting_agent_promotion_governance_invariants`,
 `self_adapting_agent_worker_activation_invariants`,

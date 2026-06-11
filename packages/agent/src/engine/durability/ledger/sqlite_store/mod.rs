@@ -43,6 +43,10 @@ impl SqliteEngineLedgerStore {
 
     /// Wrap a connection and initialize the engine-ledger schema.
     pub fn from_connection(conn: Connection) -> Result<Self> {
+        crate::shared::storage::apply_runtime_pragmas(&conn)
+            .map_err(|err| ledger_failure("ledger.storage_pragmas", format!("{err:#}")))?;
+        crate::shared::storage::ensure_storage_schema(&conn)
+            .map_err(|err| ledger_failure("ledger.storage_schema", format!("{err:#}")))?;
         let store = Self { conn };
         store.initialize_schema()?;
         Ok(store)

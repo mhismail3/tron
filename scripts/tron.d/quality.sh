@@ -38,6 +38,7 @@ run_tests() {
         concurrency_scheduling_discipline_invariants
         security_authority_capability_boundaries_invariants
         observability_diagnostics_auditability_invariants
+        data_integrity_storage_evolution_migration_discipline_invariants
         self_adapting_agent_authorship_invariants
         self_adapting_agent_promotion_governance_invariants
         self_adapting_agent_worker_activation_invariants

@@ -46,8 +46,15 @@ source teardown and closeout verification.
 
 - `retained`: 107
 - `docs-only`: 31
-- `predecessor-bookkeeping`: 23
+- `predecessor-bookkeeping`: 44
 - `simplify`: 0
+
+DISEMD predecessor-bookkeeping rows record the later
+Data Integrity / Storage Evolution / Migration Discipline storage hardening
+slice, including
+`packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs`.
+They are discoverability rows for the successor cleanup baseline inventory and
+do not change the SAASTC runtime ownership claims.
 
 ## Closeout Boundaries
 

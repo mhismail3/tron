@@ -26,6 +26,8 @@
 //! - Grants with `remainingInvocations` consume one durable budget unit after
 //!   idempotency replay/schema checks and before handler dispatch; replayed
 //!   idempotency results do not consume again.
+//! - SQLite authority stores apply shared runtime pragmas and validate the
+//!   shared storage schema before creating grant, lease, or compensation tables.
 //! - Lease state has active/released/expired transitions enforced by the store.
 //! - Compensation is audit-only durable state in this branch: the only accepted
 //!   status is `recorded`, and future automated rollback must add a new owner,

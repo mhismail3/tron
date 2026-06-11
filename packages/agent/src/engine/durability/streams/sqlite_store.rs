@@ -23,6 +23,10 @@ impl SqliteEngineStreamStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn =
             Connection::open(path).map_err(|err| sqlite_err("stream.open", err.to_string()))?;
+        crate::shared::storage::apply_runtime_pragmas(&conn)
+            .map_err(|err| sqlite_err("stream.storage_pragmas", err.to_string()))?;
+        crate::shared::storage::ensure_storage_schema(&conn)
+            .map_err(|err| sqlite_err("stream.storage_schema", err.to_string()))?;
         let store = Self { conn };
         store.init()?;
         Ok(store)
