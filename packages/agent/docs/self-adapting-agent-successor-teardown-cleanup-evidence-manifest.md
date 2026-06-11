@@ -134,6 +134,17 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   `execute`, while the SAASTC static gate rejects hidden provider metadata,
   hosted tools, schedule resources, activation bundles, and successor worker
   routing in the retained source.
+- Simplified and source-proved the invocation-host governance boundary. Source
+  inspection found `EngineHostHandle::promote_function_visibility` was a direct
+  async shortcut to `LiveCatalog::promote_function_visibility` with no
+  promotion-governance resource validation and only one runtime test caller.
+  The shortcut is removed; `engine::promote` remains the runtime host path and
+  validates payload idempotency, workspace/system authority, final accepted
+  decision resources, verified evidence resources, allowed candidate kinds, and
+  decision/evidence/candidate linkage before catalog mutation. The runtime
+  trigger test now performs direct catalog promotion only inside setup under a
+  local host lock, and the SAASTC static gate rejects reintroducing the host
+  shortcut.
 
 ## Phase 2 Focused Commands
 
@@ -158,6 +169,11 @@ cargo test --manifest-path packages/agent/Cargo.toml engine::transport --lib -- 
 cargo test --manifest-path packages/agent/Cargo.toml transport::engine --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml resource --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability::resource_contracts --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::invocation::promotion_governance --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::runtime::triggers::trigger_runtime_records_current_target_revision_after_promotion --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
+git diff --check
 cargo test --manifest-path packages/agent/Cargo.toml capability::contract --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml capability::operations --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml openai::message_converter --lib -- --nocapture

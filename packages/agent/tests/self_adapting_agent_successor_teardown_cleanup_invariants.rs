@@ -573,6 +573,111 @@ fn saastc_provider_execute_boundary_is_execute_only_and_fail_closed() {
 }
 
 #[test]
+fn saastc_invocation_host_keeps_single_governed_promotion_path() {
+    let catalog_handle =
+        read_repo_file("packages/agent/src/engine/invocation/host/catalog_handle.rs");
+    let meta = read_repo_file("packages/agent/src/engine/invocation/host/meta.rs");
+    let meta_invocation =
+        read_repo_file("packages/agent/src/engine/invocation/host/meta_invocation.rs");
+    let promotion_governance =
+        read_repo_file("packages/agent/src/engine/invocation/host/promotion_governance.rs");
+    let runtime_host = read_repo_file("packages/agent/src/engine/invocation/host/runtime_host.rs");
+    let trigger_tests = read_repo_file("packages/agent/src/engine/tests/runtime/triggers.rs");
+
+    assert!(
+        !catalog_handle.contains("pub async fn promote_function_visibility"),
+        "EngineHostHandle must not expose a direct promotion shortcut around engine::promote"
+    );
+    assert!(
+        trigger_tests.contains("host.catalog_mut()")
+            && trigger_tests.contains(".promote_function_visibility(")
+            && trigger_tests.contains("None,"),
+        "legacy direct promotion usage should be isolated to local test setup only"
+    );
+
+    for required in [
+        "pub(super) const PROMOTE_FUNCTION: &str = \"engine::promote\";",
+        ".with_required_authority(AuthorityRequirement::scope(\"engine.promote\"))",
+        "\"decisionResourceId\"",
+        "\"evidenceResourceIds\"",
+        "\"candidateResourceIds\"",
+        "\"promotionReason\"",
+        "\"additionalProperties\": false",
+    ] {
+        assert!(
+            meta.contains(required),
+            "engine::promote contract missing governance requirement {required}"
+        );
+    }
+
+    let validate_position = meta_invocation
+        .find("self.validate_promotion_governance(")
+        .expect("engine::promote must validate governance refs");
+    let mutate_position = meta_invocation
+        .find("self.catalog.promote_function_visibility(")
+        .expect("engine::promote must perform the catalog visibility mutation");
+    assert!(
+        validate_position < mutate_position,
+        "engine::promote must validate decision/evidence/candidate resources before mutation"
+    );
+    for required in [
+        "if function.visibility != VisibilityScope::Session",
+        "\"cannot promote function from a different session\"",
+        "VisibilityScope::Workspace | VisibilityScope::System",
+        "Some(governance_refs.redacted_catalog_metadata(&target))",
+    ] {
+        assert!(
+            meta_invocation.contains(required),
+            "engine::promote missing fail-closed host guard {required}"
+        );
+    }
+
+    for required in [
+        "ensure_payload_idempotency_matches_context(invocation)?",
+        "ensure_target_authority(&actor, target, workspace_id)?",
+        "require_resource(&resources, &refs.decision_resource_id)?",
+        "ensure_decision_approves(&decision, function, target, workspace_id)?",
+        "ensure_evidence_verified(&inspection)?",
+        "ensure_candidate_kind(&inspection)?",
+        "ensure_candidates_are_chained(&decision, &evidence, &candidates)?",
+        "\"workspace promotion requires engine.promote.workspace authority\"",
+        "\"system promotion requires admin authority\"",
+    ] {
+        assert!(
+            promotion_governance.contains(required),
+            "promotion governance missing retained authority/resource proof {required}"
+        );
+    }
+
+    for required in [
+        "fn derive_authority_grant(",
+        ".grants",
+        ".derive(request)",
+        "fn store_worker_activation_bundle(",
+        ".worker_activation_bundles",
+        ".store(",
+    ] {
+        assert!(
+            runtime_host.contains(required),
+            "primitive runtime host missing retained store boundary {required}"
+        );
+    }
+    for forbidden in [
+        "tokio::spawn",
+        "launchd",
+        "SMAppService",
+        "tron deploy",
+        "providerMetadata",
+        "postReadyPayload",
+    ] {
+        assert!(
+            !runtime_host.contains(forbidden),
+            "primitive runtime host must not start autonomous/public/deploy surface {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn saastc_resource_substrate_keeps_only_retained_safe_resource_contracts() {
     let sqlite_store =
         read_repo_file("packages/agent/src/engine/durability/resources/store/mod.rs");

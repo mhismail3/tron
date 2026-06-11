@@ -618,15 +618,18 @@ async fn trigger_runtime_records_current_target_revision_after_promotion() {
         grant("manual-grant"),
     );
     handle.register_trigger_for_setup(trigger, false).unwrap();
-    handle
-        .promote_function_visibility(
-            &fid("alpha::echo"),
-            &wid("alpha"),
-            VisibilityScope::Workspace,
-            Some("workspace-a".to_owned()),
-        )
-        .await
-        .unwrap();
+    {
+        let mut host = handle.lock().await;
+        host.catalog_mut()
+            .promote_function_visibility(
+                &fid("alpha::echo"),
+                &wid("alpha"),
+                VisibilityScope::Workspace,
+                Some("workspace-a".to_owned()),
+                None,
+            )
+            .unwrap();
+    }
 
     let mut request = TriggerDispatchRequest::new(
         trigger_id.clone(),

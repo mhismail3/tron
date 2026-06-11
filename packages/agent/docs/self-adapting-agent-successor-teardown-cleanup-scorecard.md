@@ -130,3 +130,10 @@ harness and full initial diff inventory.
   entries and instruction text through the retained `execute` primitive only.
   The updated provider regression passes `inspect` and `launch_activation`
   capabilities and proves only `execute` is serialized.
+- Simplified and source-proved the invocation-host governance boundary. Removed
+  the `EngineHostHandle::promote_function_visibility` shortcut that bypassed
+  `engine::promote`; the only retained host promotion path now validates
+  idempotency, actor authority, decision resources, verified evidence, and
+  candidate chains before catalog visibility mutation. The one runtime test
+  that needed a promoted target performs direct catalog setup under its local
+  test host lock instead of preserving a runtime host API.
