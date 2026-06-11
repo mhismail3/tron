@@ -175,6 +175,25 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   requires the focused runtime tests for scoped hello, grant hash/revision,
   lifecycle events, heartbeat timeout cleanup, durable unhealthy disconnect, and
   activation registration rejection.
+- Source-proved the engine catalog/module export cluster as retained primitive
+  fabric. `engine/mod.rs` keeps core submodules `pub(crate)` and exposes the
+  narrow crate facade for host handles, catalog, durability records, stream
+  primitives, external-worker DTOs, trigger runtime, and explicit schedule
+  runtime while avoiding provider, transport-handler, deploy, launchd, or
+  process ownership. `catalog/registry/mod.rs` keeps registry submodules
+  private, re-exports only engine-scoped idempotency and prepared-invocation
+  decisions, owns `LiveCatalog`, and redacts activation bundles before durable
+  invocation/idempotency storage. `idempotency.rs` retains canonical payload
+  fingerprinting, scoped reservations, replay/no-op/reject behavior, and
+  fail-closed compensation replay. `invocation.rs` retains prepare/finish split:
+  policy and grant validation, idempotency reservation, request schema, handler
+  presence, and grant budget happen before the handler executes outside the
+  catalog lock, then finish validates output contracts and response schema
+  before durable recording. `registration.rs` retains durable external-worker
+  hydration as stopped/unhealthy, worker/function/trigger owner and namespace
+  checks, worker-grant and function-grant validation, function/trigger policy
+  validation, durable external definition persistence, volatile cleanup, and
+  the catalog-only visibility mutation used after `engine::promote` governance.
 
 ## Phase 2 Focused Commands
 
@@ -218,6 +237,14 @@ cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
 cargo test --manifest-path packages/agent/Cargo.toml external_worker --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml worker_activation --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_activation_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
+git diff --check
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+cargo test --manifest-path packages/agent/Cargo.toml catalog --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::invocation::idempotency --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability::ledger_idempotency --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml host_invocation --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 git diff --check

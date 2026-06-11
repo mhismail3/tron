@@ -153,3 +153,14 @@ harness and full initial diff inventory.
   unhealthy instead of replaying readiness, updates activation lifecycle through
   the existing resource CAS path, and does not own launch, schedule, deploy,
   provider, restart, retry, or post-ready replay behavior.
+- Source-proved the engine catalog/module export cluster as retained primitive
+  fabric. `engine/mod.rs` keeps `authority`, `catalog`, `durability`,
+  `invocation`, `kernel`, `primitives`, and `runtime` as crate-private
+  submodules behind a narrow facade; the catalog registry exposes only
+  engine-scoped prepared-invocation and idempotency decisions plus `LiveCatalog`.
+  Registry code owns canonical idempotency reservation/replay, activation bundle
+  redaction before durable ledger writes, grant-backed prepared invocation,
+  output-contract finish recording, durable external-worker hydration as
+  stopped/unhealthy, owner/namespace registration checks, volatile cleanup, and
+  trigger policy checks without provider, deploy, schedule, launch, restart,
+  retry, or repo-skill ownership.

@@ -1166,6 +1166,190 @@ fn saastc_external_worker_runtime_lifecycle_is_loopback_bounded() {
 }
 
 #[test]
+fn saastc_engine_catalog_module_exports_are_retained_fabric_only() {
+    let engine_mod = read_repo_file("packages/agent/src/engine/mod.rs");
+    let registry_mod = read_repo_file("packages/agent/src/engine/catalog/registry/mod.rs");
+    let idempotency = read_repo_file("packages/agent/src/engine/catalog/registry/idempotency.rs");
+    let invocation = read_repo_file("packages/agent/src/engine/catalog/registry/invocation.rs");
+    let registration = read_repo_file("packages/agent/src/engine/catalog/registry/registration.rs");
+
+    for required in [
+        "Model providers do not see that transport surface\n//! directly; agents receive one model-facing capability, `execute`",
+        "engine submodules are crate-private implementation",
+        "must use the narrow facade re-exports in this module",
+        "pub(crate) mod authority;",
+        "pub(crate) mod catalog;",
+        "pub(crate) mod durability;",
+        "pub(crate) mod invocation;",
+        "pub(crate) mod kernel;",
+        "pub(crate) mod primitives;",
+        "pub(crate) mod runtime;",
+        "pub use catalog::registry::LiveCatalog;",
+        "pub use invocation::host::{",
+        "CatalogWatchRequest, CatalogWatchResponse, EngineHost, EngineHostHandle",
+        "pub use runtime::external_workers::{",
+        "EngineExternalWorkerRuntime, ExternalWorkerConnection, ExternalWorkerInvoker",
+        "pub use runtime::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};",
+        "pub use runtime::worker_protocol::{",
+        "pub use runtime::worker_schedule::{",
+        "pub(crate) fn is_bootstrap_authority_grant_id",
+    ] {
+        assert!(
+            engine_mod.contains(required),
+            "engine module facade missing retained export/boundary marker {required}"
+        );
+    }
+    for forbidden in [
+        "pub mod authority;",
+        "pub mod catalog;",
+        "pub mod durability;",
+        "pub mod invocation;",
+        "pub mod kernel;",
+        "pub mod primitives;",
+        "pub mod runtime;",
+        "domains::model::providers",
+        "transport::engine",
+        "std::process::Command",
+        "tokio::spawn",
+        "launchd",
+        "SMAppService",
+        "tron deploy",
+        "packages/agent/skills",
+    ] {
+        assert!(
+            !engine_mod.contains(forbidden),
+            "engine facade must not widen module/provider/deploy surface: {forbidden}"
+        );
+    }
+
+    for required in [
+        "mod authorization;",
+        "mod catalog_changes;",
+        "mod cleanup;",
+        "mod idempotency;",
+        "mod invocation;",
+        "mod output_contract;",
+        "mod registration;",
+        "mod search;",
+        "pub(in crate::engine) use idempotency::InvocationIdempotencyDecision;",
+        "pub(in crate::engine) use invocation::{PreparedSyncInvocation, PreparedSyncInvocationDecision};",
+        "pub(super) fn durable_result_for_invocation",
+        "activation_bundle_not_persisted",
+        "\"scopedWorkerToken\": {\"redacted\": true}",
+        "ledger: Box<dyn EngineLedgerStore>",
+        "grants: Arc<StdMutex<EngineGrantStoreBackend>>",
+        "pub(in crate::engine) fn set_grant_store",
+    ] {
+        assert!(
+            registry_mod.contains(required),
+            "catalog registry module missing retained private/export marker {required}"
+        );
+    }
+
+    for required in [
+        "pub(in crate::engine) enum InvocationIdempotencyDecision",
+        "ReplayBehavior::ReturnPrevious",
+        "ReplayBehavior::NoOp",
+        "ReplayBehavior::Reject",
+        "ReplayBehavior::Compensate",
+        "compensation replay is not executable in phase 1",
+        "pub(in crate::engine) fn begin_invocation_idempotency",
+        "pub(in crate::engine) fn complete_invocation_idempotency",
+        "LedgerKind::InMemory | LedgerKind::EngineLedger",
+        "payload_fingerprint(&invocation.payload)",
+        "write_canonical_json",
+    ] {
+        assert!(
+            idempotency.contains(required),
+            "catalog idempotency missing retained reservation/replay marker {required}"
+        );
+    }
+
+    for required in [
+        "pub(in crate::engine) struct PreparedSyncInvocation",
+        "pub(in crate::engine) enum PreparedSyncInvocationDecision",
+        "policy::validate_invocation",
+        "policy::validate_trigger_target_invocation",
+        "self.validate_invocation_grant(&function, &invocation)",
+        "self.ledger.reserve_idempotency(reservation.clone())",
+        "schema::validate_payload(&function.id, \"request\"",
+        "self.consume_invocation_budget(&function, &invocation)",
+        "PreparedSyncInvocationDecision::Execute",
+        "pub(in crate::engine) fn finish_prepared_sync_invocation",
+        "pub(in crate::engine) fn finish_prepared_sync_invocation_with_contracts",
+        "validate_output_contract(&function, &invocation, &value)",
+        "StoredInvocationOutcome::from_result(&durable_result)",
+        "append_invocation",
+    ] {
+        assert!(
+            invocation.contains(required),
+            "catalog invocation missing retained prepare/finish marker {required}"
+        );
+    }
+
+    for required in [
+        "pub(in crate::engine) fn hydrate_durable_catalog_from_ledger",
+        "worker.lifecycle = WorkerLifecycleState::Stopped",
+        "function.health = FunctionHealth::Unhealthy",
+        "validate_worker_namespace_claims(&definition)?",
+        "self.validate_worker_grant(&definition)?",
+        "validate_reserved_function_namespace(&definition)?",
+        "self.validate_function_worker_grant(&definition, owner)?",
+        "policy::validate_function_registration(&definition)?",
+        "let persist_durable_external = !volatile && owner.kind == WorkerKind::External;",
+        "self.cleanup_owned_volatile(id)?",
+        "pub fn promote_function_visibility",
+        "policy::validate_trigger_registration(",
+        "fn validate_worker_namespace_claims",
+        "fn validate_reserved_function_namespace",
+    ] {
+        assert!(
+            registration.contains(required),
+            "catalog registration missing retained owner/durability marker {required}"
+        );
+    }
+
+    for (path, source) in [
+        (
+            "packages/agent/src/engine/catalog/registry/idempotency.rs",
+            idempotency.as_str(),
+        ),
+        (
+            "packages/agent/src/engine/catalog/registry/invocation.rs",
+            invocation.as_str(),
+        ),
+        (
+            "packages/agent/src/engine/catalog/registry/mod.rs",
+            registry_mod.as_str(),
+        ),
+        (
+            "packages/agent/src/engine/catalog/registry/registration.rs",
+            registration.as_str(),
+        ),
+    ] {
+        for forbidden in [
+            "tokio::spawn",
+            "std::process::Command",
+            "launchd",
+            "SMAppService",
+            "tron deploy",
+            "packages/agent/skills",
+            "domains::model::providers",
+            "postReadyPayload",
+            "restartLoop",
+            "retryLoop",
+            "worker_schedule",
+            "scheduler.run",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must not own autonomous/provider/deploy/schedule surface: {forbidden}"
+            );
+        }
+    }
+}
+
+#[test]
 fn saastc_phase1_records_hard_cleanup_boundaries() {
     let joined = format!(
         "{}\n{}\n{}",

@@ -6,8 +6,8 @@ activation grant filesystem authority, trigger launch timing, and source-prove
 bundle handoff, orchestration process-record retention, and schedule state/tick
 retention, the public transport boundary, and the durability resource
 substrate, plus the provider/execute, invocation-host governance, and primitive
-surface boundaries and external-worker runtime lifecycle while later SAASTC
-rows remain open.
+surface boundaries, external-worker runtime lifecycle, and engine catalog/module
+export boundary while later SAASTC rows remain open.
 
 Scorecard: [`self-adapting-agent-successor-teardown-cleanup-scorecard.md`](self-adapting-agent-successor-teardown-cleanup-scorecard.md)
 
