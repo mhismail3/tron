@@ -960,5 +960,6 @@ packages/agent/src/engine/runtime/worker_orchestration/trigger_launch.rs	rust	im
 packages/agent/src/engine/durability/resources/worker_schedule_definitions.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/runtime/worker_schedule/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
 packages/agent/src/engine/runtime/worker_schedule/contracts.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/worker_schedule/tick_dispatch.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/runtime/worker_schedule/overlap.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
-packages/agent/src/transport/runtime/worker_schedule.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/engine/runtime/worker_schedule/scan_state.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract

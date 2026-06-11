@@ -895,12 +895,13 @@ is still no activation-worker trigger registration, automatic restart loop,
 provider-visible launch tool, public `/engine` launch message, deploy flow,
 launchd/SMAppService integration, or repo-managed skill surface.
 
-Reviewed wall-clock worker schedules are a separate internal composition layer
-over trigger-created launch. A `worker_schedule_plan`
+Reviewed wall-clock worker schedules are a separate explicit internal runtime
+layer over trigger-created launch. A `worker_schedule_plan`
 (`tron.resource.worker_schedule_plan.v1`) is UTC-only, fixed interval, reviewed,
 and bound to a registered enqueue-capable trigger whose target is exactly
 `worker::launch_from_trigger` and a reviewed matching `worker_autostart_plan`.
-The scheduler owns only cadence and cancellation: it computes the latest due
+The retained runtime does not start with the server; callers must invoke schedule
+dispatch explicitly. It computes the latest due
 nominal tick, records a safe `worker_schedule_tick`
 (`requested`, `enqueued`, `skipped_missed`, `skipped_overlap`, or `failed`),
 acquires a narrow schedule dispatch lease, and calls `trigger::dispatch` with
@@ -913,12 +914,12 @@ expose provider/public schedule APIs, change deploy/iOS settings, add
 launchd/SMAppService integration, add restart/retry loops, add repo-managed
 skills, or replay post-ready payloads.
 
-Schedule scanning is bounded and resumable. The scheduler lists reviewed
+Schedule scanning is bounded and resumable. The explicit runtime lists reviewed
 `worker_schedule_plan` resources through an internal paged resource substrate
 ordered by `updated_at DESC, resource_id DESC`, scans pages of 100 and at most
-500 plans per poll, persists the last cursor and aggregate summary in the safe
+500 plans per call, persists the last cursor and aggregate summary in the safe
 system-scoped `worker_schedule_scan_state:default` resource, resumes from that
-cursor across later polls or runtime recreation, and clears the cursor when the
+cursor across later calls or runtime recreation, and clears the cursor when the
 filtered tail is reached so the next pass wraps back to the head. Cancellation is
 cooperative between pages and schedule items and persists `cancelled` scan state
 without enqueueing when it fires before item dispatch. Scan state records cursor,

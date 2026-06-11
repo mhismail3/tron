@@ -8,22 +8,20 @@
 //! local external-worker capabilities so the live catalog reflects what can
 //! actually run. External-worker WebSocket writers use bounded outbound queues;
 //! callers see transport failures instead of unbounded buffering when a worker
-//! stops draining messages. Worker schedule polling has the same shutdown-owned
-//! task shape and only enqueues trusted trigger dispatch.
+//! stops draining messages. Worker schedule dispatch remains an explicit engine
+//! runtime contract; server startup does not spawn an autonomous schedule poller.
 
 use std::time::Duration;
 
 use crate::app::bootstrap::server::TronServer;
 use queue_drainer::EngineQueueDrainerService;
 use worker_heartbeat::ExternalWorkerHeartbeatService;
-use worker_schedule::EngineWorkerScheduleService;
 
 pub mod external_workers;
 mod queue_drainer;
 pub mod setup;
 pub mod streams;
 mod worker_heartbeat;
-mod worker_schedule;
 
 const EXTERNAL_WORKER_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(90);
 
@@ -44,9 +42,6 @@ impl EngineRuntimeServices {
             );
             shutdown.register_task(tokio::spawn(service.run()));
         }
-
-        let scheduler = EngineWorkerScheduleService::new(host.clone(), shutdown.token());
-        shutdown.register_task(tokio::spawn(scheduler.run()));
 
         let heartbeat = ExternalWorkerHeartbeatService::new(
             server.external_workers().clone(),

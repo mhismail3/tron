@@ -2,13 +2,13 @@
 
 Status: SAAWSD campaign `complete`; inventory aligned to the governed schedule-to-trigger dispatch scorecard.
 
-This inventory covers the reviewed schedule contract, engine-owned cadence service, tick audit resources, queue/lease/idempotency replay, trigger dispatch composition, inherited SAAWTL/SAAWBH/SAAWO/SAAWA surfaces, and explicit forbidden boundaries.
+This inventory covers the reviewed schedule contract, explicit schedule runtime, tick audit resources, queue/lease/idempotency replay, trigger dispatch composition, inherited SAAWTL/SAAWBH/SAAWO/SAAWA surfaces, removed autonomous service boundary, and explicit forbidden boundaries.
 
 ## Surface Taxonomy
 
 - `schedule_plan`: reviewed `worker_schedule_plan` schema, parser, policy, UTC interval bounds, and secret rejection.
 - `schedule_runtime`: `EngineWorkerScheduleRuntime` due-tick computation, lease guard, replay, overlap, skipped-missed, and trigger dispatch call.
-- `schedule_service`: transport-owned background service, cancellation, fixed cadence, and runtime task wiring.
+- `autonomous_service_removed`: server startup no longer spawns a schedule polling task.
 - `tick_audit`: `worker_schedule_tick` resource schema and safe payload builder.
 - `trigger_dispatch`: inherited trusted trigger dispatch and enqueue handoff.
 - `autostart_plan`: inherited SAAWTL reviewed autostart plan validation.
@@ -21,7 +21,7 @@ This inventory covers the reviewed schedule contract, engine-owned cadence servi
 
 ## Boundary Summary
 
-`worker_schedule_plan` resources are reviewed, UTC-only fixed-interval plans. The scheduler computes the due nominal tick, creates a safe `worker_schedule_tick`, acquires a narrow schedule dispatch lease, and invokes `trigger::dispatch` with `deliveryMode: "enqueue"` and a deterministic target idempotency key derived from schedule id plus nominal UTC timestamp.
+`worker_schedule_plan` resources are reviewed, UTC-only fixed-interval plans. The explicit runtime computes the due nominal tick, creates a safe `worker_schedule_tick`, acquires a narrow schedule dispatch lease, and invokes `trigger::dispatch` with `deliveryMode: "enqueue"` and a deterministic target idempotency key derived from schedule id plus nominal UTC timestamp. Server startup does not run a schedule poller after SAASTC cleanup.
 
 The scheduler never calls `worker::issue_activation`, activation bundle vault consume APIs, `worker::launch_activation`, supervisor methods, or process-start APIs directly. SAAWTL remains responsible for activation issue and launch after the queued trigger dispatch drains.
 

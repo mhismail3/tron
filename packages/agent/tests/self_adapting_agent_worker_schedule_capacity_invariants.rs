@@ -151,7 +151,7 @@ fn saawsc_scorecard_and_inventory_are_complete() {
     let tracked = git_ls_files();
     let inventory = parse_inventory();
     assert!(
-        inventory.len() >= 34,
+        inventory.len() >= 33,
         "SAAWSC inventory must cover major surfaces"
     );
     let mut ids = BTreeSet::new();
@@ -178,7 +178,7 @@ fn saawsc_scorecard_and_inventory_are_complete() {
         "host_substrate",
         "scan_state",
         "schedule_runtime",
-        "schedule_service",
+        "autonomous_service_removed",
         "schedule_tests",
         "predecessor_dispatch",
         "forbidden_surface",
@@ -326,10 +326,22 @@ fn saawsc_scheduler_uses_bounded_resume_wrap_and_cancellation() {
         );
     }
 
-    let service = read_repo_file("packages/agent/src/transport/runtime/worker_schedule.rs");
-    assert!(service.contains("dispatch_due_once_with_cancellation"));
-    assert!(service.contains("self.cancel.is_cancelled()"));
-    assert!(service.contains("CancellationToken"));
+    assert!(
+        !repo_path("packages/agent/src/transport/runtime/worker_schedule.rs").exists(),
+        "SAASTC removes the autonomous transport schedule polling service"
+    );
+    let runtime_mod = read_repo_file("packages/agent/src/transport/runtime/mod.rs");
+    for forbidden in [
+        "EngineWorkerScheduleService",
+        "WORKER_SCHEDULE_POLL_CADENCE",
+        "scheduler.run()",
+        "worker_schedule::",
+    ] {
+        assert!(
+            !runtime_mod.contains(forbidden),
+            "server runtime must not autostart schedule polling: {forbidden}"
+        );
+    }
 }
 
 #[test]

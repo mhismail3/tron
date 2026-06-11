@@ -52,3 +52,14 @@ harness and full initial diff inventory.
   successor work and must stay synchronized without preserving successor cruft.
 - No source retention decision is final until SAASTC-2 through SAASTC-8 are
   closed by source inspection and focused verification.
+
+## Source Teardown Log
+
+- Removed `packages/agent/src/transport/runtime/worker_schedule.rs` and the
+  `EngineRuntimeServices::start` schedule-poller task. The retained schedule
+  runtime is explicit-only; future cadence ownership requires a successor
+  scorecard.
+- Split `packages/agent/src/engine/runtime/worker_schedule/tick_dispatch.rs`
+  out of the schedule runtime facade so trigger enqueue and tick mutation stay
+  owner-private while `worker_schedule/mod.rs` remains below the TPC hard file
+  budget.

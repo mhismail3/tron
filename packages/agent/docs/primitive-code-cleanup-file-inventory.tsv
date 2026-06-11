@@ -1616,8 +1616,19 @@ packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.tsv	r
 packages/agent/src/engine/durability/resources/worker_schedule_definitions.rs	retain	saawsd rust source	SAAWSD-2	Worker schedule plan and tick resource schemas retained for governed schedule dispatch.
 packages/agent/src/engine/runtime/worker_schedule/mod.rs	retain	saawsd rust source	SAAWSD-3	Worker schedule runtime retained for due tick calculation, lease ownership, and trigger dispatch composition.
 packages/agent/src/engine/runtime/worker_schedule/contracts.rs	retain	saawsd rust source	SAAWSD-2	Worker schedule contract parser retained for UTC interval, fixed policy, and safe tick payload validation.
+packages/agent/src/engine/runtime/worker_schedule/tick_dispatch.rs	retain	saawsd rust source	SAASTC-3	Worker schedule trigger enqueue and tick mutation helper retained after source teardown split.
 packages/agent/src/engine/runtime/worker_schedule/overlap.rs	retain	saawsd rust source	SAAWSD-6	Worker schedule overlap evidence helper retained for one-active-tick replay and process-state checks.
-packages/agent/src/transport/runtime/worker_schedule.rs	retain	saawsd rust source	SAAWSD-3	Cancellable worker schedule polling service retained under transport runtime startup ownership.
 packages/agent/src/engine/tests/runtime/worker_schedule_dispatch.rs	retain	saawsd rust test	SAAWSD-11	Worker schedule dispatch runtime tests retained for due, replay, missed, overlap, and negative validation coverage.
 packages/agent/src/engine/tests/runtime/worker_schedule_dispatch_support.rs	retain	saawsd rust test	SAAWSD-11	Worker schedule dispatch test support retained for synthetic launch and resource fixtures.
 packages/agent/tests/self_adapting_agent_worker_schedule_dispatch_invariants.rs	retain	saawsd rust test	SAAWSD-11	Worker schedule dispatch invariant target retained for closeout static gates.
+packages/agent/docs/self-adapting-agent-worker-schedule-capacity-scorecard.md	retain	saawsc docs	SAAWSC-0	Worker schedule capacity scorecard retained as completed closeout evidence.
+packages/agent/docs/self-adapting-agent-worker-schedule-capacity-evidence-manifest.md	retain	saawsc docs	SAAWSC-0	Worker schedule capacity evidence manifest retained for verification provenance.
+packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.md	retain	saawsc docs	SAAWSC-1	Worker schedule capacity inventory summary retained for source taxonomy.
+packages/agent/docs/self-adapting-agent-worker-schedule-capacity-inventory.tsv	retain	saawsc docs	SAAWSC-1	Worker schedule capacity machine-readable inventory retained for static gates.
+packages/agent/src/engine/runtime/worker_schedule/scan_state.rs	retain	saawsc rust source	SAAWSC-4	Worker schedule scan-state helper retained for explicit bounded schedule scans.
+packages/agent/tests/self_adapting_agent_worker_schedule_capacity_invariants.rs	retain	saawsc rust test	SAAWSC-11	Worker schedule capacity invariant target retained for closeout static gates.
+packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-scorecard.md	retain	saastc docs	SAASTC-0	Successor teardown cleanup scorecard retained as active cleanup control.
+packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-evidence-manifest.md	retain	saastc docs	SAASTC-0	Successor teardown cleanup evidence manifest retained for cleanup provenance.
+packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.md	retain	saastc docs	SAASTC-1	Successor teardown cleanup inventory summary retained for diff classification.
+packages/agent/docs/self-adapting-agent-successor-teardown-cleanup-inventory.tsv	retain	saastc docs	SAASTC-1	Successor teardown cleanup machine inventory retained for static gates.
+packages/agent/tests/self_adapting_agent_successor_teardown_cleanup_invariants.rs	retain	saastc rust test	SAASTC-0	Successor teardown cleanup invariant target retained for cleanup static gates.

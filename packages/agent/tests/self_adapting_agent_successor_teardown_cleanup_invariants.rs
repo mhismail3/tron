@@ -79,7 +79,7 @@ fn git_ls_files() -> BTreeSet<String> {
 }
 
 fn changed_paths_since_baseline() -> BTreeMap<String, String> {
-    git_output(&["diff", "--name-status", &format!("{BASELINE_COMMIT}..HEAD")])
+    git_output(&["diff", "--name-status", BASELINE_COMMIT])
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| {
@@ -254,13 +254,13 @@ fn saastc_scorecard_weights_statuses_and_current_score_are_consistent() {
 #[test]
 fn saastc_inventory_covers_every_changed_file_since_oda_baseline() {
     let rows = parse_inventory();
+    let changed = changed_paths_since_baseline();
     assert!(
-        rows.len() >= 147,
-        "Phase 1 inventory should cover the 142 integration files plus cleanup harness files"
+        rows.len() >= changed.len(),
+        "cleanup inventory must cover at least the current baseline diff"
     );
 
     let tracked = git_ls_files();
-    let changed = changed_paths_since_baseline();
     let allowed_classifications = BTreeSet::from([
         "retained",
         "simplify",

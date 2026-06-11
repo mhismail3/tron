@@ -35,6 +35,17 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
 | SAASTC-10 | pending_source_teardown | Not yet closed in Phase 1. | Cross-campaign regression remains for closeout. |
 | SAASTC-11 | pending_source_teardown | Not yet closed in Phase 1. | Full verification and adversarial closeout remain for final cleanup. |
 
+## Source Teardown Log
+
+- Removed `packages/agent/src/transport/runtime/worker_schedule.rs` and the
+  server-start schedule poller from `packages/agent/src/transport/runtime/mod.rs`.
+  Updated SAAWSD/SAAWSC docs, inventories, and static gates so they now enforce
+  explicit schedule runtime only and reject `EngineWorkerScheduleService`
+  autostart wiring.
+- Split `packages/agent/src/engine/runtime/worker_schedule/tick_dispatch.rs`
+  from `worker_schedule/mod.rs` to keep trigger enqueue and tick resource
+  mutation owner-private while closing the TPC hard file-budget guard.
+
 ## Phase 1 Commands
 
 ```bash

@@ -174,7 +174,7 @@ fn saawsd_scorecard_and_inventory_are_complete() {
     for surface in [
         "schedule_plan",
         "schedule_runtime",
-        "schedule_service",
+        "autonomous_service_removed",
         "tick_audit",
         "trigger_dispatch",
         "queue_lease_replay",
@@ -225,7 +225,9 @@ fn saawsd_resource_contracts_are_registered() {
 fn saawsd_runtime_composes_only_through_trigger_dispatch() {
     let runtime = read_repo_file("packages/agent/src/engine/runtime/worker_schedule/mod.rs");
     let overlap = read_repo_file("packages/agent/src/engine/runtime/worker_schedule/overlap.rs");
-    let runtime_surface = format!("{runtime}\n{overlap}");
+    let tick_dispatch =
+        read_repo_file("packages/agent/src/engine/runtime/worker_schedule/tick_dispatch.rs");
+    let runtime_surface = format!("{runtime}\n{overlap}\n{tick_dispatch}");
     for required in [
         "EngineWorkerScheduleRuntime",
         "dispatch_due_once",
@@ -278,20 +280,23 @@ fn saawsd_runtime_composes_only_through_trigger_dispatch() {
 }
 
 #[test]
-fn saawsd_service_and_tests_cover_cadence_replay_and_negative_paths() {
-    let service = read_repo_file("packages/agent/src/transport/runtime/worker_schedule.rs");
-    for required in [
-        "WORKER_SCHEDULE_POLL_CADENCE",
-        "Duration::from_secs(30)",
-        "CancellationToken",
-        "tokio::time::sleep",
-        "worker_schedule_dispatch_service_cancels_cleanly",
-    ] {
-        assert!(service.contains(required), "service missing {required}");
-    }
+fn saawsd_tests_cover_explicit_dispatch_replay_and_negative_paths() {
     let runtime_mod = read_repo_file("packages/agent/src/transport/runtime/mod.rs");
-    assert!(runtime_mod.contains("EngineWorkerScheduleService"));
-    assert!(runtime_mod.contains("shutdown.register_task(tokio::spawn(scheduler.run()))"));
+    assert!(
+        !repo_path("packages/agent/src/transport/runtime/worker_schedule.rs").exists(),
+        "SAASTC removes the autonomous transport schedule polling service"
+    );
+    for forbidden in [
+        "EngineWorkerScheduleService",
+        "WORKER_SCHEDULE_POLL_CADENCE",
+        "scheduler.run()",
+        "worker_schedule::",
+    ] {
+        assert!(
+            !runtime_mod.contains(forbidden),
+            "server runtime must not autostart schedule polling: {forbidden}"
+        );
+    }
 
     let tests = format!(
         "{}\n{}",
