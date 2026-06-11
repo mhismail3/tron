@@ -445,6 +445,134 @@ fn saastc_transport_boundary_has_no_successor_worker_public_surface() {
 }
 
 #[test]
+fn saastc_provider_execute_boundary_is_execute_only_and_fail_closed() {
+    let capability_mod = read_repo_file("packages/agent/src/domains/capability/mod.rs");
+    let capability_contract = read_repo_file("packages/agent/src/domains/capability/contract.rs");
+    let operations = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    let openai_converter = read_repo_file(
+        "packages/agent/src/domains/model/providers/openai/message_converter/mod.rs",
+    );
+    let openai_converter_tests = read_repo_file(
+        "packages/agent/src/domains/model/providers/openai/message_converter/tests.rs",
+    );
+
+    for required in [
+        "if spec.operation_key != \"execute\"",
+        "unexpected capability operation",
+        "`capability::execute`",
+        "Provider integrations must expose exactly this one tool",
+    ] {
+        assert!(
+            capability_mod.contains(required),
+            "capability module missing execute-only registration guard {required}"
+        );
+    }
+    for required in [
+        "pub(crate) const EXECUTE_FUNCTION_ID: &str = \"capability::execute\";",
+        "Ok(vec![",
+        "CapabilityContract::new(",
+        "\"modelPrimitiveName\": \"execute\"",
+        "\"additionalProperties\": false",
+        "only_execute_is_registered_and_model_facing",
+        "execute_schema_exposes_primitive_operations_not_catalog_targets",
+        "schema[\"properties\"].get(\"target\").is_none()",
+        "schema[\"properties\"].get(\"contractId\").is_none()",
+        "schema[\"properties\"].get(\"functionId\").is_none()",
+        "schema[\"properties\"].get(\"constraints\").is_none()",
+    ] {
+        assert!(
+            capability_contract.contains(required),
+            "capability contract missing execute-only provider marker {required}"
+        );
+    }
+    for forbidden in [
+        "worker::launch_activation",
+        "worker::launch_from_trigger",
+        "worker::issue_activation",
+        "worker_schedule_plan",
+        "worker_schedule_tick",
+        "worker_schedule_scan_state",
+    ] {
+        assert!(
+            !capability_contract.contains(forbidden),
+            "provider execute contract must not expose forbidden field or worker surface {forbidden}"
+        );
+    }
+
+    for required in [
+        "validate_execute_context",
+        "ActorKind::Agent",
+        "ActorKind::System",
+        "is_bootstrap_authority_grant_id",
+        "execute_operation",
+        "\"resource_create\"",
+        "\"resource_list\"",
+        "\"replay_manifest\"",
+        "capability::execute cannot read or write system-scoped resources",
+        "capability::execute requires a derived least-privilege authority grant",
+    ] {
+        assert!(
+            operations.contains(required),
+            "execute operations missing retained authority/direct-operation guard {required}"
+        );
+    }
+    for forbidden in [
+        "catalog_search",
+        "catalog::inspect",
+        "targetFunction",
+        "launch_activation",
+        "launch_from_trigger",
+        "worker_schedule",
+        "activationBundle",
+        "providerMetadata",
+    ] {
+        assert!(
+            !operations.contains(forbidden),
+            "execute operations must not route through successor/provider surface {forbidden}"
+        );
+    }
+
+    for required in [
+        "primitive_execute_capabilities(capabilities)",
+        "capability.name == \"execute\"",
+        "Use ONLY this model-facing tool",
+    ] {
+        assert!(
+            openai_converter.contains(required),
+            "OpenAI converter missing execute-only provider guard {required}"
+        );
+    }
+    for forbidden in [
+        "hosted",
+        "tool_search",
+        "computer_use",
+        "worker_schedule",
+        "activationBundle",
+        "providerMetadata",
+        "runtimeMetadata",
+    ] {
+        assert!(
+            !openai_converter.contains(forbidden),
+            "OpenAI converter must not expose hidden/provider worker surface {forbidden}"
+        );
+    }
+    for required in [
+        "convert_tools_v2_ignores_non_execute_capabilities",
+        "make_tool(\"inspect\"",
+        "make_tool(\"launch_activation\"",
+        "assert_eq!(result.len(), 1)",
+        "assert_eq!(name, \"execute\")",
+        "assert!(!result.contains(\"- **inspect**\"))",
+        "assert!(result.contains(\"Do not send `target`\"))",
+    ] {
+        assert!(
+            openai_converter_tests.contains(required),
+            "OpenAI converter tests missing execute-only regression {required}"
+        );
+    }
+}
+
+#[test]
 fn saastc_resource_substrate_keeps_only_retained_safe_resource_contracts() {
     let sqlite_store =
         read_repo_file("packages/agent/src/engine/durability/resources/store/mod.rs");

@@ -369,18 +369,19 @@ fn empty_messages_returns_empty() {
 // ── convert_tools_v2 ────────────────────────────────────────────
 
 #[test]
-fn convert_tools_v2_exports_function_entries() {
+fn convert_tools_v2_ignores_non_execute_capabilities() {
     use crate::domains::model::providers::openai::types::ResponsesToolEntry;
     let capabilities = vec![
-        make_tool("execute", "Run commands"),
+        make_tool("execute", "Run primitive host operations"),
         make_tool("inspect", "Read file"),
+        make_tool("launch_activation", "Launch a worker"),
     ];
     let result = convert_tools_v2(&capabilities);
 
-    assert_eq!(result.len(), 2);
-    for entry in &result {
-        match entry {
-            ResponsesToolEntry::Function { .. } => {}
+    assert_eq!(result.len(), 1);
+    match &result[0] {
+        ResponsesToolEntry::Function { name, .. } => {
+            assert_eq!(name, "execute");
         }
     }
 }
@@ -421,16 +422,17 @@ fn convert_tools_v2_empty_tools() {
 
 #[test]
 fn clarification_includes_model_primitive_names() {
-    let capabilities = vec![make_tool_with_required(
-        "execute",
-        "Execute inspected capabilities",
-        vec!["mode"],
-    )];
+    let capabilities = vec![
+        make_tool_with_required("execute", "Run primitive host operations", vec!["mode"]),
+        make_tool_with_required("inspect", "Read file", vec!["path"]),
+    ];
     let result = generate_capability_instruction_text(&capabilities);
 
     assert!(result.contains("execute"));
-    assert!(result.contains("Execute inspected capabilities"));
+    assert!(result.contains("Run primitive host operations"));
     assert!(result.contains("required params: mode"));
+    assert!(!result.contains("- **inspect**"));
+    assert!(!result.contains("Read file"));
 }
 
 #[test]

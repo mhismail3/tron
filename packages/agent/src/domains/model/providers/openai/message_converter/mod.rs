@@ -64,8 +64,7 @@ pub fn convert_to_responses_input(messages: &[Message]) -> Vec<ResponsesInputIte
 /// match the single checked-in `execute` surface.
 #[must_use]
 pub fn convert_tools_v2(capabilities: &[ModelCapability]) -> Vec<ResponsesToolEntry> {
-    capabilities
-        .iter()
+    primitive_execute_capabilities(capabilities)
         .map(|t| {
             let schema = serde_json::to_value(&t.parameters).unwrap_or_default();
             let params = normalize_schema_for_openai(&schema);
@@ -111,8 +110,7 @@ pub fn normalize_schema_for_openai(schema: &serde_json::Value) -> serde_json::Va
 /// the actual available capability surface in the request instructions.
 #[must_use]
 pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) -> String {
-    let tool_descriptions: Vec<String> = capabilities
-        .iter()
+    let tool_descriptions: Vec<String> = primitive_execute_capabilities(capabilities)
         .map(|t| {
             let required = serde_json::to_value(&t.parameters)
                 .ok()
@@ -168,6 +166,14 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         6. Be helpful, accurate, and efficient when working with code",
         tool_list = tool_descriptions.join("\n")
     )
+}
+
+fn primitive_execute_capabilities(
+    capabilities: &[ModelCapability],
+) -> impl Iterator<Item = &ModelCapability> {
+    capabilities
+        .iter()
+        .filter(|capability| capability.name == "execute")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -122,6 +122,18 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   schedule scan state is bounded, resource validation runs schema validation
   before persistence, CAS/version/pagination types remain present, and resource
   store tests retain payload validation plus memory/SQLite pagination parity.
+- Tightened and source-proved the provider/execute boundary. Source inspection
+  showed `capability/mod.rs` already fails closed on any non-`execute`
+  `operation_key`, and `operations/mod.rs` dispatches direct primitive
+  operations only after trusted agent/system context and derived-grant checks.
+  The OpenAI converter previously serialized every `ModelCapability` it was
+  handed; this checkpoint narrows tool serialization and instruction text
+  through `primitive_execute_capabilities`, which keeps only `execute`. The
+  provider regression now supplies `execute`, `inspect`, and
+  `launch_activation` capabilities and asserts the OpenAI request exposes only
+  `execute`, while the SAASTC static gate rejects hidden provider metadata,
+  hosted tools, schedule resources, activation bundles, and successor worker
+  routing in the retained source.
 
 ## Phase 2 Focused Commands
 
@@ -146,6 +158,9 @@ cargo test --manifest-path packages/agent/Cargo.toml engine::transport --lib -- 
 cargo test --manifest-path packages/agent/Cargo.toml transport::engine --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml resource --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability::resource_contracts --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability::contract --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability::operations --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml openai::message_converter --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 ```

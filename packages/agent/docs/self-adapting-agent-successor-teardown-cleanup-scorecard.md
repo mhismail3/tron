@@ -122,3 +122,11 @@ harness and full initial diff inventory.
   validation, CAS/version state, deterministic pagination, and memory/SQLite
   parity tests without adding a public type-catalog or secret-bearing store
   API.
+- Tightened and source-proved the provider/execute boundary. Capability worker
+  registration still rejects any operation key except `execute`, the execute
+  schema remains a direct primitive-operation payload without catalog target
+  fields, execute operations require trusted agent/system context plus derived
+  least-privilege grants, and the OpenAI converter now filters provider tool
+  entries and instruction text through the retained `execute` primitive only.
+  The updated provider regression passes `inspect` and `launch_activation`
+  capabilities and proves only `execute` is serialized.

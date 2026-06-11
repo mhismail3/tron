@@ -5,7 +5,8 @@ provider-visible resource authorship, activation bundle metadata naming, worker
 activation grant filesystem authority, trigger launch timing, and source-prove
 bundle handoff, orchestration process-record retention, and schedule state/tick
 retention, the public transport boundary, and the durability resource
-substrate while later SAASTC rows remain open.
+substrate, plus the provider/execute boundary while later SAASTC rows remain
+open.
 
 Scorecard: [`self-adapting-agent-successor-teardown-cleanup-scorecard.md`](self-adapting-agent-successor-teardown-cleanup-scorecard.md)
 
