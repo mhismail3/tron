@@ -326,12 +326,28 @@ Current living entry points:
   validation, scoped grants/tokens, worker hello/registration binding,
   lifecycle audit, no-launch boundaries, provider/public transport absence, CI
   wiring, and README parity.
+- `packages/agent/docs/self-adapting-agent-worker-orchestration-scorecard.md`:
+  completed SAAWO scorecard for governed direct-exec process supervision of
+  already issued worker activation bundles.
+- `packages/agent/docs/self-adapting-agent-worker-orchestration-evidence-manifest.md`:
+  companion evidence manifest for launch-plan validation, process audit,
+  supervisor behavior, readiness binding, and closeout validation.
+- `packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.md`:
+  SAAWO source inventory taxonomy and launch/process boundary notes.
+- `packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.tsv`:
+  machine-readable SAAWO inventory covering activation binding, launch plans,
+  process resources, supervisor, readiness cleanup, transport boundaries, and
+  regression gates.
+- `packages/agent/tests/self_adapting_agent_worker_orchestration_invariants.rs`:
+  completed SAAWO gates for resource contracts, admin launch/stop governance,
+  direct-exec supervision, redaction, readiness binding, no scheduler/provider/
+  public transport surface, CI wiring, and README parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO
 scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -752,6 +768,28 @@ namespace expansion, durable registration, revoked or expired grants, and scope
 mismatch. Activation resources move through `issued`, `connected`,
 `registered`, `disconnected`, `expired`, or `revoked` alongside the existing
 `worker.lifecycle` stream audit.
+
+Worker orchestration is a separate admin/internal layer over already issued
+activation bundles. `worker::launch_activation` requires `worker.launch`,
+explicit system-ledger idempotency, an active unexpired session/workspace
+`worker_activation`, and a reviewed `worker_launch_plan` whose expected worker,
+function, namespace, scope, executable path policy, executable SHA-256 digest,
+argv allowlist, env allowlist, cwd policy, startup timeout, stop timeout, log
+capture bound, and `preissued_bundle` delivery mode all match before any process
+starts. It invokes the executable directly with no shell and creates a redacted
+`worker_process` resource in `requested`/`starting`; readiness is not trusted
+until the existing `/engine/workers` SAAWA hello moves the process to
+`hello_seen` and exact function registration moves it to `ready`.
+`worker::stop_process` is also admin/internal under `worker.launch`; it is
+idempotent for terminal or missing processes, stops through the supervisor,
+updates process/activation audit, and unregisters volatile catalog entries.
+Process resources persist only redacted handles, pid fingerprints, env keys,
+argv, executable digest/path policy, bounded log snippets, exit state, and
+readiness markers. Activation tokens are not persisted or reconstructed; the
+launched worker must already possess its issued bundle through a non-persisted
+channel. There is no scheduler launch, automatic restart loop, trigger creation,
+provider-visible launch tool, public `/engine` launch message, deploy flow,
+launchd/SMAppService integration, or repo-managed skill surface.
 
 Volatile worker entries are removed on disconnect or missed heartbeat. Durable
 local worker entries stay in the catalog but are marked unhealthy when the
@@ -1466,6 +1504,7 @@ tron ci clippy test          # Subset: linting + tests
 `self_adapting_agent_authorship_invariants`,
 `self_adapting_agent_promotion_governance_invariants`,
 `self_adapting_agent_worker_activation_invariants`,
+`self_adapting_agent_worker_orchestration_invariants`,
 `primitive_trace_execution`, and serial `integration`. GitHub's Rust
 static-gates job runs the same named target set for docs, template, iOS, Mac,
 script, and CI changes.

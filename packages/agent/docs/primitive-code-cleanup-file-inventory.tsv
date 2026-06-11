@@ -1585,3 +1585,13 @@ packages/agent/src/engine/tests/runtime/worker_activation.rs	retain	saawa rust t
 packages/agent/tests/self_adapting_agent_worker_activation_invariants.rs	retain	saawa rust test	SAAWA-10	Current Self-Adapting Agent Worker Activation invariant target retained for closeout verification.
 packages/agent/src/engine/tests/fixtures/worker_activation.rs	retain	saawa rust test	SAAWA-3/SAAWA-4	Worker activation fixture support retained after split from shared engine fixtures.
 packages/agent/tests/security_authority_capability_boundaries/lifecycle_guards.rs	retain	sacb rust test	SACB-9/SACB-10	SACB lifecycle and internal-invoke static guards retained after file-budget split.
+packages/agent/docs/self-adapting-agent-worker-orchestration-scorecard.md	retain	saawo docs	SAAWO-0	Worker orchestration scorecard retained as completed closeout evidence.
+packages/agent/docs/self-adapting-agent-worker-orchestration-evidence-manifest.md	retain	saawo docs	SAAWO-0	Worker orchestration evidence manifest retained for verification provenance.
+packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.md	retain	saawo docs	SAAWO-1	Worker orchestration inventory summary retained for source taxonomy.
+packages/agent/docs/self-adapting-agent-worker-orchestration-inventory.tsv	retain	saawo docs	SAAWO-1	Worker orchestration machine-readable inventory retained for static gates.
+packages/agent/tests/self_adapting_agent_worker_orchestration_invariants.rs	retain	saawo rust test	SAAWO-10	Worker orchestration invariant target retained for closeout verification.
+packages/agent/src/engine/runtime/worker_orchestration/mod.rs	retain	saawo rust source	SAAWO-6	Worker orchestration facade retained as the launch, stop, and readiness callback owner.
+packages/agent/src/engine/runtime/worker_orchestration/contracts.rs	retain	saawo rust source	SAAWO-2	Launch plan and activation request contract validation retained in the split orchestration module.
+packages/agent/src/engine/runtime/worker_orchestration/process_resource.rs	retain	saawo rust source	SAAWO-3	Worker process payload, redaction, and readiness matching retained in the split orchestration module.
+packages/agent/src/engine/runtime/worker_orchestration/supervisor.rs	retain	saawo rust source	SAAWO-6	Direct-exec worker process supervisor retained as the process boundary owner.
+packages/agent/src/engine/tests/runtime/worker_orchestration.rs	retain	saawo rust test	SAAWO-7	Worker orchestration runtime tests retained for fake supervisor and readiness binding coverage.

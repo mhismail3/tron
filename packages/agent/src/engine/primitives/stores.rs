@@ -35,6 +35,7 @@ use crate::engine::durability::streams::{
 use crate::engine::invocation::host::{EngineHost, EngineHostHandle};
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::types::VisibilityScope;
+use crate::engine::runtime::worker_orchestration::WorkerProcessSupervisorRegistry;
 
 pub(in crate::engine) enum StreamStoreBackend {
     InMemory(InMemoryEngineStreamStore),
@@ -464,6 +465,7 @@ pub(in crate::engine) struct PrimitiveStores {
     pub(in crate::engine) resources: Arc<StdMutex<ResourceStoreBackend>>,
     pub(in crate::engine) grants: Arc<StdMutex<EngineGrantStoreBackend>>,
     pub(in crate::engine) compensation: Arc<StdMutex<CompensationStoreBackend>>,
+    pub(in crate::engine) worker_process_supervisors: WorkerProcessSupervisorRegistry,
     engine_host: Arc<OnceLock<Weak<AsyncMutex<EngineHost>>>>,
 }
 
@@ -491,6 +493,7 @@ impl PrimitiveStores {
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::InMemory(
                 InMemoryEngineCompensationStore::new(),
             ))),
+            worker_process_supervisors: WorkerProcessSupervisorRegistry::production(),
             engine_host: Arc::new(OnceLock::new()),
         };
         stores
@@ -522,6 +525,7 @@ impl PrimitiveStores {
             compensation: Arc::new(StdMutex::new(CompensationStoreBackend::Sqlite(
                 SqliteEngineCompensationStore::open(path)?,
             ))),
+            worker_process_supervisors: WorkerProcessSupervisorRegistry::production(),
             engine_host: Arc::new(OnceLock::new()),
         };
         stores.install_builtin_resource_types()?;

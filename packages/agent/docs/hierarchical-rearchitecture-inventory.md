@@ -2,7 +2,7 @@
 
 Status: `completed`
 
-Generated from the live checkout after HRA-16, then refreshed during AHA-6, AHA-8, AHA-9, TPC-11, SOL-10, SACB-POST-2, ODA-10, SAA-10, and SAAWA-10 to keep the current ownership TSVs aligned with post-HRA cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test current ownership map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs. TPC-11 refreshed the maps after True Primitive Cleanup split additional Rust/iOS owners and converted same-name Rust file/folder pairs to folder-owned modules. SOL-10 refreshed the maps after the State Ownership Lifecycle invariant target was split into focused modules. SACB-POST-2 refreshed the maps after the delegated engine-invoke budget-ordering regression module split. ODA-10 and SAA-10 refreshed the maps for the observability and self-adapting authorship campaign artifacts. SAAWA-10 refreshed the maps for promotion governance and worker activation ownership rows.
+Generated from the live checkout after HRA-16, then refreshed during AHA-6, AHA-8, AHA-9, TPC-11, SOL-10, SACB-POST-2, ODA-10, SAA-10, SAAWA-10, and SAAWO-11 to keep the current ownership TSVs aligned with post-HRA cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test current ownership map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs. TPC-11 refreshed the maps after True Primitive Cleanup split additional Rust/iOS owners and converted same-name Rust file/folder pairs to folder-owned modules. SOL-10 refreshed the maps after the State Ownership Lifecycle invariant target was split into focused modules. SACB-POST-2 refreshed the maps after the delegated engine-invoke budget-ordering regression module split. ODA-10 and SAA-10 refreshed the maps for the observability and self-adapting authorship campaign artifacts. SAAWA-10 refreshed the maps for promotion governance and worker activation ownership rows. SAAWO-11 refreshed the maps for worker orchestration docs, invariant, runtime, and runtime-test ownership rows.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -32,13 +32,13 @@ The HRA iOS current ownership map uses this HRA-8-specific header:
 current_path	target_path	owner	phase	classification	status	reason
 ```
 
-## HRA-1 Baseline Counts Updated After SAA-10
+## HRA-1 Baseline Counts Updated After SAAWO-11
 
 | Metric | Count |
 | --- | --- |
-| Tracked files after SAAWA-10 staged additions | 1586 |
-| Files under `packages/agent/src` | 585 |
-| Files under `packages/agent/tests` | 104 |
+| Tracked files after SAAWO-11 staged additions | 1596 |
+| Files under `packages/agent/src` | 590 |
+| Files under `packages/agent/tests` | 105 |
 | Files under `packages/ios-app/Sources` | 428 |
 | Files under `packages/ios-app/Tests` | 211 |
 | Files under `packages/mac-app/Sources` | 76 |
@@ -48,7 +48,7 @@ current_path	target_path	owner	phase	classification	status	reason
 
 | Extension | Count |
 | --- | --- |
-| .rs | 688 |
+| .rs | 691 |
 | .swift | 678 |
 | .md | 60 |
 | .json | 20 |
@@ -80,7 +80,7 @@ current_path	target_path	owner	phase	classification	status	reason
 
 | Package | Count |
 | --- | --- |
-| agent | 745 |
+| agent | 748 |
 | ios-app | 663 |
 | mac-app | 123 |
 | scripts | 22 |

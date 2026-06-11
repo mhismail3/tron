@@ -6,6 +6,7 @@
 //! |--------|----------------|
 //! | `external_workers` | Loopback external-worker lifecycle, governed activation binding, registration, invocation proxying, and health. |
 //! | `triggers` | Trigger dispatch runtime, cascade bounds, and trigger metadata recording. |
+//! | `worker_orchestration` | Governed direct-exec process supervision for already issued worker activations. |
 //! | `worker_protocol` | `/engine/workers` protocol DTOs and scoped worker token model. |
 //!
 //! ## Entry Points
@@ -13,8 +14,10 @@
 //! `EngineExternalWorkerRuntime` manages connected local workers.
 //! `EngineTriggerRuntime` dispatches registered triggers through the engine
 //! host. Activation tokens bind reviewed capability-definition governance to a
-//! volatile worker connection but do not launch workers. Protocol DTOs are
-//! consumed by transport runtime code.
+//! volatile worker connection. Worker orchestration may start a reviewed local
+//! process for an already issued activation, but readiness still comes only from
+//! the external-worker hello/register path. Protocol DTOs are consumed by
+//! transport runtime code.
 //!
 //! ## Dependency Direction
 //!
@@ -31,6 +34,9 @@
 //! - Governed activation workers must match the activation resource, token
 //!   fingerprint, governance fingerprint, expected function, exact namespace,
 //!   volatile mode, and session/workspace scope before registration.
+//! - Orchestrated workers use direct executable invocation only, have no
+//!   scheduler/restart ownership, and record redacted `worker_process` audit
+//!   resources before any readiness is trusted.
 //! - Disconnected durable workers remain catalog truth but fail closed as
 //!   unhealthy until reconnect.
 //! - Trigger cascades carry explicit depth/path budgets.
@@ -42,4 +48,5 @@
 
 pub mod external_workers;
 pub mod triggers;
+pub mod worker_orchestration;
 pub mod worker_protocol;

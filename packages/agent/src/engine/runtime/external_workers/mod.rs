@@ -33,6 +33,7 @@ use crate::engine::kernel::types::{
     DeliveryMode, FunctionDefinition, FunctionHealth, TriggerDefinition, VisibilityScope,
     WorkerKind, WorkerLifecycleState,
 };
+use crate::engine::runtime::worker_orchestration::EngineWorkerOrchestrationRuntime;
 use crate::engine::runtime::worker_protocol::{
     CatalogSnapshot, RegisterFunction, RegisterTrigger, ScopedWorkerToken, WORKER_PROTOCOL_VERSION,
     WorkerAuthPolicy, WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat,
@@ -89,6 +90,7 @@ pub struct ExternalWorkerConnection {
 /// In-process local external-worker runtime.
 pub struct EngineExternalWorkerRuntime {
     host: EngineHostHandle,
+    orchestration: EngineWorkerOrchestrationRuntime,
     connections: BTreeMap<WorkerId, ExternalWorkerConnection>,
     invokers: BTreeMap<WorkerId, Arc<dyn ExternalWorkerInvoker>>,
 }
@@ -97,7 +99,11 @@ impl EngineExternalWorkerRuntime {
     /// Create a runtime over an engine host.
     #[must_use]
     pub fn new(host: EngineHostHandle) -> Self {
+        let supervisor_registry = host
+            .worker_process_supervisor_registry_for_setup()
+            .unwrap_or_default();
         Self {
+            orchestration: EngineWorkerOrchestrationRuntime::new(host.clone(), supervisor_registry),
             host,
             connections: BTreeMap::new(),
             invokers: BTreeMap::new(),

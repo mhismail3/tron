@@ -17,3 +17,4 @@ mod restart_chaos;
 mod trigger_helpers;
 mod triggers;
 mod worker_activation;
+mod worker_orchestration;

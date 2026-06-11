@@ -59,6 +59,15 @@ impl EngineHostHandle {
             .inspect(resource_id)
     }
 
+    /// Create one durable resource through the engine-owned store.
+    pub async fn create_resource(&self, request: CreateResource) -> Result<EngineResource> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .create(request)
+    }
+
     /// Append a durable resource version through the engine-owned store.
     pub async fn update_resource(&self, request: UpdateResource) -> Result<EngineResourceVersion> {
         let store = self.inner.lock().await.primitives.resources.clone();
@@ -66,6 +75,32 @@ impl EngineHostHandle {
             .lock()
             .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
             .update(request)
+    }
+
+    /// List durable resources through the engine-owned store.
+    pub async fn list_resources(&self, filter: ListResources) -> Result<Vec<EngineResource>> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .list(filter)
+    }
+
+    /// Return the worker-process supervisor registry installed with this host.
+    pub fn worker_process_supervisor_registry_for_setup(
+        &self,
+    ) -> Result<crate::engine::runtime::worker_orchestration::WorkerProcessSupervisorRegistry> {
+        Ok(self
+            .inner
+            .try_lock()
+            .map_err(|_| {
+                EngineError::PolicyViolation(
+                    "engine host is busy during worker process supervisor setup".to_owned(),
+                )
+            })?
+            .primitives
+            .worker_process_supervisors
+            .clone())
     }
 
     /// Acquire a high-risk resource lease and publish a lease lifecycle stream

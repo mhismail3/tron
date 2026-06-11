@@ -72,6 +72,13 @@ impl EngineExternalWorkerRuntime {
                 &[],
             )
             .await?;
+            self.orchestration
+                .mark_failed_for_activation(
+                    activation_resource_id,
+                    "expired",
+                    Some("activation expired before hello"),
+                )
+                .await?;
             return Err(EngineError::PolicyViolation(format!(
                 "worker activation {activation_resource_id} is expired"
             )));
@@ -96,6 +103,13 @@ impl EngineExternalWorkerRuntime {
                 &[],
             )
             .await?;
+            self.orchestration
+                .mark_failed_for_activation(
+                    activation_resource_id,
+                    "revoked",
+                    Some("activation grant revoked"),
+                )
+                .await?;
             return Err(EngineError::PolicyViolation(format!(
                 "activation grant {} is revoked",
                 grant.grant_id
@@ -113,6 +127,13 @@ impl EngineExternalWorkerRuntime {
                 &[],
             )
             .await?;
+            self.orchestration
+                .mark_failed_for_activation(
+                    activation_resource_id,
+                    "expired",
+                    Some("activation grant expired"),
+                )
+                .await?;
             return Err(EngineError::PolicyViolation(format!(
                 "activation grant {} is expired",
                 grant.grant_id
@@ -253,8 +274,26 @@ impl EngineExternalWorkerRuntime {
             &connection.functions.iter().cloned().collect::<Vec<_>>(),
             &connection.triggers.iter().cloned().collect::<Vec<_>>(),
         )
-        .await
-        .map(|_| ())
+        .await?;
+        match status {
+            "connected" => {
+                self.orchestration
+                    .mark_hello_seen(activation_resource_id, reason)
+                    .await?;
+            }
+            "registered" => {
+                self.orchestration
+                    .mark_ready(activation_resource_id, reason)
+                    .await?;
+            }
+            "disconnected" => {
+                self.orchestration
+                    .mark_failed_for_activation(activation_resource_id, "unhealthy", reason)
+                    .await?;
+            }
+            _ => {}
+        }
+        Ok(())
     }
 
     async fn activation_inspection(&self, resource_id: &str) -> Result<EngineResourceInspection> {
