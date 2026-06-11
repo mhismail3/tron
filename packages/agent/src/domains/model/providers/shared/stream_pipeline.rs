@@ -8,6 +8,8 @@
 use futures::stream::{self, StreamExt};
 use tracing::{error, warn};
 
+use crate::shared::foundation::redaction::redact_sensitive_content;
+
 use crate::domains::model::providers::shared::provider::{ProviderResult, StreamEventStream};
 use crate::domains::model::providers::shared::sse::{SseParserOptions, parse_sse_lines};
 use crate::shared::protocol::events::StreamEvent;
@@ -35,7 +37,11 @@ where
             let event: E = match serde_json::from_str(&line) {
                 Ok(e) => e,
                 Err(e) => {
-                    warn!(line = %line, error = %e, "Failed to parse SSE event");
+                    warn!(
+                        line = %redact_sensitive_content(&line),
+                        error = %redact_sensitive_content(&e.to_string()),
+                        "Failed to parse SSE event"
+                    );
                     return std::future::ready(Some(vec![]));
                 }
             };
@@ -59,7 +65,11 @@ pub fn wrap_provider_stream(
     let inner_stream = match inner {
         Ok(s) => s,
         Err(e) => {
-            error!(error = %e, provider = %provider_name, "stream failed");
+            error!(
+                error = %redact_sensitive_content(&e.to_string()),
+                provider = %provider_name,
+                "stream failed"
+            );
             return Err(e);
         }
     };

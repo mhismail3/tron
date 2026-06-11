@@ -17,6 +17,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::shared::foundation::redaction::redact_sensitive_content;
 use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::protocol::events::{RetryErrorInfo, StreamEvent};
 use futures::Stream;
@@ -140,7 +141,7 @@ pub fn with_provider_retry(
                             delay_ms,
                             error: RetryErrorInfo {
                                 category: err.category().to_string(),
-                                message: err.to_string(),
+                                message: redact_sensitive_content(&err.to_string()),
                                 is_retryable: true,
                             },
                         });

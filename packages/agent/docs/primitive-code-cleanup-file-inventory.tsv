@@ -1583,3 +1583,9 @@ packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv	retain
 packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md	retain	ppacd docs	PPACD-9	Current Public Protocol API Contract Discipline scorecard retained after final closeout.
 packages/agent/src/shared/protocol/settings.rs	retain	ppacd rust source	PPACD-6	Public settings DTO boundary retained after public protocol closeout.
 packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs	retain	ppacd rust test	PPACD-9	Current Public Protocol API Contract Discipline invariant target retained after final closeout.
+packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md	retain	pmbd docs	PMBD-0	Current Provider Model Boundary Discipline evidence manifest retained after final closeout.
+packages/agent/docs/provider-model-boundary-discipline-inventory.md	retain	pmbd docs	PMBD-0	Current Provider Model Boundary Discipline inventory retained after final closeout.
+packages/agent/docs/provider-model-boundary-discipline-inventory.tsv	retain	pmbd docs	PMBD-0	Current Provider Model Boundary Discipline machine-readable inventory retained after final closeout.
+packages/agent/docs/provider-model-boundary-discipline-scorecard.md	retain	pmbd docs	PMBD-0	Current Provider Model Boundary Discipline scorecard retained after final closeout.
+packages/agent/src/shared/foundation/redaction.rs	retain	pmbd rust source	PMBD-6	Shared redaction primitive retained for provider audit retry failure and log secret safety.
+packages/agent/tests/provider_model_boundary_discipline_invariants.rs	retain	pmbd rust test	PMBD-0	Current Provider Model Boundary Discipline invariant target retained after final closeout.

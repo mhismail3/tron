@@ -3,7 +3,7 @@
 //! Provider implementations keep wire-format specifics in their own folders.
 //! This module owns provider-neutral helpers: the shared [`provider`] trait,
 //! SSE parsing, retry policy, health tracking, context composition, stream
-//! accumulation, and stream wrapping.
+//! accumulation, stream wrapping, and redacted provider-derived diagnostics.
 //!
 //! ## Submodules
 //!
@@ -38,7 +38,8 @@
 //! - Shared helpers are provider-neutral and contain no provider-specific auth
 //!   or endpoint policy.
 //! - Stream wrappers preserve cancellation and retry events without altering
-//!   provider-native parsing semantics.
+//!   provider-native parsing semantics; retry and parse diagnostics redact
+//!   provider-derived secret-looking text.
 //! - Health tracking is advisory routing state, not an authority source.
 //!
 //! ## Test Ownership

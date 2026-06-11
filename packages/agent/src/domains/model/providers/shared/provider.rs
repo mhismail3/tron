@@ -21,6 +21,8 @@ use futures::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use crate::shared::foundation::redaction::redact_sensitive_content;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Typed effort / reasoning enums
 // ─────────────────────────────────────────────────────────────────────────────
@@ -285,7 +287,12 @@ impl ProviderError {
                 false,
                 Some(json!({ "message": message })),
             ),
-            Self::Auth { message } => (FailureCategory::Auth, message.clone(), true, None),
+            Self::Auth { message } => (
+                FailureCategory::Auth,
+                redact_sensitive_content(message),
+                true,
+                None,
+            ),
             Self::UnsupportedModel { model } => (
                 FailureCategory::InvalidModel,
                 format!("Unsupported model: {model}"),
@@ -297,7 +304,7 @@ impl ProviderError {
                 message,
             } => (
                 FailureCategory::RateLimit,
-                message.clone(),
+                redact_sensitive_content(message),
                 true,
                 Some(json!({ "retryAfterMs": retry_after_ms })),
             ),
@@ -308,7 +315,7 @@ impl ProviderError {
                 retryable,
             } => (
                 FailureCategory::Api,
-                message.clone(),
+                redact_sensitive_content(message),
                 *retryable || matches!(*status, 400 | 401 | 403 | 404 | 409 | 429),
                 Some(json!({
                     "statusCode": status,
@@ -321,7 +328,12 @@ impl ProviderError {
                 true,
                 None,
             ),
-            Self::Other { message } => (FailureCategory::Unknown, message.clone(), false, None),
+            Self::Other { message } => (
+                FailureCategory::Unknown,
+                redact_sensitive_content(message),
+                false,
+                None,
+            ),
         };
 
         FailureEnvelope::new(

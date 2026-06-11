@@ -7,7 +7,7 @@
 //! | [`events`] | Runtime event payloads and stream event DTOs |
 //! | [`memory`] | Session memory DTOs |
 //! | [`messages`] | Chat message DTOs |
-//! | [`model_audit`] | Provider request audit DTOs consumed by replay manifests |
+//! | [`model_audit`] | Provider request audit DTOs consumed by replay manifests; payloads are redacted and bounded before persistence |
 //! | [`model_capabilities`] | Model-facing capability result DTOs |
 //! | [`settings`] | Public settings DTOs for `settings::*` and thin clients |
 

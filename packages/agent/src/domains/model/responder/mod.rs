@@ -25,6 +25,7 @@ use crate::domains::model::providers::shared::provider::{
 use crate::domains::model::providers::shared::{
     ProviderHealthTracker, StreamFactory, StreamRetryConfig, with_provider_retry,
 };
+use crate::shared::foundation::redaction::redact_sensitive_content;
 use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::Context;
@@ -458,7 +459,7 @@ impl ModelResponder for ProviderBackedModelResponder {
                     provider = %info.provider_name,
                     model = %info.model,
                     status = %category,
-                    error = %error,
+                    error = %redact_sensitive_content(&error.to_string()),
                     "provider stream error"
                 );
                 return Err(ModelResponseError::from_provider_error(error, &info));
@@ -510,6 +511,9 @@ fn build_request_audit(
         .map(ModelReasoningLevel::as_canonical_str)
         .map(str::to_owned);
     let capability_count = request.context.capabilities.as_ref().map_or(0, Vec::len);
+    let provider_request = provider_request
+        .redacted_and_bounded()
+        .map_err(|error| ModelResponseError::audit(error.to_string()))?;
     Ok(ModelProviderRequestAudit::new(
         info.provider_type,
         info.provider_name,

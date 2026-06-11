@@ -8,6 +8,8 @@
 
 use serde_json::Value;
 
+use crate::shared::foundation::redaction::redact_sensitive_content;
+
 /// Parsed API error information.
 pub struct ApiErrorInfo {
     /// Human-readable error message.
@@ -33,7 +35,7 @@ pub fn parse_api_error(body: &str, status: u16) -> ApiErrorInfo {
                 .or_else(|| json["error"]["status"].as_str())
                 .map(String::from);
             return ApiErrorInfo {
-                message: msg.to_string(),
+                message: redact_sensitive_content(msg),
                 code,
                 retryable,
             };
@@ -46,7 +48,7 @@ pub fn parse_api_error(body: &str, status: u16) -> ApiErrorInfo {
                 .or_else(|| json["type"].as_str())
                 .map(String::from);
             return ApiErrorInfo {
-                message: msg.to_string(),
+                message: redact_sensitive_content(msg),
                 code,
                 retryable,
             };
@@ -54,7 +56,7 @@ pub fn parse_api_error(body: &str, status: u16) -> ApiErrorInfo {
 
         // Valid JSON but unrecognized structure — include raw body
         return ApiErrorInfo {
-            message: format!("HTTP {status}: {body}"),
+            message: redact_sensitive_content(&format!("HTTP {status}: {body}")),
             code: None,
             retryable,
         };
@@ -62,7 +64,7 @@ pub fn parse_api_error(body: &str, status: u16) -> ApiErrorInfo {
 
     // Not JSON
     ApiErrorInfo {
-        message: format!("HTTP {status}: {body}"),
+        message: redact_sensitive_content(&format!("HTTP {status}: {body}")),
         code: None,
         retryable,
     }
@@ -129,6 +131,14 @@ mod tests {
         assert!(info.message.contains("Bad Gateway"));
         assert!(info.code.is_none());
         assert!(info.retryable);
+    }
+
+    #[test]
+    fn redacts_secret_bearing_error_body() {
+        let body = r#"{"error":{"message":"api_key=sk-proj-abcdefghijklmnopqrstuvwxyz","type":"invalid_request"}}"#;
+        let info = parse_api_error(body, 400);
+        assert!(!info.message.contains("abcdefghijklmnopqrstuvwxyz"));
+        assert!(info.message.contains("api_key=****"));
     }
 
     #[test]

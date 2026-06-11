@@ -55,6 +55,8 @@
 //! - Provider-native wire formats are converted before they reach canonical
 //!   capability history.
 //! - Malformed provider capability arguments fail closed at the stream boundary.
+//! - Provider-derived retry, failure, log, and audit surfaces are redacted and
+//!   provider audit payloads are bounded before persistence.
 //!
 //! ## Test Ownership
 //!

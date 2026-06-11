@@ -346,6 +346,17 @@ Current living entry points:
 - `packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs`:
   PPACD guard for artifact wiring, inventory coverage, public settings DTO
   discipline, narrowed `/engine` context, and delegated child-envelope shape.
+- `packages/agent/docs/provider-model-boundary-discipline-scorecard.md`,
+  `packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md`,
+  `packages/agent/docs/provider-model-boundary-discipline-inventory.md`, and
+  `packages/agent/docs/provider-model-boundary-discipline-inventory.tsv`:
+  completed Provider / Model Boundary Discipline closeout artifacts covering
+  provider trait, responder, request, stream, error, retry, auth, catalog,
+  audit, public protocol, and iOS projection boundaries.
+- `packages/agent/tests/provider_model_boundary_discipline_invariants.rs`:
+  PMBD guard for artifact wiring, inventory coverage, provider-native import
+  confinement, provider wire-name confinement, redacted bounded audit payloads,
+  retry/failure redaction, and provider factory auth custody.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -1478,6 +1489,7 @@ tron ci clippy test          # Subset: linting + tests
 `concurrency_scheduling_discipline_invariants`,
 `security_authority_capability_boundaries_invariants`,
 `public_protocol_api_contract_discipline_invariants`,
+`provider_model_boundary_discipline_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
 `off_plan_successor_teardown_cleanup_invariants`,
