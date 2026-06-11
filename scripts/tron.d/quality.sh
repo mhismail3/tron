@@ -40,6 +40,7 @@ run_tests() {
         public_protocol_api_contract_discipline_invariants
         provider_model_boundary_discipline_invariants
         performance_resource_governance_invariants
+        configuration_profile_environment_discipline_invariants
         observability_diagnostics_auditability_invariants
         data_integrity_storage_evolution_migration_discipline_invariants
         off_plan_successor_teardown_cleanup_invariants

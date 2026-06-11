@@ -123,7 +123,7 @@ impl TronSettings {
 
 /// Retry configuration for API calls.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct RetrySettings {
     /// Maximum number of retry attempts.
     pub max_retries: u32,
@@ -353,5 +353,29 @@ mod tests {
         });
         let settings: TronSettings = serde_json::from_value(json).unwrap();
         assert_eq!(settings.context.compactor.max_tokens, 50_000);
+    }
+
+    #[test]
+    fn retry_unknown_field_rejected() {
+        let json = serde_json::json!({
+            "maxRetries": 3,
+            "retiredRetryMode": "legacy"
+        });
+        let err = serde_json::from_value::<RetrySettings>(json).unwrap_err();
+        assert!(err.to_string().contains("retiredRetryMode"));
+    }
+
+    #[test]
+    fn bundled_default_profile_settings_match_rust_defaults() {
+        let bundled = crate::shared::foundation::profile::bundled_default_execution_spec()
+            .settings()
+            .clone();
+        let defaults = TronSettings::default();
+
+        assert_eq!(
+            serde_json::to_value(bundled).unwrap(),
+            serde_json::to_value(defaults).unwrap(),
+            "managed default profile settings must match Rust Default implementations"
+        );
     }
 }

@@ -4,7 +4,7 @@
 //! 1. Resolve the active profile without the global user overlay.
 //! 2. Read sparse `[settings]` overrides from `~/.tron/profiles/user/profile.toml`.
 //! 3. Deep-merge sparse values over the profile settings.
-//! 4. Apply supported environment variable overrides.
+//! 4. Apply supported environment variable overrides from an explicit allowlist.
 
 use std::path::{Path, PathBuf};
 
@@ -13,6 +13,19 @@ use tracing::debug;
 
 use crate::domains::settings::errors::{Result, SettingsError};
 use crate::domains::settings::types::TronSettings;
+
+/// Settings environment variables accepted as runtime overrides.
+///
+/// INVARIANT: this is the complete settings-env allowlist. Path, release,
+/// device-selection, test-host, and benchmark secrets are inventoried as
+/// separate runtime/script env surfaces and must not be added here unless they
+/// intentionally become settings sources.
+pub const SETTINGS_ENV_ALLOWLIST: &[&str] = &[
+    "TRON_DEFAULT_MODEL",
+    "TRON_DEFAULT_PROVIDER",
+    "TRON_HEARTBEAT_INTERVAL",
+    "ANTHROPIC_CLIENT_ID",
+];
 
 /// Resolve the `~/.tron` directory.
 pub fn tron_home_dir() -> PathBuf {
@@ -70,7 +83,7 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
         SettingsError::InvalidValue(format!("failed to load settings: {error}"))
     })?;
     settings.validate_strict()?;
-    apply_env_overrides(&mut settings);
+    apply_env_overrides(&mut settings)?;
     settings.validate();
     settings.validate_strict()?;
     Ok(settings)
@@ -166,55 +179,43 @@ pub fn deep_merge(target: Value, source: Value) -> Value {
 
 /// Apply environment variable overrides to loaded settings.
 ///
-/// Each env var has strict parsing rules:
-/// - Integers must be valid and within the specified range
-/// - Booleans accept: `true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off`
-/// - Invalid values are silently ignored (use file/default)
-pub fn apply_env_overrides(settings: &mut TronSettings) {
+/// Each env var has strict parsing rules. A malformed setting env var returns
+/// an error before mutating the caller's settings snapshot, so an invalid
+/// high-priority source cannot silently fall back to profile/default values.
+pub fn apply_env_overrides(settings: &mut TronSettings) -> Result<()> {
+    apply_env_overrides_from(settings, |name| std::env::var(name).ok())
+}
+
+pub(crate) fn apply_env_overrides_from(
+    settings: &mut TronSettings,
+    mut read_env: impl FnMut(&str) -> Option<String>,
+) -> Result<()> {
+    let mut next = settings.clone();
+
     // ── Server settings ─────────────────────────────────────────────
-    if let Some(v) = read_env_string("TRON_DEFAULT_MODEL") {
-        settings.server.default_model = v;
+    if let Some(v) = read_env_string_from(&mut read_env, "TRON_DEFAULT_MODEL") {
+        next.server.default_model = v;
     }
-    if let Some(v) = read_env_string("TRON_DEFAULT_PROVIDER") {
-        settings.server.default_provider = v;
+    if let Some(v) = read_env_string_from(&mut read_env, "TRON_DEFAULT_PROVIDER") {
+        next.server.default_provider = v;
     }
-    if let Some(v) = read_env_u64("TRON_HEARTBEAT_INTERVAL", 1000, 600_000) {
-        settings.server.heartbeat_interval_ms = v;
+    if let Some(v) = read_env_u64_from(
+        &mut read_env,
+        "TRON_HEARTBEAT_INTERVAL",
+        crate::domains::settings::types::ServerSettings::MIN_HEARTBEAT_INTERVAL_MS,
+        crate::domains::settings::types::ServerSettings::MAX_HEARTBEAT_INTERVAL_MS,
+    )? {
+        next.server.heartbeat_interval_ms = v;
     }
     // ── API settings ────────────────────────────────────────────────
-    if let Some(v) = read_env_string("ANTHROPIC_CLIENT_ID") {
-        settings.api.anthropic.client_id = v;
+    if let Some(v) = read_env_string_from(&mut read_env, "ANTHROPIC_CLIENT_ID") {
+        next.api.anthropic.client_id = v;
     }
+    *settings = next;
+    Ok(())
 }
 
 // ── Pure parsing functions (testable without env vars) ──────────────────────
-
-/// Parse a string as a boolean.
-///
-/// Accepts (case-insensitive): `true`/`1`/`yes`/`on` or `false`/`0`/`no`/`off`.
-pub fn parse_bool(val: &str) -> Option<bool> {
-    if val.eq_ignore_ascii_case("true")
-        || val == "1"
-        || val.eq_ignore_ascii_case("yes")
-        || val.eq_ignore_ascii_case("on")
-    {
-        Some(true)
-    } else if val.eq_ignore_ascii_case("false")
-        || val == "0"
-        || val.eq_ignore_ascii_case("no")
-        || val.eq_ignore_ascii_case("off")
-    {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-/// Parse a string as a `u16` within a range.
-pub fn parse_u16_range(val: &str, min: u16, max: u16) -> Option<u16> {
-    let n: u16 = val.parse().ok()?;
-    (n >= min && n <= max).then_some(n)
-}
 
 /// Parse a string as a `u64` within a range.
 pub fn parse_u64_range(val: &str, min: u64, max: u64) -> Option<u64> {
@@ -224,17 +225,28 @@ pub fn parse_u64_range(val: &str, min: u64, max: u64) -> Option<u64> {
 
 // ── Env var readers (thin wrappers) ─────────────────────────────────────────
 
-fn read_env_string(name: &str) -> Option<String> {
-    std::env::var(name).ok().filter(|v| !v.is_empty())
+fn read_env_string_from(
+    read_env: &mut impl FnMut(&str) -> Option<String>,
+    name: &str,
+) -> Option<String> {
+    read_env(name).filter(|v| !v.is_empty())
 }
 
-fn read_env_u64(name: &str, min: u64, max: u64) -> Option<u64> {
-    let val = std::env::var(name).ok()?;
-    let result = parse_u64_range(&val, min, max);
-    if result.is_none() {
-        tracing::warn!(key = name, value = %val, "invalid u64 env var, ignoring");
+fn read_env_u64_from(
+    read_env: &mut impl FnMut(&str) -> Option<String>,
+    name: &str,
+    min: u64,
+    max: u64,
+) -> Result<Option<u64>> {
+    let Some(val) = read_env(name) else {
+        return Ok(None);
+    };
+    match parse_u64_range(&val, min, max) {
+        Some(parsed) => Ok(Some(parsed)),
+        None => Err(SettingsError::InvalidValue(format!(
+            "environment override {name} must be an integer between {min} and {max}; got {val:?}"
+        ))),
     }
-    result
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -573,6 +585,46 @@ maxTokens = 50000
     }
 
     #[test]
+    fn load_rejects_unknown_nested_settings_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_settings_path(&dir);
+        write_sparse_settings(
+            &path,
+            r#"[settings.context.compactor]
+retiredKnob = true
+"#,
+        );
+
+        let err = load_settings_from_path(&path).unwrap_err();
+
+        assert!(matches!(err, SettingsError::InvalidValue(_)));
+        assert!(
+            err.to_string().contains("retiredKnob"),
+            "error should name the unknown nested field: {err}"
+        );
+    }
+
+    #[test]
+    fn load_rejects_wrong_type_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_settings_path(&dir);
+        write_sparse_settings(
+            &path,
+            r#"[settings.server]
+heartbeatIntervalMs = "fast"
+"#,
+        );
+
+        let err = load_settings_from_path(&path).unwrap_err();
+
+        assert!(matches!(err, SettingsError::InvalidValue(_)));
+        assert!(
+            err.to_string().contains("expected u64"),
+            "error should reject the wrong-typed field without coercion: {err}"
+        );
+    }
+
+    #[test]
     fn load_zero_heartbeat_interval_returns_error() {
         let dir = tempfile::tempdir().unwrap();
         let path = temp_settings_path(&dir);
@@ -637,50 +689,6 @@ jitterFactor = 5.0
         assert!((settings.retry.jitter_factor - 1.0).abs() < f64::EPSILON);
     }
 
-    // ── parse_bool ──────────────────────────────────────────────────
-
-    #[test]
-    fn parse_bool_true_variants() {
-        for val in &["true", "1", "yes", "on", "TRUE", "Yes", "ON"] {
-            assert_eq!(parse_bool(val), Some(true), "failed for {val}");
-        }
-    }
-
-    #[test]
-    fn parse_bool_false_variants() {
-        for val in &["false", "0", "no", "off", "FALSE", "No", "OFF"] {
-            assert_eq!(parse_bool(val), Some(false), "failed for {val}");
-        }
-    }
-
-    #[test]
-    fn parse_bool_invalid() {
-        assert_eq!(parse_bool("maybe"), None);
-        assert_eq!(parse_bool(""), None);
-        assert_eq!(parse_bool("2"), None);
-    }
-
-    // ── parse_u16_range ─────────────────────────────────────────────
-
-    #[test]
-    fn parse_u16_valid() {
-        assert_eq!(parse_u16_range("9090", 1, 65535), Some(9090));
-        assert_eq!(parse_u16_range("1", 1, 65535), Some(1));
-        assert_eq!(parse_u16_range("65535", 1, 65535), Some(65535));
-    }
-
-    #[test]
-    fn parse_u16_out_of_range() {
-        assert_eq!(parse_u16_range("0", 1, 65535), None);
-    }
-
-    #[test]
-    fn parse_u16_invalid() {
-        assert_eq!(parse_u16_range("not_a_number", 1, 65535), None);
-        assert_eq!(parse_u16_range("", 1, 65535), None);
-        assert_eq!(parse_u16_range("99999", 1, 65535), None);
-    }
-
     // ── parse_u64_range ─────────────────────────────────────────────
 
     #[test]
@@ -702,5 +710,57 @@ jitterFactor = 5.0
     #[test]
     fn parse_u64_invalid() {
         assert_eq!(parse_u64_range("abc", 1000, 600_000), None);
+    }
+
+    #[test]
+    fn settings_env_allowlist_documents_supported_overrides() {
+        assert_eq!(
+            SETTINGS_ENV_ALLOWLIST,
+            [
+                "TRON_DEFAULT_MODEL",
+                "TRON_DEFAULT_PROVIDER",
+                "TRON_HEARTBEAT_INTERVAL",
+                "ANTHROPIC_CLIENT_ID",
+            ]
+        );
+    }
+
+    #[test]
+    fn apply_env_overrides_from_sets_allowlisted_values() {
+        let mut settings = TronSettings::default();
+
+        apply_env_overrides_from(&mut settings, |name| match name {
+            "TRON_DEFAULT_MODEL" => Some("env-model".to_string()),
+            "TRON_DEFAULT_PROVIDER" => Some("env-provider".to_string()),
+            "TRON_HEARTBEAT_INTERVAL" => Some("45000".to_string()),
+            "ANTHROPIC_CLIENT_ID" => Some("env-client".to_string()),
+            _ => None,
+        })
+        .unwrap();
+
+        assert_eq!(settings.server.default_model, "env-model");
+        assert_eq!(settings.server.default_provider, "env-provider");
+        assert_eq!(settings.server.heartbeat_interval_ms, 45_000);
+        assert_eq!(settings.api.anthropic.client_id, "env-client");
+    }
+
+    #[test]
+    fn invalid_env_override_returns_error_without_partial_mutation() {
+        let mut settings = TronSettings::default();
+        let original = settings.clone();
+
+        let err = apply_env_overrides_from(&mut settings, |name| match name {
+            "TRON_DEFAULT_MODEL" => Some("env-model".to_string()),
+            "TRON_HEARTBEAT_INTERVAL" => Some("fast".to_string()),
+            _ => None,
+        })
+        .unwrap_err();
+
+        assert!(err.to_string().contains("TRON_HEARTBEAT_INTERVAL"));
+        assert_eq!(settings.server.default_model, original.server.default_model);
+        assert_eq!(
+            settings.server.heartbeat_interval_ms,
+            original.server.heartbeat_interval_ms
+        );
     }
 }

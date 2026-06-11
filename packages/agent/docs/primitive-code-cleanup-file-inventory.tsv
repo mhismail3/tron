@@ -1589,3 +1589,13 @@ packages/agent/docs/provider-model-boundary-discipline-inventory.tsv	retain	pmbd
 packages/agent/docs/provider-model-boundary-discipline-scorecard.md	retain	pmbd docs	PMBD-0	Current Provider Model Boundary Discipline scorecard retained after final closeout.
 packages/agent/src/shared/foundation/redaction.rs	retain	pmbd rust source	PMBD-6	Shared redaction primitive retained for provider audit retry failure and log secret safety.
 packages/agent/tests/provider_model_boundary_discipline_invariants.rs	retain	pmbd rust test	PMBD-0	Current Provider Model Boundary Discipline invariant target retained after final closeout.
+packages/agent/docs/performance-resource-governance-evidence-manifest.md	retain	prg docs	PRG-10	Current Performance Resource Governance evidence manifest retained after final closeout.
+packages/agent/docs/performance-resource-governance-inventory.md	retain	prg docs	PRG-10	Current Performance Resource Governance inventory retained after final closeout.
+packages/agent/docs/performance-resource-governance-inventory.tsv	retain	prg docs	PRG-10	Current Performance Resource Governance machine-readable inventory retained after final closeout.
+packages/agent/docs/performance-resource-governance-scorecard.md	retain	prg docs	PRG-10	Current Performance Resource Governance scorecard retained after final closeout.
+packages/agent/tests/performance_resource_governance_invariants.rs	retain	prg rust test	PRG-10	Current Performance Resource Governance invariant target retained after final closeout.
+packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md	retain	cpe docs	CPE-10	Current Configuration Profile Environment Discipline evidence manifest retained after final closeout.
+packages/agent/docs/configuration-profile-environment-discipline-inventory.md	retain	cpe docs	CPE-10	Current Configuration Profile Environment Discipline inventory retained after final closeout.
+packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv	retain	cpe docs	CPE-10	Current Configuration Profile Environment Discipline machine-readable inventory retained after final closeout.
+packages/agent/docs/configuration-profile-environment-discipline-scorecard.md	retain	cpe docs	CPE-10	Current Configuration Profile Environment Discipline scorecard retained after final closeout.
+packages/agent/tests/configuration_profile_environment_discipline_invariants.rs	retain	cpe rust test	CPE-10	Current Configuration Profile Environment Discipline invariant target retained after final closeout.

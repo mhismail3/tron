@@ -369,6 +369,20 @@ Current living entry points:
   PRG guard for artifact wiring, inventory coverage, provider/agent stream
   bounds, journal limits, `/engine` slow-consumer closure, log/read retention
   ceilings, predecessor target preservation, and successor cleanup invariants.
+- `packages/agent/docs/configuration-profile-environment-discipline-scorecard.md`,
+  `packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md`,
+  `packages/agent/docs/configuration-profile-environment-discipline-inventory.md`,
+  and
+  `packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv`:
+  completed Configuration / Profile / Environment Discipline closeout artifacts
+  covering canonical settings defaults, managed profile drift, sparse user
+  overrides, malformed config failure, environment override allowlists, README
+  examples, and iOS public-settings parity.
+- `packages/agent/tests/configuration_profile_environment_discipline_invariants.rs`:
+  CPE guard for artifact wiring, inventory coverage, README/settings parity,
+  local/GitHub static gates, HRA ownership rows, strict settings schemas,
+  default-profile drift, sparse override semantics, env override allowlists, iOS
+  public-settings parity, and predecessor target preservation.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -959,6 +973,14 @@ snapshot remains active.
 
 The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If a managed profile default is missing, corrupt, or stale against the current strict profile schema, startup restores it from compiled defaults; malformed user settings fail fast. iOS device-only preferences live in iOS storage/Keychain, not in the server settings profile.
 
+Environment overrides are intentionally allowlisted. The settings loader accepts
+only `TRON_DEFAULT_MODEL`, `TRON_DEFAULT_PROVIDER`,
+`TRON_HEARTBEAT_INTERVAL`, and `ANTHROPIC_CLIENT_ID` as settings sources.
+Malformed numeric overrides fail the settings/profile load instead of silently
+falling back to profile/default values. Other environment variables in the repo
+belong to path selection, release identity, test-host, device-helper, or
+benchmark surfaces; they are not profile settings.
+
 The schema is defined in `packages/agent/src/domains/settings/profile/types/`. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
 
 ### Key Configuration
@@ -1002,7 +1024,12 @@ The schema is defined in `packages/agent/src/domains/settings/profile/types/`. A
     "maxDatabaseMb": 512                        // Soft cap surfaced by storage reports
   },
 
-  "retry":  { "maxRetries": 1 },
+  "retry":  {
+    "maxRetries": 3,
+    "baseDelayMs": 1000,
+    "maxDelayMs": 60000,
+    "jitterFactor": 0.2
+  },
 
   "session": {}
 }

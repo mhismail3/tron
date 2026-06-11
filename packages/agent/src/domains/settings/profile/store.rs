@@ -46,6 +46,9 @@ impl SettingsStore {
 
     /// Serialize higher-level async settings operations that must keep runtime
     /// state and file state consistent across multiple store calls.
+    /// INVARIANT: SettingsStore::operation_lock guards update/reset/reload
+    /// sequences from materializing full defaults or splitting runtime/file
+    /// state on failure.
     pub async fn operation_lock() -> tokio::sync::OwnedMutexGuard<()> {
         SETTINGS_OPERATION_LOCK
             .get_or_init(|| Arc::new(tokio::sync::Mutex::new(())))

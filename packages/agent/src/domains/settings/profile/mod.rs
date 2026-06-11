@@ -163,8 +163,8 @@ pub fn load_settings_from_path(path: &Path) -> Result<TronSettings> {
 }
 
 /// Apply environment overrides to a settings snapshot.
-pub(crate) fn apply_env_overrides(settings: &mut TronSettings) {
-    storage::loader::apply_env_overrides(settings);
+pub(crate) fn apply_env_overrides(settings: &mut TronSettings) -> Result<()> {
+    storage::loader::apply_env_overrides(settings)
 }
 
 /// Reload settings from a specific file path.
