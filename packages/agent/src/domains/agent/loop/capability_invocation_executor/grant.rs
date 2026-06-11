@@ -16,6 +16,7 @@ pub(super) async fn derive_capability_runtime_grant(
     actor_id: &ActorId,
     target_function_id: &FunctionId,
     target_authority_scopes: &[String],
+    effective_args: &Value,
     session_id: &str,
     workspace_id: Option<&str>,
     working_directory: &str,
@@ -25,28 +26,8 @@ pub(super) async fn derive_capability_runtime_grant(
     turn: i64,
     run_id: Option<&str>,
 ) -> Result<AuthorityGrantId, FailureEnvelope> {
-    let mut allowed_capabilities = vec![
-        target_function_id.as_str().to_owned(),
-        "resource::create".to_owned(),
-        "resource::inspect".to_owned(),
-        "resource::link".to_owned(),
-        "resource::list".to_owned(),
-        "resource::update".to_owned(),
-        "state::get".to_owned(),
-        "state::set".to_owned(),
-        "state::list".to_owned(),
-    ];
-    allowed_capabilities.sort();
-    allowed_capabilities.dedup();
-    let mut allowed_authority_scopes = target_authority_scopes.to_vec();
-    allowed_authority_scopes.extend([
-        "resource.read".to_owned(),
-        "resource.write".to_owned(),
-        "state.read".to_owned(),
-        "state.write".to_owned(),
-    ]);
-    allowed_authority_scopes.sort();
-    allowed_authority_scopes.dedup();
+    let grant_shape =
+        runtime_grant_shape(target_function_id, target_authority_scopes, effective_args);
     let allowed_resource_kinds = self_adapting_resource_kinds();
     let idempotency_material = json!({
         "version": 1,
@@ -56,6 +37,10 @@ pub(super) async fn derive_capability_runtime_grant(
         "actorId": actor_id.as_str(),
         "targetFunctionId": target_function_id.as_str(),
         "targetAuthorityScopes": target_authority_scopes,
+        "executeOperation": execute_operation(effective_args),
+        "allowedCapabilities": &grant_shape.allowed_capabilities,
+        "allowedAuthorityScopes": &grant_shape.allowed_authority_scopes,
+        "remainingInvocations": grant_shape.remaining_invocations,
         "providerInvocationId": invocation_id,
         "modelPrimitiveName": model_primitive_name,
         "turn": turn,
@@ -82,16 +67,16 @@ pub(super) async fn derive_capability_runtime_grant(
     let payload = json!({
         "parentGrantId": "agent-capability-runtime",
         "subjectActorId": actor_id.as_str(),
-        "allowedCapabilities": allowed_capabilities,
+        "allowedCapabilities": grant_shape.allowed_capabilities,
         "allowedNamespaces": ["__no_namespace_authority__"],
-        "allowedAuthorityScopes": allowed_authority_scopes,
+        "allowedAuthorityScopes": grant_shape.allowed_authority_scopes,
         "allowedResourceKinds": allowed_resource_kinds,
         "resourceSelectors": ["*"],
         "fileRoots": [working_directory],
         "networkPolicy": "none",
         "maxRisk": "medium",
         "budget": {
-            "remainingInvocations": 4,
+            "remainingInvocations": grant_shape.remaining_invocations,
             "remainingProcessMs": 120000
         },
         "canDelegate": false,
@@ -142,6 +127,86 @@ pub(super) async fn derive_capability_runtime_grant(
             )
         })?;
     AuthorityGrantId::new(grant_id.to_owned()).map_err(|error| engine_error_to_failure(&error))
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct RuntimeGrantShape {
+    allowed_capabilities: Vec<String>,
+    allowed_authority_scopes: Vec<String>,
+    remaining_invocations: u64,
+}
+
+fn runtime_grant_shape(
+    target_function_id: &FunctionId,
+    target_authority_scopes: &[String],
+    effective_args: &Value,
+) -> RuntimeGrantShape {
+    let mut allowed_capabilities = vec![target_function_id.as_str().to_owned()];
+    let mut allowed_authority_scopes = target_authority_scopes.to_vec();
+    let mut remaining_invocations = 2;
+
+    if target_function_id.as_str() == "capability::execute" {
+        match execute_operation(effective_args) {
+            Some("resource_create") => {
+                allowed_capabilities.push("resource::create".to_owned());
+                allowed_authority_scopes.push("resource.write".to_owned());
+            }
+            Some("resource_update") => {
+                allowed_capabilities.extend([
+                    "resource::inspect".to_owned(),
+                    "resource::update".to_owned(),
+                ]);
+                allowed_authority_scopes
+                    .extend(["resource.read".to_owned(), "resource.write".to_owned()]);
+                remaining_invocations = 3;
+            }
+            Some("resource_link") => {
+                allowed_capabilities
+                    .extend(["resource::inspect".to_owned(), "resource::link".to_owned()]);
+                allowed_authority_scopes
+                    .extend(["resource.read".to_owned(), "resource.write".to_owned()]);
+                remaining_invocations = 4;
+            }
+            Some("resource_inspect") | Some("resource_list") => {
+                allowed_capabilities.push(match execute_operation(effective_args) {
+                    Some("resource_inspect") => "resource::inspect".to_owned(),
+                    _ => "resource::list".to_owned(),
+                });
+                allowed_authority_scopes.push("resource.read".to_owned());
+            }
+            Some("state_get") | Some("state_list") => {
+                allowed_capabilities.push(match execute_operation(effective_args) {
+                    Some("state_get") => "state::get".to_owned(),
+                    _ => "state::list".to_owned(),
+                });
+                allowed_authority_scopes.push("state.read".to_owned());
+            }
+            Some("state_set") => {
+                allowed_capabilities.push("state::set".to_owned());
+                allowed_authority_scopes.push("state.write".to_owned());
+            }
+            _ => {}
+        }
+    }
+
+    allowed_capabilities.sort();
+    allowed_capabilities.dedup();
+    allowed_authority_scopes.sort();
+    allowed_authority_scopes.dedup();
+
+    RuntimeGrantShape {
+        allowed_capabilities,
+        allowed_authority_scopes,
+        remaining_invocations,
+    }
+}
+
+fn execute_operation(effective_args: &Value) -> Option<&str> {
+    effective_args
+        .get("operation")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|operation| !operation.is_empty())
 }
 
 fn self_adapting_resource_kinds() -> Vec<&'static str> {
@@ -221,4 +286,54 @@ pub(super) fn sha256_hex(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
     format!("{:x}", hasher.finalize())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn direct_model_target_gets_target_only_child_grant_shape() {
+        let shape = runtime_grant_shape(
+            &FunctionId::new("capability::capture").expect("function id"),
+            &["capability.execute".to_owned()],
+            &json!({"value": "hello"}),
+        );
+
+        assert_eq!(
+            shape,
+            RuntimeGrantShape {
+                allowed_capabilities: vec!["capability::capture".to_owned()],
+                allowed_authority_scopes: vec!["capability.execute".to_owned()],
+                remaining_invocations: 2,
+            }
+        );
+    }
+
+    #[test]
+    fn execute_resource_link_gets_only_nested_resource_link_shape() {
+        let shape = runtime_grant_shape(
+            &FunctionId::new("capability::execute").expect("function id"),
+            &["capability.execute".to_owned()],
+            &json!({"operation": "resource_link"}),
+        );
+
+        assert_eq!(
+            shape,
+            RuntimeGrantShape {
+                allowed_capabilities: vec![
+                    "capability::execute".to_owned(),
+                    "resource::inspect".to_owned(),
+                    "resource::link".to_owned(),
+                ],
+                allowed_authority_scopes: vec![
+                    "capability.execute".to_owned(),
+                    "resource.read".to_owned(),
+                    "resource.write".to_owned(),
+                ],
+                remaining_invocations: 4,
+            }
+        );
+    }
 }

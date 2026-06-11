@@ -449,6 +449,12 @@ fn saastc_provider_execute_boundary_is_execute_only_and_fail_closed() {
     let capability_mod = read_repo_file("packages/agent/src/domains/capability/mod.rs");
     let capability_contract = read_repo_file("packages/agent/src/domains/capability/contract.rs");
     let operations = read_repo_file("packages/agent/src/domains/capability/operations/mod.rs");
+    let executor_grant = read_repo_file(
+        "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs",
+    );
+    let executor_tests = read_repo_file(
+        "packages/agent/src/domains/agent/loop/capability_invocation_executor/tests.rs",
+    );
     let openai_converter = read_repo_file(
         "packages/agent/src/domains/model/providers/openai/message_converter/mod.rs",
     );
@@ -529,6 +535,32 @@ fn saastc_provider_execute_boundary_is_execute_only_and_fail_closed() {
         assert!(
             !operations.contains(forbidden),
             "execute operations must not route through successor/provider surface {forbidden}"
+        );
+    }
+
+    for required in [
+        "fn runtime_grant_shape(",
+        "target_function_id.as_str() == \"capability::execute\"",
+        "Some(\"resource_link\")",
+        "remaining_invocations = 4",
+        "remaining_invocations = 3",
+        "\"executeOperation\": execute_operation(effective_args)",
+        "direct_model_target_gets_target_only_child_grant_shape",
+        "execute_resource_link_gets_only_nested_resource_link_shape",
+    ] {
+        assert!(
+            executor_grant.contains(required),
+            "execute runtime grant missing operation-scoped proof {required}"
+        );
+    }
+    for required in [
+        "direct model targets must not inherit nested execute resource/state capabilities",
+        "direct model targets must keep only target-required authority scopes",
+        "grant.budget[\"remainingInvocations\"], json!(1)",
+    ] {
+        assert!(
+            executor_tests.contains(required),
+            "execute idempotency regression test missing direct-target grant proof {required}"
         );
     }
 

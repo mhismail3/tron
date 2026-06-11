@@ -52,10 +52,17 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   targets against the current session/workspace before mutation. This keeps
   worker activation/process/schedule resources out of the provider-visible
   primitive while retaining typed resource authorship.
-- Updated the capability runtime child grant from two to four remaining
-  invocations, matching the guarded `resource_link` call graph without opening
-  an unbounded authority path. The failing intermediate authorship test exposed
-  the old budget mismatch; rerun passed after the bounded budget fix.
+- Reproduced and fixed the `idempotency --lib` regression in
+  `model_capability_invocation_inherits_agent_trace_parent_and_idempotency`.
+  The root cause was an over-broad successor grant: the retained four-invocation
+  `resource_link` budget had become the default for every model-launched
+  primitive call. `derive_capability_runtime_grant` now builds an
+  operation-scoped grant shape, includes that shape in the grant idempotency
+  hash, gives direct targets only their target capability/scope with the normal
+  two-invocation budget, and reserves four invocations only for the guarded
+  `capability::execute` `resource_link` call graph. The direct-target
+  idempotency test now proves the derived grant has one remaining invocation
+  after execution and no nested resource/state capabilities or scopes.
 - Renamed `worker_activation_bundle_metadata_for_test` to
   `worker_activation_bundle_metadata` in the host handle and call sites because
   production orchestration uses that safe metadata for stdin bundle preflight.
@@ -199,6 +206,9 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
 
 ```bash
 cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+cargo test --manifest-path packages/agent/Cargo.toml idempotency --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml capability_invocation_executor --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_authorship_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml engine::tests::authority --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml worker_activation --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture

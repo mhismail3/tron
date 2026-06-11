@@ -68,9 +68,13 @@ harness and full initial diff inventory.
   only on retained authorship resource kinds and only on current
   session/workspace resources. `resource_list` now requires an allowed kind,
   and inspect/update/link preflight resource scope and kind before mutation.
-- Bounded the per-call capability runtime child grant at four invocations to
-  cover the retained guarded `resource_link` call graph:
-  `capability::execute`, source inspect, target inspect, and link.
+- Tightened the per-call capability runtime child grant from a broad
+  four-invocation default into an operation-scoped shape. Direct model targets
+  receive only their target capability and target authority scope with the
+  normal two-invocation budget; `capability::execute` adds only the nested
+  state/resource primitives required by the selected operation, and
+  `resource_link` alone receives the four-invocation call graph budget for
+  execute, source inspect, target inspect, and link.
 - Renamed the activation bundle metadata host accessor from
   `worker_activation_bundle_metadata_for_test` to
   `worker_activation_bundle_metadata`; the accessor is safe metadata used by

@@ -500,10 +500,15 @@ async fn model_capability_invocation_inherits_agent_trace_parent_and_idempotency
     assert_eq!(grant.file_roots, vec![working_directory.clone()]);
     assert_eq!(grant.network_policy, "none");
     assert_eq!(grant.budget["remainingInvocations"], json!(1));
-    assert!(
-        grant
-            .allowed_capabilities
-            .contains(&"capability::capture".to_owned())
+    assert_eq!(
+        grant.allowed_capabilities,
+        vec!["capability::capture".to_owned()],
+        "direct model targets must not inherit nested execute resource/state capabilities"
+    );
+    assert_eq!(
+        grant.allowed_authority_scopes,
+        vec!["capability.execute".to_owned()],
+        "direct model targets must keep only target-required authority scopes"
     );
     assert!(!grant.allowed_namespaces.contains(&"capability".to_owned()));
     assert_eq!(invocation.causal_context.trace_id, trace_id);

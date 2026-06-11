@@ -128,11 +128,18 @@ fn saa_durable_memory_and_rules_are_typed_resources_with_lineage_fields() {
 }
 
 #[test]
-fn saa_runtime_grant_allows_only_execute_plus_internal_resource_substrate() {
+fn saa_runtime_grant_scopes_nested_execute_operations_only() {
     let grant = read_repo_file(
         "packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs",
     );
     for required in [
+        "fn runtime_grant_shape(",
+        "target_function_id.as_str() == \"capability::execute\"",
+        "Some(\"resource_link\")",
+        "remaining_invocations = 4",
+        "remaining_invocations = 3",
+        "let mut allowed_capabilities = vec![target_function_id.as_str().to_owned()];",
+        "\"executeOperation\": execute_operation(effective_args)",
         "\"resource::create\".to_owned()",
         "\"resource::inspect\".to_owned()",
         "\"resource::link\".to_owned()",
@@ -147,6 +154,8 @@ fn saa_runtime_grant_allows_only_execute_plus_internal_resource_substrate() {
         "\"patch_proposal\"",
         "\"networkPolicy\": \"none\"",
         "\"canDelegate\": false",
+        "direct_model_target_gets_target_only_child_grant_shape",
+        "execute_resource_link_gets_only_nested_resource_link_shape",
     ] {
         assert!(
             grant.contains(required),
