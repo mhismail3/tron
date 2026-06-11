@@ -3,6 +3,7 @@
 use serde_json::{Value, json};
 
 use crate::domains::settings::Deps;
+use crate::shared::protocol::settings::{PublicSettingsSnapshot, PublicSettingsUpdate};
 use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 use crate::shared::server::params::require_param;
@@ -17,7 +18,15 @@ pub(crate) async fn settings_update_value(
     params: Option<&Value>,
     deps: &Deps,
 ) -> std::result::Result<Value, CapabilityError> {
-    let updates = require_param(params, "settings")?.clone();
+    let updates =
+        serde_json::from_value::<PublicSettingsUpdate>(require_param(params, "settings")?.clone())
+            .map_err(|error| CapabilityError::InvalidParams {
+                message: format!(
+                    "settings update payload must match the public settings contract: {error}"
+                ),
+            })?
+            .into_sparse_settings_value()
+            .map_err(|message| CapabilityError::InvalidParams { message })?;
     let settings_path = deps.settings_path.clone();
 
     let _operation_guard = crate::domains::settings::SettingsStore::operation_lock().await;
@@ -39,7 +48,7 @@ pub(crate) async fn settings_reset_to_defaults_value(
     let _operation_guard = crate::domains::settings::SettingsStore::operation_lock().await;
     let previous_sparse = read_sparse_settings_snapshot(deps).await?;
     let settings_path = deps.settings_path.clone();
-    let result = run_blocking_task("settings::reset_to_defaults", move || {
+    run_blocking_task("settings::reset_to_defaults", move || {
         crate::domains::settings::SettingsStore::new(settings_path)
             .reset()
             .map_err(settings_error)
@@ -52,7 +61,11 @@ pub(crate) async fn settings_reset_to_defaults_value(
     )
     .await?;
 
-    Ok(result)
+    PublicSettingsSnapshot::from_internal(&deps.profile_runtime.current().settings)
+        .to_value()
+        .map_err(|error| CapabilityError::Internal {
+            message: format!("Failed to serialize settings: {error}"),
+        })
 }
 
 async fn read_sparse_settings_snapshot(deps: &Deps) -> std::result::Result<Value, CapabilityError> {

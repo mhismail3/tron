@@ -4,6 +4,8 @@
 //! domain contracts, services, and tests beside the worker that uses them. Settings
 //! updates persist the sparse profile overlay, then reload the profile runtime so
 //! subsequent turns use the new provider and loop settings.
+//! Public capability input and output is projected through
+//! `shared::protocol::settings`; internal `TronSettings` stays server-only.
 
 pub(crate) mod contract;
 pub(crate) mod deps;

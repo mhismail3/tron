@@ -232,6 +232,17 @@ Current living entry points:
 - `packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.tsv`:
   machine-readable inventory for every file changed in the off-plan
   `e781a6aef..2da96a848` range.
+- `packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md`:
+  active Public Protocol API Contract Discipline scorecard for narrowing
+  `/engine`, settings DTOs, iOS mirrors, and transport error contracts; local
+  iOS build/test is currently blocked by host Xcode destination state.
+- `packages/agent/docs/public-protocol-api-contract-discipline-evidence-manifest.md`:
+  companion evidence manifest for PPACD source findings, focused checks, full
+  closeout verification, and residual contract risks.
+- `packages/agent/docs/public-protocol-api-contract-discipline-inventory.md`:
+  PPACD public protocol surface taxonomy and proof notes.
+- `packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv`:
+  machine-readable PPACD public protocol inventory used by static gates.
 - `packages/agent/docs/self-adapting-agent-authorship-scorecard.md`:
   completed Self-Adapting Agent Authorship scorecard for proving durable
   goals, evidence, decisions, memories/rules, patch proposals, materialized
@@ -332,6 +343,9 @@ Current living entry points:
   completed SACB scorecard, inventory, CI wiring, and security boundary gates, with
   focused modules under
   `packages/agent/tests/security_authority_capability_boundaries/`.
+- `packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs`:
+  PPACD guard for artifact wiring, inventory coverage, public settings DTO
+  discipline, narrowed `/engine` context, and delegated child-envelope shape.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -906,7 +920,18 @@ Settings are loaded from three layers (highest priority last):
 2. **User overlay** (`~/.tron/profiles/user/profile.toml` `[settings]`, deep-merged over the active profile)
 3. **Environment variables** (`TRON_*` overrides)
 
-Settings are server-authoritative. Engine-native clients read the current valid `ProfileRuntime` snapshot by invoking `settings::get` and write sparse user overrides through `settings::update` / `settings::reset_to_defaults` with explicit idempotency keys. Missing overlays use profile defaults, but malformed TOML or non-object `[settings]` returns an engine/transport error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then swapped into the cached `Arc<TronSettings>` and `ProfileRuntime`. If the compiled profile runtime rejects the result, the sparse overlay is rolled back and the last valid runtime snapshot remains active.
+Settings are server-authoritative. Engine-native clients read a versioned public
+settings snapshot by invoking `settings::get` and write sparse public overrides
+through `settings::update` / `settings::reset_to_defaults` with explicit
+idempotency keys. The wire DTO starts with `contractVersion: 1` and exposes only
+the paired-client surface; internal `TronSettings` and the full
+`ProfileRuntime` remain server-only. Missing overlays use profile defaults, but
+malformed TOML or non-object `[settings]` returns an engine/transport error
+instead of being repaired silently. Successful writes are serialized,
+validated, written atomically, and then swapped into the cached
+`Arc<TronSettings>` and `ProfileRuntime`. If the compiled profile runtime
+rejects the result, the sparse overlay is rolled back and the last valid runtime
+snapshot remains active.
 
 The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If a managed profile default is missing, corrupt, or stale against the current strict profile schema, startup restores it from compiled defaults; malformed user settings fail fast. iOS device-only preferences live in iOS storage/Keychain, not in the server settings profile.
 
@@ -1452,6 +1477,7 @@ tron ci clippy test          # Subset: linting + tests
 `post_aha_adversarial_closeout_invariants`,
 `concurrency_scheduling_discipline_invariants`,
 `security_authority_capability_boundaries_invariants`,
+`public_protocol_api_contract_discipline_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
 `off_plan_successor_teardown_cleanup_invariants`,

@@ -8,6 +8,9 @@ use crate::engine::{
     CompensationContract, CompensationKind, EffectClass, IdempotencyContract,
     Result as EngineResult, RiskLevel,
 };
+use crate::shared::protocol::settings::{
+    public_settings_snapshot_schema, public_settings_update_schema,
+};
 
 pub(crate) const STREAM_TOPICS: &[&str] = &["settings.changes"];
 
@@ -16,18 +19,18 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
     Ok(vec![
         CapabilityContract::new("settings::get", "settings", EffectClass::PureRead, RiskLevel::Low, Some("settings.read"))
             .request_schema(json!({"additionalProperties":false,"properties":{},"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .response_schema(public_settings_snapshot_schema())
             .build()?,
         CapabilityContract::new("settings::update", "settings", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("settings.write"))
-            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"settings":{"additionalProperties":true,"type":"object"},"workspaceId":{"type":"string"}},"required":["settings"],"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{"sessionId":{"type":"string"},"settings":public_settings_update_schema(),"workspaceId":{"type":"string"}},"required":["settings"],"type":"object"}))
             .response_schema(json!({"additionalProperties":false,"properties":{"success":{"type":"boolean"}},"required":["success"],"type":"object"}))
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .stream_topics(STREAM_TOPICS.to_vec())
             .build()?,
         CapabilityContract::new("settings::reset_to_defaults", "settings", EffectClass::ReversibleSideEffect, RiskLevel::High, Some("settings.write"))
-            .request_schema(json!({"additionalProperties":true,"type":"object"}))
-            .response_schema(json!({"additionalProperties":true,"type":"object"}))
+            .request_schema(json!({"additionalProperties":false,"properties":{},"type":"object"}))
+            .response_schema(public_settings_snapshot_schema())
             .idempotency(IdempotencyContract::caller_system_engine_ledger())
             .compensation(CompensationContract::new(CompensationKind::InverseCommandAvailable, "domain-specific tests preserve current rollback, no-op, or replay behavior"))
             .stream_topics(STREAM_TOPICS.to_vec())

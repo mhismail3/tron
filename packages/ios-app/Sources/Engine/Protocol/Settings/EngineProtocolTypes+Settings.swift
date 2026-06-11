@@ -2,11 +2,16 @@ import Foundation
 
 // MARK: - Settings Methods
 
+enum ServerSettingsContract {
+    static let currentVersion: UInt64 = 1
+}
+
 /// Server-authoritative settings decoded from `settings::get`.
 ///
 /// This mirrors the primitive server settings surface. Product policy planes
 /// and fixed workflow settings are intentionally absent.
 struct ServerSettings: Decodable {
+    let contractVersion: UInt64
     let defaultModel: String
     let defaultWorkspace: String?
     let tailscaleIp: String?
@@ -19,7 +24,7 @@ struct ServerSettings: Decodable {
     let storageMaxDatabaseMb: UInt64
 
     private enum CodingKeys: String, CodingKey {
-        case server, context, observability, storage
+        case contractVersion, server, context, observability, storage
     }
 
     private enum ServerKeys: String, CodingKey {
@@ -40,6 +45,14 @@ struct ServerSettings: Decodable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        contractVersion = try container.decode(UInt64.self, forKey: .contractVersion)
+        guard contractVersion == ServerSettingsContract.currentVersion else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .contractVersion,
+                in: container,
+                debugDescription: "Unsupported settings contractVersion \(contractVersion)"
+            )
+        }
 
         if let serverContainer = try? container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server) {
             defaultModel = (try? serverContainer.decodeIfPresent(String.self, forKey: .defaultModel)) ?? "claude-sonnet-4-6"
@@ -101,6 +114,7 @@ struct ServerSettings: Decodable {
 }
 
 struct ServerSettingsUpdate: Encodable {
+    var contractVersion: UInt64 = ServerSettingsContract.currentVersion
     var server: ServerUpdate?
     var context: ContextUpdate?
     var observability: ObservabilityUpdate?

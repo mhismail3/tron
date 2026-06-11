@@ -292,9 +292,6 @@ pub(super) fn invocation_result_value(result: &InvocationResult) -> Value {
     json!({
         "invocationId": result.invocation_id.as_str(),
         "functionId": result.function_id.as_str(),
-        "workerId": result.worker_id.as_str(),
-        "functionRevision": result.function_revision.0,
-        "catalogRevision": result.catalog_revision.0,
         "traceId": result.trace_id.as_str(),
         "value": result.value.as_ref(),
         "error": result.error.as_ref().map(error_value),

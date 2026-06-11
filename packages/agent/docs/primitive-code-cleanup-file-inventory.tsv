@@ -1577,3 +1577,9 @@ packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.md	retain	opst
 packages/agent/docs/off-plan-successor-teardown-cleanup-inventory.tsv	retain	opstc docs	OPSTC-0	Current Off-Plan Successor Teardown Cleanup machine-readable inventory retained for closeout verification.
 packages/agent/docs/off-plan-successor-teardown-cleanup-scorecard.md	retain	opstc docs	OPSTC-0	Current Off-Plan Successor Teardown Cleanup scorecard retained for closeout verification.
 packages/agent/tests/off_plan_successor_teardown_cleanup_invariants.rs	retain	opstc rust test	OPSTC-0	Current Off-Plan Successor Teardown Cleanup invariant target retained for closeout verification.
+packages/agent/docs/public-protocol-api-contract-discipline-evidence-manifest.md	retain	ppacd docs	PPACD-9	Current Public Protocol API Contract Discipline evidence manifest retained after final closeout.
+packages/agent/docs/public-protocol-api-contract-discipline-inventory.md	retain	ppacd docs	PPACD-9	Current Public Protocol API Contract Discipline inventory retained after final closeout.
+packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv	retain	ppacd docs	PPACD-9	Current Public Protocol API Contract Discipline machine-readable inventory retained after final closeout.
+packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md	retain	ppacd docs	PPACD-9	Current Public Protocol API Contract Discipline scorecard retained after final closeout.
+packages/agent/src/shared/protocol/settings.rs	retain	ppacd rust source	PPACD-6	Public settings DTO boundary retained after public protocol closeout.
+packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs	retain	ppacd rust test	PPACD-9	Current Public Protocol API Contract Discipline invariant target retained after final closeout.

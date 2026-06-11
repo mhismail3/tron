@@ -37,6 +37,7 @@ run_tests() {
         post_aha_adversarial_closeout_invariants
         concurrency_scheduling_discipline_invariants
         security_authority_capability_boundaries_invariants
+        public_protocol_api_contract_discipline_invariants
         observability_diagnostics_auditability_invariants
         data_integrity_storage_evolution_migration_discipline_invariants
         off_plan_successor_teardown_cleanup_invariants

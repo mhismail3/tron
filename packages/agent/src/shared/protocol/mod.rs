@@ -9,6 +9,7 @@
 //! | [`messages`] | Chat message DTOs |
 //! | [`model_audit`] | Provider request audit DTOs consumed by replay manifests |
 //! | [`model_capabilities`] | Model-facing capability result DTOs |
+//! | [`settings`] | Public settings DTOs for `settings::*` and thin clients |
 
 pub mod content;
 pub mod document_extractor;
@@ -17,3 +18,4 @@ pub mod memory;
 pub mod messages;
 pub mod model_audit;
 pub mod model_capabilities;
+pub mod settings;

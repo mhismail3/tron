@@ -47,23 +47,17 @@ struct EngineInvocationContext: Codable, Equatable, Sendable {
     var workspaceId: String?
     var traceId: String?
     var parentInvocationId: String?
-    var authorityScopes: [String]
-    var runtimeMetadata: [String: String]
 
     init(
         sessionId: String? = nil,
         workspaceId: String? = nil,
         traceId: String? = nil,
-        parentInvocationId: String? = nil,
-        authorityScopes: [String] = [],
-        runtimeMetadata: [String: String] = [:]
+        parentInvocationId: String? = nil
     ) {
         self.sessionId = sessionId
         self.workspaceId = workspaceId
         self.traceId = traceId
         self.parentInvocationId = parentInvocationId
-        self.authorityScopes = authorityScopes
-        self.runtimeMetadata = runtimeMetadata
     }
 }
 
@@ -153,9 +147,6 @@ struct EngineFunctionCallEnvelope<R: Decodable>: Decodable {
 struct EngineChildInvocation<R: Decodable>: Decodable {
     let invocationId: String?
     let functionId: String?
-    let workerId: String?
-    let functionRevision: UInt64?
-    let catalogRevision: UInt64?
     let traceId: String?
     let value: R?
     let error: EngineChildError?
