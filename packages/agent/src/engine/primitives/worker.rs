@@ -12,8 +12,8 @@ use super::{
 };
 use crate::engine::runtime::worker_orchestration::EngineWorkerOrchestrationRuntime;
 use crate::engine::{
-    AuthorityRequirement, CompensationKind, EffectClass, EngineError, IdempotencyContract,
-    InProcessFunctionHandler, Invocation, Result, RiskLevel, VisibilityScope,
+    AuthorityRequirement, CompensationKind, DeliveryMode, EffectClass, EngineError,
+    IdempotencyContract, InProcessFunctionHandler, Invocation, Result, RiskLevel, VisibilityScope,
 };
 
 pub(in crate::engine::primitives) use super::worker_activation::issue_activation;
@@ -117,6 +117,7 @@ pub(super) fn registrations(
         "worker.launch",
     )
     .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+    .with_allowed_delivery_modes(vec![DeliveryMode::Sync, DeliveryMode::Enqueue])
     .with_required_authority(AuthorityRequirement {
         scopes: vec!["worker.activate".to_owned(), "worker.launch".to_owned()],
     })

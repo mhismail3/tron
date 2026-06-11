@@ -24,7 +24,7 @@ use crate::engine::kernel::ids::{AuthorityGrantId, FunctionId, TraceId, WorkerId
 use crate::engine::primitives::WORKER_WORKER_ID;
 use crate::engine::runtime::worker_protocol::WorkerRegistrationMode;
 
-mod contracts;
+pub(in crate::engine::runtime) mod contracts;
 mod process_resource;
 mod supervisor;
 mod trigger_launch;

@@ -45,10 +45,10 @@ through `packages/agent/src/transport/runtime/setup.rs`. Individual
 | `contract` | 95 |
 | `facade` | 87 |
 | `generated-wire-dto` | 22 |
-| `implementation` | 477 |
+| `implementation` | 478 |
 | `test-support` | 120 |
 
-Total tracked source rows: **946**.
+Total tracked source rows: **947**.
 
 ## Verification
 

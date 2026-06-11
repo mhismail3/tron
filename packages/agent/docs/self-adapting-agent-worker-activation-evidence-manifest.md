@@ -69,3 +69,7 @@ SAAWTL preserves the same activation boundary for trigger-created launch:
 `worker::launch_from_trigger` invokes `worker::issue_activation` with a derived
 idempotency key and does not mint tokens through any parallel path. Callable
 readiness still requires the SAAWA hello/register flow.
+
+SAAWSD preserves SAAWA as the only activation issuance path for scheduled
+workers. Schedule ticks enqueue trusted trigger dispatch; activation issuance
+still happens later through SAAWTL and this SAAWA contract.

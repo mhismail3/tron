@@ -8,9 +8,9 @@ Baseline: `899910502ec894e1ba8b0c6a5bb0795549383d88`
 
 | Row | Status | Evidence | Verification | Residual Risk |
 |---|---|---|---|---|
-| SAAWTL-0 | passed_after_fix | Added scorecard, evidence manifest, inventory docs/TSV, invariant target, README links, and local/GitHub static-gate wiring. | `self_adapting_agent_worker_trigger_launch_invariants::saawtl_docs_readme_and_ci_are_linked`. | New generated inventory rows must be refreshed after staging. |
+| SAAWTL-0 | passed_after_fix | Added scorecard, evidence manifest, inventory docs/TSV, invariant target, README links, and local/GitHub static-gate wiring. | `self_adapting_agent_worker_trigger_launch_invariants::saawtl_docs_readme_and_ci_are_linked`. | Whole-repo HRA/PCC/TPC/TMB/SACB inventory rows are current after the SAAWSD closeout refresh. |
 | SAAWTL-1 | passed_after_fix | Source inventory covers trigger dispatch, autostart plan parsing, activation issue, SAAWBH vault, stdin launch, attempt audit, replay/export, and forbidden surfaces. | `saawtl_scorecard_and_inventory_are_complete`. | Inventory is static and intentionally conservative. |
-| SAAWTL-2 | passed_after_fix | `worker_autostart_plan` resource type and `AutostartPlan` parser enforce reviewed status, trigger/launch references, activation request fields, stdin-only delivery, no restart, duplicate replay policy, and secret-looking value rejection. | `saawtl_source_enforces_trigger_only_stdin_launch`; focused runtime rejection test. | JSON schema is broad for some fields; runtime parser owns semantic checks. |
+| SAAWTL-2 | passed_after_fix | `worker_autostart_plan` resource type and runtime-scoped `AutostartPlan` parser enforce reviewed status, trigger/launch references, activation request fields, stdin-only delivery, no restart, duplicate replay policy, and secret-looking value rejection. SAAWSD reuses the parser through `pub(in crate::engine::runtime)` visibility without creating a public launch surface. | `saawtl_source_enforces_trigger_only_stdin_launch`; focused runtime rejection test. | JSON schema is broad for some fields; runtime parser owns semantic checks. |
 | SAAWTL-3 | passed_after_fix | `worker::launch_from_trigger` is admin/internal, high-risk, system-ledger idempotent, and requires `worker.activate` plus `worker.launch`; runtime rejects missing trigger causal context and target idempotency. | `worker_trigger_launch_rejects_direct_calls_and_unreviewed_context`. | Causal trigger metadata is trusted engine context, not model payload. |
 | SAAWTL-4 | passed_after_fix | Trigger launch calls `worker::issue_activation` and `worker::launch_activation` with `saawtl:issue:<attempt-id>` and `saawtl:launch:<attempt-id>` keys. | `worker_trigger_launch_dispatch_issues_stdin_launch_once_and_replays_attempt`. | Worker id agreement is proven after activation issue and before process start. |
 | SAAWTL-5 | passed_after_fix | Attempt id hashes autostart plan id, trigger id, and target idempotency key; duplicate delivery returns existing idempotency outcome/attempt without second supervisor start. | Focused replay assertion on fake supervisor start count. | Concurrency collision handling relies on the engine ledger and deterministic resource id. |
@@ -34,3 +34,7 @@ Baseline: `899910502ec894e1ba8b0c6a5bb0795549383d88`
 - SAAWO remains the only direct-exec process supervision contract.
 - SAAWBH remains the only live activation-bundle custody and stdin handoff contract.
 - SAAWTL adds trigger-created composition over those paths; it does not duplicate token minting, process supervision, or readiness routing.
+- SAAWSD adds a successor schedule-to-trigger layer over SAAWTL. It records safe
+  scheduled ticks and enqueues `trigger::dispatch`; it does not change
+  SAAWTL's trigger causal guard, activation issue, vault consume, process start,
+  or readiness boundaries.

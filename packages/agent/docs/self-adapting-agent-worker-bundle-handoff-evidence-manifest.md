@@ -61,3 +61,6 @@ Notes:
   issues a fresh activation, leaves the live bundle in the in-memory vault, and
   launches only through `stdin_activation_bundle_v1`; attempt audit records keep
   ids, fingerprints, statuses, and redacted errors only.
+- SAAWSD reuses SAAWBH custody indirectly through SAAWTL. Schedule ticks persist
+  only safe queue/tick metadata and never store activation bundles, stdin
+  payloads, vault material, process environment, or raw idempotency secrets.

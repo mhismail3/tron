@@ -90,8 +90,9 @@ fn saa_resource_authorship_uses_execute_operations_without_catalog_routing() {
 
 #[test]
 fn saa_durable_memory_and_rules_are_typed_resources_with_lineage_fields() {
-    let definitions =
-        read_repo_file("packages/agent/src/engine/durability/resources/definitions.rs");
+    let definitions = read_repo_file(
+        "packages/agent/src/engine/durability/resources/agent_record_definitions.rs",
+    );
     for required in [
         "\"agent_memory\"",
         "\"tron.resource.agent_memory.v1\"",

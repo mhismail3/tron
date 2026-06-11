@@ -238,7 +238,7 @@ fn saawtl_source_enforces_trigger_only_stdin_launch() {
     let contracts =
         read_repo_file("packages/agent/src/engine/runtime/worker_orchestration/contracts.rs");
     for required in [
-        "pub(super) struct AutostartPlan",
+        "pub(in crate::engine::runtime) struct AutostartPlan",
         "require_policy(policy, \"deliveryMode\", \"stdin_activation_bundle_v1\")",
         "require_policy(policy, \"restartPolicy\", \"none\")",
         "require_policy(policy, \"duplicatePolicy\", \"idempotency_key_replay_v1\")",

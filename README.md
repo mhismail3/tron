@@ -374,12 +374,28 @@ Current living entry points:
   completed SAAWTL gates for docs/CI parity, trigger-only primitive contract,
   reviewed autostart schemas, attempt audit, no provider/public/scheduler
   surface, and README parity.
+- `packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-scorecard.md`:
+  completed SAAWSD scorecard for governed wall-clock schedule ticks that
+  enqueue trusted trigger dispatch into the existing worker launch path.
+- `packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-evidence-manifest.md`:
+  companion evidence manifest for reviewed schedule plans, tick replay,
+  overlap/missed policies, and closeout validation.
+- `packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.md`:
+  SAAWSD source inventory taxonomy and schedule/trigger boundary notes.
+- `packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.tsv`:
+  machine-readable SAAWSD inventory covering scheduler ownership, trigger
+  dispatch, autostart validation, queues, leases, tick audit, and forbidden
+  surfaces.
+- `packages/agent/tests/self_adapting_agent_worker_schedule_dispatch_invariants.rs`:
+  completed SAAWSD gates for docs/CI parity, reviewed schedule contracts,
+  trigger-dispatch-only composition, cadence ownership, no provider/public
+  schedule surface, and README parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH/SAAWTL
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH/SAAWTL/SAAWSD
 scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -823,7 +839,7 @@ argv, executable digest/path policy, bounded log snippets, exit state, readiness
 markers, and stdin handoff fingerprints/byte counts. Activation bundles are not
 persisted or reconstructed; idempotent activation replay returns the redacted
 durable shape rather than the original bundle, and a failed stdin launch after
-consume requires issuing a new activation. There is no scheduler launch,
+consume requires issuing a new activation. There is no direct scheduler launch,
 automatic restart loop, trigger creation,
 provider-visible launch tool, public `/engine` launch message, deploy flow,
 launchd/SMAppService integration, or repo-managed skill surface.
@@ -843,10 +859,27 @@ idempotency fingerprints, policy, and redacted errors. Duplicate delivery with
 the same target idempotency key replays the attempt/process without another
 activation issue, vault consume, or process start. Trigger launch does not imply
 callable readiness; the SAAWA hello/register path remains authoritative. There
-is still no wall-clock scheduler, activation-worker trigger registration,
-automatic restart loop, provider-visible launch tool, public `/engine` launch
-message, deploy flow, launchd/SMAppService integration, or repo-managed skill
-surface.
+is still no activation-worker trigger registration, automatic restart loop,
+provider-visible launch tool, public `/engine` launch message, deploy flow,
+launchd/SMAppService integration, or repo-managed skill surface.
+
+Reviewed wall-clock worker schedules are a separate internal composition layer
+over trigger-created launch. A `worker_schedule_plan`
+(`tron.resource.worker_schedule_plan.v1`) is UTC-only, fixed interval, reviewed,
+and bound to a registered enqueue-capable trigger whose target is exactly
+`worker::launch_from_trigger` and a reviewed matching `worker_autostart_plan`.
+The scheduler owns only cadence and cancellation: it computes the latest due
+nominal tick, records a safe `worker_schedule_tick`
+(`requested`, `enqueued`, `skipped_missed`, `skipped_overlap`, or `failed`),
+acquires a narrow schedule dispatch lease, and calls `trigger::dispatch` with
+enqueue delivery plus deterministic target idempotency derived from schedule id
+and nominal UTC tick. Duplicate polls or restarts replay the existing tick/queue
+state, missed offline intervals collapse to the latest due tick, and an active
+prior tick records overlap evidence without another enqueue. Scheduler code does
+not issue activations, consume vault bundles, call supervisors, start processes,
+expose provider/public schedule APIs, change deploy/iOS settings, add
+launchd/SMAppService integration, add restart/retry loops, add repo-managed
+skills, or replay post-ready payloads.
 
 Volatile worker entries are removed on disconnect or missed heartbeat. Durable
 local worker entries stay in the catalog but are marked unhealthy when the

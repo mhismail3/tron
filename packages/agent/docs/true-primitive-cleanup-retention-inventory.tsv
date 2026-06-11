@@ -398,6 +398,7 @@ packages/agent/src/engine/durability/queue/mod.rs	primitive	engine	TPC-2	primiti
 packages/agent/src/engine/durability/queue/runtime.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/queue/sqlite_codec.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/queue/sqlite_store.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/durability/resources/agent_record_definitions.rs	primitive	engine	SAAWSD-11	Primitive engine retained agent record schema helper split for file-budget compliance.
 packages/agent/src/engine/durability/resources/definitions.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/resources/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/durability/resources/store/memory.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
@@ -1550,3 +1551,28 @@ packages/agent/src/engine/runtime/worker_orchestration/contracts.rs	implementati
 packages/agent/src/engine/runtime/worker_orchestration/process_resource.rs	implementation	engine	SAAWO-3	Worker process payload, redaction, and readiness matching retained in the split orchestration module.
 packages/agent/src/engine/runtime/worker_orchestration/supervisor.rs	implementation	engine	SAAWO-6	Direct-exec worker process supervisor retained as the process boundary owner.
 packages/agent/src/engine/tests/runtime/worker_orchestration.rs	test	test_harness	SAAWO-7	Worker orchestration runtime tests retained for fake supervisor and readiness binding coverage.
+packages/agent/docs/self-adapting-agent-worker-bundle-handoff-scorecard.md	docs	docs/static gates	SAAWBH-0	Worker bundle handoff scorecard retained as completed closeout evidence.
+packages/agent/docs/self-adapting-agent-worker-bundle-handoff-evidence-manifest.md	docs	docs/static gates	SAAWBH-0	Worker bundle handoff evidence manifest retained for verification provenance.
+packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.md	docs	docs/static gates	SAAWBH-1	Worker bundle handoff inventory summary retained for source taxonomy.
+packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.tsv	docs	docs/static gates	SAAWBH-1	Worker bundle handoff machine-readable inventory retained for static gates.
+packages/agent/tests/self_adapting_agent_worker_bundle_handoff_invariants.rs	test	test_harness	SAAWBH-10	Worker bundle handoff invariant target retained for closeout verification.
+packages/agent/src/engine/runtime/worker_activation_bundle_vault.rs	implementation	engine	SAAWBH-3	Process-memory activation bundle vault retained as the ephemeral custody boundary.
+packages/agent/docs/self-adapting-agent-worker-trigger-launch-scorecard.md	docs	docs/static gates	SAAWTL-0	Worker trigger launch scorecard retained as completed closeout evidence.
+packages/agent/docs/self-adapting-agent-worker-trigger-launch-evidence-manifest.md	docs	docs/static gates	SAAWTL-0	Worker trigger launch evidence manifest retained for verification provenance.
+packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.md	docs	docs/static gates	SAAWTL-1	Worker trigger launch inventory summary retained for source taxonomy.
+packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.tsv	docs	docs/static gates	SAAWTL-1	Worker trigger launch machine-readable inventory retained for static gates.
+packages/agent/tests/self_adapting_agent_worker_trigger_launch_invariants.rs	test	test_harness	SAAWTL-0	Worker trigger launch invariant target retained for closeout verification.
+packages/agent/src/engine/runtime/worker_orchestration/trigger_launch.rs	implementation	engine	SAAWTL-4	Trigger-created worker launch runtime retained as the trusted SAAWTL composition path.
+packages/agent/src/engine/tests/runtime/worker_trigger_launch.rs	test	test_harness	SAAWTL-5	Worker trigger launch runtime tests retained for enqueue drain and idempotency coverage.
+packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-scorecard.md	docs	docs/static gates	SAAWSD-0	Worker schedule dispatch scorecard retained as completed closeout evidence.
+packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-evidence-manifest.md	docs	docs/static gates	SAAWSD-0	Worker schedule dispatch evidence manifest retained for verification provenance.
+packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.md	docs	docs/static gates	SAAWSD-1	Worker schedule dispatch inventory summary retained for source taxonomy.
+packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.tsv	docs	docs/static gates	SAAWSD-1	Worker schedule dispatch machine-readable inventory retained for static gates.
+packages/agent/src/engine/durability/resources/worker_schedule_definitions.rs	support	engine	SAAWSD-2	Worker schedule plan and tick resource schema helper retained for governed schedule dispatch.
+packages/agent/src/engine/runtime/worker_schedule/mod.rs	implementation	engine	SAAWSD-3	Worker schedule runtime retained for due tick calculation, lease ownership, and trigger dispatch composition.
+packages/agent/src/engine/runtime/worker_schedule/contracts.rs	implementation	engine	SAAWSD-2	Worker schedule contract parser retained for UTC interval, fixed policy, and safe tick payload validation.
+packages/agent/src/engine/runtime/worker_schedule/overlap.rs	implementation	engine	SAAWSD-6	Worker schedule overlap evidence helper retained for one-active-tick replay and process-state checks.
+packages/agent/src/transport/runtime/worker_schedule.rs	support	agent_runtime	SAAWSD-3	Cancellable worker schedule polling service retained under runtime startup ownership.
+packages/agent/src/engine/tests/runtime/worker_schedule_dispatch.rs	test	test_harness	SAAWSD-11	Worker schedule dispatch runtime tests retained for due, replay, missed, overlap, and negative validation coverage.
+packages/agent/src/engine/tests/runtime/worker_schedule_dispatch_support.rs	test	test_harness	SAAWSD-11	Worker schedule dispatch test support retained for synthetic launch and resource fixtures.
+packages/agent/tests/self_adapting_agent_worker_schedule_dispatch_invariants.rs	test	test_harness	SAAWSD-11	Worker schedule dispatch invariant target retained for closeout static gates.

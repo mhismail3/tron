@@ -31,30 +31,33 @@ pub(super) struct ActivationResource {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct LaunchPlan {
-    pub(super) resource_id: String,
-    pub(super) expected_worker_id: WorkerId,
-    pub(super) expected_function_id: FunctionId,
-    pub(super) target_visibility: VisibilityScope,
-    pub(super) namespace: String,
-    pub(super) scope: PlanScope,
-    pub(super) executable_path: String,
-    pub(super) executable_digest_sha256: String,
-    pub(super) executable_path_policy: String,
-    pub(super) argv: Vec<String>,
-    pub(super) argv_allowlist: Vec<String>,
-    pub(super) env: BTreeMap<String, String>,
-    pub(super) env_allowlist: Vec<String>,
-    pub(super) cwd: Option<String>,
-    pub(super) cwd_policy: String,
-    pub(super) startup_timeout_ms: u64,
-    pub(super) stop_timeout_ms: u64,
-    pub(super) max_log_capture_bytes: u64,
-    pub(super) activation_delivery_mode: String,
+pub(in crate::engine::runtime) struct LaunchPlan {
+    pub(in crate::engine::runtime) resource_id: String,
+    pub(in crate::engine::runtime) expected_worker_id: WorkerId,
+    pub(in crate::engine::runtime) expected_function_id: FunctionId,
+    pub(in crate::engine::runtime) target_visibility: VisibilityScope,
+    pub(in crate::engine::runtime) namespace: String,
+    pub(in crate::engine::runtime) scope: PlanScope,
+    pub(in crate::engine::runtime) executable_path: String,
+    pub(in crate::engine::runtime) executable_digest_sha256: String,
+    pub(in crate::engine::runtime) executable_path_policy: String,
+    pub(in crate::engine::runtime) argv: Vec<String>,
+    pub(in crate::engine::runtime) argv_allowlist: Vec<String>,
+    pub(in crate::engine::runtime) env: BTreeMap<String, String>,
+    pub(in crate::engine::runtime) env_allowlist: Vec<String>,
+    pub(in crate::engine::runtime) cwd: Option<String>,
+    pub(in crate::engine::runtime) cwd_policy: String,
+    pub(in crate::engine::runtime) startup_timeout_ms: u64,
+    pub(in crate::engine::runtime) stop_timeout_ms: u64,
+    pub(in crate::engine::runtime) max_log_capture_bytes: u64,
+    pub(in crate::engine::runtime) activation_delivery_mode: String,
 }
 
 impl LaunchPlan {
-    pub(super) fn from_payload(resource_id: &str, payload: &Value) -> Result<Self> {
+    pub(in crate::engine::runtime) fn from_payload(
+        resource_id: &str,
+        payload: &Value,
+    ) -> Result<Self> {
         let expected_worker_id = WorkerId::new(payload_str(payload, "expectedWorkerId")?)?;
         let expected_function_id = FunctionId::new(payload_str(payload, "expectedFunctionId")?)?;
         let target_visibility = parse_target_visibility(payload_str(payload, "targetVisibility")?)?;
@@ -194,9 +197,9 @@ impl LaunchPlan {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct PlanScope {
-    pub(super) session_id: Option<String>,
-    pub(super) workspace_id: Option<String>,
+pub(in crate::engine::runtime) struct PlanScope {
+    pub(in crate::engine::runtime) session_id: Option<String>,
+    pub(in crate::engine::runtime) workspace_id: Option<String>,
 }
 
 impl PlanScope {
@@ -240,22 +243,25 @@ pub(super) struct StopProcessRequest {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct AutostartPlan {
-    pub(super) resource_id: String,
-    pub(super) trigger_id: TriggerId,
-    pub(super) launch_plan_resource_id: String,
-    pub(super) function_id: FunctionId,
-    pub(super) candidate_resource_id: String,
-    pub(super) decision_resource_id: String,
-    pub(super) evidence_resource_ids: Vec<String>,
-    pub(super) target_visibility: VisibilityScope,
-    pub(super) workspace_id: Option<String>,
-    pub(super) expires_at: Option<String>,
-    pub(super) activation_reason: String,
+pub(in crate::engine::runtime) struct AutostartPlan {
+    pub(in crate::engine::runtime) resource_id: String,
+    pub(in crate::engine::runtime) trigger_id: TriggerId,
+    pub(in crate::engine::runtime) launch_plan_resource_id: String,
+    pub(in crate::engine::runtime) function_id: FunctionId,
+    pub(in crate::engine::runtime) candidate_resource_id: String,
+    pub(in crate::engine::runtime) decision_resource_id: String,
+    pub(in crate::engine::runtime) evidence_resource_ids: Vec<String>,
+    pub(in crate::engine::runtime) target_visibility: VisibilityScope,
+    pub(in crate::engine::runtime) workspace_id: Option<String>,
+    pub(in crate::engine::runtime) expires_at: Option<String>,
+    pub(in crate::engine::runtime) activation_reason: String,
 }
 
 impl AutostartPlan {
-    pub(super) fn from_payload(resource_id: &str, payload: &Value) -> Result<Self> {
+    pub(in crate::engine::runtime) fn from_payload(
+        resource_id: &str,
+        payload: &Value,
+    ) -> Result<Self> {
         reject_secret_material_in_value("worker autostart plan", payload)?;
         if payload_str(payload, "status")? != "reviewed" {
             return Err(EngineError::PolicyViolation(

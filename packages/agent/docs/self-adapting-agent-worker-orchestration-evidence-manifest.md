@@ -69,3 +69,7 @@ git status --short
   supervisor. `worker::launch_from_trigger` calls `worker::launch_activation`
   with a derived launch idempotency key and inherits direct-exec, no-restart,
   redacted process audit, and SAAWA readiness semantics.
+- SAAWSD composes scheduled wall-clock ticks over SAAWTL rather than adding a
+  scheduler-owned process launcher. The scheduler records ticks and queues
+  trigger dispatch; SAAWO remains the only direct-exec supervision path after
+  the queued trigger drains.

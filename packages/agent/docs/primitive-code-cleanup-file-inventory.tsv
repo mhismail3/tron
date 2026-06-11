@@ -391,6 +391,7 @@ packages/agent/src/engine/durability/mod.rs	retain	rust agent	PCC-10/AHA-9	Curre
 packages/agent/src/engine/durability/queue/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/queue/runtime.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/queue/sqlite_codec.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/engine/durability/resources/agent_record_definitions.rs	retain	rust agent	SAAWSD-11	Retained agent record schema helper split from resource definitions for file-budget compliance.
 packages/agent/src/engine/durability/resources/definitions.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/resources/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/durability/resources/store/memory.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1601,3 +1602,22 @@ packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.md	retai
 packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.tsv	retain	saawbh docs	SAAWBH-1	Worker bundle handoff machine-readable inventory retained for static gates.
 packages/agent/tests/self_adapting_agent_worker_bundle_handoff_invariants.rs	retain	saawbh rust test	SAAWBH-10	Worker bundle handoff invariant target retained for closeout verification.
 packages/agent/src/engine/runtime/worker_activation_bundle_vault.rs	retain	saawbh rust source	SAAWBH-3	Process-memory activation bundle vault retained as the ephemeral custody boundary.
+packages/agent/docs/self-adapting-agent-worker-trigger-launch-scorecard.md	retain	saawtl docs	SAAWTL-0	Worker trigger launch scorecard retained as completed closeout evidence.
+packages/agent/docs/self-adapting-agent-worker-trigger-launch-evidence-manifest.md	retain	saawtl docs	SAAWTL-0	Worker trigger launch evidence manifest retained for verification provenance.
+packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.md	retain	saawtl docs	SAAWTL-1	Worker trigger launch inventory summary retained for source taxonomy.
+packages/agent/docs/self-adapting-agent-worker-trigger-launch-inventory.tsv	retain	saawtl docs	SAAWTL-1	Worker trigger launch machine-readable inventory retained for static gates.
+packages/agent/tests/self_adapting_agent_worker_trigger_launch_invariants.rs	retain	saawtl rust test	SAAWTL-0	Worker trigger launch invariant target retained for closeout verification.
+packages/agent/src/engine/runtime/worker_orchestration/trigger_launch.rs	retain	saawtl rust source	SAAWTL-4	Trigger-created worker launch runtime retained as the trusted SAAWTL composition path.
+packages/agent/src/engine/tests/runtime/worker_trigger_launch.rs	retain	saawtl rust test	SAAWTL-5	Worker trigger launch runtime tests retained for enqueue drain and idempotency coverage.
+packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-scorecard.md	retain	saawsd docs	SAAWSD-0	Worker schedule dispatch scorecard retained as completed closeout evidence.
+packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-evidence-manifest.md	retain	saawsd docs	SAAWSD-0	Worker schedule dispatch evidence manifest retained for verification provenance.
+packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.md	retain	saawsd docs	SAAWSD-1	Worker schedule dispatch inventory summary retained for source taxonomy.
+packages/agent/docs/self-adapting-agent-worker-schedule-dispatch-inventory.tsv	retain	saawsd docs	SAAWSD-1	Worker schedule dispatch machine-readable inventory retained for static gates.
+packages/agent/src/engine/durability/resources/worker_schedule_definitions.rs	retain	saawsd rust source	SAAWSD-2	Worker schedule plan and tick resource schemas retained for governed schedule dispatch.
+packages/agent/src/engine/runtime/worker_schedule/mod.rs	retain	saawsd rust source	SAAWSD-3	Worker schedule runtime retained for due tick calculation, lease ownership, and trigger dispatch composition.
+packages/agent/src/engine/runtime/worker_schedule/contracts.rs	retain	saawsd rust source	SAAWSD-2	Worker schedule contract parser retained for UTC interval, fixed policy, and safe tick payload validation.
+packages/agent/src/engine/runtime/worker_schedule/overlap.rs	retain	saawsd rust source	SAAWSD-6	Worker schedule overlap evidence helper retained for one-active-tick replay and process-state checks.
+packages/agent/src/transport/runtime/worker_schedule.rs	retain	saawsd rust source	SAAWSD-3	Cancellable worker schedule polling service retained under transport runtime startup ownership.
+packages/agent/src/engine/tests/runtime/worker_schedule_dispatch.rs	retain	saawsd rust test	SAAWSD-11	Worker schedule dispatch runtime tests retained for due, replay, missed, overlap, and negative validation coverage.
+packages/agent/src/engine/tests/runtime/worker_schedule_dispatch_support.rs	retain	saawsd rust test	SAAWSD-11	Worker schedule dispatch test support retained for synthetic launch and resource fixtures.
+packages/agent/tests/self_adapting_agent_worker_schedule_dispatch_invariants.rs	retain	saawsd rust test	SAAWSD-11	Worker schedule dispatch invariant target retained for closeout static gates.

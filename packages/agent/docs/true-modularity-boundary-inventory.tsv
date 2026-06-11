@@ -372,6 +372,7 @@ packages/agent/src/engine/durability/queue/mod.rs	rust	facade	rust:engine	caller
 packages/agent/src/engine/durability/queue/runtime.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/durability/queue/sqlite_codec.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/durability/queue/sqlite_store.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/resources/agent_record_definitions.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/durability/resources/definitions.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/durability/resources/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
 packages/agent/src/engine/durability/resources/store/memory.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
@@ -945,3 +946,19 @@ packages/agent/src/engine/durability/ledger/sqlite_store/rows.rs	rust	implementa
 packages/agent/src/shared/protocol/model_audit.rs	rust	contract	agent:shared-protocol	provider request audit DTO contract
 packages/agent/src/shared/server/failure.rs	rust	contract	agent:shared-server	canonical server failure envelope contract used by transport, capability, and replay surfaces
 packages/ios-app/Sources/Engine/Protocol/Core/FailurePayload.swift	swift	contract	ios:engine-protocol	server-authored failure payload DTO decoded by protocol and event projection surfaces
+packages/agent/src/domains/capability/operations/resource.rs	rust	implementation	rust:domain-capability	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/invocation/host/promotion_governance.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/worker_activation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/primitives/worker_activation_governance.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/external_workers/activation.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/worker_activation_bundle_vault.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/worker_orchestration/contracts.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/worker_orchestration/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/runtime/worker_orchestration/process_resource.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/worker_orchestration/supervisor.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/worker_orchestration/trigger_launch.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/durability/resources/worker_schedule_definitions.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/worker_schedule/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
+packages/agent/src/engine/runtime/worker_schedule/contracts.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/runtime/worker_schedule/overlap.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/transport/runtime/worker_schedule.rs	rust	adapter	rust:transport	may depend inward on contracts and outward on one concrete external backend only

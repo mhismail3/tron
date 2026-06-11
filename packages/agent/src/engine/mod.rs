@@ -28,6 +28,8 @@
 //!   startup, and domain services.
 //! - [`EngineTriggerRuntime`] dispatches trigger-originated work through the
 //!   same canonical invocation lifecycle as direct requests.
+//! - [`EngineWorkerScheduleRuntime`] computes reviewed fixed-interval schedule
+//!   ticks and dispatches them through `trigger::dispatch` enqueue delivery.
 //! - [`EngineExternalWorkerRuntime`] owns loopback external-worker connection,
 //!   registration, health, and invocation proxy state.
 //!
@@ -100,6 +102,11 @@
 //!   on the queue item instead of living only in stream logs; queued
 //!   non-mutating worker transport failures retry through queue lifecycle truth
 //!   without committing a failed target invocation row.
+//! - worker schedule dispatch is wall-clock owned but launch-safe: reviewed
+//!   schedule plans create deterministic `worker_schedule_tick` audit resources,
+//!   use a narrow resource lease, enqueue `trigger::dispatch`, and rely on
+//!   `worker::launch_from_trigger` plus worker launch idempotency for activation
+//!   and process start.
 //!
 //! # INVARIANT: one production execution shape
 //!
@@ -196,6 +203,10 @@ pub use runtime::worker_protocol::{
     WorkerAuthPolicy, WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat,
     WorkerHello, WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
     WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
+};
+pub use runtime::worker_schedule::{
+    EngineWorkerScheduleRuntime, WORKER_SCHEDULE_PLAN_KIND, WORKER_SCHEDULE_PLAN_SCHEMA_ID,
+    WORKER_SCHEDULE_TICK_KIND, WORKER_SCHEDULE_TICK_SCHEMA_ID, WorkerScheduleDispatchSummary,
 };
 
 /// Return whether a grant id is one of the engine-owned bootstrap roots.
