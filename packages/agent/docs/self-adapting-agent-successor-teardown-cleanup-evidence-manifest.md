@@ -70,6 +70,11 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   governance refs and a SAPG static guard for the exact scope branch. This moves
   the promotion-governance SAASTC rows from conservative `simplify` to
   source-proven `retained` without closing the broader SAASTC authority row.
+- Removed `startupTimeoutMs` from the `worker::launch_from_trigger` request
+  schema and runtime payload pass-through. Trigger-created launches now inherit
+  startup timing only from the reviewed launch plan; focused runtime tests assert
+  the supervisor sees the reviewed timeout, and SAAWTL static gates reject a
+  trigger-payload timeout surface.
 
 ## Phase 2 Focused Commands
 
@@ -81,6 +86,8 @@ cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_c
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_authorship_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml promotion_governance --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_promotion_governance_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_trigger_launch --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_trigger_launch_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
 ```
 

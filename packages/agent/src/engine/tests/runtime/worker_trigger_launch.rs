@@ -55,6 +55,10 @@ async fn worker_trigger_launch_dispatch_issues_stdin_launch_once_and_replays_att
     let attempt_id = value["triggerLaunchAttemptResourceId"].as_str().unwrap();
     let request = fake.requests.lock().unwrap()[0].clone();
     assert!(request.had_secret_stdin);
+    assert_eq!(
+        request.startup_timeout_ms, 10000,
+        "trigger launch must use the reviewed launch plan timeout"
+    );
 
     let attempt_payload = resource_payload(&handle, attempt_id).await;
     assert_eq!(attempt_payload["status"], "ready_pending");
@@ -169,6 +173,7 @@ struct FakeSupervisor {
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RecordedStartRequest {
     had_secret_stdin: bool,
+    startup_timeout_ms: u128,
 }
 
 #[async_trait]
@@ -178,6 +183,7 @@ impl WorkerProcessSupervisor for FakeSupervisor {
         let process_id = request.process_resource_id.clone();
         self.requests.lock().unwrap().push(RecordedStartRequest {
             had_secret_stdin: request.secret_stdin.is_some(),
+            startup_timeout_ms: request.startup_timeout.as_millis(),
         });
         Ok(WorkerProcessStartResult {
             handle: WorkerProcessHandle {

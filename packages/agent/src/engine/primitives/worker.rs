@@ -334,7 +334,6 @@ fn launch_from_trigger_schema() -> Value {
         "additionalProperties": false,
         "properties": {
             "autostartPlanResourceId": {"type": "string", "minLength": 1},
-            "startupTimeoutMs": {"type": "integer", "minimum": 1},
             "launchReason": {"type": "string"}
         }
     })

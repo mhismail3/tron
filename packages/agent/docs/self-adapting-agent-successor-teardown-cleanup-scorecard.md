@@ -85,3 +85,6 @@ harness and full initial diff inventory.
   decision/evidence/candidate resources now require an admin-like actor before
   `engine::promote` can use them, so a workspace actor cannot borrow parent
   system governance refs to widen a session function.
+- Removed the trigger-launch timeout override. `worker::launch_from_trigger`
+  now accepts only reviewed autostart input plus optional launch reason; startup
+  timing comes from the reviewed launch plan, not trigger dispatch payload.

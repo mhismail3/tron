@@ -199,6 +199,15 @@ fn saawtl_source_enforces_trigger_only_stdin_launch() {
             "worker primitive missing {required}"
         );
     }
+    let trigger_schema = worker
+        .split("fn launch_from_trigger_schema() -> Value")
+        .nth(1)
+        .and_then(|tail| tail.split("fn stop_process_schema() -> Value").next())
+        .expect("worker primitive must define launch_from_trigger_schema");
+    assert!(
+        !trigger_schema.contains("startupTimeoutMs"),
+        "trigger-created launch must use reviewed launch plan timing only"
+    );
 
     let trigger_launch =
         read_repo_file("packages/agent/src/engine/runtime/worker_orchestration/trigger_launch.rs");
@@ -228,6 +237,7 @@ fn saawtl_source_enforces_trigger_only_stdin_launch() {
         "tron deploy",
         "set_var(",
         "activationBundle",
+        "startupTimeoutMs",
     ] {
         assert!(
             !trigger_launch.contains(forbidden),

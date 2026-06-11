@@ -20,7 +20,7 @@ This inventory covers the governed internal trigger-to-launch bridge. It include
 
 ## Boundary Summary
 
-`worker::launch_from_trigger` accepts only `autostartPlanResourceId`, optional `launchReason`, and optional `startupTimeoutMs`. The target idempotency key and trigger id must come from causal context supplied by trusted trigger dispatch. The runtime loads a reviewed autostart plan, validates the registered trigger target is exactly `worker::launch_from_trigger`, preflights the reviewed launch plan for stdin-only delivery, issues activation through `worker::issue_activation`, and launches through `worker::launch_activation`.
+`worker::launch_from_trigger` accepts only `autostartPlanResourceId` and optional `launchReason`. The target idempotency key and trigger id must come from causal context supplied by trusted trigger dispatch, and launch timing comes only from the reviewed launch plan. The runtime loads a reviewed autostart plan, validates the registered trigger target is exactly `worker::launch_from_trigger`, preflights the reviewed launch plan for stdin-only delivery, issues activation through `worker::issue_activation`, and launches through `worker::launch_activation`.
 
 Attempts are deterministic and redacted. Duplicate delivery by the same target idempotency key returns the existing attempt/process instead of issuing another activation, consuming another vault entry, or starting another process.
 

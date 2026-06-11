@@ -25,7 +25,6 @@ const LAUNCH_FROM_TRIGGER_FUNCTION: &str = "worker::launch_from_trigger";
 pub(super) struct TriggerLaunchRequest {
     autostart_plan_resource_id: String,
     launch_reason: Option<String>,
-    startup_timeout_ms: Option<u64>,
 }
 
 impl TriggerLaunchRequest {
@@ -36,7 +35,6 @@ impl TriggerLaunchRequest {
                 "autostartPlanResourceId",
             )?,
             launch_reason: optional_request_string(&invocation.payload, "launchReason")?,
-            startup_timeout_ms: optional_request_u64(&invocation.payload, "startupTimeoutMs")?,
         })
     }
 }
@@ -216,7 +214,6 @@ impl EngineWorkerOrchestrationRuntime {
                     &activation_resource_id,
                     &autostart.launch_plan_resource_id,
                     request.launch_reason.as_deref(),
-                    request.startup_timeout_ms,
                     &launch_idempotency_key,
                 ),
                 derived_context(&invocation.causal_context, &launch_idempotency_key),
@@ -478,19 +475,14 @@ fn launch_payload(
     activation_resource_id: &str,
     launch_plan_resource_id: &str,
     launch_reason: Option<&str>,
-    startup_timeout_ms: Option<u64>,
     idempotency_key: &str,
 ) -> Value {
-    let mut payload = json!({
+    json!({
         "activationResourceId": activation_resource_id,
         "launchPlanResourceId": launch_plan_resource_id,
         "launchReason": launch_reason.unwrap_or("trigger launch"),
         "idempotencyKey": idempotency_key,
-    });
-    if let Some(startup_timeout_ms) = startup_timeout_ms {
-        payload["startupTimeoutMs"] = json!(startup_timeout_ms);
-    }
-    payload
+    })
 }
 
 fn trigger_launch_attempt_payload(
@@ -605,18 +597,6 @@ fn optional_request_string(payload: &Value, field: &str) -> Result<Option<String
         ))),
         Some(other) => Err(EngineError::PolicyViolation(format!(
             "{field} must be a string, got {other}"
-        ))),
-    }
-}
-
-fn optional_request_u64(payload: &Value, field: &str) -> Result<Option<u64>> {
-    match payload.get(field) {
-        None | Some(Value::Null) => Ok(None),
-        Some(Value::Number(number)) => number.as_u64().map(Some).ok_or_else(|| {
-            EngineError::PolicyViolation(format!("{field} must be an unsigned integer"))
-        }),
-        Some(other) => Err(EngineError::PolicyViolation(format!(
-            "{field} must be an unsigned integer, got {other}"
         ))),
     }
 }
