@@ -41,6 +41,7 @@ run_tests() {
         provider_model_boundary_discipline_invariants
         performance_resource_governance_invariants
         configuration_profile_environment_discipline_invariants
+        release_install_upgrade_rollback_discipline_invariants
         observability_diagnostics_auditability_invariants
         data_integrity_storage_evolution_migration_discipline_invariants
         off_plan_successor_teardown_cleanup_invariants

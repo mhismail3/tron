@@ -117,12 +117,17 @@ cmd_preflight() {
         print_warning "Health check failed (server may be starting)"
     fi
 
-    # 7. No dev takeover
+    # 7. No conflicting port owner
     if ! service_is_running; then
-        local dev_pid
-        dev_pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
-        if [ -n "$dev_pid" ]; then
-            print_error "Dev takeover active (PID: $dev_pid) — stop with: tron dev --stop"
+        local listener_pid
+        listener_pid=$(listener_pid_for_port "$PROD_PORT")
+        if [ -n "$listener_pid" ]; then
+            if is_dev_server_pid "$listener_pid"; then
+                print_error "Dev takeover active (PID: $listener_pid) — stop with: tron dev --stop"
+            else
+                print_error "Port $PROD_PORT is occupied by a non-Tron-dev listener"
+                echo "  $(describe_port_owner "$PROD_PORT" "$listener_pid")"
+            fi
             all_ok=false
         fi
     fi
@@ -173,13 +178,19 @@ cmd_manual_deploy() {
     require_project_dir
     require_installed
 
-    # Abort if dev takeover is active
+    # Abort if dev takeover or an external listener owns the production port.
     if ! service_is_running; then
-        local dev_pid
-        dev_pid=$(lsof -t -i :$PROD_PORT -sTCP:LISTEN 2>/dev/null || true)
-        if [ -n "$dev_pid" ]; then
-            print_error "Dev server is running on port $PROD_PORT (PID: $dev_pid)"
-            echo "  Stop dev first with Ctrl+C or: tron dev --stop"
+        local listener_pid
+        listener_pid=$(listener_pid_for_port "$PROD_PORT")
+        if [ -n "$listener_pid" ]; then
+            if is_dev_server_pid "$listener_pid"; then
+                print_error "Dev server is running on port $PROD_PORT (PID: $listener_pid)"
+                echo "  Stop dev first with Ctrl+C or: tron dev --stop"
+            else
+                print_error "Port $PROD_PORT is occupied by an unknown process"
+                echo "  $(describe_port_owner "$PROD_PORT" "$listener_pid")"
+                echo "  Stop that process manually before running manual-deploy."
+            fi
             return 1
         fi
     fi

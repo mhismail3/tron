@@ -382,6 +382,20 @@ Current living entry points:
   local/CI gate wiring, HRA ownership rows, strict settings decode, transactional
   env overrides, default-profile drift, README settings docs, and Rust/Swift
   public settings parity.
+- `packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md`,
+  `packages/agent/docs/release-install-upgrade-rollback-discipline-evidence-manifest.md`,
+  `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md`, and
+  `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv`:
+  active Release / Install / Upgrade / Rollback Discipline artifacts covering
+  Mac wrapper install ownership, SMAppService/LaunchAgent semantics,
+  contributor CLI install/manual-deploy/rollback paths, `tron dev` takeover,
+  port `9847` conflict handling, generated project drift, stale-helper cleanup,
+  and clean-machine proof.
+- `packages/agent/tests/release_install_upgrade_rollback_discipline_invariants.rs`:
+  RUR guard for artifact wiring, inventory shape, local/CI gate wiring, HRA
+  ownership rows, production deploy automation absence, port-owner fail-closed
+  script behavior, manual deploy boundaries, generated project drift commands,
+  runtime cleanup preservation, and shell syntax.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -607,7 +621,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 
 | Command | Description |
 |---------|-------------|
-| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`, defaults dev logging to `RUST_LOG=info,ort=error` unless the caller already set `RUST_LOG`, waits up to 30 seconds for `/health` in background mode by default, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID and health state. |
+| `tron dev` | Start the dev-profile server in the foreground (`-b` build first, `-t` test first, `-d` launchd-backed background takeover). Stops the installed `com.tron.server` job before binding port `9847`, defaults dev logging to `RUST_LOG=info,ort=error` unless the caller already set `RUST_LOG`, waits up to 30 seconds for `/health` in background mode by default, writes startup/exit output to `~/.tron/internal/run/tron-dev-background.log`, and restores the installed helper through `/Applications/Tron.app` on exit/stop only after `/health` passes. If port `9847` remains owned by anything other than the verified `Tron-Dev.app` helper, dev takeover fails closed and reports the external listener instead of stopping or killing it. Agent automation should use `tron dev -bd --json --wait <seconds>` so the final stdout object reports the actual listener PID, `listenerIsDevServer`, and health state. |
 | `tron ci` | CI checks: any subset of `fmt`, `check`, `clippy`, `test`, `bench`, `doc`; the `test` step runs lib/bin tests, closeout invariant targets, primitive trace, database-path, and serial integration targets |
 | `tron bench` | Performance benchmarks (`run`, `bless`, `compare`) |
 | `tron version` | Central release version helper (`print`, `check`, `sync`, `bump`). `VERSION.env` is the only hand-edited release identity source; platform files are generated mirrors. |
@@ -629,7 +643,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron start` | Start `com.tron.server`. When `/Applications/Tron.app` is installed, this enters the wrapper's `--tron-start-server-and-quit` path so `SMAppService` owns production registration and success is reported only after `/health` passes; the older contributor `~/Library/LaunchAgents` path is used only when no installed Release wrapper is available. |
 | `tron stop` | Stop the service |
 | `tron restart` | Stop and start the service through the same health-gated path as `tron start`. |
-| `tron status` | Show service/dev-takeover status, PID, port, health, uptime, and stale dev pid-file diagnostics. Use `tron status --json` for deterministic automation. |
+| `tron status` | Show service/dev-takeover/external listener status, loaded-without-listener LaunchAgent state, PID, port, health, uptime, and stale dev pid-file diagnostics. Use `tron status --json` for deterministic automation. |
 | `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm) |
 | `tron login` | Authenticate with a provider (`--label <name>` for multi-account) |
 | `tron auth rotate` | Rotate the WebSocket bearer token (forces every paired iOS device to pair again) |
@@ -1379,7 +1393,7 @@ tron manual-deploy --ci     # Non-interactive: any failure aborts
 
 The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`) is retained for local contributor workflows:
 
-1. Aborts if a dev server is bound to the prod port.
+1. Aborts if a dev server or external listener is bound to the prod port.
 2. Warns on uncommitted changes (errors out under `--ci`).
 3. Builds the release binary (`cargo build --release`).
 4. Runs `cargo test`. Failures prompt for continuation unless `--ci`.
@@ -1436,6 +1450,8 @@ Base directories in the tree below are resolved through helpers in `packages/age
     |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`
     |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server
     |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle
+    |   +-- tron-dev-background.log Optional launchd-backed dev takeover log
+    |   +-- tron-dev-background.pid Optional launchd-backed dev takeover PID marker
         +-- worker.py              parakeet-mlx Python worker
         +-- requirements.txt       Pip deps for the venv
         +-- venv/                  Auto-created when enabled and the sidecar starts
@@ -1451,7 +1467,7 @@ Notes:
 
 The production Mac app registers `com.tron.server` with `SMAppService.agent(plistName: "com.tron.server.plist")`. The notarized app must live at `/Applications/Tron.app`; the bundled LaunchAgent lives inside the app at `Contents/Library/LaunchAgents/com.tron.server.plist`, and its `BundleProgram` points at `Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron` with `ProgramArguments` of `tron --port 9847 --quiet`. `AssociatedBundleIdentifiers` lists the wrapper bundle IDs (`com.tron.mac`, then `com.tron.mac.dev`) so Login Items/TCC attribution follows the responsible wrapper app. No production code writes `~/Library/LaunchAgents` or copies an app bundle into `~/.tron/internal/`. An enabled Login Item registration without a loaded launchd job is not treated as installed/running; the current app replaces that registration through SMAppService and still waits for the server heartbeat. If `launchctl print` reveals a stale event trigger pointing at a missing/mismatched helper executable, a stale parent bundle build number for the same installed app, stale launch constraints such as `needs LWCR update`, or a Debug/DerivedData parent owns the production label, the installed app boots it out, unregisters the stale registration, and re-registers `/Applications/Tron.app` before restarting.
 
-Local Release builds use the same path rule: copy the built `Tron.app` to `/Applications/Tron.app` before testing install/registration. If a DMG build is already installed, the local Release build replaces that same slot; reopen `/Applications/Tron.app` or run `tron start`/`tron restart` so the wrapper repairs SMAppService before launchd executes the bundled server. Start-like menu actions, command-mode starts, contributor CLI start/restart, and update finalization wait for `/health` after ServiceManagement reports loaded; the app-version marker is recorded only after that health gate succeeds. Loaded-but-unhealthy helpers remain visible failures until `/Applications/Tron.app` is updated or reinstalled. Default Debug Xcode builds use bundle ID `com.tron.mac.dev`, may run from DerivedData, and are companion-only: they can show the menu bar and observe the production server, but server pause/restart/uninstall/install actions are disabled. Use the `TronMac Isolated Install` scheme when testing the first-run/reinstall wizard from Xcode; it registers `com.tron.server.dev`, points `BundleProgram` at `Tron Server Dev.app`, runs on port `9848`, and stores data under `~/.tron-dev`. For agent-only iteration, `tron dev` stops the production LaunchAgent, binds port `9847`, and later restores the installed helper through the wrapper's internal `--tron-start-server-and-quit` command so ServiceManagement remains the only production registration path.
+Local Release builds use the same path rule: copy the built `Tron.app` to `/Applications/Tron.app` before testing install/registration. If a DMG build is already installed, the local Release build replaces that same slot; reopen `/Applications/Tron.app` or run `tron start`/`tron restart` so the wrapper repairs SMAppService before launchd executes the bundled server. Start-like menu actions, command-mode starts, contributor CLI start/restart, and update finalization wait for `/health` after ServiceManagement reports loaded; the app-version marker is recorded only after that health gate succeeds. Loaded-but-unhealthy helpers remain visible failures until `/Applications/Tron.app` is updated or reinstalled. Default Debug Xcode builds use bundle ID `com.tron.mac.dev`, may run from DerivedData, and are companion-only: they can show the menu bar and observe the production server, but server pause/restart/uninstall/install actions are disabled. Use the `TronMac Isolated Install` scheme when testing the first-run/reinstall wizard from Xcode; it registers `com.tron.server.dev`, points `BundleProgram` at `Tron Server Dev.app`, runs on port `9848`, and stores data under `~/.tron-dev`. For agent-only iteration, `tron dev` stops the production LaunchAgent, binds port `9847`, and later restores the installed helper through the wrapper's internal `--tron-start-server-and-quit` command so ServiceManagement remains the only production registration path. If an unknown process owns port `9847`, the CLI reports an external listener and refuses to stop or kill it.
 
 ### DMG Release Pipeline
 
@@ -1519,12 +1535,20 @@ tron ci clippy test          # Subset: linting + tests
 `public_protocol_api_contract_discipline_invariants`,
 `provider_model_boundary_discipline_invariants`,
 `performance_resource_governance_invariants`,
+`configuration_profile_environment_discipline_invariants`,
+`release_install_upgrade_rollback_discipline_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
 `off_plan_successor_teardown_cleanup_invariants`,
 `self_adapting_agent_authorship_invariants`, `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.
+
+Generated Apple projects are still verified outside the Rust target list:
+`cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj`
+checks the tracked iOS project, while
+`cd packages/mac-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/mac-app/TronMac.xcodeproj`
+checks the ignored/generated Mac project path.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

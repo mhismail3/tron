@@ -207,6 +207,61 @@ listener_pid_for_port() {
     lsof -nP -t -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | head -n 1 || true
 }
 
+process_command_for_pid() {
+    local pid="$1"
+    [ -n "$pid" ] || return 0
+    ps -p "$pid" -ww -o command= 2>/dev/null | head -n 1 || true
+}
+
+is_dev_server_pid() {
+    local pid="$1"
+    local command
+    command="$(process_command_for_pid "$pid")"
+    [[ "$command" == *"/Tron-Dev.app/Contents/MacOS/tron"* ]]
+}
+
+is_prod_server_pid() {
+    local pid="$1"
+    local command
+    command="$(process_command_for_pid "$pid")"
+    [[ "$command" == *"$INSTALLED_BINARY"* ]] \
+        || [[ "$command" == *"/Applications/Tron.app/Contents/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"* ]]
+}
+
+describe_port_owner() {
+    local port="${1:-$PROD_PORT}"
+    local pid="$2"
+    local command
+    command="$(process_command_for_pid "$pid")"
+    echo "PID: ${pid:-unknown}, command: ${command:-unknown}, port: $port"
+}
+
+refuse_unknown_port_owner() {
+    local port="${1:-$PROD_PORT}"
+    local pid="$2"
+    print_error "Port $port is occupied by an unknown process; refusing to stop or kill it."
+    echo "  $(describe_port_owner "$port" "$pid")"
+    echo "  Stop that process manually or free port $port before retrying."
+}
+
+stop_known_dev_server_pid() {
+    local pid="$1"
+    if ! is_dev_server_pid "$pid"; then
+        refuse_unknown_port_owner "$PROD_PORT" "$pid"
+        return 1
+    fi
+
+    kill "$pid" 2>/dev/null || true
+    sleep 2
+    if kill -0 "$pid" 2>/dev/null; then
+        if ! is_dev_server_pid "$pid"; then
+            refuse_unknown_port_owner "$PROD_PORT" "$pid"
+            return 1
+        fi
+        kill -9 "$pid" 2>/dev/null || true
+    fi
+}
+
 pid_uptime() {
     local pid="$1"
     [ -n "$pid" ] || return 0
@@ -233,7 +288,7 @@ cmd_status_json() {
 
     if service_is_running; then
         service_loaded=true
-        mode="prod"
+        mode="prod_loaded_no_listener"
     fi
     if launchd_is_loaded "$DEV_PLIST_NAME"; then
         dev_loaded=true
@@ -247,12 +302,12 @@ cmd_status_json() {
         pid_file_pid="$(cat "$DEV_BACKGROUND_PID_FILE" 2>/dev/null || true)"
     fi
     if [ -n "$listener_pid" ]; then
-        if [ "$service_loaded" = true ]; then
+        if is_dev_server_pid "$listener_pid"; then
+            mode="dev_takeover"
+        elif is_prod_server_pid "$listener_pid"; then
             mode="prod"
-        elif [ "$dev_loaded" = true ]; then
-            mode="dev_takeover"
         else
-            mode="dev_takeover"
+            mode="external_listener"
         fi
         uptime="$(pid_uptime "$listener_pid")"
     elif [ -n "$pid_file_pid" ]; then
@@ -287,6 +342,7 @@ print(json.dumps({
     "devLaunchdLoaded": os.environ["TRON_STATUS_DEV_LOADED"] == "true",
     "devLaunchdLabel": os.environ["TRON_STATUS_DEV_LABEL"],
     "listenerPid": int(pid) if pid and pid.isdigit() else None,
+    "listenerIsDevServer": os.environ["TRON_STATUS_MODE"] == "dev_takeover",
     "pidFilePid": int(pid_file_pid) if pid_file_pid and pid_file_pid.isdigit() else None,
     "pidFileStale": os.environ["TRON_STATUS_PID_FILE_STALE"] == "true",
     "healthy": os.environ["TRON_STATUS_HEALTHY"] == "true",
@@ -337,19 +393,35 @@ cmd_status() {
 
     if service_is_running; then
         local pid=$(get_service_pid)
-        print_success "Prod:    ${GREEN}RUNNING${NC} (PID: ${pid:-unknown})"
-        echo "  Server: http://localhost:$PROD_PORT"
-        echo "  Health: http://localhost:$PROD_PORT/health"
-
-        if [ -n "$pid" ] && [ "$pid" != "-" ]; then
-            local uptime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
-            [ -n "$uptime" ] && echo "  Uptime: $uptime"
-        fi
-
-        if health_check; then
-            echo -e "  Status: ${GREEN}Healthy${NC}"
+        if [ -z "$pid" ]; then
+            print_warning "Prod:    ${YELLOW}LOADED${NC}, but no listener is active on port $PROD_PORT"
+            echo "  LaunchAgent: $PLIST_NAME"
+            echo "  Server: http://localhost:$PROD_PORT"
+            echo "  Health: http://localhost:$PROD_PORT/health"
+            if health_check; then
+                echo -e "  Status: ${GREEN}Healthy${NC}"
+            else
+                echo -e "  Status: ${YELLOW}No listener observed${NC}"
+            fi
+        elif ! is_prod_server_pid "$pid"; then
+            print_warning "Prod:    ${YELLOW}LOADED${NC}, but port $PROD_PORT is owned by an external listener"
+            echo "  $(describe_port_owner "$PROD_PORT" "$pid")"
+            echo "  Tron will not report this listener as a production server."
         else
-            echo -e "  Status: ${YELLOW}Not responding${NC}"
+            print_success "Prod:    ${GREEN}RUNNING${NC} (PID: ${pid:-unknown})"
+            echo "  Server: http://localhost:$PROD_PORT"
+            echo "  Health: http://localhost:$PROD_PORT/health"
+
+            if [ -n "$pid" ] && [ "$pid" != "-" ]; then
+                local uptime=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+                [ -n "$uptime" ] && echo "  Uptime: $uptime"
+            fi
+
+            if health_check; then
+                echo -e "  Status: ${GREEN}Healthy${NC}"
+            else
+                echo -e "  Status: ${YELLOW}Not responding${NC}"
+            fi
         fi
 
         if [ -f "$DEPLOYED_COMMIT_FILE" ]; then
@@ -377,16 +449,23 @@ cmd_status() {
         local dev_pid
         dev_pid=$(listener_pid_for_port "$PROD_PORT")
         if [ -n "$dev_pid" ]; then
-            echo ""
-            print_success "Dev takeover: ${GREEN}ACTIVE${NC} (PID: $dev_pid)"
-            echo "  Server: http://localhost:$PROD_PORT"
-            echo "  Health: http://localhost:$PROD_PORT/health"
-            local dev_uptime=$(ps -o etime= -p "$dev_pid" 2>/dev/null | tr -d ' ')
-            [ -n "$dev_uptime" ] && echo "  Uptime: $dev_uptime"
-            if health_check; then
-                echo -e "  Status: ${GREEN}Healthy${NC}"
+            if is_dev_server_pid "$dev_pid"; then
+                echo ""
+                print_success "Dev takeover: ${GREEN}ACTIVE${NC} (PID: $dev_pid)"
+                echo "  Server: http://localhost:$PROD_PORT"
+                echo "  Health: http://localhost:$PROD_PORT/health"
+                local dev_uptime=$(ps -o etime= -p "$dev_pid" 2>/dev/null | tr -d ' ')
+                [ -n "$dev_uptime" ] && echo "  Uptime: $dev_uptime"
+                if health_check; then
+                    echo -e "  Status: ${GREEN}Healthy${NC}"
+                else
+                    echo -e "  Status: ${YELLOW}Not responding${NC}"
+                fi
             else
-                echo -e "  Status: ${YELLOW}Not responding${NC}"
+                echo ""
+                print_warning "External listener: ${YELLOW}PORT OCCUPIED${NC} (PID: $dev_pid)"
+                echo "  $(describe_port_owner "$PROD_PORT" "$dev_pid")"
+                echo "  Tron will not stop or replace an unknown port owner."
             fi
         elif launchd_is_loaded "$DEV_PLIST_NAME"; then
             echo ""
@@ -473,8 +552,19 @@ cmd_uninstall() {
         sleep 1
     fi
 
+    if launchd_is_loaded "$DEV_PLIST_NAME"; then
+        print_status "Stopping dev takeover launchd job..."
+        launchd_stop "$DEV_PLIST_NAME"
+    fi
+    local dev_pid
+    dev_pid=$(listener_pid_for_port "$PROD_PORT")
+    if [ -n "$dev_pid" ] && is_dev_server_pid "$dev_pid"; then
+        print_status "Stopping dev server (PID: $dev_pid)..."
+        stop_known_dev_server_pid "$dev_pid" || true
+    fi
+
     print_status "Removing launchd service..."
-    rm -f "$PLIST_PATH"
+    rm -f "$PLIST_PATH" "$DEV_PLIST_PATH"
 
     print_status "Removing CLI entrypoint..."
     rm -f "$BIN_DIR/tron"
@@ -490,7 +580,9 @@ cmd_uninstall() {
         "$CONTRIBUTOR_DIR/workspace-path" \
         "$CONTRIBUTOR_DIR/deployed-commit" \
         "$CONTRIBUTOR_DIR/last-deployment.json" \
-        "$CONTRIBUTOR_DIR/restart-sentinel.json"
+        "$CONTRIBUTOR_DIR/restart-sentinel.json" \
+        "$DEV_BACKGROUND_PID_FILE" \
+        "$DEV_BACKGROUND_LOG"
 
     print_status "Resetting Mac onboarding state..."
     rm -f "$ONBOARDED_MARKER_PATH"

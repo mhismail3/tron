@@ -156,10 +156,13 @@ dev_start_foreground() {
         local existing_pid
         existing_pid=$(lsof -t -i :"$PROD_PORT" -sTCP:LISTEN 2>/dev/null || true)
         print_error "Port $PROD_PORT still in use (PID: $existing_pid) after waiting"
-        print_status "Killing lingering process..."
-        kill -9 "$existing_pid" 2>/dev/null || true
-        sleep 1
-        if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
+        if [ -n "$existing_pid" ] && is_dev_server_pid "$existing_pid"; then
+            print_status "Stopping lingering dev process..."
+            stop_known_dev_server_pid "$existing_pid" || true
+        else
+            refuse_unknown_port_owner "$PROD_PORT" "$existing_pid"
+        fi
+        if ! wait_for_port_free "$PROD_PORT" 4; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
             restart_installed_service_after_dev 12
             return 1
@@ -213,10 +216,13 @@ dev_start_background() {
         local existing_pid
         existing_pid=$(lsof -t -i :"$PROD_PORT" -sTCP:LISTEN 2>/dev/null || true)
         print_error "Port $PROD_PORT still in use (PID: $existing_pid) after waiting"
-        print_status "Killing lingering process..."
-        kill -9 "$existing_pid" 2>/dev/null || true
-        sleep 1
-        if lsof -t -i :"$PROD_PORT" -sTCP:LISTEN &>/dev/null; then
+        if [ -n "$existing_pid" ] && is_dev_server_pid "$existing_pid"; then
+            print_status "Stopping lingering dev process..."
+            stop_known_dev_server_pid "$existing_pid" || true
+        else
+            refuse_unknown_port_owner "$PROD_PORT" "$existing_pid"
+        fi
+        if ! wait_for_port_free "$PROD_PORT" 4; then
             print_error "Port $PROD_PORT still in use, cannot proceed"
             restart_installed_service_after_dev 12
             return 1
@@ -327,13 +333,13 @@ dev_stop() {
     local pid
     pid=$(listener_pid_for_port "$PROD_PORT")
     if [ -n "$pid" ]; then
+        if ! is_dev_server_pid "$pid"; then
+            refuse_unknown_port_owner "$PROD_PORT" "$pid"
+            return 1
+        fi
         print_status "Stopping dev server (PID: $pid)..."
         launchd_stop "$DEV_PLIST_NAME"
-        kill "$pid" 2>/dev/null || true
-        sleep 2
-        if kill -0 "$pid" 2>/dev/null; then
-            kill -9 "$pid" 2>/dev/null || true
-        fi
+        stop_known_dev_server_pid "$pid" || return 1
         print_success "Dev server stopped"
         rm -f "$DEV_BACKGROUND_PID_FILE"
         # The EXIT trap in the dev process should restart the installed helper.

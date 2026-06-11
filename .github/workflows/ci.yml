@@ -146,6 +146,7 @@ jobs:
           cargo test --test provider_model_boundary_discipline_invariants -- --quiet
           cargo test --test performance_resource_governance_invariants -- --quiet
           cargo test --test configuration_profile_environment_discipline_invariants -- --quiet
+          cargo test --test release_install_upgrade_rollback_discipline_invariants -- --quiet
           cargo test --test observability_diagnostics_auditability_invariants -- --quiet
           cargo test --test data_integrity_storage_evolution_migration_discipline_invariants -- --quiet
           cargo test --test off_plan_successor_teardown_cleanup_invariants -- --quiet

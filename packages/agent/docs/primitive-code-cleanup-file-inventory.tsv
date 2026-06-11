@@ -1599,6 +1599,11 @@ packages/agent/docs/configuration-profile-environment-discipline-inventory.md	re
 packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv	retain	cpe docs	CPE-1	Current Configuration Profile Environment Discipline machine-readable inventory retained after final closeout.
 packages/agent/docs/configuration-profile-environment-discipline-scorecard.md	retain	cpe docs	CPE-10	Current Configuration Profile Environment Discipline scorecard retained after final closeout.
 packages/agent/tests/configuration_profile_environment_discipline_invariants.rs	retain	cpe rust test	CPE-0	Current Configuration Profile Environment Discipline invariant target retained after final closeout.
+packages/agent/docs/release-install-upgrade-rollback-discipline-evidence-manifest.md	retain	rur docs	RUR-10	Current Release Install Upgrade Rollback Discipline evidence manifest retained for final closeout proof.
+packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md	retain	rur docs	RUR-1	Current Release Install Upgrade Rollback Discipline inventory retained for release/install ownership proof.
+packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv	retain	rur docs	RUR-1	Current Release Install Upgrade Rollback Discipline machine-readable inventory retained for release/install ownership proof.
+packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md	retain	rur docs	RUR-10	Current Release Install Upgrade Rollback Discipline scorecard retained for final closeout proof.
+packages/agent/tests/release_install_upgrade_rollback_discipline_invariants.rs	retain	rur rust test	RUR-0	Current Release Install Upgrade Rollback Discipline invariant target retained for local and CI static gates.
 packages/agent/src/domains/agent/loop/orchestrator/streaming_journal/tests.rs	retain	agent runtime test	TPC-10	Streaming journal tests split into a tracked submodule to preserve hard file budgets.
 packages/agent/src/domains/model/providers/google/stream_handler/tests.rs	retain	model provider test	TPC-10	Google stream handler tests split into a tracked submodule to preserve hard file budgets.
 packages/agent/src/domains/model/providers/shared/stream_common/tests.rs	retain	model provider test	TPC-10	Shared stream accumulator tests split into a tracked submodule to preserve hard file budgets.
