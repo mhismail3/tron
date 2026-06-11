@@ -55,6 +55,9 @@
 //! - Provider-native wire formats are converted before they reach canonical
 //!   capability history.
 //! - Malformed provider capability arguments fail closed at the stream boundary.
+//! - Provider stream parsers and accumulators enforce bounded line, content,
+//!   signature, and capability-argument retention before yielding canonical
+//!   stream events.
 //! - Provider-derived retry, failure, log, and audit surfaces are redacted and
 //!   provider audit payloads are bounded before persistence.
 //!

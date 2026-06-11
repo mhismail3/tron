@@ -27,6 +27,8 @@ use crate::domains::model::providers::shared::compose_context_parts;
 use crate::domains::model::providers::shared::provider::{
     Provider, ProviderError, ProviderResult, ProviderStreamOptions, StreamEventStream,
 };
+use crate::domains::model::providers::shared::sse::DEFAULT_MAX_SSE_LINE_BYTES;
+use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::Context;
 use crate::shared::protocol::model_audit::ProviderAuditPayload;
 
@@ -308,11 +310,27 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
                 >,
             OllamaStreamState::new(),
             BytesMut::with_capacity(8192),
+            false,
         ),
-        |(mut stream, mut state, mut buffer)| async move {
+        |(mut stream, mut state, mut buffer, done)| async move {
+            if done {
+                return None;
+            }
             loop {
                 // Check buffer for a complete line
                 if let Some(newline_pos) = buffer.iter().position(|&b| b == b'\n') {
+                    if newline_pos > DEFAULT_MAX_SSE_LINE_BYTES {
+                        buffer.clear();
+                        return Some((
+                            vec![StreamEvent::Error {
+                                error: format!(
+                                    "Ollama NDJSON line exceeded {} byte limit",
+                                    DEFAULT_MAX_SSE_LINE_BYTES
+                                ),
+                            }],
+                            (stream, state, buffer, true),
+                        ));
+                    }
                     let line_bytes = buffer.split_to(newline_pos + 1);
                     let line = match std::str::from_utf8(&line_bytes) {
                         Ok(s) => s.trim(),
@@ -336,7 +354,7 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
 
                     let events = process_chunk(&chunk, &mut state);
                     if !events.is_empty() {
-                        return Some((events, (stream, state, buffer)));
+                        return Some((events, (stream, state, buffer, false)));
                     }
                     continue;
                 }
@@ -345,6 +363,18 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
                 match StreamExt::next(&mut stream).await {
                     Some(Ok(bytes)) => {
                         buffer.extend_from_slice(&bytes);
+                        if buffer.len() > DEFAULT_MAX_SSE_LINE_BYTES && !buffer.contains(&b'\n') {
+                            buffer.clear();
+                            return Some((
+                                vec![StreamEvent::Error {
+                                    error: format!(
+                                        "Ollama NDJSON line exceeded {} byte limit",
+                                        DEFAULT_MAX_SSE_LINE_BYTES
+                                    ),
+                                }],
+                                (stream, state, buffer, true),
+                            ));
+                        }
                     }
                     Some(Err(e)) => {
                         tracing::warn!("Ollama NDJSON stream read error: {e}");
@@ -353,6 +383,18 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
                     None => {
                         // Stream ended — process remaining buffer
                         if !buffer.is_empty() {
+                            if buffer.len() > DEFAULT_MAX_SSE_LINE_BYTES {
+                                buffer.clear();
+                                return Some((
+                                    vec![StreamEvent::Error {
+                                        error: format!(
+                                            "Ollama NDJSON line exceeded {} byte limit",
+                                            DEFAULT_MAX_SSE_LINE_BYTES
+                                        ),
+                                    }],
+                                    (stream, state, buffer, true),
+                                ));
+                            }
                             let line = match std::str::from_utf8(&buffer) {
                                 Ok(s) => s.trim(),
                                 Err(_) => return None,
@@ -362,7 +404,7 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
                                     let events = process_chunk(&chunk, &mut state);
                                     if !events.is_empty() {
                                         buffer.clear();
-                                        return Some((events, (stream, state, buffer)));
+                                        return Some((events, (stream, state, buffer, true)));
                                     }
                                 }
                             }

@@ -4,7 +4,8 @@
 //! Durable log storage is accessed through the event-store facade so request
 //! translation stays separate from SQL/backend details. Recent-log reads are
 //! bounded and may be narrowed by session, workspace, and trace identifiers;
-//! the event-store owner applies those predicates before rows are returned.
+//! the event-store owner applies those predicates before rows are returned. The
+//! CLI log reader mirrors the same server-owned maximum row count.
 
 use crate::domains::registration::bindings::operation_bindings;
 use crate::domains::registration::catalog::CapabilitySpec;

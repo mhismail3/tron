@@ -62,6 +62,7 @@ const TOKEN_EXPIRY_BUFFER_MS: i64 = 300 * 1000;
 static SSE_OPTIONS: crate::domains::model::providers::shared::SseParserOptions =
     crate::domains::model::providers::shared::SseParserOptions {
         process_remaining_buffer: false,
+        max_line_bytes: crate::domains::model::providers::shared::sse::DEFAULT_MAX_SSE_LINE_BYTES,
     };
 
 // ─────────────────────────────────────────────────────────────────────────────

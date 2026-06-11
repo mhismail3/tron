@@ -93,6 +93,7 @@ hard limit without review.
 | `packages/agent/src/engine/invocation/host/mod.rs` | 880 | engine invocation owner | Keep host type boundary in root; move new catalog/substrate/invocation/meta behavior into existing host helper modules. | watch |
 | `packages/agent/src/engine/runtime/external_workers/mod.rs` | 855 | engine runtime owner | Move new proxy, lifecycle, or protocol-specific behavior out before it approaches the 900 LOC hard limit. | watch |
 | `packages/agent/src/transport/engine/socket/mod.rs` | 873 | engine transport owner | Keep WebSocket session boundary in root; move new wire/projection/outbound behavior into existing socket helper modules. | watch |
+| `packages/agent/src/domains/model/providers/shared/stream_common.rs` | 892 | model providers owner | Keep accumulator contracts in place; move new provider stream tests or helper behavior into provider-owned modules before approaching the 900 LOC hard limit. | watch |
 
 ## Swift Near-Budget Watchlist
 

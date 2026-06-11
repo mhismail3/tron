@@ -92,3 +92,4 @@ with a concrete split plan before PAC-7 can close.
 | Path | Current LOC | Owner | Concrete split plan | Status |
 |------|-------------|-------|---------------------|--------|
 | `packages/agent/src/engine/catalog/registry/mod.rs` | 895 | engine catalog registry owner | concrete split plan: keep the revisioned registry type and public mutation/query boundary in `registry/mod.rs`; move the next new catalog-change projection, idempotency registration helper, or function query helper into a focused sibling module before adding behavior here. | watch |
+| `packages/agent/src/domains/model/providers/shared/stream_common.rs` | 892 | model provider shared owner | concrete split plan: keep the provider-neutral accumulator contract and public limit constants in `stream_common.rs`; move the next new provider-specific stream behavior or accumulator regression coverage into provider-owned stream handler tests before adding behavior here. | watch |

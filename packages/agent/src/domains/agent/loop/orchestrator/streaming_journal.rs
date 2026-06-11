@@ -31,6 +31,12 @@ use tracing::{debug, trace, warn};
 
 use crate::shared::foundation::paths;
 
+/// Maximum bytes retained in one per-turn streaming journal WAL.
+pub const MAX_STREAMING_JOURNAL_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_RECOVERED_TEXT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_RECOVERED_THINKING_BYTES: usize = 4 * 1024 * 1024;
+const MAX_RECOVERED_CAPABILITY_INVOCATIONS: usize = 64;
+
 /// A single delta entry in the journal WAL.
 #[derive(Debug, Serialize, Deserialize)]
 struct JournalEntry {
@@ -91,6 +97,8 @@ impl StreamingJournal {
         let mut line =
             serde_json::to_string(&entry).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
         line.push('\n');
+        let current_len = self.file.metadata()?.len();
+        ensure_journal_size_budget(current_len, line.len())?;
         self.file.write_all(line.as_bytes())?;
         self.file.flush()?;
         trace!(
@@ -140,6 +148,16 @@ impl StreamingJournal {
             debug!(session_id, turn, "empty journal found, skipping recovery");
             return Ok(None);
         }
+        if metadata.len() > MAX_STREAMING_JOURNAL_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "streaming journal exceeds {} byte limit: {} bytes",
+                    MAX_STREAMING_JOURNAL_BYTES,
+                    metadata.len()
+                ),
+            ));
+        }
 
         let reader = BufReader::new(file);
         let mut text = String::new();
@@ -181,9 +199,34 @@ impl StreamingJournal {
             };
 
             match entry.t.as_str() {
-                "text" => text.push_str(&entry.c),
-                "thinking" => thinking.push_str(&entry.c),
+                "text" => {
+                    ensure_recovered_size_budget(
+                        text.len(),
+                        entry.c.len(),
+                        MAX_RECOVERED_TEXT_BYTES,
+                        "text",
+                    )?;
+                    text.push_str(&entry.c);
+                }
+                "thinking" => {
+                    ensure_recovered_size_budget(
+                        thinking.len(),
+                        entry.c.len(),
+                        MAX_RECOVERED_THINKING_BYTES,
+                        "thinking",
+                    )?;
+                    thinking.push_str(&entry.c);
+                }
                 "capability_invocation" => {
+                    if capability_invocations.len() >= MAX_RECOVERED_CAPABILITY_INVOCATIONS {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!(
+                                "streaming journal capability invocations exceed {} item limit",
+                                MAX_RECOVERED_CAPABILITY_INVOCATIONS
+                            ),
+                        ));
+                    }
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&entry.c) {
                         capability_invocations.push(val);
                     }
@@ -281,6 +324,38 @@ impl StreamingJournal {
     }
 }
 
+fn ensure_journal_size_budget(current_len: u64, additional_len: usize) -> io::Result<()> {
+    let attempted = current_len.saturating_add(u64::try_from(additional_len).unwrap_or(u64::MAX));
+    if attempted > MAX_STREAMING_JOURNAL_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "streaming journal exceeds {} byte limit (attempted {} bytes)",
+                MAX_STREAMING_JOURNAL_BYTES, attempted
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn ensure_recovered_size_budget(
+    current_len: usize,
+    additional_len: usize,
+    max_len: usize,
+    field: &'static str,
+) -> io::Result<()> {
+    let attempted = current_len.saturating_add(additional_len);
+    if attempted > max_len {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "streaming journal recovered {field} exceeds {max_len} byte limit (attempted {attempted} bytes)"
+            ),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -361,6 +436,32 @@ mod tests {
         let e3: JournalEntry = serde_json::from_str(lines[2]).unwrap();
         assert_eq!(e3.t, "thinking");
         assert_eq!(e3.c, "Let me think...");
+    }
+
+    #[test]
+    fn test_append_delta_rejects_journal_over_byte_limit() {
+        let tmp = TempDir::new().unwrap();
+        let session_id = "test-session-over-budget";
+        let path = test_journal_path(tmp.path(), session_id, 1);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
+        file.set_len(MAX_STREAMING_JOURNAL_BYTES).unwrap();
+
+        let mut journal = StreamingJournal {
+            file,
+            path,
+            session_id: session_id.to_string(),
+            turn: 1,
+        };
+
+        let error = journal.append_delta("text", "x").unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(error.to_string().contains("streaming journal exceeds"));
     }
 
     // ── Test 3: finalize_deletes_file ─────────────────────────────────────
@@ -498,6 +599,13 @@ mod tests {
         let metadata = file.metadata().unwrap();
         assert_eq!(metadata.len(), 0);
         // Empty file → should return None in load_recovery
+    }
+
+    #[test]
+    fn test_load_recovery_rejects_oversized_metadata_before_accumulating() {
+        let attempted = ensure_journal_size_budget(MAX_STREAMING_JOURNAL_BYTES, 1).unwrap_err();
+        assert_eq!(attempted.kind(), io::ErrorKind::InvalidData);
+        assert!(attempted.to_string().contains("streaming journal exceeds"));
     }
 
     // ── Test 8: load_recovery_partial_line_skipped ────────────────────────

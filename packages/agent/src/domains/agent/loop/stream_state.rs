@@ -23,6 +23,10 @@ use crate::domains::agent::r#loop::errors::RuntimeError;
 use crate::domains::agent::r#loop::event_emitter::EventEmitter;
 use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
 
+const MAX_AGENT_STREAM_TEXT_BYTES: usize = 4 * 1024 * 1024;
+const MAX_AGENT_STREAM_THINKING_BYTES: usize = 4 * 1024 * 1024;
+const MAX_AGENT_STREAM_TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
+
 /// What `process_stream` should do after handling one event.
 pub(super) enum StreamAction {
     /// Keep reading the stream.
@@ -400,6 +404,14 @@ impl StreamState {
     ) -> StreamAction {
         match stream_event {
             StreamEvent::TextDelta { delta } => {
+                if let Err(error) = ensure_append_within_limit(
+                    self.text_acc.len(),
+                    delta.len(),
+                    MAX_AGENT_STREAM_TEXT_BYTES,
+                    "text",
+                ) {
+                    return StreamAction::Err(error);
+                }
                 if let Some(j) = journal {
                     if let Err(e) = j.append_delta("text", &delta) {
                         tracing::warn!(session_id, error = %e, "journal write failed for text delta");
@@ -427,6 +439,14 @@ impl StreamState {
             }
 
             StreamEvent::ThinkingDelta { delta } => {
+                if let Err(error) = ensure_append_within_limit(
+                    self.thinking_acc.len(),
+                    delta.len(),
+                    MAX_AGENT_STREAM_THINKING_BYTES,
+                    "thinking",
+                ) {
+                    return StreamAction::Err(error);
+                }
                 if let Some(j) = journal {
                     if let Err(e) = j.append_delta("thinking", &delta) {
                         tracing::warn!(session_id, error = %e, "journal write failed for thinking delta");
@@ -445,6 +465,13 @@ impl StreamState {
                 thinking,
                 signature,
             } => {
+                if let Err(error) = ensure_full_value_within_limit(
+                    thinking.len(),
+                    MAX_AGENT_STREAM_THINKING_BYTES,
+                    "thinking",
+                ) {
+                    return StreamAction::Err(error);
+                }
                 tracing::debug!(
                     session_id,
                     thinking_len = thinking.len(),
@@ -478,6 +505,14 @@ impl StreamState {
                 invocation_id,
                 arguments_delta,
             } => {
+                if let Err(error) = ensure_append_within_limit(
+                    self.current_capability_args.len(),
+                    arguments_delta.len(),
+                    MAX_AGENT_STREAM_TOOL_ARGUMENT_BYTES,
+                    "capability arguments",
+                ) {
+                    return StreamAction::Err(error);
+                }
                 self.handle_capability_invocation_delta(
                     invocation_id,
                     arguments_delta,
@@ -491,6 +526,11 @@ impl StreamState {
             StreamEvent::CapabilityInvocationDraftEnd {
                 capability_invocation,
             } => {
+                if let Err(error) =
+                    ensure_capability_arguments_within_limit(&capability_invocation.arguments)
+                {
+                    return StreamAction::Err(error);
+                }
                 if let Some(j) = journal {
                     if let Ok(serialized) = serde_json::to_string(&capability_invocation) {
                         if let Err(e) = j.append_delta("capability_invocation", &serialized) {
@@ -567,6 +607,42 @@ impl StreamState {
         }
         StreamAction::Continue
     }
+}
+
+fn ensure_append_within_limit(
+    current_bytes: usize,
+    delta_bytes: usize,
+    max_bytes: usize,
+    field: &'static str,
+) -> Result<(), RuntimeError> {
+    let attempted = current_bytes.saturating_add(delta_bytes);
+    ensure_full_value_within_limit(attempted, max_bytes, field)
+}
+
+fn ensure_full_value_within_limit(
+    attempted_bytes: usize,
+    max_bytes: usize,
+    field: &'static str,
+) -> Result<(), RuntimeError> {
+    if attempted_bytes > max_bytes {
+        return Err(RuntimeError::Internal(format!(
+            "agent stream {field} exceeded {max_bytes} byte limit (attempted {attempted_bytes} bytes)"
+        )));
+    }
+    Ok(())
+}
+
+fn ensure_capability_arguments_within_limit(
+    arguments: &Map<String, serde_json::Value>,
+) -> Result<(), RuntimeError> {
+    let bytes = serde_json::to_vec(arguments).map_err(|error| {
+        RuntimeError::Internal(format!("serialize capability arguments: {error}"))
+    })?;
+    ensure_full_value_within_limit(
+        bytes.len(),
+        MAX_AGENT_STREAM_TOOL_ARGUMENT_BYTES,
+        "capability arguments",
+    )
 }
 
 fn capability_invocation_stops_turn(

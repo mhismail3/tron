@@ -19,7 +19,7 @@ Invariant target:
 ## Source Inspection
 
 - Read the original campaign plan attachment at
-  `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5-57839c35bfee/pasted-text.txt`;
+  `/Users/<USER>/.codex/attachments/fdc4e780-354b-4da4-8fb5-57839c35bfee/pasted-text.txt`;
   it identifies Provider / Model Boundary Discipline as one of the original
   remaining hardening slices.
 - Inspected model domain roots, provider shared helpers, concrete provider

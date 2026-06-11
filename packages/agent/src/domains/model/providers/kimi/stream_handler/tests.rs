@@ -524,6 +524,37 @@ fn malformed_capability_invocation_arguments_fail_closed() {
 }
 
 #[test]
+fn capability_invocation_index_over_limit_fails_closed() {
+    let mut state = KimiStreamState::new();
+    let chunk = ChatCompletionChunk {
+        choices: vec![ChunkChoice {
+            delta: ChunkDelta {
+                content: None,
+                reasoning_content: None,
+                capability_invocations: Some(vec![ChunkCapabilityInvocationDraft {
+                    index: MAX_PROVIDER_STREAM_TOOL_INVOCATIONS as u32,
+                    id: Some("call_over".into()),
+                    function: Some(ChunkCapabilityInvocationDraftFunction {
+                        name: Some("execute".into()),
+                        arguments: Some("{}".into()),
+                    }),
+                }]),
+            },
+            finish_reason: None,
+        }],
+        usage: None,
+    };
+
+    let events = process_chunk(&chunk, &mut state);
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, StreamEvent::Error { error } if error.contains("capability invocations exceeded")))
+    );
+    assert!(state.failed);
+}
+
+#[test]
 fn separate_finish_and_usage_chunks() {
     let mut state = KimiStreamState::new();
     let _ = process_chunk(&text_chunk("hi"), &mut state);

@@ -40,6 +40,9 @@
 //! - Stream wrappers preserve cancellation and retry events without altering
 //!   provider-native parsing semantics; retry and parse diagnostics redact
 //!   provider-derived secret-looking text.
+//! - Shared stream parsers and accumulators enforce owner-local line, text,
+//!   thinking, signature, tool-argument, and tool-count ceilings before
+//!   retaining provider data.
 //! - Health tracking is advisory routing state, not an authority source.
 //!
 //! ## Test Ownership

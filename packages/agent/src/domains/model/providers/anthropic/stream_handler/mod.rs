@@ -11,7 +11,9 @@
 
 use tracing::{debug, warn};
 
-use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
+use crate::domains::model::providers::shared::stream_common::{
+    StreamAccumulator, stream_limit_error_event,
+};
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
 use crate::shared::protocol::messages::TokenUsage;
@@ -140,19 +142,25 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
 
         AnthropicSseEvent::ContentBlockDelta { delta, .. } => match delta {
             SseDelta::TextDelta { text } => {
-                state.acc.accumulate_text(text);
+                if let Err(error) = state.acc.try_accumulate_text(text) {
+                    return vec![stream_limit_error_event(error)];
+                }
                 vec![StreamEvent::TextDelta {
                     delta: text.clone(),
                 }]
             }
             SseDelta::ThinkingDelta { thinking } => {
-                state.acc.accumulate_thinking(thinking);
+                if let Err(error) = state.acc.try_accumulate_thinking(thinking) {
+                    return vec![stream_limit_error_event(error)];
+                }
                 vec![StreamEvent::ThinkingDelta {
                     delta: thinking.clone(),
                 }]
             }
             SseDelta::SignatureDelta { signature } => {
-                state.acc.accumulate_signature(signature);
+                if let Err(error) = state.acc.try_accumulate_signature(signature) {
+                    return vec![stream_limit_error_event(error)];
+                }
                 vec![]
             }
             SseDelta::InputJsonDelta { partial_json } => {

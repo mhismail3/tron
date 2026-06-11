@@ -5,6 +5,8 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
+pub(super) const OUTBOUND_SEND_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(250);
+
 pub(super) fn send_engine_ws_value(out_tx: &mpsc::Sender<String>, value: Value) -> bool {
     let mut value = value;
     remove_null_transport_fields(&mut value);
@@ -17,7 +19,7 @@ pub(super) fn send_engine_ws_value(out_tx: &mpsc::Sender<String>, value: Value) 
     };
     match out_tx.try_send(json) {
         Ok(()) => true,
-        Err(mpsc::error::TrySendError::Full(_)) => {
+        Err(mpsc::error::TrySendError::Full(_json)) => {
             counter!("engine_ws_overload_total").increment(1);
             tracing::warn!("engine WebSocket outbound queue overloaded; closing connection");
             false
@@ -40,14 +42,29 @@ pub(super) async fn send_engine_ws_value_async(
             return false;
         }
     };
+    let json = match out_tx.try_send(json) {
+        Ok(()) => return true,
+        Err(mpsc::error::TrySendError::Full(json)) => json,
+        Err(mpsc::error::TrySendError::Closed(_)) => return false,
+    };
     tokio::select! {
         () = cancel.cancelled() => false,
-        result = out_tx.send(json) => {
-            if result.is_err() {
-                tracing::debug!("engine WebSocket outbound queue closed while sending stream event");
-                return false;
+        result = tokio::time::timeout(OUTBOUND_SEND_TIMEOUT, out_tx.send(json)) => {
+            match result {
+                Ok(Ok(())) => true,
+                Ok(Err(_)) => {
+                    tracing::debug!("engine WebSocket outbound queue closed while sending stream event");
+                    false
+                }
+                Err(_) => {
+                    counter!("engine_ws_overload_total").increment(1);
+                    tracing::warn!(
+                        timeout_ms = OUTBOUND_SEND_TIMEOUT.as_millis(),
+                        "engine WebSocket outbound queue stayed full; closing slow consumer"
+                    );
+                    false
+                }
             }
-            true
         }
     }
 }

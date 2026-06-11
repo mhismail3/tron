@@ -49,9 +49,11 @@
 //!
 //! Each active LLM turn writes streaming deltas to a journal file at
 //! `~/.tron/internal/database/journals/{session_id}/turn_{n}.wal`. On normal
-//! completion the journal is deleted. If the server crashes mid-turn, orphaned
-//! journals are recovered on next startup by `recovery::recover_incomplete_turns`,
-//! which persists partial content as assistant messages before accepting connections.
+//! completion the journal is deleted. Each WAL has a hard byte ceiling, and
+//! recovery also caps accumulated text, thinking, and capability-invocation
+//! counts. If the server crashes mid-turn, orphaned journals are recovered on
+//! next startup by `recovery::recover_incomplete_turns`, which persists partial
+//! content as assistant messages before accepting connections.
 //!
 //! ## Invariants
 //!
@@ -59,7 +61,8 @@
 //!   event-store truth before runtime persistence.
 //! - Active runs must hold a registry permit and remove their active session
 //!   entry on drop.
-//! - Streaming journal recovery runs before accepting new connections.
+//! - Streaming journal recovery runs before accepting new connections and
+//!   rejects oversized journal content before accumulating it in memory.
 //!
 //! ## Test Ownership
 //!

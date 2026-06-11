@@ -14,6 +14,89 @@ use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_ca
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::CapabilityInvocationDraft;
 
+/// Maximum accumulated assistant text bytes retained for one provider stream.
+pub const MAX_PROVIDER_STREAM_TEXT_BYTES: usize = 4 * 1024 * 1024;
+/// Maximum accumulated thinking bytes retained for one provider stream.
+pub const MAX_PROVIDER_STREAM_THINKING_BYTES: usize = 4 * 1024 * 1024;
+/// Maximum accumulated provider thinking signature bytes retained per stream.
+pub const MAX_PROVIDER_STREAM_SIGNATURE_BYTES: usize = 256 * 1024;
+/// Maximum accumulated JSON argument bytes retained for one capability draft.
+pub const MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES: usize = 1024 * 1024;
+/// Maximum concurrently accumulated capability drafts in one provider stream.
+pub const MAX_PROVIDER_STREAM_TOOL_INVOCATIONS: usize = 64;
+
+/// Resource-limit error for provider stream accumulation.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StreamAccumulatorLimitError {
+    field: &'static str,
+    max_bytes: usize,
+    attempted_bytes: usize,
+}
+
+impl StreamAccumulatorLimitError {
+    fn new(field: &'static str, max_bytes: usize, attempted_bytes: usize) -> Self {
+        Self {
+            field,
+            max_bytes,
+            attempted_bytes,
+        }
+    }
+}
+
+impl std::fmt::Display for StreamAccumulatorLimitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "provider stream {} exceeded {} byte limit (attempted {} bytes)",
+            self.field, self.max_bytes, self.attempted_bytes
+        )
+    }
+}
+
+impl std::error::Error for StreamAccumulatorLimitError {}
+
+/// Check that a full provider stream field value is within its byte ceiling.
+pub fn check_stream_field_bytes(
+    value: &str,
+    max_bytes: usize,
+    field: &'static str,
+) -> Result<(), StreamAccumulatorLimitError> {
+    if value.len() > max_bytes {
+        return Err(StreamAccumulatorLimitError::new(
+            field,
+            max_bytes,
+            value.len(),
+        ));
+    }
+    Ok(())
+}
+
+/// Append a delta to a provider stream field only when the result stays bounded.
+pub fn append_stream_field_bounded(
+    target: &mut String,
+    delta: &str,
+    max_bytes: usize,
+    field: &'static str,
+) -> Result<(), StreamAccumulatorLimitError> {
+    let attempted_bytes = target.len().saturating_add(delta.len());
+    if attempted_bytes > max_bytes {
+        return Err(StreamAccumulatorLimitError::new(
+            field,
+            max_bytes,
+            attempted_bytes,
+        ));
+    }
+    target.push_str(delta);
+    Ok(())
+}
+
+/// Convert a provider stream resource-limit error into the canonical stream error path.
+pub fn stream_limit_error_event(error: StreamAccumulatorLimitError) -> StreamEvent {
+    StreamEvent::Error {
+        error: error.to_string(),
+    }
+}
+
 /// In-progress capability invocation being accumulated from streaming deltas.
 #[derive(Clone, Debug)]
 pub struct CapabilityInvocationAccumulator {
@@ -76,12 +159,14 @@ impl StreamAccumulator {
 
     /// Process a text delta. Emits `TextStart` on the first call, then `TextDelta`.
     pub fn process_text_delta(&mut self, text: &str) -> Vec<StreamEvent> {
+        if let Err(error) = self.try_accumulate_text(text) {
+            return vec![stream_limit_error_event(error)];
+        }
         let mut events = Vec::new();
         if !self.text_started {
             self.text_started = true;
             events.push(StreamEvent::TextStart);
         }
-        self.accumulated_text.push_str(text);
         events.push(StreamEvent::TextDelta {
             delta: text.to_string(),
         });
@@ -90,12 +175,14 @@ impl StreamAccumulator {
 
     /// Process a thinking delta. Emits `ThinkingStart` on the first call, then `ThinkingDelta`.
     pub fn process_thinking_delta(&mut self, text: &str) -> Vec<StreamEvent> {
+        if let Err(error) = self.try_accumulate_thinking(text) {
+            return vec![stream_limit_error_event(error)];
+        }
         let mut events = Vec::new();
         if !self.thinking_started {
             self.thinking_started = true;
             events.push(StreamEvent::ThinkingStart);
         }
-        self.accumulated_thinking.push_str(text);
         events.push(StreamEvent::ThinkingDelta {
             delta: text.to_string(),
         });
@@ -133,21 +220,87 @@ impl StreamAccumulator {
     /// Used by providers that emit deltas themselves (e.g. Anthropic where
     /// `TextStart` comes from `content_block_start`, not from first delta).
     pub fn accumulate_text(&mut self, text: &str) {
-        self.accumulated_text.push_str(text);
+        if let Err(error) = self.try_accumulate_text(text) {
+            tracing::warn!(error = %error, "provider stream text limit exceeded");
+        }
+    }
+
+    /// Fallibly accumulate text without emitting events.
+    pub fn try_accumulate_text(&mut self, text: &str) -> Result<(), StreamAccumulatorLimitError> {
+        append_stream_field_bounded(
+            &mut self.accumulated_text,
+            text,
+            MAX_PROVIDER_STREAM_TEXT_BYTES,
+            "text",
+        )
     }
 
     /// Accumulate thinking without emitting start/delta events.
     pub fn accumulate_thinking(&mut self, text: &str) {
-        self.accumulated_thinking.push_str(text);
+        if let Err(error) = self.try_accumulate_thinking(text) {
+            tracing::warn!(error = %error, "provider stream thinking limit exceeded");
+        }
+    }
+
+    /// Fallibly accumulate thinking without emitting events.
+    pub fn try_accumulate_thinking(
+        &mut self,
+        text: &str,
+    ) -> Result<(), StreamAccumulatorLimitError> {
+        append_stream_field_bounded(
+            &mut self.accumulated_thinking,
+            text,
+            MAX_PROVIDER_STREAM_THINKING_BYTES,
+            "thinking",
+        )
     }
 
     /// Accumulate signature content.
     pub fn accumulate_signature(&mut self, sig: &str) {
-        self.accumulated_signature.push_str(sig);
+        if let Err(error) = self.try_accumulate_signature(sig) {
+            tracing::warn!(error = %error, "provider stream signature limit exceeded");
+        }
+    }
+
+    /// Fallibly accumulate signature content.
+    pub fn try_accumulate_signature(
+        &mut self,
+        sig: &str,
+    ) -> Result<(), StreamAccumulatorLimitError> {
+        append_stream_field_bounded(
+            &mut self.accumulated_signature,
+            sig,
+            MAX_PROVIDER_STREAM_SIGNATURE_BYTES,
+            "signature",
+        )
+    }
+
+    /// Replace accumulated text with a complete provider value after checking size.
+    pub fn try_set_text(&mut self, text: &str) -> Result<(), StreamAccumulatorLimitError> {
+        check_stream_field_bytes(text, MAX_PROVIDER_STREAM_TEXT_BYTES, "text")?;
+        self.accumulated_text.clear();
+        self.accumulated_text.push_str(text);
+        Ok(())
+    }
+
+    /// Replace accumulated thinking with a complete provider value after checking size.
+    pub fn try_set_thinking(&mut self, text: &str) -> Result<(), StreamAccumulatorLimitError> {
+        check_stream_field_bytes(text, MAX_PROVIDER_STREAM_THINKING_BYTES, "thinking")?;
+        self.accumulated_thinking.clear();
+        self.accumulated_thinking.push_str(text);
+        Ok(())
     }
 
     /// Start tracking a new capability invocation. Emits `CapabilityInvocationDraftStart`.
     pub fn start_capability_invocation(&mut self, id: String, name: String) -> Vec<StreamEvent> {
+        if self.capability_invocations.len() >= MAX_PROVIDER_STREAM_TOOL_INVOCATIONS {
+            return vec![StreamEvent::Error {
+                error: format!(
+                    "provider stream capability invocations exceeded {} item limit",
+                    MAX_PROVIDER_STREAM_TOOL_INVOCATIONS
+                ),
+            }];
+        }
         let events = vec![StreamEvent::CapabilityInvocationDraftStart {
             invocation_id: id.clone(),
             name: name.clone(),
@@ -168,7 +321,14 @@ impl StreamAccumulator {
             .iter_mut()
             .find(|tc| tc.id == id)
         {
-            tc.args.push_str(delta);
+            if let Err(error) = append_stream_field_bounded(
+                &mut tc.args,
+                delta,
+                MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES,
+                "capability arguments",
+            ) {
+                return vec![stream_limit_error_event(error)];
+            }
             vec![StreamEvent::CapabilityInvocationDraftDelta {
                 invocation_id: id.to_string(),
                 arguments_delta: delta.to_string(),
@@ -323,15 +483,9 @@ impl Default for StreamAccumulator {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    // ── new / default ───────────────────────────────────────────────
 
     #[test]
     fn new_accumulator_is_empty() {
@@ -354,8 +508,6 @@ mod tests {
         assert_eq!(a.text_started, b.text_started);
     }
 
-    // ── process_text_delta ──────────────────────────────────────────
-
     #[test]
     fn text_delta_emits_start_on_first_call() {
         let mut acc = StreamAccumulator::new();
@@ -376,8 +528,6 @@ mod tests {
         assert!(matches!(&events[0], StreamEvent::TextDelta { delta } if delta == " world"));
         assert_eq!(acc.accumulated_text, "hello world");
     }
-
-    // ── process_thinking_delta ──────────────────────────────────────
 
     #[test]
     fn thinking_delta_emits_start_on_first_call() {

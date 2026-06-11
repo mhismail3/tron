@@ -184,6 +184,7 @@ fn provider_wire_names_stay_confined_to_owned_boundaries() {
         "packages/agent/src/shared/protocol/events/",
         "packages/agent/src/shared/protocol/messages/",
         "packages/agent/src/shared/protocol/model_audit.rs",
+        "packages/agent/src/shared/foundation/redaction.rs",
         "packages/agent/src/shared/foundation/errors/parse.rs",
     ];
     let markers = [

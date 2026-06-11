@@ -17,7 +17,10 @@
 use std::collections::{HashMap, HashSet};
 
 use super::types::{OutputItemType, ResponsesSseEvent, SseEventType};
-use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
+use crate::domains::model::providers::shared::stream_common::{
+    MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES, StreamAccumulator, StreamAccumulatorLimitError,
+    append_stream_field_bounded, stream_limit_error_event,
+};
 use crate::domains::model::providers::{
     CapabilityArgumentParseError, CapabilityCallContext, parse_capability_call_arguments,
 };
@@ -113,7 +116,15 @@ fn handle_output_item_added(
                         existing.name.clone_from(&name);
                     }
                     if existing.args.is_empty() && !initial_args.is_empty() {
-                        existing.args = initial_args;
+                        if let Err(error) = append_stream_field_bounded(
+                            &mut existing.args,
+                            &initial_args,
+                            MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES,
+                            "capability arguments",
+                        ) {
+                            state.capability_argument_failed = true;
+                            return vec![stream_limit_error_event(error)];
+                        }
                     }
                 } else {
                     let _ = state.capability_invocations.insert(
@@ -121,9 +132,24 @@ fn handle_output_item_added(
                         CapabilityInvocationDraftState {
                             id: call_id.clone(),
                             name: name.clone(),
-                            args: initial_args,
+                            args: String::new(),
                         },
                     );
+                    if !initial_args.is_empty() {
+                        let Some(existing) = state.capability_invocations.get_mut(call_id.as_str())
+                        else {
+                            return events;
+                        };
+                        if let Err(error) = append_stream_field_bounded(
+                            &mut existing.args,
+                            &initial_args,
+                            MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES,
+                            "capability arguments",
+                        ) {
+                            state.capability_argument_failed = true;
+                            return vec![stream_limit_error_event(error)];
+                        }
+                    }
                 }
                 if is_new {
                     events.push(StreamEvent::CapabilityInvocationDraftStart {
@@ -196,7 +222,15 @@ fn handle_function_call_args_delta(
                 name: String::new(),
                 args: String::new(),
             });
-        tc.args.push_str(delta);
+        if let Err(error) = append_stream_field_bounded(
+            &mut tc.args,
+            delta,
+            MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES,
+            "capability arguments",
+        ) {
+            state.capability_argument_failed = true;
+            return vec![stream_limit_error_event(error)];
+        }
         events.push(StreamEvent::CapabilityInvocationDraftDelta {
             invocation_id: call_id.clone(),
             arguments_delta: delta.clone(),
@@ -220,7 +254,11 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
         return events;
     };
     if item.item_type == OutputItemType::FunctionCall {
-        merge_function_call_item(item, state);
+        if let Err(error) = merge_function_call_item(item, state) {
+            state.capability_argument_failed = true;
+            events.push(stream_limit_error_event(error));
+            return events;
+        }
         match capability_invocation_from_item_state(item, state) {
             Ok(Some(capability_invocation)) => {
                 events.push(StreamEvent::CapabilityInvocationDraftEnd {
@@ -253,7 +291,11 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
                 && let Some(text) = &part.text
             {
                 let _ = state.seen_thinking_texts.insert(text.clone());
-                state.acc.accumulate_thinking(text);
+                if let Err(error) = state.acc.try_accumulate_thinking(text) {
+                    state.capability_argument_failed = true;
+                    events.push(stream_limit_error_event(error));
+                    return events;
+                }
                 events.push(StreamEvent::ThinkingDelta {
                     delta: text.clone(),
                 });
@@ -350,17 +392,24 @@ fn merge_completed_output_items(
     events: &mut Vec<StreamEvent>,
 ) {
     for item in &response.output {
-        match item.item_type {
+        let result = match item.item_type {
             OutputItemType::Message => merge_message_item(item, state),
             OutputItemType::Reasoning => merge_reasoning_item(item, state, events),
             OutputItemType::FunctionCall => merge_function_call_item(item, state),
-            OutputItemType::Unknown => {}
+            OutputItemType::Unknown => Ok(()),
+        };
+        if let Err(error) = result {
+            state.capability_argument_failed = true;
+            events.push(stream_limit_error_event(error));
         }
     }
 }
 
 /// Merge a message output item — capture text if not yet started.
-fn merge_message_item(item: &super::types::ResponsesOutputItem, state: &mut StreamState) {
+fn merge_message_item(
+    item: &super::types::ResponsesOutputItem,
+    state: &mut StreamState,
+) -> Result<(), StreamAccumulatorLimitError> {
     if let Some(content) = &item.content {
         for c in content {
             if c.content_type == "output_text"
@@ -368,10 +417,11 @@ fn merge_message_item(item: &super::types::ResponsesOutputItem, state: &mut Stre
                 && !state.acc.text_started
             {
                 state.acc.text_started = true;
-                state.acc.accumulated_text.clone_from(text);
+                state.acc.try_set_text(text)?;
             }
         }
     }
+    Ok(())
 }
 
 /// Merge a reasoning output item — use summary if no streaming deltas received.
@@ -379,9 +429,9 @@ fn merge_reasoning_item(
     item: &super::types::ResponsesOutputItem,
     state: &mut StreamState,
     events: &mut Vec<StreamEvent>,
-) {
+) -> Result<(), StreamAccumulatorLimitError> {
     if !state.acc.accumulated_thinking.is_empty() || state.has_reasoning_text {
-        return;
+        return Ok(());
     }
     if let Some(summary) = &item.summary {
         for s in summary {
@@ -389,22 +439,31 @@ fn merge_reasoning_item(
                 && let Some(text) = &s.text
             {
                 events.extend(state.acc.mark_thinking_started());
-                state.acc.accumulated_thinking.clone_from(text);
+                state.acc.try_set_thinking(text)?;
             }
         }
     }
+    Ok(())
 }
 
 /// Merge a `function_call` output item — update or insert capability invocation state.
-fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mut StreamState) {
+fn merge_function_call_item(
+    item: &super::types::ResponsesOutputItem,
+    state: &mut StreamState,
+) -> Result<(), StreamAccumulatorLimitError> {
     let Some(call_id) = &item.call_id else {
-        return;
+        return Ok(());
     };
     if let Some(existing) = state.capability_invocations.get_mut(call_id.as_str()) {
         if let Some(arguments) = &item.arguments
             && existing.args.is_empty()
         {
-            existing.args.clone_from(arguments);
+            append_stream_field_bounded(
+                &mut existing.args,
+                arguments,
+                MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES,
+                "capability arguments",
+            )?;
         }
         if let Some(name) = &item.name
             && existing.name.is_empty()
@@ -417,10 +476,21 @@ fn merge_function_call_item(item: &super::types::ResponsesOutputItem, state: &mu
             CapabilityInvocationDraftState {
                 id: call_id.clone(),
                 name: item.name.clone().unwrap_or_default(),
-                args: item.arguments.clone().unwrap_or_default(),
+                args: String::new(),
             },
         );
+        if let Some(arguments) = &item.arguments
+            && let Some(existing) = state.capability_invocations.get_mut(call_id.as_str())
+        {
+            append_stream_field_bounded(
+                &mut existing.args,
+                arguments,
+                MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES,
+                "capability arguments",
+            )?;
+        }
     }
+    Ok(())
 }
 
 /// Build the final `Done` event with the complete message.

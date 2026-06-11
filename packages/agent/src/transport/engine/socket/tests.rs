@@ -508,7 +508,7 @@ async fn push_subscription_advances_past_filtered_stream_pages() {
 }
 
 #[tokio::test]
-async fn push_subscription_applies_backpressure_to_catch_up_bursts() {
+async fn push_subscription_closes_slow_consumer_after_bounded_backpressure() {
     let ctx = Arc::new(make_test_context());
     let target_session = "session-burst";
     let total_events = OUTBOUND_QUEUE_CAPACITY + 24;
@@ -566,26 +566,25 @@ async fn push_subscription_applies_backpressure_to_catch_up_bursts() {
         cancel.clone(),
     ));
 
-    tokio::time::sleep(PUSH_POLL_INTERVAL * 2).await;
+    tokio::time::sleep(PUSH_POLL_INTERVAL * 2 + outbound::OUTBOUND_SEND_TIMEOUT * 2).await;
     assert!(
-        !cancel.is_cancelled(),
-        "catch-up bursts must apply channel backpressure instead of closing the socket"
+        cancel.is_cancelled(),
+        "slow consumers must be closed after the bounded outbound send timeout"
     );
 
     let mut delivered = 0usize;
-    tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        while delivered < total_events {
-            let message = out_rx.recv().await.expect("push stream should stay open");
-            let value: Value = serde_json::from_str(&message).unwrap();
-            if value.get("type").and_then(Value::as_str) == Some("event") {
-                delivered += 1;
-            }
+    while let Ok(Some(message)) =
+        tokio::time::timeout(std::time::Duration::from_millis(10), out_rx.recv()).await
+    {
+        let value: Value = serde_json::from_str(&message).unwrap();
+        if value.get("type").and_then(Value::as_str) == Some("event") {
+            delivered += 1;
         }
-    })
-    .await
-    .expect("backpressured catch-up burst should drain completely");
+    }
 
-    cancel.cancel();
     push_task.await.unwrap();
-    assert_eq!(delivered, total_events);
+    assert!(
+        delivered <= OUTBOUND_QUEUE_CAPACITY,
+        "slow consumer should not accumulate beyond bounded queue capacity"
+    );
 }

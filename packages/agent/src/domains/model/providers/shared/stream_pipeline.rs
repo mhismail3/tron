@@ -33,7 +33,15 @@ where
     let sse_lines = parse_sse_lines(byte_stream, options);
 
     let event_stream = sse_lines
-        .scan(initial_state, move |state, line| {
+        .scan(initial_state, move |state, line_result| {
+            let line = match line_result {
+                Ok(line) => line,
+                Err(error) => {
+                    return std::future::ready(Some(vec![StreamEvent::Error {
+                        error: error.to_string(),
+                    }]));
+                }
+            };
             let event: E = match serde_json::from_str(&line) {
                 Ok(e) => e,
                 Err(e) => {

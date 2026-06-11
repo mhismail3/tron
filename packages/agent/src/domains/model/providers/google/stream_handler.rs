@@ -11,7 +11,10 @@
 use std::collections::HashSet;
 
 use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
-use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
+use crate::domains::model::providers::shared::stream_common::{
+    MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES, MAX_PROVIDER_STREAM_TOOL_INVOCATIONS,
+    StreamAccumulator, check_stream_field_bytes, stream_limit_error_event,
+};
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::{AssistantMessage, StreamEvent};
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
@@ -175,6 +178,14 @@ fn process_function_call(
     state: &mut StreamState,
 ) -> Vec<StreamEvent> {
     let mut events = Vec::new();
+    if state.capability_invocations.len() >= MAX_PROVIDER_STREAM_TOOL_INVOCATIONS {
+        return vec![StreamEvent::Error {
+            error: format!(
+                "provider stream capability invocations exceeded {} item limit",
+                MAX_PROVIDER_STREAM_TOOL_INVOCATIONS
+            ),
+        }];
+    }
 
     let id = format!(
         "call_{}_{}",
@@ -183,6 +194,13 @@ fn process_function_call(
     state.capability_invocation_index += 1;
 
     let args_str = serde_json::to_string(&fc.args).unwrap_or_else(|_| "{}".into());
+    if let Err(error) = check_stream_field_bytes(
+        &args_str,
+        MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES,
+        "capability arguments",
+    ) {
+        return vec![stream_limit_error_event(error)];
+    }
     let ctx = CapabilityCallContext {
         invocation_id: Some(id.clone()),
         model_primitive_name: Some(fc.name.clone()),

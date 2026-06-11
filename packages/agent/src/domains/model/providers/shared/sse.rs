@@ -14,21 +14,49 @@ use futures::Stream;
 use tokio_stream::StreamExt;
 use tracing::warn;
 
+/// Default maximum bytes buffered for a single provider SSE line.
+pub const DEFAULT_MAX_SSE_LINE_BYTES: usize = 1024 * 1024;
+
 /// Options for the SSE parser.
 #[derive(Clone, Debug)]
 pub struct SseParserOptions {
     /// Whether to process remaining buffer content after the stream ends.
     /// Default: `true` (Google needs this; `OpenAI` uses explicit `[DONE]`).
     pub process_remaining_buffer: bool,
+    /// Maximum bytes accepted for one SSE line before failing the stream.
+    pub max_line_bytes: usize,
 }
 
 impl Default for SseParserOptions {
     fn default() -> Self {
         Self {
             process_remaining_buffer: true,
+            max_line_bytes: DEFAULT_MAX_SSE_LINE_BYTES,
         }
     }
 }
+
+/// SSE parser failure surfaced to the provider stream pipeline.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SseParseError {
+    message: String,
+}
+
+impl SseParseError {
+    fn line_too_large(max_line_bytes: usize) -> Self {
+        Self {
+            message: format!("provider SSE line exceeded {max_line_bytes} byte limit"),
+        }
+    }
+}
+
+impl std::fmt::Display for SseParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for SseParseError {}
 
 /// Parse SSE lines from a byte stream and yield JSON data strings.
 ///
@@ -41,11 +69,12 @@ impl Default for SseParserOptions {
 pub fn parse_sse_lines<S>(
     byte_stream: S,
     options: &SseParserOptions,
-) -> impl Stream<Item = String> + Send + '_
+) -> impl Stream<Item = Result<String, SseParseError>> + Send + '_
 where
     S: Stream<Item = Result<Bytes, reqwest::Error>> + Send + Unpin + 'static,
 {
     let process_remaining = options.process_remaining_buffer;
+    let max_line_bytes = options.max_line_bytes;
 
     futures::stream::unfold(
         (byte_stream, BytesMut::with_capacity(8192), false),
@@ -57,6 +86,13 @@ where
             loop {
                 // Check buffer for a complete line (\n)
                 if let Some(newline_pos) = buffer.iter().position(|&b| b == b'\n') {
+                    if newline_pos > max_line_bytes {
+                        buffer.clear();
+                        return Some((
+                            Err(SseParseError::line_too_large(max_line_bytes)),
+                            (stream, buffer, true),
+                        ));
+                    }
                     // Split the line bytes out of the buffer (zero-copy split)
                     let mut line_bytes = buffer.split_to(newline_pos + 1);
                     // Remove trailing \n
@@ -73,7 +109,7 @@ where
                     };
 
                     if let Some(data) = extract_sse_data(line) {
-                        return Some((data, (stream, buffer, false)));
+                        return Some((Ok(data), (stream, buffer, false)));
                     }
                     continue;
                 }
@@ -82,6 +118,13 @@ where
                 match stream.next().await {
                     Some(Ok(chunk)) => {
                         buffer.extend_from_slice(&chunk);
+                        if buffer.len() > max_line_bytes && !buffer.contains(&b'\n') {
+                            buffer.clear();
+                            return Some((
+                                Err(SseParseError::line_too_large(max_line_bytes)),
+                                (stream, buffer, true),
+                            ));
+                        }
                     }
                     Some(Err(e)) => {
                         warn!("SSE stream read error: {e}");
@@ -90,13 +133,20 @@ where
                     None => {
                         // Stream ended — process remaining buffer if configured
                         if process_remaining && !buffer.is_empty() {
+                            if buffer.len() > max_line_bytes {
+                                buffer.clear();
+                                return Some((
+                                    Err(SseParseError::line_too_large(max_line_bytes)),
+                                    (stream, buffer, true),
+                                ));
+                            }
                             let line = match std::str::from_utf8(&buffer) {
                                 Ok(s) => s.trim(),
                                 Err(_) => return None,
                             };
                             if let Some(data) = extract_sse_data(line) {
                                 buffer.clear();
-                                return Some((data, (stream, buffer, true)));
+                                return Some((Ok(data), (stream, buffer, true)));
                             }
                         }
                         return None;
@@ -242,7 +292,10 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], "{\"type\":\"hello\"}");
     }
@@ -253,7 +306,10 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert_eq!(results.len(), 2);
         assert_eq!(results[0], "{\"a\":1}");
         assert_eq!(results[1], "{\"b\":2}");
@@ -268,7 +324,10 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], "{\"partial\":true}");
     }
@@ -279,7 +338,10 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], "{\"ok\":true}");
     }
@@ -292,7 +354,10 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], "{\"v\":1}");
     }
@@ -303,9 +368,13 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions {
             process_remaining_buffer: true,
+            ..SseParserOptions::default()
         };
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], "{\"trailing\":true}");
     }
@@ -316,9 +385,13 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions {
             process_remaining_buffer: false,
+            ..SseParserOptions::default()
         };
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert_eq!(results.len(), 0);
     }
 
@@ -328,7 +401,10 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert!(results.is_empty());
     }
 
@@ -338,7 +414,10 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], "{\"cr\":true}");
     }
@@ -356,9 +435,27 @@ mod tests {
         let stream = futures::stream::iter(chunks);
         let options = SseParserOptions::default();
 
-        let results: Vec<String> = parse_sse_lines(stream, &options).collect().await;
+        let results: Vec<String> = parse_sse_lines(stream, &options)
+            .map(|result| result.unwrap())
+            .collect()
+            .await;
         assert_eq!(results.len(), 1);
         assert_eq!(results[0], "{\"valid\":true}");
+    }
+
+    #[tokio::test]
+    async fn parse_lines_rejects_line_over_byte_limit() {
+        let chunks = vec![Ok(Bytes::from("data: 123456\n"))];
+        let stream = futures::stream::iter(chunks);
+        let options = SseParserOptions {
+            max_line_bytes: 8,
+            ..SseParserOptions::default()
+        };
+
+        let results: Vec<_> = parse_sse_lines(stream, &options).collect().await;
+        assert_eq!(results.len(), 1);
+        let error = results[0].as_ref().unwrap_err().to_string();
+        assert!(error.contains("provider SSE line exceeded 8 byte limit"));
     }
 
     // ── SseParserOptions ─────────────────────────────────────────────────
@@ -367,5 +464,6 @@ mod tests {
     fn default_options() {
         let opts = SseParserOptions::default();
         assert!(opts.process_remaining_buffer);
+        assert_eq!(opts.max_line_bytes, DEFAULT_MAX_SSE_LINE_BYTES);
     }
 }

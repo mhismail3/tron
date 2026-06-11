@@ -10,6 +10,7 @@ query_logs() {
     local workspace=""
     local trace=""
     local search=""
+    local max_limit=1000
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -30,8 +31,8 @@ query_logs() {
                 echo ""
                 echo "Options:"
                 echo "  -l, --level LEVEL    Filter by level (trace/debug/info/warn/error)"
-                echo "  -n, --limit N        Number of logs to show (default: 50)"
-                echo "  --tail N             Alias for --limit N"
+                echo "  -n, --limit N        Number of logs to show (default: 50, max: 1000)"
+                echo "  --tail N             Alias for --limit N (max: 1000)"
                 echo "  --json               Emit newline-delimited JSON rows"
                 echo "  -o, --output FILE    Write output to file"
                 echo "  -s, --session ID     Filter by session ID"
@@ -101,6 +102,10 @@ query_logs() {
     [ -n "$trace" ] && conditions+=("trace_id = $(sql_quote_literal "$trace")")
     if ! [[ "$limit" =~ ^[0-9]+$ ]] || [ "$limit" -lt 1 ]; then
         print_error "Invalid limit: $limit"
+        return 1
+    fi
+    if [ "$limit" -gt "$max_limit" ]; then
+        print_error "Invalid limit: $limit (max: $max_limit)"
         return 1
     fi
 

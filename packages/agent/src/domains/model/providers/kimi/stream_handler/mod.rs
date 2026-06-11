@@ -7,6 +7,11 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 
 use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
+use crate::domains::model::providers::shared::stream_common::{
+    MAX_PROVIDER_STREAM_TEXT_BYTES, MAX_PROVIDER_STREAM_THINKING_BYTES,
+    MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES, MAX_PROVIDER_STREAM_TOOL_INVOCATIONS,
+    append_stream_field_bounded, stream_limit_error_event,
+};
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
@@ -161,6 +166,9 @@ impl Default for KimiStreamState {
 /// Process a single SSE chunk and produce stream events.
 pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -> Vec<StreamEvent> {
     let mut events = Vec::new();
+    if state.failed {
+        return events;
+    }
 
     // Process usage (final chunk)
     if let Some(ref usage) = chunk.usage {
@@ -200,7 +208,16 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 state.in_thinking = true;
                 events.push(StreamEvent::ThinkingStart);
             }
-            state.thinking_text.push_str(reasoning);
+            if let Err(error) = append_stream_field_bounded(
+                &mut state.thinking_text,
+                reasoning,
+                MAX_PROVIDER_STREAM_THINKING_BYTES,
+                "thinking",
+            ) {
+                state.failed = true;
+                events.push(stream_limit_error_event(error));
+                return events;
+            }
             events.push(StreamEvent::ThinkingDelta {
                 delta: reasoning.clone(),
             });
@@ -227,7 +244,16 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                 state.in_text = true;
                 events.push(StreamEvent::TextStart);
             }
-            state.text_content.push_str(content);
+            if let Err(error) = append_stream_field_bounded(
+                &mut state.text_content,
+                content,
+                MAX_PROVIDER_STREAM_TEXT_BYTES,
+                "text",
+            ) {
+                state.failed = true;
+                events.push(stream_limit_error_event(error));
+                return events;
+            }
             events.push(StreamEvent::TextDelta {
                 delta: content.clone(),
             });
@@ -260,6 +286,16 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
 
             for tc in capability_invocations {
                 let idx = tc.index as usize;
+                if idx >= MAX_PROVIDER_STREAM_TOOL_INVOCATIONS {
+                    state.failed = true;
+                    events.push(StreamEvent::Error {
+                        error: format!(
+                            "provider stream capability invocations exceeded {} item limit",
+                            MAX_PROVIDER_STREAM_TOOL_INVOCATIONS
+                        ),
+                    });
+                    return events;
+                }
                 // Ensure active_capabilities is large enough
                 while state.active_capabilities.len() <= idx {
                     state.active_capabilities.push(None);
@@ -289,7 +325,16 @@ pub fn process_chunk(chunk: &ChatCompletionChunk, state: &mut KimiStreamState) -
                     && !args.is_empty()
                     && let Some(ref mut active) = state.active_capabilities[idx]
                 {
-                    active.arguments.push_str(args);
+                    if let Err(error) = append_stream_field_bounded(
+                        &mut active.arguments,
+                        args,
+                        MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES,
+                        "capability arguments",
+                    ) {
+                        state.failed = true;
+                        events.push(stream_limit_error_event(error));
+                        return events;
+                    }
                     events.push(StreamEvent::CapabilityInvocationDraftDelta {
                         invocation_id: active.id.clone(),
                         arguments_delta: args.clone(),

@@ -201,6 +201,39 @@ fn multiple_tool_calls_in_one_chunk() {
 }
 
 #[test]
+fn too_many_tool_calls_fail_closed() {
+    let mut state = OllamaStreamState::new();
+    let tool_calls = (0..=MAX_PROVIDER_STREAM_TOOL_INVOCATIONS)
+        .map(|index| OllamaCapabilityInvocationDraft {
+            id: Some(format!("call_{index}")),
+            function: OllamaCapabilityInvocationDraftFunction {
+                name: "execute".into(),
+                arguments: Map::new(),
+            },
+        })
+        .collect();
+    let chunk = OllamaChatChunk {
+        message: OllamaMessage {
+            content: String::new(),
+            thinking: None,
+            tool_calls: Some(tool_calls),
+        },
+        done: false,
+        done_reason: None,
+        prompt_eval_count: None,
+        eval_count: None,
+    };
+
+    let events = process_chunk(&chunk, &mut state);
+    assert!(
+        events
+            .iter()
+            .any(|event| matches!(event, StreamEvent::Error { error } if error.contains("capability invocations exceeded")))
+    );
+    assert!(state.failed);
+}
+
+#[test]
 fn done_with_stop_reason() {
     let mut state = OllamaStreamState::new();
     let _ = process_chunk(&text_chunk("hello"), &mut state);

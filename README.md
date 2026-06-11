@@ -357,6 +357,18 @@ Current living entry points:
   PMBD guard for artifact wiring, inventory coverage, provider-native import
   confinement, provider wire-name confinement, redacted bounded audit payloads,
   retry/failure redaction, and provider factory auth custody.
+- `packages/agent/docs/performance-resource-governance-scorecard.md`,
+  `packages/agent/docs/performance-resource-governance-evidence-manifest.md`,
+  `packages/agent/docs/performance-resource-governance-inventory.md`, and
+  `packages/agent/docs/performance-resource-governance-inventory.tsv`:
+  completed Performance / Resource Governance closeout artifacts covering
+  provider parser/accumulator ceilings, agent stream state, journals, engine
+  backpressure, logs, diagnostics, startup/shutdown, storage retention, and
+  retry-loop resource discipline.
+- `packages/agent/tests/performance_resource_governance_invariants.rs`:
+  PRG guard for artifact wiring, inventory coverage, provider/agent stream
+  bounds, journal limits, `/engine` slow-consumer closure, log/read retention
+  ceilings, predecessor target preservation, and successor cleanup invariants.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -367,7 +379,8 @@ Current living entry points:
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA scorecards.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/PMBD/PRG/SAA
+scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1490,6 +1503,7 @@ tron ci clippy test          # Subset: linting + tests
 `security_authority_capability_boundaries_invariants`,
 `public_protocol_api_contract_discipline_invariants`,
 `provider_model_boundary_discipline_invariants`,
+`performance_resource_governance_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
 `off_plan_successor_teardown_cleanup_invariants`,

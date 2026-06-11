@@ -8,6 +8,9 @@
 //! session/workspace/trace correlation; authority scopes and runtime metadata
 //! are not accepted on the wire. Model providers do not receive this transport
 //! surface; they receive only the capability-domain `execute` orchestrator.
+//! Per-client outbound queues, stream poll pages, and async push backpressure
+//! are bounded so slow consumers close observably instead of parking delivery
+//! tasks indefinitely.
 
 use std::collections::BTreeMap;
 use std::sync::Arc;

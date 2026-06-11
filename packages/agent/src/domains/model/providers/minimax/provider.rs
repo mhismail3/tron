@@ -34,6 +34,7 @@ const API_VERSION: &str = "2023-06-01";
 static SSE_OPTIONS: crate::domains::model::providers::shared::SseParserOptions =
     crate::domains::model::providers::shared::SseParserOptions {
         process_remaining_buffer: true,
+        max_line_bytes: crate::domains::model::providers::shared::sse::DEFAULT_MAX_SSE_LINE_BYTES,
     };
 
 /// `MiniMax` LLM provider.

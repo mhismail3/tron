@@ -260,6 +260,38 @@ async fn error_mid_stream() {
 }
 
 #[tokio::test]
+async fn oversized_text_delta_fails_before_accumulating_turn_state() {
+    let huge_delta = "x".repeat(4 * 1024 * 1024 + 1);
+    let s = stream! {
+        yield Ok(StreamEvent::Start);
+        yield Ok(StreamEvent::TextDelta { delta: huge_delta });
+        yield Ok(StreamEvent::Done {
+            message: AssistantMessage { content: vec![], token_usage: None },
+            stop_reason: "end_turn".into(),
+        });
+    };
+
+    let emitter = make_emitter();
+    let cancel = CancellationToken::new();
+    let result = process_stream(
+        Box::pin(s),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_capabilities(),
+        None,
+        None,
+    )
+    .await;
+
+    assert!(matches!(
+        result.unwrap_err(),
+        RuntimeError::Internal(message)
+            if message.contains("agent stream text exceeded 4194304 byte limit")
+    ));
+}
+
+#[tokio::test]
 async fn abort_mid_stream() {
     let cancel = CancellationToken::new();
     let cancel_clone = cancel.clone();

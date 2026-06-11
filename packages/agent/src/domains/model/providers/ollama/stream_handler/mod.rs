@@ -23,6 +23,11 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use tracing::{debug, info};
 
+use crate::domains::model::providers::shared::stream_common::{
+    MAX_PROVIDER_STREAM_TEXT_BYTES, MAX_PROVIDER_STREAM_THINKING_BYTES,
+    MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES, MAX_PROVIDER_STREAM_TOOL_INVOCATIONS,
+    append_stream_field_bounded, check_stream_field_bytes, stream_limit_error_event,
+};
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::events::StreamEvent;
 use crate::shared::protocol::messages::{CapabilityInvocationDraft, Provider, TokenUsage};
@@ -91,6 +96,7 @@ pub struct OllamaStreamState {
     text_content: String,
     usage: Option<TokenUsage>,
     content_blocks: Vec<AssistantContent>,
+    failed: bool,
 }
 
 impl OllamaStreamState {
@@ -103,6 +109,7 @@ impl OllamaStreamState {
             text_content: String::new(),
             usage: None,
             content_blocks: Vec::new(),
+            failed: false,
         }
     }
 }
@@ -118,6 +125,9 @@ impl Default for OllamaStreamState {
 /// Process a single native API chunk and produce stream events.
 pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> Vec<StreamEvent> {
     let mut events = Vec::new();
+    if state.failed {
+        return events;
+    }
 
     // Log first chunk for diagnostics
     if !state.in_thinking && !state.in_text && !chunk.done {
@@ -143,7 +153,16 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
             debug!("ollama: entering thinking state");
             events.push(StreamEvent::ThinkingStart);
         }
-        state.thinking_text.push_str(thinking);
+        if let Err(error) = append_stream_field_bounded(
+            &mut state.thinking_text,
+            thinking,
+            MAX_PROVIDER_STREAM_THINKING_BYTES,
+            "thinking",
+        ) {
+            state.failed = true;
+            events.push(stream_limit_error_event(error));
+            return events;
+        }
         events.push(StreamEvent::ThinkingDelta {
             delta: thinking.clone(),
         });
@@ -168,7 +187,16 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
             state.in_text = true;
             events.push(StreamEvent::TextStart);
         }
-        state.text_content.push_str(&chunk.message.content);
+        if let Err(error) = append_stream_field_bounded(
+            &mut state.text_content,
+            &chunk.message.content,
+            MAX_PROVIDER_STREAM_TEXT_BYTES,
+            "text",
+        ) {
+            state.failed = true;
+            events.push(stream_limit_error_event(error));
+            return events;
+        }
         events.push(StreamEvent::TextDelta {
             delta: chunk.message.content.clone(),
         });
@@ -200,6 +228,21 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
         }
 
         for tc in tool_calls {
+            let completed_tools = state
+                .content_blocks
+                .iter()
+                .filter(|content| matches!(content, AssistantContent::CapabilityInvocation { .. }))
+                .count();
+            if completed_tools >= MAX_PROVIDER_STREAM_TOOL_INVOCATIONS {
+                state.failed = true;
+                events.push(StreamEvent::Error {
+                    error: format!(
+                        "provider stream capability invocations exceeded {} item limit",
+                        MAX_PROVIDER_STREAM_TOOL_INVOCATIONS
+                    ),
+                });
+                return events;
+            }
             let id = tc
                 .id
                 .clone()
@@ -207,6 +250,15 @@ pub fn process_chunk(chunk: &OllamaChatChunk, state: &mut OllamaStreamState) -> 
             let name = tc.function.name.clone();
             let arguments = tc.function.arguments.clone();
             let args_str = serde_json::to_string(&arguments).unwrap_or_default();
+            if let Err(error) = check_stream_field_bytes(
+                &args_str,
+                MAX_PROVIDER_STREAM_TOOL_ARGUMENT_BYTES,
+                "capability arguments",
+            ) {
+                state.failed = true;
+                events.push(stream_limit_error_event(error));
+                return events;
+            }
 
             events.push(StreamEvent::CapabilityInvocationDraftStart {
                 invocation_id: id.clone(),
