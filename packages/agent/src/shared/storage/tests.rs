@@ -27,6 +27,59 @@ fn non_current_active_database_is_archived_for_modular_engine_generation() {
         .unwrap();
     assert!(archive_name.starts_with(CURRENT_STORAGE_GENERATION));
     assert!(archive_dir.join(UNIFIED_DB_FILENAME).exists());
+    assert!(archive_dir.join("archive-manifest.json").exists());
+}
+
+#[test]
+fn malformed_generation_marker_fails_closed_without_archiving_active_db() {
+    let dir = tempfile::tempdir().unwrap();
+    let active = dir.path().join(UNIFIED_DB_FILENAME);
+    {
+        let conn = Connection::open(&active).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE storage_metadata (key TEXT PRIMARY KEY);
+             INSERT INTO storage_metadata (key) VALUES ('storage_generation');",
+        )
+        .unwrap();
+    }
+
+    let err = prepare_active_database(&active).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("failed to inspect active storage generation"),
+        "{err:#}"
+    );
+    assert!(
+        active.exists(),
+        "malformed active DB must remain in place for operator inspection"
+    );
+    assert!(!dir.path().join(ARCHIVE_DIR).exists());
+}
+
+#[test]
+fn orphaned_wal_and_shm_sidecars_are_archived_before_fresh_startup() {
+    let dir = tempfile::tempdir().unwrap();
+    let active = dir.path().join(UNIFIED_DB_FILENAME);
+    fs::write(wal_path(&active), b"stale wal").unwrap();
+    fs::write(shm_path(&active), b"stale shm").unwrap();
+
+    let report = prepare_active_database(&active).unwrap();
+    assert!(report.moved_any());
+    assert!(!active.exists());
+    assert!(!wal_path(&active).exists());
+    assert!(!shm_path(&active).exists());
+    let archived_names = report
+        .files
+        .iter()
+        .map(|file| file.filename.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        archived_names,
+        std::collections::BTreeSet::from(["tron.sqlite-shm", "tron.sqlite-wal"])
+    );
+    let manifest =
+        fs::read_to_string(report.archive_dir.unwrap().join("archive-manifest.json")).unwrap();
+    assert!(manifest.contains("orphaned WAL/SHM sidecars"));
 }
 
 #[test]
@@ -157,6 +210,99 @@ fn retention_prunes_verbose_ios_logs_and_unowned_blobs_but_keeps_owned_blobs() {
         .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
         .unwrap();
     assert_eq!(remaining_blobs, 1);
+}
+
+#[test]
+fn storage_schema_drift_fails_closed_before_retention_deletes_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(UNIFIED_DB_FILENAME);
+    {
+        let conn = Connection::open(&path).unwrap();
+        apply_runtime_pragmas(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE storage_retention_runs (id INTEGER PRIMARY KEY);
+             CREATE TABLE logs (
+               id INTEGER PRIMARY KEY AUTOINCREMENT,
+               timestamp TEXT NOT NULL,
+               level TEXT NOT NULL,
+               component TEXT NOT NULL
+             );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO logs (timestamp, level, component) VALUES (?1, 'debug', 'ios.Engine')",
+            params![(Utc::now() - chrono::Duration::days(10)).to_rfc3339()],
+        )
+        .unwrap();
+    }
+
+    let runtime = StorageRuntime::new(&path);
+    let err = runtime.retention_run(false, 1).unwrap_err();
+    assert!(err.to_string().contains("storage schema drift"), "{err:#}");
+    let remaining_logs: i64 = Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM logs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(remaining_logs, 1);
+}
+
+#[test]
+fn dangling_payload_blob_refs_fail_storage_integrity_checks() {
+    let conn = Connection::open_in_memory().unwrap();
+    apply_runtime_pragmas(&conn).unwrap();
+    ensure_storage_schema(&conn).unwrap();
+    conn.execute(
+        "INSERT INTO storage_payload_refs (
+           id, owner_kind, owner_id, field_name, payload_hash, payload_blob_id,
+           payload_preview, payload_size_bytes, payload_kind, redaction_level,
+           retention_class, created_at
+         ) VALUES (
+           'payload_ref_bad', 'test', 'owner', 'payload', 'hash', 'blob_missing',
+           '', 1, 'application/json', 'redacted', 'audit', ?1
+         )",
+        params![Utc::now().to_rfc3339()],
+    )
+    .unwrap();
+
+    let err = ensure_storage_schema(&conn).unwrap_err();
+    assert!(
+        err.to_string().contains("payload integrity failed"),
+        "{err:#}"
+    );
+}
+
+#[test]
+fn retention_prunes_expired_payload_refs_and_their_now_unowned_blobs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(UNIFIED_DB_FILENAME);
+    let runtime = StorageRuntime::new(&path);
+    let conn = runtime.open_connection().unwrap();
+    let stored = store_json_bytes(
+        &conn,
+        br#"{"pending":"large-enough-for-blob"}"#,
+        &StorePayloadOptions::new("pending_owner", "row-expired", "payload", "pending")
+            .with_inline_threshold(1)
+            .with_expires_at(Some((Utc::now() - chrono::Duration::days(1)).to_rfc3339())),
+    )
+    .unwrap();
+    assert!(stored.contains(PAYLOAD_REF_ENVELOPE_KEY));
+    drop(conn);
+
+    let report = runtime.retention_run(false, 7).unwrap();
+    assert_eq!(report.payload_refs_deleted, 1);
+    assert_eq!(report.blobs_deleted, 1);
+
+    let conn = runtime.open_connection().unwrap();
+    let refs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM storage_payload_refs", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    let blobs: i64 = conn
+        .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(refs, 0);
+    assert_eq!(blobs, 0);
 }
 
 #[test]

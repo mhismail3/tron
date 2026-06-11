@@ -138,6 +138,18 @@ impl SqliteEngineCompensationStore {
     /// Open a compensation store in the isolated engine ledger DB.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open(path).map_err(|err| sqlite_err("compensation.open", err))?;
+        crate::shared::storage::apply_runtime_pragmas(&conn).map_err(|err| {
+            EngineError::LedgerFailure {
+                operation: "compensation.storage_pragmas",
+                message: err.to_string(),
+            }
+        })?;
+        crate::shared::storage::ensure_storage_schema(&conn).map_err(|err| {
+            EngineError::LedgerFailure {
+                operation: "compensation.storage_schema",
+                message: err.to_string(),
+            }
+        })?;
         let store = Self { conn };
         store.init()?;
         Ok(store)

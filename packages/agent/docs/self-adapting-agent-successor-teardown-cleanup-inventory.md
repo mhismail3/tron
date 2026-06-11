@@ -46,7 +46,7 @@ source teardown and closeout verification.
 
 - `retained`: 107
 - `docs-only`: 31
-- `predecessor-bookkeeping`: 23
+- `predecessor-bookkeeping`: 41
 - `simplify`: 0
 
 ## Closeout Boundaries

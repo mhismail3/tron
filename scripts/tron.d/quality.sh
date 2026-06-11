@@ -47,6 +47,7 @@ run_tests() {
         self_adapting_agent_worker_schedule_dispatch_invariants
         self_adapting_agent_worker_schedule_capacity_invariants
         self_adapting_agent_successor_teardown_cleanup_invariants
+        data_integrity_storage_evolution_migration_discipline_invariants
         primitive_trace_execution
         integration
     )

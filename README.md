@@ -422,13 +422,31 @@ Current living entry points:
 - `packages/agent/tests/self_adapting_agent_successor_teardown_cleanup_invariants.rs`:
   active SAASTC gates for scorecard formalization, README/CI wiring, full
   baseline diff inventory coverage, and cleanup boundary recording.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md`:
+  completed DISEMD scorecard for clean-break SQLite generation, archive
+  sidecars, schema/migration discipline, WAL/pragmas, process locks,
+  payload/blob retention, engine durability stores, session event integrity,
+  and CLI/iOS storage boundaries.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-evidence-manifest.md`:
+  companion evidence manifest for DISEMD row checkpoints, source findings,
+  verification logs, and residual storage recovery risk.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md`:
+  DISEMD storage-surface taxonomy for server storage, event store, engine
+  durability, authority SQLite, iOS projection caches, CLI/dev helpers, and
+  static gates.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv`:
+  machine-readable DISEMD storage inventory used by static gates.
+- `packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs`:
+  DISEMD gates for scorecard/evidence/inventory wiring, storage source
+  contracts, shared SQLite pragmas/schema checks, event-store locking and
+  migration ownership, iOS projection boundaries, and closeout artifacts.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH/SAAWTL/SAAWSD/SAAWSC
-scorecards plus the active SAASTC cleanup scorecard.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH/SAAWTL/SAAWSD/SAAWSC/SAASTC/DISEMD
+scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1260,9 +1278,9 @@ Agent soul / system prompt
 
 ## Database Schema
 
-Default production server storage lives in `~/.tron/internal/database/tron.sqlite`; explicit developer/test homes such as the Mac isolated install use the same `internal/database/tron.sqlite` path under their resolved Tron home. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v4"` marker in `storage_metadata`; if startup sees a `tron.sqlite` without the current marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into `internal/database/archive/modular-engine-v4-*` and starts fresh. Non-current product/session data is archived, not migrated or read by the new runtime. Pre-unified database artifacts are archived the same way and are never read as active storage.
+Default production server storage lives in `~/.tron/internal/database/tron.sqlite`; explicit developer/test homes such as the Mac isolated install use the same `internal/database/tron.sqlite` path under their resolved Tron home. WAL mode stays enabled at runtime with a 5 s busy timeout, foreign keys, bounded auto-checkpointing, and a shutdown checkpoint; `storage::export_snapshot` creates a portable single-file copy when needed. The active DB carries a `storage_generation = "modular-engine-v4"` marker in `storage_metadata`; if startup sees a `tron.sqlite` with a non-current or missing marker, it archives `tron.sqlite`, `tron.sqlite-wal`, and `tron.sqlite-shm` into a unique `internal/database/archive/modular-engine-v4-*` directory, writes `archive-manifest.json`, and starts fresh. Malformed generation metadata fails closed without moving the active database. Orphaned `tron.sqlite-wal` and `tron.sqlite-shm` sidecars are archived before a fresh DB is created. Non-current product/session data is archived, not migrated or read by the new runtime. Pre-unified database artifacts are archived the same way and are never read as active storage.
 
-The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`, with migration tests under `packages/agent/src/domains/session/event_store/sqlite/migrations/tests/`. The migration runner registers only that schema; deleted product follow-up migrations are not active on this clean-break branch. Every retained session-store constraint is declared inline on `CREATE TABLE`: `UNIQUE(session_id, sequence)` on events, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships.
+The unified database has one fresh migration surface for primitive session/log/blob tables: `packages/agent/src/domains/session/event_store/sqlite/migrations/v001_schema.sql`, with migration tests under `packages/agent/src/domains/session/event_store/sqlite/migrations/tests/`. The migration runner registers only that schema; deleted product follow-up migrations are not active on this clean-break branch. Migration work runs transactionally and finishes with `PRAGMA foreign_key_check`. Shared storage schema work runs inside `SAVEPOINT tron_storage_schema`, verifies required storage columns and payload-ref-to-blob ownership, and rolls back on drift. Every retained session-store constraint is declared inline on `CREATE TABLE` or its required index: `idx_events_session_sequence_unique` on `(session_id, sequence)`, `CHECK (payload IS NOT NULL OR content_blob_id IS NOT NULL)` on events, and foreign-key checks on session/workspace/blob relationships. Engine durability and authority SQLite stores apply the same runtime pragmas and shared storage schema validation before their own tables are used.
 
 Retained session rows, event rows, Agent Trace-style records, bounded
 server/iOS logs, and compressed content-addressed blobs share that same SQLite
@@ -1646,6 +1664,7 @@ tron ci clippy test          # Subset: linting + tests
 `self_adapting_agent_worker_schedule_dispatch_invariants`,
 `self_adapting_agent_worker_schedule_capacity_invariants`,
 `self_adapting_agent_successor_teardown_cleanup_invariants`,
+`data_integrity_storage_evolution_migration_discipline_invariants`,
 `primitive_trace_execution`, and serial `integration`. GitHub's Rust
 static-gates job runs the same named target set for docs, template, iOS, Mac,
 script, and CI changes.
@@ -1681,6 +1700,13 @@ These constraints are enforced in code with `// INVARIANT:` markers at the enfor
 8. **Database path guard**: Startup validates the database path is exactly `<resolved-tron-home>/internal/database/tron.sqlite`. Rejects alternate filenames, wrong directories, and symlinked paths.
 
 9. **Single-process DB ownership**: Startup takes an OS-level `flock(2)` on `tron.sqlite.lock` before opening the connection pool. A second `tron` process pointed at the same database aborts with a clear error naming the holder's PID, instead of silently racing on `(session_id, sequence)` writes. Released on process exit (normal or abnormal). Enforced by `domains/session/event_store/sqlite/process_lock.rs::acquire_database_lock` called from startup database initialization.
+
+10. **Storage generation and schema discipline**: Startup archives stale
+    `tron.sqlite` databases plus WAL/SHM sidecars with a manifest, archives
+    orphaned sidecars before creating fresh storage, fails closed on malformed
+    generation metadata or schema drift, and applies shared SQLite pragmas plus
+    storage schema validation on production server, event-store, engine
+    durability, and authority-store connections.
 
 ---
 

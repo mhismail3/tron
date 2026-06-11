@@ -229,6 +229,10 @@ impl SqliteEngineGrantStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn =
             Connection::open(path).map_err(|err| sqlite_err("grant.open", err.to_string()))?;
+        crate::shared::storage::apply_runtime_pragmas(&conn)
+            .map_err(|err| sqlite_err("grant.storage_pragmas", err.to_string()))?;
+        crate::shared::storage::ensure_storage_schema(&conn)
+            .map_err(|err| sqlite_err("grant.storage_schema", err.to_string()))?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS engine_grants (
                 grant_id TEXT PRIMARY KEY,

@@ -1,6 +1,6 @@
 # State Ownership And Lifecycle Inventory
 
-Status: SOL-10 `passed_after_fix`; 486 state-surface rows inventoried and classified.
+Status: SOL-10 `passed_after_fix`; 508 state-surface rows inventoried and classified.
 
 This inventory classifies stateful Tron surfaces by owner, lifecycle class,
 scope, creation path, mutation boundary, hydration or reconstruction path,
@@ -33,15 +33,17 @@ SOL-8 added the iOS architecture state-ownership doc row, and SOL-9 tagged the
 already-inventoried observability/recovery rows for health, logs, storage
 maintenance, replay, crash recovery, and shutdown drain visibility. SACB
 closeout splits added the capability grant helper and external-worker runtime
-lifecycle rows without changing ownership boundaries.
+lifecycle rows without changing ownership boundaries. Successor cleanup
+bookkeeping added 22 engine resource, worker, schedule, activation, and
+orchestration rows so inherited stateful markers remain owner-classified.
 
 State class distribution:
 
 | State class | Rows |
 |---|---:|
-| `ephemeral_runtime` | 267 |
+| `ephemeral_runtime` | 276 |
 | `projection_cache` | 73 |
-| `durable_substrate` | 69 |
+| `durable_substrate` | 82 |
 | `canonical_truth` | 41 |
 | `secret` | 16 |
 | `diagnostic_buffer` | 11 |
