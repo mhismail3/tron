@@ -350,6 +350,101 @@ fn saastc_inventory_covers_every_changed_file_since_oda_baseline() {
 }
 
 #[test]
+fn saastc_transport_boundary_has_no_successor_worker_public_surface() {
+    let contracts = read_repo_file("packages/agent/src/transport/engine/contracts.rs");
+    assert!(
+        contracts.contains("&[\"discover\", \"inspect\", \"watch\", \"invoke\", \"promote\"]"),
+        "public engine transport method set must stay narrow"
+    );
+    for forbidden in [
+        "\"launch\"",
+        "\"launch_activation\"",
+        "\"launch_from_trigger\"",
+        "\"issue_activation\"",
+        "\"schedule\"",
+        "\"worker_schedule\"",
+        "\"worker_activation\"",
+        "\"worker_process\"",
+        "startupTimeoutMs",
+    ] {
+        assert!(
+            !contracts.contains(forbidden),
+            "public engine contracts must not expose successor worker surface: {forbidden}"
+        );
+    }
+
+    let socket = read_repo_file("packages/agent/src/transport/engine/socket/mod.rs");
+    for required in [
+        "\"hello\" =>",
+        "\"discover\" =>",
+        "\"inspect\" =>",
+        "\"watch\" =>",
+        "\"invoke\" =>",
+        "\"promote\" =>",
+        "\"subscribe\" =>",
+        "\"poll\" =>",
+        "\"ack\" =>",
+        "\"heartbeat\" =>",
+        "\"goodbye\" =>",
+    ] {
+        assert!(
+            socket.contains(required),
+            "engine socket dispatch missing retained public/protocol branch {required}"
+        );
+    }
+
+    let transport_files = [
+        "packages/agent/src/transport/engine/contracts.rs",
+        "packages/agent/src/transport/engine/mod.rs",
+        "packages/agent/src/transport/engine/socket/mod.rs",
+        "packages/agent/src/transport/engine/socket/tests.rs",
+        "packages/agent/src/transport/engine/socket/wire.rs",
+        "packages/agent/src/transport/runtime/mod.rs",
+    ];
+    for path in transport_files {
+        let source = read_repo_file(path);
+        for forbidden in [
+            "domains::model::providers",
+            "openai",
+            "worker::launch_activation",
+            "worker::launch_from_trigger",
+            "worker::issue_activation",
+            "worker_schedule_plan",
+            "worker_schedule_tick",
+            "worker_schedule_scan_state",
+            "activationBundle",
+            "postReadyPayload",
+            "EngineWorkerScheduleService",
+            "scheduler.run()",
+            "worker_schedule::",
+            "SMAppService",
+            "launchd",
+            "tron deploy",
+            "packages/agent/skills",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{path} must not expose or start successor worker/provider/deploy surface: {forbidden}"
+            );
+        }
+    }
+
+    let wire = read_repo_file("packages/agent/src/transport/engine/socket/wire.rs");
+    for forbidden in [
+        "LaunchMessage",
+        "ScheduleMessage",
+        "ActivationMessage",
+        "WorkerActivation",
+        "WorkerSchedule",
+    ] {
+        assert!(
+            !wire.contains(forbidden),
+            "engine wire DTOs must not define successor worker messages: {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn saastc_phase1_records_hard_cleanup_boundaries() {
     let joined = format!(
         "{}\n{}\n{}",

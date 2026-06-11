@@ -104,3 +104,12 @@ harness and full initial diff inventory.
   tick/idempotency fingerprints, active-overlap evidence, and enqueue-only
   `trigger::dispatch` composition. This reduces the schedule cluster's
   `simplify` rows without closing SAASTC rows outside the cluster.
+- Source-proved the public transport boundary cluster as retained primitive
+  shell. `/engine` transport still registers only discover, inspect, watch,
+  invoke, and promote; the socket layer accepts only protocol framing,
+  stream-subscription, heartbeat, and those public methods; wire DTOs reject
+  undeclared authority/runtime metadata; and server runtime starts queue
+  draining plus external-worker heartbeat only, with no worker launch, worker
+  activation, schedule, provider, deploy, launchd, retry, or repo-skill public
+  surface. This moves the transport-boundary rows out of `simplify` but leaves
+  SAASTC rows pending until all successor clusters are audited.

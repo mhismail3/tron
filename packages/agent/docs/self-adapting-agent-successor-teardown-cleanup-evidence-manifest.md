@@ -97,6 +97,18 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   scan cap and never starts workers; scan state stores only cursor, budget,
   wrap/cancel flags, aggregate summary, trace id, generic redacted error, and
   scanner metadata.
+- Source-proved the transport-boundary cluster as retained primitive shell.
+  `public_engine_transport_methods` remains discover, inspect, watch, invoke,
+  and promote; `contracts.rs` registers only internal engine_ws triggers for
+  those methods; `transport/engine/mod.rs` derives authority from contracts and
+  strips transport-only context without accepting runtime metadata; the socket
+  dispatcher has no launch, activation, or schedule branch; wire DTOs deny
+  unknown fields including caller-supplied authority/runtime metadata; and
+  `transport/runtime/mod.rs` starts queue draining plus external-worker
+  heartbeat only. The new SAASTC static gate rejects provider imports, schedule
+  resources, activation/launch function ids, schedule autostart, deploy,
+  launchd/SMAppService, post-ready replay, and repo-skill surfaces in the
+  retained transport files.
 
 ## Phase 2 Focused Commands
 
@@ -117,6 +129,8 @@ cargo test --manifest-path packages/agent/Cargo.toml worker_schedule_dispatch --
 cargo test --manifest-path packages/agent/Cargo.toml worker_schedule --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_schedule_dispatch_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_schedule_capacity_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::transport --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml transport::engine --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 ```

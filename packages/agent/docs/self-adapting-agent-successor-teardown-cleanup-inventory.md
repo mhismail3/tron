@@ -4,7 +4,8 @@ Status: Source teardown in progress; current checkpoints tighten
 provider-visible resource authorship, activation bundle metadata naming, worker
 activation grant filesystem authority, trigger launch timing, and source-prove
 bundle handoff, orchestration process-record retention, and schedule state/tick
-retention while later SAASTC rows remain open.
+retention, plus the public transport boundary, while later SAASTC rows remain
+open.
 
 Scorecard: [`self-adapting-agent-successor-teardown-cleanup-scorecard.md`](self-adapting-agent-successor-teardown-cleanup-scorecard.md)
 
