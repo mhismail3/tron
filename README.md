@@ -342,12 +342,28 @@ Current living entry points:
   completed SAAWO gates for resource contracts, admin launch/stop governance,
   direct-exec supervision, redaction, readiness binding, no scheduler/provider/
   public transport surface, CI wiring, and README parity.
+- `packages/agent/docs/self-adapting-agent-worker-bundle-handoff-scorecard.md`:
+  completed SAAWBH scorecard for ephemeral activation-bundle custody, durable
+  result redaction, and stdin handoff for governed worker launches.
+- `packages/agent/docs/self-adapting-agent-worker-bundle-handoff-evidence-manifest.md`:
+  companion evidence manifest for bundle vault, stdin supervisor boundary,
+  non-persistence audit, and closeout validation.
+- `packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.md`:
+  SAAWBH source inventory taxonomy and handoff boundary notes.
+- `packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.tsv`:
+  machine-readable SAAWBH inventory covering activation issue, durable
+  redaction, vault custody, launch plans, supervisor stdin, process resources,
+  replay, and transport boundaries.
+- `packages/agent/tests/self_adapting_agent_worker_bundle_handoff_invariants.rs`:
+  completed SAAWBH gates for docs/CI parity, vault-only custody, durable
+  redaction, stdin handoff, no scheduler/provider/public handoff surface, and
+  README parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA/SAAWO/SAAWBH
 scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -775,19 +791,24 @@ explicit system-ledger idempotency, an active unexpired session/workspace
 `worker_activation`, and a reviewed `worker_launch_plan` whose expected worker,
 function, namespace, scope, executable path policy, executable SHA-256 digest,
 argv allowlist, env allowlist, cwd policy, startup timeout, stop timeout, log
-capture bound, and `preissued_bundle` delivery mode all match before any process
-starts. It invokes the executable directly with no shell and creates a redacted
-`worker_process` resource in `requested`/`starting`; readiness is not trusted
-until the existing `/engine/workers` SAAWA hello moves the process to
-`hello_seen` and exact function registration moves it to `ready`.
+capture bound, and either `preissued_bundle` or `stdin_activation_bundle_v1`
+delivery mode all match before any process starts. In stdin mode the engine
+consumes the in-memory `WorkerActivationBundleVault` entry exactly once,
+writes the activation bundle to piped child stdin, and closes stdin. It invokes
+the executable directly with no shell and creates a redacted `worker_process`
+resource in `requested`/`starting`; readiness is not trusted until the existing
+`/engine/workers` SAAWA hello moves the process to `hello_seen` and exact
+function registration moves it to `ready`.
 `worker::stop_process` is also admin/internal under `worker.launch`; it is
 idempotent for terminal or missing processes, stops through the supervisor,
 updates process/activation audit, and unregisters volatile catalog entries.
 Process resources persist only redacted handles, pid fingerprints, env keys,
-argv, executable digest/path policy, bounded log snippets, exit state, and
-readiness markers. Activation tokens are not persisted or reconstructed; the
-launched worker must already possess its issued bundle through a non-persisted
-channel. There is no scheduler launch, automatic restart loop, trigger creation,
+argv, executable digest/path policy, bounded log snippets, exit state, readiness
+markers, and stdin handoff fingerprints/byte counts. Activation bundles are not
+persisted or reconstructed; idempotent activation replay returns the redacted
+durable shape rather than the original bundle, and a failed stdin launch after
+consume requires issuing a new activation. There is no scheduler launch,
+automatic restart loop, trigger creation,
 provider-visible launch tool, public `/engine` launch message, deploy flow,
 launchd/SMAppService integration, or repo-managed skill surface.
 
@@ -1505,6 +1526,7 @@ tron ci clippy test          # Subset: linting + tests
 `self_adapting_agent_promotion_governance_invariants`,
 `self_adapting_agent_worker_activation_invariants`,
 `self_adapting_agent_worker_orchestration_invariants`,
+`self_adapting_agent_worker_bundle_handoff_invariants`,
 `primitive_trace_execution`, and serial `integration`. GitHub's Rust
 static-gates job runs the same named target set for docs, template, iOS, Mac,
 script, and CI changes.

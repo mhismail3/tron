@@ -426,7 +426,10 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "startupTimeoutMs": {"type": "integer"},
                     "stopTimeoutMs": {"type": "integer"},
                     "maxLogCaptureBytes": {"type": "integer"},
-                    "activationDeliveryMode": {"type": "string", "enum": ["preissued_bundle"]},
+                    "activationDeliveryMode": {
+                        "type": "string",
+                        "enum": ["preissued_bundle", "stdin_activation_bundle_v1"]
+                    },
                     "governance": {
                         "type": "object",
                         "required": ["reviewed", "decisionResourceId", "evidenceResourceIds"],
@@ -468,6 +471,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "namespace",
                     "scope",
                     "launch",
+                    "activationHandoff",
                     "process",
                     "readiness",
                     "logs",
@@ -499,6 +503,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "namespace": {"type": "string"},
                     "scope": {"type": "object"},
                     "launch": {"type": "object"},
+                    "activationHandoff": {"type": "object"},
                     "process": {"type": "object"},
                     "readiness": {"type": "object"},
                     "logs": {"type": "object"},

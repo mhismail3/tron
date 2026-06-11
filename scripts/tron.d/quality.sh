@@ -42,6 +42,7 @@ run_tests() {
         self_adapting_agent_promotion_governance_invariants
         self_adapting_agent_worker_activation_invariants
         self_adapting_agent_worker_orchestration_invariants
+        self_adapting_agent_worker_bundle_handoff_invariants
         primitive_trace_execution
         integration
     )

@@ -3,11 +3,15 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex as StdMutex};
 
+use sha2::Digest as _;
+
 use crate::engine::authority::grants::{EngineGrantStoreBackend, InMemoryEngineGrantStore};
 use crate::engine::durability::ledger::{
     EngineLedgerStore, IdempotencyEntry, InMemoryEngineLedgerStore,
 };
-use crate::engine::invocation::model::{InProcessFunctionHandler, InvocationRecord};
+use crate::engine::invocation::model::{
+    InProcessFunctionHandler, Invocation, InvocationRecord, InvocationResult,
+};
 use crate::engine::kernel::errors::Result;
 use crate::engine::kernel::ids::{FunctionId, TriggerId, TriggerTypeId, WorkerId};
 use crate::engine::kernel::types::{
@@ -29,6 +33,71 @@ pub(in crate::engine) use invocation::{PreparedSyncInvocation, PreparedSyncInvoc
 
 const RESERVED_ENGINE_NAMESPACE: &str = "engine";
 const RESERVED_ENGINE_WORKER_ID: &str = "engine";
+
+pub(super) fn durable_result_for_invocation(
+    invocation: &Invocation,
+    result: &InvocationResult,
+) -> InvocationResult {
+    if invocation.function_id.as_str()
+        != crate::engine::primitives::worker::ISSUE_ACTIVATION_FUNCTION
+    {
+        return result.clone();
+    }
+    let Some(value) = result.value.as_ref() else {
+        return result.clone();
+    };
+    let Some(bundle) = value.get("activationBundle") else {
+        return result.clone();
+    };
+    let token_fingerprint = bundle
+        .get("scopedWorkerToken")
+        .and_then(fingerprint_json_value)
+        .or_else(|| {
+            value
+                .get("tokenFingerprint")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        });
+    let expected_function_id = bundle
+        .get("expectedFunctionDefinition")
+        .and_then(|value| value.get("id"))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            invocation
+                .payload
+                .get("functionId")
+                .and_then(serde_json::Value::as_str)
+        });
+    let expected_namespace =
+        expected_function_id.and_then(|id| id.split_once("::").map(|(namespace, _)| namespace));
+    let mut redacted = result.clone();
+    redacted.value = Some(serde_json::json!({
+        "activationResourceId": value.get("activationResourceId").cloned().unwrap_or(serde_json::Value::Null),
+        "workerId": value.get("workerId").cloned().unwrap_or(serde_json::Value::Null),
+        "expiresAt": value.get("expiresAt").cloned().unwrap_or(serde_json::Value::Null),
+        "activationBundle": {
+            "redacted": true,
+            "redaction": "activation_bundle_not_persisted",
+            "custody": "process_memory_vault_or_immediate_result_only",
+            "tokenFingerprint": token_fingerprint,
+            "expectedFunctionId": expected_function_id,
+            "expectedFunctionNamespace": expected_namespace,
+            "workerHello": {"redacted": true},
+            "scopedWorkerToken": {"redacted": true},
+            "expectedFunctionDefinition": {
+                "redacted": true,
+                "id": expected_function_id,
+                "namespace": expected_namespace
+            }
+        }
+    }));
+    redacted
+}
+
+fn fingerprint_json_value(value: &serde_json::Value) -> Option<String> {
+    let bytes = serde_json::to_vec(value).ok()?;
+    Some(hex::encode(sha2::Sha256::digest(bytes)))
+}
 
 struct WorkerEntry {
     definition: WorkerDefinition,

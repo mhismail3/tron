@@ -8,7 +8,10 @@ use super::contracts::{
     ActivationResource, LaunchActivationRequest, LaunchPlan, contains_secret_material,
     non_empty_payload_string,
 };
-use super::supervisor::{WorkerProcessHandle, WorkerProcessStartResult, WorkerProcessStopResult};
+use super::supervisor::{
+    WorkerProcessHandle, WorkerProcessSecretStdin, WorkerProcessStartResult,
+    WorkerProcessStopResult,
+};
 use crate::engine::durability::resources::{EngineResourceInspection, EngineResourceScope};
 use crate::engine::invocation::model::Invocation;
 use crate::engine::kernel::errors::{EngineError, Result};
@@ -65,6 +68,33 @@ impl RedactedOutput {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct ActivationHandoffAudit {
+    fingerprint: String,
+    byte_count: usize,
+}
+
+impl ActivationHandoffAudit {
+    pub(super) fn from_secret_stdin(secret: &WorkerProcessSecretStdin) -> Self {
+        Self {
+            fingerprint: secret.fingerprint.clone(),
+            byte_count: secret.byte_count,
+        }
+    }
+
+    fn json(&self) -> Value {
+        json!({
+            "delivery": "stdin_activation_bundle_v1",
+            "secretStdin": {
+                "present": true,
+                "redacted": true,
+                "fingerprint": self.fingerprint,
+                "byteCount": self.byte_count,
+            }
+        })
+    }
+}
+
 pub(super) fn process_payload(
     status: &str,
     process_resource_id: &str,
@@ -73,6 +103,7 @@ pub(super) fn process_payload(
     request: &LaunchActivationRequest,
     handle: Option<WorkerProcessHandle>,
     logs: RedactedOutput,
+    handoff: Option<ActivationHandoffAudit>,
     failure_reason: Option<String>,
 ) -> Value {
     let handle_value = handle
@@ -98,6 +129,15 @@ pub(super) fn process_payload(
             "requestedAt": Utc::now().to_rfc3339(),
             "idempotencyKeyFingerprint": short_hash(&request.idempotency_key),
         },
+        "activationHandoff": handoff.map(|handoff| handoff.json()).unwrap_or_else(|| json!({
+            "delivery": plan.activation_delivery_mode,
+            "secretStdin": {
+                "present": false,
+                "redacted": true,
+                "fingerprint": Value::Null,
+                "byteCount": 0,
+            }
+        })),
         "process": {
             "directExec": true,
             "executablePath": plan.executable_path,

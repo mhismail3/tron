@@ -131,6 +131,90 @@ async fn worker_orchestration_launch_replay_ready_invoke_and_stop_are_governed()
 }
 
 #[tokio::test]
+async fn worker_orchestration_stdin_activation_bundle_consumes_vault_once() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let fake = Arc::new(FakeSupervisor::default());
+    handle
+        .worker_process_supervisor_registry_for_setup()
+        .unwrap()
+        .set_supervisor(fake.clone());
+
+    let (activation_id, _hello, expected_function) =
+        issued_activation_bundle(&handle, "orch-stdin", "orchestrated_stdin::echo").await;
+    let vault_before = handle
+        .worker_activation_bundle_metadata_for_test(&activation_id)
+        .await
+        .unwrap()
+        .expect("activation bundle should be in the in-memory vault");
+    let plan_id = create_launch_plan(
+        &handle,
+        "orch-stdin",
+        &activation_id,
+        &expected_function,
+        LaunchPlanOverrides {
+            activation_delivery_mode: Some("stdin_activation_bundle_v1".to_owned()),
+            ..LaunchPlanOverrides::default()
+        },
+    )
+    .await;
+    let launched = launch_activation(&handle, &activation_id, &plan_id, "saawo-stdin-launch").await;
+    assert_eq!(launched.error, None, "stdin launch failed: {launched:?}");
+    assert_eq!(fake.starts.load(Ordering::SeqCst), 1);
+    let request = fake.requests.lock().unwrap()[0].clone();
+    assert!(request.had_secret_stdin);
+    assert_eq!(
+        request.secret_stdin_byte_count,
+        vault_before.bundle_byte_count
+    );
+    assert_eq!(
+        request.secret_stdin_fingerprint.as_deref(),
+        Some(vault_before.bundle_fingerprint.as_str())
+    );
+    assert!(
+        handle
+            .worker_activation_bundle_metadata_for_test(&activation_id)
+            .await
+            .unwrap()
+            .is_none(),
+        "stdin launch must consume the vault entry exactly once"
+    );
+    let process_id = launched.value.unwrap()["workerProcessResourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let payload = process_payload(&handle, &process_id).await;
+    assert_eq!(
+        payload["activationHandoff"]["delivery"],
+        "stdin_activation_bundle_v1"
+    );
+    assert_eq!(payload["activationHandoff"]["secretStdin"]["present"], true);
+    assert_eq!(
+        payload["activationHandoff"]["secretStdin"]["redacted"],
+        true
+    );
+    assert_eq!(
+        payload["activationHandoff"]["secretStdin"]["fingerprint"],
+        vault_before.bundle_fingerprint
+    );
+    assert_eq!(
+        payload["activationHandoff"]["secretStdin"]["byteCount"],
+        vault_before.bundle_byte_count
+    );
+    assert!(
+        !payload.to_string().contains("workerHello"),
+        "worker_process payload must not persist activation bundle JSON"
+    );
+
+    let replay = launch_activation(&handle, &activation_id, &plan_id, "saawo-stdin-launch").await;
+    assert_eq!(replay.error, None);
+    assert_eq!(fake.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        replay.value.as_ref().unwrap()["workerProcessResourceId"],
+        json!(process_id)
+    );
+}
+
+#[tokio::test]
 async fn worker_orchestration_rejects_mismatched_or_secret_launch_plans_before_start() {
     let handle = EngineHostHandle::new_in_memory().unwrap();
     let fake = Arc::new(FakeSupervisor::default());
@@ -262,7 +346,16 @@ async fn worker_orchestration_wrong_registration_marks_process_failed() {
 struct FakeSupervisor {
     starts: AtomicUsize,
     stops: AtomicUsize,
-    requests: Mutex<Vec<WorkerProcessStartRequest>>,
+    requests: Mutex<Vec<RecordedStartRequest>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RecordedStartRequest {
+    env: BTreeMap<String, String>,
+    argv: Vec<String>,
+    had_secret_stdin: bool,
+    secret_stdin_byte_count: usize,
+    secret_stdin_fingerprint: Option<String>,
 }
 
 #[async_trait]
@@ -270,7 +363,20 @@ impl WorkerProcessSupervisor for FakeSupervisor {
     async fn start(&self, request: WorkerProcessStartRequest) -> Result<WorkerProcessStartResult> {
         self.starts.fetch_add(1, Ordering::SeqCst);
         let process_id = request.process_resource_id.clone();
-        self.requests.lock().unwrap().push(request);
+        self.requests.lock().unwrap().push(RecordedStartRequest {
+            env: request.env.clone(),
+            argv: request.argv.clone(),
+            had_secret_stdin: request.secret_stdin.is_some(),
+            secret_stdin_byte_count: request
+                .secret_stdin
+                .as_ref()
+                .map(|stdin| stdin.byte_count)
+                .unwrap_or_default(),
+            secret_stdin_fingerprint: request
+                .secret_stdin
+                .as_ref()
+                .map(|stdin| stdin.fingerprint.clone()),
+        });
         Ok(WorkerProcessStartResult {
             handle: WorkerProcessHandle {
                 supervisor_process_id: process_id.clone(),

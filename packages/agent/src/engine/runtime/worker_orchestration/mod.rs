@@ -32,8 +32,8 @@ use contracts::{
     parse_target_visibility, parse_time, payload_str,
 };
 use process_resource::{
-    RedactedOutput, current_payload, ensure_idempotency, ensure_resource_kind,
-    expected_readiness_markers, is_terminal_process_status, launch_env,
+    ActivationHandoffAudit, RedactedOutput, current_payload, ensure_idempotency,
+    ensure_resource_kind, expected_readiness_markers, is_terminal_process_status, launch_env,
     launch_response_from_process, process_handle_from_payload, process_payload,
     process_resource_id, redact_text, scope_ids, validate_activation_for_launch,
     validate_launch_plan_matches_activation,
@@ -42,7 +42,9 @@ use process_resource::{
 pub use supervisor::{
     WorkerProcessHandle, WorkerProcessStartResult, WorkerProcessStopResult, WorkerProcessSupervisor,
 };
-pub use supervisor::{WorkerProcessStartRequest, WorkerProcessSupervisorRegistry};
+pub use supervisor::{
+    WorkerProcessSecretStdin, WorkerProcessStartRequest, WorkerProcessSupervisorRegistry,
+};
 
 /// Built-in resource kind for reviewed local process launch plans.
 pub const WORKER_LAUNCH_PLAN_KIND: &str = "worker_launch_plan";
@@ -54,7 +56,8 @@ pub const WORKER_PROCESS_KIND: &str = "worker_process";
 pub const WORKER_PROCESS_SCHEMA_ID: &str = "tron.resource.worker_process.v1";
 
 const WORKER_ACTIVATION_KIND: &str = "worker_activation";
-const SUPPORTED_ACTIVATION_DELIVERY_MODE: &str = "preissued_bundle";
+const PREISSUED_BUNDLE_DELIVERY_MODE: &str = "preissued_bundle";
+const STDIN_BUNDLE_DELIVERY_MODE: &str = "stdin_activation_bundle_v1";
 const DEFAULT_STARTUP_TIMEOUT_MS: u64 = 10_000;
 const DEFAULT_STOP_TIMEOUT_MS: u64 = 5_000;
 const MAX_STARTUP_TIMEOUT_MS: u64 = 60_000;
@@ -116,6 +119,7 @@ impl EngineWorkerOrchestrationRuntime {
             None,
             RedactedOutput::empty(plan.max_log_capture_bytes),
             None,
+            None,
         );
         self.host
             .create_resource(CreateResource {
@@ -149,6 +153,34 @@ impl EngineWorkerOrchestrationRuntime {
         self.link_process_on_activation(&activation, &process_resource_id, &invocation)
             .await?;
 
+        let secret_stdin = if plan.activation_delivery_mode == STDIN_BUNDLE_DELIVERY_MODE {
+            let metadata = self
+                .host
+                .worker_activation_bundle_metadata_for_test(&request.activation_resource_id)
+                .await?
+                .ok_or_else(|| {
+                    EngineError::PolicyViolation(format!(
+                        "activation bundle {} is missing, expired, or already consumed",
+                        request.activation_resource_id
+                    ))
+                })?;
+            validate_vault_metadata_matches_activation(&metadata, &activation)?;
+            let consumed = self
+                .host
+                .consume_worker_activation_bundle(&request.activation_resource_id)
+                .await?;
+            validate_vault_metadata_matches_activation(&consumed.metadata, &activation)?;
+            Some(WorkerProcessSecretStdin {
+                bytes: consumed.stdin_bytes,
+                fingerprint: consumed.metadata.bundle_fingerprint,
+                byte_count: consumed.metadata.bundle_byte_count,
+            })
+        } else {
+            None
+        };
+        let handoff_audit = secret_stdin
+            .as_ref()
+            .map(ActivationHandoffAudit::from_secret_stdin);
         let start_request = WorkerProcessStartRequest {
             process_resource_id: process_resource_id.clone(),
             executable_path: PathBuf::from(&plan.executable_path),
@@ -158,6 +190,7 @@ impl EngineWorkerOrchestrationRuntime {
             startup_timeout: StdDuration::from_millis(startup_timeout_ms),
             stop_timeout: StdDuration::from_millis(plan.stop_timeout_ms),
             max_log_capture_bytes: plan.max_log_capture_bytes as usize,
+            secret_stdin,
         };
         let start_result = self
             .supervisor_registry
@@ -175,6 +208,7 @@ impl EngineWorkerOrchestrationRuntime {
                     &request,
                     Some(started.handle.clone()),
                     RedactedOutput::from_start_result(&started, plan.max_log_capture_bytes),
+                    handoff_audit.clone(),
                     None,
                 );
                 self.update_process(&inspection, "starting", payload, Some(&invocation))
@@ -206,6 +240,7 @@ impl EngineWorkerOrchestrationRuntime {
                     &request,
                     None,
                     RedactedOutput::empty(plan.max_log_capture_bytes),
+                    handoff_audit,
                     Some(redact_text(
                         &error.to_string(),
                         plan.max_log_capture_bytes as usize,
@@ -616,4 +651,41 @@ impl EngineWorkerOrchestrationRuntime {
             .await?;
         Ok(())
     }
+}
+
+fn validate_vault_metadata_matches_activation(
+    metadata: &crate::engine::runtime::worker_activation_bundle_vault::WorkerActivationBundleMetadata,
+    activation: &ActivationResource,
+) -> Result<()> {
+    if metadata.activation_resource_id != activation.resource.resource_id {
+        return Err(EngineError::PolicyViolation(
+            "activation bundle id does not match launch activation".to_owned(),
+        ));
+    }
+    if metadata.worker_id != activation.worker_id {
+        return Err(EngineError::PolicyViolation(
+            "activation bundle workerId does not match activation".to_owned(),
+        ));
+    }
+    if metadata.function_id != activation.function_id {
+        return Err(EngineError::PolicyViolation(
+            "activation bundle functionId does not match activation".to_owned(),
+        ));
+    }
+    if metadata.expires_at <= Utc::now() {
+        return Err(EngineError::PolicyViolation(
+            "activation bundle is expired".to_owned(),
+        ));
+    }
+    let activation_fingerprint = activation
+        .payload
+        .get("tokenFingerprint")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if metadata.token_fingerprint != activation_fingerprint {
+        return Err(EngineError::PolicyViolation(
+            "activation bundle fingerprint does not match activation".to_owned(),
+        ));
+    }
+    Ok(())
 }

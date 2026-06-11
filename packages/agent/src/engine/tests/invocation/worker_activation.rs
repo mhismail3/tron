@@ -57,6 +57,22 @@ async fn worker_activation_issues_scoped_resource_grant_token_and_replays_idempo
     assert!(payload.get("workerHello").is_none());
     assert!(payload["tokenFingerprint"].as_str().unwrap().len() >= 32);
     assert!(payload["governanceFingerprint"].as_str().unwrap().len() >= 32);
+    let vault_metadata = handle
+        .worker_activation_bundle_metadata_for_test(activation_resource_id)
+        .await
+        .unwrap()
+        .expect("live activation bundle should be held in memory");
+    assert_eq!(
+        vault_metadata.activation_resource_id,
+        activation_resource_id
+    );
+    assert_eq!(vault_metadata.worker_id.as_str(), worker_id);
+    assert_eq!(vault_metadata.function_id.as_str(), "activated_demo::echo");
+    assert_eq!(
+        vault_metadata.token_fingerprint,
+        payload["tokenFingerprint"].as_str().unwrap()
+    );
+    assert!(vault_metadata.bundle_byte_count > 0);
 
     let grant_id = grant(payload["grantId"].as_str().unwrap());
     let grant_record = handle
@@ -104,11 +120,39 @@ async fn worker_activation_issues_scoped_resource_grant_token_and_replays_idempo
 
     let replay = issue_worker_activation(&handle, &refs, "saawa-issue-valid").await;
     assert_eq!(replay.error, None);
-    assert_eq!(replay.replayed_from, Some(issued.invocation_id));
+    let issued_invocation_id = issued.invocation_id.clone();
+    assert_eq!(replay.replayed_from, Some(issued_invocation_id.clone()));
     assert_eq!(
         replay.value.as_ref().unwrap()["activationResourceId"],
         activation_resource_id
     );
+    assert_eq!(
+        replay.value.as_ref().unwrap()["activationBundle"]["redacted"],
+        true
+    );
+    assert!(
+        replay.value.as_ref().unwrap()["activationBundle"]["scopedWorkerToken"]
+            .get("authorityGrantHash")
+            .is_none(),
+        "durable idempotency replay must not return token material"
+    );
+    let replay_snapshot = handle.replay_snapshot("session-a").await.unwrap();
+    let durable_invocation = replay_snapshot
+        .invocations
+        .iter()
+        .find(|record| record.invocation_id == issued_invocation_id)
+        .expect("issue invocation should be durable");
+    let durable_text = serde_json::to_string(&durable_invocation.result_value).unwrap();
+    assert!(durable_text.contains("activation_bundle_not_persisted"));
+    assert!(!durable_text.contains("scopedWorkerToken\":{\"pluginId"));
+    let durable_idempotency = replay_snapshot
+        .idempotency_entries
+        .iter()
+        .find(|entry| entry.first_invocation_id == issued_invocation_id)
+        .expect("issue idempotency outcome should be durable");
+    let durable_outcome_text = serde_json::to_string(&durable_idempotency.outcome).unwrap();
+    assert!(durable_outcome_text.contains("activation_bundle_not_persisted"));
+    assert!(!durable_outcome_text.contains("authorityGrantHash"));
 
     let workspace_refs = create_worker_activation_governance(
         &handle,

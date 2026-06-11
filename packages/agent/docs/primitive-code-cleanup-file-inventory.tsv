@@ -1595,3 +1595,9 @@ packages/agent/src/engine/runtime/worker_orchestration/contracts.rs	retain	saawo
 packages/agent/src/engine/runtime/worker_orchestration/process_resource.rs	retain	saawo rust source	SAAWO-3	Worker process payload, redaction, and readiness matching retained in the split orchestration module.
 packages/agent/src/engine/runtime/worker_orchestration/supervisor.rs	retain	saawo rust source	SAAWO-6	Direct-exec worker process supervisor retained as the process boundary owner.
 packages/agent/src/engine/tests/runtime/worker_orchestration.rs	retain	saawo rust test	SAAWO-7	Worker orchestration runtime tests retained for fake supervisor and readiness binding coverage.
+packages/agent/docs/self-adapting-agent-worker-bundle-handoff-scorecard.md	retain	saawbh docs	SAAWBH-0	Worker bundle handoff scorecard retained as completed closeout evidence.
+packages/agent/docs/self-adapting-agent-worker-bundle-handoff-evidence-manifest.md	retain	saawbh docs	SAAWBH-0	Worker bundle handoff evidence manifest retained for verification provenance.
+packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.md	retain	saawbh docs	SAAWBH-1	Worker bundle handoff inventory summary retained for source taxonomy.
+packages/agent/docs/self-adapting-agent-worker-bundle-handoff-inventory.tsv	retain	saawbh docs	SAAWBH-1	Worker bundle handoff machine-readable inventory retained for static gates.
+packages/agent/tests/self_adapting_agent_worker_bundle_handoff_invariants.rs	retain	saawbh rust test	SAAWBH-10	Worker bundle handoff invariant target retained for closeout verification.
+packages/agent/src/engine/runtime/worker_activation_bundle_vault.rs	retain	saawbh rust source	SAAWBH-3	Process-memory activation bundle vault retained as the ephemeral custody boundary.

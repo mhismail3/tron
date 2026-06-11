@@ -58,3 +58,9 @@ Activation v1 remains a governed audit bridge from reviewed capability
 definitions to the existing external-worker runtime. It does not launch a
 process, schedule a trigger, deploy code, add a provider tool, expose a public
 activation message on `/engine`, or manage skills from the repo.
+
+## Successor Note
+
+SAAWBH preserves SAAWA activation issuance and hello/register readiness as the
+authority for callable worker state, while adding process-memory bundle custody
+and durable redaction for idempotency replay.

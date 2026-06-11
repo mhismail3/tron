@@ -62,4 +62,6 @@ git status --short
 
 - Proactive termination on grant revocation without a subsequent worker protocol event is not implemented as a scheduler/watch loop in this slice. The runtime fails closed on revoked/expired hello and stop is manual/admin.
 - Production process supervision starts and stops direct child processes, captures bounded output, and records audit state; it intentionally does not restart or relaunch.
-- `preissued_bundle` requires the launched worker to receive the activation bundle through a non-persisted channel outside the `worker_process` resource.
+- `preissued_bundle` remains supported. SAAWBH closes the prior residual
+  non-persisted handoff gap for new launches with `stdin_activation_bundle_v1`,
+  backed by an in-memory one-shot vault and supervisor stdin boundary.

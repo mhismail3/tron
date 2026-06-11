@@ -103,6 +103,52 @@ impl EngineHostHandle {
             .clone())
     }
 
+    /// Inspect safe in-memory activation bundle metadata.
+    pub async fn worker_activation_bundle_metadata_for_test(
+        &self,
+        activation_resource_id: &str,
+    ) -> Result<
+        Option<
+            crate::engine::runtime::worker_activation_bundle_vault::WorkerActivationBundleMetadata,
+        >,
+    > {
+        let vault = self
+            .inner
+            .lock()
+            .await
+            .primitives
+            .worker_activation_bundles
+            .clone();
+        Ok(vault
+            .lock()
+            .map_err(|_| {
+                EngineError::HandlerFailed("activation bundle vault lock poisoned".to_owned())
+            })?
+            .metadata(activation_resource_id))
+    }
+
+    /// Consume one activation bundle for direct child-stdin handoff.
+    pub(in crate::engine) async fn consume_worker_activation_bundle(
+        &self,
+        activation_resource_id: &str,
+    ) -> Result<
+        crate::engine::runtime::worker_activation_bundle_vault::ConsumedWorkerActivationBundle,
+    > {
+        let vault = self
+            .inner
+            .lock()
+            .await
+            .primitives
+            .worker_activation_bundles
+            .clone();
+        vault
+            .lock()
+            .map_err(|_| {
+                EngineError::HandlerFailed("activation bundle vault lock poisoned".to_owned())
+            })?
+            .consume(activation_resource_id)
+    }
+
     /// Acquire a high-risk resource lease and publish a lease lifecycle stream
     /// event. This is a primitive API for domain functions that mutate shared
     /// resources and need fail-closed exclusion.

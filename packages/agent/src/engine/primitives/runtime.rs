@@ -18,6 +18,7 @@ use crate::engine::kernel::ids::WorkerId;
 use crate::engine::kernel::types::{
     FunctionDefinition, TriggerDefinition, TriggerTypeDefinition, VisibilityScope, WorkerDefinition,
 };
+use crate::engine::runtime::worker_activation_bundle_vault::WorkerActivationBundleMetadata;
 
 /// Narrow host interface required by host-dispatched primitive workers.
 pub(in crate::engine) trait PrimitiveRuntimeHost {
@@ -34,6 +35,10 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
     fn create_resource(&mut self, request: CreateResource) -> Result<EngineResource>;
     fn update_resource(&mut self, request: UpdateResource) -> Result<EngineResourceVersion>;
     fn derive_authority_grant(&mut self, request: DeriveGrant) -> Result<EngineGrant>;
+    fn store_worker_activation_bundle(
+        &mut self,
+        request: StoreWorkerActivationBundle,
+    ) -> Result<WorkerActivationBundleMetadata>;
     fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport>;
     fn storage_checkpoint(&self) -> Result<crate::shared::storage::StorageCheckpointReport>;
     fn storage_export_snapshot(
@@ -45,6 +50,18 @@ pub(in crate::engine) trait PrimitiveRuntimeHost {
         dry_run: bool,
         verbose_retention_days: u64,
     ) -> Result<crate::shared::storage::StorageRetentionReport>;
+}
+
+/// In-memory activation bundle vault store request.
+pub(in crate::engine) struct StoreWorkerActivationBundle {
+    pub activation_resource_id: String,
+    pub worker_id: crate::engine::kernel::ids::WorkerId,
+    pub function_id: crate::engine::kernel::ids::FunctionId,
+    pub expires_at: chrono::DateTime<chrono::Utc>,
+    pub token_fingerprint: String,
+    pub activation_bundle: Value,
+    pub issued_trace_id: crate::engine::kernel::ids::TraceId,
+    pub issued_invocation_id: crate::engine::kernel::ids::InvocationId,
 }
 
 pub(in crate::engine) fn dispatch(

@@ -11,7 +11,9 @@ use crate::engine::kernel::ids::{ActorId, AuthorityGrantId, FunctionId, WorkerId
 use crate::engine::kernel::types::{
     FunctionDefinition, Provenance, VisibilityScope, WorkerDefinition, WorkerKind,
 };
-use crate::engine::primitives::runtime::{PrimitiveRuntimeHost, actor_context};
+use crate::engine::primitives::runtime::{
+    PrimitiveRuntimeHost, StoreWorkerActivationBundle, actor_context,
+};
 use crate::engine::runtime::worker_protocol::{
     ScopedWorkerToken, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy, WorkerHello, WorkerIdentity,
     WorkerRegistrationMode, WorkerVisibility,
@@ -170,15 +172,27 @@ pub(in crate::engine::primitives) fn issue_activation(
         invocation_id: Some(invocation.id.clone()),
     })?;
 
+    let activation_bundle = json!({
+        "workerHello": hello,
+        "scopedWorkerToken": token,
+        "expectedFunctionDefinition": expected_function,
+    });
+    let _vault_metadata = host.store_worker_activation_bundle(StoreWorkerActivationBundle {
+        activation_resource_id: activation_resource_id.clone(),
+        worker_id: worker_id.clone(),
+        function_id: request.function_id.clone(),
+        expires_at,
+        token_fingerprint: token_fingerprint.clone(),
+        activation_bundle: activation_bundle.clone(),
+        issued_trace_id: invocation.causal_context.trace_id.clone(),
+        issued_invocation_id: invocation.id.clone(),
+    })?;
+
     Ok(json!({
         "activationResourceId": activation_resource_id,
         "workerId": worker_id,
         "expiresAt": expires_at.to_rfc3339(),
-        "activationBundle": {
-            "workerHello": hello,
-            "scopedWorkerToken": token,
-            "expectedFunctionDefinition": expected_function,
-        }
+        "activationBundle": activation_bundle
     }))
 }
 

@@ -5,7 +5,7 @@ use std::time::Duration as StdDuration;
 
 use async_trait::async_trait;
 use sha2::{Digest, Sha256};
-use tokio::io::AsyncReadExt as _;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -32,6 +32,20 @@ pub struct WorkerProcessStartRequest {
     pub stop_timeout: StdDuration,
     /// Maximum stdout/stderr bytes retained for audit.
     pub max_log_capture_bytes: usize,
+    /// Optional secret stdin payload. Supervisors must write once and never
+    /// retain these bytes.
+    pub secret_stdin: Option<WorkerProcessSecretStdin>,
+}
+
+/// Secret stdin payload plus safe audit metadata.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WorkerProcessSecretStdin {
+    /// Bytes to write once to child stdin.
+    pub bytes: Vec<u8>,
+    /// Non-secret fingerprint of bytes.
+    pub fingerprint: String,
+    /// Byte count.
+    pub byte_count: usize,
 }
 
 /// Redacted process handle details safe to persist.
@@ -147,6 +161,11 @@ impl WorkerProcessSupervisor for TokioWorkerProcessSupervisor {
         if let Some(cwd) = &request.cwd {
             command.current_dir(cwd);
         }
+        if request.secret_stdin.is_some() {
+            command.stdin(std::process::Stdio::piped());
+        } else {
+            command.stdin(std::process::Stdio::null());
+        }
         command.stdout(std::process::Stdio::piped());
         command.stderr(std::process::Stdio::piped());
         let mut child = command
@@ -155,6 +174,23 @@ impl WorkerProcessSupervisor for TokioWorkerProcessSupervisor {
                 code: "WORKER_PROCESS_START_FAILED".to_owned(),
                 message: format!("worker process spawn failed: {error}"),
             })?;
+        if let Some(secret_stdin) = request.secret_stdin {
+            let Some(mut stdin) = child.stdin.take() else {
+                let _ = child.start_kill();
+                return Err(EngineError::WorkerTransportFailure {
+                    code: "WORKER_PROCESS_STDIN_UNAVAILABLE".to_owned(),
+                    message: "worker process stdin pipe was unavailable".to_owned(),
+                });
+            };
+            if let Err(error) = stdin.write_all(&secret_stdin.bytes).await {
+                let _ = child.start_kill();
+                return Err(EngineError::WorkerTransportFailure {
+                    code: "WORKER_PROCESS_STDIN_WRITE_FAILED".to_owned(),
+                    message: format!("worker process stdin write failed: {error}"),
+                });
+            }
+            drop(stdin);
+        }
         let pid = child.id();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();

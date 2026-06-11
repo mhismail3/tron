@@ -6,6 +6,7 @@
 //! |--------|----------------|
 //! | `external_workers` | Loopback external-worker lifecycle, governed activation binding, registration, invocation proxying, and health. |
 //! | `triggers` | Trigger dispatch runtime, cascade bounds, and trigger metadata recording. |
+//! | `worker_activation_bundle_vault` | Process-memory custody for one-shot activation bundle stdin handoff. |
 //! | `worker_orchestration` | Governed direct-exec process supervision for already issued worker activations. |
 //! | `worker_protocol` | `/engine/workers` protocol DTOs and scoped worker token model. |
 //!
@@ -14,10 +15,11 @@
 //! `EngineExternalWorkerRuntime` manages connected local workers.
 //! `EngineTriggerRuntime` dispatches registered triggers through the engine
 //! host. Activation tokens bind reviewed capability-definition governance to a
-//! volatile worker connection. Worker orchestration may start a reviewed local
-//! process for an already issued activation, but readiness still comes only from
-//! the external-worker hello/register path. Protocol DTOs are consumed by
-//! transport runtime code.
+//! volatile worker connection. Activation bundles may be held only in the
+//! in-memory vault until a reviewed launch consumes them into child stdin.
+//! Worker orchestration may start a reviewed local process for an already issued
+//! activation, but readiness still comes only from the external-worker
+//! hello/register path. Protocol DTOs are consumed by transport runtime code.
 //!
 //! ## Dependency Direction
 //!
@@ -37,6 +39,8 @@
 //! - Orchestrated workers use direct executable invocation only, have no
 //!   scheduler/restart ownership, and record redacted `worker_process` audit
 //!   resources before any readiness is trusted.
+//! - Activation bundles are never durable runtime state; the vault is
+//!   process-memory only, TTL-bound, and one-shot.
 //! - Disconnected durable workers remain catalog truth but fail closed as
 //!   unhealthy until reconnect.
 //! - Trigger cascades carry explicit depth/path budgets.
@@ -48,5 +52,6 @@
 
 pub mod external_workers;
 pub mod triggers;
+pub mod worker_activation_bundle_vault;
 pub mod worker_orchestration;
 pub mod worker_protocol;

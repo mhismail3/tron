@@ -7,7 +7,8 @@ use sha2::{Digest, Sha256};
 
 use super::{
     DEFAULT_STARTUP_TIMEOUT_MS, DEFAULT_STOP_TIMEOUT_MS, MAX_LOG_CAPTURE_BYTES,
-    MAX_STARTUP_TIMEOUT_MS, MAX_STOP_TIMEOUT_MS, SUPPORTED_ACTIVATION_DELIVERY_MODE,
+    MAX_STARTUP_TIMEOUT_MS, MAX_STOP_TIMEOUT_MS, PREISSUED_BUNDLE_DELIVERY_MODE,
+    STDIN_BUNDLE_DELIVERY_MODE,
 };
 use crate::engine::durability::resources::EngineResource;
 use crate::engine::invocation::model::Invocation;
@@ -121,18 +122,22 @@ impl LaunchPlan {
     }
 
     fn validate_direct_exec_contract(&self) -> Result<()> {
-        if self.activation_delivery_mode != SUPPORTED_ACTIVATION_DELIVERY_MODE {
+        if self.activation_delivery_mode != PREISSUED_BUNDLE_DELIVERY_MODE
+            && self.activation_delivery_mode != STDIN_BUNDLE_DELIVERY_MODE
+        {
             return Err(EngineError::PolicyViolation(format!(
                 "unsupported activation delivery mode {}",
                 self.activation_delivery_mode
             )));
         }
         validate_direct_path("executable path", &self.executable_path)?;
+        reject_secret_material("executable path", &self.executable_path)?;
         if self.executable_path_policy != "absolute_file" {
             return Err(EngineError::PolicyViolation(
                 "worker launch plan executable path policy must be absolute_file".to_owned(),
             ));
         }
+        reject_secret_material("executable path policy", &self.executable_path_policy)?;
         ensure_file_digest(&self.executable_path, &self.executable_digest_sha256)?;
         for arg in &self.argv {
             if looks_like_shell_arg(arg) {
@@ -140,11 +145,15 @@ impl LaunchPlan {
                     "worker launch argv contains shell syntax: {arg}"
                 )));
             }
+            reject_secret_material("argv", arg)?;
             if !self.argv_allowlist.iter().any(|allowed| allowed == arg) {
                 return Err(EngineError::PolicyViolation(format!(
                     "worker launch argv {arg:?} is not allowlisted"
                 )));
             }
+        }
+        for allowed in &self.argv_allowlist {
+            reject_secret_material("argv allowlist", allowed)?;
         }
         for (key, value) in &self.env {
             validate_env_key(key)?;
@@ -159,9 +168,15 @@ impl LaunchPlan {
                 )));
             }
         }
+        for key in &self.env_allowlist {
+            reject_secret_material("env allowlist", key)?;
+        }
         match (&self.cwd_policy[..], self.cwd.as_deref()) {
             ("none", None) => {}
-            ("exact", Some(cwd)) => validate_direct_path("cwd", cwd)?,
+            ("exact", Some(cwd)) => {
+                validate_direct_path("cwd", cwd)?;
+                reject_secret_material("cwd", cwd)?;
+            }
             ("exact", None) => {
                 return Err(EngineError::PolicyViolation(
                     "worker launch cwdPolicy exact requires cwd".to_owned(),
@@ -173,6 +188,7 @@ impl LaunchPlan {
                 )));
             }
         }
+        reject_secret_material("cwd policy", &self.cwd_policy)?;
         Ok(())
     }
 }
@@ -300,6 +316,15 @@ pub(super) fn contains_secret_material(value: &str) -> bool {
     ]
     .iter()
     .any(|needle| lower.contains(needle))
+}
+
+fn reject_secret_material(label: &str, value: &str) -> Result<()> {
+    if contains_secret_material(value) {
+        return Err(EngineError::PolicyViolation(format!(
+            "worker launch {label} appears secret-bearing"
+        )));
+    }
+    Ok(())
 }
 
 fn ensure_reviewed_governance(payload: &Value) -> Result<()> {
