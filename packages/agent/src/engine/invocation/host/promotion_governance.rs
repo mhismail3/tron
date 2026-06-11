@@ -212,7 +212,7 @@ fn ensure_resource_scope_compatible(
     target_workspace_id: Option<&str>,
 ) -> Result<()> {
     let compatible = match &inspection.resource.scope {
-        EngineResourceScope::System => true,
+        EngineResourceScope::System => actor.actor_kind.is_admin_like(),
         EngineResourceScope::Workspace(resource_workspace) => {
             actor.actor_kind.is_admin_like()
                 || actor.workspace_id.as_deref() == Some(resource_workspace.as_str())

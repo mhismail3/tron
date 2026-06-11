@@ -14,6 +14,27 @@ pub(super) async fn create_promotion_governance(
     workspace_id: Option<&str>,
     candidate_kind: &str,
 ) -> PromotionGovernanceFixture {
+    create_promotion_governance_in_scope(
+        host,
+        suffix,
+        function_id,
+        target_visibility,
+        workspace_id,
+        candidate_kind,
+        "session",
+    )
+    .await
+}
+
+pub(super) async fn create_promotion_governance_in_scope(
+    host: &mut EngineHost,
+    suffix: &str,
+    function_id: &str,
+    target_visibility: &str,
+    workspace_id: Option<&str>,
+    candidate_kind: &str,
+    resource_scope: &str,
+) -> PromotionGovernanceFixture {
     let decision_resource_id = format!("sapg-{suffix}-decision");
     let evidence_resource_id = format!("sapg-{suffix}-evidence");
     let candidate_resource_id = format!("sapg-{suffix}-candidate");
@@ -39,6 +60,7 @@ pub(super) async fn create_promotion_governance(
         host,
         &decision_resource_id,
         "decision",
+        resource_scope,
         "final",
         decision_payload,
         &format!("sapg-{suffix}-decision-create"),
@@ -48,6 +70,7 @@ pub(super) async fn create_promotion_governance(
         host,
         &evidence_resource_id,
         "evidence",
+        resource_scope,
         "accepted",
         json!({
             "summary": "verification passed",
@@ -64,6 +87,7 @@ pub(super) async fn create_promotion_governance(
         host,
         &candidate_resource_id,
         candidate_kind,
+        resource_scope,
         "draft",
         candidate_payload(candidate_kind, function_id),
         &format!("sapg-{suffix}-candidate-create"),
@@ -97,6 +121,7 @@ async fn create_resource(
     host: &mut EngineHost,
     resource_id: &str,
     kind: &str,
+    scope: &str,
     lifecycle: &str,
     payload: Value,
     idempotency_key: &str,
@@ -107,7 +132,7 @@ async fn create_resource(
             json!({
                 "resourceId": resource_id,
                 "kind": kind,
-                "scope": "session",
+                "scope": scope,
                 "sessionId": "session-a",
                 "lifecycle": lifecycle,
                 "payload": payload

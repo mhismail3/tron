@@ -64,6 +64,12 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   activation grants with empty file roots instead of `/`. Focused authority
   tests prove empty file roots persist, pathless invocations still run, and
   path-bearing invocations fail before handler execution.
+- Tightened `packages/agent/src/engine/invocation/host/promotion_governance.rs`
+  so system-scoped governance resources require an admin-like actor. Added a
+  runtime regression for non-admin workspace promotion using system-scoped
+  governance refs and a SAPG static guard for the exact scope branch. This moves
+  the promotion-governance SAASTC rows from conservative `simplify` to
+  source-proven `retained` without closing the broader SAASTC authority row.
 
 ## Phase 2 Focused Commands
 
@@ -73,6 +79,8 @@ cargo test --manifest-path packages/agent/Cargo.toml engine::tests::authority --
 cargo test --manifest-path packages/agent/Cargo.toml worker_activation --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_authorship_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml promotion_governance --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_promotion_governance_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
 ```
 

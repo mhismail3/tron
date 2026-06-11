@@ -296,6 +296,65 @@ async fn engine_promote_system_requires_admin_authority_and_verified_chain() {
 }
 
 #[tokio::test]
+async fn engine_promote_workspace_rejects_system_governance_refs_for_non_admin() {
+    let mut host = EngineHost::new().unwrap();
+    host.catalog_mut()
+        .register_worker(worker("w1", "alpha"), true)
+        .unwrap();
+    host.catalog_mut()
+        .register_function(
+            FunctionDefinition::new(
+                fid("alpha::workspace_candidate"),
+                wid("w1"),
+                "session function",
+                VisibilityScope::Session,
+                EffectClass::PureRead,
+            )
+            .with_provenance(Provenance::new(actor("agent"), "test").with_session_id("session-a")),
+            Some(handler()),
+            true,
+        )
+        .unwrap();
+    let refs = create_promotion_governance_in_scope(
+        &mut host,
+        "system-ref-workspace",
+        "alpha::workspace_candidate",
+        "workspace",
+        Some("workspace-a"),
+        "capability_definition",
+        "system",
+    )
+    .await;
+
+    let rejected = host
+        .invoke(host_invocation(
+            "engine::promote",
+            governed_promote_payload(
+                "alpha::workspace_candidate",
+                "workspace",
+                Some("workspace-a"),
+                "promote-workspace-system-ref",
+                &refs,
+            ),
+            mutating_causal("promote-workspace-system-ref").with_scope("engine.promote.workspace"),
+        ))
+        .await;
+    assert!(matches!(
+        rejected.error,
+        Some(EngineError::PolicyViolation(message))
+            if message.contains("decision resource")
+                && message.contains("scope is incompatible")
+    ));
+    assert_eq!(
+        host.catalog()
+            .function(&fid("alpha::workspace_candidate"))
+            .unwrap()
+            .visibility,
+        VisibilityScope::Session
+    );
+}
+
+#[tokio::test]
 async fn engine_promote_conflicting_duplicate_key_does_not_mutate_new_target() {
     let mut host = EngineHost::new().unwrap();
     host.catalog_mut()

@@ -221,6 +221,7 @@ fn sapg_engine_promote_validates_before_catalog_visibility_mutation() {
         "engine.promote.workspace",
         "engine.promote.system",
         "admin authority",
+        "EngineResourceScope::System => actor.actor_kind.is_admin_like()",
     ] {
         assert!(
             gate.contains(required),

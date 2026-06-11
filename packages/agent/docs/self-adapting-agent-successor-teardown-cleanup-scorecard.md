@@ -81,3 +81,7 @@ harness and full initial diff inventory.
   narrowing remains intact. `worker::issue_activation` uses empty file roots
   instead of inheriting `/`, and authority tests prove path-bearing invocations
   fail before handler execution under that grant.
+- Tightened promotion governance resource authority. System-scoped
+  decision/evidence/candidate resources now require an admin-like actor before
+  `engine::promote` can use them, so a workspace actor cannot borrow parent
+  system governance refs to widen a session function.
