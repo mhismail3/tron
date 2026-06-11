@@ -1567,3 +1567,21 @@ packages/agent/tests/self_adapting_agent_authorship/scorecard_inventory.rs	retai
 packages/agent/tests/self_adapting_agent_authorship/source_guards.rs	retain	saa rust test	SAA-2/SAA-9	Current Self-Adapting Agent Authorship source guard invariant retained for closeout verification.
 packages/agent/tests/self_adapting_agent_authorship/support.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant support retained for closeout verification.
 packages/agent/tests/self_adapting_agent_authorship_invariants.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant target retained for closeout verification.
+packages/agent/docs/self-adapting-agent-promotion-governance-evidence-manifest.md	retain	sapg docs	SAPG-10	Current Self-Adapting Agent Promotion Governance evidence manifest retained for promotion closeout.
+packages/agent/docs/self-adapting-agent-promotion-governance-scorecard.md	retain	sapg docs	SAPG-10	Current Self-Adapting Agent Promotion Governance scorecard retained for promotion closeout.
+packages/agent/src/engine/invocation/host/promotion_governance.rs	retain	sapg rust source	SAPG-3/SAPG-4	Promotion governance validator retained as the accepted-decision and evidence-chain boundary.
+packages/agent/src/engine/tests/invocation/promotion_governance.rs	retain	sapg rust test	SAPG-3/SAPG-4	Promotion governance tests retained for accepted/rejected governance chain coverage.
+packages/agent/src/engine/tests/invocation/promotion_governance_support.rs	retain	sapg rust test	SAPG-3/SAPG-4	Promotion governance fixture support retained for synthetic resource-chain tests.
+packages/agent/tests/self_adapting_agent_promotion_governance_invariants.rs	retain	sapg rust test	SAPG-10	Current Self-Adapting Agent Promotion Governance invariant target retained for closeout verification.
+packages/agent/docs/self-adapting-agent-worker-activation-evidence-manifest.md	retain	saawa docs	SAAWA-10	Current Self-Adapting Agent Worker Activation evidence manifest retained for activation closeout.
+packages/agent/docs/self-adapting-agent-worker-activation-inventory.md	retain	saawa docs	SAAWA-1	Current Self-Adapting Agent Worker Activation source inventory retained for activation closeout.
+packages/agent/docs/self-adapting-agent-worker-activation-inventory.tsv	retain	saawa docs	SAAWA-1	Current Self-Adapting Agent Worker Activation machine-readable inventory retained for activation closeout.
+packages/agent/docs/self-adapting-agent-worker-activation-scorecard.md	retain	saawa docs	SAAWA-10	Current Self-Adapting Agent Worker Activation scorecard retained for activation closeout.
+packages/agent/src/engine/primitives/worker_activation.rs	retain	saawa rust source	SAAWA-2/SAAWA-4	Worker activation issue primitive retained as the governed activation bundle issuance boundary.
+packages/agent/src/engine/primitives/worker_activation_governance.rs	retain	saawa rust source	SAAWA-3	Governance chain validator retained for capability-definition decision/evidence/candidate linkage.
+packages/agent/src/engine/runtime/external_workers/activation.rs	retain	saawa rust source	SAAWA-5/SAAWA-6	External-worker activation binding retained for hello, registration, lifecycle, and revocation validation.
+packages/agent/src/engine/tests/invocation/worker_activation.rs	retain	saawa rust test	SAAWA-3/SAAWA-4	Worker activation invocation tests retained for governance rejection and idempotent issuance coverage.
+packages/agent/src/engine/tests/runtime/worker_activation.rs	retain	saawa rust test	SAAWA-5/SAAWA-7	Worker activation runtime tests retained for hello, registration, proxy invocation, and disconnect coverage.
+packages/agent/tests/self_adapting_agent_worker_activation_invariants.rs	retain	saawa rust test	SAAWA-10	Current Self-Adapting Agent Worker Activation invariant target retained for closeout verification.
+packages/agent/src/engine/tests/fixtures/worker_activation.rs	retain	saawa rust test	SAAWA-3/SAAWA-4	Worker activation fixture support retained after split from shared engine fixtures.
+packages/agent/tests/security_authority_capability_boundaries/lifecycle_guards.rs	retain	sacb rust test	SACB-9/SACB-10	SACB lifecycle and internal-invoke static guards retained after file-budget split.

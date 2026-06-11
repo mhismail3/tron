@@ -18,7 +18,8 @@ pub(in crate::engine) fn primitive_workers() -> Result<Vec<WorkerDefinition>> {
         .with_namespace_claim("agent_memory")
         .with_namespace_claim("agent_rule")
         .with_namespace_claim("materialized_file")
-        .with_namespace_claim("patch");
+        .with_namespace_claim("patch")
+        .with_namespace_claim("worker_activation");
     Ok(vec![
         primitive_worker(STREAM_WORKER_ID, WorkerKind::Stream)?,
         primitive_worker(STATE_WORKER_ID, WorkerKind::State)?,

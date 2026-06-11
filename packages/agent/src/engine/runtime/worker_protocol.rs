@@ -10,6 +10,9 @@
 //! scope binding, grant policy hashing, and signature state. Session/workspace
 //! visible workers must bind that scope in the token, and stream resource
 //! selectors are namespace scoped (`stream:<claim>:*`) rather than wildcarded.
+//! Activation-issued tokens additionally carry the durable activation resource
+//! id and governance fingerprint so the runtime can bind hello and function
+//! registration back to the reviewed `capability_definition` chain.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -169,6 +172,12 @@ pub struct ScopedWorkerToken {
     pub expires_at: Option<String>,
     /// Signature status for durable plugin policy.
     pub signature_status: String,
+    /// Optional durable worker_activation resource id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub activation_resource_id: Option<String>,
+    /// Optional governance fingerprint issued with the activation bundle.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub governance_fingerprint: Option<String>,
 }
 
 impl ScopedWorkerToken {
@@ -198,6 +207,8 @@ impl ScopedWorkerToken {
             workspace_id: None,
             expires_at: None,
             signature_status: "session_scoped".to_owned(),
+            activation_resource_id: None,
+            governance_fingerprint: None,
         }
     }
 }

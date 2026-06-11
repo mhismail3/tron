@@ -47,6 +47,27 @@ impl EngineHostHandle {
             .inspect(grant_id)
     }
 
+    /// Inspect one durable resource through the engine-owned store.
+    pub async fn inspect_resource(
+        &self,
+        resource_id: &str,
+    ) -> Result<Option<EngineResourceInspection>> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .inspect(resource_id)
+    }
+
+    /// Append a durable resource version through the engine-owned store.
+    pub async fn update_resource(&self, request: UpdateResource) -> Result<EngineResourceVersion> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .update(request)
+    }
+
     /// Acquire a high-risk resource lease and publish a lease lifecycle stream
     /// event. This is a primitive API for domain functions that mutate shared
     /// resources and need fail-closed exclusion.

@@ -309,12 +309,30 @@ Current living entry points:
   completed SAPG gates for promote contract schemas, decision/evidence/candidate
   validation, authority boundaries, non-launch worker policy, CI wiring, and
   README parity.
+- `packages/agent/docs/self-adapting-agent-worker-activation-scorecard.md`:
+  completed SAAWA scorecard for governed, loopback-only worker activation
+  bundles from reviewed capability definitions.
+- `packages/agent/docs/self-adapting-agent-worker-activation-evidence-manifest.md`:
+  companion evidence manifest for activation issuance, runtime binding, audit,
+  regression, and closeout validation.
+- `packages/agent/docs/self-adapting-agent-worker-activation-inventory.md`:
+  SAAWA activation source inventory taxonomy and boundary notes.
+- `packages/agent/docs/self-adapting-agent-worker-activation-inventory.tsv`:
+  machine-readable SAAWA inventory covering worker primitives, governance,
+  scoped tokens, grants, runtime binding, lifecycle audit, and transport
+  boundaries.
+- `packages/agent/tests/self_adapting_agent_worker_activation_invariants.rs`:
+  completed SAAWA gates for activation resource contracts, governance chain
+  validation, scoped grants/tokens, worker hello/registration binding,
+  lifecycle audit, no-launch boundaries, provider/public transport absence, CI
+  wiring, and README parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG scorecards.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/SAA/SAPG/SAAWA
+scorecards.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -669,6 +687,12 @@ Engine protocol messages are JSON objects with a `type`, optional correlation
 `agent::prompt`, or `settings::get`. Mutating calls must include an explicit
 idempotency key. Message ids are correlation ids only.
 
+Worker activation is not a public `/engine` message. Reviewed
+`capability_definition` resources can be manually activated only through the
+admin/internal `worker::issue_activation` primitive, which validates accepted
+decision/evidence/candidate governance and issues a session/workspace-scoped
+loopback bundle for the worker protocol.
+
 Public clients cannot become the agent actor by invoking `capability::execute`
 directly. Trusted agent runtime paths must use a derived least-privilege grant
 and trusted working-directory runtime metadata; bootstrap grants are rejected by
@@ -717,6 +741,17 @@ functions owned by the same accepted worker. Workers publish events by asking
 the engine to invoke `stream::publish`; stream visibility, topic selectors, and
 session/workspace scope are checked against the accepted token and connection.
 There is no direct socket event bypass.
+
+Governed activation tokens add a stricter binding on top of the base scoped
+token: the hello must match the `worker_activation` resource, governance
+fingerprint, token fingerprint, grant hash, expected grant id, session/workspace
+scope, exact namespace claims, volatile registration mode, and non-system
+visibility. Function registration accepts only the expected function definition
+and rejects trigger registration, extra function ids, metadata mismatches,
+namespace expansion, durable registration, revoked or expired grants, and scope
+mismatch. Activation resources move through `issued`, `connected`,
+`registered`, `disconnected`, `expired`, or `revoked` alongside the existing
+`worker.lifecycle` stream audit.
 
 Volatile worker entries are removed on disconnect or missed heartbeat. Durable
 local worker entries stay in the catalog but are marked unhealthy when the
@@ -1430,6 +1465,7 @@ tron ci clippy test          # Subset: linting + tests
 `observability_diagnostics_auditability_invariants`,
 `self_adapting_agent_authorship_invariants`,
 `self_adapting_agent_promotion_governance_invariants`,
+`self_adapting_agent_worker_activation_invariants`,
 `primitive_trace_execution`, and serial `integration`. GitHub's Rust
 static-gates job runs the same named target set for docs, template, iOS, Mac,
 script, and CI changes.

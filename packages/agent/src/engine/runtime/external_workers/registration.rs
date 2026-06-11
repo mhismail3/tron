@@ -65,6 +65,8 @@ impl EngineExternalWorkerRuntime {
             definition.provenance.workspace_id = Some(workspace_id);
         }
         let worker = self.host.inspect_worker(&worker_id).await?;
+        self.validate_activation_function_registration(&connection, &definition)
+            .await?;
         validate_external_capability_metadata(
             &definition,
             &worker.namespace_claims,
@@ -87,6 +89,7 @@ impl EngineExternalWorkerRuntime {
             .functions
             .insert(id.clone());
         let connection = self.connection_mut(&worker_id)?.clone();
+        self.mark_activation_registered(&connection).await?;
         self.publish_lifecycle_event(
             "worker.function_registered",
             &connection,
@@ -109,6 +112,7 @@ impl EngineExternalWorkerRuntime {
     ) -> Result<WorkerCatalogChange> {
         let worker_id = message.definition.owner_worker.clone();
         let connection = self.connection_mut(&worker_id)?.clone();
+        self.validate_activation_trigger_registration(&connection)?;
         if connection.health != WorkerHealth::Healthy {
             return Err(EngineError::PolicyViolation(format!(
                 "worker {worker_id} is not healthy"

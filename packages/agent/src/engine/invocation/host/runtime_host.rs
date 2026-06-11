@@ -78,6 +78,17 @@ impl primitives::runtime::PrimitiveRuntimeHost for EngineHost {
             .update(request)
     }
 
+    fn derive_authority_grant(
+        &mut self,
+        request: crate::engine::authority::grants::DeriveGrant,
+    ) -> Result<crate::engine::authority::grants::EngineGrant> {
+        self.primitives
+            .grants
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .derive(request)
+    }
+
     fn storage_stats(&self) -> Result<crate::shared::storage::StorageStatsReport> {
         self.storage_runtime()?.stats().map_err(storage_error)
     }

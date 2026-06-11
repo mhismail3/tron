@@ -40,6 +40,7 @@ run_tests() {
         observability_diagnostics_auditability_invariants
         self_adapting_agent_authorship_invariants
         self_adapting_agent_promotion_governance_invariants
+        self_adapting_agent_worker_activation_invariants
         primitive_trace_execution
         integration
     )

@@ -1,5 +1,9 @@
 //! Shared fixtures for engine test modules.
 
+mod worker_activation;
+
+pub(in crate::engine::tests) use worker_activation::*;
+
 pub(in crate::engine::tests) use std::sync::{
     Arc,
     atomic::{AtomicUsize, Ordering},
@@ -23,7 +27,7 @@ pub(in crate::engine::tests) use crate::engine::durability::queue;
 pub(in crate::engine::tests) use crate::engine::durability::streams::SqliteEngineStreamStore;
 pub(in crate::engine::tests) use crate::engine::invocation::host;
 pub(in crate::engine::tests) use crate::engine::invocation::model::{
-    CausalContext, InProcessFunctionHandler, Invocation,
+    CausalContext, InProcessFunctionHandler, Invocation, InvocationResult,
 };
 pub(in crate::engine::tests) use crate::engine::kernel::errors::{EngineError, Result};
 pub(in crate::engine::tests) use crate::engine::kernel::ids;

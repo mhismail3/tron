@@ -40,6 +40,7 @@ use crate::engine::runtime::worker_protocol::{
     WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
 
+mod activation;
 mod lifecycle;
 mod proxy;
 mod registration;

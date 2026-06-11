@@ -34,6 +34,9 @@ use crate::engine::durability::ledger::{
 use crate::engine::durability::queue::{
     EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation,
 };
+use crate::engine::durability::resources::{
+    EngineResourceInspection, EngineResourceVersion, UpdateResource,
+};
 use crate::engine::durability::streams::{
     EngineStreamPage, EngineStreamSubscription, PublishStreamEvent, StreamActorScope, StreamCursor,
 };

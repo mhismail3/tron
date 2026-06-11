@@ -8,3 +8,4 @@ mod idempotency;
 mod meta_primitives;
 mod promotion_governance;
 mod promotion_governance_support;
+mod worker_activation;

@@ -2,20 +2,62 @@
 
 use serde_json::{Value, json};
 
+use super::worker_activation::issue_activation_schema;
 use super::{
     PrimitiveFunctionRegistration, WORKER_WORKER_ID, host_dispatched_registration,
     primitive_compensation, primitive_function,
 };
 use crate::engine::{
     AuthorityRequirement, CompensationKind, EffectClass, IdempotencyContract, Result, RiskLevel,
+    VisibilityScope,
 };
+
+pub(in crate::engine::primitives) use super::worker_activation::issue_activation;
 
 pub(crate) const LIST_FUNCTION: &str = "worker::list";
 pub(crate) const GET_FUNCTION: &str = "worker::get";
 pub(crate) const DISCONNECT_FUNCTION: &str = "worker::disconnect";
 pub(crate) const HEALTH_FUNCTION: &str = "worker::health";
+pub(crate) const ISSUE_ACTIVATION_FUNCTION: &str = "worker::issue_activation";
 
 pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
+    let mut issue_activation = primitive_function(
+        ISSUE_ACTIVATION_FUNCTION,
+        WORKER_WORKER_ID,
+        "issue a governed loopback worker activation bundle",
+        EffectClass::IdempotentWrite,
+        "worker.activate",
+    )
+    .with_idempotency(IdempotencyContract::caller_system_engine_ledger())
+    .with_required_authority(AuthorityRequirement::scope("worker.activate"))
+    .with_risk(RiskLevel::High)
+    .with_compensation(primitive_compensation(
+        CompensationKind::ManualOnly,
+        "worker activation issues a scoped expiring grant and auditable activation resource; revocation is performed by revoking the derived grant and resource lifecycle",
+    ))
+    .with_request_schema(issue_activation_schema())
+    .with_response_schema(json!({
+        "type": "object",
+        "required": ["activationResourceId", "workerId", "expiresAt", "activationBundle"],
+        "additionalProperties": false,
+        "properties": {
+            "activationResourceId": {"type": "string"},
+            "workerId": {"type": "string"},
+            "expiresAt": {"type": "string"},
+            "activationBundle": {
+                "type": "object",
+                "required": ["workerHello", "scopedWorkerToken", "expectedFunctionDefinition"],
+                "additionalProperties": false,
+                "properties": {
+                    "workerHello": {"type": "object"},
+                    "scopedWorkerToken": {"type": "object"},
+                    "expectedFunctionDefinition": {"type": "object"}
+                }
+            }
+        }
+    }));
+    issue_activation.visibility = VisibilityScope::Admin;
+
     Ok(vec![
         host_dispatched_registration(
             primitive_function(
@@ -85,6 +127,7 @@ pub(super) fn registrations() -> Result<Vec<PrimitiveFunctionRegistration>> {
                 }
             })),
         ),
+        host_dispatched_registration(issue_activation),
     ])
 }
 

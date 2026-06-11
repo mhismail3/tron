@@ -4,7 +4,7 @@
 //!
 //! | Module | Responsibility |
 //! |--------|----------------|
-//! | `external_workers` | Loopback external-worker lifecycle, registration, invocation proxying, and health. |
+//! | `external_workers` | Loopback external-worker lifecycle, governed activation binding, registration, invocation proxying, and health. |
 //! | `triggers` | Trigger dispatch runtime, cascade bounds, and trigger metadata recording. |
 //! | `worker_protocol` | `/engine/workers` protocol DTOs and scoped worker token model. |
 //!
@@ -12,7 +12,9 @@
 //!
 //! `EngineExternalWorkerRuntime` manages connected local workers.
 //! `EngineTriggerRuntime` dispatches registered triggers through the engine
-//! host. Protocol DTOs are consumed by transport runtime code.
+//! host. Activation tokens bind reviewed capability-definition governance to a
+//! volatile worker connection but do not launch workers. Protocol DTOs are
+//! consumed by transport runtime code.
 //!
 //! ## Dependency Direction
 //!
@@ -26,6 +28,9 @@
 //! - Visible external workers must bind session/workspace scope in the scoped
 //!   token, present an active grant at the token revision, and keep namespace,
 //!   trigger, stream, and result ownership inside the accepted connection.
+//! - Governed activation workers must match the activation resource, token
+//!   fingerprint, governance fingerprint, expected function, exact namespace,
+//!   volatile mode, and session/workspace scope before registration.
 //! - Disconnected durable workers remain catalog truth but fail closed as
 //!   unhealthy until reconnect.
 //! - Trigger cascades carry explicit depth/path budgets.

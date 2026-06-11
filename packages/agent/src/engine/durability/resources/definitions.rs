@@ -293,6 +293,79 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             json!({"read": ["resource.read"], "write": ["resource.write"], "promote": ["resource.write"], "delete": ["resource.write"]}),
         ),
         builtin_type(
+            "worker_activation",
+            "tron.resource.worker_activation.v1",
+            json!({
+                "type": "object",
+                "required": [
+                    "status",
+                    "functionId",
+                    "workerId",
+                    "candidateResourceId",
+                    "decisionResourceId",
+                    "evidenceResourceIds",
+                    "targetVisibility",
+                    "scope",
+                    "activationReason",
+                    "expiresAt",
+                    "grantId",
+                    "tokenFingerprint",
+                    "governanceFingerprint",
+                    "expectedFunctionDefinition",
+                    "registrationMode",
+                    "networkPolicy"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                    "status": {"type": "string"},
+                    "functionId": {"type": "string"},
+                    "workerId": {"type": "string"},
+                    "candidateResourceId": {"type": "string"},
+                    "decisionResourceId": {"type": "string"},
+                    "evidenceResourceIds": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+                    "targetVisibility": {"type": "string", "enum": ["session", "workspace"]},
+                    "scope": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "sessionId": {"type": ["string", "null"]},
+                            "workspaceId": {"type": ["string", "null"]}
+                        }
+                    },
+                    "activationReason": {"type": "string"},
+                    "expiresAt": {"type": "string"},
+                    "grantId": {"type": "string"},
+                    "tokenFingerprint": {"type": "string"},
+                    "governanceFingerprint": {"type": "string"},
+                    "expectedFunctionDefinition": {"type": "object"},
+                    "registrationMode": {"type": "string", "enum": ["volatile"]},
+                    "networkPolicy": {"type": "string", "enum": ["loopback"]},
+                    "tokenStorage": {"type": "object"},
+                    "metadata": {"type": "object"}
+                }
+            }),
+            vec![
+                "issued",
+                "connected",
+                "registered",
+                "disconnected",
+                "expired",
+                "revoked",
+                "failed",
+                "archived",
+            ],
+            vec![
+                "activates",
+                "decided_by",
+                "supported_by",
+                "evidence_for",
+                "derived_from",
+                "revokes",
+                "supersedes",
+            ],
+            json!({"read": ["resource.read"], "write": ["worker.activate", "resource.write"], "delete": ["worker.activate", "resource.write"]}),
+        ),
+        builtin_type(
             "execution_output",
             "tron.resource.execution_output.v1",
             json!({

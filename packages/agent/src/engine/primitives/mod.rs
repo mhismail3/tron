@@ -18,6 +18,10 @@
 //! `ui::*` stores runtime UI surface resources, validates the bounded schema,
 //! and records generic action submissions without server-authored target
 //! routing.
+//! `worker::issue_activation` lives in `worker_activation` because it owns the
+//! governed bridge from reviewed capability-definition resources to loopback
+//! external-worker bundles, with decision/evidence/candidate checks split into
+//! `worker_activation_governance`; `worker` keeps the primitive contract list.
 //! `storage::*` is the
 //! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot
@@ -48,6 +52,8 @@ pub(crate) mod stream;
 pub(crate) mod trigger;
 pub(crate) mod ui;
 pub(crate) mod worker;
+mod worker_activation;
+mod worker_activation_governance;
 mod workers;
 
 pub(in crate::engine) use crate::engine::authority::grants::EngineGrantStoreBackend;
