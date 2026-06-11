@@ -96,3 +96,11 @@ harness and full initial diff inventory.
   cleanup inventory rows out of `simplify` but does not close broader SAASTC
   rows until every successor cluster receives the same teardown treatment and
   full closeout runs.
+- Tightened and source-proved the schedule state/tick cluster. The retained
+  contract is an explicit-only schedule runtime with no transport autostart
+  poller, closed top-level `worker_schedule_plan` schema, safe
+  `worker_schedule_tick` and `worker_schedule_scan_state` records, bounded
+  100-page/500-per-poll scanning, cooperative cancellation, deterministic
+  tick/idempotency fingerprints, active-overlap evidence, and enqueue-only
+  `trigger::dispatch` composition. This reduces the schedule cluster's
+  `simplify` rows without closing SAASTC rows outside the cluster.

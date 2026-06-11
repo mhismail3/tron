@@ -213,6 +213,17 @@ fn saawsd_resource_contracts_are_registered() {
             "schedule resource definitions missing {required}"
         );
     }
+    let plan_start = definitions
+        .find("\"worker_schedule_plan\"")
+        .expect("schedule plan definition should exist");
+    let tick_start = definitions
+        .find("\"worker_schedule_tick\"")
+        .expect("schedule tick definition should exist");
+    let plan_definition = &definitions[plan_start..tick_start];
+    assert!(
+        plan_definition.contains("\"additionalProperties\": false"),
+        "worker schedule plan schema must reject undeclared top-level fields"
+    );
     let registration =
         read_repo_file("packages/agent/src/engine/durability/resources/definitions.rs");
     assert!(registration.contains("worker_schedule_resource_type_definitions"));
@@ -240,6 +251,7 @@ fn saawsd_runtime_composes_only_through_trigger_dispatch() {
         "skipped_missed",
         "skipped_overlap",
         "WORKER_TRIGGER_LAUNCH_ATTEMPT_KIND",
+        "SCHEDULE_SCAN_MAX_PER_POLL",
     ] {
         assert!(
             runtime_surface.contains(required),

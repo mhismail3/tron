@@ -23,7 +23,7 @@ pub(super) fn worker_schedule_resource_type_definitions() -> Vec<RegisterResourc
                     "overlapPolicy",
                     "duplicatePolicy"
                 ],
-                "additionalProperties": true,
+                "additionalProperties": false,
                 "properties": {
                     "status": {"type": "string", "enum": ["reviewed"]},
                     "scheduleId": {"type": "string"},

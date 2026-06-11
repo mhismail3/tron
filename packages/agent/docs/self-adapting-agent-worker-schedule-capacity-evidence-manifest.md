@@ -27,6 +27,10 @@ Baseline: `9e9393acde1284b0c684a5c15d9bf331133c9928`
 - `sqlite_resource_pages_match_in_memory_cursor_semantics` proves SQLite paging also drains the full filtered set without duplicate resources.
 - `worker_schedule_dispatch_resumes_beyond_first_scan_budget` proves a due schedule older than 500 newer reviewed schedules is eventually reached by cursor resume.
 - `worker_schedule_dispatch_persists_cancelled_scan_without_enqueue` proves cooperative cancellation can stop before item dispatch and still produce durable safe scan state.
+- The SAASTC teardown pass re-audited the schedule scan/tick cluster and kept
+  capacity ownership explicit-only: no server-start poller, no direct activation
+  issue, no worker launch, no vault consume, and no process supervisor call live
+  in the schedule runtime.
 
 ## Relationship To Predecessor Campaigns
 

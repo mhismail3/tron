@@ -85,6 +85,18 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   byte-limited capture, bounded capture joins, and stop-timeout kill without
   shell, restart, retry, launchd, deploy, or scheduler ownership; and
   `worker_protocol.rs` remains DTO-only scoped hello/register binding.
+- Tightened and source-proved the schedule state/tick cluster. The
+  `worker_schedule_plan` schema now rejects arbitrary top-level fields while
+  preserving declared optional metadata; schedule contracts retain reviewed UTC
+  interval parsing, fixed policy literals, trigger/autostart/launch-plan
+  binding, secret-looking value rejection, deterministic tick ids, hashed target
+  keys, and redacted errors; the explicit runtime pages reviewed plans with a
+  100 page size and 500 per-poll cap, observes caller-supplied cancellation,
+  persists safe scan state, leases tick dispatch, and invokes only
+  `trigger::dispatch` with enqueue delivery; overlap evidence is bounded by the
+  scan cap and never starts workers; scan state stores only cursor, budget,
+  wrap/cancel flags, aggregate summary, trace id, generic redacted error, and
+  scanner metadata.
 
 ## Phase 2 Focused Commands
 
@@ -101,6 +113,10 @@ cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_
 cargo test --manifest-path packages/agent/Cargo.toml worker_orchestration --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_bundle_handoff_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_orchestration_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_schedule_dispatch --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml worker_schedule --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_schedule_dispatch_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_worker_schedule_capacity_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
 ```
