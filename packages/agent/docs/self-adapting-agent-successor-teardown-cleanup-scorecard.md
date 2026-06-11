@@ -168,3 +168,15 @@ harness and full initial diff inventory.
   stopped/unhealthy, owner/namespace registration checks, volatile cleanup, and
   trigger policy checks without provider, deploy, schedule, launch, restart,
   retry, or repo-skill ownership.
+- Source-proved and tightened the final test-quality cluster. Engine catalog,
+  durability, invocation, fixture, runtime, and activation tests are retained
+  because they guard primitive catalog ownership/idempotency, resource
+  schema/CAS/relation behavior, public/internal meta invocation trust, shared
+  primitive fixtures, runtime suite wiring, and scoped activation lifecycle
+  behavior. The SAA authorship invariant target remains retained only as
+  primitive-surface/evidence-integrity coverage, and its support fixture now
+  derives operation-scoped grants for `resource_create`, `resource_inspect`, and
+  `resource_link`, failing closed for any other operation instead of preserving
+  the previous broad resource/state fixture grant. This removes the last
+  `simplify` classifications from the cleanup inventory, while SAASTC rows stay
+  pending until the full focused and closeout verification suite passes.

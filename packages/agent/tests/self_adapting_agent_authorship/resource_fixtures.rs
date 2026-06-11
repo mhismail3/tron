@@ -216,6 +216,7 @@ async fn saa_execute_can_author_goal_evidence_decision_memory_and_rule_resources
             workspace_id,
             workspace.path(),
             "saa-provider-inspect-rule",
+            "resource_inspect",
             "saa-inspect-rule",
         )
         .await,
@@ -378,6 +379,7 @@ async fn saa_execute_can_author_patch_materialized_file_and_ui_surface_without_l
             workspace_id,
             workspace.path(),
             "saa-provider-inspect-ui",
+            "resource_inspect",
             "saa-inspect-ui",
         )
         .await,
@@ -455,6 +457,7 @@ async fn saa_execute_resource_ops_reject_worker_kinds_and_cross_session_refs() {
             workspace_id,
             workspace.path(),
             "saa-provider-forbidden-worker-kind",
+            "resource_create",
             "saa-forbidden-worker-kind",
         )
         .await,
@@ -488,6 +491,7 @@ async fn saa_execute_resource_ops_reject_worker_kinds_and_cross_session_refs() {
             second.session.workspace_id.as_str(),
             workspace.path(),
             "saa-provider-cross-session-inspect",
+            "resource_inspect",
             "saa-cross-session-inspect",
         )
         .await,
@@ -529,6 +533,7 @@ async fn execute_resource(
             workspace_id,
             working_directory,
             provider_invocation_id,
+            "resource_create",
             &format!("{provider_invocation_id}-key"),
         )
         .await,
@@ -568,6 +573,7 @@ async fn execute_link(
             workspace_id,
             working_directory,
             provider_invocation_id,
+            "resource_link",
             &format!("{provider_invocation_id}-key"),
         )
         .await,

@@ -10,7 +10,10 @@ surface boundaries, external-worker runtime lifecycle, and engine catalog/module
 export boundary. The execute child grant is now source-proved operation-scoped:
 direct model targets keep target-only authority, and only the retained
 `capability::execute` resource/state operations receive nested substrate
-capabilities. Later SAASTC rows remain open.
+capabilities. The final test-quality cluster is source-proved and the SAA
+authorship fixture grant no longer preserves broad state authority; the TSV now
+has no remaining `simplify` classifications. Later SAASTC rows remain open
+until full closeout verification runs.
 
 Scorecard: [`self-adapting-agent-successor-teardown-cleanup-scorecard.md`](self-adapting-agent-successor-teardown-cleanup-scorecard.md)
 
@@ -37,6 +40,13 @@ triage decision for teardown work, not final proof of retention.
   runtime contract.
 - `predecessor-bookkeeping`: older campaign artifacts changed by successor work;
   these must be synchronized without preserving successor cruft.
+
+## Current Classification Counts
+
+- `retained`: 100
+- `docs-only`: 31
+- `predecessor-bookkeeping`: 23
+- `simplify`: 0
 
 ## Phase 1 Boundaries
 

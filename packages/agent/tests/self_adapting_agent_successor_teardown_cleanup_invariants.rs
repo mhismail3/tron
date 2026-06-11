@@ -1382,6 +1382,182 @@ fn saastc_engine_catalog_module_exports_are_retained_fabric_only() {
 }
 
 #[test]
+fn saastc_test_quality_rows_are_source_proven_and_fixture_grants_are_operation_scoped() {
+    let catalog_tests =
+        read_repo_file("packages/agent/src/engine/tests/catalog/catalog_discovery.rs");
+    for required in [
+        "discovery_is_sorted_and_filters_visibility_namespace_effect_risk_health_and_text",
+        "discovery_enforces_scoped_visibility_and_internal_requires_admin",
+        "mutating_function_requires_idempotency",
+        "high_risk_agent_visible_function_requires_compensation_metadata",
+        "unregister_function_removes_targeting_triggers_and_revisions_remain_monotonic",
+        "catalog_change_ledger_failure_does_not_mutate_registered_catalog_entries",
+    ] {
+        assert!(
+            catalog_tests.contains(required),
+            "catalog tests must retain primitive catalog ownership/idempotency coverage {required}"
+        );
+    }
+
+    let resource_contracts =
+        read_repo_file("packages/agent/src/engine/tests/durability/resource_contracts.rs");
+    for required in [
+        "resource_kernel_builtin_definitions_keep_core_kinds_and_relations",
+        "resource_kernel_rejects_invalid_payload_stale_cas_and_unsupported_links",
+        "agent_memory",
+        "agent_rule",
+        "expected_current_version_id",
+        "not_allowed",
+        "does not allow relation",
+    ] {
+        assert!(
+            resource_contracts.contains(required),
+            "resource contract tests must retain schema/CAS/relation coverage {required}"
+        );
+    }
+
+    let fixtures = read_repo_file("packages/agent/src/engine/tests/fixtures/mod.rs");
+    for required in [
+        "pub(in crate::engine::tests) fn external_visible_function",
+        "pub(in crate::engine::tests) fn reject_idempotency",
+        "pub(in crate::engine::tests) struct CatalogChangeFailingLedger",
+        "pub(in crate::engine::tests) struct CountingHandler",
+        "pub(in crate::engine::tests) fn write_function",
+        "pub(in crate::engine::tests) fn engine_ledger_contract",
+    ] {
+        assert!(
+            fixtures.contains(required),
+            "engine shared fixtures must stay tied to retained primitive behavior {required}"
+        );
+    }
+
+    let meta_tests =
+        read_repo_file("packages/agent/src/engine/tests/invocation/meta_primitives.rs");
+    for required in [
+        "engine_meta_discover_and_inspect_are_live_and_scope_checked",
+        "engine_invoke_delegates_with_parent_causality_and_target_policy",
+        "public_engine_invoke_cannot_reach_hidden_visibility_targets",
+        "engine_watch_filters_catalog_changes_without_leaking_hidden_scopes",
+        "engine_internal_invoke_scope_does_not_make_public_context_trusted",
+    ] {
+        assert!(
+            meta_tests.contains(required),
+            "meta primitive tests must retain public/internal trust boundary coverage {required}"
+        );
+    }
+
+    let invocation_mod = read_repo_file("packages/agent/src/engine/tests/invocation/mod.rs");
+    for required in [
+        "mod host_invocation;",
+        "mod idempotency;",
+        "mod meta_primitives;",
+        "mod promotion_governance;",
+        "mod worker_activation;",
+    ] {
+        assert!(
+            invocation_mod.contains(required),
+            "invocation test module must keep retained primitive suites wired {required}"
+        );
+    }
+
+    let runtime_mod = read_repo_file("packages/agent/src/engine/tests/runtime/mod.rs");
+    for required in [
+        "mod external_worker;",
+        "mod triggers;",
+        "mod worker_activation;",
+        "mod worker_orchestration;",
+        "mod worker_schedule_dispatch;",
+        "mod worker_trigger_launch;",
+    ] {
+        assert!(
+            runtime_mod.contains(required),
+            "runtime test module must keep retained runtime suites wired {required}"
+        );
+    }
+
+    let worker_activation_tests =
+        read_repo_file("packages/agent/src/engine/tests/runtime/worker_activation.rs");
+    for required in [
+        "worker_activation_runtime_connects_registers_invokes_and_disconnects_volatile_function",
+        "worker_activation_hello_rejects_token_scope_expansion_durable_and_revoked_grant",
+        "worker_activation_registration_rejects_function_metadata_and_trigger_expansion",
+        "connected_activation_runtime",
+        "activation_resource_status",
+    ] {
+        assert!(
+            worker_activation_tests.contains(required),
+            "worker activation runtime tests must prove retained lifecycle behavior {required}"
+        );
+    }
+
+    let saa_mod = read_repo_file("packages/agent/tests/self_adapting_agent_authorship/mod.rs");
+    for required in [
+        "mod resource_fixtures;",
+        "mod scorecard_inventory;",
+        "mod source_guards;",
+        "mod support;",
+    ] {
+        assert!(
+            saa_mod.contains(required),
+            "SAA authorship invariant module must wire only retained proof modules {required}"
+        );
+    }
+
+    let saa_scorecard_inventory = read_repo_file(
+        "packages/agent/tests/self_adapting_agent_authorship/scorecard_inventory.rs",
+    );
+    for required in [
+        "saa_inventory_rows_are_structured_and_reference_tracked_paths",
+        "saa_evidence_rows_cover_every_closed_scorecard_checkpoint",
+        "saa_closeout_artifacts_reject_stale_state_after_completion",
+    ] {
+        assert!(
+            saa_scorecard_inventory.contains(required),
+            "SAA scorecard/inventory tests must remain evidence-integrity guards {required}"
+        );
+    }
+
+    let saa_invariant_root =
+        read_repo_file("packages/agent/tests/self_adapting_agent_authorship_invariants.rs");
+    assert!(
+        saa_invariant_root.contains("mod self_adapting_agent_authorship;"),
+        "SAA authorship invariant target must remain a narrow module root"
+    );
+
+    let saa_support =
+        read_repo_file("packages/agent/tests/self_adapting_agent_authorship/support.rs");
+    for required in [
+        "fn execute_grant_shape(operation: &str) -> ExecuteGrantShape",
+        "\"resource_create\" => ExecuteGrantShape",
+        "\"resource_link\" => ExecuteGrantShape",
+        "\"resource_inspect\" => ExecuteGrantShape",
+        "remaining_invocations: 4",
+        "\"operation\": operation",
+        "\"allowedCapabilities\": grant_shape.allowed_capabilities",
+        "\"allowedAuthorityScopes\": grant_shape.allowed_authority_scopes",
+        "\"remainingInvocations\": grant_shape.remaining_invocations",
+        "unsupported SAA execute fixture operation",
+    ] {
+        assert!(
+            saa_support.contains(required),
+            "SAA authorship fixture grant must stay operation scoped {required}"
+        );
+    }
+    for forbidden in [
+        "\"state::get\"",
+        "\"state::set\"",
+        "\"state::list\"",
+        "\"state.read\"",
+        "\"state.write\"",
+    ] {
+        assert!(
+            !saa_support.contains(forbidden),
+            "SAA authorship fixture grant must not preserve broad state authority {forbidden}"
+        );
+    }
+}
+
+#[test]
 fn saastc_phase1_records_hard_cleanup_boundaries() {
     let joined = format!(
         "{}\n{}\n{}",

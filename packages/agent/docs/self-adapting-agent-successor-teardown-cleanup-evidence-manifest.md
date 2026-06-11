@@ -201,6 +201,27 @@ Original operator plan: `/Users/moose/.codex/attachments/fdc4e780-354b-4da4-8fb5
   checks, worker-grant and function-grant validation, function/trigger policy
   validation, durable external definition persistence, volatile cleanup, and
   the catalog-only visibility mutation used after `engine::promote` governance.
+- Source-proved and tightened the final test-quality cluster. Source inspection
+  retained `engine/tests/catalog/catalog_discovery.rs` for catalog ownership,
+  visibility filtering, idempotency, compensation metadata, unregister cleanup,
+  bootstrap repair, and catalog-ledger atomicity; `resource_contracts.rs` for
+  built-in resource definitions, memory/rule lineage fields, schema validation,
+  stale CAS rejection, damaged-version state, and relation denial; shared engine
+  fixtures for retained id/worker/function/idempotency/handler/ledger/causal
+  setup used by multiple primitive tests; `meta_primitives.rs` for
+  discover/inspect/watch/invoke trust boundaries, parent causality,
+  idempotency, and internal/admin/worker-only denials; runtime module wiring and
+  worker activation tests for scoped hello/register/invoke/disconnect lifecycle
+  behavior, token-scope denial, revoked grants, and metadata/trigger expansion
+  rejection. The SAA authorship module is retained only as primitive
+  authorship/evidence-integrity coverage, and its support fixture was
+  simplified from a broad resource/state grant helper into
+  `execute_grant_shape(operation)`: `resource_create` receives execute plus
+  resource create/write, `resource_inspect` receives execute plus resource
+  inspect/read, and only `resource_link` receives execute plus inspect/link with
+  the four-invocation call-graph budget. Unsupported fixture operations now fail
+  closed. The SAASTC static gate rejects the removed fixture state authority and
+  the reintroduction of a generic operation fallback.
 
 ## Phase 2 Focused Commands
 
@@ -257,6 +278,17 @@ cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability::
 cargo test --manifest-path packages/agent/Cargo.toml host_invocation --lib -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
 cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
+git diff --check
+cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::catalog --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability::resource_contracts --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::invocation --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml engine::tests::runtime --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml idempotency --lib -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_authorship_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test self_adapting_agent_successor_teardown_cleanup_invariants -- --nocapture
+cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture
+cargo check --manifest-path packages/agent/Cargo.toml
 git diff --check
 ```
 
