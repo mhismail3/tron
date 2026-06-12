@@ -39,6 +39,10 @@
 //!   or endpoint policy.
 //! - Stream wrappers preserve cancellation and retry events without altering
 //!   provider-native parsing semantics.
+//! - Provider-neutral stream resource bounds live here: SSE/NDJSON frames,
+//!   accumulated text/thinking, tool-call argument buffers, and active streamed
+//!   tool invocations are capped before provider-specific handlers can retain
+//!   unbounded buffers.
 //! - Health tracking is advisory routing state, not an authority source.
 //!
 //! ## Test Ownership

@@ -631,6 +631,10 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         }
         "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md"
         | "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv"
+        | "packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md"
+        | "packages/agent/docs/provider-model-boundary-discipline-inventory.md"
+        | "packages/agent/docs/provider-model-boundary-discipline-scorecard.md"
+        | "packages/agent/tests/provider_model_boundary_discipline_invariants.rs"
         | "packages/agent/docs/public-protocol-api-contract-discipline-inventory.md"
         | "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv" => {
             Some(ResidueClass::HistoricalCleanupEvidence)

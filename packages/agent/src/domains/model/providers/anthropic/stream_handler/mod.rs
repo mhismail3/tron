@@ -140,13 +140,17 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
 
         AnthropicSseEvent::ContentBlockDelta { delta, .. } => match delta {
             SseDelta::TextDelta { text } => {
-                state.acc.accumulate_text(text);
+                if let Some(error) = state.acc.accumulate_text(text) {
+                    return vec![error];
+                }
                 vec![StreamEvent::TextDelta {
                     delta: text.clone(),
                 }]
             }
             SseDelta::ThinkingDelta { thinking } => {
-                state.acc.accumulate_thinking(thinking);
+                if let Some(error) = state.acc.accumulate_thinking(thinking) {
+                    return vec![error];
+                }
                 vec![StreamEvent::ThinkingDelta {
                     delta: thinking.clone(),
                 }]

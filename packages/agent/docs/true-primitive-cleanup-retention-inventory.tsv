@@ -240,7 +240,7 @@ packages/agent/src/domains/model/providers/shared/mod.rs	implementation	model_pr
 packages/agent/src/domains/model/providers/shared/provider.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/shared/retry.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/shared/sse.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
-packages/agent/src/domains/model/providers/shared/stream_common.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
+packages/agent/src/domains/model/providers/shared/stream_common/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/tokens/errors.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
 packages/agent/src/domains/model/providers/tokens/mod.rs	implementation	model_provider	TPC-5	provider loop, routing, protocol, token, or provider catalog implementation
@@ -1534,3 +1534,9 @@ packages/agent/docs/provider-model-boundary-discipline-inventory.tsv	docs	docs/s
 packages/agent/docs/provider-model-boundary-discipline-scorecard.md	docs	docs/static gates	PMBD-9	Provider / Model Boundary Discipline scorecard retained for provider/model boundary hardening.
 packages/agent/src/shared/foundation/redaction.rs	support	shared_foundation	PMBD-5	Shared redaction helper retained for provider/model errors, retry events, audit payloads, and event storage.
 packages/agent/tests/provider_model_boundary_discipline_invariants.rs	test	test_harness	PMBD-9	Provider / Model Boundary Discipline invariant target retained for static provider/model boundary gates.
+packages/agent/docs/performance-resource-governance-scorecard.md	docs	docs/static gates	PERF-9	Performance / Resource Governance scorecard retained for resource-governance hardening.
+packages/agent/docs/performance-resource-governance-evidence-manifest.md	docs	docs/static gates	PERF-9	Performance / Resource Governance evidence retained for verification and closeout provenance.
+packages/agent/docs/performance-resource-governance-inventory.md	docs	docs/static gates	PERF-9	Performance / Resource Governance inventory retained for queue, stream, transport, storage, and retention ownership.
+packages/agent/docs/performance-resource-governance-inventory.tsv	docs	docs/static gates	PERF-9	Performance / Resource Governance extends TPC retention proof with a machine-readable resource-governance inventory.
+packages/agent/src/domains/model/providers/shared/stream_common/tests.rs	test	test_harness	PERF-7	Provider stream accumulator resource-limit tests split from the production stream_common module to keep file budgets bounded.
+packages/agent/tests/performance_resource_governance_invariants.rs	test	test_harness	PERF-9	Performance / Resource Governance invariant target retained for static resource-governance gates.

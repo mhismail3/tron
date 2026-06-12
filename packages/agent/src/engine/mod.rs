@@ -97,7 +97,11 @@
 //!   replay refs, errors, resource lease ids, and compensation refs are stored
 //!   on the queue item instead of living only in stream logs; queued
 //!   non-mutating worker transport failures retry through queue lifecycle truth
-//!   without committing a failed target invocation row.
+//!   without committing a failed target invocation row;
+//! - queue resource governance is owned by the queue substrate: active
+//!   ready/leased depth, list page size, and serialized payload size are capped
+//!   before storage so worker bursts backpressure at the durable receipt
+//!   boundary rather than inside provider or transport code.
 //!
 //! # INVARIANT: one production execution shape
 //!
@@ -147,7 +151,8 @@ pub use durability::ledger::{
 };
 pub use durability::queue::{
     EngineQueueAttemptRecord, EngineQueueDrainer, EngineQueueItem, EngineQueueRuntime,
-    EnqueueInvocation, QueueAttemptOutcome, QueueItemStatus,
+    EnqueueInvocation, MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE, MAX_QUEUE_LIST_PAGE_SIZE,
+    MAX_QUEUE_PAYLOAD_BYTES, QueueAttemptOutcome, QueueItemStatus,
 };
 pub(crate) use durability::replay::EngineReplaySnapshot;
 pub use durability::resources::{

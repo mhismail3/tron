@@ -7,8 +7,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 
 use super::sqlite_codec::{item_params, row_to_queue_item, sqlite_err, validate_queue};
 use super::{
-    EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation, QueueAttemptOutcome,
-    QueueItemStatus,
+    EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation, MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE,
+    MAX_QUEUE_LIST_PAGE_SIZE, QueueAttemptOutcome, QueueItemStatus, validate_queue_payload,
 };
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::InvocationId;
@@ -128,6 +128,22 @@ CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
     /// Enqueue one invocation.
     pub fn enqueue(&mut self, request: EnqueueInvocation) -> Result<EngineQueueItem> {
         validate_queue(&request.queue)?;
+        validate_queue_payload(&request.payload)?;
+        let active_depth: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM engine_queue_items
+                 WHERE queue = ?1 AND status IN ('ready', 'leased')",
+                params![request.queue.as_str()],
+                |row| row.get(0),
+            )
+            .map_err(|err| sqlite_err("queue.enqueue.depth", err.to_string()))?;
+        if active_depth >= MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE as i64 {
+            return Err(EngineError::PolicyViolation(format!(
+                "queue {} active depth limit exceeded ({MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE})",
+                request.queue
+            )));
+        }
         let now = Utc::now();
         let item = EngineQueueItem {
             receipt_id: InvocationId::generate().to_string(),
@@ -352,9 +368,10 @@ CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
             .prepare("SELECT * FROM engine_queue_items WHERE queue = ?1 ORDER BY created_at ASC LIMIT ?2")
             .map_err(|err| sqlite_err("queue.list.prepare", err.to_string()))?;
         let rows = stmt
-            .query_map(params![queue, limit.min(500) as i64], |row| {
-                row_to_queue_item(&self.conn, row)
-            })
+            .query_map(
+                params![queue, limit.min(MAX_QUEUE_LIST_PAGE_SIZE) as i64],
+                |row| row_to_queue_item(&self.conn, row),
+            )
             .map_err(|err| sqlite_err("queue.list.query", err.to_string()))?;
         rows.map(|row| row.map_err(|err| sqlite_err("queue.list.row", err.to_string())))
             .collect()
@@ -377,9 +394,10 @@ CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
             )
             .map_err(|err| sqlite_err("queue.list_by_trace.prepare", err.to_string()))?;
         let rows = stmt
-            .query_map(params![trace_id, limit.min(500) as i64], |row| {
-                row_to_queue_item(&self.conn, row)
-            })
+            .query_map(
+                params![trace_id, limit.min(MAX_QUEUE_LIST_PAGE_SIZE) as i64],
+                |row| row_to_queue_item(&self.conn, row),
+            )
             .map_err(|err| sqlite_err("queue.list_by_trace.query", err.to_string()))?;
         rows.map(|row| row.map_err(|err| sqlite_err("queue.list_by_trace.row", err.to_string())))
             .collect()

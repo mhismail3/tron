@@ -12,7 +12,9 @@
 //! so the queue runtime can record retry/dead-letter truth without waiting for
 //! the per-invocation timeout. Worker result frames are consumed only by the
 //! pending invocation map owned by that socket connection; they are not routed
-//! through the runtime message handler as standalone commands.
+//! through the runtime message handler as standalone commands. Inbound worker
+//! frames are size-capped before JSON parsing, and outbound writes use a
+//! bounded channel plus send timeout.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +31,7 @@ use crate::engine::{
 
 const EXTERNAL_WORKER_OUTBOUND_CAPACITY: usize = 128;
 const EXTERNAL_WORKER_OUTBOUND_SEND_TIMEOUT: Duration = Duration::from_secs(5);
+pub(crate) const MAX_EXTERNAL_WORKER_FRAME_BYTES: usize = 1024 * 1024;
 
 /// Shared server-owned external-worker runtime.
 pub type SharedExternalWorkerRuntime = Arc<Mutex<EngineExternalWorkerRuntime>>;
@@ -68,6 +71,23 @@ pub async fn run_external_worker_socket(socket: WebSocket, runtime: SharedExtern
                 break;
             }
         };
+        if message.len() > MAX_EXTERNAL_WORKER_FRAME_BYTES {
+            let _ = outgoing_tx
+                .send(Message::Text(
+                    serde_json::json!({
+                        "type": "error",
+                        "message": format!(
+                            "worker protocol frame exceeds maximum size ({} > {} bytes)",
+                            message.len(),
+                            MAX_EXTERNAL_WORKER_FRAME_BYTES
+                        )
+                    })
+                    .to_string()
+                    .into(),
+                ))
+                .await;
+            break;
+        }
         let parsed = match serde_json::from_str::<WorkerProtocolMessage>(&message) {
             Ok(parsed) => parsed,
             Err(error) => {

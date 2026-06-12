@@ -17,6 +17,9 @@
 //! Worker transport loss before a non-mutating queued target returns is treated
 //! as delivery failure: the queue publishes retry state, but the target
 //! invocation ledger does not record an application-level handler failure.
+//! Enqueue is also the resource-governance boundary: payload size and
+//! per-queue active ready/leased depth are rejected before either queue store
+//! persists the item, and list calls clamp to the owner-defined page cap.
 
 use std::collections::BTreeMap;
 
@@ -39,6 +42,13 @@ pub use memory::InMemoryEngineQueueStore;
 pub use runtime::{EngineQueueDrainer, EngineQueueRuntime, publish_queue_lifecycle_event};
 pub(in crate::engine) use runtime::{queue_failure_event_type, queue_lifecycle_stream_event};
 pub use sqlite_store::SqliteEngineQueueStore;
+
+/// Maximum ready/leased items allowed for one queue before enqueue rejects.
+pub const MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE: usize = 10_000;
+/// Maximum rows any queue list call may return.
+pub const MAX_QUEUE_LIST_PAGE_SIZE: usize = 500;
+/// Maximum serialized JSON payload bytes accepted for one queue item.
+pub const MAX_QUEUE_PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
 
 /// Queue item lifecycle.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,4 +201,23 @@ pub struct EnqueueInvocation {
     pub workspace_id: Option<String>,
     /// Idempotency key.
     pub idempotency_key: Option<String>,
+}
+
+pub(crate) fn queue_item_is_active(status: &QueueItemStatus) -> bool {
+    matches!(status, QueueItemStatus::Ready | QueueItemStatus::Leased)
+}
+
+pub(crate) fn validate_queue_payload(payload: &Value) -> Result<()> {
+    let bytes = serde_json::to_vec(payload).map_err(|error| EngineError::LedgerFailure {
+        operation: "queue.payload_size",
+        message: error.to_string(),
+    })?;
+    if bytes.len() > MAX_QUEUE_PAYLOAD_BYTES {
+        return Err(EngineError::PolicyViolation(format!(
+            "queue payload exceeds maximum size ({} > {} bytes)",
+            bytes.len(),
+            MAX_QUEUE_PAYLOAD_BYTES
+        )));
+    }
+    Ok(())
 }

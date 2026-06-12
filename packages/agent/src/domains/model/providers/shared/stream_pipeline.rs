@@ -8,7 +8,9 @@
 use futures::stream::{self, StreamExt};
 use tracing::{error, warn};
 
-use crate::domains::model::providers::shared::provider::{ProviderResult, StreamEventStream};
+use crate::domains::model::providers::shared::provider::{
+    ProviderError, ProviderResult, StreamEventStream,
+};
 use crate::domains::model::providers::shared::sse::{SseParserOptions, parse_sse_lines};
 use crate::shared::protocol::events::StreamEvent;
 
@@ -32,6 +34,10 @@ where
 
     let event_stream = sse_lines
         .scan(initial_state, move |state, line| {
+            let line = match line {
+                Ok(line) => line,
+                Err(error) => return std::future::ready(Some(vec![Err(error)])),
+            };
             let event: E = match serde_json::from_str(&line) {
                 Ok(e) => e,
                 Err(e) => {
@@ -40,10 +46,14 @@ where
                 }
             };
             let events = handler(&event, state);
-            std::future::ready(Some(events))
+            std::future::ready(Some(
+                events
+                    .into_iter()
+                    .map(Ok::<StreamEvent, ProviderError>)
+                    .collect(),
+            ))
         })
-        .flat_map(stream::iter)
-        .map(Ok);
+        .flat_map(stream::iter);
 
     Box::pin(event_stream)
 }

@@ -253,7 +253,10 @@ fn handle_output_item_done(event: &ResponsesSseEvent, state: &mut StreamState) -
                 && let Some(text) = &part.text
             {
                 let _ = state.seen_thinking_texts.insert(text.clone());
-                state.acc.accumulate_thinking(text);
+                if let Some(error) = state.acc.accumulate_thinking(text) {
+                    events.push(error);
+                    return events;
+                }
                 events.push(StreamEvent::ThinkingDelta {
                     delta: text.clone(),
                 });

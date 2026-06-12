@@ -6,8 +6,9 @@ use chrono::{Duration, Utc};
 
 use super::sqlite_codec::validate_queue;
 use super::{
-    EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation, QueueAttemptOutcome,
-    QueueItemStatus,
+    EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation, MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE,
+    MAX_QUEUE_LIST_PAGE_SIZE, QueueAttemptOutcome, QueueItemStatus, queue_item_is_active,
+    validate_queue_payload,
 };
 use crate::engine::kernel::errors::{EngineError, Result};
 use crate::engine::kernel::ids::InvocationId;
@@ -28,6 +29,18 @@ impl InMemoryEngineQueueStore {
     /// Enqueue one invocation.
     pub fn enqueue(&mut self, request: EnqueueInvocation) -> Result<EngineQueueItem> {
         validate_queue(&request.queue)?;
+        validate_queue_payload(&request.payload)?;
+        let active_depth = self
+            .items
+            .values()
+            .filter(|item| item.queue == request.queue && queue_item_is_active(&item.status))
+            .count();
+        if active_depth >= MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE {
+            return Err(EngineError::PolicyViolation(format!(
+                "queue {} active depth limit exceeded ({MAX_ACTIVE_QUEUE_ITEMS_PER_QUEUE})",
+                request.queue
+            )));
+        }
         let now = Utc::now();
         let item = EngineQueueItem {
             receipt_id: InvocationId::generate().to_string(),
@@ -236,7 +249,7 @@ impl InMemoryEngineQueueStore {
             .items
             .values()
             .filter(|item| item.queue == queue)
-            .take(limit.min(500))
+            .take(limit.min(MAX_QUEUE_LIST_PAGE_SIZE))
             .cloned()
             .collect())
     }
@@ -255,7 +268,7 @@ impl InMemoryEngineQueueStore {
             .cloned()
             .collect::<Vec<_>>();
         items.sort_by_key(|item| item.created_at);
-        items.truncate(limit.min(500));
+        items.truncate(limit.min(MAX_QUEUE_LIST_PAGE_SIZE));
         Ok(items)
     }
 

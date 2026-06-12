@@ -212,7 +212,7 @@ packages/agent/src/domains/model/providers/shared/mod.rs	rust	adapter	rust:domai
 packages/agent/src/domains/model/providers/shared/provider.rs	rust	contract	rust:domain-model	may be shared across the owning boundary without concrete implementation imports
 packages/agent/src/domains/model/providers/shared/retry.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
 packages/agent/src/domains/model/providers/shared/sse.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
-packages/agent/src/domains/model/providers/shared/stream_common.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
+packages/agent/src/domains/model/providers/shared/stream_common/mod.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
 packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only
 packages/agent/src/domains/model/responder/mod.rs	rust	facade	rust:domain-model	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/model/tokens/errors.rs	rust	adapter	rust:domain-model	may depend inward on contracts and outward on one concrete external backend only

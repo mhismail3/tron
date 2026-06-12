@@ -245,7 +245,7 @@ packages/agent/src/domains/model/providers/shared/mod.rs	retain	rust agent	PCC-1
 packages/agent/src/domains/model/providers/shared/provider.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/shared/retry.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/providers/shared/sse.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/agent/src/domains/model/providers/shared/stream_common.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/model/providers/shared/stream_common/mod.rs	retain	rust agent	PCC-10/AHA-9/PERF-10	Current tracked file retained after AHA-9 inventory provenance cleanup; PERF moved it to directory module layout.
 packages/agent/src/domains/model/providers/shared/stream_pipeline.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/catalog.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/model/routing/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1579,3 +1579,9 @@ packages/agent/docs/provider-model-boundary-discipline-inventory.tsv	retain	pmbd
 packages/agent/docs/provider-model-boundary-discipline-scorecard.md	retain	pmbd docs	PMBD-9	Provider / Model Boundary Discipline scorecard retained for provider/model boundary hardening.
 packages/agent/src/shared/foundation/redaction.rs	retain	shared foundation	PMBD-5	Shared redaction helper retained for provider/model errors, retry events, audit payloads, and event storage.
 packages/agent/tests/provider_model_boundary_discipline_invariants.rs	retain	pmbd rust test	PMBD-9	Provider / Model Boundary Discipline invariant target retained for static provider/model boundary gates.
+packages/agent/docs/performance-resource-governance-evidence-manifest.md	retain	perf docs	PERF-9	Performance / Resource Governance evidence manifest retained for resource governance closeout.
+packages/agent/docs/performance-resource-governance-inventory.md	retain	perf docs	PERF-9	Performance / Resource Governance inventory retained for resource surface coverage.
+packages/agent/docs/performance-resource-governance-inventory.tsv	retain	perf docs	PERF-9	Performance / Resource Governance machine-readable inventory retained for static gates.
+packages/agent/docs/performance-resource-governance-scorecard.md	retain	perf docs	PERF-9	Performance / Resource Governance scorecard retained for resource governance closeout.
+packages/agent/src/domains/model/providers/shared/stream_common/tests.rs	retain	model provider rust test	PERF-7	Provider stream accumulator resource-limit tests retained outside production module body to preserve file budgets.
+packages/agent/tests/performance_resource_governance_invariants.rs	retain	perf rust test	PERF-9	Performance / Resource Governance invariant target retained for static resource-governance gates.

@@ -33,6 +33,7 @@ use crate::transport::engine::{
 
 const PROTOCOL_VERSION: u64 = 1;
 const MIN_PROTOCOL_VERSION: u64 = 1;
+pub(crate) const MAX_ENGINE_WS_FRAME_BYTES: usize = 1024 * 1024;
 const OUTBOUND_QUEUE_CAPACITY: usize = 256;
 const STREAM_DEFAULT_LIMIT: usize = 100;
 const STREAM_MAX_LIMIT: usize = 500;
@@ -167,6 +168,20 @@ impl EngineWsSession {
     }
 
     async fn handle_text(&mut self, text: &str) -> bool {
+        if text.len() > MAX_ENGINE_WS_FRAME_BYTES {
+            return self.send_error(
+                None,
+                protocol_error(
+                    INVALID_PARAMS,
+                    format!(
+                        "engine WebSocket frame exceeds maximum size ({} > {} bytes)",
+                        text.len(),
+                        MAX_ENGINE_WS_FRAME_BYTES
+                    ),
+                    None,
+                ),
+            );
+        }
         let value = match serde_json::from_str::<Value>(text) {
             Ok(value) => value,
             Err(error) => {

@@ -298,6 +298,8 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
     use bytes::BytesMut;
     use futures::stream::{self, StreamExt};
 
+    use crate::domains::model::providers::shared::sse::MAX_PROVIDER_STREAM_FRAME_BYTES;
+
     let byte_stream = response.bytes_stream();
 
     let event_stream = futures::stream::unfold(
@@ -336,7 +338,10 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
 
                     let events = process_chunk(&chunk, &mut state);
                     if !events.is_empty() {
-                        return Some((events, (stream, state, buffer)));
+                        return Some((
+                            events.into_iter().map(Ok).collect(),
+                            (stream, state, buffer),
+                        ));
                     }
                     continue;
                 }
@@ -344,25 +349,62 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
                 // Read next bytes from the HTTP response stream
                 match StreamExt::next(&mut stream).await {
                     Some(Ok(bytes)) => {
+                        if buffer.len().saturating_add(bytes.len())
+                            > MAX_PROVIDER_STREAM_FRAME_BYTES
+                        {
+                            let message = format!(
+                                "Ollama NDJSON frame exceeded maximum size ({} > {} bytes)",
+                                buffer.len().saturating_add(bytes.len()),
+                                MAX_PROVIDER_STREAM_FRAME_BYTES
+                            );
+                            tracing::warn!(%message, "Ollama NDJSON frame rejected");
+                            return Some((
+                                vec![Err(ProviderError::SseParse { message })],
+                                (stream, state, buffer),
+                            ));
+                        }
                         buffer.extend_from_slice(&bytes);
                     }
                     Some(Err(e)) => {
                         tracing::warn!("Ollama NDJSON stream read error: {e}");
-                        return None;
+                        return Some((vec![Err(ProviderError::Http(e))], (stream, state, buffer)));
                     }
                     None => {
                         // Stream ended — process remaining buffer
                         if !buffer.is_empty() {
+                            if buffer.len() > MAX_PROVIDER_STREAM_FRAME_BYTES {
+                                let message = format!(
+                                    "Ollama NDJSON frame exceeded maximum size ({} > {} bytes)",
+                                    buffer.len(),
+                                    MAX_PROVIDER_STREAM_FRAME_BYTES
+                                );
+                                tracing::warn!(%message, "Ollama NDJSON frame rejected");
+                                return Some((
+                                    vec![Err(ProviderError::SseParse { message })],
+                                    (stream, state, buffer),
+                                ));
+                            }
                             let line = match std::str::from_utf8(&buffer) {
                                 Ok(s) => s.trim(),
-                                Err(_) => return None,
+                                Err(_) => {
+                                    return Some((
+                                        vec![Err(ProviderError::SseParse {
+                                            message: "Ollama NDJSON frame was not valid UTF-8"
+                                                .to_owned(),
+                                        })],
+                                        (stream, state, buffer),
+                                    ));
+                                }
                             };
                             if !line.is_empty() {
                                 if let Ok(chunk) = serde_json::from_str::<OllamaChatChunk>(line) {
                                     let events = process_chunk(&chunk, &mut state);
                                     if !events.is_empty() {
                                         buffer.clear();
-                                        return Some((events, (stream, state, buffer)));
+                                        return Some((
+                                            events.into_iter().map(Ok).collect(),
+                                            (stream, state, buffer),
+                                        ));
                                     }
                                 }
                             }
@@ -373,8 +415,7 @@ fn ndjson_to_event_stream(response: reqwest::Response) -> StreamEventStream {
             }
         },
     )
-    .flat_map(stream::iter)
-    .map(Ok);
+    .flat_map(stream::iter);
 
     Box::pin(event_stream)
 }

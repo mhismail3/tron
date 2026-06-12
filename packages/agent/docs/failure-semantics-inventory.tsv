@@ -31,3 +31,4 @@ packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/TurnFailedPlugin.swift	
 packages/ios-app/Sources/Engine/Events/Plugins/Lifecycle/ErrorPlugin.swift	Swift	error_live_plugin	ios_events	registered_for_live_error_event_and_preserves_canonical_failure	FSC-8
 packages/ios-app/Sources/UI/Capabilities/Shared/ErrorClassification.swift	Swift	capability_error_classification	ios_ui	data_only_rows_populated_from_server_failure	FSC-8
 packages/ios-app/Sources/UI/Capabilities/Shared/FileOperationError.swift	Swift	file_operation_error_ui	ios_ui	operation_specific_details_no_server_failure_taxonomy	FSC-8
+packages/agent/docs/performance-resource-governance-scorecard.md	Markdown	resource_governance	perf_docs	Performance / Resource Governance extends FSC timeout/cancellation proof	FSC-4,FSC-9

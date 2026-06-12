@@ -42,6 +42,7 @@ run_tests() {
         data_integrity_storage_evolution_migration_discipline_invariants
         public_protocol_api_contract_discipline_invariants
         provider_model_boundary_discipline_invariants
+        performance_resource_governance_invariants
         primitive_trace_execution
         integration
     )

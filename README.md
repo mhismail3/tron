@@ -247,6 +247,17 @@ Current living entry points:
   completed PMBD provider/model boundary taxonomy and proof notes.
 - `packages/agent/docs/provider-model-boundary-discipline-inventory.tsv`:
   machine-readable PMBD provider/model boundary inventory used by static gates.
+- `packages/agent/docs/performance-resource-governance-scorecard.md`:
+  completed Performance / Resource Governance scorecard for queue,
+  concurrency, stream, payload, timeout, shutdown, retention, startup,
+  runtime/iOS boundary, docs, CI, and verification hardening.
+- `packages/agent/docs/performance-resource-governance-evidence-manifest.md`:
+  companion evidence manifest for PERF lineage, stale-branch quarantine,
+  resource-boundary proofs, verification commands, and residual risks.
+- `packages/agent/docs/performance-resource-governance-inventory.md`:
+  completed PERF resource-governance taxonomy and proof notes.
+- `packages/agent/docs/performance-resource-governance-inventory.tsv`:
+  machine-readable PERF resource-governance inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -342,12 +353,17 @@ Current living entry points:
   inventory coverage, README/CI wiring, provider-native import confinement,
   provider wire marker confinement, provider audit redaction/bounding, retry and
   failure redaction, provider family test anchors, and predecessor inventory rows.
+- `packages/agent/tests/performance_resource_governance_invariants.rs`:
+  completed Performance / Resource Governance gates for scorecard/evidence,
+  resource inventory coverage, README/CI wiring, queue burst and payload
+  rejection, stream/frame/accumulator/WebSocket bounds, cancellation, shutdown,
+  retention, startup, runtime/iOS boundary, and predecessor inventory rows.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF
 scorecards and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -1465,6 +1481,8 @@ tron ci clippy test          # Subset: linting + tests
 `off_plan_saa_authorship_teardown_cleanup_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
 `public_protocol_api_contract_discipline_invariants`,
+`provider_model_boundary_discipline_invariants`,
+`performance_resource_governance_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.
