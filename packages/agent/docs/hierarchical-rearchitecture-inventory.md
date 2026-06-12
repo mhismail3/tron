@@ -2,7 +2,7 @@
 
 Status: `completed`
 
-Generated from the live checkout after HRA-16, then refreshed during AHA-6, AHA-8, AHA-9, TPC-11, SOL-10, SACB-POST-2, ODA-10, and SAA-10 to keep the current ownership TSVs aligned with post-HRA cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test current ownership map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs. TPC-11 refreshed the maps after True Primitive Cleanup split additional Rust/iOS owners and converted same-name Rust file/folder pairs to folder-owned modules. SOL-10 refreshed the maps after the State Ownership Lifecycle invariant target was split into focused modules. SACB-POST-2 refreshed the maps after the delegated engine-invoke budget-ordering regression module split. ODA-10 and SAA-10 refreshed the maps for the observability and self-adapting authorship campaign artifacts.
+Generated from the live checkout after HRA-16, then refreshed during AHA-6, AHA-8, AHA-9, TPC-11, SOL-10, SACB-POST-2, ODA-10, and OPSAA-6 to keep the current ownership TSVs aligned with post-HRA cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test current ownership map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs. TPC-11 refreshed the maps after True Primitive Cleanup split additional Rust/iOS owners and converted same-name Rust file/folder pairs to folder-owned modules. SOL-10 refreshed the maps after the State Ownership Lifecycle invariant target was split into focused modules. SACB-POST-2 refreshed the maps after the delegated engine-invoke budget-ordering regression module split. ODA-10 refreshed the maps for observability artifacts, and OPSAA-6 refreshed them after removing off-plan authorship artifacts.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -32,13 +32,13 @@ The HRA iOS current ownership map uses this HRA-8-specific header:
 current_path	target_path	owner	phase	classification	status	reason
 ```
 
-## HRA-1 Baseline Counts Updated After SAA-10
+## HRA-1 Baseline Counts Updated After OPSAA Cleanup
 
 | Metric | Count |
 | --- | --- |
-| Tracked files after SAA-10 staged additions | 1568 |
-| Files under `packages/agent/src` | 576 |
-| Files under `packages/agent/tests` | 101 |
+| Tracked files after OPSAA cleanup | 1563 |
+| Files under `packages/agent/src` | 575 |
+| Files under `packages/agent/tests` | 97 |
 | Files under `packages/ios-app/Sources` | 428 |
 | Files under `packages/ios-app/Tests` | 211 |
 | Files under `packages/mac-app/Sources` | 76 |
@@ -49,7 +49,7 @@ current_path	target_path	owner	phase	classification	status	reason
 | Extension | Count |
 | --- | --- |
 | .swift | 678 |
-| .rs | 676 |
+| .rs | 671 |
 | .md | 55 |
 | .json | 20 |
 | .png | 20 |
@@ -80,7 +80,7 @@ current_path	target_path	owner	phase	classification	status	reason
 
 | Package | Count |
 | --- | --- |
-| agent | 745 |
+| agent | 740 |
 | ios-app | 663 |
 | mac-app | 123 |
 | scripts | 22 |

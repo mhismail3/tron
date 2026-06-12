@@ -143,7 +143,7 @@ jobs:
           cargo test --test concurrency_scheduling_discipline_invariants -- --quiet
           cargo test --test security_authority_capability_boundaries_invariants -- --quiet
           cargo test --test observability_diagnostics_auditability_invariants -- --quiet
-          cargo test --test self_adapting_agent_authorship_invariants -- --quiet
+          cargo test --test off_plan_saa_authorship_teardown_cleanup_invariants -- --quiet
           cargo test --test primitive_trace_execution -- --quiet
           cargo test --test integration -- --test-threads=1 --quiet
 

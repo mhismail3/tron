@@ -1497,7 +1497,23 @@ packages/agent/tests/concurrency_scheduling_discipline/static_guards.rs	test	tes
 packages/agent/tests/concurrency_scheduling_discipline/support.rs	test	test_harness	CSD-10	Concurrency Scheduling Discipline invariant test support retained after final closeout.
 packages/agent/tests/concurrency_scheduling_discipline_invariants.rs	test	test_harness	CSD-10	Concurrency Scheduling Discipline invariant target retained after final closeout.
 packages/agent/tests/security_authority_capability_boundaries/mod.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries invariant module retained for active campaign verification.
+packages/agent/tests/security_authority_capability_boundaries/platform_guards.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries platform guard invariant retained for active campaign verification.
 packages/agent/tests/security_authority_capability_boundaries/scorecard_inventory.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries scorecard/inventory invariant retained for active campaign verification.
 packages/agent/tests/security_authority_capability_boundaries/static_guards.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries static guard invariant retained for active campaign verification.
 packages/agent/tests/security_authority_capability_boundaries/support.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries invariant test support retained for active campaign verification.
 packages/agent/tests/security_authority_capability_boundaries_invariants.rs	test	test_harness	SACB-4	Security Authority Capability Boundaries invariant target retained for active campaign verification.
+packages/agent/docs/observability-diagnostics-auditability-evidence-manifest.md	docs	docs/static gates	ODA-9	Observability Diagnostics Auditability evidence manifest retained after closeout.
+packages/agent/docs/observability-diagnostics-auditability-inventory.md	docs	docs/static gates	ODA-9	Observability Diagnostics Auditability inventory retained after closeout.
+packages/agent/docs/observability-diagnostics-auditability-inventory.tsv	docs	docs/static gates	ODA-9	Observability Diagnostics Auditability machine-readable inventory retained after closeout.
+packages/agent/docs/observability-diagnostics-auditability-scorecard.md	docs	docs/static gates	ODA-9	Observability Diagnostics Auditability scorecard retained after closeout.
+packages/agent/src/engine/authority/grants/policy_hash.rs	support	engine	SACB-post-audit	Authority grant policy hash helper retained for scoped worker token integrity.
+packages/agent/tests/observability_diagnostics_auditability/mod.rs	test	test_harness	ODA-9	Observability Diagnostics Auditability invariant module retained after closeout.
+packages/agent/tests/observability_diagnostics_auditability/scorecard_inventory.rs	test	test_harness	ODA-9	Observability Diagnostics Auditability scorecard/inventory invariant retained after closeout.
+packages/agent/tests/observability_diagnostics_auditability/source_guards.rs	test	test_harness	ODA-9	Observability Diagnostics Auditability source guard invariant retained after closeout.
+packages/agent/tests/observability_diagnostics_auditability/support.rs	test	test_harness	ODA-9	Observability Diagnostics Auditability invariant support retained after closeout.
+packages/agent/tests/observability_diagnostics_auditability_invariants.rs	test	test_harness	ODA-9	Observability Diagnostics Auditability invariant target retained after closeout.
+packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-evidence-manifest.md	docs	docs/static gates	OPSAA-6	Off-plan authorship teardown cleanup evidence manifest retained for remediation closeout.
+packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.md	docs	docs/static gates	OPSAA-6	Off-plan authorship teardown cleanup inventory retained for remediation closeout.
+packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv	docs	docs/static gates	OPSAA-6	Off-plan authorship teardown cleanup machine-readable inventory retained for remediation closeout.
+packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-scorecard.md	docs	docs/static gates	OPSAA-6	Off-plan authorship teardown cleanup scorecard retained for remediation closeout.
+packages/agent/tests/off_plan_saa_authorship_teardown_cleanup_invariants.rs	test	test_harness	OPSAA-6	Off-plan authorship teardown cleanup invariant target retained for remediation closeout.

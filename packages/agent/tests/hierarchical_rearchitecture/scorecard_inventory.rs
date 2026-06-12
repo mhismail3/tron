@@ -91,7 +91,7 @@ fn hierarchical_rearchitecture_scorecard_stays_formalized() {
         "Machine-Readable Artifacts",
         "Allowed classifications",
         "Allowed statuses",
-        "HRA-1 Baseline Counts Updated After SAA-10",
+        "HRA-1 Baseline Counts Updated After OPSAA Cleanup",
         PLAN_SUMMARY_PATH,
         IOS_OWNERSHIP_MAP_PATH,
         IOS_PROJECT_MAP_PATH,

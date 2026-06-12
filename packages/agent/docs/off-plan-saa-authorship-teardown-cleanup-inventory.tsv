@@ -1,0 +1,43 @@
+row_id	path	surface	classification	source_proof	action	proof_notes
+OPSAA-INV-001	packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-scorecard.md	cleanup_harness	retain_with_rewording	new OPSAA cleanup artifact	added	cleanup scorecard is current remediation evidence, not SAA feature proof
+OPSAA-INV-002	packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-evidence-manifest.md	cleanup_harness	retain_with_rewording	new OPSAA cleanup artifact	added	closeout commands/results recorded here before commit
+OPSAA-INV-003	packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.md	cleanup_harness	retain_with_rewording	new OPSAA cleanup artifact	added	classification notes separate retained generic substrate from deleted SAA feature work
+OPSAA-INV-004	packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv	cleanup_harness	retain_with_rewording	new OPSAA cleanup artifact	added	machine-readable inventory used by OPSAA static target
+OPSAA-INV-005	packages/agent/tests/off_plan_saa_authorship_teardown_cleanup_invariants.rs	cleanup_harness	retain_with_rewording	new OPSAA cleanup artifact	added	negative guards against SAA resurrection plus scorecard/evidence checks
+OPSAA-INV-006	packages/agent/docs/self-adapting-agent-authorship-scorecard.md	active_saa_docs	delete	added by e781a6aef	deleted	active completed SAA scorecard removed
+OPSAA-INV-007	packages/agent/docs/self-adapting-agent-authorship-evidence-manifest.md	active_saa_docs	delete	added by e781a6aef	deleted	active SAA evidence manifest removed
+OPSAA-INV-008	packages/agent/docs/self-adapting-agent-authorship-inventory.md	active_saa_docs	delete	added by e781a6aef	deleted	active SAA inventory removed
+OPSAA-INV-009	packages/agent/docs/self-adapting-agent-authorship-inventory.tsv	active_saa_docs	delete	added by e781a6aef	deleted	active SAA TSV inventory removed
+OPSAA-INV-010	packages/agent/tests/self_adapting_agent_authorship_invariants.rs	active_saa_tests	delete	added by e781a6aef	deleted	active SAA invariant target removed
+OPSAA-INV-011	packages/agent/tests/self_adapting_agent_authorship/mod.rs	active_saa_tests	delete	added by e781a6aef	deleted	active SAA test module registry removed
+OPSAA-INV-012	packages/agent/tests/self_adapting_agent_authorship/resource_fixtures.rs	active_saa_tests	delete	added by e781a6aef	deleted	active SAA resource fixture tests removed
+OPSAA-INV-013	packages/agent/tests/self_adapting_agent_authorship/scorecard_inventory.rs	active_saa_tests	delete	added by e781a6aef	deleted	active SAA scorecard/inventory tests removed
+OPSAA-INV-014	packages/agent/tests/self_adapting_agent_authorship/source_guards.rs	active_saa_tests	delete	added by e781a6aef	deleted	active SAA source guards removed
+OPSAA-INV-015	packages/agent/tests/self_adapting_agent_authorship/support.rs	active_saa_tests	delete	added by e781a6aef	deleted	active SAA test support removed
+OPSAA-INV-016	packages/agent/src/domains/capability/operations/resource.rs	execute_surface	delete	added by e781a6aef	deleted	provider-visible resource operation adapter removed
+OPSAA-INV-017	packages/agent/src/domains/capability/operations/mod.rs	execute_surface	revert_to_pre_saa	modified by e781a6aef	reverted	removed resource module import, validation, dispatcher branches, and unsupported-operation text
+OPSAA-INV-018	packages/agent/src/domains/capability/contract.rs	provider_schema	revert_to_pre_saa	modified by e781a6aef	reverted	removed resource operations and fields from provider-visible execute schema
+OPSAA-INV-019	packages/agent/src/domains/capability/mod.rs	progressive_docs	revert_to_pre_saa	modified by e781a6aef	reverted	removed current durable self-authorship wording from capability module docs
+OPSAA-INV-020	packages/agent/src/domains/model/providers/openai/message_converter/mod.rs	provider_instruction	revert_to_pre_saa	modified by e781a6aef	reverted	removed resource operation guidance from OpenAI execute clarification
+OPSAA-INV-021	packages/agent/src/domains/model/providers/openai/message_converter/tests.rs	provider_instruction_test	revert_to_pre_saa	modified by e781a6aef	reverted	removed resource_create expectation
+OPSAA-INV-022	packages/agent/src/domains/agent/loop/capability_invocation_executor/grant.rs	runtime_grant	revert_to_pre_saa	modified by e781a6aef	reverted	removed resource primitive allowances, resource read/write scopes, wildcard resource selectors, and SAA resource kinds
+OPSAA-INV-023	packages/agent/src/engine/durability/resources/definitions.rs	resource_definitions	revert_to_pre_saa	modified by e781a6aef	reverted	removed agent_memory and agent_rule built-ins while retaining preexisting generic kinds
+OPSAA-INV-024	packages/agent/src/engine/durability/resources/mod.rs	progressive_docs	revert_to_pre_saa	modified by e781a6aef	reverted	removed current memory/rule resource claim from module docs
+OPSAA-INV-025	packages/agent/src/engine/primitives/mod.rs	progressive_docs	revert_to_pre_saa	modified by e781a6aef	reverted	removed current memory/rule substrate claim from primitive docs
+OPSAA-INV-026	packages/agent/src/engine/primitives/workers.rs	resource_worker	revert_to_pre_saa	modified by e781a6aef	reverted	removed agent_memory and agent_rule namespace claims
+OPSAA-INV-027	packages/agent/src/engine/tests/durability/resource_contracts.rs	durability_tests	revert_to_pre_saa	modified by e781a6aef	reverted	removed memory/rule schema requirements from generic resource contract tests
+OPSAA-INV-028	packages/agent/src/engine/primitives/resource/mod.rs	engine_resource_worker	retain_generic_preexisting	predates e781a6aef	retained	generic resource primitive create/update/link/inspect/list remains internal engine substrate
+OPSAA-INV-029	packages/agent/src/engine/durability/resources/store/mod.rs	resource_store	retain_generic_preexisting	predates e781a6aef	retained	generic resource persistence remains covered by durability tests
+OPSAA-INV-030	packages/agent/src/engine/durability/resources/validation.rs	resource_validation	retain_generic_preexisting	predates e781a6aef	retained	generic schema/lifecycle/link validation remains required by retained resources
+OPSAA-INV-031	packages/agent/src/engine/durability/resources/ui_surface.rs	ui_resource	retain_generic_preexisting	predates e781a6aef	retained	generic ui_surface resource validation remains primitive-engine substrate
+OPSAA-INV-032	packages/agent/src/engine/primitives/resource/materialized_file.rs	materialized_file_resource	retain_generic_preexisting	predates e781a6aef	retained	generic materialized file wrapper remains primitive-engine substrate
+OPSAA-INV-033	README.md	living_docs	retain_with_rewording	modified by e781a6aef	reworded	remove completed/current SAA claims and add OPSAA cleanup artifacts
+OPSAA-INV-034	scripts/tron.d/quality.sh	local_static_gates	revert_to_pre_saa	modified by e781a6aef	reconciled	remove SAA target and add OPSAA cleanup target
+OPSAA-INV-035	.github/workflows/ci.yml	github_static_gates	revert_to_pre_saa	modified by e781a6aef	reconciled	remove SAA target and add OPSAA cleanup target
+OPSAA-INV-036	packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv	predecessor_inventory	retain_with_rewording	modified by e781a6aef	reconciled	remove SAA rows and add OPSAA cleanup rows
+OPSAA-INV-037	packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv	predecessor_inventory	retain_with_rewording	modified by e781a6aef	reconciled	remove SAA rows and add OPSAA cleanup rows
+OPSAA-INV-038	packages/agent/docs/hierarchical-rearchitecture-inventory.md	predecessor_inventory	retain_with_rewording	modified by e781a6aef	reconciled	replace SAA-10 baseline language/counts with OPSAA cleanup language/counts
+OPSAA-INV-039	packages/agent/docs/primitive-code-cleanup-file-inventory.tsv	predecessor_inventory	retain_with_rewording	modified by e781a6aef	reconciled	remove SAA rows and add OPSAA cleanup rows
+OPSAA-INV-040	packages/agent/docs/primitive-code-cleanup-inventory.md	predecessor_inventory	retain_with_rewording	modified by e781a6aef	reconciled	replace SAA closeout language/counts with OPSAA cleanup language/counts
+OPSAA-INV-041	packages/agent/docs/security-authority-capability-boundaries-inventory.tsv	predecessor_inventory	retain_with_rewording	modified by e781a6aef	reconciled	remove SAA rows and add OPSAA cleanup rows
+OPSAA-INV-042	packages/agent/docs/security-authority-capability-boundaries-inventory.md	predecessor_inventory	retain_with_rewording	modified by e781a6aef	reconciled	refresh row count after SAA removal and OPSAA additions

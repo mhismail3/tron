@@ -1543,6 +1543,7 @@ packages/agent/docs/security-authority-capability-boundaries-inventory.md	retain
 packages/agent/docs/security-authority-capability-boundaries-inventory.tsv	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries machine-readable inventory retained for the current campaign.
 packages/agent/docs/security-authority-capability-boundaries-scorecard.md	retain	sacb docs	SACB-0	Active Security Authority Capability Boundaries scorecard retained for the current campaign.
 packages/agent/tests/security_authority_capability_boundaries/mod.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant module registry retained for the current campaign.
+packages/agent/tests/security_authority_capability_boundaries/platform_guards.rs	retain	sacb rust test	SACB-4	Active Security Authority Capability Boundaries platform guard module retained for the current campaign.
 packages/agent/tests/security_authority_capability_boundaries/scorecard_inventory.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries scorecard/inventory invariant module retained for the current campaign.
 packages/agent/tests/security_authority_capability_boundaries/static_guards.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries static guard module retained for the current campaign.
 packages/agent/tests/security_authority_capability_boundaries/support.rs	retain	sacb rust test	SACB-0	Active Security Authority Capability Boundaries invariant test support retained for the current campaign.
@@ -1556,14 +1557,8 @@ packages/agent/tests/observability_diagnostics_auditability/scorecard_inventory.
 packages/agent/tests/observability_diagnostics_auditability/source_guards.rs	retain	oda rust test	ODA-10	Current Observability Diagnostics Auditability source guard invariant retained after closeout.
 packages/agent/tests/observability_diagnostics_auditability/support.rs	retain	oda rust test	ODA-10	Current Observability Diagnostics Auditability invariant support retained after closeout.
 packages/agent/tests/observability_diagnostics_auditability_invariants.rs	retain	oda rust test	ODA-10	Current Observability Diagnostics Auditability invariant target retained after closeout.
-packages/agent/docs/self-adapting-agent-authorship-evidence-manifest.md	retain	saa docs	SAA-10	Current Self-Adapting Agent Authorship evidence manifest retained for primitive authorship closeout.
-packages/agent/docs/self-adapting-agent-authorship-inventory.md	retain	saa docs	SAA-10	Current Self-Adapting Agent Authorship inventory retained for primitive authorship closeout.
-packages/agent/docs/self-adapting-agent-authorship-inventory.tsv	retain	saa docs	SAA-10	Current Self-Adapting Agent Authorship machine-readable inventory retained for primitive authorship closeout.
-packages/agent/docs/self-adapting-agent-authorship-scorecard.md	retain	saa docs	SAA-10	Current Self-Adapting Agent Authorship scorecard retained for primitive authorship closeout.
-packages/agent/src/domains/capability/operations/resource.rs	retain	saa rust source	SAA-2	Execute resource operation adapter retained for self-adapting authorship through the primitive execute tool.
-packages/agent/tests/self_adapting_agent_authorship/mod.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant module registry retained for closeout verification.
-packages/agent/tests/self_adapting_agent_authorship/resource_fixtures.rs	retain	saa rust test	SAA-3/SAA-6	Current Self-Adapting Agent Authorship resource fixture invariants retained for closeout verification.
-packages/agent/tests/self_adapting_agent_authorship/scorecard_inventory.rs	retain	saa rust test	SAA-0/SAA-1	Current Self-Adapting Agent Authorship scorecard and inventory invariant retained for closeout verification.
-packages/agent/tests/self_adapting_agent_authorship/source_guards.rs	retain	saa rust test	SAA-2/SAA-9	Current Self-Adapting Agent Authorship source guard invariant retained for closeout verification.
-packages/agent/tests/self_adapting_agent_authorship/support.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant support retained for closeout verification.
-packages/agent/tests/self_adapting_agent_authorship_invariants.rs	retain	saa rust test	SAA-0	Current Self-Adapting Agent Authorship invariant target retained for closeout verification.
+packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-evidence-manifest.md	retain	opsaa cleanup docs	OPSAA-6	Off-plan authorship teardown cleanup evidence manifest retained for remediation closeout.
+packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.md	retain	opsaa cleanup docs	OPSAA-6	Off-plan authorship teardown cleanup inventory retained for remediation closeout.
+packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv	retain	opsaa cleanup docs	OPSAA-6	Off-plan authorship teardown cleanup machine-readable inventory retained for remediation closeout.
+packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-scorecard.md	retain	opsaa cleanup docs	OPSAA-6	Off-plan authorship teardown cleanup scorecard retained for remediation closeout.
+packages/agent/tests/off_plan_saa_authorship_teardown_cleanup_invariants.rs	retain	opsaa cleanup rust test	OPSAA-6	Off-plan authorship teardown cleanup invariant target retained for remediation closeout.

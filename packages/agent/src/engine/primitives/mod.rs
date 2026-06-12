@@ -9,15 +9,14 @@
 //! shared primitive constants and payload/schema helpers only.
 //! `grant::*` is the engine-owned authority surface; `resource::*` plus the
 //! artifact/goal/claim/evidence/decision wrappers form the durable output
-//! substrate, including agent-authored memory and rule resources. Materialized-
-//! file wrappers keep file bytes tied to resource versions, record damaged
-//! truth through the resource store, and block operational reads or rewrites
-//! after discard while leaving inspection available. `trigger::*` dispatches
-//! registered triggers back through the same trigger runtime used by transports
-//! and schedules, so queued trigger delivery is not a harness-only path.
-//! `ui::*` stores runtime UI surface resources, validates the bounded schema,
-//! and records generic action submissions without server-authored target
-//! routing.
+//! substrate. Materialized-file wrappers keep file bytes tied to resource
+//! versions, record damaged truth through the resource store, and block
+//! operational reads or rewrites after discard while leaving inspection
+//! available. `trigger::*` dispatches registered triggers back through the
+//! same trigger runtime used by transports and schedules, so queued trigger
+//! delivery is not a harness-only path. `ui::*` stores runtime UI surface
+//! resources, validates the bounded schema, and records generic action
+//! submissions without server-authored target routing.
 //! `storage::*` is the
 //! system primitive surface for the unified
 //! `tron.sqlite` runtime: stats, retention, checkpoints, and portable snapshot

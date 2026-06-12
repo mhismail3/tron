@@ -1,11 +1,10 @@
 //! Generic engine resource kernel.
 //!
 //! Resources are the durable object model for the primitive engine. Artifacts,
-//! goals, claims, evidence, decisions, agent-authored memories/rules, UI
-//! surfaces, harness docs, and files become typed resources with versioned
-//! payloads, links, lifecycle state, policy, provenance, and auditable events.
-//! Streams, indexes, and control-plane summaries are projections over this
-//! store.
+//! goals, claims, evidence, decisions, UI surfaces, harness docs, and files become typed resources with
+//! versioned payloads, links, lifecycle state, policy, provenance, and
+//! auditable events. Streams, indexes, and control-plane summaries are
+//! projections over this store.
 //!
 //! Ownership is split by concern: `types` holds public substrate structs,
 //! `definitions` registers built-in resource kinds, `validation` enforces the
