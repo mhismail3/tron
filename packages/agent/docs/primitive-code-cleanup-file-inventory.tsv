@@ -1604,6 +1604,12 @@ packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md	ret
 packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv	retain	rur docs	RUR-1	Current Release Install Upgrade Rollback Discipline machine-readable inventory retained for release/install ownership proof.
 packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md	retain	rur docs	RUR-10	Current Release Install Upgrade Rollback Discipline scorecard retained for final closeout proof.
 packages/agent/tests/release_install_upgrade_rollback_discipline_invariants.rs	retain	rur rust test	RUR-0	Current Release Install Upgrade Rollback Discipline invariant target retained for local and CI static gates.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md	retain	itc docs	ITC-9	Current iOS Thin Client Generic Runtime Shell scorecard retained for static-gate and closeout proof.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md	retain	itc docs	ITC-9	Current iOS Thin Client Generic Runtime Shell evidence manifest retained for validation proof.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md	retain	itc docs	ITC-1	Current iOS Thin Client Generic Runtime Shell inventory retained for source-boundary proof.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv	retain	itc docs	ITC-1	Current iOS Thin Client Generic Runtime Shell machine-readable inventory retained for static gates.
+packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs	retain	itc rust test	ITC-0	Current iOS Thin Client Generic Runtime Shell invariant target retained for local and CI static gates.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ThinClientShell.swift	retain	itc swift guard	ITC-2	Current iOS thin-client SourceGuard retained to prove generic shell anchors and deleted product surface absence.
 packages/agent/src/domains/agent/loop/orchestrator/streaming_journal/tests.rs	retain	agent runtime test	TPC-10	Streaming journal tests split into a tracked submodule to preserve hard file budgets.
 packages/agent/src/domains/model/providers/google/stream_handler/tests.rs	retain	model provider test	TPC-10	Google stream handler tests split into a tracked submodule to preserve hard file budgets.
 packages/agent/src/domains/model/providers/shared/stream_common/tests.rs	retain	model provider test	TPC-10	Shared stream accumulator tests split into a tracked submodule to preserve hard file budgets.

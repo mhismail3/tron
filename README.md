@@ -396,6 +396,21 @@ Current living entry points:
   ownership rows, production deploy automation absence, port-owner fail-closed
   script behavior, manual deploy boundaries, generated project drift commands,
   runtime cleanup preservation, and shell syntax.
+- `packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md`,
+  `packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md`,
+  `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md`, and
+  `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv`:
+  active iOS Thin Client / Generic Runtime Shell artifacts covering retained
+  pairing, settings, chat/timeline, generic capability/runtime rendering,
+  canonical server errors, diagnostics/logs/redaction, deleted product
+  boundaries, iOS 26.5 simulator proof, generated project drift, and static
+  gate wiring.
+- `packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`:
+  ITC guard for artifact wiring, scorecard weights, inventory shape, evidence
+  matrix, README/iOS doc links, local/GitHub static-gate wiring, HRA/PCC
+  ownership rows, generated-project drift command, iOS 26.5 simulator command,
+  deleted product source guard coverage, thin-client boundary docs, and
+  production deploy automation absence.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -1248,6 +1263,13 @@ packages/ios-app/Sources/
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server's Keychain token before removing local metadata and surfaces a Keychain error without forgetting metadata if token deletion fails. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the runtime-configured `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. The tracked default is blank and may be supplied by `Local.xcconfig`, CI secrets, or release build settings. Settings also exposes the Logs sheet in every iOS build configuration so production installs can inspect or copy redacted in-memory client logs without enabling verbose production logging. When connected to a paired server, iOS automatically ingests deduplicated client logs into the server `logs` table through `logs::ingest` with client send-boundary redaction, server-side ingestion redaction for bearer/API/OAuth fields, deterministic batch idempotency, and client-side entry fingerprints, so server and client logs share the same durable query surface during normal execution without resending unchanged local buffers. Successful `logs::ingest` transport chatter is filtered at the client-ingestion boundary to prevent self-feeding diagnostics loops while preserving ingestion failures and reconnect warnings. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
+- **ITC guardrails**: `SourceGuardTests+ThinClientShell.swift` and
+  `ios_thin_client_generic_runtime_shell_invariants.rs` prove the retained
+  pairing/settings/chat/logs/error/runtime shell anchors and keep deleted
+  repository panels, assistant-management panels, extension-source surfaces,
+  media workflows, audio transcription, memory/rules/skills panels, prompt
+  queue, hook suggestions, product clients/state, and fixed product panels out
+  of ordinary iOS source/tests.
 
 ### Data Flow
 
@@ -1274,6 +1296,10 @@ Detailed iOS documentation lives in `packages/ios-app/docs/`:
 - `development.md` — Xcode setup, builds, testing
 - `events.md` — Event plugin system
 - `onboarding.md` — First-run onboarding sheet, QR/deep-link handling, local paired servers, and bearer persistence
+
+Full paths: `packages/ios-app/docs/architecture.md`,
+`packages/ios-app/docs/development.md`, `packages/ios-app/docs/events.md`, and
+`packages/ios-app/docs/onboarding.md`.
 
 ---
 
@@ -1537,6 +1563,7 @@ tron ci clippy test          # Subset: linting + tests
 `performance_resource_governance_invariants`,
 `configuration_profile_environment_discipline_invariants`,
 `release_install_upgrade_rollback_discipline_invariants`,
+`ios_thin_client_generic_runtime_shell_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
 `off_plan_successor_teardown_cleanup_invariants`,

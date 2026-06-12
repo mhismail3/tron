@@ -6,7 +6,7 @@ Status: `passed_after_fix`
 
 Scorecard row: `PCC-1`
 
-Last updated: 2026-06-11 during `PPACD-9` final closeout inventory refresh.
+Last updated: 2026-06-11 during `ITC-9` first-diff inventory refresh.
 
 Machine-readable inventory:
 [`primitive-code-cleanup-file-inventory.tsv`](primitive-code-cleanup-file-inventory.tsv)
@@ -36,10 +36,10 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 
 | Classification | Files | Primary owner |
 |----------------|-------|---------------|
-| `retain` | 1507 | Current package/config/test/doc boundaries |
+| `retain` | 1513 | Current package/config/test/doc boundaries |
 | `asset` | 70 | iOS/Mac resources and benchmark baselines |
 | `generated` | 7 | XcodeGen, Cargo, and package-manager outputs |
-| **Total** | **1584** | Whole repo plus retained inventory artifacts |
+| **Total** | **1590** | Whole repo plus retained inventory artifacts |
 
 ## Current Tracked Package Counts
 
@@ -48,8 +48,8 @@ git ls-files | awk -F. 'NF>1 {ext=$NF; count[ext]++} NF==1 {count["<none>"]++} E
 | `.codex` | 2 |
 | `.github` | 8 |
 | root files | 5 |
-| `packages/agent` | 761 |
-| `packages/ios-app` | 663 |
+| `packages/agent` | 766 |
+| `packages/ios-app` | 664 |
 | `packages/mac-app` | 123 |
 | `scripts` | 22 |
 

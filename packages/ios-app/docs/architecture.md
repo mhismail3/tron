@@ -9,8 +9,7 @@
 The iOS app is a SwiftUI `/engine` client. On the primitive teardown branch it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,
 renders session messages, persists a local event cache for reconstruction, and
-renders generic runtime surfaces emitted by the engine. It does not own fixed
-product panels, repository-specific panels, media workflow surfaces,
+renders generic runtime surfaces emitted by the engine. It does not own fixed product panels, repository-specific panels, media workflow surfaces,
 assistant-management panels, extension-source surfaces, audio transcription,
 memory-retain, or rules.
 
@@ -18,6 +17,11 @@ The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
 may cache and render server facts, but it must not invent capability policy,
 source-control state, worker state, or product panels locally.
+
+Settings, pairing, logs, chat, generic primitive/result display, and server errors are the retained iOS shell responsibilities. The ITC static guards in
+`SourceGuardTests+ThinClientShell.swift` and
+`packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`
+keep that boundary attached to source, docs, inventories, and CI wiring.
 
 ## Retained Surface
 
