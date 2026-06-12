@@ -29,6 +29,10 @@ impl SqliteEngineQueueStore {
     }
 
     fn init(&self) -> Result<()> {
+        crate::shared::storage::apply_runtime_pragmas(&self.conn)
+            .map_err(|err| sqlite_err("queue.storage_pragmas", err.to_string()))?;
+        crate::shared::storage::ensure_storage_schema(&self.conn)
+            .map_err(|err| sqlite_err("queue.storage_schema", err.to_string()))?;
         self.conn
             .execute_batch(
                 r#"

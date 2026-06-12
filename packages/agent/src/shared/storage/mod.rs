@@ -8,7 +8,9 @@
 //! the canonical active DB path and moves a non-current `tron.sqlite` generation
 //! aside before creating the grant, resource, ledger, stream, state, queue,
 //! lease, compensation, storage, and session-harness tables from the current
-//! schema only.
+//! schema only. Generation inspection errors fail closed, archived DB/WAL/SHM
+//! files carry an `archive-manifest.json`, and shared storage schema setup runs
+//! behind a savepoint with drift and payload-reference integrity checks.
 
 use std::fs;
 use std::path::{Path, PathBuf};

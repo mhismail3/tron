@@ -216,6 +216,16 @@ Current living entry points:
   cleanup source inventory taxonomy and proof notes.
 - `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv`:
   machine-readable cleanup inventory used by static gates.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md`:
+  active Data Integrity Storage Evolution Migration Discipline scorecard for
+  SQLite storage ownership, schema drift rejection, generation/archive rules,
+  WAL/checkpoint behavior, runtime hygiene, and closeout proof.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-evidence-manifest.md`:
+  companion evidence manifest for DSEMD command results and residual risks.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md`:
+  active storage surface taxonomy and ownership notes.
+- `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv`:
+  machine-readable DSEMD storage inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -297,6 +307,10 @@ Current living entry points:
 - `packages/agent/tests/off_plan_saa_authorship_teardown_cleanup_invariants.rs`:
   cleanup scorecard, evidence, inventory, provider execute narrowing,
   memory/rule removal, static target, README, and predecessor-inventory gates.
+- `packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs`:
+  active Data Integrity Storage Evolution Migration Discipline gates for
+  scorecard/evidence, inventory coverage, README/CI wiring, storage source
+  contracts, negative corruption guards, and final closeout claims.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
@@ -1407,6 +1421,7 @@ tron ci clippy test          # Subset: linting + tests
 `security_authority_capability_boundaries_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `off_plan_saa_authorship_teardown_cleanup_invariants`,
+`data_integrity_storage_evolution_migration_discipline_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

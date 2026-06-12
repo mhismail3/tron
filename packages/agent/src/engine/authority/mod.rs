@@ -30,6 +30,9 @@
 //! - Compensation is audit-only durable state in this branch: the only accepted
 //!   status is `recorded`, and future automated rollback must add a new owner,
 //!   status transitions, and tests instead of overloading the audit record.
+//! - SQLite-backed authority stores apply shared storage pragmas and validate
+//!   the shared storage schema before grant, lease, or compensation tables are
+//!   used.
 //!
 //! ## Test Ownership
 //!

@@ -1,5 +1,7 @@
 //! Storage schema and runtime pragma setup.
 
+use std::collections::BTreeSet;
+
 use anyhow::{Context, Result};
 use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -19,8 +21,26 @@ pub fn apply_runtime_pragmas(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-/// Ensure storage metadata tables exist.
+/// Ensure storage metadata tables exist and still match the current owner shape.
 pub fn ensure_storage_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch("SAVEPOINT tron_storage_schema")
+        .context("failed to start storage schema savepoint")?;
+    let result = ensure_storage_schema_inner(conn);
+    match result {
+        Ok(()) => conn
+            .execute_batch("RELEASE SAVEPOINT tron_storage_schema")
+            .context("failed to release storage schema savepoint"),
+        Err(error) => {
+            let _ = conn.execute_batch(
+                "ROLLBACK TO SAVEPOINT tron_storage_schema;
+                 RELEASE SAVEPOINT tron_storage_schema;",
+            );
+            Err(error)
+        }
+    }
+}
+
+fn ensure_storage_schema_inner(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS storage_metadata (
            key TEXT PRIMARY KEY,
@@ -94,6 +114,8 @@ pub fn ensure_storage_schema(conn: &Connection) -> Result<()> {
            ON storage_payload_refs(retention_class, expires_at);",
     )
     .context("failed to create blob indexes")?;
+    verify_storage_schema(conn)?;
+    verify_payload_blob_integrity(conn)?;
     let current_generation = conn
         .query_row(
             "SELECT value FROM storage_metadata WHERE key = ?1",
@@ -102,18 +124,135 @@ pub fn ensure_storage_schema(conn: &Connection) -> Result<()> {
         )
         .optional()
         .context("failed to read storage generation marker")?;
-    if current_generation.as_deref() != Some(CURRENT_STORAGE_GENERATION) {
-        conn.execute(
-            "INSERT INTO storage_metadata (key, value, updated_at)
-             VALUES (?1, ?2, ?3)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at",
-            params![
-                STORAGE_GENERATION_KEY,
-                CURRENT_STORAGE_GENERATION,
-                Utc::now().to_rfc3339()
-            ],
+    match current_generation {
+        Some(generation) if generation == CURRENT_STORAGE_GENERATION => {}
+        Some(generation) => {
+            anyhow::bail!(
+                "storage generation marker mismatch: found {generation}, expected {CURRENT_STORAGE_GENERATION}"
+            );
+        }
+        None => {
+            conn.execute(
+                "INSERT INTO storage_metadata (key, value, updated_at)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    STORAGE_GENERATION_KEY,
+                    CURRENT_STORAGE_GENERATION,
+                    Utc::now().to_rfc3339()
+                ],
+            )
+            .context("failed to record storage generation marker")?;
+        }
+    }
+    Ok(())
+}
+
+fn verify_storage_schema(conn: &Connection) -> Result<()> {
+    for (table, columns) in [
+        ("storage_metadata", &["key", "value", "updated_at"][..]),
+        (
+            "storage_checkpoints",
+            &[
+                "id",
+                "checkpointed_at",
+                "mode",
+                "busy",
+                "log_pages",
+                "checkpointed_pages",
+                "wal_bytes",
+            ][..],
+        ),
+        (
+            "storage_exports",
+            &["id", "exported_at", "snapshot_path", "snapshot_bytes"][..],
+        ),
+        (
+            "storage_retention_runs",
+            &[
+                "id",
+                "started_at",
+                "finished_at",
+                "dry_run",
+                "rows_deleted",
+                "blobs_deleted",
+                "notes",
+            ][..],
+        ),
+        (
+            "blobs",
+            &[
+                "id",
+                "hash",
+                "content",
+                "mime_type",
+                "uncompressed_size",
+                "size_compressed",
+                "compression",
+                "created_at",
+                "ref_count",
+            ][..],
+        ),
+        (
+            "storage_payload_refs",
+            &[
+                "id",
+                "owner_kind",
+                "owner_id",
+                "field_name",
+                "payload_hash",
+                "payload_blob_id",
+                "payload_preview",
+                "payload_size_bytes",
+                "payload_kind",
+                "redaction_level",
+                "retention_class",
+                "trace_id",
+                "session_id",
+                "workspace_id",
+                "expires_at",
+                "created_at",
+            ][..],
+        ),
+    ] {
+        verify_table_columns(conn, table, columns)?;
+    }
+    Ok(())
+}
+
+fn verify_table_columns(conn: &Connection, table_name: &str, required: &[&str]) -> Result<()> {
+    let escaped = table_name.replace('"', "\"\"");
+    let mut stmt = conn
+        .prepare(&format!("PRAGMA table_info(\"{escaped}\")"))
+        .with_context(|| format!("failed to inspect storage table {table_name}"))?;
+    let columns = stmt
+        .query_map([], |row| row.get::<_, String>(1))
+        .with_context(|| format!("failed to list columns for storage table {table_name}"))?
+        .collect::<rusqlite::Result<BTreeSet<_>>>()
+        .with_context(|| format!("failed to collect columns for storage table {table_name}"))?;
+    for column in required {
+        if !columns.contains(*column) {
+            anyhow::bail!("storage schema drift: table {table_name} missing column {column}");
+        }
+    }
+    Ok(())
+}
+
+fn verify_payload_blob_integrity(conn: &Connection) -> Result<()> {
+    let dangling: i64 = conn
+        .query_row(
+            "SELECT COUNT(*)
+             FROM storage_payload_refs refs
+             LEFT JOIN blobs ON blobs.id = refs.payload_blob_id
+             WHERE refs.payload_blob_id IS NOT NULL
+               AND blobs.id IS NULL",
+            [],
+            |row| row.get(0),
         )
-        .context("failed to record storage generation marker")?;
+        .context("failed to verify payload-ref blob ownership")?;
+    if dangling > 0 {
+        anyhow::bail!(
+            "storage payload integrity failed: {dangling} payload ref(s) point at missing blobs"
+        );
     }
     Ok(())
 }

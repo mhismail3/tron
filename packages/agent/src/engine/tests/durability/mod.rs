@@ -9,5 +9,6 @@ mod queue_lifecycle;
 mod resource_contracts;
 mod resource_output_contracts;
 mod resource_wrappers;
+mod sqlite_storage_discipline;
 mod state_primitives;
 mod streams;

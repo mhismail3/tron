@@ -114,83 +114,62 @@ pub fn retention_run(
     let cutoff = Utc::now()
         - chrono::Duration::days(i64::try_from(verbose_retention_days).unwrap_or(i64::MAX));
     let cutoff = cutoff.to_rfc3339();
-    let rows_deleted = if table_exists(&conn, "logs")? {
-        let count = conn
-            .query_row(
-                "SELECT COUNT(*) FROM logs
-                 WHERE component LIKE 'ios.%'
-                   AND lower(level) IN ('trace', 'debug')
-                   AND timestamp < ?1",
-                params![cutoff],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or(0);
-        if !dry_run && count > 0 {
-            let _ = conn.execute(
+    let now = Utc::now().to_rfc3339();
+    let has_logs = table_exists(&conn, "logs")?;
+    let has_payload_refs = table_exists(&conn, "storage_payload_refs")?;
+    let has_blobs = table_exists(&conn, "blobs")?;
+
+    let (rows_deleted, expired_refs_deleted, blobs_deleted, finished_at) = if dry_run {
+        let rows_deleted = count_verbose_logs(&conn, has_logs, &cutoff)?;
+        let expired_refs_deleted = count_expired_payload_refs(&conn, has_payload_refs, &now)?;
+        let blobs_deleted = count_unowned_blobs(&conn, has_blobs, has_payload_refs)?;
+        (
+            rows_deleted,
+            expired_refs_deleted,
+            blobs_deleted,
+            Utc::now().to_rfc3339(),
+        )
+    } else {
+        let tx = conn
+            .unchecked_transaction()
+            .context("failed to begin storage retention transaction")?;
+        let tx_conn: &Connection = &tx;
+        let rows_deleted = count_verbose_logs(tx_conn, has_logs, &cutoff)?;
+        if rows_deleted > 0 {
+            tx.execute(
                 "DELETE FROM logs
                  WHERE component LIKE 'ios.%'
                    AND lower(level) IN ('trace', 'debug')
                    AND timestamp < ?1",
                 params![cutoff],
-            )?;
-        }
-        count
-    } else {
-        0
-    };
-    let expired_refs_deleted = if table_exists(&conn, "storage_payload_refs")? {
-        let count = conn
-            .query_row(
-                "SELECT COUNT(*) FROM storage_payload_refs
-                 WHERE retention_class IN ('diagnostic_verbose', 'pending')
-                   AND expires_at IS NOT NULL
-                   AND expires_at < ?1",
-                params![Utc::now().to_rfc3339()],
-                |row| row.get::<_, i64>(0),
             )
-            .unwrap_or(0);
-        if !dry_run && count > 0 {
-            let _ = conn.execute(
+            .context("failed to delete verbose diagnostic logs")?;
+        }
+        let expired_refs_deleted = count_expired_payload_refs(tx_conn, has_payload_refs, &now)?;
+        if expired_refs_deleted > 0 {
+            tx.execute(
                 "DELETE FROM storage_payload_refs
                  WHERE retention_class IN ('diagnostic_verbose', 'pending')
                    AND expires_at IS NOT NULL
                    AND expires_at < ?1",
-                params![Utc::now().to_rfc3339()],
-            )?;
-        }
-        count
-    } else {
-        0
-    };
-    let blobs_deleted = if table_exists(&conn, "blobs")? {
-        let count = conn
-            .query_row(
-                "SELECT COUNT(*) FROM blobs
-                 WHERE NOT EXISTS (
-                   SELECT 1 FROM storage_payload_refs refs
-                   WHERE refs.payload_blob_id = blobs.id
-                 )",
-                [],
-                |row| row.get::<_, i64>(0),
+                params![now],
             )
-            .unwrap_or(0);
-        if !dry_run && count > 0 {
-            let _ = conn.execute(
+            .context("failed to delete expired storage payload refs")?;
+        }
+        let blobs_deleted = count_unowned_blobs(tx_conn, has_blobs, has_payload_refs)?;
+        if blobs_deleted > 0 {
+            tx.execute(
                 "DELETE FROM blobs
                  WHERE NOT EXISTS (
                    SELECT 1 FROM storage_payload_refs refs
                    WHERE refs.payload_blob_id = blobs.id
                  )",
                 [],
-            )?;
+            )
+            .context("failed to delete unowned storage blobs")?;
         }
-        count
-    } else {
-        0
-    };
-    let finished_at = Utc::now().to_rfc3339();
-    if !dry_run {
-        conn.execute(
+        let finished_at = Utc::now().to_rfc3339();
+        tx.execute(
             "INSERT INTO storage_retention_runs
              (started_at, finished_at, dry_run, rows_deleted, blobs_deleted, notes)
              VALUES (?1, ?2, 0, ?3, ?4, ?5)",
@@ -205,11 +184,19 @@ pub fn retention_run(
             ],
         )
         .context("failed to record storage retention run")?;
+        tx.commit()
+            .context("failed to commit storage retention transaction")?;
         let _ =
             conn.query_row::<(i64, i64, i64), _, _>("PRAGMA wal_checkpoint(PASSIVE)", [], |row| {
                 Ok((row.get(0)?, row.get(1)?, row.get(2)?))
             });
-    }
+        (
+            rows_deleted,
+            expired_refs_deleted,
+            blobs_deleted,
+            finished_at,
+        )
+    };
     Ok(StorageRetentionReport {
         dry_run,
         verbose_retention_days,
@@ -219,6 +206,57 @@ pub fn retention_run(
         started_at,
         finished_at,
     })
+}
+
+fn count_verbose_logs(conn: &Connection, has_logs: bool, cutoff: &str) -> Result<i64> {
+    if !has_logs {
+        return Ok(0);
+    }
+    conn.query_row(
+        "SELECT COUNT(*) FROM logs
+         WHERE component LIKE 'ios.%'
+           AND lower(level) IN ('trace', 'debug')
+           AND timestamp < ?1",
+        params![cutoff],
+        |row| row.get::<_, i64>(0),
+    )
+    .context("failed to count verbose diagnostic logs")
+}
+
+fn count_expired_payload_refs(conn: &Connection, has_payload_refs: bool, now: &str) -> Result<i64> {
+    if !has_payload_refs {
+        return Ok(0);
+    }
+    conn.query_row(
+        "SELECT COUNT(*) FROM storage_payload_refs
+         WHERE retention_class IN ('diagnostic_verbose', 'pending')
+           AND expires_at IS NOT NULL
+           AND expires_at < ?1",
+        params![now],
+        |row| row.get::<_, i64>(0),
+    )
+    .context("failed to count expired storage payload refs")
+}
+
+fn count_unowned_blobs(conn: &Connection, has_blobs: bool, has_payload_refs: bool) -> Result<i64> {
+    if !has_blobs {
+        return Ok(0);
+    }
+    if !has_payload_refs {
+        return conn
+            .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get::<_, i64>(0))
+            .context("failed to count unowned storage blobs without refs table");
+    }
+    conn.query_row(
+        "SELECT COUNT(*) FROM blobs
+         WHERE NOT EXISTS (
+           SELECT 1 FROM storage_payload_refs refs
+           WHERE refs.payload_blob_id = blobs.id
+         )",
+        [],
+        |row| row.get::<_, i64>(0),
+    )
+    .context("failed to count unowned storage blobs")
 }
 
 /// Enforce the active database soft size budget with safe cleanup only.

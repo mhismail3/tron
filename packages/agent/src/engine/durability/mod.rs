@@ -28,6 +28,8 @@
 //! - Durable records are source of truth, not projections over stream logs.
 //! - Queue attempts and resource versions retain causality and trace identity.
 //! - SQLite codecs stay inside the store owner that persists the row shape.
+//! - SQLite-backed durability constructors apply shared storage pragmas and
+//!   validate the shared storage schema before owner-specific tables are used.
 //! - Large JSON payloads are stored through shared storage payload refs with an
 //!   explicit owner kind/owner id/field/retention class, so retention,
 //!   checkpoints, and exports stay owned by the shared storage runtime instead

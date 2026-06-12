@@ -55,6 +55,10 @@ impl SqliteEngineLedgerStore {
     }
 
     fn initialize_schema(&self) -> Result<()> {
+        crate::shared::storage::apply_runtime_pragmas(&self.conn)
+            .map_err(|err| ledger_failure("ledger.storage_pragmas", err.to_string()))?;
+        crate::shared::storage::ensure_storage_schema(&self.conn)
+            .map_err(|err| ledger_failure("ledger.storage_schema", err.to_string()))?;
         self.conn
             .execute_batch(SQLITE_SCHEMA)
             .map_err(|err| sqlite_err("initialize_schema", err))?;

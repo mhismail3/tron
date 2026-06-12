@@ -201,6 +201,10 @@ impl SqliteEngineResourceLeaseStore {
     }
 
     fn init(&self) -> Result<()> {
+        crate::shared::storage::apply_runtime_pragmas(&self.conn)
+            .map_err(|err| sqlite_err_message("lease.storage_pragmas", err.to_string()))?;
+        crate::shared::storage::ensure_storage_schema(&self.conn)
+            .map_err(|err| sqlite_err_message("lease.storage_schema", err.to_string()))?;
         self.conn
             .execute_batch(
                 r#"
@@ -451,6 +455,13 @@ fn sqlite_err(operation: &'static str, err: rusqlite::Error) -> EngineError {
     EngineError::LedgerFailure {
         operation,
         message: err.to_string(),
+    }
+}
+
+fn sqlite_err_message(operation: &'static str, message: impl Into<String>) -> EngineError {
+    EngineError::LedgerFailure {
+        operation,
+        message: message.into(),
     }
 }
 
