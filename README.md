@@ -436,6 +436,20 @@ Current living entry points:
   inventory coverage, README truthfulness, stale closed-artifact markers,
   local/GitHub target parity, predecessor inventory rows, personal/path hygiene,
   and tracked ignored-file hygiene.
+- `packages/agent/docs/self-sufficient-agent-runtime-readiness-scorecard.md`,
+  `packages/agent/docs/self-sufficient-agent-runtime-readiness-evidence-manifest.md`,
+  `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md`, and
+  `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv`:
+  completed Self-Sufficient Agent Runtime Readiness audit artifacts covering
+  generated-worker extension points without activation, authored-state
+  boundaries, authority and promotion gates, durability/replay audit paths,
+  public protocol and iOS shell readiness, operational guardrails, predecessor
+  inventory synchronization, and negative activation guards.
+- `packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs`:
+  SARR guard for artifact wiring, scorecard weights, evidence command matrix,
+  inventory shape, README/local/GitHub static-gate parity, predecessor inventory
+  rows, closed-placeholder rejection, public protocol narrowness, path hygiene,
+  and off-plan activation/scheduler/autostart/skill resurrection absence.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -1591,6 +1605,7 @@ tron ci clippy test          # Subset: linting + tests
 `ios_thin_client_generic_runtime_shell_invariants`,
 `developer_experience_repo_hygiene_automation_invariants`,
 `documentation_evidence_scorecard_integrity_invariants`,
+`self_sufficient_agent_runtime_readiness_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
 `off_plan_successor_teardown_cleanup_invariants`,

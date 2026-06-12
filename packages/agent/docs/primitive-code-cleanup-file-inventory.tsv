@@ -1623,3 +1623,8 @@ packages/agent/docs/documentation-evidence-scorecard-integrity-evidence-manifest
 packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.md	retain	desi docs	DESI-1	Current Documentation Evidence Scorecard Integrity inventory retained for documentation and evidence surface proof.
 packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv	retain	desi docs	DESI-1	Current Documentation Evidence Scorecard Integrity machine-readable inventory retained for static gates.
 packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs	retain	desi rust test	DESI-0	Current Documentation Evidence Scorecard Integrity invariant target retained for local and CI static gates.
+packages/agent/docs/self-sufficient-agent-runtime-readiness-scorecard.md	retain	sarr docs	SARR-0	Current Self-Sufficient Agent Runtime Readiness scorecard retained for readiness audit proof.
+packages/agent/docs/self-sufficient-agent-runtime-readiness-evidence-manifest.md	retain	sarr docs	SARR-10	Current Self-Sufficient Agent Runtime Readiness evidence manifest retained for validation proof.
+packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md	retain	sarr docs	SARR-1	Current Self-Sufficient Agent Runtime Readiness inventory retained for runtime readiness source proof.
+packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv	retain	sarr docs	SARR-1	Current Self-Sufficient Agent Runtime Readiness machine-readable inventory retained for static gates.
+packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs	retain	sarr rust test	SARR-9	Current Self-Sufficient Agent Runtime Readiness invariant target retained for local and CI static gates.
