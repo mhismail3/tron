@@ -1605,3 +1605,8 @@ packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manife
 packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md	retain	dxrha docs	DXRHA-8	Developer Experience / Repo Hygiene / Automation inventory retained for workflow surface coverage.
 packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv	retain	dxrha docs	DXRHA-8	Developer Experience / Repo Hygiene / Automation machine-readable inventory retained for static gates.
 packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs	retain	dxrha rust test	DXRHA-10	Developer Experience / Repo Hygiene / Automation invariant target retained for static workflow gates.
+packages/agent/docs/documentation-evidence-scorecard-integrity-scorecard.md	retain	desi docs	DESI-5	Documentation / Evidence / Scorecard Integrity scorecard retained for closeout artifact integrity proof.
+packages/agent/docs/documentation-evidence-scorecard-integrity-evidence-manifest.md	retain	desi docs	DESI-5	Documentation / Evidence / Scorecard Integrity evidence retained for command provenance proof.
+packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.md	retain	desi docs	DESI-5	Documentation / Evidence / Scorecard Integrity inventory retained for active historical artifact classification.
+packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv	retain	desi docs	DESI-5	Documentation / Evidence / Scorecard Integrity machine-readable inventory retained for static gates.
+packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs	retain	desi rust test	DESI-10	Documentation / Evidence / Scorecard Integrity invariant target retained for static documentation/evidence gates.

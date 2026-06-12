@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. On the primitive teardown branch, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The native iOS app is being reduced to a thin chat and generic runtime shell; fixed product panels are teardown targets, not supported branch behavior.
+Tron is a local-first AI coding agent that runs as a persistent background service. On the primitive teardown branch, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The iOS app is a thin chat and generic runtime shell; fixed product panels are teardown targets, not supported branch behavior.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -305,6 +305,18 @@ Current living entry points:
   completed DXRHA contributor workflow taxonomy and ownership notes.
 - `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv`:
   machine-readable DXRHA workflow inventory used by static gates.
+- `packages/agent/docs/documentation-evidence-scorecard-integrity-scorecard.md`:
+  completed Documentation / Evidence / Scorecard Integrity scorecard for
+  active-doc truthfulness, command-evidence provenance, scorecard arithmetic,
+  inventory coverage, local/GitHub gate parity, branch handoff, and closeout
+  proof.
+- `packages/agent/docs/documentation-evidence-scorecard-integrity-evidence-manifest.md`:
+  companion evidence manifest for DESI source findings, verification commands,
+  stale-branch quarantine, and residual documentation/evidence risks.
+- `packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.md`:
+  completed DESI documentation/evidence taxonomy and ownership notes.
+- `packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv`:
+  machine-readable DESI artifact inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -424,12 +436,17 @@ Current living entry points:
   GitHub static-gate parity, generated/ignored artifact policy, setup/dev
   runtime-state docs, version/release helper checks, branch handoff, and
   predecessor inventory rows.
+- `packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs`:
+  completed DESI gates for active scorecard/evidence/inventory integrity,
+  present-tense docs, command provenance, predecessor inventory coverage,
+  local/GitHub closeout target parity, stale branch quarantine, and final
+  closeout proof.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI
 scorecards and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -835,7 +852,7 @@ definitions hydrate as stopped/unhealthy with no handler, so an unclean socket
 loss cannot become an optimistic callable function. Worker
 connect/register/disconnect/heartbeat-timeout events are stored on
 `worker.lifecycle` through the stream primitive and are visible through retained
-ledger/log records while PET-10 finishes primitive substrate cleanup. Invocation
+ledger/log records. Invocation
 results are owned by the socket connection's pending invocation map; disconnects
 and outbound backpressure drain or fail pending calls as worker transport
 failures.
@@ -848,7 +865,7 @@ agent-owned state, workspace files, or generic resources. If a future helper
 needs to become a live worker, it must be introduced through explicit host
 infrastructure rather than a checked-in product lifecycle.
 
-Engine substrate primitives still provide host infrastructure behind the loop:
+Engine substrate primitives provide host infrastructure behind the loop:
 state, streams, queues, triggers, grants, generic resources, storage operations,
 and bounded internal projections. They are not exported as model tools. The
 agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
@@ -863,8 +880,9 @@ underlying durable rows carry replay-critical payloads or results.
 Each trace record carries the causal trace id, invocation id, provider tool-call
 id, session/workspace, turn, model id/provider, authority envelope, VCS revision
 when available, result/error hashes, and file attribution with content hashes.
-PET-10 owns deleting or collapsing any remaining substrate workers that are not
-required once this trace path and the primitive loop are sufficient.
+The retained substrate workers are covered by completed primitive cleanup,
+state, scheduling, security, observability, storage, and resource-governance
+scorecards.
 
 Fixed helper-orchestration routes are not registered on the primitive teardown
 branch. Any future parallel helper behavior must be created by the agent
@@ -1564,6 +1582,7 @@ tron ci clippy test          # Subset: linting + tests
 `release_install_upgrade_rollback_discipline_invariants`,
 `ios_thin_client_generic_runtime_shell_invariants`,
 `developer_experience_repo_hygiene_automation_invariants`,
+`documentation_evidence_scorecard_integrity_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

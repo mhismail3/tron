@@ -62,8 +62,8 @@
 //! - registered domain functions are loop infrastructure only; retired product
 //!   domains are not part of startup registration on this branch;
 //! - stream, state, queue, catalog, grant, worker, trace records, generated UI,
-//!   and the generic `resource` kernel are retained only where still needed by
-//!   the primitive loop or awaiting their teardown scorecard rows;
+//!   and the generic `resource` kernel are retained only where covered by the
+//!   primitive loop and the completed cleanup/ownership scorecards;
 //! - resource leases and compensation contracts are first-class primitives for
 //!   shared-state mutations, so the host can acquire/release one domain resource
 //!   from payload fields plus causal context such as `sessionId`, record

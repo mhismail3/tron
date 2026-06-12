@@ -26,6 +26,7 @@ Title format: prefer Conventional Commits — e.g. `feat(ios-onboarding): add pa
 - [ ] Tests added or updated (TDD: tests before implementation where practical).
 - [ ] `cd packages/agent && cargo check && cargo test -- --quiet` is green locally.
 - [ ] Workflow/docs/static-gate changes: `scripts/tron ci fmt check clippy test`, `git diff --check`, and `git ls-files -ci --exclude-standard` are green locally.
+- [ ] Scorecard/evidence/inventory changes: companion artifacts include concrete command results, closed 100/100 rows, and predecessor inventory rows where static gates require them.
 - [ ] iOS changes: `xcodegen generate && xcodebuild test -scheme Tron …` is green locally.
 - [ ] `scripts/personal-info-guard.sh` is green (no leaked usernames, paths, or domains).
 - [ ] [README.md](../README.md) updated per the [README maintenance table](../AGENTS.md#readme-maintenance) for any of: new RPC method, new event, new setting, new tool, new CLI command, new module, new migration, new path constant, new iOS top-level directory.
