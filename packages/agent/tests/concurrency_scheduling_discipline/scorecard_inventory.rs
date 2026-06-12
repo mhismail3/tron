@@ -133,7 +133,7 @@ fn csd_invariant_target_is_in_closeout_ci_lists() {
 #[test]
 fn csd_inventory_rows_are_structured_and_cover_marker_files() {
     let rows = parse_inventory();
-    assert_eq!(rows.len(), 114, "CSD inventory row count changed");
+    assert_eq!(rows.len(), 115, "CSD inventory row count changed");
 
     let mut paths = BTreeSet::new();
     let allowed: BTreeSet<_> = ALLOWED_SCHEDULER_CLASSES.iter().copied().collect();

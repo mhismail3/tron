@@ -1,6 +1,6 @@
 # Mac App Architecture
 
-> Last verified: 2026-06-10 (SACB-9 pairing lifecycle; SACB-8 diagnostics redaction parity; HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
+> Last verified: 2026-06-12 (RIURD release/install discipline; SACB-9 pairing lifecycle; SACB-8 diagnostics redaction parity; HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated starts, command-mode app-version finalization, stale SMAppService/LWCR repair, and isolated helper registration)
 
 ## Overview
 

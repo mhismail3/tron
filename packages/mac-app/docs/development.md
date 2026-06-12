@@ -1,6 +1,6 @@
 # Mac App Development
 
-> Last verified: 2026-06-08 (HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated recovery, isolated helper registration, and two-helper signing)
+> Last verified: 2026-06-12 (RIURD release/install discipline, HRA-14 wrapper hierarchy audit, primitive helper bundle, health-gated recovery, isolated helper registration, and two-helper signing)
 
 ## Setup
 
@@ -31,6 +31,8 @@ Use the `TronMac Isolated Install` scheme only when testing first-run or reinsta
 > **Disambiguation**: the Debug-config `TronMac.app` (wrapper UI dogfood or isolated install testing) is unrelated to `Tron-Dev.app` at `~/.tron/internal/run/Tron-Dev.app`, which is the headless agent built by `tron dev` (bundle ID `com.tron.agent`, no SwiftUI). See [architecture.md → Workflows & Variants](./architecture.md#workflows--variants) for the canonical workflow breakdown.
 
 The wizard install path validates the bundled helper app + LaunchAgent plist, registers or refreshes the active scheme's LaunchAgent through `SMAppService`, and waits for the server heartbeat. A previously enabled Login Item registration is shown as registered, not ready; the user still has to press Start server and the wizard still waits for `system::ping` before continuing. Release builds must run from `/Applications/Tron.app`; default Debug builds may run from DerivedData for wrapper dogfood but cannot mutate the production Login Item; isolated Debug is the explicit install-test path. The wizard does not copy a server bundle into `~/.tron/internal/`, write `~/Library/LaunchAgents`, stage contributor CLI artifacts under `~/.tron/internal/run/`, or sync managed product assets. Menu-bar startup writes `~/.tron/internal/run/mac-app-version.json` after a successful first-run or update finalization; when that marker does not match the current app build, startup restarts the production helper once and records the marker only after `/health` is reachable.
+
+Contributor `tron manual-deploy` is separate from the Mac wrapper and DMG release path. It uses contributor-only bundles under `~/.tron/internal/run/`, refuses active `tron dev` listeners on port 9847, advances `deployed-commit` only after `/health`, and records `restart-sentinel.json` as completed, rolled back, or failed so preflight can catch interrupted deployments. `tron rollback` is also health-gated: launchd loaded state is not enough to print success.
 
 ## Workflow quick reference
 

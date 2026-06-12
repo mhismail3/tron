@@ -563,12 +563,15 @@ cmd_rollback() {
 
     # Start service
     launchd_start "$PLIST_NAME"
-    sleep 3
 
-    if service_is_running; then
-        print_success "Service restarted from backup"
+    if service_is_running && wait_for_service_health 12; then
+        local pid
+        pid="$(get_service_pid)"
+        print_success "Service restarted from healthy backup (PID: ${pid:-unknown})"
     else
-        print_error "Failed to restart service after rollback"
+        print_error "Rollback restored the backup, but the service did not become healthy"
+        write_deployment_result "failed" "Manual rollback did not pass health"
+        exit 1
     fi
 
     write_deployment_result "rolled_back" "Manual rollback"

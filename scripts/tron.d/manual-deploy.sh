@@ -64,6 +64,60 @@ create_launchd_plist() {
 PLIST
 }
 
+write_restart_sentinel() {
+    local action="$1"
+    local commit="$2"
+    local previous_commit="$3"
+    local status="$4"
+    local completed_at="null"
+    if [ "$status" != "restarting" ]; then
+        completed_at="\"$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")\""
+    fi
+
+    local now
+    now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
+    mkdir -p "$CONTRIBUTOR_DIR"
+    cat > "$CONTRIBUTOR_DIR/restart-sentinel.json" <<SENTINEL
+{
+  "action": "$action",
+  "timestamp": "$now",
+  "commit": "$commit",
+  "previousCommit": "$previous_commit",
+  "status": "$status",
+  "completedAt": $completed_at,
+  "initiatedBy": "cli"
+}
+SENTINEL
+}
+
+restore_contributor_backup() {
+    if [ ! -f "$CONTRIBUTOR_DIR/tron.bak" ]; then
+        print_error "No backup found for rollback"
+        return 1
+    fi
+
+    print_status "Rolling back..."
+    launchd_stop "$PLIST_NAME"
+    wait_for_port_free "$PROD_PORT" 10 || return 1
+
+    if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
+        return 1
+    fi
+    codesign_bundle "$INSTALLED_BUNDLE"
+    launchd_start "$PLIST_NAME"
+
+    if wait_for_service_health 12; then
+        local pid
+        pid=$(get_service_pid)
+        print_success "Rolled back to previous healthy version (PID: ${pid:-unknown})"
+        rm -f "$CONTRIBUTOR_DIR/tron.bak"
+        return 0
+    fi
+
+    print_error "Rollback helper did not become healthy"
+    return 1
+}
+
 cmd_preflight() {
     require_project_dir
 
@@ -273,70 +327,49 @@ cmd_manual_deploy() {
     print_status "Updating launchd plist..."
     create_launchd_plist
 
-    # Record new commit
+    # Record candidate commit. DEPLOYED_COMMIT_FILE is updated only after
+    # the replacement helper passes health, so failed upgrades keep the
+    # previous deployed commit as durable truth.
     local new_commit
     new_commit=$(git -C "$PROJECT_DIR" rev-parse HEAD 2>/dev/null || echo "unknown")
-    echo "$new_commit" > "$DEPLOYED_COMMIT_FILE"
 
     # Write restart sentinel so the contributor service records deploy restart state.
-    local now
-    now=$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")
-    cat > "$CONTRIBUTOR_DIR/restart-sentinel.json" <<SENTINEL
-{
-  "action": "deploy",
-  "timestamp": "$now",
-  "commit": "$new_commit",
-  "previousCommit": "$previous_commit",
-  "status": "restarting",
-  "completedAt": null,
-  "initiatedBy": "cli"
-}
-SENTINEL
+    write_restart_sentinel "deploy" "$new_commit" "$previous_commit" "restarting"
 
     # Start service
     print_status "Starting service..."
     launchd_start "$PLIST_NAME"
-    sleep 3
 
-    if service_is_running; then
+    if service_is_running && wait_for_service_health 12; then
         local pid
         pid=$(get_service_pid)
         print_success "Service started (PID: ${pid:-unknown})"
 
-        # Health check
-        sleep 2
-        if health_check; then
-            print_success "Health check passed"
-
-            # Remove backup (deploy succeeded)
-            rm -f "$CONTRIBUTOR_DIR/tron.bak"
-
+        # Health check passed. Only now does the candidate become the deployed truth.
+        echo "$new_commit" > "$DEPLOYED_COMMIT_FILE"
+        write_restart_sentinel "deploy" "$new_commit" "$previous_commit" "completed"
+        rm -f "$CONTRIBUTOR_DIR/tron.bak"
+        TRON_DEPLOYMENT_COMMIT="$new_commit" \
+            TRON_DEPLOYMENT_PREVIOUS_COMMIT="$previous_commit" \
             write_deployment_result "success"
-        else
-            print_warning "Health check failed — server may still be starting"
-            echo "  Monitor with: tron status"
-        fi
     else
-        print_error "Service failed to start!"
-
-        # Auto-rollback
-        if [ -f "$CONTRIBUTOR_DIR/tron.bak" ]; then
-            print_status "Rolling back..."
-            if ! create_app_bundle "$INSTALLED_BUNDLE" "$CONTRIBUTOR_DIR/tron.bak"; then
-                return 1
-            fi
-            codesign_bundle "$INSTALLED_BUNDLE"
-            rm -f "$CONTRIBUTOR_DIR/tron.bak"
-            launchd_start "$PLIST_NAME"
-            sleep 2
-            if service_is_running; then
-                print_success "Rolled back to previous version"
-            else
-                print_error "Rollback also failed!"
-            fi
+        if service_is_running; then
+            print_error "Service started but did not pass /health; failing deploy closed."
+        else
+            print_error "Service failed to start!"
         fi
 
-        write_deployment_result "failed" "Service failed to start"
+        local failure_reason="Service failed to start or pass health"
+        if restore_contributor_backup; then
+            write_restart_sentinel "deploy" "$new_commit" "$previous_commit" "rolled_back"
+            failure_reason="$failure_reason; rolled back to previous helper"
+        else
+            write_restart_sentinel "deploy" "$new_commit" "$previous_commit" "failed"
+            failure_reason="$failure_reason; rollback failed"
+        fi
+        TRON_DEPLOYMENT_COMMIT="$new_commit" \
+            TRON_DEPLOYMENT_PREVIOUS_COMMIT="$previous_commit" \
+            write_deployment_result "failed" "$failure_reason"
         return 1
     fi
 

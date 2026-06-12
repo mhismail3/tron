@@ -269,6 +269,18 @@ Current living entry points:
   completed CPE settings/profile/env taxonomy and proof notes.
 - `packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv`:
   machine-readable CPE settings/profile/env inventory used by static gates.
+- `packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md`:
+  completed Release / Install / Upgrade / Rollback Discipline scorecard for Mac
+  app install/update, LaunchAgent/SMAppService ownership, `tron dev`,
+  contributor deploy, rollback, setup/uninstall, generated projects, docs, CI,
+  and verification.
+- `packages/agent/docs/release-install-upgrade-rollback-discipline-evidence-manifest.md`:
+  companion evidence manifest for RIURD lineage, stale-branch quarantine,
+  source findings, command results, and residual risks.
+- `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md`:
+  completed RIURD release/install lifecycle taxonomy and proof notes.
+- `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv`:
+  machine-readable RIURD release/install inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -373,12 +385,17 @@ Current living entry points:
   completed CPE gates for scorecard/evidence, inventory coverage, default drift,
   strict schema, sparse overlay, env ownership, iOS settings parity, Mac sparse
   seed, README/CI wiring, and predecessor inventory rows.
+- `packages/agent/tests/release_install_upgrade_rollback_discipline_invariants.rs`:
+  completed RIURD gates for scorecard/evidence, inventory coverage, port/process
+  ownership, hidden deploy absence, setup/install/uninstall preservation,
+  fail-closed deploy/rollback, generated project policy, README/CI wiring, and
+  predecessor inventory rows.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD
 scorecards and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -608,7 +625,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | Command | Description |
 |---------|-------------|
 | `tron preflight` | Pre-deploy infrastructure check |
-| `tron manual-deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check (`--force` skips confirms; `--ci` is non-interactive). No automatic deploy watcher or shorter deploy alias is retained. |
+| `tron manual-deploy` | Manual contributor deploy: build, test, swap binary, restart, health-check, and fail-closed rollback (`--force` skips confirms; `--ci` is non-interactive). `deployed-commit` and the restart sentinel advance only after `/health` passes. No automatic deploy watcher or shorter deploy alias is retained. |
 | `tron install` | Contributor-only shell install for workspace testing. The distributed Mac app does not call this; real installs use `/Applications/Tron.app` + `SMAppService`. |
 | `tron uninstall [--reset-settings] [--reset-credentials]` | Remove launchd service/runtime bundles and reset Mac onboarding. Preserves the database and workspace; optional flags remove `profiles/user/profile.toml` settings overrides and/or `profiles/auth.json`. |
 
@@ -620,7 +637,7 @@ The `scripts/tron` CLI manages workspace development and contributor service wor
 | `tron stop` | Stop the service |
 | `tron restart` | Stop and start the service through the same health-gated path as `tron start`. |
 | `tron status` | Show service/dev-takeover status, PID, port, health, uptime, and stale dev pid-file diagnostics. Use `tron status --json` for deterministic automation. |
-| `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm) |
+| `tron rollback` | Restore the previous binary from backup (`--yes` skips confirm); success requires the restored helper to pass `/health` |
 | `tron login` | Authenticate with a provider (`--label <name>` for multi-account) |
 | `tron auth rotate` | Rotate the WebSocket bearer token (forces every paired iOS device to pair again) |
 | `tron logs` | Query unified `~/.tron/internal/database/tron.sqlite` logs with bounded level/search/session/workspace/trace filters (`-h` for options; `--json` emits machine-readable rows with session/workspace/trace IDs) |
@@ -1362,7 +1379,9 @@ The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`)
 5. Under `--ci`, also runs the benchmark gate.
 6. Uses contributor-only artifacts directly under `~/.tron/internal/run/`.
 7. Seeds managed defaults and runtime support.
-8. Runs local health checks for the contributor server.
+8. Starts the contributor service and waits for `/health`.
+9. Records `deployed-commit` and marks `restart-sentinel.json` complete only after health passes.
+10. If start or health fails, attempts to restore `tron.bak`, waits for the restored helper to pass `/health`, marks the sentinel `rolled_back` or `failed`, writes `last-deployment.json`, and exits nonzero.
 
 ### Install Directory
 
@@ -1407,6 +1426,10 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
     |   +-- .mac-wrapper.*.lock    Per-wrapper menu app lock
     |   +-- .onboarded             First-run sentinel; presence drives `system::get_info.paired`
     |   +-- mac-app-version.json   Last app build whose menu-bar launch finalized the server
+    |   +-- deployed-commit        Last contributor helper commit that passed `/health`
+    |   +-- last-deployment.json   Last manual deploy/rollback result
+    |   +-- restart-sentinel.json  Manual deploy restart state; `restarting` is a preflight blocker
+    |   +-- Tron-Deploy.app        Contributor-only service bundle used by `tron install` / `manual-deploy`
     |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle
         +-- worker.py              parakeet-mlx Python worker
         +-- requirements.txt       Pip deps for the venv
@@ -1495,6 +1518,7 @@ tron ci clippy test          # Subset: linting + tests
 `provider_model_boundary_discipline_invariants`,
 `performance_resource_governance_invariants`,
 `configuration_profile_environment_discipline_invariants`,
+`release_install_upgrade_rollback_discipline_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

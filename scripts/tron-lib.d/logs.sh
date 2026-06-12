@@ -196,8 +196,8 @@ write_deployment_result() {
     local commit
     local previous_commit
 
-    commit=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-    previous_commit=$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")
+    commit="${TRON_DEPLOYMENT_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo "unknown")}"
+    previous_commit="${TRON_DEPLOYMENT_PREVIOUS_COMMIT:-$(cat "$DEPLOYED_COMMIT_FILE" 2>/dev/null || echo "unknown")}"
 
     if [ "$error_msg" = "null" ]; then
         error_msg="null"
