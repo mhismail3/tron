@@ -411,6 +411,19 @@ Current living entry points:
   ownership rows, generated-project drift command, iOS 26.5 simulator command,
   deleted product source guard coverage, thin-client boundary docs, and
   production deploy automation absence.
+- `packages/agent/docs/developer-experience-repo-hygiene-automation-scorecard.md`,
+  `packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manifest.md`,
+  `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md`, and
+  `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv`:
+  active Developer Experience / Repo Hygiene / Automation artifacts covering
+  setup/dev/test workflow, script UX, generated project policy, local/GitHub
+  target parity, ignored-file hygiene, branch/worktree handoff, README accuracy,
+  and production automation safety.
+- `packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs`:
+  DXRHA guard for artifact wiring, scorecard weights, evidence matrix,
+  inventory shape, local/GitHub target parity, generated-project policy,
+  tracked ignored files, contributor docs/script UX, automation safety, stale
+  closeout wording, shell syntax, and predecessor inventory rows.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -569,7 +582,7 @@ Build and run:
 cd packages/agent
 cargo build --release
 
-# Development mode (foreground, auto-rebuild)
+# Development mode (foreground dev-server build/run)
 ./scripts/tron dev
 
 # Or install as launchd service
@@ -1564,6 +1577,7 @@ tron ci clippy test          # Subset: linting + tests
 `configuration_profile_environment_discipline_invariants`,
 `release_install_upgrade_rollback_discipline_invariants`,
 `ios_thin_client_generic_runtime_shell_invariants`,
+`developer_experience_repo_hygiene_automation_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
 `off_plan_successor_teardown_cleanup_invariants`,
@@ -1574,8 +1588,10 @@ set for docs, template, iOS, Mac, script, and CI changes.
 Generated Apple projects are still verified outside the Rust target list:
 `cd packages/ios-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/ios-app/TronMobile.xcodeproj`
 checks the tracked iOS project, while
-`cd packages/mac-app && xcodegen generate && cd ../.. && git diff --exit-code -- packages/mac-app/TronMac.xcodeproj`
-checks the ignored/generated Mac project path.
+`cd packages/mac-app && xcodegen generate && cd ../.. && test -d packages/mac-app/TronMac.xcodeproj && git check-ignore -q packages/mac-app/TronMac.xcodeproj`
+checks that the generated Mac project exists and stays ignored. A plain
+`git diff --exit-code -- packages/mac-app/TronMac.xcodeproj` remains empty
+because that path is ignored, but it is not the Mac project policy proof.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

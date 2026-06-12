@@ -1557,3 +1557,19 @@ packages/agent/tests/provider_model_boundary_discipline_invariants.rs	test	test_
 packages/agent/src/domains/agent/loop/orchestrator/streaming_journal/tests.rs	test	test_harness	TPC-10	Streaming journal test submodule retained to keep runtime source files below hard budget.
 packages/agent/src/domains/model/providers/google/stream_handler/tests.rs	test	test_harness	TPC-10	Google stream handler test submodule retained to keep provider source files below hard budget.
 packages/agent/src/domains/model/providers/shared/stream_common/tests.rs	test	test_harness	TPC-10	Shared stream accumulator test submodule retained to keep provider source files below hard budget.
+packages/agent/docs/release-install-upgrade-rollback-discipline-scorecard.md	docs	docs/static gates	RUR-10	Release Install Upgrade Rollback Discipline scorecard retained after closeout verification.
+packages/agent/docs/release-install-upgrade-rollback-discipline-evidence-manifest.md	docs	docs/static gates	RUR-10	Release Install Upgrade Rollback Discipline evidence artifact retained after closeout verification.
+packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md	docs	docs/static gates	RUR-1	Release Install Upgrade Rollback Discipline inventory retained for release workflow proof.
+packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv	docs	docs/static gates	RUR-1	Release Install Upgrade Rollback Discipline machine-readable inventory retained for static gates.
+packages/agent/tests/release_install_upgrade_rollback_discipline_invariants.rs	test	test_harness	RUR-0	Release Install Upgrade Rollback Discipline invariant target retained after closeout verification.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md	docs	docs/static gates	ITC-9	iOS Thin Client Generic Runtime Shell scorecard retained after closeout verification.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md	docs	docs/static gates	ITC-9	iOS Thin Client Generic Runtime Shell evidence artifact retained after closeout verification.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md	docs	docs/static gates	ITC-1	iOS Thin Client Generic Runtime Shell inventory retained for workflow and boundary proof.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv	docs	docs/static gates	ITC-1	iOS Thin Client Generic Runtime Shell machine-readable inventory retained for static gates.
+packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs	test	test_harness	ITC-0	iOS Thin Client Generic Runtime Shell invariant target retained after closeout verification.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ThinClientShell.swift	test	test_harness	ITC-0	iOS thin-client shell source guard retained after closeout verification.
+packages/agent/docs/developer-experience-repo-hygiene-automation-scorecard.md	docs	docs/static gates	DXRHA-8	Developer Experience Repo Hygiene Automation scorecard retained for workflow hygiene closeout verification.
+packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manifest.md	docs	docs/static gates	DXRHA-10	Developer Experience Repo Hygiene Automation evidence artifact retained for closeout verification.
+packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md	docs	docs/static gates	DXRHA-1	Developer Experience Repo Hygiene Automation inventory retained for contributor workflow source proof.
+packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv	docs	docs/static gates	DXRHA-1	Developer Experience Repo Hygiene Automation machine-readable inventory retained for static gates.
+packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs	test	test_harness	DXRHA-0	Developer Experience Repo Hygiene Automation invariant target retained for local and CI static gates.

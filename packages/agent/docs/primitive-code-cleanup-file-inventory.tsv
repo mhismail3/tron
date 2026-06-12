@@ -1613,3 +1613,8 @@ packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ThinClientShell.sw
 packages/agent/src/domains/agent/loop/orchestrator/streaming_journal/tests.rs	retain	agent runtime test	TPC-10	Streaming journal tests split into a tracked submodule to preserve hard file budgets.
 packages/agent/src/domains/model/providers/google/stream_handler/tests.rs	retain	model provider test	TPC-10	Google stream handler tests split into a tracked submodule to preserve hard file budgets.
 packages/agent/src/domains/model/providers/shared/stream_common/tests.rs	retain	model provider test	TPC-10	Shared stream accumulator tests split into a tracked submodule to preserve hard file budgets.
+packages/agent/docs/developer-experience-repo-hygiene-automation-scorecard.md	retain	dxrha docs	DXRHA-8	Current Developer Experience Repo Hygiene Automation scorecard retained for static-gate and closeout proof.
+packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manifest.md	retain	dxrha docs	DXRHA-10	Current Developer Experience Repo Hygiene Automation evidence manifest retained for validation proof.
+packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md	retain	dxrha docs	DXRHA-1	Current Developer Experience Repo Hygiene Automation inventory retained for contributor workflow proof.
+packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv	retain	dxrha docs	DXRHA-1	Current Developer Experience Repo Hygiene Automation machine-readable inventory retained for static gates.
+packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs	retain	dxrha rust test	DXRHA-0	Current Developer Experience Repo Hygiene Automation invariant target retained for local and CI static gates.

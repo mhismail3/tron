@@ -24,7 +24,7 @@ progressive-disclosure docs drift fast.
 packages/
   agent/      Rust server (cargo workspace member)
   ios-app/    SwiftUI iOS app (XcodeGen)
-  mac-app/    SwiftUI macOS wrapper (lands in Phase 5)
+  mac-app/    SwiftUI macOS wrapper (XcodeGen)
 scripts/      Bash entrypoints — `tron`, `install-hooks.sh`, `personal-info-guard.sh`
 ```
 
@@ -49,7 +49,7 @@ scripts/tron dev
 
 # Same, but background — useful for iterating in another shell.
 scripts/tron dev --background
-scripts/tron dev stop
+scripts/tron dev --stop
 ```
 
 You should never need to run `scripts/tron deploy` or any production
@@ -116,10 +116,11 @@ work test-first whenever practical — write the failing test, then make it pass
 
 CI runs the same Rust test harness through `scripts/tron ci test` when the Rust
 job is selected. A separate Ubuntu static-gates job runs the same named
-closeout targets, including PET/PCC/HRA/AHA/PAC invariants, primitive trace,
-database-path, and serial integration targets, for docs/template/iOS/Mac
-changes. iOS and Mac jobs only run for their package paths, relevant labels, or
-pushes to `main` (macOS minutes are ~10× the cost of Linux minutes).
+closeout target set as `scripts/tron ci test` for docs/template/iOS/Mac/script
+changes, including database-path, primitive trace, hardening invariant, and
+serial integration targets. iOS and Mac jobs only run for their package paths,
+relevant labels, or pushes to `main` (macOS minutes are ~10× the cost of Linux
+minutes).
 
 ## Commits
 
