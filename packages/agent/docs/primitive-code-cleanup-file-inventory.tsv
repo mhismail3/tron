@@ -1595,3 +1595,8 @@ packages/agent/docs/release-install-upgrade-rollback-discipline-evidence-manifes
 packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md	retain	riurd docs	RIURD-8	Release / Install / Upgrade / Rollback Discipline inventory retained for release/install surface coverage.
 packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv	retain	riurd docs	RIURD-8	Release / Install / Upgrade / Rollback Discipline machine-readable inventory retained for static gates.
 packages/agent/tests/release_install_upgrade_rollback_discipline_invariants.rs	retain	riurd rust test	RIURD-9	Release / Install / Upgrade / Rollback Discipline invariant target retained for static release/install gates.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md	retain	iostc docs	IOSTC-9	iOS Thin Client / Generic Runtime Shell scorecard retained for iOS thin-client closeout.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md	retain	iostc docs	IOSTC-9	iOS Thin Client / Generic Runtime Shell evidence retained for verification provenance.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md	retain	iostc docs	IOSTC-9	iOS Thin Client / Generic Runtime Shell inventory retained for client surface coverage.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv	retain	iostc docs	IOSTC-9	iOS Thin Client / Generic Runtime Shell machine-readable inventory retained for static gates.
+packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs	retain	iostc rust test	IOSTC-10	iOS Thin Client / Generic Runtime Shell invariant target retained for static iOS shell gates.

@@ -281,6 +281,19 @@ Current living entry points:
   completed RIURD release/install lifecycle taxonomy and proof notes.
 - `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv`:
   machine-readable RIURD release/install inventory used by static gates.
+- `packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md`:
+  completed iOS Thin Client / Generic Runtime Shell scorecard for proving the
+  iOS app remains a thin `/engine` client with robust settings, pairing, logs,
+  chat, generic primitive/result display, server errors, simulator evidence,
+  generated-project discipline, docs, CI, and source guards.
+- `packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md`:
+  companion evidence manifest for IOSTC lineage, stale-branch quarantine,
+  source findings, simulator commands, verification commands, and residual
+  risks.
+- `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md`:
+  completed IOSTC iOS client surface taxonomy and ownership notes.
+- `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv`:
+  machine-readable IOSTC inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -390,12 +403,17 @@ Current living entry points:
   ownership, hidden deploy absence, setup/install/uninstall preservation,
   fail-closed deploy/rollback, generated project policy, README/CI wiring, and
   predecessor inventory rows.
+- `packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`:
+  completed IOSTC gates for scorecard/evidence, inventory coverage, README/CI
+  wiring, deleted iOS product panels, successor/server-ownership residue,
+  settings parity references, generated project policy, focused simulator
+  evidence, and predecessor inventory rows.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC
 scorecards and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -1227,6 +1245,12 @@ packages/ios-app/Sources/
 - **Setup hydration**: after QR/manual pairing, onboarding reads the active Mac's `settings::get` response and best-effort `auth::get` masked credential state before unlocking setup pages. Pairing a previously forgotten Mac therefore shows the server's existing workspace/model choices and credential hints without storing server settings or secrets on iOS; OAuth/API-key saves refresh those cards immediately from the returned `AuthState`.
 - **Forgetting a server**: Settings → Servers → menu → "Forget" removes the server's Keychain token before removing local metadata and surfaces a Keychain error without forgetting metadata if token deletion fails. If another paired server remains, the app switches locally; if none remain, Settings shows the onboarding CTA.
 - **Local diagnostics + feedback**: Tron ships no outbound analytics SDKs and `PrivacyInfo.xcprivacy` declares no collected data. iOS registers `MetricKitDiagnosticsStore` for Apple MetricKit payloads, stores them locally with bounded retention, and includes them only when the user taps Settings -> Send Feedback. `DiagnosticsBundleBuilder` creates one redacted JSON attachment with app/server state, recent local/server logs, session/event summaries, and MetricKit payloads; Settings opens the native Mail composer with the runtime-configured `TRON_FEEDBACK_EMAIL` recipient, subject, body, and JSON attachment, including a body time range when real log timestamps are available. The tracked default is blank and may be supplied by `Local.xcconfig`, CI secrets, or release build settings. Settings also exposes the Logs sheet in every iOS build configuration so production installs can inspect or copy redacted in-memory client logs without enabling verbose production logging. When connected to a paired server, iOS automatically ingests deduplicated client logs into the server `logs` table through `logs::ingest` with client send-boundary redaction, server-side ingestion redaction for bearer/API/OAuth fields, deterministic batch idempotency, and client-side entry fingerprints, so server and client logs share the same durable query surface during normal execution without resending unchanged local buffers. Successful `logs::ingest` transport chatter is filtered at the client-ingestion boundary to prevent self-feeding diagnostics loops while preserving ingestion failures and reconnect warnings. If Mail is unavailable or recipient config is unresolved, Settings shows an alert instead of a share-sheet alternate path. App Store/TestFlight crash diagnostics remain available through Apple's Xcode Organizer path, and release builds keep `dwarf-with-dsym`.
+- **IOSTC proof**: `packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md`,
+  `packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md`,
+  `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md`,
+  `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv`, and
+  `packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`
+  are the current static proof that iOS stays a generic runtime shell.
 
 ### Data Flow
 
@@ -1519,6 +1543,7 @@ tron ci clippy test          # Subset: linting + tests
 `performance_resource_governance_invariants`,
 `configuration_profile_environment_discipline_invariants`,
 `release_install_upgrade_rollback_discipline_invariants`,
+`ios_thin_client_generic_runtime_shell_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

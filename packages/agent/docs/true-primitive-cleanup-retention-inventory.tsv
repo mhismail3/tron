@@ -1550,3 +1550,8 @@ packages/agent/docs/release-install-upgrade-rollback-discipline-evidence-manifes
 packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md	docs	docs/static gates	RIURD-8	Release / Install / Upgrade / Rollback Discipline inventory retained for release/install ownership.
 packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv	docs	docs/static gates	RIURD-8	Release / Install / Upgrade / Rollback Discipline extends TPC retention proof with a machine-readable lifecycle inventory.
 packages/agent/tests/release_install_upgrade_rollback_discipline_invariants.rs	test	test_harness	RIURD-9	Release / Install / Upgrade / Rollback Discipline invariant target retained for static release/install gates.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md	docs	docs/static gates	IOSTC-9	iOS Thin Client / Generic Runtime Shell scorecard retained for iOS thin-client closeout.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md	docs	docs/static gates	IOSTC-9	iOS Thin Client / Generic Runtime Shell evidence retained for verification and closeout provenance.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md	docs	docs/static gates	IOSTC-9	iOS Thin Client / Generic Runtime Shell inventory retained for iOS client surface ownership.
+packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv	docs	docs/static gates	IOSTC-9	iOS Thin Client / Generic Runtime Shell extends TPC retention proof with a machine-readable iOS shell inventory.
+packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs	test	test_harness	IOSTC-10	iOS Thin Client / Generic Runtime Shell invariant target retained for static iOS shell gates.

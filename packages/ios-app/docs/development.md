@@ -116,6 +116,27 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+For the IOSTC thin-client closeout, the focused iOS 26.5 simulator set is:
+
+```bash
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/ServerSettingsTests
+
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/SettingsParityTests \
+  -only-testing:TronMobileTests/PairingValidationTests \
+  -only-testing:TronMobileTests/PairingURLParserTests \
+  -only-testing:TronMobileTests/EventTypeRegistryTests \
+  -only-testing:TronMobileTests/ErrorEventProjectionTests \
+  -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests \
+  -only-testing:TronMobileTests/GeneratedUIRendererTests
+```
+
+The source-backed scorecard and evidence live under
+`packages/agent/docs/ios-thin-client-generic-runtime-shell-*`.
+
 ### Simulator Deep-Link Harnessing
 
 Use the simulator deep-link path only when a scenario is explicitly testing

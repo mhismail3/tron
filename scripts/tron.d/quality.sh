@@ -45,6 +45,7 @@ run_tests() {
         performance_resource_governance_invariants
         configuration_profile_environment_discipline_invariants
         release_install_upgrade_rollback_discipline_invariants
+        ios_thin_client_generic_runtime_shell_invariants
         primitive_trace_execution
         integration
     )

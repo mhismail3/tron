@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-10 (SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-12 (IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -248,3 +248,9 @@ For shell-affecting changes:
 - Capture iPhone and iPad simulator screenshots when UI behavior changes.
 - Include simulator name, UDID, bundle id, launch/openurl return codes, and
   screenshot paths in the relevant scorecard evidence.
+
+The current iOS thin-client closeout proof is recorded in
+`packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md`,
+`packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md`,
+`packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md`, and
+`packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`.

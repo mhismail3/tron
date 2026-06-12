@@ -1,6 +1,6 @@
 # Event Handling
 
-> Last verified: 2026-06-09 (FSC-8 canonical failure parity).
+> Last verified: 2026-06-12 (IOSTC-5 generic chat/timeline/runtime rendering; FSC-8 canonical failure parity).
 
 The iOS app handles engine events through two paths:
 

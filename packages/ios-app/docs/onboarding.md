@@ -1,6 +1,6 @@
 # Onboarding (iOS sheet)
 
-> Last verified: 2026-06-08 (PCC-6 iOS source consolidation).
+> Last verified: 2026-06-12 (IOSTC-3 pairing/auth custody and connection robustness; PCC-6 iOS source consolidation).
 
 The iOS app always opens to the normal session shell after initialization.
 Fresh installs present a medium-detent onboarding sheet above the
