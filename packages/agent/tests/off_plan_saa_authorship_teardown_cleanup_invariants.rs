@@ -38,6 +38,48 @@ const RETAINED_EXECUTE_OPS: &[&str] = &[
     "replay_manifest",
 ];
 
+const POST_PPACD_STALE_BRANCHES: &[&str] = &[
+    "codex/provider-model-boundary-discipline",
+    "codex/performance-resource-governance-recovery",
+    "codex/configuration-profile-environment-discipline-recovery",
+    "codex/release-install-upgrade-rollback-discipline",
+    "codex/ios-thin-client-generic-runtime-shell",
+    "codex/developer-experience-repo-hygiene-automation",
+    "codex/documentation-evidence-scorecard-integrity",
+    "codex/self-sufficient-agent-runtime-readiness",
+];
+
+const POST_PPACD_RESIDUE_TERMS: &[&str] = &[
+    "self-adapting",
+    "Self-Adapting",
+    "SAA",
+    "generated worker",
+    "generated-worker",
+    "worker schedule",
+    "worker activation",
+    "self_adapting_agent_authorship",
+    "self-adapting-agent-authorship",
+];
+
+const CURRENT_ARCHITECTURE_COMPLETION_CLAIMS: &[&str] = &[
+    "Complete SAA authorship scorecard",
+    "completed SAA scorecard",
+    "completed Self-Adapting Agent Authorship",
+    "approved SAA",
+    "SAA as completed current architecture",
+    "SAA current architecture",
+    "current SAA architecture",
+    "self-adapting-agent-authorship-scorecard.md",
+    "self_adapting_agent_authorship_invariants",
+    "generated worker execution is implemented",
+    "generated-worker systems are implemented",
+    "generated workers are complete",
+    "worker schedule dispatch is implemented",
+    "worker schedule scanning is complete",
+    "worker activation is implemented",
+    "worker activation is complete",
+];
+
 #[test]
 fn opsaa_scorecard_rows_total_100_and_close_cleanly() {
     let scorecard = read_repo_file(SCORECARD_PATH);
@@ -120,6 +162,7 @@ fn opsaa_evidence_manifest_records_closeout_without_placeholders() {
         "cargo test --manifest-path packages/agent/Cargo.toml domains::capability --lib -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml engine::tests::durability --lib -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture",
+        "cargo test --manifest-path packages/agent/Cargo.toml --test public_protocol_api_contract_discipline_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test observability_diagnostics_auditability_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture",
         "cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture",
@@ -136,6 +179,51 @@ fn opsaa_evidence_manifest_records_closeout_without_placeholders() {
         assert!(
             evidence.contains(command),
             "OPSAA evidence manifest missing command: {command}"
+        );
+    }
+}
+
+#[test]
+fn post_ppacd_reconciliation_evidence_records_lineage_quarantine_and_residue_audit() {
+    let evidence = read_repo_file(EVIDENCE_PATH);
+    assert!(evidence.contains("## Post-PPACD Current-Lineage Reconciliation"));
+    for required in [
+        "codex/opsaa-post-ppacd-reconciliation",
+        "codex/public-protocol-api-contract-discipline-current",
+        "30dbf4b6bfd45edbee00ed7e55be2fb1ed964b19",
+        "fccdbbd54161e82bc4c837d68b7c4d0ca62be0cf",
+        "05d0a5872d6426afa1bda076706a362835410748",
+        "e781a6aef263327d82f666611cb975a71e67e2ee",
+        "Stale branch quarantine",
+        "not current-lineage completion evidence",
+        "must not be merged, cherry-picked, or copied wholesale",
+        "Active residue audit",
+        "retained historical cleanup/evidence",
+        "retained generic primitive wording",
+        "retained future/readiness wording",
+        "No removable stale current-architecture claim was found",
+        "no runtime removal was required",
+        "git worktree list",
+        "git log --graph --oneline --decorate --boundary --all --ancestry-path e781a6aef..30dbf4b6b",
+        "git branch --list",
+        "git grep -n -I -E",
+    ] {
+        assert!(
+            evidence.contains(required),
+            "post-PPACD reconciliation evidence missing `{required}`"
+        );
+    }
+
+    for branch in POST_PPACD_STALE_BRANCHES {
+        assert!(
+            evidence.contains(branch),
+            "post-PPACD evidence missing stale branch quarantine entry for {branch}"
+        );
+    }
+    for term in POST_PPACD_RESIDUE_TERMS {
+        assert!(
+            evidence.contains(term),
+            "post-PPACD residue audit missing searched term {term}"
         );
     }
 }
@@ -231,6 +319,72 @@ fn active_saa_docs_tests_and_static_targets_are_absent() {
             !source.contains(RETIRED_SAA_TARGET),
             "{path} must not list retired SAA invariant target"
         );
+    }
+}
+
+#[test]
+fn post_ppacd_active_residue_hits_stay_in_classified_buckets() {
+    for path in git_ls_files()
+        .into_iter()
+        .filter(|path| is_post_ppacd_audited_text_surface(path))
+    {
+        let Some(source) = read_repo_file_if_utf8(&path) else {
+            continue;
+        };
+        let matched_terms = POST_PPACD_RESIDUE_TERMS
+            .iter()
+            .filter(|term| source.contains(**term))
+            .copied()
+            .collect::<Vec<_>>();
+        if matched_terms.is_empty() {
+            continue;
+        }
+
+        let classification = post_ppacd_residue_classification(&path).unwrap_or_else(|| {
+            panic!("{path} has unclassified OPSAA/SAA residue: {matched_terms:?}")
+        });
+        match classification {
+            ResidueClass::HistoricalCleanupEvidence => assert!(
+                source.contains("OPSAA")
+                    || source.contains("off-plan")
+                    || source.contains("teardown cleanup")
+                    || source.contains("SAA")
+                    || source.contains("not SAA resurrection"),
+                "{path} is classified as historical cleanup/evidence but lacks cleanup context"
+            ),
+            ResidueClass::FutureReadinessWording => assert!(
+                source.contains("successor")
+                    || source.contains("readiness")
+                    || source.contains("does not add")
+                    || source.contains("not implemented here")
+                    || source.contains("After PET-11 passes"),
+                "{path} is classified as future/readiness wording but lacks future-scope context"
+            ),
+        }
+    }
+}
+
+#[test]
+fn post_ppacd_active_surfaces_do_not_reclaim_saa_or_generated_worker_completion() {
+    for path in git_ls_files()
+        .into_iter()
+        .filter(|path| is_post_ppacd_audited_text_surface(path))
+    {
+        if matches!(
+            post_ppacd_residue_classification(&path),
+            Some(ResidueClass::HistoricalCleanupEvidence)
+        ) {
+            continue;
+        }
+        let Some(source) = read_repo_file_if_utf8(&path) else {
+            continue;
+        };
+        for forbidden in CURRENT_ARCHITECTURE_COMPLETION_CLAIMS {
+            assert!(
+                !source.contains(forbidden),
+                "{path} reclaims stale current-architecture SAA/generated-worker completion through `{forbidden}`"
+            );
+        }
     }
 }
 
@@ -453,8 +607,65 @@ fn git_ls_files() -> Vec<String> {
         .collect()
 }
 
+fn is_post_ppacd_audited_text_surface(path: &str) -> bool {
+    path == "README.md"
+        || path == ".github/workflows/ci.yml"
+        || path.starts_with("scripts/")
+        || path.ends_with(".rs")
+        || path.ends_with(".swift")
+        || (path.starts_with("packages/agent/docs/")
+            && (path.ends_with(".md") || path.ends_with(".tsv")))
+}
+
+fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
+    match path {
+        "README.md"
+        | "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv"
+        | "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv"
+        | "packages/agent/docs/hierarchical-rearchitecture-inventory.md"
+        | "packages/agent/docs/primitive-code-cleanup-file-inventory.tsv"
+        | "packages/agent/docs/security-authority-capability-boundaries-inventory.tsv"
+        | "packages/agent/docs/true-primitive-cleanup-retention-inventory.tsv"
+        | "packages/agent/tests/hierarchical_rearchitecture/scorecard_inventory.rs" => {
+            Some(ResidueClass::HistoricalCleanupEvidence)
+        }
+        "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md"
+        | "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv"
+        | "packages/agent/docs/public-protocol-api-contract-discipline-inventory.md"
+        | "packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv" => {
+            Some(ResidueClass::HistoricalCleanupEvidence)
+        }
+        "packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md"
+        | "packages/agent/docs/primitive-code-cleanup-scorecard.md"
+        | "packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md"
+        | "packages/agent/tests/primitive_engine_teardown/scorecard_inventory.rs" => {
+            Some(ResidueClass::FutureReadinessWording)
+        }
+        _ if path.starts_with("packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-") => {
+            Some(ResidueClass::HistoricalCleanupEvidence)
+        }
+        _ if path
+            == "packages/agent/tests/off_plan_saa_authorship_teardown_cleanup_invariants.rs" =>
+        {
+            Some(ResidueClass::HistoricalCleanupEvidence)
+        }
+        _ if path.starts_with("packages/agent/docs/primitive-engine-teardown-") => {
+            Some(ResidueClass::FutureReadinessWording)
+        }
+        _ if path.contains("self-sufficient-agent-runtime-readiness") => {
+            Some(ResidueClass::FutureReadinessWording)
+        }
+        _ => None,
+    }
+}
+
 fn read_repo_file(path: &str) -> String {
     fs::read_to_string(repo_path(path)).unwrap_or_else(|error| panic!("read {path}: {error}"))
+}
+
+fn read_repo_file_if_utf8(path: &str) -> Option<String> {
+    let bytes = fs::read(repo_path(path)).unwrap_or_else(|error| panic!("read {path}: {error}"));
+    String::from_utf8(bytes).ok()
 }
 
 fn repo_path(path: &str) -> PathBuf {
@@ -478,4 +689,9 @@ struct ScorecardRow {
 struct InventoryRow {
     path: String,
     classification: String,
+}
+
+enum ResidueClass {
+    HistoricalCleanupEvidence,
+    FutureReadinessWording,
 }
