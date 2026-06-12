@@ -1600,3 +1600,8 @@ packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md	r
 packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md	retain	iostc docs	IOSTC-9	iOS Thin Client / Generic Runtime Shell inventory retained for client surface coverage.
 packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv	retain	iostc docs	IOSTC-9	iOS Thin Client / Generic Runtime Shell machine-readable inventory retained for static gates.
 packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs	retain	iostc rust test	IOSTC-10	iOS Thin Client / Generic Runtime Shell invariant target retained for static iOS shell gates.
+packages/agent/docs/developer-experience-repo-hygiene-automation-scorecard.md	retain	dxrha docs	DXRHA-8	Developer Experience / Repo Hygiene / Automation scorecard retained for contributor workflow closeout.
+packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manifest.md	retain	dxrha docs	DXRHA-8	Developer Experience / Repo Hygiene / Automation evidence retained for verification provenance.
+packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md	retain	dxrha docs	DXRHA-8	Developer Experience / Repo Hygiene / Automation inventory retained for workflow surface coverage.
+packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv	retain	dxrha docs	DXRHA-8	Developer Experience / Repo Hygiene / Automation machine-readable inventory retained for static gates.
+packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs	retain	dxrha rust test	DXRHA-10	Developer Experience / Repo Hygiene / Automation invariant target retained for static workflow gates.

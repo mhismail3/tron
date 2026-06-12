@@ -52,7 +52,7 @@ fn csd_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Concurrency Scheduling Discipline Inventory",
-        "Status: CSD-10 `passed_after_fix`; 113 scheduling-surface rows inventoried and classified.",
+        "Status: CSD-10 `passed_after_fix`; 113 scheduling-surface rows and 8 static-gate/predecessor rows inventoried and classified.",
         "## Allowed Scheduler Classes",
         "`tracked_background_task`",
         "`bounded_queue`",
@@ -133,7 +133,7 @@ fn csd_invariant_target_is_in_closeout_ci_lists() {
 #[test]
 fn csd_inventory_rows_are_structured_and_cover_marker_files() {
     let rows = parse_inventory();
-    assert_eq!(rows.len(), 116, "CSD inventory row count changed");
+    assert_eq!(rows.len(), 121, "CSD inventory row count changed");
 
     let mut paths = BTreeSet::new();
     let allowed: BTreeSet<_> = ALLOWED_SCHEDULER_CLASSES.iter().copied().collect();
@@ -154,11 +154,13 @@ fn csd_inventory_rows_are_structured_and_cover_marker_files() {
             row.scheduler_class,
             row.path
         );
+        let language_allowed = matches!(row.language.as_str(), "Rust" | "Swift")
+            || (matches!(row.language.as_str(), "Markdown" | "TSV")
+                && row.scheduler_class == "test_fixture");
         assert!(
-            row.language == "Rust" || row.language == "Swift",
+            language_allowed,
             "unexpected language `{}` for {}",
-            row.language,
-            row.path
+            row.language, row.path
         );
         for (field, value) in [
             ("surface", &row.surface),

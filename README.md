@@ -294,6 +294,17 @@ Current living entry points:
   completed IOSTC iOS client surface taxonomy and ownership notes.
 - `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv`:
   machine-readable IOSTC inventory used by static gates.
+- `packages/agent/docs/developer-experience-repo-hygiene-automation-scorecard.md`:
+  completed Developer Experience / Repo Hygiene / Automation scorecard for
+  setup, dev server, local/GitHub CI parity, generated projects, docs upkeep,
+  ignored artifacts, version helpers, branch handoff, and closeout hygiene.
+- `packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manifest.md`:
+  companion evidence manifest for DXRHA source findings, verification commands,
+  stale-branch quarantine, and residual workflow risks.
+- `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md`:
+  completed DXRHA contributor workflow taxonomy and ownership notes.
+- `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv`:
+  machine-readable DXRHA workflow inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -408,12 +419,17 @@ Current living entry points:
   wiring, deleted iOS product panels, successor/server-ownership residue,
   settings parity references, generated project policy, focused simulator
   evidence, and predecessor inventory rows.
+- `packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs`:
+  completed DXRHA gates for scorecard/evidence, inventory coverage, local and
+  GitHub static-gate parity, generated/ignored artifact policy, setup/dev
+  runtime-state docs, version/release helper checks, branch handoff, and
+  predecessor inventory rows.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA
 scorecards and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -1438,6 +1454,9 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 |   +-- archive/                   Archived workspace material
 |   +-- knowledge/                 Curated wiki/research experiment
 |   +-- vault/                     Local fast secret storage for agent-owned workspace state
++-- memory/                       User-authored memory and rule notes loaded by sessions
+|   +-- rules/                     Detail files for memory-backed rules
+|   +-- sessions/                  Session-scoped memory material
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
     |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, leases, compensation, workers
@@ -1462,7 +1481,7 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 ```
 
 Notes:
-- The seeded top-level homes are `profiles`, `workspace`, and `internal`; Tron startup no longer creates a top-level `memory` directory.
+- The seeded top-level homes are `profiles`, `workspace`, `memory`, and `internal`; for a clean reset, move `~/.tron` aside rather than deleting individual subtrees.
 - Credentials for external CLIs (Google Workspace, etc.) live in `~/.tron/workspace/vault/`. Tron-owned provider auth and the bearer token live in `~/.tron/profiles/auth.json`.
 - Pause/lock sentinels live under `~/.tron/internal/run/` with the rest of the runtime machinery. They are managed by the respective CLI subcommands, not user-edited at the Tron Home root.
 
@@ -1544,6 +1563,7 @@ tron ci clippy test          # Subset: linting + tests
 `configuration_profile_environment_discipline_invariants`,
 `release_install_upgrade_rollback_discipline_invariants`,
 `ios_thin_client_generic_runtime_shell_invariants`,
+`developer_experience_repo_hygiene_automation_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

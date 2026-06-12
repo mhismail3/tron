@@ -1,6 +1,6 @@
 # Concurrency Scheduling Discipline Inventory
 
-Status: CSD-10 `passed_after_fix`; 113 scheduling-surface rows inventoried and classified.
+Status: CSD-10 `passed_after_fix`; 113 scheduling-surface rows and 8 static-gate/predecessor rows inventoried and classified.
 
 This inventory classifies production scheduling surfaces by owner, scheduler
 class, start site, cancellation or stop path, backpressure or capacity policy,
@@ -31,7 +31,8 @@ Machine-readable rows live in
 ## Inventory Summary
 
 The TSV covers every tracked production Rust/Swift file containing CSD marker
-patterns:
+patterns, plus static-gate/predecessor rows that keep follow-on scorecard
+artifacts visible to the CSD harness:
 
 - Rust markers: `tokio::spawn`, Tokio channel constructors, `CancellationToken`,
   Tokio sleep/timeout, and blocking sleeps.
@@ -39,7 +40,7 @@ patterns:
   `DispatchQueue`, `AsyncStream`, timers, debounce/coalescing markers, and
   `AsyncSemaphore`.
 
-Scheduler class distribution:
+Scheduler class distribution for the 113 production scheduling-surface rows:
 
 | Scheduler class | Rows |
 |---|---:|
@@ -54,6 +55,8 @@ Scheduler class distribution:
 | `bounded_queue` | 4 |
 | `blocking_supervisor` | 1 |
 | `ack_coalescer` | 1 |
+
+Static-gate/predecessor rows: 8 `test_fixture` rows.
 
 ## Rust Scheduling Proof
 

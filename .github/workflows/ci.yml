@@ -151,6 +151,7 @@ jobs:
           cargo test --test configuration_profile_environment_discipline_invariants -- --quiet
           cargo test --test release_install_upgrade_rollback_discipline_invariants -- --quiet
           cargo test --test ios_thin_client_generic_runtime_shell_invariants -- --quiet
+          cargo test --test developer_experience_repo_hygiene_automation_invariants -- --quiet
           cargo test --test primitive_trace_execution -- --quiet
           cargo test --test integration -- --test-threads=1 --quiet
 

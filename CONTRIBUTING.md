@@ -49,7 +49,7 @@ scripts/tron dev
 
 # Same, but background — useful for iterating in another shell.
 scripts/tron dev --background
-scripts/tron dev stop
+scripts/tron dev --stop
 ```
 
 You should never need to run `scripts/tron deploy` or any production
@@ -71,7 +71,8 @@ for App ID `6761511764`; contributor PRs do not need App Store Connect access.
 ### Mac wrapper
 
 The Mac SwiftUI wrapper lives at `packages/mac-app/`. It's a SwiftUI app that
-bundles the headless Rust agent as `Contents/Resources/tron-agent` and presents
+bundles the headless Rust agent inside helper apps under
+`Contents/Library/LoginItems/Tron Server*.app/Contents/MacOS/tron` and presents
 a first-run wizard + menu bar icon. Both Debug and Release configurations
 build `TronMac.app` (the bundle name follows the XcodeGen target); Debug uses
 bundle ID `com.tron.mac.dev` (lives in DerivedData), Release uses
