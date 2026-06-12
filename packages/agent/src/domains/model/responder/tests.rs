@@ -26,6 +26,7 @@ impl Provider for AuditProvider {
                 "model": self.model(),
                 "reasoningEffort": options.reasoning_effort.as_ref().map(ToString::to_string),
                 "promptCacheKey": options.prompt_cache_key.clone(),
+                "authorization": "Bearer abcdefghijklmnopqrstuvwxyz0123456789",
             }),
         ))
     }
@@ -208,7 +209,7 @@ fn model_response_error_auth_has_recoverable_canonical_failure() {
 #[tokio::test]
 async fn provider_stream_error_event_becomes_canonical_model_response_error() {
     let stream: StreamEventStream = Box::pin(stream::iter([Ok(StreamEvent::Error {
-        error: "malformed provider stream JSON".into(),
+        error: "malformed provider stream JSON Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789".into(),
     })]));
     let health = Arc::new(ModelResponderHealth::new());
     let mut wrapped = wrap_provider_stream(
@@ -236,6 +237,8 @@ async fn provider_stream_error_event_becomes_canonical_model_response_error() {
         failure.details.as_ref().unwrap()["kind"],
         "stream_event_error"
     );
+    assert!(!failure.message.contains("abcdefghijklmnopqrstuvwxyz"));
+    assert!(failure.message.contains("Bearer ****"));
 }
 
 #[test]
@@ -287,5 +290,9 @@ fn provider_backed_request_audit_uses_stream_options_and_exact_payload() {
     assert_eq!(
         audit.provider_request.body["promptCacheKey"],
         serde_json::json!("tron-session-sess-1")
+    );
+    assert_eq!(
+        audit.provider_request.body["authorization"],
+        serde_json::json!("Bearer ****")
     );
 }

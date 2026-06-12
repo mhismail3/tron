@@ -1573,3 +1573,9 @@ packages/agent/docs/public-protocol-api-contract-discipline-inventory.md	retain	
 packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv	retain	ppacd docs	PPACD-0	Public Protocol API Contract Discipline machine-readable inventory retained for static gates.
 packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md	retain	ppacd docs	PPACD-0	Public Protocol API Contract Discipline scorecard retained for public protocol hardening.
 packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs	retain	ppacd rust test	PPACD-0	Public Protocol API Contract Discipline invariant target retained for static protocol gates.
+packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md	retain	pmbd docs	PMBD-9	Provider / Model Boundary Discipline evidence manifest retained for provider/model boundary hardening closeout.
+packages/agent/docs/provider-model-boundary-discipline-inventory.md	retain	pmbd docs	PMBD-9	Provider / Model Boundary Discipline inventory retained for provider/model boundary coverage.
+packages/agent/docs/provider-model-boundary-discipline-inventory.tsv	retain	pmbd docs	PMBD-9	Provider / Model Boundary Discipline machine-readable inventory retained for static gates.
+packages/agent/docs/provider-model-boundary-discipline-scorecard.md	retain	pmbd docs	PMBD-9	Provider / Model Boundary Discipline scorecard retained for provider/model boundary hardening.
+packages/agent/src/shared/foundation/redaction.rs	retain	shared foundation	PMBD-5	Shared redaction helper retained for provider/model errors, retry events, audit payloads, and event storage.
+packages/agent/tests/provider_model_boundary_discipline_invariants.rs	retain	pmbd rust test	PMBD-9	Provider / Model Boundary Discipline invariant target retained for static provider/model boundary gates.

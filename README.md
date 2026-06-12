@@ -236,6 +236,17 @@ Current living entry points:
   completed public protocol surface taxonomy and ownership notes.
 - `packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv`:
   machine-readable PPACD public protocol inventory used by static gates.
+- `packages/agent/docs/provider-model-boundary-discipline-scorecard.md`:
+  completed Provider / Model Boundary Discipline scorecard for provider/model
+  request, stream, auth, retry, error, catalog, token, audit, and redaction
+  boundaries across OpenAI, Anthropic, Google, Kimi, MiniMax, and Ollama.
+- `packages/agent/docs/provider-model-boundary-discipline-evidence-manifest.md`:
+  companion evidence manifest for PMBD lineage, stale-branch quarantine,
+  verification commands, and residual risks.
+- `packages/agent/docs/provider-model-boundary-discipline-inventory.md`:
+  completed PMBD provider/model boundary taxonomy and proof notes.
+- `packages/agent/docs/provider-model-boundary-discipline-inventory.tsv`:
+  machine-readable PMBD provider/model boundary inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -326,12 +337,17 @@ Current living entry points:
   inventory coverage, README/CI wiring, public `/engine` method/schema shape,
   iOS context/decoder narrowness, predecessor inventory rows, and final closeout
   claims.
+- `packages/agent/tests/provider_model_boundary_discipline_invariants.rs`:
+  completed Provider / Model Boundary Discipline gates for scorecard/evidence,
+  inventory coverage, README/CI wiring, provider-native import confinement,
+  provider wire marker confinement, provider audit redaction/bounding, retry and
+  failure redaction, provider family test anchors, and predecessor inventory rows.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD
 scorecards and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -435,6 +451,10 @@ split the same way in domain-owned folders such as `domains/agent/runtime/*`,
 argument parsing and provider-specific invocation id remapping are isolated
 under `domains/model/protocol/*` before canonical capability history reaches
 the loop, ledger, audit, or iOS DTO layers.
+`domains/model/responder` is the non-provider composition boundary: it builds
+provider-neutral stream options, opens provider streams, applies retry, maps
+provider errors to canonical failure envelopes, and redacts/bounds
+`model.provider_request` audit payloads before persistence.
 `stream.rs` publishes only that domain's declared topics. Cross-domain access
 goes through explicit domain services or shared DTOs, so an engineer can follow
 a capability by reading one domain folder instead of a central dispatch table.
@@ -952,6 +972,13 @@ The auth system supports OAuth 2.0 (PKCE), API keys, and multi-account selection
 Fresh Mac installs seed `auth.json` as the exact empty JSON object `{}`. That sentinel is valid only as pristine install state: first server boot materializes it through the normal atomic `0o600` auth writer into `version`, `providers`, `lastUpdated`, and `bearerToken`. Invalid JSON, unsupported versions, and non-empty partial auth objects remain hard errors and are not overwritten. Writers load through the malformed-file-preserving write helper and persist with a same-directory temp file, `sync_all`, and atomic rename, so provider credentials and the bearer token never pass through a wider-permission file.
 
 OAuth refresh is owned by `domains/auth/credentials/`: Anthropic, OpenAI, and Google refresh paths take a process-local refresh mutex, acquire the auth-file `flock`, re-read `auth.json` after the lock, persist refreshed tokens while holding the lock, and fail the refresh if persistence fails. Model providers receive ephemeral token copies for request execution and do not write durable auth state directly.
+
+Provider-derived errors, retry events, client logs, and provider request audit
+payloads share the same server redaction policy. Audit payloads are body-only,
+versioned as `tron.model_provider_request.v1`, classified as exact provider
+envelopes or provider-independent snapshots, redacted recursively, and rejected
+if they exceed the provider-audit payload bound before the provider stream
+opens.
 
 OpenAI credential selection is owned by auth credentials through `OpenAIAuthPath`: ChatGPT OAuth accounts route model metadata and requests to the Codex backend, while OpenAI API keys route to Platform metadata and `/v1/responses`.
 

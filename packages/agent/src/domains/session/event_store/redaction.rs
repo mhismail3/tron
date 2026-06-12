@@ -1,87 +1,13 @@
 //! Sensitive data redaction for event payloads.
 //!
-//! Defense-in-depth: redacts API keys, tokens, and secrets from text
-//! before storage in the event store. Each pattern requires a minimum
-//! length to avoid false positives on short strings.
+//! The event store re-exports the shared foundation redactor so legacy call
+//! sites keep their domain-local import while provider/model surfaces can use
+//! the same policy without depending on the session domain.
+//!
+//! Delegated auth-secret coverage remains: `access_?token`,
+//! `refresh_?token`, `client_?secret`, and `authorization_?code`.
 
-use std::sync::LazyLock;
-
-use regex::Regex;
-
-/// Redact sensitive content from text.
-///
-/// Matches common secret patterns (API keys, tokens, passwords) and masks
-/// the secret portion. Returns the original text unchanged if no secrets found.
-pub fn redact_sensitive_content(text: &str) -> String {
-    static PATTERNS: LazyLock<Vec<(Regex, &str)>> = LazyLock::new(|| {
-        vec![
-            // JSON-shaped auth fields, preserving the key and JSON quoting.
-            (
-                Regex::new(
-                    r#"(?i)("(?:(?:api_?key)|token|authorization|bearer|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code|code)"\s*:\s*")([^"]{8,})(")"#,
-                )
-                .unwrap(),
-                "${1}****${3}",
-            ),
-            // Swift/Rust debug-description fields like `apiKey: "..."`.
-            (
-                Regex::new(
-                    r#"(?i)(\b(?:(?:api_?key)|token|authorization|bearer|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code|code)\s*:\s*")([^"]{8,})(")"#,
-                )
-                .unwrap(),
-                "${1}****${3}",
-            ),
-            // Common unquoted key/value forms. Keep this narrower than the
-            // JSON/debug-description patterns so generic error `code=` fields
-            // do not get masked.
-            (
-                Regex::new(
-                    r"(?i)\b(api_?key|access_?token|refresh_?token|client_?secret|authorization_?code|auth_?code|oauth_?code|password|secret)\s*[:=]\s*[A-Za-z0-9._~+/=-]{8,}",
-                )
-                .unwrap(),
-                "${1}=****",
-            ),
-            // Anthropic API keys (sk-ant-api03-...)
-            (
-                Regex::new(r"sk-ant-api\d{2}-[A-Za-z0-9_-]{10,}").unwrap(),
-                "sk-ant-****",
-            ),
-            // OpenAI-style keys (sk-proj-...)
-            (
-                Regex::new(r"sk-proj-[A-Za-z0-9_-]{10,}").unwrap(),
-                "sk-proj-****",
-            ),
-            // AWS access keys (AKIA...)
-            (Regex::new(r"AKIA[0-9A-Z]{16}").unwrap(), "AKIA****"),
-            // GitHub PATs (ghp_, gho_, ghs_, ghu_, ghr_)
-            (
-                Regex::new(r"gh[pousr]_[A-Za-z0-9_]{20,}").unwrap(),
-                "gh*_****",
-            ),
-            // Bearer tokens
-            (
-                Regex::new(r"Bearer\s+[A-Za-z0-9._-]{20,}").unwrap(),
-                "Bearer ****",
-            ),
-            // Slack tokens (xoxb-, xoxp-, xoxa-, xoxo-)
-            (
-                Regex::new(r"xox[bpao]-[A-Za-z0-9-]{10,}").unwrap(),
-                "xox*-****",
-            ),
-            // Google API keys (AIzaSy...)
-            (
-                Regex::new(r"AIzaSy[A-Za-z0-9_-]{30,}").unwrap(),
-                "AIzaSy****",
-            ),
-        ]
-    });
-
-    let mut result = text.to_string();
-    for (pattern, replacement) in PATTERNS.iter() {
-        result = pattern.replace_all(&result, *replacement).to_string();
-    }
-    result
-}
+pub use crate::shared::foundation::redaction::redact_sensitive_content;
 
 #[cfg(test)]
 mod tests {

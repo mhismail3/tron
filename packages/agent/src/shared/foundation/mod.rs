@@ -8,6 +8,7 @@
 //! | [`ids`] | Branded IDs used across domains and protocol payloads |
 //! | [`paths`] | Canonical filesystem paths |
 //! | [`profile`] | Profile runtime constants and validation |
+//! | [`redaction`] | Shared sensitive-data redaction helpers |
 //! | [`retry`] | Retry/backoff policy helpers |
 //! | [`text`] | Text helpers used by multiple owners |
 
@@ -17,5 +18,6 @@ pub mod errors;
 pub mod ids;
 pub mod paths;
 pub mod profile;
+pub mod redaction;
 pub mod retry;
 pub mod text;

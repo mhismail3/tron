@@ -5,6 +5,8 @@
 //!
 //! The trait returns a boxed [`Stream`] of [`StreamEvent`]s, allowing the runtime
 //! to process tokens incrementally regardless of the underlying API format.
+//! Provider-native errors are converted into canonical failure envelopes with
+//! redacted public messages before they leave the model boundary.
 
 use std::pin::Pin;
 use std::sync::Arc;
@@ -20,6 +22,8 @@ use async_trait::async_trait;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+
+use crate::shared::foundation::redaction::redact_sensitive_content;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Typed effort / reasoning enums
@@ -283,9 +287,14 @@ impl ProviderError {
                 FailureCategory::Parse,
                 "Provider stream parse failed".to_owned(),
                 false,
-                Some(json!({ "message": message })),
+                Some(json!({ "message": redact_sensitive_content(message) })),
             ),
-            Self::Auth { message } => (FailureCategory::Auth, message.clone(), true, None),
+            Self::Auth { message } => (
+                FailureCategory::Auth,
+                redact_sensitive_content(message),
+                true,
+                None,
+            ),
             Self::UnsupportedModel { model } => (
                 FailureCategory::InvalidModel,
                 format!("Unsupported model: {model}"),
@@ -297,7 +306,7 @@ impl ProviderError {
                 message,
             } => (
                 FailureCategory::RateLimit,
-                message.clone(),
+                redact_sensitive_content(message),
                 true,
                 Some(json!({ "retryAfterMs": retry_after_ms })),
             ),
@@ -308,7 +317,7 @@ impl ProviderError {
                 retryable,
             } => (
                 FailureCategory::Api,
-                message.clone(),
+                redact_sensitive_content(message),
                 *retryable || matches!(*status, 400 | 401 | 403 | 404 | 409 | 429),
                 Some(json!({
                     "statusCode": status,
@@ -321,7 +330,12 @@ impl ProviderError {
                 true,
                 None,
             ),
-            Self::Other { message } => (FailureCategory::Unknown, message.clone(), false, None),
+            Self::Other { message } => (
+                FailureCategory::Unknown,
+                redact_sensitive_content(message),
+                false,
+                None,
+            ),
         };
 
         FailureEnvelope::new(
@@ -543,6 +557,22 @@ mod tests {
         assert_eq!(failure.error_type.as_deref(), Some("invalid_api_key"));
         assert!(!failure.retryable);
         assert!(failure.recoverable);
+    }
+
+    #[test]
+    fn provider_error_to_failure_redacts_secret_bearing_messages() {
+        let err = ProviderError::Api {
+            status: 401,
+            message: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789".to_owned(),
+            code: Some("invalid_api_key".to_owned()),
+            retryable: false,
+        };
+
+        let failure = err.to_failure("openai", "gpt-5.5");
+
+        assert!(!failure.message.contains("abcdefghijklmnopqrstuvwxyz"));
+        assert_eq!(failure.message, "Authorization: Bearer ****");
+        assert_eq!(failure.error_type.as_deref(), Some("invalid_api_key"));
     }
 
     #[test]

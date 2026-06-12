@@ -17,6 +17,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::shared::foundation::redaction::redact_sensitive_content;
 use crate::shared::foundation::retry::RetryConfig;
 use crate::shared::protocol::events::{RetryErrorInfo, StreamEvent};
 use futures::Stream;
@@ -140,7 +141,7 @@ pub fn with_provider_retry(
                             delay_ms,
                             error: RetryErrorInfo {
                                 category: err.category().to_string(),
-                                message: err.to_string(),
+                                message: redact_sensitive_content(&err.to_string()),
                                 is_retryable: true,
                             },
                         });
@@ -413,6 +414,44 @@ mod tests {
         } else {
             panic!("Expected retry event");
         }
+    }
+
+    #[tokio::test]
+    async fn retry_event_redacts_provider_error_message() {
+        let factory: StreamFactory = Box::new(|| {
+            Box::pin(async {
+                Err(ProviderError::Api {
+                    status: 500,
+                    message: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789"
+                        .to_owned(),
+                    code: None,
+                    retryable: true,
+                })
+            })
+        });
+        let config = StreamRetryConfig {
+            retry: RetryConfig {
+                max_retries: 1,
+                base_delay_ms: 1,
+                max_delay_ms: 1,
+                jitter_factor: 0.0,
+            },
+            emit_retry_events: true,
+            cancel_token: None,
+        };
+
+        let stream = with_provider_retry(factory, config);
+        let events: Vec<_> = stream.collect().await;
+        let retry = events
+            .iter()
+            .find_map(|event| match event {
+                Ok(StreamEvent::Retry { error, .. }) => Some(error),
+                _ => None,
+            })
+            .expect("retry event should be emitted");
+
+        assert!(!retry.message.contains("abcdefghijklmnopqrstuvwxyz"));
+        assert!(retry.message.contains("Bearer ****"));
     }
 
     #[tokio::test]

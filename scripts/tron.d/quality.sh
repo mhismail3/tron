@@ -41,6 +41,7 @@ run_tests() {
         off_plan_saa_authorship_teardown_cleanup_invariants
         data_integrity_storage_evolution_migration_discipline_invariants
         public_protocol_api_contract_discipline_invariants
+        provider_model_boundary_discipline_invariants
         primitive_trace_execution
         integration
     )
