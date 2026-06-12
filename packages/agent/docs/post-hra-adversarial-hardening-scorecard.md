@@ -104,8 +104,7 @@ quietly become oversized modules.
 |------|-------------|-------|---------------------|--------|
 | `packages/ios-app/Tests/Session/Chat/ViewModel/ChatViewModelEventRoutingTests.swift` | 651 | chat event-routing test owner | Split new event-routing coverage into coordinator- or event-family tests before expanding this file. | watch |
 | `packages/ios-app/Tests/Engine/Persistence/EventDatabaseTests.swift` | 646 | event database test owner | Add new persistence cases under behavior-specific test files before growing the broad database suite. | watch |
+| `packages/ios-app/Tests/Engine/Protocol/EngineProtocolTypesTests.swift` | 627 | engine protocol test owner | Move new DTO encoding/decoding cases into type-family test files before growing this broad protocol suite. | watch |
 | `packages/ios-app/Tests/UI/Chat/TurnGroupingTests.swift` | 611 | chat grouping test owner | Split new grouping cases into role/timeline-specific tests before expanding shared fixtures. | watch |
 | `packages/ios-app/Tests/Session/Chat/TurnLifecycleCoordinatorTests.swift` | 608 | turn lifecycle test owner | Add new lifecycle cases under focused coordinator tests before increasing this broad suite. | watch |
-| `packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift` | 595 | settings shell owner | Move new settings section support into page-owned files before expanding the shared shell support file. | watch |
-| `packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift` | 593 | model picker owner | Move new provider/model row behavior into focused picker components before growing the sheet root. | watch |
 | `packages/ios-app/Tests/Session/Chat/Navigation/ScrollStateCoordinatorTests.swift` | 590 | chat navigation test owner | Move new scroll-state cases into focused navigation tests before this threshold row grows further. | watch |

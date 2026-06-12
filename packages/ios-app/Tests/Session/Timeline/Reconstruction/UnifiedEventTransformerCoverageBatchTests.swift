@@ -113,6 +113,9 @@ final class UnifiedEventTransformerCoverageBatchTests: UnifiedEventTransformerTe
             // Session tree / completion metadata lives outside ReconstructedState.
             .sessionEnd,
             .sessionFork,
+            // Provider request audit rows are diagnostics for the server-side
+            // model call and do not rebuild chat or session state.
+            .modelProviderRequest,
             // Prompt/process events do not currently restore
             // user-visible chat or persisted ReconstructedState fields.
             .capabilityRunStatus,
