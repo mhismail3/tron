@@ -28,7 +28,7 @@ pub struct ApiSettings {
 
 /// Anthropic API and OAuth settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct AnthropicApiSettings {
     /// OAuth authorization URL.
     pub auth_url: String,
@@ -85,7 +85,7 @@ pub enum ReasoningEffort {
 
 /// `OpenAI` Codex API and OAuth settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct OpenAiCodexApiSettings {
     /// OAuth authorization URL.
     pub auth_url: String,
@@ -124,7 +124,7 @@ impl Default for OpenAiCodexApiSettings {
 
 /// `MiniMax` API settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct MiniMaxApiSettings {
     /// Base URL for the `MiniMax` Anthropic-compatible API.
     pub base_url: String,
@@ -140,7 +140,7 @@ impl Default for MiniMaxApiSettings {
 
 /// Kimi (Moonshot AI) API settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct KimiApiSettings {
     /// Base URL for the Kimi API.
     pub base_url: String,
@@ -156,7 +156,7 @@ impl Default for KimiApiSettings {
 
 /// Ollama API settings (local models via Ollama).
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct OllamaApiSettings {
     /// Base URL for the Ollama API (default: `http://localhost:11434`).
     pub base_url: String,
@@ -249,6 +249,18 @@ mod tests {
             "someFutureProvider": {}
         });
         assert!(serde_json::from_value::<ApiSettings>(json).is_err());
+    }
+
+    #[test]
+    fn unknown_nested_provider_field_rejected() {
+        let json = serde_json::json!({
+            "anthropic": {
+                "clientId": "custom",
+                "accidentalSetting": true
+            }
+        });
+        let err = serde_json::from_value::<ApiSettings>(json).unwrap_err();
+        assert!(err.to_string().contains("accidentalSetting"));
     }
 
     #[test]

@@ -3,9 +3,10 @@
 //! All types use `#[serde(rename_all = "camelCase")]` to match the TypeScript
 //! JSON wire format. Each type implements [`Default`] with the emergency
 //! default values that must stay in parity with the bundled default profile's
-//! `[settings]` table. Types marked with `#[serde(default)]`
-//! allow partial JSON — missing fields get their default value during
-//! deserialization.
+//! `[settings]` table. Types marked with `#[serde(default)]` allow partial JSON:
+//! missing fields get their default value during deserialization. Root and
+//! nested settings structs deny unknown fields so stale profile keys cannot
+//! drift silently.
 
 mod api;
 mod context;
@@ -23,7 +24,8 @@ use serde::{Deserialize, Serialize};
 ///
 /// Loaded from the active profile's `[settings]`, then sparse
 /// `~/.tron/profiles/user/profile.toml` `[settings]`, with defaults applied for missing fields.
-/// Environment variables can override specific values.
+/// Only the explicit settings environment variables in the loader can override
+/// specific values.
 ///
 /// # JSON Format
 ///
@@ -123,7 +125,7 @@ impl TronSettings {
 
 /// Retry configuration for API calls.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct RetrySettings {
     /// Maximum number of retry attempts.
     pub max_retries: u32,
@@ -353,5 +355,15 @@ mod tests {
         });
         let settings: TronSettings = serde_json::from_value(json).unwrap();
         assert_eq!(settings.context.compactor.max_tokens, 50_000);
+    }
+
+    #[test]
+    fn retry_unknown_field_rejected() {
+        let json = serde_json::json!({
+            "maxRetries": 3,
+            "legacyBackoffMode": "linear"
+        });
+        let err = serde_json::from_value::<RetrySettings>(json).unwrap_err();
+        assert!(err.to_string().contains("legacyBackoffMode"));
     }
 }

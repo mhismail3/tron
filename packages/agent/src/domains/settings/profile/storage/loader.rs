@@ -433,6 +433,16 @@ authProfile = "default"
     }
 
     #[test]
+    fn bundled_profile_settings_match_compiled_rust_defaults() {
+        let profile = crate::shared::foundation::profile::bundled_default_execution_spec();
+        assert_eq!(
+            serde_json::to_value(profile.settings()).unwrap(),
+            serde_json::to_value(TronSettings::default()).unwrap(),
+            "managed default profile [settings] must not drift from TronSettings::default()"
+        );
+    }
+
+    #[test]
     fn load_uses_active_profile_settings_before_sparse_user_overlay() {
         let dir = tempfile::tempdir().unwrap();
         let settings_path = temp_settings_path(&dir);
@@ -608,6 +618,29 @@ maxEntries = 500
 
         assert!(matches!(err, SettingsError::InvalidValue(_)));
         assert!(err.to_string().contains(&section));
+    }
+
+    #[test]
+    fn load_rejects_unknown_nested_session_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = temp_settings_path(&dir);
+        let key = ["queue", "DrainMode"].concat();
+        write_sparse_settings(
+            &path,
+            &format!(
+                r#"[settings.session]
+{key} = "sequential"
+"#
+            ),
+        );
+
+        let err = load_settings_from_path(&path).unwrap_err();
+
+        assert!(matches!(err, SettingsError::InvalidValue(_)));
+        assert!(
+            err.to_string().contains(&key),
+            "unknown nested settings key should be named in error: {err}"
+        );
     }
 
     #[test]

@@ -1,9 +1,11 @@
 //! Primitive profile loading.
 //!
 //! Profiles are now retained only for boot-time configuration: inheritance,
-//! auth profile selection, and effective server settings. Model prompts,
-//! process plans, policy packs, and context manifests are
-//! not profile primitives on the teardown branch.
+//! auth profile selection, and effective server settings. Managed defaults are
+//! compiled into the binary for reproducible seeding/recovery, and the sparse
+//! user profile must not inherit or copy managed default settings. Model
+//! prompts, process plans, policy packs, and context manifests are not profile
+//! primitives on the teardown branch.
 
 use std::collections::{BTreeSet, HashMap};
 use std::fs;

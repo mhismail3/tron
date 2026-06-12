@@ -41,47 +41,26 @@ struct ServerSettings: Decodable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        if let serverContainer = try? container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server) {
-            defaultModel = (try? serverContainer.decodeIfPresent(String.self, forKey: .defaultModel)) ?? "claude-sonnet-4-6"
-            defaultWorkspace = try? serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
-            tailscaleIp = try? serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
-        } else {
-            defaultModel = "claude-sonnet-4-6"
-            defaultWorkspace = nil
-            tailscaleIp = nil
-        }
+        let serverContainer = try container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server)
+        defaultModel = try serverContainer.decode(String.self, forKey: .defaultModel)
+        defaultWorkspace = try serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
+        tailscaleIp = try serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
 
-        if let contextContainer = try? container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context) {
-            compaction = (try? contextContainer.decodeIfPresent(CompactionSettings.self, forKey: .compactor)) ?? .defaults
-        } else {
-            compaction = .defaults
-        }
+        let contextContainer = try container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context)
+        compaction = try contextContainer.decode(CompactionSettings.self, forKey: .compactor)
 
-        if let observabilityContainer = try? container.nestedContainer(keyedBy: ObservabilityKeys.self, forKey: .observability) {
-            observabilityLogLevel = (try? observabilityContainer.decodeIfPresent(String.self, forKey: .logLevel)) ?? "info"
-            observabilityVerboseRetentionDays = (try? observabilityContainer.decodeIfPresent(UInt64.self, forKey: .verboseRetentionDays)) ?? 7
-        } else {
-            observabilityLogLevel = "info"
-            observabilityVerboseRetentionDays = 7
-        }
+        let observabilityContainer = try container.nestedContainer(keyedBy: ObservabilityKeys.self, forKey: .observability)
+        observabilityLogLevel = try observabilityContainer.decode(String.self, forKey: .logLevel)
+        observabilityVerboseRetentionDays = try observabilityContainer.decode(UInt64.self, forKey: .verboseRetentionDays)
 
-        if let storageContainer = try? container.nestedContainer(keyedBy: StorageKeys.self, forKey: .storage) {
-            storageRetentionEnabled = (try? storageContainer.decodeIfPresent(Bool.self, forKey: .retentionEnabled)) ?? true
-            storageMaxDatabaseMb = (try? storageContainer.decodeIfPresent(UInt64.self, forKey: .maxDatabaseMb)) ?? 512
-        } else {
-            storageRetentionEnabled = true
-            storageMaxDatabaseMb = 512
-        }
+        let storageContainer = try container.nestedContainer(keyedBy: StorageKeys.self, forKey: .storage)
+        storageRetentionEnabled = try storageContainer.decode(Bool.self, forKey: .retentionEnabled)
+        storageMaxDatabaseMb = try storageContainer.decode(UInt64.self, forKey: .maxDatabaseMb)
     }
 
     struct CompactionSettings: Decodable {
         let preserveRecentCount: Int
         let triggerTokenThreshold: Double
-
-        static let defaults = CompactionSettings(
-            preserveRecentCount: 5,
-            triggerTokenThreshold: 0.70
-        )
 
         private enum CodingKeys: String, CodingKey {
             case preserveRecentCount, triggerTokenThreshold
@@ -94,8 +73,8 @@ struct ServerSettings: Decodable {
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
-            preserveRecentCount = (try? container.decodeIfPresent(Int.self, forKey: .preserveRecentCount)) ?? 5
-            triggerTokenThreshold = (try? container.decodeIfPresent(Double.self, forKey: .triggerTokenThreshold)) ?? 0.70
+            preserveRecentCount = try container.decode(Int.self, forKey: .preserveRecentCount)
+            triggerTokenThreshold = try container.decode(Double.self, forKey: .triggerTokenThreshold)
         }
     }
 }

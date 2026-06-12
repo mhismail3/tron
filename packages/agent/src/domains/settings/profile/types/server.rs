@@ -66,7 +66,7 @@ impl ServerSettings {
 
 /// Agent runtime settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct AgentRuntimeSettings {
     /// Maximum number of agentic turns per prompt.
     pub max_turns: u32,
@@ -112,7 +112,7 @@ impl LogLevel {
 
 /// Logging configuration.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct LoggingSettings {
     /// Per-module log level overrides. Keys are Rust module/crate names.
     /// Example: `{"ort": "warn"}` suppresses ONNX Runtime info spam.
@@ -167,7 +167,7 @@ impl Default for StorageSettings {
 
 /// Tmux integration settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct TmuxSettings {
     /// Timeout for tmux commands in milliseconds.
     pub command_timeout_ms: u64,
@@ -186,7 +186,7 @@ impl Default for TmuxSettings {
 
 /// Session behavior settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct SessionSettings {}
 
 impl Default for SessionSettings {
@@ -337,6 +337,14 @@ mod tests {
     fn empty_session_json_uses_defaults() {
         let s: SessionSettings = serde_json::from_str("{}").unwrap();
         assert_eq!(serde_json::to_value(s).unwrap(), serde_json::json!({}));
+    }
+
+    #[test]
+    fn session_unknown_field_rejected() {
+        let key = ["queue", "DrainMode"].concat();
+        let err = serde_json::from_str::<SessionSettings>(&format!(r#"{{"{key}":"sequential"}}"#))
+            .unwrap_err();
+        assert!(err.to_string().contains(&key));
     }
 
     #[test]

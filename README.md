@@ -258,6 +258,17 @@ Current living entry points:
   completed PERF resource-governance taxonomy and proof notes.
 - `packages/agent/docs/performance-resource-governance-inventory.tsv`:
   machine-readable PERF resource-governance inventory used by static gates.
+- `packages/agent/docs/configuration-profile-environment-discipline-scorecard.md`:
+  completed Configuration / Profile / Environment Discipline scorecard for
+  settings schema/default parity, sparse overlays, profile recovery, env
+  ownership, iOS settings parity, docs, CI, and verification.
+- `packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md`:
+  companion evidence manifest for CPE lineage, stale-branch quarantine,
+  settings/profile/env proofs, verification commands, and residual risks.
+- `packages/agent/docs/configuration-profile-environment-discipline-inventory.md`:
+  completed CPE settings/profile/env taxonomy and proof notes.
+- `packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv`:
+  machine-readable CPE settings/profile/env inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -358,12 +369,16 @@ Current living entry points:
   resource inventory coverage, README/CI wiring, queue burst and payload
   rejection, stream/frame/accumulator/WebSocket bounds, cancellation, shutdown,
   retention, startup, runtime/iOS boundary, and predecessor inventory rows.
+- `packages/agent/tests/configuration_profile_environment_discipline_invariants.rs`:
+  completed CPE gates for scorecard/evidence, inventory coverage, default drift,
+  strict schema, sparse overlay, env ownership, iOS settings parity, Mac sparse
+  seed, README/CI wiring, and predecessor inventory rows.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE
 scorecards and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -922,11 +937,11 @@ Settings are loaded from three layers (highest priority last):
 
 1. **Active profile settings** (`[settings]` in the resolved `profiles/<name>/profile.toml` chain)
 2. **User overlay** (`~/.tron/profiles/user/profile.toml` `[settings]`, deep-merged over the active profile)
-3. **Environment variables** (`TRON_*` overrides)
+3. **Environment variables** (`TRON_DEFAULT_MODEL`, `TRON_DEFAULT_PROVIDER`, `TRON_HEARTBEAT_INTERVAL`, and `ANTHROPIC_CLIENT_ID`)
 
 Settings are server-authoritative. Engine-native clients read the current valid `ProfileRuntime` snapshot by invoking `settings::get` and write sparse user overrides through `settings::update` / `settings::reset_to_defaults` with explicit idempotency keys. Missing overlays use profile defaults, but malformed TOML or non-object `[settings]` returns an engine/transport error instead of being repaired silently. Successful writes are serialized, validated, written atomically, and then swapped into the cached `Arc<TronSettings>` and `ProfileRuntime`. If the compiled profile runtime rejects the result, the sparse overlay is rolled back and the last valid runtime snapshot remains active.
 
-The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If a managed profile default is missing, corrupt, or stale against the current strict profile schema, startup restores it from compiled defaults; malformed user settings fail fast. iOS device-only preferences live in iOS storage/Keychain, not in the server settings profile.
+The managed `profiles/default/profile.toml` is the auditable seeded baseline from `packages/agent/defaults/profiles/default/profile.toml`, compiled into the agent and written into `~/.tron/profiles/default/profile.toml` during startup seeding/recovery. `profiles/user/profile.toml` is intentionally sparse and high-signal: it stores only values the user/app explicitly changed under `[settings]`. If a managed profile default is missing, corrupt, or stale against the current strict profile schema, startup restores it from compiled defaults; malformed user settings, unknown nested settings keys, invalid TOML, and non-object `[settings]` fail fast. iOS decodes server-owned settings as authoritative fields instead of using local fallback defaults; device-only iOS preferences live in iOS storage/Keychain, not in the server settings profile.
 
 The schema is defined in `packages/agent/src/domains/settings/profile/types/`. All field names are camelCase on the wire. **The WebSocket port is a CLI flag (`--port`, default 9847), not a settings field.**
 
@@ -1351,7 +1366,7 @@ The manual deploy process (`scripts/tron.d/manual-deploy.sh::cmd_manual_deploy`)
 
 ### Install Directory
 
-Base directories in the tree below are resolved through helpers in `packages/agent/src/shared/foundation/paths/`. To rename a directory, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/invocation/host/mod.rs`.
+Base directories for `profiles`, `workspace`, and `internal` in the tree below are resolved through helpers in `packages/agent/src/shared/foundation/paths/`. To rename one of those directories, change the constant in `dirs::*` there and every call site updates automatically. The engine ledger file is derived from the resolved event DB path in `packages/agent/src/engine/invocation/host/mod.rs`.
 
 ```
 ~/.tron/
@@ -1364,15 +1379,11 @@ Base directories in the tree below are resolved through helpers in `packages/age
 |   +-- normal/                    Managed standard workspace/session profile
 |   |   +-- profile.toml           Inherits default; profileClass = "normal"
 |   +-- chat/                      Managed quick-chat profile
-|   |   +-- profile.toml           Inherits default; quick-chat provider defaults
+|   |   +-- profile.toml           Inherits default; profileClass = "chat"
 |   +-- local/                     Managed local-provider profile
-|   |   +-- profile.toml           Inherits default; local-provider defaults
-|   +-- user/                      Sparse user profile/settings/prompt overrides
+|   |   +-- profile.toml           Inherits default; profileClass = "local"
+|   +-- user/                      Sparse user profile/settings overrides
 |       +-- profile.toml           Sparse `[settings]` overrides
-+-- memory/                       Durable user/agent continuity
-|   +-- MEMORY.md                  Canonical single-file root (name, preferences, active projects)
-|   +-- rules/                     Optional user-authored continuity detail files
-|   +-- sessions/                  Optional agent-owned session summaries
 +-- workspace/                    Active work and generated artifacts
 |   +-- projects/                  Project-local active work
 |   +-- plans/                     Plan files and task lists
@@ -1404,7 +1415,7 @@ Base directories in the tree below are resolved through helpers in `packages/age
 ```
 
 Notes:
-- The four top-level homes are the primitives: behavior in `profiles`, continuity in `memory`, active substrate in `workspace`, and runtime machinery in `internal`.
+- The seeded top-level homes are `profiles`, `workspace`, and `internal`; Tron startup no longer creates a top-level `memory` directory.
 - Credentials for external CLIs (Google Workspace, etc.) live in `~/.tron/workspace/vault/`. Tron-owned provider auth and the bearer token live in `~/.tron/profiles/auth.json`.
 - Pause/lock sentinels live under `~/.tron/internal/run/` with the rest of the runtime machinery. They are managed by the respective CLI subcommands, not user-edited at the Tron Home root.
 
@@ -1483,6 +1494,7 @@ tron ci clippy test          # Subset: linting + tests
 `public_protocol_api_contract_discipline_invariants`,
 `provider_model_boundary_discipline_invariants`,
 `performance_resource_governance_invariants`,
+`configuration_profile_environment_discipline_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

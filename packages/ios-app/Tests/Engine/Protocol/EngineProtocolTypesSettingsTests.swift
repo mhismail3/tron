@@ -40,8 +40,8 @@ struct ServerSettingsTests {
         #expect(settings.storageMaxDatabaseMb == 256)
     }
 
-    @Test("decode minimal server payload uses primitive defaults")
-    func minimalServerPayloadDefaults() throws {
+    @Test("decode fixture server payload uses primitive defaults")
+    func fixtureServerPayloadDefaults() throws {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data())
         #expect(settings.defaultModel == "claude-sonnet-4-6")
         #expect(settings.defaultWorkspace == nil)
@@ -64,16 +64,45 @@ struct ServerSettingsTests {
     @Test("missing retired policy blocks are accepted")
     func missingRetiredPolicyBlocksAccepted() throws {
         let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
-        let settings = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.defaultModel == "claude-opus-4-6")
     }
 
-    @Test("CompactionSettings decoder with empty JSON uses defaults")
-    func compactionDecoderDefaults() throws {
-        let decoded = try JSONDecoder().decode(ServerSettings.CompactionSettings.self, from: Data("{}".utf8))
-        let manual = ServerSettings.CompactionSettings.defaults
-        #expect(decoded.preserveRecentCount == manual.preserveRecentCount)
-        #expect(decoded.triggerTokenThreshold == manual.triggerTokenThreshold)
+    @Test("CompactionSettings decoder rejects missing server fields")
+    func compactionDecoderRejectsMissingFields() throws {
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(ServerSettings.CompactionSettings.self, from: Data("{}".utf8))
+        }
+    }
+
+    @Test("ServerSettings decoder rejects empty payload")
+    func serverSettingsDecoderRejectsEmptyPayload() throws {
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(ServerSettings.self, from: Data("{}".utf8))
+        }
+    }
+
+    @Test("ServerSettings decoder rejects malformed server field type")
+    func serverSettingsDecoderRejectsMalformedTypes() throws {
+        let json = """
+        {
+            "server": { "defaultModel": 42 },
+            "context": {
+                "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
+            },
+            "observability": {
+                "logLevel": "debug",
+                "verboseRetentionDays": 3
+            },
+            "storage": {
+                "retentionEnabled": false,
+                "maxDatabaseMb": 256
+            }
+        }
+        """
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(ServerSettings.self, from: Data(json.utf8))
+        }
     }
 
     @Test("ServerSettingsUpdate encodes primitive structure")

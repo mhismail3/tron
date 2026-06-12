@@ -21,3 +21,4 @@ DRC-1-019	proof	offline_roundtrip	packages/agent/src/domains/session/replay/roun
 DRC-1-020	source	engine_idempotency_entries	packages/agent/src/engine/durability/ledger/	stable key order	Include session-scoped or session-invocation-referenced entries with request/outcome hashes	DRC-7 passed
 DRC-1-021	proof	docs_protocol_ios_parity	packages/agent/tests/determinism_replayability/docs_parity.rs	implemented	Guard README/protocol/session/iOS docs for replay manifest parity	DRC-9 passed
 DRC-1-022	proof	final_closeout	packages/agent/tests/determinism_replayability/closeout.rs	implemented	Enforce 100/100, complete active DRC docs, final TSV proof, and no stale unresolved closeout wording	DRC-10 passed
+DRC-1-023	proof	configuration_profile_default_drift	packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv	implemented	Configuration / Profile / Environment Discipline keeps managed defaults reproducible against compiled settings	DRC-9 passed

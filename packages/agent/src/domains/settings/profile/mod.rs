@@ -5,13 +5,17 @@
 //! Settings are loaded from three layers (in priority order):
 //! 1. **Active profile settings** — `[settings]` in the resolved profile chain
 //! 2. **User overlay** — `~/.tron/profiles/user/profile.toml` `[settings]`
-//! 3. **Environment variables** — `TRON_*` overrides (highest priority)
+//! 3. **Environment variables** — explicit settings overrides only:
+//!    `TRON_DEFAULT_MODEL`, `TRON_DEFAULT_PROVIDER`,
+//!    `TRON_HEARTBEAT_INTERVAL`, and `ANTHROPIC_CLIENT_ID`
 //!
 //! Settings are server-authoritative: `~/.tron/profiles/user/profile.toml` stores
 //! sparse user overrides. iOS reads/writes the effective server settings via
 //! `settings.get`, `settings.update`, and `settings.resetToDefaults`.
 //! Device-only iOS preferences stay in the app's local storage, not here.
 //! [`SettingsStore`] owns strict, atomic, serialized sparse-file writes.
+//! Unknown nested settings keys are rejected so stale managed defaults and user
+//! overlays fail closed instead of being silently ignored.
 //!
 //! The global singleton is reloadable: when `settings.update` writes new
 //! values to disk, [`reload_settings_from_path`] swaps the cached value
@@ -56,7 +60,8 @@
 //!
 //! - Server settings are authoritative and sparse user overrides stay in
 //!   `profiles/user/profile.toml`.
-//! - Malformed settings fail fast instead of being silently repaired.
+//! - Malformed settings and unknown nested settings keys fail fast instead of
+//!   being silently repaired or ignored.
 //! - JSON encode/decode implementation errors are mapped to [`SettingsError`]
 //!   at the settings boundary before callers receive them.
 //! - The global settings cache swaps atomically so readers hold consistent

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 /// UI settings container.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct UiSettings {
     /// Active theme name.
     pub theme: String,
@@ -39,7 +39,7 @@ impl Default for UiSettings {
 
 /// Color palette (20 named colors).
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct PaletteSettings {
     /// Primary brand color.
     pub primary: String,
@@ -112,7 +112,7 @@ impl Default for PaletteSettings {
 
 /// Unicode icon characters.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct IconSettings {
     /// Prompt indicator.
     pub prompt: String,
@@ -170,7 +170,7 @@ impl Default for IconSettings {
 
 /// Thinking animation settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ThinkingAnimationSettings {
     /// Animation frame characters.
     pub chars: Vec<String>,
@@ -198,7 +198,7 @@ impl Default for ThinkingAnimationSettings {
 
 /// Input behavior settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct InputSettings {
     /// Character threshold to detect paste vs typing.
     pub paste_threshold: usize,
@@ -229,7 +229,7 @@ impl Default for InputSettings {
 
 /// Menu display settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct MenuSettings {
     /// Maximum visible commands in the menu.
     pub max_visible_commands: usize,
@@ -320,5 +320,15 @@ mod tests {
         assert_eq!(ui.palette.error, "#ef4444");
         // Other sections should be defaults
         assert_eq!(ui.icons.prompt, "\u{203a}");
+    }
+
+    #[test]
+    fn ui_unknown_nested_field_rejected() {
+        let json = serde_json::json!({
+            "primary": "#123524",
+            "legacyAccent": "#ffffff"
+        });
+        let err = serde_json::from_value::<PaletteSettings>(json).unwrap_err();
+        assert!(err.to_string().contains("legacyAccent"));
     }
 }

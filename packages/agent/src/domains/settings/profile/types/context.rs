@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// Container for all context management settings.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct ContextSettings {
     /// Context compaction settings.
     pub compactor: CompactorSettings,
@@ -14,7 +14,7 @@ pub struct ContextSettings {
 
 /// Context compaction settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
 pub struct CompactorSettings {
     /// Maximum token budget for summarized context.
     pub max_tokens: usize,
@@ -101,5 +101,15 @@ mod tests {
         });
         let ctx: ContextSettings = serde_json::from_value(json).unwrap();
         assert_eq!(ctx.compactor.max_tokens, 50_000);
+    }
+
+    #[test]
+    fn unknown_compactor_field_rejected() {
+        let json = serde_json::json!({
+            "maxTokens": 50000,
+            "unusedQueueDrainMode": "sequential"
+        });
+        let err = serde_json::from_value::<CompactorSettings>(json).unwrap_err();
+        assert!(err.to_string().contains("unusedQueueDrainMode"));
     }
 }

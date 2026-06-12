@@ -3,13 +3,14 @@
 //! The settings domain stores sparse user overrides under
 //! `~/.tron/profiles/user/profile.toml` and loads managed defaults from the
 //! bundled profile tree. [`loader`] owns filesystem paths, default seeding,
-//! sparse overlay decoding, deep merge, and environment overrides.
+//! sparse overlay decoding, deep merge, environment overrides, and drift checks
+//! that keep bundled managed defaults aligned with compiled Rust defaults.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | [`loader`] | Resolve settings paths, seed defaults, load sparse overlays, merge defaults, and apply environment overrides |
+//! | [`loader`] | Resolve settings paths, seed defaults, load sparse overlays, merge defaults, apply environment overrides, and guard managed-default drift |
 //!
 //! ## Entry Points
 //!
@@ -28,7 +29,8 @@
 //! ## Invariants
 //!
 //! - Missing sparse user profiles mean defaults, not an implicit write.
-//! - Invalid TOML or invalid settings shapes return errors.
+//! - Invalid TOML, invalid settings shapes, and unknown nested settings keys
+//!   return errors.
 //! - Environment overrides apply after file/default merging.
 //!
 //! ## Test Ownership

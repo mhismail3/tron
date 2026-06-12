@@ -148,6 +148,7 @@ jobs:
           cargo test --test public_protocol_api_contract_discipline_invariants -- --quiet
           cargo test --test provider_model_boundary_discipline_invariants -- --quiet
           cargo test --test performance_resource_governance_invariants -- --quiet
+          cargo test --test configuration_profile_environment_discipline_invariants -- --quiet
           cargo test --test primitive_trace_execution -- --quiet
           cargo test --test integration -- --test-threads=1 --quiet
 

@@ -99,11 +99,12 @@ enum ServerSettingsWriter {
 
 private enum ProfileSettingsToml {
     static let defaultUserProfile = """
-    version = "2"
+    version = "3"
     name = "user"
     managed = false
     profileClass = "custom"
-    inherits = ["normal"]
+    inherits = []
+    authProfile = "default"
 
     """
 

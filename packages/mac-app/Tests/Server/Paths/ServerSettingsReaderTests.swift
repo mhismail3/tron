@@ -97,7 +97,10 @@ struct ServerSettingsWriterTests {
 
         #expect(ServerSettingsReader.tailscaleIP(at: path) == "100.95.255.62")
         let text = try String(contentsOf: path, encoding: .utf8)
-        #expect(text.contains(#"inherits = ["normal"]"#))
+        #expect(text.contains(#"version = "3""#))
+        #expect(text.contains(#"inherits = []"#))
+        #expect(text.contains(#"authProfile = "default""#))
+        #expect(!text.contains("[settings.context.compactor]"))
     }
 
     @Test("preserves existing profile while updating Tailscale IP")

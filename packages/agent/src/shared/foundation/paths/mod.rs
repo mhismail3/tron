@@ -3,7 +3,9 @@
 //! All call sites that need `$HOME`, `~/.tron`, or any subdirectory under
 //! `~/.tron` should use the functions and constants in this module. This
 //! centralizes every directory and file name so the primitive Tron Home has one
-//! enforceable path contract.
+//! enforceable path contract. `TRON_DATA_DIR` is an absolute developer/test
+//! override; `TRON_HOME_NAME` is limited to one home-relative directory segment
+//! for isolated Mac installs.
 
 use std::path::{Path, PathBuf};
 

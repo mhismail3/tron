@@ -1585,3 +1585,8 @@ packages/agent/docs/performance-resource-governance-inventory.tsv	retain	perf do
 packages/agent/docs/performance-resource-governance-scorecard.md	retain	perf docs	PERF-9	Performance / Resource Governance scorecard retained for resource governance closeout.
 packages/agent/src/domains/model/providers/shared/stream_common/tests.rs	retain	model provider rust test	PERF-7	Provider stream accumulator resource-limit tests retained outside production module body to preserve file budgets.
 packages/agent/tests/performance_resource_governance_invariants.rs	retain	perf rust test	PERF-9	Performance / Resource Governance invariant target retained for static resource-governance gates.
+packages/agent/docs/configuration-profile-environment-discipline-scorecard.md	retain	cpe docs	CPE-8	Configuration / Profile / Environment Discipline scorecard retained for settings/profile/env closeout.
+packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md	retain	cpe docs	CPE-8	Configuration / Profile / Environment Discipline evidence retained for verification provenance.
+packages/agent/docs/configuration-profile-environment-discipline-inventory.md	retain	cpe docs	CPE-8	Configuration / Profile / Environment Discipline inventory retained for settings/profile/env surface coverage.
+packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv	retain	cpe docs	CPE-8	Configuration / Profile / Environment Discipline machine-readable inventory retained for static gates.
+packages/agent/tests/configuration_profile_environment_discipline_invariants.rs	retain	cpe rust test	CPE-9	Configuration / Profile / Environment Discipline invariant target retained for static settings/profile/env gates.

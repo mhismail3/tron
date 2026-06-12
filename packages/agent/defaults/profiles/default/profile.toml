@@ -63,9 +63,6 @@ defaultProvider = "anthropic"
 commandTimeoutMs = 30000
 pollingIntervalMs = 500
 
-[settings.session]
-queueDrainMode = "sequential"
-
 [settings.ui]
 theme = "forest_green"
 
