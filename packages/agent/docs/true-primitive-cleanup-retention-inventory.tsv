@@ -1570,3 +1570,8 @@ packages/agent/docs/self-sufficient-agent-runtime-readiness-evidence-manifest.md
 packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md	docs	ssarr_docs	SSARR-10	Self-Sufficient Agent Runtime Readiness inventory retained as closeout documentation.
 packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv	docs	ssarr_docs	SSARR-10	Self-Sufficient Agent Runtime Readiness machine inventory retained as closeout documentation.
 packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs	test	test_harness	SSARR-10	Self-Sufficient Agent Runtime Readiness invariant target retained as static closeout proof.
+packages/agent/docs/primitive-minimality-closure-scorecard.md	docs	pmc_docs	PMC-9	Primitive Minimality Closure scorecard retained as closeout documentation.
+packages/agent/docs/primitive-minimality-closure-evidence-manifest.md	docs	pmc_docs	PMC-9	Primitive Minimality Closure evidence manifest retained as closeout documentation.
+packages/agent/docs/primitive-minimality-closure-inventory.md	docs	pmc_docs	PMC-9	Primitive Minimality Closure inventory retained as closeout documentation.
+packages/agent/docs/primitive-minimality-closure-inventory.tsv	docs	pmc_docs	PMC-9	Primitive Minimality Closure machine inventory retained as closeout documentation.
+packages/agent/tests/primitive_minimality_closure_invariants.rs	test	test_harness	PMC-9	Primitive Minimality Closure invariant target retained as static closeout proof.

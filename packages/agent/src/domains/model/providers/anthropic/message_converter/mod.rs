@@ -6,7 +6,6 @@
 //! - Thinking block signature handling (only include with signature)
 //! - Capability invocation ID remapping for cross-provider DTO parity
 //! - System prompt construction with cache breakpoints (all auth types)
-//! - ModelCapability definitions with cache control
 
 use std::collections::HashMap;
 
@@ -20,43 +19,11 @@ use crate::shared::protocol::messages::{
 };
 use serde_json::{Value, json};
 
-use super::types::{AnthropicMessageParam, AnthropicTool, CacheControl, SystemPromptBlock};
+use super::types::{AnthropicMessageParam, CacheControl, SystemPromptBlock};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Message conversion
 // ─────────────────────────────────────────────────────────────────────────────
-
-/// Convert a [`Context`] into Anthropic Messages API parameters.
-///
-/// Returns `(system, messages, capabilities)` where:
-/// - `system` is the system prompt as an array of blocks with cache breakpoints
-/// - `messages` is the list of Anthropic message params
-/// - `tools` is the optional tool list
-///
-/// `prefix` is an optional system prompt prefix block (e.g. OAuth identification).
-/// Caching is always applied regardless of auth type.
-pub fn convert_context(
-    context: &Context,
-    prefix: Option<&str>,
-) -> (
-    Option<Value>,
-    Vec<AnthropicMessageParam>,
-    Option<Vec<AnthropicTool>>,
-) {
-    // Build capability invocation ID mapping for cross-provider DTO parity.
-    let id_mapping = build_id_mapping(&context.messages);
-
-    // Convert messages
-    let messages = convert_messages_impl(&context.messages, &id_mapping);
-
-    // Convert tools
-    let capabilities = context.capabilities.as_ref().map(|t| convert_tools(t));
-
-    // Build system prompt
-    let system = build_system_prompt(context, prefix);
-
-    (system, messages, capabilities)
-}
 
 /// Build capability invocation ID mapping from messages for cross-provider DTO parity.
 fn build_id_mapping(messages: &[Message]) -> HashMap<String, String> {
@@ -419,37 +386,6 @@ fn build_system_prompt(context: &Context, prefix: Option<&str>) -> Option<Value>
     }
 
     Some(serde_json::to_value(&blocks).expect("SystemPromptBlock serialization"))
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// ModelCapability conversion
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Convert context capabilities to Anthropic format with cache control.
-///
-/// The last tool always gets a 1h cache control breakpoint (Breakpoint 1).
-fn convert_tools(
-    capabilities: &[crate::shared::protocol::model_capabilities::ModelCapability],
-) -> Vec<AnthropicTool> {
-    let mut result: Vec<AnthropicTool> = capabilities
-        .iter()
-        .map(|t| AnthropicTool {
-            name: t.name.clone(),
-            description: t.description.clone(),
-            input_schema: serde_json::to_value(&t.parameters).unwrap_or_default(),
-            cache_control: None,
-        })
-        .collect();
-
-    // Breakpoint 1: Last tool gets 1h cache
-    if let Some(last) = result.last_mut() {
-        last.cache_control = Some(CacheControl {
-            cache_type: "ephemeral".into(),
-            ttl: Some("1h".into()),
-        });
-    }
-
-    result
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -110,22 +110,6 @@ fn system_prompt_block_text_no_cache() {
     assert!(json.get("cache_control").is_none());
 }
 
-#[test]
-fn system_prompt_block_cached_5m() {
-    let block = SystemPromptBlock::text_cached("hello", Some("5m"));
-    let json = serde_json::to_value(&block).unwrap();
-    assert_eq!(json["cache_control"]["type"], "ephemeral");
-    assert_eq!(json["cache_control"]["ttl"], "5m");
-}
-
-#[test]
-fn system_prompt_block_cached_no_ttl() {
-    let block = SystemPromptBlock::text_cached("hello", None);
-    let json = serde_json::to_value(&block).unwrap();
-    assert_eq!(json["cache_control"]["type"], "ephemeral");
-    assert!(json["cache_control"].get("ttl").is_none());
-}
-
 // -- SSE event deserialization --
 
 #[test]
@@ -359,66 +343,6 @@ fn sse_error() {
         }
         _ => panic!("expected Error"),
     }
-}
-
-// -- Request building helpers --
-
-#[test]
-fn text_block_builds_correct_json() {
-    let block = text_block("hello");
-    assert_eq!(block["type"], "text");
-    assert_eq!(block["text"], "hello");
-}
-
-#[test]
-fn image_block_builds_correct_json() {
-    let block = image_block("base64data", "image/png");
-    assert_eq!(block["type"], "image");
-    assert_eq!(block["source"]["type"], "base64");
-    assert_eq!(block["source"]["media_type"], "image/png");
-    assert_eq!(block["source"]["data"], "base64data");
-}
-
-#[test]
-fn document_block_builds_correct_json() {
-    let block = document_block("pdfdata", "application/pdf");
-    assert_eq!(block["type"], "document");
-    assert_eq!(block["source"]["media_type"], "application/pdf");
-}
-
-#[test]
-fn thinking_block_builds_correct_json() {
-    let block = thinking_block("deep thought", "sig123");
-    assert_eq!(block["type"], "thinking");
-    assert_eq!(block["thinking"], "deep thought");
-    assert_eq!(block["signature"], "sig123");
-}
-
-#[test]
-fn tool_use_block_builds_correct_json() {
-    let mut input = Map::new();
-    let _ = input.insert("cmd".into(), serde_json::json!("ls"));
-    let block = tool_use_block("toolu_01abc", "execute", &input);
-    assert_eq!(block["type"], "tool_use");
-    assert_eq!(block["id"], "toolu_01abc");
-    assert_eq!(block["name"], "execute");
-    assert_eq!(block["input"]["cmd"], "ls");
-}
-
-#[test]
-fn tool_result_block_success() {
-    let content = vec![text_block("output")];
-    let block = tool_result_block("toolu_01abc", &content, false);
-    assert_eq!(block["type"], "tool_result");
-    assert_eq!(block["tool_use_id"], "toolu_01abc");
-    assert!(block.get("is_error").is_none());
-}
-
-#[test]
-fn tool_result_block_error() {
-    let content = vec![text_block("error msg")];
-    let block = tool_result_block("toolu_01abc", &content, true);
-    assert_eq!(block["is_error"], true);
 }
 
 // -- AnthropicTool --

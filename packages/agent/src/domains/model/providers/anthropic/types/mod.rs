@@ -5,7 +5,7 @@
 //! from the Anthropic Messages API streaming responses.
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 mod catalog;
 mod stream;
@@ -110,19 +110,6 @@ impl SystemPromptBlock {
             cache_control: None,
         }
     }
-
-    /// Create a text block with ephemeral cache control.
-    #[must_use]
-    pub fn text_cached(text: impl Into<String>, ttl: Option<&str>) -> Self {
-        Self {
-            block_type: "text".into(),
-            text: text.into(),
-            cache_control: Some(CacheControl {
-                cache_type: "ephemeral".into(),
-                ttl: ttl.map(String::from),
-            }),
-        }
-    }
 }
 
 /// OAuth system prompt prefix required by Anthropic for OAuth connections.
@@ -186,80 +173,6 @@ pub struct AnthropicMessageParam {
     pub role: String,
     /// Content blocks.
     pub content: Vec<Value>,
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Anthropic API content block types (for building requests)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Build a text content block.
-#[must_use]
-pub fn text_block(text: &str) -> Value {
-    serde_json::json!({
-        "type": "text",
-        "text": text,
-    })
-}
-
-/// Build an image content block (base64).
-#[must_use]
-pub fn image_block(data: &str, media_type: &str) -> Value {
-    serde_json::json!({
-        "type": "image",
-        "source": {
-            "type": "base64",
-            "media_type": media_type,
-            "data": data,
-        },
-    })
-}
-
-/// Build a document content block (base64).
-#[must_use]
-pub fn document_block(data: &str, media_type: &str) -> Value {
-    serde_json::json!({
-        "type": "document",
-        "source": {
-            "type": "base64",
-            "media_type": media_type,
-            "data": data,
-        },
-    })
-}
-
-/// Build a thinking content block.
-#[must_use]
-pub fn thinking_block(thinking: &str, signature: &str) -> Value {
-    serde_json::json!({
-        "type": "thinking",
-        "thinking": thinking,
-        "signature": signature,
-    })
-}
-
-/// Build a `tool_use` content block.
-#[must_use]
-pub fn tool_use_block(id: &str, name: &str, input: &Map<String, Value>) -> Value {
-    serde_json::json!({
-        "type": "tool_use",
-        "id": id,
-        "name": name,
-        "input": input,
-    })
-}
-
-/// Build a `tool_result` content block.
-#[must_use]
-pub fn tool_result_block(tool_use_id: &str, content: &[Value], is_error: bool) -> Value {
-    let mut block = serde_json::json!({
-        "type": "tool_result",
-        "tool_use_id": tool_use_id,
-        "content": content,
-    });
-    if is_error {
-        block["is_error"] = serde_json::json!(true);
-    }
-    block
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

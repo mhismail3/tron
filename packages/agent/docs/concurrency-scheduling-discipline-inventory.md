@@ -1,6 +1,6 @@
 # Concurrency Scheduling Discipline Inventory
 
-Status: CSD-10 `passed_after_fix`; 113 scheduling-surface rows and 13 static-gate/predecessor rows inventoried and classified.
+Status: CSD-10 `passed_after_fix`; 113 scheduling-surface rows and 18 static-gate/predecessor rows inventoried and classified.
 
 This inventory classifies production scheduling surfaces by owner, scheduler
 class, start site, cancellation or stop path, backpressure or capacity policy,
@@ -56,7 +56,7 @@ Scheduler class distribution for the 113 production scheduling-surface rows:
 | `blocking_supervisor` | 1 |
 | `ack_coalescer` | 1 |
 
-Static-gate/predecessor rows: 13 `test_fixture` rows.
+Static-gate/predecessor rows: 18 `test_fixture` rows.
 
 ## Rust Scheduling Proof
 

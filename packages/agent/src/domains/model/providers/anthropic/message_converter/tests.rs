@@ -2,7 +2,6 @@ use super::super::types::OAUTH_SYSTEM_PROMPT_PREFIX;
 use super::*;
 use crate::shared::protocol::content::AssistantContent;
 use crate::shared::protocol::messages::{Context, Message, UserMessageContent};
-use crate::shared::protocol::model_capabilities::{CapabilityParameterSchema, ModelCapability};
 use serde_json::Map;
 
 fn simple_context() -> Context {
@@ -13,20 +12,6 @@ fn simple_context() -> Context {
         working_directory: None,
         agent_state_context: None,
         server_origin: None,
-    }
-}
-
-fn make_tool(name: &str) -> ModelCapability {
-    ModelCapability {
-        name: name.into(),
-        description: format!("{name} tool"),
-        parameters: CapabilityParameterSchema {
-            schema_type: "object".into(),
-            properties: None,
-            required: None,
-            description: None,
-            extra: serde_json::Map::default(),
-        },
     }
 }
 
@@ -286,60 +271,6 @@ fn system_prompt_with_prefix_volatile_has_two_cache_tiers() {
         has_default,
         "Should have default (5m) cache on volatile content"
     );
-}
-
-// ── ModelCapability conversion ──────────────────────────────────────────────────
-
-#[test]
-fn convert_tools_always_caches_last() {
-    let capabilities = vec![make_tool("execute"), make_tool("inspect")];
-    let result = convert_tools(&capabilities);
-    assert_eq!(result.len(), 2);
-    assert_eq!(result[0].name, "execute");
-    assert_eq!(result[1].name, "inspect");
-    assert!(result[0].cache_control.is_none());
-    assert!(result[1].cache_control.is_some());
-    assert_eq!(
-        result[1].cache_control.as_ref().unwrap().ttl.as_deref(),
-        Some("1h")
-    );
-}
-
-#[test]
-fn convert_tools_empty() {
-    let capabilities: Vec<ModelCapability> = vec![];
-    let result = convert_tools(&capabilities);
-    assert!(result.is_empty());
-}
-
-// ── Full context conversion ──────────────────────────────────────────
-
-#[test]
-fn convert_context_full() {
-    let ctx = Context {
-        system_prompt: Some("You are helpful.".into()),
-        messages: vec![
-            Message::user("hello"),
-            Message::Assistant {
-                content: vec![AssistantContent::text("hi there")],
-                usage: None,
-                cost: None,
-                stop_reason: None,
-                thinking: None,
-            },
-        ]
-        .into(),
-        capabilities: Some(vec![make_tool("execute")]),
-        ..Default::default()
-    };
-
-    let (system, messages, capabilities) = convert_context(&ctx, Some(OAUTH_SYSTEM_PROMPT_PREFIX));
-    assert!(system.is_some());
-    assert_eq!(messages.len(), 2);
-    assert_eq!(messages[0].role, "user");
-    assert_eq!(messages[1].role, "assistant");
-    assert!(capabilities.is_some());
-    assert_eq!(capabilities.unwrap().len(), 1);
 }
 
 // ── ID mapping ───────────────────────────────────────────────────────

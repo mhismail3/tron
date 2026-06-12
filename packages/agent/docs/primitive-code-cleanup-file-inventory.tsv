@@ -1615,3 +1615,8 @@ packages/agent/docs/self-sufficient-agent-runtime-readiness-evidence-manifest.md
 packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md	retain	ssarr docs	SSARR-10	Self-Sufficient Agent Runtime Readiness inventory retained for extension-point classification.
 packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv	retain	ssarr docs	SSARR-10	Self-Sufficient Agent Runtime Readiness machine inventory retained for static gates.
 packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs	retain	ssarr rust test	SSARR-10	Self-Sufficient Agent Runtime Readiness invariant target retained for static readiness gates.
+packages/agent/docs/primitive-minimality-closure-scorecard.md	retain	pmc docs	PMC-9	Primitive Minimality Closure scorecard retained for minimality closeout.
+packages/agent/docs/primitive-minimality-closure-evidence-manifest.md	retain	pmc docs	PMC-9	Primitive Minimality Closure evidence manifest retained for command and failed-attempt proof.
+packages/agent/docs/primitive-minimality-closure-inventory.md	retain	pmc docs	PMC-9	Primitive Minimality Closure inventory retained for removed and retained surface classification.
+packages/agent/docs/primitive-minimality-closure-inventory.tsv	retain	pmc docs	PMC-9	Primitive Minimality Closure machine inventory retained for static gates.
+packages/agent/tests/primitive_minimality_closure_invariants.rs	retain	pmc rust test	PMC-9	Primitive Minimality Closure invariant target retained for static minimality gates.

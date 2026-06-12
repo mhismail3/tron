@@ -154,6 +154,7 @@ jobs:
           cargo test --test developer_experience_repo_hygiene_automation_invariants -- --quiet
           cargo test --test documentation_evidence_scorecard_integrity_invariants -- --quiet
           cargo test --test self_sufficient_agent_runtime_readiness_invariants -- --quiet
+          cargo test --test primitive_minimality_closure_invariants -- --quiet
           cargo test --test primitive_trace_execution -- --quiet
           cargo test --test integration -- --test-threads=1 --quiet
 

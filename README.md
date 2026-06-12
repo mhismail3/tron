@@ -329,6 +329,18 @@ Current living entry points:
   completed SSARR readiness taxonomy and extension-point ownership notes.
 - `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv`:
   machine-readable SSARR readiness inventory used by static gates.
+- `packages/agent/docs/primitive-minimality-closure-scorecard.md`: completed
+  Primitive Minimality Closure scorecard for the post-SSARR teardown pass over
+  dead provider helpers, stream residue, proof-layer parity, retained
+  suspicious surfaces, and final regression proof.
+- `packages/agent/docs/primitive-minimality-closure-evidence-manifest.md`:
+  companion evidence manifest for PMC baseline checks, removal batches, failed
+  attempts and fixes, retained-contract rationale, and final verification.
+- `packages/agent/docs/primitive-minimality-closure-inventory.md`: completed PMC
+  classification of removed runtime residue, retained provider/engine
+  contracts, historical evidence, and static gates.
+- `packages/agent/docs/primitive-minimality-closure-inventory.tsv`:
+  machine-readable PMC minimality inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -458,13 +470,18 @@ Current living entry points:
   successor-term classification, negative generated-worker/learned-memory/tool
   synthesis guards, local/GitHub target parity, README wiring, stale branch
   quarantine, and final closeout proof.
+- `packages/agent/tests/primitive_minimality_closure_invariants.rs`:
+  completed PMC gates for minimality scorecard/evidence/inventory integrity,
+  deleted provider helper absence, retained-contract classification,
+  local/GitHub target parity, README wiring, predecessor inventory rows, and
+  no public protocol/iOS behavior expansion.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
 the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
-scorecards and the OPSAA cleanup scorecard.
+scorecards, the PMC closure scorecard, and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1602,6 +1619,7 @@ tron ci clippy test          # Subset: linting + tests
 `developer_experience_repo_hygiene_automation_invariants`,
 `documentation_evidence_scorecard_integrity_invariants`,
 `self_sufficient_agent_runtime_readiness_invariants`,
+`primitive_minimality_closure_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

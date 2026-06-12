@@ -178,24 +178,6 @@ fn extract_sse_data(line: &str) -> Option<String> {
     Some(data.to_string())
 }
 
-/// Safely parse JSON from an SSE data string.
-///
-/// Returns `None` on parse failure with a warning log.
-pub fn parse_sse_data<T: serde::de::DeserializeOwned>(data: &str, provider: &str) -> Option<T> {
-    match serde_json::from_str(data) {
-        Ok(parsed) => Some(parsed),
-        Err(e) => {
-            warn!(
-                provider = provider,
-                error = %e,
-                data_preview = crate::shared::foundation::text::truncate_str(data, 100),
-                "Failed to parse SSE data"
-            );
-            None
-        }
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Tests
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,21 +249,6 @@ mod tests {
     fn extract_preserves_json_with_spaces() {
         let data = extract_sse_data("data: { \"key\": \"value\" }");
         assert_eq!(data, Some("{ \"key\": \"value\" }".into()));
-    }
-
-    // ── parse_sse_data ───────────────────────────────────────────────────
-
-    #[test]
-    fn parse_valid_json() {
-        let result: Option<serde_json::Value> = parse_sse_data("{\"type\":\"text\"}", "test");
-        assert!(result.is_some());
-        assert_eq!(result.unwrap()["type"], "text");
-    }
-
-    #[test]
-    fn parse_invalid_json_returns_none() {
-        let result: Option<serde_json::Value> = parse_sse_data("not json at all", "test");
-        assert!(result.is_none());
     }
 
     // ── parse_sse_lines (integration) ────────────────────────────────────

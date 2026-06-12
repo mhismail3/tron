@@ -8,8 +8,6 @@
 //! shared `stream_common` module. Capability invocation handling remains provider-specific
 //! because Gemini delivers complete function calls (not streamed argument deltas).
 
-use std::collections::HashSet;
-
 use crate::domains::model::protocol::{CapabilityCallContext, parse_capability_call_arguments};
 use crate::domains::model::providers::shared::stream_common::StreamAccumulator;
 use crate::shared::protocol::content::AssistantContent;
@@ -29,8 +27,6 @@ pub struct StreamState {
     pub capability_invocation_index: u32,
     /// Unique prefix for capability invocation ID generation (Gemini doesn't provide IDs).
     pub unique_prefix: String,
-    /// Set of capability invocation IDs already completed (to avoid duplicates).
-    pub completed_tool_ids: HashSet<String>,
     /// Token count for tool-use prompt scaffolding.
     pub tool_use_prompt_tokens: u64,
     /// Provider-reported total token count.
@@ -58,7 +54,6 @@ pub fn create_stream_state() -> StreamState {
         capability_invocations: Vec::new(),
         capability_invocation_index: 0,
         unique_prefix: prefix,
-        completed_tool_ids: HashSet::new(),
         tool_use_prompt_tokens: 0,
         total_tokens: 0,
     }
@@ -320,16 +315,6 @@ fn handle_finish(
 
 fn nonzero(value: u64) -> Option<u64> {
     (value > 0).then_some(value)
-}
-
-/// Synthesize a done event when the stream ends without a finish reason.
-pub fn synthesize_done_event(state: &mut StreamState) -> Vec<StreamEvent> {
-    let finish_reason = if state.capability_invocations.is_empty() {
-        "STOP"
-    } else {
-        "TOOL_USE"
-    };
-    handle_finish(finish_reason, None, state)
 }
 
 /// Map a Gemini finish reason to a unified stop reason string.
@@ -699,38 +684,6 @@ mod tests {
                     _ => panic!("Expected CapabilityInvocation"),
                 }
             }
-            _ => panic!("Expected done"),
-        }
-    }
-
-    // ── synthesize_done_event ────────────────────────────────────────
-
-    #[test]
-    fn synthesize_uses_capability_invocation_when_tools_present() {
-        let mut state = create_stream_state();
-        state
-            .capability_invocations
-            .push(CapabilityInvocationDraftState {
-                id: "call_1".into(),
-                name: "test".into(),
-                args: serde_json::json!({}),
-                thought_signature: None,
-            });
-        let events = synthesize_done_event(&mut state);
-        match events.last().unwrap() {
-            StreamEvent::Done { stop_reason, .. } => {
-                assert_eq!(stop_reason, "capability_invocation")
-            }
-            _ => panic!("Expected done"),
-        }
-    }
-
-    #[test]
-    fn synthesize_uses_stop_when_no_tools() {
-        let mut state = create_stream_state();
-        let events = synthesize_done_event(&mut state);
-        match events.last().unwrap() {
-            StreamEvent::Done { stop_reason, .. } => assert_eq!(stop_reason, "end_turn"),
             _ => panic!("Expected done"),
         }
     }
