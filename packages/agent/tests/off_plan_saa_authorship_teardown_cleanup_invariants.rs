@@ -660,7 +660,10 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         _ if path.starts_with("packages/agent/docs/primitive-engine-teardown-") => {
             Some(ResidueClass::FutureReadinessWording)
         }
-        _ if path.contains("self-sufficient-agent-runtime-readiness") => {
+        _ if path.contains("self-sufficient-agent-runtime-readiness")
+            || path
+                == "packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs" =>
+        {
             Some(ResidueClass::FutureReadinessWording)
         }
         _ => None,

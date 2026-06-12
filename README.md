@@ -317,6 +317,18 @@ Current living entry points:
   completed DESI documentation/evidence taxonomy and ownership notes.
 - `packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv`:
   machine-readable DESI artifact inventory used by static gates.
+- `packages/agent/docs/self-sufficient-agent-runtime-readiness-scorecard.md`:
+  completed Self-Sufficient Agent Runtime Readiness scorecard for auditing
+  clean extension points for generated workers, learned rules/memory, tool
+  synthesis, and agent-authored state without implementing successor features.
+- `packages/agent/docs/self-sufficient-agent-runtime-readiness-evidence-manifest.md`:
+  companion evidence manifest for SSARR lineage, source audit, term
+  classification, verification commands, iOS no-touch rationale, and residual
+  readiness risks.
+- `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md`:
+  completed SSARR readiness taxonomy and extension-point ownership notes.
+- `packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv`:
+  machine-readable SSARR readiness inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -441,12 +453,17 @@ Current living entry points:
   present-tense docs, command provenance, predecessor inventory coverage,
   local/GitHub closeout target parity, stale branch quarantine, and final
   closeout proof.
+- `packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs`:
+  completed SSARR gates for readiness scorecard/evidence/inventory integrity,
+  successor-term classification, negative generated-worker/learned-memory/tool
+  synthesis guards, local/GitHub target parity, README wiring, stale branch
+  quarantine, and final closeout proof.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
 scorecards and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
@@ -817,11 +834,12 @@ Correlation ids are never command ids or idempotency keys. Stream clients should
 persist delivered cursors locally and ACK the latest delivered cursor per
 subscription, not every event in a burst; ACK responses use normal engine
 backpressure so catch-up traffic does not become a socket-fatal overload.
-Public `promote` is a user-owned `engine::promote` path, not a client-side
-catalog edit: it requires a non-empty `idempotencyKey`, workspace/system
-authority, and workspace context for workspace promotion. Owner mismatch,
-idempotency, and invalid visibility promotion failures return typed public
-error codes with structured details.
+Public `promote` is a user-owned `engine::promote` path, not a client-side catalog edit:
+it requires a non-empty `idempotencyKey`, workspace/system authority, and
+workspace context for workspace promotion. It is not a tool-synthesis or
+generated-capability authoring API. Owner mismatch, idempotency, and invalid
+visibility promotion failures return typed public error codes with structured
+details.
 Failed `/engine` responses expose the same canonical failure envelope used by
 runtime events: stable `code`, `category`, sanitized `message`, `retryable`,
 `recoverable`, `origin`, optional provider/model/status/error-type/retry-after
@@ -1583,6 +1601,7 @@ tron ci clippy test          # Subset: linting + tests
 `ios_thin_client_generic_runtime_shell_invariants`,
 `developer_experience_repo_hygiene_automation_invariants`,
 `documentation_evidence_scorecard_integrity_invariants`,
+`self_sufficient_agent_runtime_readiness_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

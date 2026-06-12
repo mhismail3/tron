@@ -48,6 +48,7 @@ run_tests() {
         ios_thin_client_generic_runtime_shell_invariants
         developer_experience_repo_hygiene_automation_invariants
         documentation_evidence_scorecard_integrity_invariants
+        self_sufficient_agent_runtime_readiness_invariants
         primitive_trace_execution
         integration
     )
