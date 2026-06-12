@@ -1523,3 +1523,8 @@ packages/agent/docs/data-integrity-storage-evolution-migration-discipline-invent
 packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md	docs	docs/static gates	DSEMD-0	Data Integrity Storage Evolution Migration Discipline scorecard retained for active storage hardening.
 packages/agent/src/engine/tests/durability/sqlite_storage_discipline.rs	test	test_harness	DSEMD-5	Focused engine durability SQLite storage-discipline tests retained for shared-schema constructor hardening.
 packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs	test	test_harness	DSEMD-0	Data Integrity Storage Evolution Migration Discipline invariant target retained for static storage integrity gates.
+packages/agent/docs/public-protocol-api-contract-discipline-evidence-manifest.md	docs	docs/static gates	PPACD-0	Public Protocol API Contract Discipline evidence manifest retained for protocol contract closeout.
+packages/agent/docs/public-protocol-api-contract-discipline-inventory.md	docs	docs/static gates	PPACD-0	Public Protocol API Contract Discipline inventory retained for protocol surface coverage.
+packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv	docs	docs/static gates	PPACD-0	Public Protocol API Contract Discipline machine-readable inventory retained for static gates.
+packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md	docs	docs/static gates	PPACD-0	Public Protocol API Contract Discipline scorecard retained for public protocol hardening.
+packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs	test	test_harness	PPACD-0	Public Protocol API Contract Discipline invariant target retained for static protocol gates.

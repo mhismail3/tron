@@ -46,8 +46,8 @@ pub fn public_engine_transport_specs() -> EngineResult<Vec<CapabilitySpec>> {
             EffectClass::DelegatedInvocation,
             RiskLevel::Low,
         )
-        .request_schema(json!({"additionalProperties":true,"properties":{"context":{"additionalProperties":true,"type":"object"},"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"payload":{"type":"object"}},"required":["functionId"],"type":"object"}))
-        .response_schema(json!({"additionalProperties":true,"properties":{"invocationId":{"type":"string"},"result":{},"status":{"type":"string"}},"required":["status"],"type":"object"}))
+        .request_schema(json!({"additionalProperties":false,"properties":{"context":{"additionalProperties":false,"properties":{"parentInvocationId":{"type":"string"},"sessionId":{"type":"string"},"traceId":{"type":"string"},"workspaceId":{"type":"string"}},"type":"object"},"functionId":{"type":"string"},"idempotencyKey":{"type":"string"},"payload":{"additionalProperties":true,"type":"object"}},"required":["functionId"],"type":"object"}))
+        .response_schema(json!({"additionalProperties":false,"properties":{"child":{"additionalProperties":false,"properties":{"error":{"type":"object"},"functionId":{"type":"string"},"invocationId":{"type":"string"},"replayedFrom":{"type":"string"},"traceId":{"type":"string"},"value":{}},"type":"object"}},"required":["child"],"type":"object"}))
         .build()?,
         public_spec(
             "promote",
@@ -225,5 +225,81 @@ mod tests {
         );
         assert!(schema["properties"]["newVisibility"].is_null());
         assert!(schema["properties"]["promoted"].is_null());
+    }
+
+    #[test]
+    fn invoke_transport_request_schema_matches_public_wire_context() {
+        let invoke = public_engine_transport_specs()
+            .expect("public specs")
+            .into_iter()
+            .find(|spec| spec.operation_key.as_str() == "invoke")
+            .expect("invoke spec");
+        let schema = invoke.request_schema.expect("invoke request schema");
+
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(
+            schema["properties"]["context"]["additionalProperties"],
+            false
+        );
+        assert_eq!(
+            schema["properties"]["context"]["properties"],
+            json!({
+                "sessionId": {"type": "string"},
+                "workspaceId": {"type": "string"},
+                "traceId": {"type": "string"},
+                "parentInvocationId": {"type": "string"}
+            })
+        );
+        for forbidden in [
+            "authorityScopes",
+            "runtimeMetadata",
+            "actorKind",
+            "actorId",
+            "grantId",
+            "workerId",
+        ] {
+            assert!(
+                schema["properties"]["context"]["properties"][forbidden].is_null(),
+                "public invoke context schema must not expose {forbidden}"
+            );
+        }
+        assert_eq!(
+            schema["properties"]["payload"]["additionalProperties"], true,
+            "function payload remains target-defined while transport context is closed"
+        );
+    }
+
+    #[test]
+    fn invoke_transport_response_schema_excludes_child_runtime_metadata() {
+        let invoke = public_engine_transport_specs()
+            .expect("public specs")
+            .into_iter()
+            .find(|spec| spec.operation_key.as_str() == "invoke")
+            .expect("invoke spec");
+        let schema = invoke.response_schema.expect("invoke response schema");
+        let child = &schema["properties"]["child"];
+
+        assert_eq!(schema["additionalProperties"], false);
+        assert_eq!(schema["required"], json!(["child"]));
+        assert_eq!(child["additionalProperties"], false);
+        for allowed in [
+            "invocationId",
+            "functionId",
+            "traceId",
+            "value",
+            "error",
+            "replayedFrom",
+        ] {
+            assert!(
+                !child["properties"][allowed].is_null(),
+                "public child schema missing {allowed}"
+            );
+        }
+        for forbidden in ["workerId", "functionRevision", "catalogRevision"] {
+            assert!(
+                child["properties"][forbidden].is_null(),
+                "public child schema must not expose {forbidden}"
+            );
+        }
     }
 }

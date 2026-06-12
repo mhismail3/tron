@@ -217,15 +217,25 @@ Current living entry points:
 - `packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-inventory.tsv`:
   machine-readable cleanup inventory used by static gates.
 - `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-scorecard.md`:
-  active Data Integrity Storage Evolution Migration Discipline scorecard for
+  completed Data Integrity Storage Evolution Migration Discipline scorecard for
   SQLite storage ownership, schema drift rejection, generation/archive rules,
   WAL/checkpoint behavior, runtime hygiene, and closeout proof.
 - `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-evidence-manifest.md`:
   companion evidence manifest for DSEMD command results and residual risks.
 - `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.md`:
-  active storage surface taxonomy and ownership notes.
+  completed storage surface taxonomy and ownership notes.
 - `packages/agent/docs/data-integrity-storage-evolution-migration-discipline-inventory.tsv`:
   machine-readable DSEMD storage inventory used by static gates.
+- `packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md`:
+  completed Public Protocol API Contract Discipline scorecard for `/engine`
+  public methods, wire schemas, context boundaries, response/error/event
+  payloads, DTO parity, iOS transport decoders/encoders, and closeout proof.
+- `packages/agent/docs/public-protocol-api-contract-discipline-evidence-manifest.md`:
+  companion evidence manifest for PPACD command results and corrected findings.
+- `packages/agent/docs/public-protocol-api-contract-discipline-inventory.md`:
+  completed public protocol surface taxonomy and ownership notes.
+- `packages/agent/docs/public-protocol-api-contract-discipline-inventory.tsv`:
+  machine-readable PPACD public protocol inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -308,16 +318,21 @@ Current living entry points:
   cleanup scorecard, evidence, inventory, provider execute narrowing,
   memory/rule removal, static target, README, and predecessor-inventory gates.
 - `packages/agent/tests/data_integrity_storage_evolution_migration_discipline_invariants.rs`:
-  active Data Integrity Storage Evolution Migration Discipline gates for
+  completed Data Integrity Storage Evolution Migration Discipline gates for
   scorecard/evidence, inventory coverage, README/CI wiring, storage source
   contracts, negative corruption guards, and final closeout claims.
+- `packages/agent/tests/public_protocol_api_contract_discipline_invariants.rs`:
+  completed Public Protocol API Contract Discipline gates for scorecard/evidence,
+  inventory coverage, README/CI wiring, public `/engine` method/schema shape,
+  iOS context/decoder narrowness, predecessor inventory rows, and final closeout
+  claims.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
-the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA scorecards and
-the OPSAA cleanup scorecard.
+the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD
+scorecards and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1422,6 +1437,7 @@ tron ci clippy test          # Subset: linting + tests
 `observability_diagnostics_auditability_invariants`,
 `off_plan_saa_authorship_teardown_cleanup_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
+`public_protocol_api_contract_discipline_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

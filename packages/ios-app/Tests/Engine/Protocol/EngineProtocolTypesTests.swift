@@ -431,6 +431,112 @@ final class EngineProtocolBaseTypesTests: XCTestCase {
         XCTAssertEqual(payload["value"] as? Int, 42)
     }
 
+    func testEngineInvocationContextEncodesOnlyPublicWireScope() throws {
+        let context = EngineInvocationContext(
+            sessionId: "session-1",
+            workspaceId: "workspace-1",
+            traceId: "trace-1",
+            parentInvocationId: "parent-1"
+        )
+
+        let data = try JSONEncoder().encode(context)
+        let decoded = try JSONSerialization.jsonObject(with: data) as! [String: Any]
+
+        XCTAssertEqual(Set(decoded.keys), [
+            "sessionId",
+            "workspaceId",
+            "traceId",
+            "parentInvocationId",
+        ])
+        XCTAssertNil(decoded["authorityScopes"])
+        XCTAssertNil(decoded["runtimeMetadata"])
+    }
+
+    func testPublicEngineFramesDoNotEncodeAuthorityOrRuntimeContext() throws {
+        let context = EngineInvocationContext(
+            sessionId: "session-1",
+            workspaceId: "workspace-1",
+            traceId: "trace-1",
+            parentInvocationId: "parent-1"
+        )
+
+        let encodedFrames: [[String: Any]] = [
+            try encodedFrame(
+                EngineFunctionCallFrame(
+                    id: "invoke-1",
+                    functionId: "system::ping",
+                    payload: ["ping": "pong"],
+                    idempotencyKey: "idem-1",
+                    context: context
+                )
+            ),
+            try encodedFrame(
+                EngineSubscribeFrame(
+                    id: "subscribe-1",
+                    topic: "events.session",
+                    cursor: 1,
+                    filters: nil,
+                    limit: 10,
+                    context: context
+                )
+            ),
+            try encodedFrame(
+                EnginePollFrame(
+                    id: "poll-1",
+                    subscriptionId: nil,
+                    topic: "events.session",
+                    cursor: 1,
+                    filters: nil,
+                    limit: 10,
+                    context: context
+                )
+            ),
+        ]
+
+        for frame in encodedFrames {
+            let frameContext = frame["context"] as! [String: Any]
+            XCTAssertEqual(frameContext["sessionId"] as? String, "session-1")
+            XCTAssertEqual(frameContext["workspaceId"] as? String, "workspace-1")
+            XCTAssertEqual(frameContext["traceId"] as? String, "trace-1")
+            XCTAssertEqual(frameContext["parentInvocationId"] as? String, "parent-1")
+            XCTAssertNil(frameContext["authorityScopes"])
+            XCTAssertNil(frameContext["runtimeMetadata"])
+        }
+    }
+
+    private func encodedFrame<T: Encodable>(_ frame: T) throws -> [String: Any] {
+        let data = try JSONEncoder().encode(frame)
+        return try JSONSerialization.jsonObject(with: data) as! [String: Any]
+    }
+
+    func testPublicEngineFramesDoNotExposeChildRuntimeMetadata() throws {
+        struct TestResult: Decodable {
+            let data: String
+        }
+        let json = """
+        {
+            "invocationId": "invocation-1",
+            "functionId": "system::ping",
+            "workerId": "engine",
+            "functionRevision": 7,
+            "catalogRevision": 9,
+            "traceId": "trace-1",
+            "value": {"data": "hello"},
+            "error": null,
+            "replayedFrom": null
+        }
+        """.data(using: .utf8)!
+
+        let child = try JSONDecoder().decode(EngineChildInvocation<TestResult>.self, from: json)
+
+        XCTAssertEqual(child.invocationId, "invocation-1")
+        XCTAssertEqual(child.functionId, "system::ping")
+        XCTAssertEqual(child.traceId, "trace-1")
+        XCTAssertEqual(child.value?.data, "hello")
+        XCTAssertNil(child.error)
+        XCTAssertNil(child.replayedFrom)
+    }
+
     func testEngineFunctionCallResponseDecoding() throws {
         struct TestResult: Decodable {
             let data: String

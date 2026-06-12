@@ -40,6 +40,7 @@ run_tests() {
         observability_diagnostics_auditability_invariants
         off_plan_saa_authorship_teardown_cleanup_invariants
         data_integrity_storage_evolution_migration_discipline_invariants
+        public_protocol_api_contract_discipline_invariants
         primitive_trace_execution
         integration
     )

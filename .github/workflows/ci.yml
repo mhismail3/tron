@@ -145,6 +145,7 @@ jobs:
           cargo test --test observability_diagnostics_auditability_invariants -- --quiet
           cargo test --test off_plan_saa_authorship_teardown_cleanup_invariants -- --quiet
           cargo test --test data_integrity_storage_evolution_migration_discipline_invariants -- --quiet
+          cargo test --test public_protocol_api_contract_discipline_invariants -- --quiet
           cargo test --test primitive_trace_execution -- --quiet
           cargo test --test integration -- --test-threads=1 --quiet
 
