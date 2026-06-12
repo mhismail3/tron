@@ -1573,3 +1573,8 @@ packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manife
 packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md	docs	docs/static gates	DXRHA-1	Developer Experience Repo Hygiene Automation inventory retained for contributor workflow source proof.
 packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv	docs	docs/static gates	DXRHA-1	Developer Experience Repo Hygiene Automation machine-readable inventory retained for static gates.
 packages/agent/tests/developer_experience_repo_hygiene_automation_invariants.rs	test	test_harness	DXRHA-0	Developer Experience Repo Hygiene Automation invariant target retained for local and CI static gates.
+packages/agent/docs/documentation-evidence-scorecard-integrity-scorecard.md	docs	docs/static gates	DESI-4	Documentation Evidence Scorecard Integrity scorecard retained for docs integrity closeout verification.
+packages/agent/docs/documentation-evidence-scorecard-integrity-evidence-manifest.md	docs	docs/static gates	DESI-8	Documentation Evidence Scorecard Integrity evidence artifact retained for closeout verification.
+packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.md	docs	docs/static gates	DESI-1	Documentation Evidence Scorecard Integrity inventory retained for documentation and evidence source proof.
+packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv	docs	docs/static gates	DESI-1	Documentation Evidence Scorecard Integrity machine-readable inventory retained for static gates.
+packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs	test	test_harness	DESI-0	Documentation Evidence Scorecard Integrity invariant target retained for local and CI static gates.

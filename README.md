@@ -233,9 +233,8 @@ Current living entry points:
   machine-readable inventory for every file changed in the off-plan
   `e781a6aef..2da96a848` range.
 - `packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md`:
-  active Public Protocol API Contract Discipline scorecard for narrowing
-  `/engine`, settings DTOs, iOS mirrors, and transport error contracts; local
-  iOS build/test is currently blocked by host Xcode destination state.
+  completed Public Protocol API Contract Discipline scorecard for narrowing
+  `/engine`, settings DTOs, iOS mirrors, and transport error contracts.
 - `packages/agent/docs/public-protocol-api-contract-discipline-evidence-manifest.md`:
   companion evidence manifest for PPACD source findings, focused checks, full
   closeout verification, and residual contract risks.
@@ -373,7 +372,7 @@ Current living entry points:
   `packages/agent/docs/configuration-profile-environment-discipline-evidence-manifest.md`,
   `packages/agent/docs/configuration-profile-environment-discipline-inventory.md`, and
   `packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv`:
-  active Configuration / Profile / Environment Discipline artifacts covering
+  completed Configuration / Profile / Environment Discipline artifacts covering
   canonical settings schemas, managed profile defaults, sparse user overrides,
   fail-closed environment overrides, malformed config rejection, README/profile
   drift, and iOS public settings parity.
@@ -386,7 +385,7 @@ Current living entry points:
   `packages/agent/docs/release-install-upgrade-rollback-discipline-evidence-manifest.md`,
   `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.md`, and
   `packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv`:
-  active Release / Install / Upgrade / Rollback Discipline artifacts covering
+  completed Release / Install / Upgrade / Rollback Discipline artifacts covering
   Mac wrapper install ownership, SMAppService/LaunchAgent semantics,
   contributor CLI install/manual-deploy/rollback paths, `tron dev` takeover,
   port `9847` conflict handling, generated project drift, stale-helper cleanup,
@@ -400,7 +399,7 @@ Current living entry points:
   `packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md`,
   `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md`, and
   `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv`:
-  active iOS Thin Client / Generic Runtime Shell artifacts covering retained
+  completed iOS Thin Client / Generic Runtime Shell artifacts covering retained
   pairing, settings, chat/timeline, generic capability/runtime rendering,
   canonical server errors, diagnostics/logs/redaction, deleted product
   boundaries, iOS 26.5 simulator proof, generated project drift, and static
@@ -415,7 +414,7 @@ Current living entry points:
   `packages/agent/docs/developer-experience-repo-hygiene-automation-evidence-manifest.md`,
   `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.md`, and
   `packages/agent/docs/developer-experience-repo-hygiene-automation-inventory.tsv`:
-  active Developer Experience / Repo Hygiene / Automation artifacts covering
+  completed Developer Experience / Repo Hygiene / Automation artifacts covering
   setup/dev/test workflow, script UX, generated project policy, local/GitHub
   target parity, ignored-file hygiene, branch/worktree handoff, README accuracy,
   and production automation safety.
@@ -424,6 +423,19 @@ Current living entry points:
   inventory shape, local/GitHub target parity, generated-project policy,
   tracked ignored files, contributor docs/script UX, automation safety, stale
   closeout wording, shell syntax, and predecessor inventory rows.
+- `packages/agent/docs/documentation-evidence-scorecard-integrity-scorecard.md`,
+  `packages/agent/docs/documentation-evidence-scorecard-integrity-evidence-manifest.md`,
+  `packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.md`, and
+  `packages/agent/docs/documentation-evidence-scorecard-integrity-inventory.tsv`:
+  completed Documentation / Evidence / Scorecard Integrity artifacts covering
+  living-doc truthfulness, closed artifact state, scorecard/evidence
+  traceability, inventory coverage, local/GitHub gate parity, predecessor
+  inventory synchronization, and provenance/path hygiene.
+- `packages/agent/tests/documentation_evidence_scorecard_integrity_invariants.rs`:
+  DESI guard for artifact wiring, scorecard weights, evidence command matrix,
+  inventory coverage, README truthfulness, stale closed-artifact markers,
+  local/GitHub target parity, predecessor inventory rows, personal/path hygiene,
+  and tracked ignored-file hygiene.
 - `packages/agent/tests/self_adapting_agent_authorship_invariants.rs`:
   completed SAA scorecard, evidence, inventory, execute resource operation,
   durable memory/rule, generated UI, promotion boundary, autonomous-loop
@@ -1578,6 +1590,7 @@ tron ci clippy test          # Subset: linting + tests
 `release_install_upgrade_rollback_discipline_invariants`,
 `ios_thin_client_generic_runtime_shell_invariants`,
 `developer_experience_repo_hygiene_automation_invariants`,
+`documentation_evidence_scorecard_integrity_invariants`,
 `observability_diagnostics_auditability_invariants`,
 `data_integrity_storage_evolution_migration_discipline_invariants`,
 `off_plan_successor_teardown_cleanup_invariants`,

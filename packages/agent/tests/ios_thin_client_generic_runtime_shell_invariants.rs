@@ -195,7 +195,7 @@ fn itc_scorecard_rows_have_required_weights_and_pending_or_closed_state() {
 #[test]
 fn itc_inventory_shape_and_required_surfaces_are_complete() {
     let inventory = read_repo_file(INVENTORY_PATH);
-    assert!(inventory.contains("Status: **active_validation_pending**"));
+    assert!(inventory.contains("Status: **closed**"));
     assert!(inventory.contains(INVENTORY_TSV_PATH));
 
     let tsv = read_repo_file(INVENTORY_TSV_PATH);

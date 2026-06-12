@@ -1,6 +1,6 @@
 # iOS Thin Client / Generic Runtime Shell Inventory
 
-Status: **active_validation_pending**
+Status: **closed**
 
 Scorecard row: `ITC-1`
 
@@ -68,8 +68,9 @@ must be regenerated and checked with `git diff --exit-code -- packages/ios-app/T
 The new Rust invariant target is wired into `scripts/tron.d/quality.sh` and
 `.github/workflows/ci.yml` with no production deploy automation expansion.
 
-## Current Action
+## Closeout State
 
-The first concrete diff adds docs, inventory, static gates, and a SourceGuard
-extension. No iOS production source is changed because the initial scan found
-no source-grounded stale production surface to remove.
+The ITC scorecard and evidence manifest are closed at 100/100. The retained
+inventory remains the source-audited boundary map for iOS thin-client surfaces,
+deleted product boundaries, generated project drift, and local/GitHub static
+gate wiring.

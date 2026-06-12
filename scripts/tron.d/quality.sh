@@ -44,6 +44,7 @@ run_tests() {
         release_install_upgrade_rollback_discipline_invariants
         ios_thin_client_generic_runtime_shell_invariants
         developer_experience_repo_hygiene_automation_invariants
+        documentation_evidence_scorecard_integrity_invariants
         observability_diagnostics_auditability_invariants
         data_integrity_storage_evolution_migration_discipline_invariants
         off_plan_successor_teardown_cleanup_invariants
