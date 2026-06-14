@@ -195,9 +195,9 @@ pub use runtime::external_workers::{
 };
 pub use runtime::triggers::{EngineTriggerRuntime, TriggerDispatchRequest};
 pub use runtime::worker_protocol::{
-    CatalogSnapshot, RegisterFunction, RegisterTrigger, WORKER_PROTOCOL_VERSION, WorkerAuthPolicy,
-    WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat, WorkerHello,
-    WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
+    CatalogSnapshot, RegisterFunction, RegisterTrigger, ScopedWorkerToken, WORKER_PROTOCOL_VERSION,
+    WorkerAuthPolicy, WorkerCatalogChange, WorkerDisconnect, WorkerHealth, WorkerHeartbeat,
+    WorkerHello, WorkerIdentity, WorkerInvocationResult, WorkerInvoke, WorkerLifecycleEvent,
     WorkerProtocolMessage, WorkerRegistrationMode, WorkerStreamPublish, WorkerVisibility,
 };
 

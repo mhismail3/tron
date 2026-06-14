@@ -51,6 +51,7 @@ run_tests() {
         self_sufficient_agent_runtime_readiness_invariants
         primitive_minimality_closure_invariants
         baseline_pre_restoration_closure_invariants
+        self_updating_worker_runtime_foundation_invariants
         primitive_trace_execution
         integration
     )

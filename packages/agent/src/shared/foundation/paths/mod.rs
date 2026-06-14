@@ -61,6 +61,8 @@ pub mod dirs {
     pub const KNOWLEDGE: &str = "knowledge";
     /// Workspace-local credential vault.
     pub const VAULT: &str = "vault";
+    /// Approved local worker packages and launchable worker bundles.
+    pub const WORKERS: &str = "workers";
 }
 
 /// Well-known file names under `~/.tron/`.
@@ -259,6 +261,11 @@ pub fn knowledge_dir() -> PathBuf {
 /// `~/.tron/workspace/vault/`
 pub fn vault_dir() -> PathBuf {
     workspace_dir().join(dirs::VAULT)
+}
+
+/// `~/.tron/workspace/workers/`
+pub fn worker_packages_dir() -> PathBuf {
+    workspace_dir().join(dirs::WORKERS)
 }
 
 // ── Composite file path helpers ────────────────────────────────────────

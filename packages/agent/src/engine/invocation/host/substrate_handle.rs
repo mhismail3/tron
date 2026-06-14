@@ -47,6 +47,24 @@ impl EngineHostHandle {
             .inspect(grant_id)
     }
 
+    /// Derive a narrower grant through the engine-owned grant store.
+    pub async fn derive_authority_grant(&self, request: DeriveGrant) -> Result<EngineGrant> {
+        let store = self.inner.lock().await.primitives.grants.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("grant store lock poisoned".to_owned()))?
+            .derive(request)
+    }
+
+    /// Return the deterministic policy hash for a stored grant.
+    pub async fn authority_grant_policy_hash(&self, grant_id: &AuthorityGrantId) -> Result<String> {
+        let grant = self
+            .inspect_authority_grant(grant_id)
+            .await?
+            .ok_or_else(|| EngineError::PolicyViolation(format!("unknown grant {grant_id}")))?;
+        Ok(crate::engine::authority::grants::grant_policy_hash(&grant))
+    }
+
     /// Acquire a high-risk resource lease and publish a lease lifecycle stream
     /// event. This is a primitive API for domain functions that mutate shared
     /// resources and need fail-closed exclusion.
@@ -109,6 +127,66 @@ impl EngineHostHandle {
                 .await;
         }
         Ok(lease)
+    }
+
+    /// Register a resource type through the engine-owned resource store.
+    pub async fn register_resource_type(
+        &self,
+        request: RegisterResourceType,
+    ) -> Result<EngineResourceTypeDefinition> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .register_type(request)
+    }
+
+    /// Create a typed resource through the engine-owned resource store.
+    pub async fn create_resource(&self, request: CreateResource) -> Result<EngineResource> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .create(request)
+    }
+
+    /// Append or compare-and-set a typed resource version.
+    pub async fn update_resource(&self, request: UpdateResource) -> Result<EngineResourceVersion> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .update(request)
+    }
+
+    /// Create a typed edge between two resources.
+    pub async fn link_resources(&self, request: LinkResources) -> Result<EngineResourceLink> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .link(request)
+    }
+
+    /// Inspect one resource and its version/link/event history.
+    pub async fn inspect_resource(
+        &self,
+        resource_id: &str,
+    ) -> Result<Option<EngineResourceInspection>> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .inspect(resource_id)
+    }
+
+    /// List typed resources from the engine-owned resource store.
+    pub async fn list_resources(&self, filter: ListResources) -> Result<Vec<EngineResource>> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .list(filter)
     }
 
     /// Get a high-risk resource lease record.

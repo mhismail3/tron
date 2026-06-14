@@ -12,7 +12,7 @@
 //! |--------|---------|
 //! | `capability` | Single model-facing `execute` primitive |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
-//! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, and system |
+//! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, and worker lifecycle |
 //!
 //! Each retained domain `contract.rs` is the local source of truth for that
 //! worker's function ids, schemas, idempotency, leases, compensation, stream
@@ -43,8 +43,10 @@
 //! reaching these handlers.
 //!
 //! Product/tool domains retired by the primitive teardown must remain absent
-//! from this module tree and startup registration. New domain behavior must add
-//! a contract, deps narrowing, handler binding, tests, and README/domain-doc
+//! from this module tree and startup registration. The worker lifecycle domain
+//! is the post-baseline package/launch substrate for self-updating workers; it
+//! is not a restored product tool domain. New domain behavior must add a
+//! contract, deps narrowing, handler binding, tests, and README/domain-doc
 //! updates together.
 //!
 //! ## Test Ownership
@@ -66,3 +68,4 @@ pub mod registration;
 pub mod session;
 pub mod settings;
 pub mod system;
+pub mod worker_lifecycle;

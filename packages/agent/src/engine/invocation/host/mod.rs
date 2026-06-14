@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, MutexGuard};
 
 use crate::engine::authority::compensation::{EngineCompensationRecord, compensation_record};
-use crate::engine::authority::grants::{ConsumeGrantInvocationBudget, EngineGrant};
+use crate::engine::authority::grants::{ConsumeGrantInvocationBudget, DeriveGrant, EngineGrant};
 use crate::engine::authority::leases::{AcquireResourceLease, EngineResourceLease};
 use crate::engine::catalog::discovery::{ActorContext, ActorKind, FunctionQuery};
 use crate::engine::catalog::registry::{
@@ -33,6 +33,11 @@ use crate::engine::durability::ledger::{
 };
 use crate::engine::durability::queue::{
     EngineQueueAttemptRecord, EngineQueueItem, EnqueueInvocation,
+};
+use crate::engine::durability::resources::{
+    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLink,
+    EngineResourceTypeDefinition, EngineResourceVersion, LinkResources, ListResources,
+    RegisterResourceType, UpdateResource,
 };
 use crate::engine::durability::streams::{
     EngineStreamPage, EngineStreamSubscription, PublishStreamEvent, StreamActorScope, StreamCursor,

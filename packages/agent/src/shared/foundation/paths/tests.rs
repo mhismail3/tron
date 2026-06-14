@@ -121,6 +121,7 @@ fn workspace_subdirs_chain_correctly() {
     assert!(archive_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::ARCHIVE)));
     assert!(knowledge_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::KNOWLEDGE)));
     assert!(vault_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::VAULT)));
+    assert!(worker_packages_dir().ends_with(format!("{}/{}", dirs::WORKSPACE, dirs::WORKERS)));
 }
 
 #[test]

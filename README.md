@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The iOS app is a thin chat and generic runtime shell; fixed product panels are absent from supported baseline behavior. Pre-restoration work follows an iii-aligned Worker / Function / Trigger contract: future capabilities must enter as worker-owned functions and triggers in the live catalog, not as hardcoded harness features.
+Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The Self-Updating Worker Runtime Foundation adds the first post-baseline host-owned lifecycle for local launchable packages while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell; fixed product panels are absent from supported baseline behavior. Feature restoration follows an iii-aligned Worker / Function / Trigger contract: capabilities must enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -354,6 +354,20 @@ Current living entry points:
   restoration backlog rows, and the pre-restoration entry contract.
 - `packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv`:
   machine-readable BPRC inventory and restoration backlog used by static gates.
+- `packages/agent/docs/self-updating-worker-runtime-foundation-scorecard.md`:
+  completed Self-Updating Worker Runtime Foundation scorecard for local package
+  lifecycle ownership, manifest validation, authority-derived launches,
+  conformance proof, resource/event evidence, rollback semantics, and
+  no fixed iOS/product-panel restoration.
+- `packages/agent/docs/self-updating-worker-runtime-foundation-evidence-manifest.md`:
+  companion evidence manifest for SUWRF source changes, focused tests, static
+  gates, final closeout commands, iOS no-touch rationale, and failed
+  attempt/fix records.
+- `packages/agent/docs/self-updating-worker-runtime-foundation-inventory.md`:
+  completed SUWRF classification of new artifacts, lifecycle source files,
+  typed worker resource kinds, preserved boundaries, and validation gates.
+- `packages/agent/docs/self-updating-worker-runtime-foundation-inventory.tsv`:
+  machine-readable SUWRF inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -493,14 +507,19 @@ Current living entry points:
   integrity, iii-style worker/function/trigger alignment, restoration backlog
   coverage, active-doc current-baseline wording, old product-surface absence,
   provider-visible execute minimality, and local/GitHub target parity.
+- `packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs`:
+  completed SUWRF gates for scorecard/evidence/inventory integrity, package
+  lifecycle separation from `/engine/workers`, worker resource-kind coverage,
+  provider-visible execute minimality, local/GitHub target parity, and no fixed
+  product-panel restoration.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
 the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
-scorecards, the PMC and BPRC closure scorecards, and the OPSAA cleanup
-scorecard.
+scorecards, the PMC and BPRC closure scorecards, the SUWRF foundation
+scorecard, and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -581,7 +600,7 @@ main.rs           Thin binary entry point
 | `app` | CLI, startup/bootstrap, health, metrics, onboarding, and shutdown | `Cli`, `TronServer`, `ServerConfig`, `ShutdownCoordinator` |
 | `transport` | Thin protocol surfaces over the engine envelope | `EngineTransportRequest`, `run_engine_ws_session`, `BearerTokenStore` |
 | `engine` | Live capability fabric, primitive workers, local worker protocol, typed resource kernel | `LiveCatalog`, `EngineHostHandle`, `FunctionDefinition`, `WorkerDefinition`, `Invocation`, `InvocationRecord`, `EngineResource`, `EngineResourceTypeDefinition` |
-| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness | `DomainRegistrationContext`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
+| `domains` | Worker-owned Tron behavior and implementation code, including the collapsed capability harness and the post-baseline worker lifecycle owner | `DomainRegistrationContext`, `DomainWorkerModule`, per-domain contracts/deps/handlers |
 | `platform` | OS/vendor integrations | paired-device broker |
 | `shared` | Foundation vocabulary, protocol DTOs, server context/errors, observability, and neutral storage helpers | `Message`, `TronError`, `StreamEvent`, `SessionId`, `StorageRuntime`, `ServerRuntimeContext`, `CapabilityError` |
 
@@ -607,6 +626,11 @@ the loop, ledger, audit, or iOS DTO layers.
 provider-neutral stream options, opens provider streams, applies retry, maps
 provider errors to canonical failure envelopes, and redacts/bounds
 `model.provider_request` audit payloads before persistence.
+`domains/worker_lifecycle` owns local package proposals,
+`tron.worker_package.v1` manifest validation, install/enable/disable/launch/
+stop/retire functions, scoped token minting, conformance reports, and
+`worker_package` resource/event evidence. It is host lifecycle infrastructure,
+not a provider-visible toolbox, and it does not add fixed iOS product panels.
 `stream.rs` publishes only that domain's declared topics. Cross-domain access
 goes through explicit domain services or shared DTOs, so an engineer can follow
 a capability by reading one domain folder instead of a central dispatch table.
@@ -801,9 +825,11 @@ Current primitive operations:
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 
-Startup registration currently keeps only loop infrastructure domains: `system`,
-`capability`, `blob`, `message`, `settings`, `auth`, `agent`, `logs`, `session`,
-and model-provider modules. Product/tool domains such as `filesystem`,
+Startup registration currently keeps only loop infrastructure domains:
+`system`, `capability`, `blob`, `message`, `settings`, `auth`, `agent`,
+`logs`, `session`, and model-provider modules. The post-baseline
+`worker_lifecycle` owner is the explicit exception for local package
+proposal/apply/launch state. Product/tool domains such as `filesystem`,
 `process`, `program`, `web`, `git`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, `notifications`, `voice_notes`, and transcription/import surfaces are
@@ -918,6 +944,18 @@ tool. Model-created helper behavior must start as ordinary `execute` output,
 agent-owned state, workspace files, or generic resources. If a future helper
 needs to become a live worker, it must be introduced through explicit host
 infrastructure rather than a checked-in product lifecycle.
+
+`worker_lifecycle` is that explicit host infrastructure for local packages
+under `workspace/workers`. A package change starts as an inert
+`worker_package_proposal`, then a trusted non-bootstrap authority grant can
+install a canonicalized local package, enable it, launch it with an allowlisted
+environment and scoped `TRON_WORKER_TOKEN_JSON`, conformance-check the live
+catalog, and record `worker_package`, `worker_package_installation`,
+`worker_launch_attempt`, and `worker_package_conformance_report` resources on
+`worker.lifecycle`. A failed launch or conformance mismatch is recorded as
+typed resource evidence and fails closed. The provider-visible model tool
+remains `execute`; package lifecycle operations are engine capabilities
+invoked through the authenticated `/engine` protocol by trusted host surfaces.
 
 Engine substrate primitives provide host infrastructure behind the loop:
 state, streams, queues, triggers, grants, generic resources, storage operations,
@@ -1526,6 +1564,7 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 |   +-- archive/                   Archived workspace material
 |   +-- knowledge/                 Curated wiki/research experiment
 |   +-- vault/                     Local fast secret storage for agent-owned workspace state
+|   +-- workers/                   Approved local worker-package root for `tron.worker_package.v1` manifests
 +-- memory/                       User-authored memory and rule notes loaded by sessions
 |   +-- rules/                     Detail files for memory-backed rules
 |   +-- sessions/                  Session-scoped memory material
@@ -1640,6 +1679,7 @@ tron ci clippy test          # Subset: linting + tests
 `self_sufficient_agent_runtime_readiness_invariants`,
 `primitive_minimality_closure_invariants`,
 `baseline_pre_restoration_closure_invariants`,
+`self_updating_worker_runtime_foundation_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.
