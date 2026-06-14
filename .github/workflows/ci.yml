@@ -157,6 +157,7 @@ jobs:
           cargo test --test primitive_minimality_closure_invariants -- --quiet
           cargo test --test baseline_pre_restoration_closure_invariants -- --quiet
           cargo test --test self_updating_worker_runtime_foundation_invariants -- --quiet
+          cargo test --test ios_self_adapting_agent_cockpit_baseline_invariants -- --quiet
           cargo test --test primitive_trace_execution -- --quiet
           cargo test --test integration -- --test-threads=1 --quiet
 

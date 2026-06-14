@@ -69,6 +69,7 @@ struct ProviderErrorDetailData: Equatable, Hashable {
 enum ChatSheet: Identifiable, Equatable {
     // Settings & Info
     case settings
+    case agentCockpit
 
     case compactionDetail(CompactionDetailData)
 
@@ -83,6 +84,8 @@ enum ChatSheet: Identifiable, Equatable {
         switch self {
         case .settings:
             return "settings"
+        case .agentCockpit:
+            return "agentCockpit"
         case .compactionDetail:
             return "compaction"
         case .thinkingDetail:
@@ -99,6 +102,8 @@ enum ChatSheet: Identifiable, Equatable {
     static func == (lhs: ChatSheet, rhs: ChatSheet) -> Bool {
         switch (lhs, rhs) {
         case (.settings, .settings):
+            return true
+        case (.agentCockpit, .agentCockpit):
             return true
         case (.compactionDetail(let data1), .compactionDetail(let data2)):
             return data1 == data2

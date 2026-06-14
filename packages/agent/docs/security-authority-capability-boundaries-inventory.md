@@ -1,6 +1,6 @@
 # Security Authority Capability Boundaries Inventory
 
-Status: SACB campaign `complete`; 642 security boundary rows inventoried and
+Status: SACB campaign `complete`; 711 security boundary rows inventoried and
 classified across tracked Rust, Swift, scripts, workflows, docs, and tests.
 
 Machine-readable inventory:

@@ -27,6 +27,7 @@ protocol EngineClientProtocol: AnyObject {
     var system: SystemClient { get }
     var message: MessageClient { get }
     var logs: LogsClient { get }
+    var workerLifecycle: WorkerLifecycleClient { get }
 
     // MARK: - Connection
     func connect() async

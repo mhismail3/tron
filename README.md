@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The Self-Updating Worker Runtime Foundation adds the first post-baseline host-owned lifecycle for local launchable packages while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell; fixed product panels are absent from supported baseline behavior. Feature restoration follows an iii-aligned Worker / Function / Trigger contract: capabilities must enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
+Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The Self-Updating Worker Runtime Foundation adds the first post-baseline host-owned lifecycle for local launchable packages while preserving provider minimality: the provider-visible model tool remains `execute`. The iOS app is a thin chat and generic runtime shell with an Agent cockpit; fixed product panels are absent from supported baseline behavior. Feature restoration follows an iii-aligned Worker / Function / Trigger contract: capabilities must enter as worker-owned functions and triggers in the live catalog, with package lifecycle tracked as resources and events rather than hardcoded harness features.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -368,6 +368,17 @@ Current living entry points:
   typed worker resource kinds, preserved boundaries, and validation gates.
 - `packages/agent/docs/self-updating-worker-runtime-foundation-inventory.tsv`:
   machine-readable SUWRF inventory used by static gates.
+- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-scorecard.md`:
+  completed iOS Self-Adapting Agent Cockpit Baseline scorecard for the
+  user-facing worker lifecycle catalog, package actions, runtime `ui_surface`
+  rendering, and neutral glass cockpit shell.
+- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`:
+  companion evidence manifest for focused Swift tests, simulator validation,
+  static gates, and closeout commands.
+- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.md`:
+  completed IOSAC retained/absent surface inventory.
+- `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv`:
+  machine-readable IOSAC inventory used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -512,6 +523,11 @@ Current living entry points:
   lifecycle separation from `/engine/workers`, worker resource-kind coverage,
   provider-visible execute minimality, local/GitHub target parity, and no fixed
   product-panel restoration.
+- `packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs`:
+  completed IOSAC gates for cockpit scorecard/evidence/inventory integrity,
+  worker lifecycle client function ids, dynamic `ui_surface` rendering,
+  protocol/repository boundaries, neutral glass theme tokens, focused Swift
+  test coverage, README/iOS docs, and local/GitHub static-gate parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
@@ -519,7 +535,8 @@ Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
 the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
 scorecards, the PMC and BPRC closure scorecards, the SUWRF foundation
-scorecard, and the OPSAA cleanup scorecard.
+scorecard, the IOSAC cockpit baseline scorecard, and the OPSAA cleanup
+scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1363,6 +1380,10 @@ packages/ios-app/Sources/
   repository-specific panels, media workflow surfaces, assistant-management
   panels, extension-source surfaces, audio transcription, memory-retain, rules,
   and parallel tree-only projections are removed from the primary source tree.
+- **Agent cockpit**: the chat shell shows a compact status capsule that opens a
+  cockpit sheet. The sheet renders live worker lifecycle catalog rows,
+  package/resource status, confirmation-backed lifecycle actions, activity, and
+  active `ui_surface` resources through generic engine data.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`.
 - **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; when `@AppStorage("onboardingComplete")` is false it presents `OnboardingFlowView`. Settings can reopen the same flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token and a bare DNS, IPv4, or unbracketed IPv6 host before Connect is enabled; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are rejected before any probe. An already paired server row can reuse that server's Keychain token unless the user edits its host or port. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
@@ -1377,6 +1398,16 @@ packages/ios-app/Sources/
   `packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.tsv`, and
   `packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`
   are the current static proof that iOS stays a generic runtime shell.
+- **IOSAC proof**:
+  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-scorecard.md`,
+  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`,
+  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.md`,
+  `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv`,
+  and
+  `packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs`
+  are the current static proof for the Agent cockpit, worker lifecycle catalog
+  bridge, package action confirmations, dynamic `ui_surface` rendering, and
+  neutral glass baseline.
 
 ### Data Flow
 
@@ -1385,6 +1416,7 @@ Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> [ChatMessage] -> ChatViewModel -> ChatView
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
+Cockpit: catalog/resource APIs -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 
 ### Build Configurations
@@ -1680,6 +1712,7 @@ tron ci clippy test          # Subset: linting + tests
 `primitive_minimality_closure_invariants`,
 `baseline_pre_restoration_closure_invariants`,
 `self_updating_worker_runtime_foundation_invariants`,
+`ios_self_adapting_agent_cockpit_baseline_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.

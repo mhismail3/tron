@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-12 (IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-14 (IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -9,10 +9,12 @@
 The iOS app is a SwiftUI `/engine` client. In the current primitive baseline it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,
 renders session messages, persists a local event cache for reconstruction, and
-renders generic runtime surfaces emitted by the engine. It does not own fixed
-product panels, repository-specific panels, media workflow surfaces,
-assistant-management panels, extension-source surfaces, audio transcription,
-memory-retain, or rules.
+renders generic runtime surfaces emitted by the engine. The current user-facing
+Agent cockpit surfaces live worker lifecycle catalog entries, package/resource
+status, confirmation-backed lifecycle actions, activity, and active
+`ui_surface` resources without adding fixed product panels. The app does not
+own repository-specific panels, media workflow surfaces, assistant-management
+panels, extension-source surfaces, audio transcription, memory-retain, or rules.
 
 The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
@@ -28,6 +30,8 @@ source-control state, worker state, or product panels locally.
 - Session list, session creation/fork/resume, prompt composer, unified
   attachments for images/documents, and message rendering.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
+- Agent cockpit status capsule and sheet for worker lifecycle catalog/resource
+  state, package actions, activity, and dynamic runtime surfaces.
 - Generic capability invocation chips and generic generated runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, hashed
   server-log correlation IDs, and bounded local event cache integrity.
@@ -48,11 +52,13 @@ Sources/
 +-- Engine/               Engine transport, protocol DTOs, live/stored
 |                         events, persistence, repositories
 +-- Session/              Chat workflow, attachments, parsing, timeline
-|                         messages, reconstruction, activity, and tokens
+|                         messages, worker lifecycle cockpit state,
+|                         reconstruction, activity, and tokens
 +-- Support/              Composition, diagnostics, feedback, foundation,
 |                         pairing, share, storage
 +-- UI/                   Theme, chat, settings, onboarding, runtime
-|                         surfaces, capabilities, components, system sheets
+|                         surfaces, Agent cockpit, capabilities, components,
+|                         system sheets
 +-- Assets.xcassets/      App icons and image assets
 +-- Resources/            Fonts and generated app-icon source layers
 ```
@@ -75,6 +81,7 @@ Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
+Cockpit: WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 
 The shell mounts `ContentView` even before onboarding is complete. First-run
@@ -118,6 +125,9 @@ for mounted chat sessions, `AppConnectionRepository` for connection state,
 `SessionEventRepository` for live events, `SettingsRepository` for settings
 snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
+`WorkerLifecycleRepository` is the cockpit-facing boundary for catalog,
+resource, and worker lifecycle calls. `AgentCockpitProjection` remains a pure
+mapper from server-owned facts to UI rows; it does not own worker truth.
 `Support/Composition` is the production composition root allowed to wire those
 protocols to engine-owned clients.
 
@@ -202,6 +212,12 @@ payloads supplied by the runtime surface. Pure icon, formatting, array, and row
 preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
 
+The Agent cockpit's Surfaces tab lists active `ui_surface` resources through
+the same generic `resource::list`/`resource::inspect` substrate, decodes current
+`UiSurfaceDTO` payloads, and passes resource/version refs into
+`GeneratedRuntimeSurfaceView`. Empty state is allowed when no runtime surface is
+published; a hardcoded sample surface is not.
+
 ## Settings And Theme Boundaries
 
 `SettingsView.swift` owns settings-shell state, navigation, toolbar actions,
@@ -215,7 +231,11 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 state. Provider, family, model-card, reasoning-visibility, and reasoning
 popover rendering live in `ModelPickerSheet+Sections.swift`. `TronColors.swift`
 owns the base palette; semantic derived tokens and shape-style conveniences
-live in `TronThemeTokens.swift`.
+live in `TronThemeTokens.swift`. The current visual baseline is neutral glass:
+light backgrounds resolve to cool neutrals, dark surfaces resolve to deep
+neutral glass, primary controls use the legacy `tronEmerald` token as a blue
+primary accent for compatibility, and success/warning/error remain separate
+semantic colors.
 
 ## Diagnostics And Build Identity
 

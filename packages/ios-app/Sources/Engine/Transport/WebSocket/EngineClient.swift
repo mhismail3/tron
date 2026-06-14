@@ -110,6 +110,10 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var blob: BlobClient = BlobClient(transport: self)
 
+    /// Worker lifecycle and catalog overview client.
+    @ObservationIgnored
+    lazy var workerLifecycle: WorkerLifecycleClient = WorkerLifecycleClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.

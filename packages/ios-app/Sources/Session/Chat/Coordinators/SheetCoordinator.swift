@@ -60,6 +60,11 @@ final class SheetCoordinator {
         present(.settings)
     }
 
+    /// Show agent cockpit sheet.
+    func showAgentCockpit() {
+        present(.agentCockpit)
+    }
+
     /// Show compaction detail sheet
     func showCompactionDetail(
         tokensBefore: Int,

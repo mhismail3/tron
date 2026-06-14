@@ -41,6 +41,9 @@ protocol DependencyProviding: AnyObject {
     /// Message mutation repository.
     var messageRepository: any MessageRepository { get }
 
+    /// Worker lifecycle repository for the agent cockpit.
+    var workerLifecycleRepository: any WorkerLifecycleRepository { get }
+
     /// Protocol-typed dependency bundle for chat sessions.
     var chatSessionServices: ChatSessionServices { get }
 

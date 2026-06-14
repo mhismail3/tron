@@ -12,6 +12,7 @@ const INVENTORY_TSV_PATH: &str = "packages/agent/docs/primitive-minimality-closu
 const TARGET_PATH: &str = "packages/agent/tests/primitive_minimality_closure_invariants.rs";
 const TARGET_NAME: &str = "primitive_minimality_closure_invariants";
 const BASE_COMMIT: &str = "7b03b51f5476f5764e3813666137897af2f3cd3d";
+const CLOSEOUT_COMMIT: &str = "b7443240e2b78397388b5f6b606f4ae3adaddfba";
 
 #[derive(Debug)]
 struct ScorecardRow {
@@ -581,7 +582,7 @@ fn predecessor_inventories_classify_pmc_artifacts() {
 
 #[test]
 fn closure_does_not_expand_public_or_ios_behavior_surfaces() {
-    let changed = git_output(&["diff", "--name-only", BASE_COMMIT]);
+    let changed = git_output(&["diff", "--name-only", BASE_COMMIT, CLOSEOUT_COMMIT]);
     for path in changed.lines() {
         assert!(
             !path.starts_with("packages/ios-app/Sources/"),

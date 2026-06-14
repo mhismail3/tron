@@ -237,6 +237,60 @@ async fn catalog_read_primitives_are_visible_to_engine_client() {
 }
 
 #[tokio::test]
+async fn resource_read_primitives_are_visible_to_engine_client_without_write_access() {
+    let handle = EngineHostHandle::new_in_memory().unwrap();
+    let client_context = || {
+        CausalContext::new(
+            actor("engine-client"),
+            ActorKind::Client,
+            grant("engine-transport"),
+            trace("resource-client-read"),
+        )
+        .with_scope("resource.read")
+        .with_scope("resource.write")
+        .with_session_id("session-a")
+    };
+
+    let listed = handle
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({"functionId": "resource::list", "payload": {"kind": "ui_surface", "limit": 25}}),
+            client_context(),
+        ))
+        .await;
+    assert_eq!(listed.error, None, "engine::invoke wraps child outcomes");
+    let child = &listed.value.as_ref().unwrap()["child"];
+    assert_eq!(child["error"], serde_json::Value::Null);
+    assert!(
+        child["value"]["resources"].is_array(),
+        "engine-client resource::list should return the resource array"
+    );
+
+    let create = handle
+        .invoke(host_invocation(
+            "engine::invoke",
+            json!({
+                "functionId": "resource::create",
+                "payload": {
+                    "kind": "ui_surface",
+                    "scope": "session",
+                    "payload": {"title": "client mutation must not run"}
+                },
+                "idempotencyKey": "client-resource-create"
+            }),
+            client_context(),
+        ))
+        .await;
+    assert_eq!(create.error, None, "engine::invoke wraps child outcomes");
+    assert!(
+        create.value.unwrap()["child"]["error"]["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("not visible")),
+        "engine-client must not reach resource writes through engine::invoke"
+    );
+}
+
+#[tokio::test]
 async fn engine_watch_filters_catalog_changes_without_leaking_hidden_scopes() {
     let mut host = EngineHost::new().unwrap();
     host.catalog_mut()

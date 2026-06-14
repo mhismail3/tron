@@ -52,6 +52,7 @@ run_tests() {
         primitive_minimality_closure_invariants
         baseline_pre_restoration_closure_invariants
         self_updating_worker_runtime_foundation_invariants
+        ios_self_adapting_agent_cockpit_baseline_invariants
         primitive_trace_execution
         integration
     )

@@ -229,3 +229,148 @@ final class DefaultMessageRepository: MessageRepository {
         )
     }
 }
+
+// MARK: - Default Worker Lifecycle Repository
+
+@MainActor
+final class DefaultWorkerLifecycleRepository: WorkerLifecycleRepository {
+    private let client: WorkerLifecycleClient
+
+    init(client: WorkerLifecycleClient) {
+        self.client = client
+    }
+
+    func overview(afterRevision: UInt64?) async throws -> CatalogWatchSnapshotDTO {
+        try await client.overview(afterRevision: afterRevision)
+    }
+
+    func listResources(
+        kind: WorkerLifecycleResourceKind,
+        lifecycle: String?,
+        limit: UInt64
+    ) async throws -> ResourceListResultDTO {
+        try await client.listResources(kind: kind, lifecycle: lifecycle, limit: limit)
+    }
+
+    func inspectResource(_ resourceId: String) async throws -> ResourceInspectResultDTO {
+        try await client.inspectResource(resourceId)
+    }
+
+    func proposePackageChange(
+        manifest: [String: AnyCodable],
+        summary: String,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO {
+        try await client.proposePackageChange(
+            manifest: manifest,
+            summary: summary,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func installPackage(
+        manifest: [String: AnyCodable],
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO {
+        try await client.installPackage(
+            manifest: manifest,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func enablePackage(
+        packageId: String,
+        packageVersion: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO {
+        try await client.enablePackage(
+            packageId: packageId,
+            packageVersion: packageVersion,
+            reason: reason,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func disablePackage(
+        packageId: String,
+        packageVersion: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO {
+        try await client.disablePackage(
+            packageId: packageId,
+            packageVersion: packageVersion,
+            reason: reason,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func launchWorker(
+        packageId: String,
+        packageVersion: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO {
+        try await client.launchWorker(
+            packageId: packageId,
+            packageVersion: packageVersion,
+            reason: reason,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func stopWorker(
+        launchAttemptResourceId: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO {
+        try await client.stopWorker(
+            launchAttemptResourceId: launchAttemptResourceId,
+            reason: reason,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func retirePackage(
+        packageId: String,
+        packageVersion: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO {
+        try await client.retirePackage(
+            packageId: packageId,
+            packageVersion: packageVersion,
+            reason: reason,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+}

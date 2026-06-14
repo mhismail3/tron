@@ -292,6 +292,77 @@ protocol MessageRepository: AnyObject {
     ) async throws -> MessageDeleteResult
 }
 
+// MARK: - Worker Lifecycle Repository
+
+/// Black-box worker lifecycle contract for the agent cockpit.
+@MainActor
+protocol WorkerLifecycleRepository: AnyObject {
+    func overview(afterRevision: UInt64?) async throws -> CatalogWatchSnapshotDTO
+
+    func listResources(kind: WorkerLifecycleResourceKind, lifecycle: String?, limit: UInt64) async throws -> ResourceListResultDTO
+
+    func inspectResource(_ resourceId: String) async throws -> ResourceInspectResultDTO
+
+    func proposePackageChange(
+        manifest: [String: AnyCodable],
+        summary: String,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO
+
+    func installPackage(
+        manifest: [String: AnyCodable],
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO
+
+    func enablePackage(
+        packageId: String,
+        packageVersion: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO
+
+    func disablePackage(
+        packageId: String,
+        packageVersion: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO
+
+    func launchWorker(
+        packageId: String,
+        packageVersion: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO
+
+    func stopWorker(
+        launchAttemptResourceId: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO
+
+    func retirePackage(
+        packageId: String,
+        packageVersion: String,
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkerLifecycleResultDTO
+}
+
 // MARK: - Chat Session Services
 
 /// Protocol-typed dependency bundle for mounted chat sessions.
@@ -302,4 +373,5 @@ struct ChatSessionServices {
     let agent: any AgentRepository
     let models: any ModelRepository
     let messages: any MessageRepository
+    let workerLifecycle: any WorkerLifecycleRepository
 }

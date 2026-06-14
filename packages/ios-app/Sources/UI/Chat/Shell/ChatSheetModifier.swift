@@ -5,15 +5,18 @@ import SwiftUI
 struct ChatSheetModifier: ViewModifier {
     let sheetCoordinator: SheetCoordinator
     let viewModel: ChatViewModel
+    let agentCockpit: AgentCockpitViewModel
     let sessionId: String
     let workspaceDeleted: Bool
 
     func body(content: Content) -> some View {
+        let observedActiveSheet = sheetCoordinator.activeSheet
         content
-            .sheet(item: sheetBinding, onDismiss: onDismiss) { sheet in
+            .sheet(item: sheetBinding(observedActiveSheet), onDismiss: onDismiss) { sheet in
                 ChatSheetContent(
                     sheet: sheet,
                     viewModel: viewModel,
+                    agentCockpit: agentCockpit,
                     sessionId: sessionId,
                     workspaceDeleted: workspaceDeleted,
                     sheetCoordinator: sheetCoordinator
@@ -26,9 +29,9 @@ struct ChatSheetModifier: ViewModifier {
             }
     }
 
-    private var sheetBinding: Binding<ChatSheet?> {
+    private func sheetBinding(_ observedActiveSheet: ChatSheet?) -> Binding<ChatSheet?> {
         Binding(
-            get: { sheetCoordinator.activeSheet },
+            get: { observedActiveSheet },
             set: { sheetCoordinator.activeSheet = $0 }
         )
     }
@@ -43,12 +46,14 @@ extension View {
     func chatSheets(
         coordinator: SheetCoordinator,
         viewModel: ChatViewModel,
+        agentCockpit: AgentCockpitViewModel,
         sessionId: String,
         workspaceDeleted: Bool
     ) -> some View {
         modifier(ChatSheetModifier(
             sheetCoordinator: coordinator,
             viewModel: viewModel,
+            agentCockpit: agentCockpit,
             sessionId: sessionId,
             workspaceDeleted: workspaceDeleted
         ))

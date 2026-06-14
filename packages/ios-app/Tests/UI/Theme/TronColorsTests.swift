@@ -29,51 +29,51 @@ struct TronColorsTests {
     // MARK: - Assistant Message Text
 
     @Test func assistantMessageTextLightIsDark() {
-        #expect(lightHex(of: .assistantMessageText) == "#1C1917")
+        #expect(lightHex(of: .assistantMessageText) == "#111827")
     }
 
-    @Test func assistantMessageTextDarkIsUnchanged() {
-        #expect(darkHex(of: .assistantMessageText) == "#FAFAFA")
+    @Test func assistantMessageTextDarkIsNeutralWhite() {
+        #expect(darkHex(of: .assistantMessageText) == "#F8FAFC")
     }
 
     // MARK: - Input Text Tokens
 
-    @Test func inputTextLightIsEmerald() {
-        #expect(lightHex(of: .inputText) == "#059669")
+    @Test func inputTextLightIsPrimaryAccent() {
+        #expect(lightHex(of: .inputText) == "#2563EB")
     }
 
-    @Test func inputTextDarkIsEmerald() {
-        #expect(darkHex(of: .inputText) == "#10B981")
+    @Test func inputTextDarkIsPrimaryAccent() {
+        #expect(darkHex(of: .inputText) == "#60A5FA")
     }
 
-    @Test func inputPlaceholderLightIsSoftEmerald() {
-        #expect(lightHex(of: .inputPlaceholder) == "#6EE7B7")
+    @Test func inputPlaceholderLightIsQuietBlueGray() {
+        #expect(lightHex(of: .inputPlaceholder) == "#93A4BC")
     }
 
-    @Test func inputPlaceholderDarkIsMutedEmerald() {
-        #expect(darkHex(of: .inputPlaceholder) == "#047857")
+    @Test func inputPlaceholderDarkIsQuietBlueGray() {
+        #expect(darkHex(of: .inputPlaceholder) == "#64748B")
     }
 
-    // MARK: - Dark Mode Preservation (critical: no regressions)
+    // MARK: - Dark Mode Glass Tokens
 
-    @Test func darkModeColorsUnchanged() {
+    @Test func darkModeColorsUseNeutralGlassBaseline() {
         // Core accent colors
-        #expect(darkHex(of: .tronEmerald) == "#10B981")
-        #expect(darkHex(of: .tronMint) == "#34D399")
+        #expect(darkHex(of: .tronEmerald) == "#60A5FA")
+        #expect(darkHex(of: .tronMint) == "#2DD4BF")
 
         // Backgrounds
-        #expect(darkHex(of: .tronBackground) == "#09090B")
-        #expect(darkHex(of: .tronSurface) == "#18181B")
-        #expect(darkHex(of: .tronSurfaceElevated) == "#27272A")
+        #expect(darkHex(of: .tronBackground) == "#090A0C")
+        #expect(darkHex(of: .tronSurface) == "#16181D")
+        #expect(darkHex(of: .tronSurfaceElevated) == "#252A32")
 
         // Text
-        #expect(darkHex(of: .tronTextPrimary) == "#FAFAFA")
-        #expect(darkHex(of: .tronTextSecondary) == "#A1A1AA")
+        #expect(darkHex(of: .tronTextPrimary) == "#F8FAFC")
+        #expect(darkHex(of: .tronTextSecondary) == "#AAB2BF")
 
         // Message colors
-        #expect(darkHex(of: .userMessageText) == "#10B981")
-        #expect(darkHex(of: .userBubble) == "#10B981")
-        #expect(darkHex(of: .assistantBubble) == "#27272A")
+        #expect(darkHex(of: .userMessageText) == "#60A5FA")
+        #expect(darkHex(of: .userBubble) == "#60A5FA")
+        #expect(darkHex(of: .assistantBubble) == "#252A32")
     }
 
     // MARK: - TintedColors
@@ -94,11 +94,11 @@ struct TronColorsTests {
         #expect(tint.body == .tronTextSecondary)
     }
 
-    // MARK: - Light Mode Backgrounds (ensure warm cream preserved)
+    // MARK: - Light Mode Backgrounds
 
-    @Test func lightModeBackgroundsAreWarmCream() {
-        #expect(lightHex(of: .tronBackground) == "#F3EDE3")
-        #expect(lightHex(of: .tronSurface) == "#F8F3EA")
-        #expect(lightHex(of: .tronSurfaceElevated) == "#EBE5DA")
+    @Test func lightModeBackgroundsAreNeutralGlass() {
+        #expect(lightHex(of: .tronBackground) == "#F7F8FA")
+        #expect(lightHex(of: .tronSurface) == "#FFFFFF")
+        #expect(lightHex(of: .tronSurfaceElevated) == "#EEF2F6")
     }
 }

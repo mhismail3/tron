@@ -109,7 +109,8 @@ final class SessionSwitchingTests: XCTestCase {
             sessions: DefaultSessionRepository(sessionClient: engineClient.session),
             agent: DefaultAgentRepository(agentClient: engineClient.agent),
             models: DefaultModelRepository(modelClient: engineClient.model),
-            messages: DefaultMessageRepository(messageClient: engineClient.message)
+            messages: DefaultMessageRepository(messageClient: engineClient.message),
+            workerLifecycle: DefaultWorkerLifecycleRepository(client: engineClient.workerLifecycle)
         )
 
         let viewModel1 = ChatViewModel(services: services, sessionId: "session-A")

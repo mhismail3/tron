@@ -17,21 +17,21 @@ extension Color {
 
     // MARK: - Accent Colors (adaptive: deeper in light mode)
 
-    /// Emerald - assistant accent
-    static let tronEmerald = Color(lightHex: "#059669", darkHex: "#10B981")
+    /// Legacy primary accent token. The API name remains for compatibility; the visual token is now blue glass.
+    static let tronEmerald = Color(lightHex: "#2563EB", darkHex: "#60A5FA")
 
-    /// Darker emerald for send button
-    static let tronEmeraldDark = Color(lightHex: "#047857", darkHex: "#059669")
+    /// Deeper primary accent for high-emphasis controls.
+    static let tronEmeraldDark = Color(lightHex: "#1D4ED8", darkHex: "#3B82F6")
 
-    /// Mint - user accent
-    static let tronMint = Color(lightHex: "#10B981", darkHex: "#34D399")
+    /// Teal secondary accent for runtime context.
+    static let tronMint = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
 
     // MARK: - Semantic Colors (adaptive: deeper in light mode)
 
-    static let tronSuccess = Color(lightHex: "#059669", darkHex: "#10B981")
+    static let tronSuccess = Color(lightHex: "#15803D", darkHex: "#22C55E")
     static let tronWarning = Color(lightHex: "#D97706", darkHex: "#F59E0B")
     static let tronError = Color(lightHex: "#DC2626", darkHex: "#EF4444")
-    static let tronInfo = Color(lightHex: "#2563EB", darkHex: "#3B82F6")
+    static let tronInfo = Color(lightHex: "#0EA5E9", darkHex: "#38BDF8")
 
     // Additional accent colors (adaptive: deeper in light mode)
     static let tronAmber = Color(lightHex: "#D97706", darkHex: "#F59E0B")
@@ -55,49 +55,49 @@ extension Color {
 
     // MARK: - Special Colors
 
-    /// Glass tint — neutral in light mode (clear glass), deep green in dark mode
-    static let tronPhthaloGreen = Color(lightHex: "#FFFFFF", darkHex: "#123524")
+    /// Glass tint: clear in light mode, deep neutral in dark mode.
+    static let tronPhthaloGreen = Color(lightHex: "#FFFFFF", darkHex: "#111827")
 
-    // MARK: - Backgrounds (adaptive — warm cream in light mode)
+    // MARK: - Backgrounds (adaptive neutral glass baseline)
 
     /// Deepest background
-    static let tronBackground = Color(lightHex: "#F3EDE3", darkHex: "#09090B")
+    static let tronBackground = Color(lightHex: "#F7F8FA", darkHex: "#090A0C")
 
     /// Surface background (cards, sheets)
-    static let tronSurface = Color(lightHex: "#F8F3EA", darkHex: "#18181B")
+    static let tronSurface = Color(lightHex: "#FFFFFF", darkHex: "#16181D")
 
     /// Elevated surface background
-    static let tronSurfaceElevated = Color(lightHex: "#EBE5DA", darkHex: "#27272A")
+    static let tronSurfaceElevated = Color(lightHex: "#EEF2F6", darkHex: "#252A32")
 
     /// Subtle separator/border color
-    static let tronBorder = Color(lightHex: "#D4D4D8", darkHex: "#3F3F46")
+    static let tronBorder = Color(lightHex: "#D8DEE6", darkHex: "#3B424D")
 
     // MARK: - Text Colors (adaptive)
 
-    static let tronTextPrimary = Color(lightHex: "#18181B", darkHex: "#FAFAFA")
-    static let tronTextSecondary = Color(lightHex: "#52525B", darkHex: "#A1A1AA")
-    static let tronTextMuted = Color(hex: "#71717A")
-    static let tronTextDisabled = Color(lightHex: "#A1A1AA", darkHex: "#52525B")
+    static let tronTextPrimary = Color(lightHex: "#111827", darkHex: "#F8FAFC")
+    static let tronTextSecondary = Color(lightHex: "#4B5563", darkHex: "#AAB2BF")
+    static let tronTextMuted = Color(lightHex: "#6B7280", darkHex: "#8B949E")
+    static let tronTextDisabled = Color(lightHex: "#9CA3AF", darkHex: "#5B6472")
 
     // MARK: - Message Text Colors (adaptive per role)
 
-    /// User message text: dark emerald in light mode, emerald in dark mode
-    static let userMessageText = Color(lightHex: "#059669", darkHex: "#10B981")
-    /// Assistant message text: dark in light mode for readability, near-white in dark mode
-    static let assistantMessageText = Color(lightHex: "#1C1917", darkHex: "#FAFAFA")
+    /// User message text: primary accent in both modes.
+    static let userMessageText = Color(lightHex: "#2563EB", darkHex: "#60A5FA")
+    /// Assistant message text: neutral in light mode, near-white in dark mode.
+    static let assistantMessageText = Color(lightHex: "#111827", darkHex: "#F8FAFC")
 
-    /// Input field text: emerald in both modes (deeper shade in light)
-    static let inputText = Color(lightHex: "#059669", darkHex: "#10B981")
+    /// Input field text: primary accent in both modes.
+    static let inputText = Color(lightHex: "#2563EB", darkHex: "#60A5FA")
 
-    /// Input field placeholder: soft emerald in light, muted emerald in dark
-    static let inputPlaceholder = Color(lightHex: "#6EE7B7", darkHex: "#047857")
+    /// Input field placeholder: quiet blue-gray in both modes.
+    static let inputPlaceholder = Color(lightHex: "#93A4BC", darkHex: "#64748B")
 
     // MARK: - Role Colors (adaptive)
 
-    static let userBubble = Color(lightHex: "#059669", darkHex: "#10B981")
-    static let assistantBubble = Color(lightHex: "#EBE5DA", darkHex: "#27272A")
-    static let systemBubble = Color(lightHex: "#E3DDCF", darkHex: "#3F3F46")
-    static let capabilityBubble = Color(lightHex: "#DBEAFE", darkHex: "#1E3A5F")
+    static let userBubble = Color(lightHex: "#2563EB", darkHex: "#60A5FA")
+    static let assistantBubble = Color(lightHex: "#EEF2F6", darkHex: "#252A32")
+    static let systemBubble = Color(lightHex: "#E6EBF1", darkHex: "#323842")
+    static let capabilityBubble = Color(lightHex: "#E0F2FE", darkHex: "#14324A")
     static let errorBubble = Color(lightHex: "#FEE2E2", darkHex: "#7F1D1D")
 
     // MARK: - Overlay Colors
@@ -186,7 +186,7 @@ extension UIColor {
 // MARK: - View Modifiers
 
 extension View {
-    /// Cream background that extends behind the keyboard and into all safe areas.
+    /// Neutral glass background that extends behind the keyboard and into all safe areas.
     /// Apply to full-screen views that contain glass components (ChatView, SessionSidebar,
     /// session lists) — glass effects need a nearby opaque surface to create visible depth/shadow.
     /// Also applied at root (ContentView, TronMobileApp loading states) for overall coverage.

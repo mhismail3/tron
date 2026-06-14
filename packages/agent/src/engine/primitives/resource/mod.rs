@@ -171,12 +171,9 @@ pub(super) fn registrations(
             handler.clone(),
         ),
         handled_registration(
-            primitive_function(
+            resource_read_function(
                 INSPECT_FUNCTION,
-                RESOURCE_WORKER_ID,
                 "inspect one resource with versions, links, and events",
-                EffectClass::PureRead,
-                "resource.read",
             )
             .with_request_schema(json!({
                 "type": "object",
@@ -193,25 +190,31 @@ pub(super) fn registrations(
             handler.clone(),
         ),
         handled_registration(
-            primitive_function(
-                LIST_FUNCTION,
-                RESOURCE_WORKER_ID,
-                "list typed resources",
-                EffectClass::PureRead,
-                "resource.read",
-            )
-            .with_request_schema(list_schema())
-            .with_response_schema(json!({
-                "type": "object",
-                "required": ["resources"],
-                "additionalProperties": false,
-                "properties": {"resources": {"type": "array"}}
-            })),
+            resource_read_function(LIST_FUNCTION, "list typed resources")
+                .with_request_schema(list_schema())
+                .with_response_schema(json!({
+                    "type": "object",
+                    "required": ["resources"],
+                    "additionalProperties": false,
+                    "properties": {"resources": {"type": "array"}}
+                })),
             handler.clone(),
         ),
     ];
     registrations.extend(resource_wrapper_registrations(handler)?);
     Ok(registrations)
+}
+
+fn resource_read_function(id: &str, description: &str) -> crate::engine::FunctionDefinition {
+    let mut function = primitive_function(
+        id,
+        RESOURCE_WORKER_ID,
+        description,
+        EffectClass::PureRead,
+        "resource.read",
+    );
+    function.visibility = VisibilityScope::System;
+    function
 }
 
 struct ResourcePrimitiveHandler {

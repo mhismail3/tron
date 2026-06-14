@@ -110,6 +110,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Message mutation repository.
     private(set) var messageRepository: any MessageRepository
 
+    /// Worker lifecycle repository for the agent cockpit.
+    private(set) var workerLifecycleRepository: any WorkerLifecycleRepository
+
     var chatSessionServices: ChatSessionServices {
         ChatSessionServices(
             connection: connectionRepository,
@@ -117,7 +120,8 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
             sessions: sessionRepository,
             agent: agentRepository,
             models: modelRepository,
-            messages: messageRepository
+            messages: messageRepository,
+            workerLifecycle: workerLifecycleRepository
         )
     }
 
@@ -225,6 +229,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         settingsRepository = DefaultSettingsRepository(settingsClient: client.settings)
         authRepository = DefaultAuthRepository(authClient: client.auth)
         messageRepository = DefaultMessageRepository(messageClient: client.message)
+        workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: client.workerLifecycle)
 
         // Wire draft store into event store manager for cleanup on session delete
         eventStoreManager.draftStore = draftStore
@@ -464,6 +469,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         settingsRepository = DefaultSettingsRepository(settingsClient: newClient.settings)
         authRepository = DefaultAuthRepository(authClient: newClient.auth)
         messageRepository = DefaultMessageRepository(messageClient: newClient.message)
+        workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: newClient.workerLifecycle)
         eventStoreManager.loadSessions()
         activeServerSelectionVersion += 1
         NotificationCenter.default.post(name: .serverSettingsDidChange, object: nil)

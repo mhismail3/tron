@@ -666,6 +666,12 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         {
             Some(ResidueClass::FutureReadinessWording)
         }
+        _ if path.contains("ios-self-adapting-agent-cockpit-baseline")
+            || path
+                == "packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs" =>
+        {
+            Some(ResidueClass::FutureReadinessWording)
+        }
         _ => None,
     }
 }
