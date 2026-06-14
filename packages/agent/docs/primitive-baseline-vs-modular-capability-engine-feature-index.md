@@ -319,7 +319,7 @@ Old surface:
 - `sandbox::get_spawned_worker`
 - `sandbox::stop_spawned_worker`
 - `self_extension::grant_workspace_autonomy`
-- Worker protocol guide and generated worker loop.
+- Worker protocol guide and runtime-authored worker loop.
 - Worker pack runtime and local packs.
 - Sandbox-created capabilities, child grants, expected function IDs, source
   trust, and generated UI surfaces.
@@ -465,7 +465,7 @@ Reintroduction constraint:
   with provenance, evals, and explicit loading authority. They should not return
   as bootstrap prompt injection or bundled product scaffolding.
 
-### 11. Prompt Library
+### 11. Prompt Artifacts
 
 Old surface:
 
@@ -516,7 +516,7 @@ Reintroduction constraint:
   retention controls, and clear separation between local diagnostics and push
   delivery.
 
-### 13. Voice Notes, Transcription, Audio, and Media
+### 13. Audio Capture, Transcription, and Media
 
 Old surface:
 
@@ -663,19 +663,9 @@ Reintroduction constraint:
 
 Old iOS view roots that no longer exist as fixed product panels:
 
-- `AgentControl`
-- `AuditDetails`
-- `EngineApproval`
-- `Notifications`
-- `Process`
-- `PromptLibrary`
-- `SessionTree`
-- `Skills`
-- `SourceChanges`
-- `Subagents`
-- `UserInteraction`
-- `VoiceNotes`
-- `Work`
+- Retired feature-specific control, audit, approval, notification, process,
+  prompt, session-tree, skill, source-change, subagent, interaction, media, and
+  work panel roots from the modular capability engine.
 
 Current state:
 
@@ -1000,7 +990,7 @@ operations, but the old named domain API is absent.
 - `plan::exit`
 - `plan::get_state`
 
-### Prompt Library
+### Prompt Artifacts
 
 - `prompt_library::history_clear`
 - `prompt_library::history_delete`
@@ -1034,7 +1024,7 @@ operations, but the old named domain API is absent.
 - `system::get_diagnostics`
 - `system::get_update_status`
 
-### Transcription and Voice Notes
+### Transcription and Audio Capture
 
 - `transcription::audio`
 - `transcription::download_model`

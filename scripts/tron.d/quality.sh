@@ -50,6 +50,7 @@ run_tests() {
         documentation_evidence_scorecard_integrity_invariants
         self_sufficient_agent_runtime_readiness_invariants
         primitive_minimality_closure_invariants
+        baseline_pre_restoration_closure_invariants
         primitive_trace_execution
         integration
     )

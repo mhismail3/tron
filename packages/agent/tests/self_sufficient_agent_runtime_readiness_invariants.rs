@@ -259,6 +259,10 @@ fn classified_successor_term_path(path: &str, source: &str) -> bool {
         || path.starts_with("packages/agent/docs/off-plan-saa-authorship-teardown-cleanup-")
         || path.starts_with("packages/agent/docs/primitive-engine-teardown-")
         || path.starts_with("packages/agent/docs/ios-thin-client-generic-runtime-shell-")
+        || path
+            == "packages/agent/docs/primitive-baseline-vs-modular-capability-engine-feature-index.md"
+        || path.starts_with("packages/agent/docs/baseline-pre-restoration-closure-")
+        || path == "packages/agent/tests/baseline_pre_restoration_closure_invariants.rs"
         || path == "packages/agent/docs/primitive-code-cleanup-scorecard.md"
         || path == "packages/agent/docs/provider-model-boundary-discipline-scorecard.md"
         || path == "packages/agent/docs/public-protocol-api-contract-discipline-scorecard.md"

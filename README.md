@@ -2,7 +2,7 @@
 
 **A persistent, event-sourced AI coding agent for macOS.**
 
-Tron is a local-first AI coding agent that runs as a persistent background service. On the primitive teardown branch, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The iOS app is a thin chat and generic runtime shell; fixed product panels are teardown targets, not supported branch behavior.
+Tron is a local-first AI coding agent that runs as a persistent background service. In the current primitive baseline, a Rust server handles provider communication, a single `execute` primitive, agent-owned state, and event-sourced session persistence. The iOS app is a thin chat and generic runtime shell; fixed product panels are absent from supported baseline behavior. Pre-restoration work follows an iii-aligned Worker / Function / Trigger contract: future capabilities must enter as worker-owned functions and triggers in the live catalog, not as hardcoded harness features.
 
 This README is the single, canonical reference for the project and is expected to stay in sync with the code. The Rust codebase is self-documenting: `packages/agent/src/lib.rs` declares the module tree, `mod.rs` files map submodules, and `// INVARIANT:` comments mark critical correctness constraints. iOS documentation lives in `packages/ios-app/docs/`. When you change anything described here — modules, CLI commands, capabilities, engine protocol methods, event types, settings fields, DB tables, install layout — update this file in the same commit.
 
@@ -341,6 +341,19 @@ Current living entry points:
   contracts, historical evidence, and static gates.
 - `packages/agent/docs/primitive-minimality-closure-inventory.tsv`:
   machine-readable PMC minimality inventory used by static gates.
+- `packages/agent/docs/baseline-pre-restoration-closure-scorecard.md`: completed
+  Baseline Pre-Restoration Closure scorecard for certifying the current
+  primitive baseline, iii-style worker/function/trigger alignment, restoration
+  backlog, active-doc cleanup, absence guards, entry contract, and final
+  pre-restoration verification.
+- `packages/agent/docs/baseline-pre-restoration-closure-evidence-manifest.md`:
+  companion evidence manifest for BPRC lineage, restoration backlog proof,
+  active-doc cleanup, gate wiring, validation commands, and residual risks.
+- `packages/agent/docs/baseline-pre-restoration-closure-inventory.md`:
+  completed BPRC classification of baseline artifacts, foundational substrate,
+  restoration backlog rows, and the pre-restoration entry contract.
+- `packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv`:
+  machine-readable BPRC inventory and restoration backlog used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -475,13 +488,19 @@ Current living entry points:
   deleted provider helper absence, retained-contract classification,
   local/GitHub target parity, README wiring, predecessor inventory rows, and
   no public protocol/iOS behavior expansion.
+- `packages/agent/tests/baseline_pre_restoration_closure_invariants.rs`:
+  completed BPRC gates for pre-restoration scorecard/evidence/inventory
+  integrity, iii-style worker/function/trigger alignment, restoration backlog
+  coverage, active-doc current-baseline wording, old product-surface absence,
+  provider-visible execute minimality, and local/GitHub target parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
 Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
 the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
-scorecards, the PMC closure scorecard, and the OPSAA cleanup scorecard.
+scorecards, the PMC and BPRC closure scorecards, and the OPSAA cleanup
+scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1620,9 +1639,17 @@ tron ci clippy test          # Subset: linting + tests
 `documentation_evidence_scorecard_integrity_invariants`,
 `self_sufficient_agent_runtime_readiness_invariants`,
 `primitive_minimality_closure_invariants`,
+`baseline_pre_restoration_closure_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.
+
+Before restoring any feature from the primitive baseline feature index, the
+feature slice must satisfy the BPRC pre-restoration entry contract: worker or
+module owner, function/trigger contracts, resource/event schemas, authority
+policy, iOS parity decision, tests, docs, migration and retention policy,
+rollback strategy, and proof that the change is not a hardcoded harness
+expansion.
 
 Install the local hook once per clone with `scripts/install-hooks.sh`; it
 blocks commits with staged Rust formatting drift and runs the personal-info

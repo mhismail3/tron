@@ -1620,3 +1620,9 @@ packages/agent/docs/primitive-minimality-closure-evidence-manifest.md	retain	pmc
 packages/agent/docs/primitive-minimality-closure-inventory.md	retain	pmc docs	PMC-9	Primitive Minimality Closure inventory retained for removed and retained surface classification.
 packages/agent/docs/primitive-minimality-closure-inventory.tsv	retain	pmc docs	PMC-9	Primitive Minimality Closure machine inventory retained for static gates.
 packages/agent/tests/primitive_minimality_closure_invariants.rs	retain	pmc rust test	PMC-9	Primitive Minimality Closure invariant target retained for static minimality gates.
+packages/agent/docs/primitive-baseline-vs-modular-capability-engine-feature-index.md	retain	bprc docs	BPRC-2	Primitive baseline versus modular capability engine feature index retained as restoration backlog evidence.
+packages/agent/docs/baseline-pre-restoration-closure-scorecard.md	retain	bprc docs	BPRC-10	Baseline Pre-Restoration Closure scorecard retained for baseline closure proof.
+packages/agent/docs/baseline-pre-restoration-closure-evidence-manifest.md	retain	bprc docs	BPRC-10	Baseline Pre-Restoration Closure evidence manifest retained for command and failed-attempt proof.
+packages/agent/docs/baseline-pre-restoration-closure-inventory.md	retain	bprc docs	BPRC-8	Baseline Pre-Restoration Closure inventory retained for iii-aligned backlog classification.
+packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv	retain	bprc docs	BPRC-8	Baseline Pre-Restoration Closure machine inventory retained for static gates.
+packages/agent/tests/baseline_pre_restoration_closure_invariants.rs	retain	bprc rust test	BPRC-10	Baseline Pre-Restoration Closure invariant target retained for static baseline-restoration gates.

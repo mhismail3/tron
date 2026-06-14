@@ -6,7 +6,7 @@
 
 **Minimum iOS**: 26.0
 
-The iOS app is a SwiftUI `/engine` client. On the primitive teardown branch it
+The iOS app is a SwiftUI `/engine` client. In the current primitive baseline it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,
 renders session messages, persists a local event cache for reconstruction, and
 renders generic runtime surfaces emitted by the engine. It does not own fixed
