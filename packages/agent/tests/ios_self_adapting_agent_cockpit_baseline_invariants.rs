@@ -384,7 +384,7 @@ fn neutral_glass_theme_baseline_is_locked_by_source_and_tests() {
     assert_contains_all(
         "packages/ios-app/Sources/UI/Theme/TronColors.swift",
         &[
-            "static let tronEmerald = Color(lightHex: \"#2563EB\", darkHex: \"#60A5FA\")",
+            "static let tronEmerald = Color(lightHex: \"#059669\", darkHex: \"#10B981\")",
             "static let tronBackground = Color(lightHex: \"#F7F8FA\", darkHex: \"#090A0C\")",
             "static let tronSurface = Color(lightHex: \"#FFFFFF\", darkHex: \"#16181D\")",
             "static let tronSurfaceElevated = Color(lightHex: \"#EEF2F6\", darkHex: \"#252A32\")",
@@ -399,7 +399,7 @@ fn neutral_glass_theme_baseline_is_locked_by_source_and_tests() {
             "lightModeBackgroundsAreNeutralGlass",
             "darkModeColorsUseNeutralGlassBaseline",
             "#F7F8FA",
-            "#60A5FA",
+            "#10B981",
         ],
     );
 }

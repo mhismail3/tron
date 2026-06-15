@@ -26,7 +26,7 @@ runtime, memory feature, or successor worker capability.
 | IOSAC-3 | Lifecycle actions and confirmations | 10 | passed | Install, enable, disable, launch, stop, and retire actions are state-gated, confirmation-backed, idempotent, and refresh from server state after mutation. |
 | IOSAC-4 | Dynamic runtime surfaces | 10 | passed | The cockpit lists `ui_surface` resources, inspects current versions, decodes `UiSurfaceDTO`, and renders through `GeneratedRuntimeSurfaceView` with resource/version refs instead of a hardcoded panel. |
 | IOSAC-5 | Chat shell integration | 10 | passed | `ChatView` exposes a compact status capsule and cockpit sheet while continuing to use repository protocols and the existing composition root. |
-| IOSAC-6 | Neutral glass visual baseline | 8 | passed | Theme tokens now resolve to neutral glass backgrounds with a blue primary accent, separate semantic status colors, and tests for light/dark values. |
+| IOSAC-6 | Neutral glass visual baseline | 8 | passed | Theme tokens now resolve to neutral glass backgrounds with an emerald primary accent, separate semantic status colors, and tests for light/dark values. |
 | IOSAC-7 | Focused Swift tests | 12 | passed | DTO, client, state-projection, view-model, generated UI renderer, and theme tests cover the new user-facing surface. |
 | IOSAC-8 | Static gates | 10 | passed | `ios_self_adapting_agent_cockpit_baseline_invariants` enforces artifacts, source contracts, dynamic-surface rendering, theme tokens, and CI/local target wiring. |
 | IOSAC-9 | Docs and inventory | 8 | passed | README, iOS architecture docs, scorecard, evidence manifest, inventory docs/TSV, and primitive cleanup inventory rows describe current behavior. |

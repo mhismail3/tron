@@ -31,7 +31,7 @@ implementation.
 - IOSAC-5: `ChatView` owns the mounted cockpit view model, displays
   `AgentStatusCapsuleView`, and presents `AgentCockpitSheet` through the
   existing sheet coordinator.
-- IOSAC-6: `TronColors` now defines neutral glass backgrounds and blue primary
+- IOSAC-6: `TronColors` now defines neutral glass backgrounds and emerald primary
   accent tokens; `TronColorsTests` lock the light/dark values.
 - IOSAC-7: focused Swift tests cover DTO decoding, RPC function IDs and
   payloads, projection state, dynamic surface inspection/decoding, generated UI
@@ -58,10 +58,10 @@ implementation.
 - Initial Xcode focused test run executed 0 XCTest-selected tests before Swift
   Testing discovered the suites. Fix: subsequent verification uses the Swift
   Testing suite output and names the focused suite totals in this manifest.
-- Initial theme baseline retained warm cream and green-primary tokens. Fix:
-  `TronColors` now resolves to neutral glass backgrounds with blue primary
+- Initial theme baseline retained warm cream backgrounds. Fix: `TronColors` now
+  resolves to neutral glass backgrounds while preserving the emerald primary
   accent and separate semantic success/warning/error tokens; tests were updated
-  to assert the new baseline.
+  to assert the current baseline.
 - Initial live simulator cockpit refresh reached the shell but showed a server
   response failure when the cockpit tried to list generic resources. Fix:
   `resource::list` and `resource::inspect` now use a shared

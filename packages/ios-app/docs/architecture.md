@@ -233,9 +233,8 @@ popover rendering live in `ModelPickerSheet+Sections.swift`. `TronColors.swift`
 owns the base palette; semantic derived tokens and shape-style conveniences
 live in `TronThemeTokens.swift`. The current visual baseline is neutral glass:
 light backgrounds resolve to cool neutrals, dark surfaces resolve to deep
-neutral glass, primary controls use the legacy `tronEmerald` token as a blue
-primary accent for compatibility, and success/warning/error remain separate
-semantic colors.
+neutral glass, primary controls use the `tronEmerald` token as the emerald
+primary accent, and success/warning/error remain separate semantic colors.
 
 ## Diagnostics And Build Identity
 

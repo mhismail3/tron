@@ -17,14 +17,14 @@ extension Color {
 
     // MARK: - Accent Colors (adaptive: deeper in light mode)
 
-    /// Legacy primary accent token. The API name remains for compatibility; the visual token is now blue glass.
-    static let tronEmerald = Color(lightHex: "#2563EB", darkHex: "#60A5FA")
+    /// Emerald primary accent.
+    static let tronEmerald = Color(lightHex: "#059669", darkHex: "#10B981")
 
-    /// Deeper primary accent for high-emphasis controls.
-    static let tronEmeraldDark = Color(lightHex: "#1D4ED8", darkHex: "#3B82F6")
+    /// Deeper emerald for high-emphasis controls.
+    static let tronEmeraldDark = Color(lightHex: "#047857", darkHex: "#059669")
 
-    /// Teal secondary accent for runtime context.
-    static let tronMint = Color(lightHex: "#0D9488", darkHex: "#2DD4BF")
+    /// Mint secondary accent.
+    static let tronMint = Color(lightHex: "#10B981", darkHex: "#34D399")
 
     // MARK: - Semantic Colors (adaptive: deeper in light mode)
 
@@ -81,20 +81,20 @@ extension Color {
 
     // MARK: - Message Text Colors (adaptive per role)
 
-    /// User message text: primary accent in both modes.
-    static let userMessageText = Color(lightHex: "#2563EB", darkHex: "#60A5FA")
+    /// User message text: emerald primary accent in both modes.
+    static let userMessageText = Color(lightHex: "#059669", darkHex: "#10B981")
     /// Assistant message text: neutral in light mode, near-white in dark mode.
     static let assistantMessageText = Color(lightHex: "#111827", darkHex: "#F8FAFC")
 
-    /// Input field text: primary accent in both modes.
-    static let inputText = Color(lightHex: "#2563EB", darkHex: "#60A5FA")
+    /// Input field text: emerald primary accent in both modes.
+    static let inputText = Color(lightHex: "#059669", darkHex: "#10B981")
 
-    /// Input field placeholder: quiet blue-gray in both modes.
-    static let inputPlaceholder = Color(lightHex: "#93A4BC", darkHex: "#64748B")
+    /// Input field placeholder: soft emerald in light, muted emerald in dark.
+    static let inputPlaceholder = Color(lightHex: "#6EE7B7", darkHex: "#047857")
 
     // MARK: - Role Colors (adaptive)
 
-    static let userBubble = Color(lightHex: "#2563EB", darkHex: "#60A5FA")
+    static let userBubble = Color(lightHex: "#059669", darkHex: "#10B981")
     static let assistantBubble = Color(lightHex: "#EEF2F6", darkHex: "#252A32")
     static let systemBubble = Color(lightHex: "#E6EBF1", darkHex: "#323842")
     static let capabilityBubble = Color(lightHex: "#E0F2FE", darkHex: "#14324A")

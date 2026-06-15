@@ -38,28 +38,28 @@ struct TronColorsTests {
 
     // MARK: - Input Text Tokens
 
-    @Test func inputTextLightIsPrimaryAccent() {
-        #expect(lightHex(of: .inputText) == "#2563EB")
+    @Test func inputTextLightIsEmeraldPrimaryAccent() {
+        #expect(lightHex(of: .inputText) == "#059669")
     }
 
-    @Test func inputTextDarkIsPrimaryAccent() {
-        #expect(darkHex(of: .inputText) == "#60A5FA")
+    @Test func inputTextDarkIsEmeraldPrimaryAccent() {
+        #expect(darkHex(of: .inputText) == "#10B981")
     }
 
-    @Test func inputPlaceholderLightIsQuietBlueGray() {
-        #expect(lightHex(of: .inputPlaceholder) == "#93A4BC")
+    @Test func inputPlaceholderLightIsSoftEmerald() {
+        #expect(lightHex(of: .inputPlaceholder) == "#6EE7B7")
     }
 
-    @Test func inputPlaceholderDarkIsQuietBlueGray() {
-        #expect(darkHex(of: .inputPlaceholder) == "#64748B")
+    @Test func inputPlaceholderDarkIsMutedEmerald() {
+        #expect(darkHex(of: .inputPlaceholder) == "#047857")
     }
 
     // MARK: - Dark Mode Glass Tokens
 
     @Test func darkModeColorsUseNeutralGlassBaseline() {
         // Core accent colors
-        #expect(darkHex(of: .tronEmerald) == "#60A5FA")
-        #expect(darkHex(of: .tronMint) == "#2DD4BF")
+        #expect(darkHex(of: .tronEmerald) == "#10B981")
+        #expect(darkHex(of: .tronMint) == "#34D399")
 
         // Backgrounds
         #expect(darkHex(of: .tronBackground) == "#090A0C")
@@ -71,8 +71,8 @@ struct TronColorsTests {
         #expect(darkHex(of: .tronTextSecondary) == "#AAB2BF")
 
         // Message colors
-        #expect(darkHex(of: .userMessageText) == "#60A5FA")
-        #expect(darkHex(of: .userBubble) == "#60A5FA")
+        #expect(darkHex(of: .userMessageText) == "#10B981")
+        #expect(darkHex(of: .userBubble) == "#10B981")
         #expect(darkHex(of: .assistantBubble) == "#252A32")
     }
 
