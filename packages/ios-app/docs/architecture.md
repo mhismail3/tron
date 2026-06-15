@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-14 (IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-15 (IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -20,6 +20,15 @@ The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
 may cache and render server facts, but it must not invent capability policy,
 source-control state, worker state, or product panels locally.
+
+The iOS Affordance Restoration Map is the active planning artifact for
+functional-only Phase 1 iOS UX restoration. It classifies every deleted or
+renamed old iOS path before implementation, starts with local-native and
+current server-fact affordances, and does not restore deleted product panels.
+A later full Phase 2 agent-execution restoration plan is still required for
+capability discovery, filesystem, jobs, workers, subagents, approvals, web,
+git/worktrees, skills/rules/memory, MCP, scheduling, program execution, and
+matching database/event/settings/dependency work.
 
 ## Retained Surface
 

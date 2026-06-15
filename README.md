@@ -379,6 +379,18 @@ Current living entry points:
   completed IOSAC retained/absent surface inventory.
 - `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv`:
   machine-readable IOSAC inventory used by static gates.
+- `packages/agent/docs/ios-affordance-restoration-map-scorecard.md`:
+  completed iOS Affordance Restoration Map scorecard for exhaustively
+  classifying removed old iOS affordances before any Phase 1 restoration
+  implementation.
+- `packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md`:
+  companion evidence manifest for IARM old-tree coverage, failed-attempt
+  policy, validation commands, and Phase 1 handoff.
+- `packages/agent/docs/ios-affordance-restoration-map-inventory.md`:
+  completed IARM taxonomy, first-principles review rubric, Phase 1 queue, and
+  durable Phase 2 agent-execution anchor.
+- `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`:
+  machine-readable IARM coverage map used by static gates.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -528,6 +540,10 @@ Current living entry points:
   worker lifecycle client function ids, dynamic `ui_surface` rendering,
   protocol/repository boundaries, neutral glass theme tokens, focused Swift
   test coverage, README/iOS docs, and local/GitHub static-gate parity.
+- `packages/agent/tests/ios_affordance_restoration_map_invariants.rs`:
+  completed IARM gates for old iOS tree coverage, affordance classification
+  vocabulary, Phase 1 review queue, Phase 2 deferral anchor, README/iOS docs,
+  and local/GitHub static-gate parity.
 - `packages/ios-app/docs/architecture.md`: iOS thin-client architecture.
 - `packages/mac-app/docs/architecture.md`: Mac wrapper architecture.
 
@@ -535,8 +551,8 @@ Historical scorecard artifacts are retained as evidence only; live architecture
 guidance is owned by the current README, package docs, source module docs, and
 the completed HRA/AHA/PCC/TPC/TMB/DRC/FSC/SOL/CSD/SACB/ODA/DSEMD/PPACD/PMBD/PERF/CPE/RIURD/IOSTC/DXRHA/DESI/SSARR
 scorecards, the PMC and BPRC closure scorecards, the SUWRF foundation
-scorecard, the IOSAC cockpit baseline scorecard, and the OPSAA cleanup
-scorecard.
+scorecard, the IOSAC cockpit baseline scorecard, the IARM restoration map
+scorecard, and the OPSAA cleanup scorecard.
 
 Capability-backed truth means durable facts that affect agents or operators are
 owned by resources, decisions, evidence, invocations, grants, queues, leases, or
@@ -1408,6 +1424,17 @@ packages/ios-app/Sources/
   are the current static proof for the Agent cockpit, worker lifecycle catalog
   bridge, package action confirmations, dynamic `ui_surface` rendering, and
   neutral glass baseline.
+- **IARM proof**:
+  `packages/agent/docs/ios-affordance-restoration-map-scorecard.md`,
+  `packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md`,
+  `packages/agent/docs/ios-affordance-restoration-map-inventory.md`,
+  `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`, and
+  `packages/agent/tests/ios_affordance_restoration_map_invariants.rs` are the
+  current static proof for the functional-only iOS affordance restoration map.
+  The map exhaustively classifies deleted or renamed old iOS paths, defines the
+  Phase 1 review queue, and preserves the requirement for a later full
+  Phase 2 agent-execution restoration plan. It does not mean those affordances
+  are restored.
 
 ### Data Flow
 
@@ -1713,6 +1740,7 @@ tron ci clippy test          # Subset: linting + tests
 `baseline_pre_restoration_closure_invariants`,
 `self_updating_worker_runtime_foundation_invariants`,
 `ios_self_adapting_agent_cockpit_baseline_invariants`,
+`ios_affordance_restoration_map_invariants`,
 `primitive_trace_execution`, and
 serial `integration`. GitHub's Rust static-gates job runs the same named target
 set for docs, template, iOS, Mac, script, and CI changes.
