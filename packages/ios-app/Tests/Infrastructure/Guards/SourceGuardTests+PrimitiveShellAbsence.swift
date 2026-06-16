@@ -415,6 +415,54 @@ extension SourceGuardTests {
             "camera shutter should stay a compact single liquid-glass surface"
         )
         #expect(
+            source.contains("private var centerCameraButton"),
+            "camera shutter/confirm control should stay one stable center button for in-place animation"
+        )
+        #expect(
+            source.contains("if showingPreview {\n                usePhoto()\n            } else {\n                capturePhoto()\n            }"),
+            "camera center button should morph from shutter action to use-photo confirmation action"
+        )
+        #expect(
+            source.contains("accessibilityLabel(showingPreview ? \"Use photo\" : \"Capture photo\")"),
+            "camera center button should expose the correct accessibility label after morphing"
+        )
+        #expect(
+            source.contains("Color.tronEmerald.opacity(0.44)"),
+            "camera confirmation state should tint the center glass button green"
+        )
+        #expect(
+            source.contains("systemImage: showingPreview ? \"arrow.counterclockwise\" : \"arrow.triangle.2.circlepath.camera\""),
+            "camera switch button should morph into the go-back-to-capture button in preview state"
+        )
+        #expect(
+            source.contains("accessibilityLabel: showingPreview ? \"Go back to capture\" : \"Switch Camera\""),
+            "camera right-side button should expose switch and go-back labels for its two states"
+        )
+        #expect(
+            source.contains("retake()\n                    } else {\n                        flipCamera()"),
+            "camera right-side button should retake in preview state and switch cameras in capture state"
+        )
+        #expect(
+            source.contains("isVisible: !showingPreview"),
+            "camera flashlight button should fade away in preview state without collapsing the control row"
+        )
+        #expect(
+            source.contains("static let controlAnimation = Animation.smooth(duration: 0.28)"),
+            "camera control morphing should use one shared smooth animation"
+        )
+        #expect(
+            source.contains("withAnimation(CameraControlMetrics.controlAnimation)"),
+            "camera preview entry and retake should animate the control morph"
+        )
+        #expect(
+            !source.contains("static let previewSpacing"),
+            "camera preview state should not use a separate two-button row spacing contract"
+        )
+        #expect(
+            !source.contains("cameraIconButton(systemImage: \"checkmark\""),
+            "camera confirmation check should live inside the center shutter button rather than a separate preview-row button"
+        )
+        #expect(
             !source.contains("captureRingWidth"),
             "camera shutter should not reintroduce the older ring treatment"
         )
@@ -433,10 +481,6 @@ extension SourceGuardTests {
         #expect(
             source.contains("accessibilityLabel: \"Flashlight\""),
             "camera flashlight control should expose a stable label after moving glass styling inside the button label"
-        )
-        #expect(
-            source.contains("accessibilityLabel: \"Switch Camera\""),
-            "camera switch control should expose a stable label after moving glass styling inside the button label"
         )
         #expect(
             source.contains(".contentShape(Circle())"),

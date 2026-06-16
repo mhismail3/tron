@@ -109,46 +109,76 @@ struct CameraCaptureSheet: View {
 
     @ViewBuilder
     private var controlButtons: some View {
-        if showingPreview {
-            HStack(alignment: .center, spacing: CameraControlMetrics.previewSpacing) {
-                cameraIconButton(systemImage: "arrow.counterclockwise", isEnabled: true, action: retake)
-                cameraIconButton(systemImage: "checkmark", isEnabled: true, isPrimary: true, action: usePhoto)
-            }
-        } else {
-            HStack(alignment: .center, spacing: CameraControlMetrics.captureSpacing) {
-                cameraIconButton(
-                    systemImage: cameraModel.isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill",
-                    isEnabled: cameraModel.isReady && cameraModel.hasTorch,
-                    isActive: cameraModel.isTorchOn,
-                    accessibilityLabel: "Flashlight",
-                    action: { cameraModel.toggleTorch() }
-                )
+        HStack(alignment: .center, spacing: CameraControlMetrics.captureSpacing) {
+            cameraIconButton(
+                systemImage: cameraModel.isTorchOn ? "flashlight.on.fill" : "flashlight.off.fill",
+                isEnabled: !showingPreview && cameraModel.isReady && cameraModel.hasTorch,
+                isActive: cameraModel.isTorchOn,
+                isVisible: !showingPreview,
+                accessibilityLabel: "Flashlight",
+                action: { cameraModel.toggleTorch() }
+            )
 
-                captureButton
+            centerCameraButton
 
-                cameraIconButton(
-                    systemImage: "arrow.triangle.2.circlepath.camera",
-                    isEnabled: cameraModel.isReady,
-                    accessibilityLabel: "Switch Camera",
-                    action: flipCamera
-                )
-            }
+            cameraIconButton(
+                systemImage: showingPreview ? "arrow.counterclockwise" : "arrow.triangle.2.circlepath.camera",
+                isEnabled: showingPreview || cameraModel.isReady,
+                accessibilityLabel: showingPreview ? "Go back to capture" : "Switch Camera",
+                action: {
+                    if showingPreview {
+                        retake()
+                    } else {
+                        flipCamera()
+                    }
+                }
+            )
         }
+        .animation(CameraControlMetrics.controlAnimation, value: showingPreview)
+        .animation(CameraControlMetrics.controlAnimation, value: cameraModel.isReady)
     }
 
-    private var captureButton: some View {
-        Button(action: capturePhoto) {
-            cameraGlassSurface(
-                size: CameraControlMetrics.captureGlassSize,
-                tint: .white.opacity(cameraModel.isReady ? 0.44 : 0.14),
-                isEnabled: cameraModel.isReady
-            )
+    private var centerCameraButton: some View {
+        Button {
+            if showingPreview {
+                usePhoto()
+            } else {
+                capturePhoto()
+            }
+        } label: {
+            ZStack {
+                cameraGlassSurface(
+                    size: CameraControlMetrics.captureGlassSize,
+                    tint: centerCameraButtonTint,
+                    isEnabled: centerCameraButtonIsEnabled
+                )
+
+                if showingPreview {
+                    Image(systemName: "checkmark")
+                        .font(TronTypography.sans(size: CameraControlMetrics.confirmationIconFontSize, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .transition(.scale(scale: 0.72).combined(with: .opacity))
+                        .contentTransition(.symbolEffect(.replace.downUp))
+                }
+            }
             .frame(width: CameraControlMetrics.captureGlassSize, height: CameraControlMetrics.captureGlassSize)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(!cameraModel.isReady)
-        .accessibilityLabel("Capture photo")
+        .disabled(!centerCameraButtonIsEnabled)
+        .accessibilityLabel(showingPreview ? "Use photo" : "Capture photo")
+        .animation(CameraControlMetrics.controlAnimation, value: showingPreview)
+    }
+
+    private var centerCameraButtonIsEnabled: Bool {
+        showingPreview ? capturedImage != nil : cameraModel.isReady
+    }
+
+    private var centerCameraButtonTint: Color {
+        if showingPreview {
+            return Color.tronEmerald.opacity(0.44)
+        }
+        return .white.opacity(cameraModel.isReady ? 0.44 : 0.14)
     }
 
     private func cameraIconButton(
@@ -156,6 +186,7 @@ struct CameraCaptureSheet: View {
         isEnabled: Bool,
         isActive: Bool = false,
         isPrimary: Bool = false,
+        isVisible: Bool = true,
         accessibilityLabel: String? = nil,
         action: @escaping () -> Void
     ) -> some View {
@@ -170,6 +201,7 @@ struct CameraCaptureSheet: View {
                 Image(systemName: systemImage)
                     .font(TronTypography.sans(size: isPrimary ? CameraControlMetrics.primaryIconFontSize : CameraControlMetrics.iconFontSize, weight: .semibold))
                     .foregroundStyle(isActive ? Color.tronEmerald : .white)
+                    .contentTransition(.symbolEffect(.replace.downUp))
             }
             .frame(
                 width: isPrimary ? CameraControlMetrics.primaryIconHitTargetSize : CameraControlMetrics.iconHitTargetSize,
@@ -179,8 +211,13 @@ struct CameraCaptureSheet: View {
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
-        .opacity(isEnabled ? 1 : 0.36)
+        .opacity(isVisible ? (isEnabled ? 1 : 0.36) : 0)
+        .scaleEffect(isVisible ? 1 : 0.82)
+        .allowsHitTesting(isVisible)
+        .animation(CameraControlMetrics.controlAnimation, value: isVisible)
+        .animation(CameraControlMetrics.controlAnimation, value: systemImage)
         .accessibilityLabel(accessibilityLabel ?? systemImage)
+        .accessibilityHidden(!isVisible)
     }
 
     private func cameraGlassSurface(size: CGFloat, tint: Color, isEnabled: Bool) -> some View {
@@ -208,8 +245,10 @@ struct CameraCaptureSheet: View {
     private func capturePhoto() {
         cameraModel.capturePhoto { image in
             guard let image else { return }
-            capturedImage = image
-            showingPreview = true
+            withAnimation(CameraControlMetrics.controlAnimation) {
+                capturedImage = image
+                showingPreview = true
+            }
         }
     }
 
@@ -221,8 +260,10 @@ struct CameraCaptureSheet: View {
     }
 
     private func retake() {
-        capturedImage = nil
-        showingPreview = false
+        withAnimation(CameraControlMetrics.controlAnimation) {
+            capturedImage = nil
+            showingPreview = false
+        }
         cameraModel.startSession()
     }
 
@@ -235,7 +276,6 @@ private enum CameraControlMetrics {
     static let horizontalPadding: CGFloat = 26
     static let bottomPadding: CGFloat = 48
     static let captureSpacing: CGFloat = 34
-    static let previewSpacing: CGFloat = 46
     static let iconButtonSize: CGFloat = 46
     static let primaryIconButtonSize: CGFloat = 52
     static let captureGlassSize: CGFloat = 76
@@ -243,6 +283,8 @@ private enum CameraControlMetrics {
     static let primaryIconHitTargetSize: CGFloat = 64
     static let iconFontSize: CGFloat = TronTypography.sizeTitle
     static let primaryIconFontSize: CGFloat = TronTypography.sizeLargeTitle
+    static let confirmationIconFontSize: CGFloat = TronTypography.sizeLargeTitle
+    static let controlAnimation = Animation.smooth(duration: 0.28)
 }
 
 // MARK: - Camera Model

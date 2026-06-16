@@ -117,7 +117,10 @@ warm-up can still take time, but it must not block the initial child-sheet
 presentation. The flashlight, shutter, and switch controls share native
 interactive circular Liquid Glass surfaces with larger hit targets than their
 visual glass buttons; the shutter stays a minimal white-tinted frosted glass
-circle without a separate ring. Torch toggles and camera switching run through
+circle without a separate ring. After capture, the same center control animates
+into a green-tinted use-photo check button, the switch-camera control animates
+into the go-back-to-capture control, and the flashlight control fades out while
+the row geometry stays stable. Torch toggles and camera switching run through
 the session queue, update UI state on failure, turn off active torch before
 input replacement, discover front/back camera variants through `AVCaptureDevice`
 discovery, and remove the old video input before validating and attaching the

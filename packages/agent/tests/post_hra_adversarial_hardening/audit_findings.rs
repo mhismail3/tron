@@ -40,6 +40,9 @@ fn live_docs_templates_and_scorecards_have_no_deleted_doc_residue() {
     for file in scan_files {
         let text = read_repo_file(&file);
         for needle in banned_needles {
+            if needle == ".claude" && iarm_old_tree_census_allows_claude_rule_paths(&file, &text) {
+                continue;
+            }
             if text.contains(needle) {
                 hits.push(format!("{file}: {needle}"));
             }
@@ -50,6 +53,15 @@ fn live_docs_templates_and_scorecards_have_no_deleted_doc_residue() {
         "live docs/templates/scorecards must not retain deleted-doc residue",
         hits,
     );
+}
+
+fn iarm_old_tree_census_allows_claude_rule_paths(file: &str, text: &str) -> bool {
+    matches!(
+        file,
+        "packages/agent/docs/ios-affordance-restoration-map-inventory.md"
+            | "packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md"
+    ) && (text.contains("old-path census") || text.contains("The old reference contributes"))
+        && (text.contains("old `.claude/rules` paths") || text.contains("`.claude/rules/` paths"))
 }
 
 #[test]
