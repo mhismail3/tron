@@ -400,7 +400,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "sandbox",
         "self_extension",
         "skills",
-        "transcription",
         "tree",
         "voice_notes",
         "web",

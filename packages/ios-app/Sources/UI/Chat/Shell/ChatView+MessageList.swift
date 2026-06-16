@@ -13,6 +13,8 @@ extension ChatView {
                         agentPhase: viewModel.agentPhase,
                         isCompacting: viewModel.isCompacting,
                         isConnected: viewModel.connectionState == .connected,
+                        isRecording: viewModel.isRecording,
+                        isTranscribing: viewModel.isTranscribing,
                         tokenUsage: viewModel.contextState.totalTokenUsage,
                         contextPercentage: viewModel.contextState.contextPercentage,
                         contextWindow: viewModel.contextState.currentContextWindow,
@@ -38,6 +40,7 @@ extension ChatView {
                         onAbort: viewModel.abortAgent,
                         onAddAttachment: viewModel.addAttachment,
                         onRemoveAttachment: viewModel.removeAttachment,
+                        onMicTap: viewModel.toggleRecording,
                         onHistoryNavigate: { newText in viewModel.inputText = newText }
                     )
                 )

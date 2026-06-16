@@ -27,6 +27,8 @@ pub struct ServerSettings {
     /// 100.x.y.z" without shelling out to the `tailscale` binary.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tailscale_ip: Option<String>,
+    /// Local speech-to-text sidecar settings.
+    pub transcription: TranscriptionSettings,
 }
 
 impl Default for ServerSettings {
@@ -37,6 +39,7 @@ impl Default for ServerSettings {
             default_provider: "anthropic".to_string(),
             default_workspace: None,
             tailscale_ip: None,
+            transcription: TranscriptionSettings::default(),
         }
     }
 }
@@ -61,6 +64,20 @@ impl ServerSettings {
             ));
         }
         Ok(())
+    }
+}
+
+/// Local speech-to-text sidecar settings.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default, deny_unknown_fields)]
+pub struct TranscriptionSettings {
+    /// Whether startup loads the local Parakeet MLX sidecar.
+    pub enabled: bool,
+}
+
+impl Default for TranscriptionSettings {
+    fn default() -> Self {
+        Self { enabled: false }
     }
 }
 
@@ -212,6 +229,7 @@ mod tests {
         assert!(s.default_workspace.is_none());
         // tailscaleIp defaults absent (populated by installer scripts).
         assert!(s.tailscale_ip.is_none());
+        assert!(!s.transcription.enabled);
     }
 
     #[test]
@@ -239,6 +257,16 @@ mod tests {
         let json = serde_json::to_value(&s).unwrap();
         assert!(json.get("heartbeatIntervalMs").is_some());
         assert!(json.get("defaultModel").is_some());
+        assert!(json.get("transcription").is_some());
+    }
+
+    #[test]
+    fn transcription_settings_decode_nested_enabled() {
+        let json = serde_json::json!({
+            "transcription": { "enabled": true }
+        });
+        let s: ServerSettings = serde_json::from_value(json).unwrap();
+        assert!(s.transcription.enabled);
     }
 
     #[test]

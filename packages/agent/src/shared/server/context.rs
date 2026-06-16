@@ -182,6 +182,8 @@ pub struct ServerRuntimeContext {
     pub event_store: Arc<EventStore>,
     /// Shared live capability engine host.
     pub engine_host: EngineHostHandle,
+    /// Lazily loaded local speech-to-text backend.
+    pub transcription_engine: crate::domains::transcription::SharedTranscriptionEngine,
     /// Path to the sparse user profile settings overlay.
     pub settings_path: PathBuf,
     /// Compiled active profile runtime.

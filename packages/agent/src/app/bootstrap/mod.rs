@@ -235,6 +235,7 @@ struct ServiceState {
     event_store: Arc<EventStore>,
     session_manager: Arc<SessionManager>,
     orchestrator: Arc<Orchestrator>,
+    transcription_engine: crate::domains::transcription::SharedTranscriptionEngine,
     agent_deps: Option<AgentDeps>,
 }
 
@@ -263,13 +264,49 @@ async fn init_services(
     let agent_deps = Some(AgentDeps {
         responder_factory: responder_factory.clone(),
     });
+    let transcription_engine = Arc::new(std::sync::OnceLock::new());
 
     Ok(ServiceState {
         event_store,
         session_manager,
         orchestrator,
+        transcription_engine,
         agent_deps,
     })
+}
+
+fn register_transcription_sidecar(
+    enabled: bool,
+    server: &TronServer,
+    transcription_engine: crate::domains::transcription::SharedTranscriptionEngine,
+) {
+    if !enabled {
+        tracing::info!("transcription sidecar disabled");
+        return;
+    }
+
+    let shutdown = server.shutdown().token();
+    let task = tokio::spawn(async move {
+        tokio::select! {
+            engine = crate::domains::transcription::MlxEngine::new() => {
+                match engine {
+                    Ok(engine) => {
+                        let engine: Arc<dyn crate::domains::transcription::TranscriptionEngine> = engine;
+                        if transcription_engine.set(engine).is_ok() {
+                            tracing::info!("transcription sidecar ready (parakeet-mlx)");
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(error = %error, "transcription sidecar setup failed");
+                    }
+                }
+            }
+            () = shutdown.cancelled() => {
+                tracing::debug!("transcription sidecar startup cancelled");
+            }
+        }
+    });
+    server.shutdown().register_task(task);
 }
 
 /// Create model responder factory and check startup auth availability.
@@ -310,6 +347,7 @@ fn build_server_runtime_context(
         session_manager: services.session_manager.clone(),
         event_store: services.event_store.clone(),
         engine_host,
+        transcription_engine: services.transcription_engine.clone(),
         settings_path,
         profile_runtime,
         agent_deps: services.agent_deps,
@@ -450,6 +488,11 @@ pub(crate) async fn run_server(args: Cli) -> Result<()> {
     crate::transport::runtime::setup::register_server_domains_for_context(server.runtime_context())
         .context("Failed to register server domain workers")?;
     register_blocking_supervisor_shutdown(server.shutdown());
+    register_transcription_sidecar(
+        settings.server.transcription.enabled,
+        &server,
+        server.runtime_context().transcription_engine.clone(),
+    );
 
     // Stream pump: orchestrator events -> engine streams.
     let pump = EngineStreamEventPump::new(

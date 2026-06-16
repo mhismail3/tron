@@ -860,12 +860,13 @@ Current primitive operations:
 
 Startup registration currently keeps only loop infrastructure domains:
 `system`, `capability`, `blob`, `message`, `settings`, `auth`, `agent`,
-`logs`, `session`, and model-provider modules. The post-baseline
+`logs`, `session`, `transcription`, and model-provider modules. The post-baseline
 `worker_lifecycle` owner is the explicit exception for local package
-proposal/apply/launch state. Product/tool domains such as `filesystem`,
+proposal/apply/launch state. `transcription` is a local, opt-in composer
+speech-to-text domain; it does not store media or voice notes. Product/tool domains such as `filesystem`,
 `process`, `program`, `web`, `git`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
-`worker`, `notifications`, `voice_notes`, and transcription/import surfaces are
+`worker`, `notifications`, `voice_notes`, and media/import surfaces are
 not registered by default on this branch.
 
 The agent namespace is prompt-loop infrastructure, not an extra model toolbox.
@@ -1151,7 +1152,10 @@ The schema is defined in `packages/agent/src/domains/settings/profile/types/`. A
     "defaultProvider": "anthropic",
     "defaultModel": "claude-sonnet-4-6",
     "defaultWorkspace": null,       // Optional quick-chat workspace path set by iOS onboarding/settings
-    "tailscaleIp": null             // Cached by the Mac wrapper after live Tailscale pairing resolution
+    "tailscaleIp": null,            // Cached by the Mac wrapper after live Tailscale pairing resolution
+    "transcription": {
+      "enabled": false              // Opt-in local Parakeet/MLX composer speech-to-text
+    }
   },
 
   "agent": {
@@ -1393,11 +1397,12 @@ packages/ios-app/Sources/
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   session navigation, prompt input, the functional-only compact custom-height
   composer attachment action sheet that layers native camera/photo/file pickers
-  above the parent sheet, message rendering, local reconstruction, diagnostics,
+  above the parent sheet, composer mic input backed by the local transcription
+  domain when enabled, message rendering, local reconstruction, diagnostics,
   and generic runtime surfaces.
   Fixed product panels,
   repository-specific panels, media workflow surfaces, assistant-management
-  panels, extension-source surfaces, audio transcription, memory-retain, rules,
+  panels, extension-source surfaces, voice-note storage, memory-retain, rules,
   skills, prompt-library panels, prompt queues, and parallel tree-only
   projections are removed from the primary source tree.
 - **Agent cockpit**: the chat shell shows a compact status capsule that opens a
@@ -1676,7 +1681,8 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
     |   +-- restart-sentinel.json  Manual deploy restart state; `restarting` is a preflight blocker
     |   +-- Tron-Deploy.app        Contributor-only service bundle used by `tron install` / `manual-deploy`
     |   +-- Tron-Dev.app           Optional `tron dev` headless agent bundle
-        +-- worker.py              parakeet-mlx Python worker
+    +-- transcription/             Opt-in local composer speech-to-text runtime
+        +-- worker.py              Parakeet/MLX Python worker
         +-- requirements.txt       Pip deps for the venv
         +-- venv/                  Auto-created when enabled and the sidecar starts
         +-- models/hf/             HuggingFace model cache (HF_HOME)

@@ -22,6 +22,7 @@ final class SettingsState {
     var observabilityVerboseRetentionDays: UInt64 = 7
     var storageRetentionEnabled: Bool = true
     var storageMaxDatabaseMb: UInt64 = 512
+    var transcriptionEnabled: Bool = false
 
     @ObservationIgnored
     private var lastLoadedSettings: ServerSettingsSnapshot?
@@ -138,6 +139,7 @@ final class SettingsState {
         observabilityVerboseRetentionDays = settings.observabilityVerboseRetentionDays
         storageRetentionEnabled = settings.storageRetentionEnabled
         storageMaxDatabaseMb = settings.storageMaxDatabaseMb
+        transcriptionEnabled = settings.transcriptionEnabled
 
     }
 }

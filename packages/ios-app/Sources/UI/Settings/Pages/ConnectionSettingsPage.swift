@@ -339,6 +339,21 @@ struct ConnectionSettingsPage: View {
                     }
                 }
                 SettingsRowDivider()
+                SettingsRow(icon: "mic", label: "Local transcription") {
+                    Toggle(
+                        "",
+                        isOn: Binding(
+                            get: { settingsState.transcriptionEnabled },
+                            set: { newValue in
+                                settingsState.transcriptionEnabled = newValue
+                                updateServerSetting(.transcriptionEnabled(newValue))
+                            }
+                        )
+                    )
+                    .labelsHidden()
+                    .tint(.tronEmerald)
+                }
+                SettingsRowDivider()
                 SettingsRow(icon: "externaldrive", label: "Retention") {
                     Toggle(
                         "",

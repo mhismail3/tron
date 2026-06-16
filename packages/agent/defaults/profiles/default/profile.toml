@@ -59,6 +59,9 @@ heartbeatIntervalMs = 30000
 defaultModel = "claude-sonnet-4-6"
 defaultProvider = "anthropic"
 
+[settings.server.transcription]
+enabled = false
+
 [settings.tmux]
 commandTimeoutMs = 30000
 pollingIntervalMs = 500

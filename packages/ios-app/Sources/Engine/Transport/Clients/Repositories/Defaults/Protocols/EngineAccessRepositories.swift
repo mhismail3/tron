@@ -41,6 +41,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
     let observabilityVerboseRetentionDays: UInt64
     let storageRetentionEnabled: Bool
     let storageMaxDatabaseMb: UInt64
+    let transcriptionEnabled: Bool
 
     init(
         defaultModel: String,
@@ -50,7 +51,8 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         observabilityLogLevel: String,
         observabilityVerboseRetentionDays: UInt64,
         storageRetentionEnabled: Bool,
-        storageMaxDatabaseMb: UInt64
+        storageMaxDatabaseMb: UInt64,
+        transcriptionEnabled: Bool
     ) {
         self.defaultModel = defaultModel
         self.defaultWorkspace = defaultWorkspace
@@ -60,6 +62,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         self.observabilityVerboseRetentionDays = observabilityVerboseRetentionDays
         self.storageRetentionEnabled = storageRetentionEnabled
         self.storageMaxDatabaseMb = storageMaxDatabaseMb
+        self.transcriptionEnabled = transcriptionEnabled
     }
 
     init(_ settings: ServerSettings) {
@@ -71,7 +74,8 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
             observabilityLogLevel: settings.observabilityLogLevel,
             observabilityVerboseRetentionDays: settings.observabilityVerboseRetentionDays,
             storageRetentionEnabled: settings.storageRetentionEnabled,
-            storageMaxDatabaseMb: settings.storageMaxDatabaseMb
+            storageMaxDatabaseMb: settings.storageMaxDatabaseMb,
+            transcriptionEnabled: settings.transcriptionEnabled
         )
     }
 }
@@ -87,6 +91,7 @@ enum SettingsMutation {
     case observabilityVerboseRetentionDays(UInt64)
     case storageRetentionEnabled(Bool)
     case storageMaxDatabaseMb(UInt64)
+    case transcriptionEnabled(Bool)
 }
 
 /// Black-box settings contract for server-authoritative settings.
@@ -292,6 +297,18 @@ protocol MessageRepository: AnyObject {
     ) async throws -> MessageDeleteResult
 }
 
+// MARK: - Transcription Repository
+
+@MainActor
+protocol TranscriptionRepository: AnyObject {
+    func transcribeAudio(
+        data: Data,
+        mimeType: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> TranscribeAudioResult
+    func listModels() async throws -> TranscriptionModelsResult
+}
+
 // MARK: - Worker Lifecycle Repository
 
 /// Black-box worker lifecycle contract for the agent cockpit.
@@ -373,5 +390,6 @@ struct ChatSessionServices {
     let agent: any AgentRepository
     let models: any ModelRepository
     let messages: any MessageRepository
+    let transcription: any TranscriptionRepository
     let workerLifecycle: any WorkerLifecycleRepository
 }

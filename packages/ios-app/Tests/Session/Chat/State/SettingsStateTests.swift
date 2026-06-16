@@ -20,6 +20,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.observabilityVerboseRetentionDays, 7)
         XCTAssertTrue(state.storageRetentionEnabled)
         XCTAssertEqual(state.storageMaxDatabaseMb, 512)
+        XCTAssertFalse(state.transcriptionEnabled)
     }
 
     // MARK: - Display Helpers
@@ -50,6 +51,9 @@ final class SettingsStateTests: XCTestCase {
           "storage": {
             "retentionEnabled": false,
             "maxDatabaseMb": 256
+          },
+          "server": {
+            "transcription": { "enabled": true }
           }
         }
         """))
@@ -60,6 +64,7 @@ final class SettingsStateTests: XCTestCase {
         XCTAssertEqual(state.observabilityVerboseRetentionDays, 3)
         XCTAssertFalse(state.storageRetentionEnabled)
         XCTAssertEqual(state.storageMaxDatabaseMb, 256)
+        XCTAssertTrue(state.transcriptionEnabled)
     }
 
     // MARK: - Server Switching

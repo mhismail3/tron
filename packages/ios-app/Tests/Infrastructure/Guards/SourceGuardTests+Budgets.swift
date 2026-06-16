@@ -12,13 +12,14 @@ extension SourceGuardTests {
             HierarchyBudget(
                 relativePath: "Sources/Engine/Transport/Clients",
                 minimumFileCount: 21,
-                maximumFileCount: 24,
+                maximumFileCount: 25,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: ["Repositories"],
                 requiredFiles: [
                     "Sources/Engine/Transport/Clients/SystemClient.swift",
                     "Sources/Engine/Transport/Clients/MessageClient.swift",
                     "Sources/Engine/Transport/Clients/LogsClient.swift",
+                    "Sources/Engine/Transport/Clients/TranscriptionClient.swift",
                 ]
             ),
             HierarchyBudget(
@@ -98,11 +99,12 @@ extension SourceGuardTests {
             HierarchyBudget(
                 relativePath: "Tests/Session/Chat/Coordinators",
                 minimumFileCount: 1,
-                maximumFileCount: 1,
+                maximumFileCount: 2,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: [],
                 requiredFiles: [
                     "Tests/Session/Chat/Coordinators/MessagingCoordinatorTests.swift",
+                    "Tests/Session/Chat/Coordinators/ChatTranscriptionCoordinatorTests.swift",
                 ]
             ),
             HierarchyBudget(

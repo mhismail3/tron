@@ -130,7 +130,6 @@ extension SourceGuardTests {
             "rules" + "Discover" + "Standalone" + "Files",
             "retain" + "Model",
             "auto" + "Retain" + "Interval",
-            "trans" + "cription" + "Enabled",
             "Au" + "dio" + "Recorder",
             "Au" + "dio" + "Capture" + "Engine",
             "Media" + "Client",

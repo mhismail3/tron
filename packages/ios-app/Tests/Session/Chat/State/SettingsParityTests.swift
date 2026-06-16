@@ -35,6 +35,7 @@ final class SettingsParityTests: XCTestCase {
         "observabilityVerboseRetentionDays",
         "storageRetentionEnabled",
         "storageMaxDatabaseMb",
+        "transcriptionEnabled",
     ]
 
     /// Explicit waivers — fields that exist on SettingsState but are

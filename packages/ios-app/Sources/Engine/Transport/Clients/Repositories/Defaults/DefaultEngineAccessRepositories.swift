@@ -120,6 +120,8 @@ private extension SettingsMutation {
             var update = ServerSettingsUpdate()
             update.storage = .init(maxDatabaseMb: megabytes)
             return update
+        case .transcriptionEnabled(let enabled):
+            return ServerSettingsUpdate(server: .init(transcription: .init(enabled: enabled)))
         }
     }
 }
@@ -227,6 +229,33 @@ final class DefaultMessageRepository: MessageRepository {
             targetEventId: targetEventId,
             idempotencyKey: idempotencyKey
         )
+    }
+}
+
+// MARK: - Default Transcription Repository
+
+@MainActor
+final class DefaultTranscriptionRepository: TranscriptionRepository {
+    private let client: TranscriptionClient
+
+    init(client: TranscriptionClient) {
+        self.client = client
+    }
+
+    func transcribeAudio(
+        data: Data,
+        mimeType: String,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> TranscribeAudioResult {
+        try await client.transcribeAudio(
+            audioData: data,
+            mimeType: mimeType,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
+    func listModels() async throws -> TranscriptionModelsResult {
+        try await client.listModels()
     }
 }
 

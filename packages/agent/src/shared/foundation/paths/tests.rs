@@ -187,3 +187,28 @@ fn journals_dir_under_db() {
         dirs::JOURNALS
     )));
 }
+
+#[test]
+fn transcription_paths_live_under_internal() {
+    assert!(transcription_dir().ends_with(format!("{}/{}", dirs::INTERNAL, dirs::TRANSCRIPTION)));
+    assert!(transcription_venv_dir().ends_with(format!(
+        "{}/{}/venv",
+        dirs::INTERNAL,
+        dirs::TRANSCRIPTION
+    )));
+    assert!(transcription_worker_script().ends_with(format!(
+        "{}/{}/worker.py",
+        dirs::INTERNAL,
+        dirs::TRANSCRIPTION
+    )));
+    assert!(transcription_requirements_path().ends_with(format!(
+        "{}/{}/requirements.txt",
+        dirs::INTERNAL,
+        dirs::TRANSCRIPTION
+    )));
+    assert!(transcription_hf_cache_dir().ends_with(format!(
+        "{}/{}/models/hf",
+        dirs::INTERNAL,
+        dirs::TRANSCRIPTION
+    )));
+}

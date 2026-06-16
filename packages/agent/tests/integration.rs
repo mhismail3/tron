@@ -69,6 +69,7 @@ async fn boot_server() -> TestServer {
         session_manager,
         event_store,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
+        transcription_engine: Arc::new(std::sync::OnceLock::new()),
         settings_path,
         profile_runtime: Arc::new(ProfileRuntime::load(&home).unwrap()),
         agent_deps: None,

@@ -19,7 +19,10 @@ enum ServerSettingsFixture {
         let json = """
         {
             "server": {
-                "defaultModel": "claude-sonnet-4-6"
+                "defaultModel": "claude-sonnet-4-6",
+                "transcription": {
+                    "enabled": false
+                }
             },
             "context": {
                 "compactor": {

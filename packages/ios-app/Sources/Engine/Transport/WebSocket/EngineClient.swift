@@ -114,6 +114,10 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var workerLifecycle: WorkerLifecycleClient = WorkerLifecycleClient(transport: self)
 
+    /// Local speech-to-text operations.
+    @ObservationIgnored
+    lazy var transcription: TranscriptionClient = TranscriptionClient(transport: self)
+
     // MARK: - Unified Event Stream
     //
     // Plugin-based event system replaces 30+ individual callbacks.

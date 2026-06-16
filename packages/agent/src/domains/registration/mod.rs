@@ -30,7 +30,7 @@ use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, auth, blob, capability, logs, message, model, session, settings, system,
+    agent, auth, blob, capability, logs, message, model, session, settings, system, transcription,
     worker_lifecycle,
 };
 
@@ -63,6 +63,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         blob::worker_module(&deps)?,
         message::worker_module(&deps)?,
         settings::worker_module(&deps)?,
+        transcription::worker_module(&deps)?,
         auth::worker_module(&deps)?,
         worker_lifecycle::worker_module(&deps)?,
         agent::worker_module(&deps)?,
@@ -360,7 +361,6 @@ mod tests {
             "sandbox".to_owned(),
             ["self", "_", "extension"].concat(),
             ["sk", "ills"].concat(),
-            ["trans", "cription"].concat(),
             "tree".to_owned(),
             ["voice", "_", "notes"].concat(),
             "web".to_owned(),

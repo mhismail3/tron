@@ -41,6 +41,8 @@ pub mod dirs {
     pub const RUN: &str = "run";
     /// Streaming journals for crash recovery of partial LLM output.
     pub const JOURNALS: &str = "journals";
+    /// Local speech-to-text sidecar runtime, venv, and model cache.
+    pub const TRANSCRIPTION: &str = "transcription";
     // ── Under workspace/ ──
 
     /// Active project spaces.
@@ -214,6 +216,31 @@ pub fn run_dir_for_home(home: &Path) -> PathBuf {
 /// `~/.tron/internal/database/journals/`
 pub fn journals_dir() -> PathBuf {
     db_dir().join(dirs::JOURNALS)
+}
+
+/// `~/.tron/internal/transcription/`
+pub fn transcription_dir() -> PathBuf {
+    internal_dir().join(dirs::TRANSCRIPTION)
+}
+
+/// `~/.tron/internal/transcription/venv/`
+pub fn transcription_venv_dir() -> PathBuf {
+    transcription_dir().join("venv")
+}
+
+/// `~/.tron/internal/transcription/worker.py`
+pub fn transcription_worker_script() -> PathBuf {
+    transcription_dir().join("worker.py")
+}
+
+/// `~/.tron/internal/transcription/requirements.txt`
+pub fn transcription_requirements_path() -> PathBuf {
+    transcription_dir().join("requirements.txt")
+}
+
+/// `~/.tron/internal/transcription/models/hf/`
+pub fn transcription_hf_cache_dir() -> PathBuf {
+    transcription_dir().join("models").join("hf")
 }
 
 // ── Workspace subdirectory helpers ─────────────────────────────────────

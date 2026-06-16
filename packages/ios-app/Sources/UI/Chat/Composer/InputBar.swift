@@ -51,6 +51,11 @@ struct InputBar: View {
 
     private var shouldShowStatusPills: Bool { true }
 
+    private var micDisabled: Bool {
+        if config.isRecording { return false }
+        return config.readOnly || config.agentPhase.isActive || config.isTranscribing || !config.isConnected
+    }
+
     private var textFieldTrailingPadding: CGFloat {
         let basePadding: CGFloat = 14
         var totalPadding = basePadding
@@ -124,6 +129,20 @@ struct InputBar: View {
                     // `.accessibilityHint()`.
                     .help(config.sendBlockReason?.description ?? "")
                     .accessibilityHint(config.sendBlockReason?.description ?? "")
+                }
+
+                if !config.readOnly {
+                    GlassMicButton(
+                        isRecording: config.isRecording,
+                        isTranscribing: config.isTranscribing,
+                        isDisabled: micDisabled,
+                        onMicTap: {
+                            isFocused = false
+                            actions.onMicTap()
+                        },
+                        buttonSize: actionButtonSize
+                    )
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
                 }
 
             }

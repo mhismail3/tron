@@ -120,3 +120,63 @@ struct AttachmentButtonDock: View {
             .accessibilityHidden(true)
     }
 }
+
+// MARK: - Glass Mic Button
+
+struct GlassMicButton: View {
+    let isRecording: Bool
+    let isTranscribing: Bool
+    let isDisabled: Bool
+    let onMicTap: () -> Void
+    let buttonSize: CGFloat
+
+    @State private var isPulsing = false
+
+    private var glassTint: Color {
+        if isRecording {
+            return Color.red.opacity(isPulsing ? 0.45 : 0.25)
+        }
+        return Color.tronPhthaloGreen.opacity(0.25)
+    }
+
+    var body: some View {
+        Button(action: onMicTap) {
+            Group {
+                if isTranscribing {
+                    ProgressView()
+                        .tint(.tronEmerald)
+                        .scaleEffect(0.8)
+                } else if isRecording {
+                    Image(systemName: "stop.fill")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(.red)
+                } else {
+                    Image(systemName: "mic.fill")
+                        .font(TronTypography.buttonSM)
+                        .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+                }
+            }
+            .frame(width: buttonSize, height: buttonSize)
+            .contentShape(Circle())
+        }
+        .glassEffect(.regular.tint(glassTint).interactive(), in: .circle)
+        .disabled(isDisabled && !isRecording)
+        .animation(.easeInOut(duration: 0.2), value: isRecording)
+        .animation(.easeInOut(duration: 0.2), value: isTranscribing)
+        .onAppear { updatePulse() }
+        .onChange(of: isRecording) { _, _ in updatePulse() }
+        .accessibilityLabel(isRecording ? "Stop recording" : isTranscribing ? "Transcribing" : "Record voice input")
+        .accessibilityHint(isDisabled ? "Voice input is unavailable while the agent is active or disconnected." : "")
+    }
+
+    private func updatePulse() {
+        guard isRecording else {
+            isPulsing = false
+            return
+        }
+        isPulsing = false
+        withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+            isPulsing = true
+        }
+    }
+}

@@ -17,13 +17,14 @@ struct ServerSettings: Decodable {
     let observabilityVerboseRetentionDays: UInt64
     let storageRetentionEnabled: Bool
     let storageMaxDatabaseMb: UInt64
+    let transcriptionEnabled: Bool
 
     private enum CodingKeys: String, CodingKey {
         case server, context, observability, storage
     }
 
     private enum ServerKeys: String, CodingKey {
-        case defaultModel, defaultWorkspace, tailscaleIp
+        case defaultModel, defaultWorkspace, tailscaleIp, transcription
     }
 
     private enum ContextKeys: String, CodingKey {
@@ -38,6 +39,10 @@ struct ServerSettings: Decodable {
         case retentionEnabled, maxDatabaseMb
     }
 
+    private enum TranscriptionKeys: String, CodingKey {
+        case enabled
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
@@ -45,6 +50,15 @@ struct ServerSettings: Decodable {
         defaultModel = try serverContainer.decode(String.self, forKey: .defaultModel)
         defaultWorkspace = try serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
         tailscaleIp = try serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
+        if serverContainer.contains(.transcription) {
+            let transcriptionContainer = try serverContainer.nestedContainer(
+                keyedBy: TranscriptionKeys.self,
+                forKey: .transcription
+            )
+            transcriptionEnabled = try transcriptionContainer.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
+        } else {
+            transcriptionEnabled = false
+        }
 
         let contextContainer = try container.nestedContainer(keyedBy: ContextKeys.self, forKey: .context)
         compaction = try contextContainer.decode(CompactionSettings.self, forKey: .compactor)
@@ -89,6 +103,11 @@ struct ServerSettingsUpdate: Encodable {
         var defaultModel: String?
         var defaultWorkspace: String?
         var tailscaleIp: String?
+        var transcription: TranscriptionUpdate?
+    }
+
+    struct TranscriptionUpdate: Encodable {
+        var enabled: Bool?
     }
 
     struct ContextUpdate: Encodable {

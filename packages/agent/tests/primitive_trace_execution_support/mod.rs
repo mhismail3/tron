@@ -62,6 +62,7 @@ pub fn test_runtime() -> TestRuntime {
         session_manager,
         event_store,
         engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
+        transcription_engine: Arc::new(std::sync::OnceLock::new()),
         settings_path,
         profile_runtime,
         agent_deps: None,

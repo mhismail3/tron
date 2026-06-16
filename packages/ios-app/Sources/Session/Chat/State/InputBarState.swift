@@ -103,6 +103,10 @@ struct InputBarConfig {
 
     /// Whether the agent is currently processing (convenience).
     var isProcessing: Bool { agentPhase.isProcessing }
+    /// Whether composer audio is currently recording.
+    let isRecording: Bool
+    /// Whether a captured recording is being transcribed.
+    let isTranscribing: Bool
 
     /// Why the send button would be unavailable even with non-empty input.
     /// `nil` means no async blocker; input emptiness is the only remaining gate.
@@ -153,6 +157,8 @@ struct InputBarConfig {
         agentPhase: AgentPhase = .idle,
         isCompacting: Bool = false,
         isConnected: Bool = true,
+        isRecording: Bool = false,
+        isTranscribing: Bool = false,
         tokenUsage: TokenUsage? = nil,
         contextPercentage: Int = 0,
         contextWindow: Int = 0,
@@ -166,6 +172,8 @@ struct InputBarConfig {
         self.agentPhase = agentPhase
         self.isCompacting = isCompacting
         self.isConnected = isConnected
+        self.isRecording = isRecording
+        self.isTranscribing = isTranscribing
         self.tokenUsage = tokenUsage
         self.contextPercentage = contextPercentage
         self.contextWindow = contextWindow
@@ -187,6 +195,7 @@ struct InputBarActions {
     // MARK: - Attachments
     let onAddAttachment: (Attachment) -> Void
     let onRemoveAttachment: (Attachment) -> Void
+    let onMicTap: () -> Void
 
     // MARK: - History
     let onHistoryNavigate: ((String) -> Void)?
@@ -199,6 +208,7 @@ struct InputBarActions {
         onAbort: @escaping () -> Void = {},
         onAddAttachment: @escaping (Attachment) -> Void = { _ in },
         onRemoveAttachment: @escaping (Attachment) -> Void = { _ in },
+        onMicTap: @escaping () -> Void = {},
         onHistoryNavigate: ((String) -> Void)? = nil,
         onContextTap: (() -> Void)? = nil
     ) {
@@ -206,6 +216,7 @@ struct InputBarActions {
         self.onAbort = onAbort
         self.onAddAttachment = onAddAttachment
         self.onRemoveAttachment = onRemoveAttachment
+        self.onMicTap = onMicTap
         self.onHistoryNavigate = onHistoryNavigate
         self.onContextTap = onContextTap
     }

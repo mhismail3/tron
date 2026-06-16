@@ -8,13 +8,14 @@
 
 The iOS app is a SwiftUI `/engine` client. In the current primitive baseline it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,
-renders session messages, persists a local event cache for reconstruction, and
-renders generic runtime surfaces emitted by the engine. The current user-facing
-Agent cockpit surfaces live worker lifecycle catalog entries, package/resource
-status, confirmation-backed lifecycle actions, activity, and active
-`ui_surface` resources without adding fixed product panels. The app does not
-own repository-specific panels, media workflow surfaces, assistant-management
-panels, extension-source surfaces, audio transcription, memory-retain, or rules.
+records composer mic input for opt-in local transcription, renders session
+messages, persists a local event cache for reconstruction, and renders generic
+runtime surfaces emitted by the engine. The current user-facing Agent cockpit
+surfaces live worker lifecycle catalog entries, package/resource status,
+confirmation-backed lifecycle actions, activity, and active `ui_surface`
+resources without adding fixed product panels. The app does not own
+repository-specific panels, media workflow surfaces, saved voice notes,
+assistant-management panels, extension-source surfaces, memory-retain, or rules.
 
 The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
@@ -39,7 +40,8 @@ matching database/event/settings/dependency work.
 - Session list, session creation/fork/resume, prompt composer, a functional-only
   compact custom-height attachment action sheet that layers native
   camera/photo/file pickers above the parent sheet, unified attachments for
-  images/documents, and message rendering.
+  images/documents, a right-side mic affordance for local composer
+  transcription when enabled, and message rendering.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Agent cockpit status capsule and sheet for worker lifecycle catalog/resource
   state, package actions, activity, and dynamic runtime surfaces.
@@ -90,6 +92,7 @@ icon catalog, or fork-row state model.
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Attach:  InputBar -> AttachmentMenuSheet -> nested platform picker -> Attachment -> agent::prompt
+Voice:   InputBar -> ComposerMicRecorder -> ChatTranscriptionCoordinator -> transcription::audio -> InputBar
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView

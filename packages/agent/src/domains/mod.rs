@@ -12,7 +12,7 @@
 //! |--------|---------|
 //! | `capability` | Single model-facing `execute` primitive |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
-//! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, and worker lifecycle |
+//! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, transcription, and worker lifecycle |
 //!
 //! Each retained domain `contract.rs` is the local source of truth for that
 //! worker's function ids, schemas, idempotency, leases, compensation, stream
@@ -43,11 +43,14 @@
 //! reaching these handlers.
 //!
 //! Product/tool domains retired by the primitive teardown must remain absent
-//! from this module tree and startup registration. The worker lifecycle domain
-//! is the post-baseline package/launch substrate for self-updating workers; it
-//! is not a restored product tool domain. New domain behavior must add a
-//! contract, deps narrowing, handler binding, tests, and README/domain-doc
-//! updates together.
+//! from this module tree and startup registration unless a restoration slice
+//! reintroduces the behavior as a narrow worker-owned contract. The
+//! transcription domain is restored only as local speech-to-text for composer
+//! input; saved voice notes and media storage remain absent. The worker
+//! lifecycle domain is the post-baseline package/launch substrate for
+//! self-updating workers; it is not a restored product tool domain. New domain
+//! behavior must add a contract, deps narrowing, handler binding, tests, and
+//! README/domain-doc updates together.
 //!
 //! ## Test Ownership
 //!
@@ -68,4 +71,5 @@ pub mod registration;
 pub mod session;
 pub mod settings;
 pub mod system;
+pub mod transcription;
 pub mod worker_lifecycle;

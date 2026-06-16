@@ -12,7 +12,8 @@ struct ServerSettingsTests {
             "server": {
                 "defaultModel": "claude-opus-4-6",
                 "defaultWorkspace": "/projects",
-                "tailscaleIp": "100.64.0.7"
+                "tailscaleIp": "100.64.0.7",
+                "transcription": { "enabled": true }
             },
             "context": {
                 "compactor": { "preserveRecentCount": 3, "triggerTokenThreshold": 0.80 }
@@ -32,6 +33,7 @@ struct ServerSettingsTests {
         #expect(settings.defaultModel == "claude-opus-4-6")
         #expect(settings.defaultWorkspace == "/projects")
         #expect(settings.tailscaleIp == "100.64.0.7")
+        #expect(settings.transcriptionEnabled == true)
         #expect(settings.compaction.preserveRecentCount == 3)
         #expect(settings.compaction.triggerTokenThreshold == 0.80)
         #expect(settings.observabilityLogLevel == "debug")
@@ -46,6 +48,7 @@ struct ServerSettingsTests {
         #expect(settings.defaultModel == "claude-sonnet-4-6")
         #expect(settings.defaultWorkspace == nil)
         #expect(settings.tailscaleIp == nil)
+        #expect(settings.transcriptionEnabled == false)
         #expect(settings.compaction.preserveRecentCount == 5)
         #expect(settings.compaction.triggerTokenThreshold == 0.70)
         #expect(settings.observabilityLogLevel == "info")
@@ -59,6 +62,7 @@ struct ServerSettingsTests {
         let json = #"{"server":{"defaultModel":"claude-opus-4-6"}}"#
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
         #expect(settings.defaultModel == "claude-opus-4-6")
+        #expect(settings.transcriptionEnabled == false)
     }
 
     @Test("missing retired policy blocks are accepted")
@@ -105,18 +109,29 @@ struct ServerSettingsTests {
         }
     }
 
+    @Test("ServerSettings decoder rejects malformed transcription setting")
+    func serverSettingsDecoderRejectsMalformedTranscriptionSetting() throws {
+        let json = #"{"server":{"defaultModel":"claude-opus-4-6","transcription":"yes"}}"#
+        #expect(throws: DecodingError.self) {
+            _ = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(json))
+        }
+    }
+
     @Test("ServerSettingsUpdate encodes primitive structure")
     func settingsUpdateEncode() throws {
         var update = ServerSettingsUpdate()
         update.server = .init(defaultModel: "claude-opus-4-6")
         update.observability = .init(logLevel: "debug")
         update.storage = .init(retentionEnabled: false)
+        update.server?.transcription = .init(enabled: true)
 
         let data = try JSONEncoder().encode(update)
         let json = try JSONSerialization.jsonObject(with: data) as! [String: Any]
 
         let server = json["server"] as? [String: Any]
         #expect(server?["defaultModel"] as? String == "claude-opus-4-6")
+        let transcription = server?["transcription"] as? [String: Any]
+        #expect(transcription?["enabled"] as? Bool == true)
 
         #expect(json["session"] == nil)
 

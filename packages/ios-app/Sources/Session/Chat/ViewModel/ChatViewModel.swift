@@ -30,6 +30,10 @@ final class ChatViewModel {
     var hasMoreMessages = false
     /// Whether currently loading more messages
     var isLoadingMoreMessages = false
+    /// Composer microphone recording state.
+    var isRecording = false
+    /// Composer audio is being sent to local transcription.
+    var isTranscribing = false
 
     // MARK: - Display Stream State
 
@@ -152,6 +156,10 @@ final class ChatViewModel {
     let eventDispatchCoordinator = EventDispatchCoordinator()
     /// Coordinates compaction event handling (start/complete pill transitions)
     let compactionCoordinator = CompactionCoordinator()
+    /// Coordinates local composer mic recording and transcription.
+    let transcriptionCoordinator = ChatTranscriptionCoordinator()
+    /// Composer-scoped microphone recorder.
+    let micRecorder = ComposerMicRecorder()
     /// O(1) message lookup index — kept in sync with `messages` array
     let messageIndex = MessageIndex()
     var currentCapabilityInvocationMessages: [UUID: ChatMessage] = [:]
@@ -221,6 +229,11 @@ final class ChatViewModel {
         self.modelPickerState = ModelPickerState(modelRepository: services.models)
         setupBindings()
         setupEventProcessingCallbacks()
+        micRecorder.onFinish = { [weak self] url, success in
+            Task { @MainActor [weak self] in
+                await self?.handleRecordingFinished(url: url, success: success)
+            }
+        }
     }
 
     private var observationTasks: [Task<Void, Never>] = []
@@ -262,6 +275,10 @@ final class ChatViewModel {
 
         observationTasks.append(Self.observeLoop({ self.inputBarState.selectedImages }) { [self] images in
             Task { await self.processSelectedImages(images) }
+        })
+
+        observationTasks.append(Self.observeLoop({ self.micRecorder.isRecording }) { [self] recording in
+            self.isRecording = recording
         })
     }
 
@@ -318,6 +335,7 @@ final class ChatViewModel {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
             for task in backgroundTasks { task.cancel() }
+            micRecorder.cancelRecording()
         }
     }
 

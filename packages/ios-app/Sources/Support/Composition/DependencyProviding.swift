@@ -41,6 +41,9 @@ protocol DependencyProviding: AnyObject {
     /// Message mutation repository.
     var messageRepository: any MessageRepository { get }
 
+    /// Local transcription repository.
+    var transcriptionRepository: any TranscriptionRepository { get }
+
     /// Worker lifecycle repository for the agent cockpit.
     var workerLifecycleRepository: any WorkerLifecycleRepository { get }
 
