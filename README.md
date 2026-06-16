@@ -1460,11 +1460,15 @@ foreground layer stays controls-only with no bottom fade, keeping the camera
 view as one continuous surface, and it uses a full-height geometry root so the
 controls align to the bottom of the sheet instead of their intrinsic content
 area. The row adds the runtime bottom safe-area inset back into its padding so
-controls stay low without clipping into the rounded sheet edge.
+controls stay low without clipping into the rounded sheet edge. The sheet edge
+stays flat and does not add foreground glass, refraction, or decorative border
+layers over the live camera feed.
 `CameraCaptureSheet` defers `AVCaptureSession` and `AVCapturePhotoOutput`
 creation/configuration to its dedicated session queue so camera startup cannot
-block the initial sheet presentation. The compact flashlight/switch controls use
-larger circular hit targets than their visual glass buttons. Torch toggles and
+block the initial sheet presentation. The flashlight, shutter, and switch
+controls share native interactive circular Liquid Glass surfaces with larger
+hit targets than their visual glass buttons; the shutter stays a minimal
+white-tinted frosted glass circle without a separate ring. Torch toggles and
 camera switching run through the session queue, restore UI state on AVFoundation
 failure, turn off active torch before replacing the video input, and remove the
 old video input before validating the replacement input. Camera lookup uses

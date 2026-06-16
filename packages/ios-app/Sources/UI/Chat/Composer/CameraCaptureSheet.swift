@@ -138,14 +138,13 @@ struct CameraCaptureSheet: View {
 
     private var captureButton: some View {
         Button(action: capturePhoto) {
-            Circle()
-                .strokeBorder(.white.opacity(cameraModel.isReady ? 0.96 : 0.35), lineWidth: CameraControlMetrics.captureRingWidth)
-                .frame(width: CameraControlMetrics.captureOuterSize, height: CameraControlMetrics.captureOuterSize)
-                .overlay {
-                    Circle()
-                        .fill(.white.opacity(cameraModel.isReady ? 0.94 : 0.28))
-                        .frame(width: CameraControlMetrics.captureInnerSize, height: CameraControlMetrics.captureInnerSize)
-                }
+            cameraGlassSurface(
+                size: CameraControlMetrics.captureGlassSize,
+                tint: .white.opacity(cameraModel.isReady ? 0.44 : 0.14),
+                isEnabled: cameraModel.isReady
+            )
+            .frame(width: CameraControlMetrics.captureGlassSize, height: CameraControlMetrics.captureGlassSize)
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .disabled(!cameraModel.isReady)
@@ -161,27 +160,49 @@ struct CameraCaptureSheet: View {
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Image(systemName: systemImage)
-                .font(TronTypography.sans(size: isPrimary ? CameraControlMetrics.primaryIconFontSize : CameraControlMetrics.iconFontSize, weight: .semibold))
-                .foregroundStyle(isActive ? Color.tronEmerald : .white)
-                .frame(
-                    width: isPrimary ? CameraControlMetrics.primaryIconButtonSize : CameraControlMetrics.iconButtonSize,
-                    height: isPrimary ? CameraControlMetrics.primaryIconButtonSize : CameraControlMetrics.iconButtonSize
+            ZStack {
+                cameraGlassSurface(
+                    size: isPrimary ? CameraControlMetrics.primaryIconButtonSize : CameraControlMetrics.iconButtonSize,
+                    tint: (isActive ? Color.tronEmerald : Color.white).opacity(isActive ? 0.22 : 0.12),
+                    isEnabled: isEnabled
                 )
-                .glassEffect(
-                    .regular.tint((isPrimary ? Color.tronEmerald : Color.black).opacity(isPrimary ? 0.58 : 0.34)).interactive(),
-                    in: .circle
-                )
-                .frame(
-                    width: isPrimary ? CameraControlMetrics.primaryIconHitTargetSize : CameraControlMetrics.iconHitTargetSize,
-                    height: isPrimary ? CameraControlMetrics.primaryIconHitTargetSize : CameraControlMetrics.iconHitTargetSize
-                )
-                .contentShape(Circle())
+
+                Image(systemName: systemImage)
+                    .font(TronTypography.sans(size: isPrimary ? CameraControlMetrics.primaryIconFontSize : CameraControlMetrics.iconFontSize, weight: .semibold))
+                    .foregroundStyle(isActive ? Color.tronEmerald : .white)
+            }
+            .frame(
+                width: isPrimary ? CameraControlMetrics.primaryIconHitTargetSize : CameraControlMetrics.iconHitTargetSize,
+                height: isPrimary ? CameraControlMetrics.primaryIconHitTargetSize : CameraControlMetrics.iconHitTargetSize
+            )
+            .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.36)
         .accessibilityLabel(accessibilityLabel ?? systemImage)
+    }
+
+    private func cameraGlassSurface(size: CGFloat, tint: Color, isEnabled: Bool) -> some View {
+        Circle()
+            .fill(Color.white.opacity(0.001))
+            .frame(width: size, height: size)
+            .glassEffect(.regular.tint(tint).interactive(isEnabled), in: .circle)
+            .overlay {
+                Circle()
+                    .strokeBorder(
+                        LinearGradient(
+                            colors: [
+                                Color.white.opacity(isEnabled ? 0.52 : 0.22),
+                                Color.white.opacity(isEnabled ? 0.16 : 0.08),
+                                Color.black.opacity(isEnabled ? 0.20 : 0.08)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
+            }
     }
 
     private func capturePhoto() {
@@ -217,13 +238,11 @@ private enum CameraControlMetrics {
     static let previewSpacing: CGFloat = 46
     static let iconButtonSize: CGFloat = 46
     static let primaryIconButtonSize: CGFloat = 52
+    static let captureGlassSize: CGFloat = 76
     static let iconHitTargetSize: CGFloat = 60
     static let primaryIconHitTargetSize: CGFloat = 64
     static let iconFontSize: CGFloat = TronTypography.sizeTitle
     static let primaryIconFontSize: CGFloat = TronTypography.sizeLargeTitle
-    static let captureOuterSize: CGFloat = 64
-    static let captureInnerSize: CGFloat = 50
-    static let captureRingWidth: CGFloat = 3
 }
 
 // MARK: - Camera Model

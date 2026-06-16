@@ -109,13 +109,17 @@ material at the safe-area edge, so the camera cannot rely on regular foreground
 content to paint the whole rounded container.
 `immersiveCameraSheetPresentation` keeps the iPad compact-form height fixed,
 clears the iPad material backing, and provides the custom presentation
-background that fills the entire modal. `AVCaptureSession`/`AVCapturePhotoOutput`
-are created and configured on the dedicated session queue after presentation
-begins. Camera warm-up can still take time, but it must not block the initial
-child-sheet presentation. Camera controls keep compact glass visuals with larger
-circular hit targets. Torch toggles and camera switching run through the session
-queue, update UI state on failure, turn off active torch before input
-replacement, discover front/back camera variants through `AVCaptureDevice`
+background that fills the entire modal. The sheet edge stays flat and does not
+add foreground glass, refraction, or decorative border layers over the live
+camera feed. `AVCaptureSession`/`AVCapturePhotoOutput` are created and
+configured on the dedicated session queue after presentation begins. Camera
+warm-up can still take time, but it must not block the initial child-sheet
+presentation. The flashlight, shutter, and switch controls share native
+interactive circular Liquid Glass surfaces with larger hit targets than their
+visual glass buttons; the shutter stays a minimal white-tinted frosted glass
+circle without a separate ring. Torch toggles and camera switching run through
+the session queue, update UI state on failure, turn off active torch before
+input replacement, discover front/back camera variants through `AVCaptureDevice`
 discovery, and remove the old video input before validating and attaching the
 replacement input so the old input does not make `canAddInput` fail.
 

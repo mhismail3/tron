@@ -403,12 +403,32 @@ extension SourceGuardTests {
             "camera controls should sit close to the bottom of the viewport instead of floating high in the sheet"
         )
         #expect(
-            source.contains("static let captureOuterSize: CGFloat = 64"),
-            "camera capture control should stay compact enough to preserve the viewport as the primary surface"
-        )
-        #expect(
             source.contains("static let iconHitTargetSize: CGFloat = 60"),
             "camera side controls should keep a larger tappable area than their compact visual glass button"
+        )
+        #expect(
+            source.contains("private func cameraGlassSurface"),
+            "camera controls should share one liquid-glass surface helper"
+        )
+        #expect(
+            source.contains("static let captureGlassSize: CGFloat = 76"),
+            "camera shutter should stay a compact single liquid-glass surface"
+        )
+        #expect(
+            !source.contains("captureRingWidth"),
+            "camera shutter should not reintroduce the older ring treatment"
+        )
+        #expect(
+            !source.contains("captureInnerSize"),
+            "camera shutter should remain a minimal frosted glass circle instead of an inner/outer target"
+        )
+        #expect(
+            source.contains(".glassEffect(.regular.tint(tint).interactive(isEnabled), in: .circle)"),
+            "camera glass controls should use SwiftUI's native interactive liquid-glass circle"
+        )
+        #expect(
+            source.contains("cameraGlassSurface("),
+            "camera flashlight, shutter, and switch controls should render as liquid-glass buttons"
         )
         #expect(
             source.contains("accessibilityLabel: \"Flashlight\""),
