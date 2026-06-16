@@ -8,6 +8,7 @@ protocol ChatTranscriptionContext: LoggingContext {
     var inputText: String { get set }
     var maxRecordingDuration: TimeInterval { get }
 
+    func requireTranscriptionReady() async throws
     func startRecording() async throws
     @discardableResult
     func stopRecording() -> (url: URL?, success: Bool)
@@ -30,9 +31,10 @@ final class ChatTranscriptionCoordinator {
     private func startRecording(context: ChatTranscriptionContext) async {
         guard !context.isProcessing && !context.isTranscribing else { return }
         do {
+            try await context.requireTranscriptionReady()
             try await context.startRecording()
         } catch {
-            context.showError(error.localizedDescription)
+            context.appendTranscriptionError(transcriptionFailureMessage(for: error))
         }
     }
 
@@ -66,7 +68,7 @@ final class ChatTranscriptionCoordinator {
         } catch let error as AudioFileTooSmallError {
             context.appendTranscriptionError("No speech detected. \(error.size) bytes captured.")
         } catch {
-            context.appendTranscriptionError("Transcription failed: \(error.localizedDescription)")
+            context.appendTranscriptionError(transcriptionFailureMessage(for: error))
         }
     }
 
@@ -82,8 +84,53 @@ final class ChatTranscriptionCoordinator {
             return "application/octet-stream"
         }
     }
+
+    func transcriptionFailureMessage(for error: Error) -> String {
+        if let availabilityError = error as? ChatTranscriptionAvailabilityError {
+            return availabilityError.localizedDescription
+        }
+
+        let description = error.localizedDescription
+        let folded = description.lowercased()
+        if folded.contains("function not found")
+            || folded.contains("transcription::audio")
+            || folded.contains("transcription::list_models") {
+            return "Voice input is not available on this Mac server yet. Restart Tron Server with the latest build, then try again."
+        }
+
+        if folded.contains("transcription disabled") {
+            return "Local transcription is off. Enable Local transcription in Settings, restart Tron Server, then try again."
+        }
+
+        if folded.contains("transcription engine not loaded") {
+            return "Local transcription is enabled but the model is not loaded. Restart Tron Server to load the local model, then try again."
+        }
+
+        if folded.contains("transcription not available") {
+            return "Local transcription is not available right now. Restart Tron Server and try again."
+        }
+
+        return "Transcription failed: \(description)"
+    }
 }
 
 struct AudioFileTooSmallError: Error {
     let size: Int
+}
+
+enum ChatTranscriptionAvailabilityError: LocalizedError, Equatable {
+    case noModel
+    case disabled
+    case engineNotLoaded
+
+    var errorDescription: String? {
+        switch self {
+        case .noModel:
+            return "No local transcription model is registered on this Mac server."
+        case .disabled:
+            return "Local transcription is off. Enable Local transcription in Settings, restart Tron Server, then try again."
+        case .engineNotLoaded:
+            return "Local transcription is enabled but the model is not loaded. Restart Tron Server to load the local model, then try again."
+        }
+    }
 }

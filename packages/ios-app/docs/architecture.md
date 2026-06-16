@@ -92,7 +92,7 @@ icon catalog, or fork-row state model.
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Attach:  InputBar -> AttachmentMenuSheet -> nested platform picker -> Attachment -> agent::prompt
-Voice:   InputBar -> ComposerMicRecorder -> ChatTranscriptionCoordinator -> transcription::audio -> InputBar
+Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models -> ComposerMicRecorder -> transcription::audio -> InputBar
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView

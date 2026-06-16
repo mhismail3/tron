@@ -78,6 +78,33 @@ final class ChatTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertTrue(context.errors.isEmpty)
     }
 
+    func testToggleRecordingStopsBeforeMicrophoneWhenTranscriptionDisabled() async {
+        let coordinator = ChatTranscriptionCoordinator()
+        let context = MockTranscriptionContext()
+        context.readinessError = ChatTranscriptionAvailabilityError.disabled
+
+        await coordinator.toggleRecording(context: context)
+
+        XCTAssertEqual(context.readinessCallCount, 1)
+        XCTAssertEqual(context.startRecordingCallCount, 0)
+        XCTAssertEqual(context.errors, [
+            "Local transcription is off. Enable Local transcription in Settings, restart Tron Server, then try again."
+        ])
+    }
+
+    func testToggleRecordingMapsMissingServerFunctionToRestartMessage() async {
+        let coordinator = ChatTranscriptionCoordinator()
+        let context = MockTranscriptionContext()
+        context.readinessError = MockLocalizedError("function not found: transcription::list_models")
+
+        await coordinator.toggleRecording(context: context)
+
+        XCTAssertEqual(context.startRecordingCallCount, 0)
+        XCTAssertEqual(context.errors, [
+            "Voice input is not available on this Mac server yet. Restart Tron Server with the latest build, then try again."
+        ])
+    }
+
     func testFailedRecordingAddsRecordingError() async {
         let coordinator = ChatTranscriptionCoordinator()
         let context = MockTranscriptionContext()
@@ -111,13 +138,22 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     var nextTranscript = ""
     var nextData = Data(repeating: 1, count: 2_048)
     var stopResult: (url: URL?, success: Bool) = (nil, false)
+    var readinessError: Error?
 
+    var readinessCallCount = 0
     var startRecordingCallCount = 0
     var stopRecordingCallCount = 0
     var loadedURL: URL?
     var transcribedMimeType: String?
     var errors: [String] = []
     var shownErrors: [String] = []
+
+    func requireTranscriptionReady() async throws {
+        readinessCallCount += 1
+        if let readinessError {
+            throw readinessError
+        }
+    }
 
     func startRecording() async throws {
         startRecordingCallCount += 1
@@ -154,4 +190,14 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     func logInfo(_ message: String) {}
     func logWarning(_ message: String) {}
     func logError(_ message: String) {}
+}
+
+private struct MockLocalizedError: LocalizedError {
+    let message: String
+
+    init(_ message: String) {
+        self.message = message
+    }
+
+    var errorDescription: String? { message }
 }

@@ -863,7 +863,8 @@ Startup registration currently keeps only loop infrastructure domains:
 `logs`, `session`, `transcription`, and model-provider modules. The post-baseline
 `worker_lifecycle` owner is the explicit exception for local package
 proposal/apply/launch state. `transcription` is a local, opt-in composer
-speech-to-text domain; it does not store media or voice notes. Product/tool domains such as `filesystem`,
+speech-to-text domain; composer voice input probes local model readiness before
+recording and does not store media or voice notes. Product/tool domains such as `filesystem`,
 `process`, `program`, `web`, `git`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, `notifications`, `voice_notes`, and media/import surfaces are
@@ -1398,7 +1399,7 @@ packages/ios-app/Sources/
   session navigation, prompt input, the functional-only compact custom-height
   composer attachment action sheet that layers native camera/photo/file pickers
   above the parent sheet, composer mic input backed by the local transcription
-  domain when enabled, message rendering, local reconstruction, diagnostics,
+  domain after a readiness check, message rendering, local reconstruction, diagnostics,
   and generic runtime surfaces.
   Fixed product panels,
   repository-specific panels, media workflow surfaces, assistant-management

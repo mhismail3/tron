@@ -5,6 +5,19 @@ extension ChatViewModel: ChatTranscriptionContext {
 
     var maxRecordingDuration: TimeInterval { 300 }
 
+    func requireTranscriptionReady() async throws {
+        let models = try await services.transcription.listModels().models
+        guard let model = models.first(where: \.default) ?? models.first else {
+            throw ChatTranscriptionAvailabilityError.noModel
+        }
+        guard model.enabled else {
+            throw ChatTranscriptionAvailabilityError.disabled
+        }
+        guard model.engineLoaded else {
+            throw ChatTranscriptionAvailabilityError.engineNotLoaded
+        }
+    }
+
     func startRecording() async throws {
         try await micRecorder.startRecording(maxDuration: maxRecordingDuration)
     }

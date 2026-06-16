@@ -63,6 +63,9 @@ Scope restored:
   the send/abort control.
 - iOS records temporary composer audio, sends it through a repository/client
   boundary, and inserts returned text into the current draft.
+- iOS checks `transcription::list_models` before opening the microphone so old
+  servers, disabled local transcription, and unloaded sidecars produce
+  actionable local messages instead of a generic transcription failure.
 - The server owns an opt-in `transcription` domain with
   `transcription::audio`, `transcription::list_models`, and
   `transcription::download_model`.
@@ -88,6 +91,7 @@ Slice validation:
 | `cargo check --manifest-path packages/agent/Cargo.toml` | passed | New transcription domain/settings/runtime context compiled; existing provider dead-code warnings remain. |
 | `cargo test --manifest-path packages/agent/Cargo.toml transcription --lib` | passed | 7 filtered tests passed, including transcription cleanup, base64 normalization, temp-file cleanup, settings decode, and transcription path helpers. |
 | `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatTranscriptionCoordinatorTests -only-testing:TronMobileTests/ServerSettingsTests -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/SettingsParityTests` | passed | 28 selected tests passed on iOS 26.5 simulator. |
+| `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatTranscriptionCoordinatorTests` | passed | 9 selected tests passed after adding pre-microphone readiness checks and actionable messages for old-server/disabled transcription states. |
 | `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests` | passed | 43 source guard tests passed; updated file-count budgets explicitly include transcription client/coordinator tests. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | passed | 6 IARM tests passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants` | passed | 8 BPRC tests passed after narrowing the old-domain absence guard to allow restored local transcription. |
