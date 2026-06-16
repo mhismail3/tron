@@ -1,5 +1,81 @@
 import SwiftUI
 
+// MARK: - Compact Height Sheet Layout
+
+/// Shared metrics for short custom-height sheets that present a compact grid of
+/// direct actions.
+enum CompactActionSheetLayout {
+    static let columnCount = 3
+    static let columnSpacing: CGFloat = 8
+    static let rowSpacing: CGFloat = 8
+    static let horizontalPadding: CGFloat = 16
+    static let verticalPadding: CGFloat = 12
+    static let tileMinHeight: CGFloat = 78
+    static let toolbarHeight: CGFloat = 80
+    static let bottomPadding: CGFloat = 18
+
+    static func columns(forItemCount itemCount: Int) -> [GridItem] {
+        let visibleColumnCount = min(max(itemCount, 1), columnCount)
+        return Array(
+            repeating: GridItem(.flexible(), spacing: columnSpacing),
+            count: visibleColumnCount
+        )
+    }
+
+    static func rowCount(forItemCount itemCount: Int) -> Int {
+        let normalizedCount = max(itemCount, 1)
+        return max(1, (normalizedCount + columnCount - 1) / columnCount)
+    }
+
+    static func sheetHeight(forItemCount itemCount: Int) -> CGFloat {
+        let rows = CGFloat(rowCount(forItemCount: itemCount))
+        let interRowSpacing = max(0, rows - 1) * rowSpacing
+        return toolbarHeight
+            + (verticalPadding * 2)
+            + (rows * tileMinHeight)
+            + interRowSpacing
+            + bottomPadding
+    }
+}
+
+// MARK: - Compact Action Sheet Button
+
+/// Settings-grid style action tile for short custom-height sheets.
+struct CompactActionSheetButton: View {
+    let title: String
+    let systemImage: String
+    let accent: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 8) {
+                Image(systemName: systemImage)
+                    .font(TronTypography.sans(size: TronTypography.sizeTitle, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(height: 24)
+                    .accessibilityHidden(true)
+
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.78)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+            .frame(maxWidth: .infinity, minHeight: CompactActionSheetLayout.tileMinHeight)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .sectionFill(accent, interactive: true)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityLabel(title)
+    }
+}
+
 // MARK: - Sheet Title
 
 /// Standard principal toolbar title used across all sheets.

@@ -1,5 +1,4 @@
 import SwiftUI
-import PhotosUI
 
 // ARCHITECTURE: coordinates keyboard handling, attachment picking, and send
 // flow for the primitive prompt composer.
@@ -21,10 +20,7 @@ struct InputBar: View {
     // MARK: - Private State
 
     @FocusState private var isFocused: Bool
-    @Environment(\.dependencies) private var dependencies
-    @State private var showingImagePicker = false
-    @State private var showCamera = false
-    @State private var showFilePicker = false
+    @State private var showAttachmentMenu = false
     @State private var hasAppeared = false
     @State private var showAttachmentButton = false
 
@@ -78,12 +74,12 @@ struct InputBar: View {
                 // Attachment button
                 if showAttachmentButton {
                     GlassAttachmentButton(
-                        isProcessing: config.agentPhase.isActive || config.readOnly,
+                        isDisabled: config.agentPhase.isActive || config.readOnly,
                         buttonSize: actionButtonSize,
-                        attachmentCapability: config.attachmentCapability,
-                        showCamera: $showCamera,
-                        showingImagePicker: $showingImagePicker,
-                        showFilePicker: $showFilePicker
+                        onTap: {
+                            isFocused = false
+                            showAttachmentMenu = true
+                        }
                     )
                     .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
@@ -147,6 +143,15 @@ struct InputBar: View {
         }
         // Focus management — no blockFocusUntil; user can tap to refocus after the turn.
         .animation(nil, value: isFocused)
+        .sheet(isPresented: $showAttachmentMenu) {
+            AttachmentMenuSheet(
+                capability: config.attachmentCapability,
+                selectedImages: $state.selectedImages,
+                onCameraImageCaptured: addCameraImageAttachment,
+                onDocumentPicked: addDocumentAttachment,
+                onDocumentSizeExceeded: handleDocumentSizeExceeded
+            )
+        }
         .onChange(of: config.isProcessing) { wasProcessing, isNowProcessing in
             if !wasProcessing && isNowProcessing {
                 // Processing started - dismiss keyboard IMMEDIATELY using both methods
@@ -160,64 +165,6 @@ struct InputBar: View {
                 )
             }
         }
-        // Sheets
-        .sheet(isPresented: $showCamera) {
-            CameraCaptureSheet { capturedImage in
-                Task {
-                    // Camera always produces JPEG
-                    let jpegData = capturedImage.jpegData(compressionQuality: 1.0) ?? Data()
-                    let limits = config.providerImageLimits
-                    if let result = await ImageProcessor.process(
-                        originalData: jpegData,
-                        mimeType: "image/jpeg",
-                        limits: limits
-                    ) {
-                        let attachment = Attachment(
-                            type: .image,
-                            data: result.data,
-                            mimeType: result.mimeType,
-                            fileName: nil,
-                            originalSize: jpegData.count,
-                            wasConverted: result.wasConverted
-                        )
-                        await MainActor.run {
-                            actions.onAddAttachment(attachment)
-                        }
-                    }
-                }
-            }
-        }
-        .sheet(isPresented: $showFilePicker) {
-            DocumentPicker(
-                capability: config.attachmentCapability,
-                onDocumentPicked: { url, mimeType, fileName in
-                    do {
-                        let data = try Data(contentsOf: url)
-                        let type = AttachmentType.from(mimeType: mimeType)
-                        let attachment = Attachment(
-                            type: type,
-                            data: data,
-                            mimeType: mimeType,
-                            fileName: fileName
-                        )
-                        actions.onAddAttachment(attachment)
-                    } catch {
-                        logger.warning("Failed to read document: \(error.localizedDescription)", category: .chat)
-                    }
-                },
-                onSizeExceeded: { actualSize, maxSize in
-                    let actualMB = actualSize / (1024 * 1024)
-                    let maxMB = maxSize / (1024 * 1024)
-                    logger.warning("File too large: \(actualMB)MB exceeds \(maxMB)MB limit", category: .chat)
-                }
-            )
-        }
-        .photosPicker(
-            isPresented: $showingImagePicker,
-            selection: $state.selectedImages,
-            maxSelectionCount: 5,
-            matching: .images
-        )
         // Entrance animation — staggered morph-ins for attachment/status.
         // All timings/springs live in TronAnimationTiming so the
         // cumulative timeline can be tweaked in one place.
@@ -319,6 +266,53 @@ struct InputBar: View {
         return .handled
     }
 
+    private func addCameraImageAttachment(_ capturedImage: UIImage) {
+        Task {
+            // Camera always produces JPEG.
+            let jpegData = capturedImage.jpegData(compressionQuality: 1.0) ?? Data()
+            let limits = config.providerImageLimits
+            if let result = await ImageProcessor.process(
+                originalData: jpegData,
+                mimeType: "image/jpeg",
+                limits: limits
+            ) {
+                let attachment = Attachment(
+                    type: .image,
+                    data: result.data,
+                    mimeType: result.mimeType,
+                    fileName: nil,
+                    originalSize: jpegData.count,
+                    wasConverted: result.wasConverted
+                )
+                await MainActor.run {
+                    actions.onAddAttachment(attachment)
+                }
+            }
+        }
+    }
+
+    private func addDocumentAttachment(url: URL, mimeType: String, fileName: String?) {
+        do {
+            let data = try Data(contentsOf: url)
+            let type = AttachmentType.from(mimeType: mimeType)
+            let attachment = Attachment(
+                type: type,
+                data: data,
+                mimeType: mimeType,
+                fileName: fileName
+            )
+            actions.onAddAttachment(attachment)
+        } catch {
+            logger.warning("Failed to read document: \(error.localizedDescription)", category: .chat)
+        }
+    }
+
+    private func handleDocumentSizeExceeded(actualSize: Int, maxSize: Int) {
+        let actualMB = actualSize / (1024 * 1024)
+        let maxMB = maxSize / (1024 * 1024)
+        logger.warning("File too large: \(actualMB)MB exceeds \(maxMB)MB limit", category: .chat)
+    }
+
 }
 
 // MARK: - iOS 26 Menu Action Notifications
@@ -326,7 +320,6 @@ struct InputBar: View {
 extension Notification.Name {
     /// iOS 26 Menu bug: State mutations in button actions break gesture handling
     static let modelPickerAction = Notification.Name("modelPickerAction")
-    static let attachmentMenuAction = Notification.Name("attachmentMenuAction")
     static let reasoningLevelAction = Notification.Name("reasoningLevelAction")
 }
 

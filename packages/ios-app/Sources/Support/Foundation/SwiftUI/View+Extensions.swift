@@ -235,6 +235,12 @@ enum AdaptivePhonePresentationBackground {
     case unchanged
 }
 
+enum AdaptiveIPadPresentationBackground {
+    case material
+    case clear
+    case unchanged
+}
+
 extension View {
     /// Clear presentation background for glass popovers. Detented sheets should
     /// use `adaptivePresentationDetents` so iPad sizing/background stays centralized.
@@ -248,6 +254,39 @@ extension View {
         presentationCompactAdaptation(.popover)
     }
 
+    /// Canonical presentation for short custom-height sheets.
+    func compactHeightSheetPresentation(
+        height: CGFloat,
+        dragIndicator: Visibility = .hidden
+    ) -> some View {
+        adaptivePresentationDetents(
+            [.height(height)],
+            ipadSizing: .compactForm,
+            phoneSizing: .unchanged,
+            phoneBackground: .unchanged,
+            dragIndicator: dragIndicator
+        )
+    }
+
+    /// Canonical presentation for immersive camera sheets whose visual surface
+    /// must fill the entire modal, including sheet safe-area reservations.
+    func immersiveCameraSheetPresentation<Background: View>(
+        @ViewBuilder background: @escaping () -> Background
+    ) -> some View {
+        adaptivePresentationDetents(
+            [.medium],
+            ipadSizing: .compactForm,
+            ipadFillsHeight: true,
+            ipadBackground: .clear,
+            phoneSizing: .unchanged,
+            phoneBackground: .clear
+        )
+        .presentationBackground(alignment: .center) {
+            background()
+                .ignoresSafeArea(.container, edges: .all)
+        }
+    }
+
     /// Presentation detents with adaptive sizing for iPad/iPhone:
     /// - iPad: Uses balanced `.balancedLargeForm` or `.compactForm` sizing
     /// - iPad material background keeps floating sheets glassy so session list context remains visible
@@ -259,6 +298,8 @@ extension View {
         _ detents: Set<PresentationDetent> = [.medium, .large],
         selection: Binding<PresentationDetent>? = nil,
         ipadSizing: AdaptivePresentationSizing = .largeForm,
+        ipadFillsHeight: Bool = false,
+        ipadBackground: AdaptiveIPadPresentationBackground = .material,
         phoneSizing: AdaptivePhonePresentationSizing = .largeForm,
         phoneBackground: AdaptivePhonePresentationBackground = .automaticLargeDetent,
         dragIndicator: Visibility = .hidden
@@ -267,6 +308,8 @@ extension View {
             detents: detents,
             selection: selection,
             ipadSizing: ipadSizing,
+            ipadFillsHeight: ipadFillsHeight,
+            ipadBackground: ipadBackground,
             phoneSizing: phoneSizing,
             phoneBackground: phoneBackground,
             dragIndicator: dragIndicator
@@ -278,6 +321,8 @@ private struct AdaptivePresentationModifier: ViewModifier {
     let detents: Set<PresentationDetent>
     let selection: Binding<PresentationDetent>?
     let ipadSizing: AdaptivePresentationSizing
+    let ipadFillsHeight: Bool
+    let ipadBackground: AdaptiveIPadPresentationBackground
     let phoneSizing: AdaptivePhonePresentationSizing
     let phoneBackground: AdaptivePhonePresentationBackground
     let dragIndicator: Visibility
@@ -288,6 +333,8 @@ private struct AdaptivePresentationModifier: ViewModifier {
         detents: Set<PresentationDetent>,
         selection: Binding<PresentationDetent>?,
         ipadSizing: AdaptivePresentationSizing,
+        ipadFillsHeight: Bool,
+        ipadBackground: AdaptiveIPadPresentationBackground,
         phoneSizing: AdaptivePhonePresentationSizing,
         phoneBackground: AdaptivePhonePresentationBackground,
         dragIndicator: Visibility
@@ -295,6 +342,8 @@ private struct AdaptivePresentationModifier: ViewModifier {
         self.detents = detents
         self.selection = selection
         self.ipadSizing = ipadSizing
+        self.ipadFillsHeight = ipadFillsHeight
+        self.ipadBackground = ipadBackground
         self.phoneSizing = phoneSizing
         self.phoneBackground = phoneBackground
         self.dragIndicator = dragIndicator
@@ -334,24 +383,46 @@ private struct AdaptivePresentationModifier: ViewModifier {
     func body(content: Content) -> some View {
         if isPad {
             let targetSize = iPadTargetSize
-            let ipadBase = content
-                .presentationContentInteraction(.scrolls)
-                .frame(width: targetSize.width)
-                .frame(maxHeight: targetSize.height)
+            let ipadBase = ipadContent(content: content, targetSize: targetSize)
             switch ipadSizing {
             case .largeForm:
-                ipadBase
+                ipadBackgroundBody(content: ipadBase)
                     .presentationSizing(.balancedLargeForm)
-                    .presentationBackground(.ultraThinMaterial)
                     .presentationDragIndicator(dragIndicator)
             case .compactForm:
-                ipadBase
+                ipadBackgroundBody(content: ipadBase)
                     .presentationSizing(.compactForm)
-                    .presentationBackground(.ultraThinMaterial)
                     .presentationDragIndicator(dragIndicator)
             }
         } else {
             phoneBody(content: content)
+        }
+    }
+
+    @ViewBuilder
+    private func ipadBackgroundBody<SheetContent: View>(content: SheetContent) -> some View {
+        switch ipadBackground {
+        case .material:
+            content.presentationBackground(.ultraThinMaterial)
+        case .clear:
+            content.presentationBackground(.clear)
+        case .unchanged:
+            content
+        }
+    }
+
+    @ViewBuilder
+    private func ipadContent<SheetContent: View>(content: SheetContent, targetSize: CGSize) -> some View {
+        let widthConstrained = content
+            .presentationContentInteraction(.scrolls)
+            .frame(width: targetSize.width)
+
+        if ipadFillsHeight {
+            widthConstrained
+                .frame(height: targetSize.height)
+        } else {
+            widthConstrained
+                .frame(maxHeight: targetSize.height)
         }
     }
 

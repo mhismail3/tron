@@ -36,8 +36,10 @@ matching database/event/settings/dependency work.
   selection.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
-- Session list, session creation/fork/resume, prompt composer, unified
-  attachments for images/documents, and message rendering.
+- Session list, session creation/fork/resume, prompt composer, a functional-only
+  compact custom-height attachment action sheet that layers native
+  camera/photo/file pickers above the parent sheet, unified attachments for
+  images/documents, and message rendering.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Agent cockpit status capsule and sheet for worker lifecycle catalog/resource
   state, package actions, activity, and dynamic runtime surfaces.
@@ -87,11 +89,35 @@ icon catalog, or fork-row state model.
 
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
+Attach:  InputBar -> AttachmentMenuSheet -> nested platform picker -> Attachment -> agent::prompt
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 Cockpit: WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
+
+`CameraCaptureSheet` keeps the tap-to-sheet path light and immersive: the
+camera viewport is the sheet surface, controls layer at the bottom of that
+surface, and the live/captured camera image is installed as the modal
+presentation background. The foreground layer is controls-only; it does not add
+a bottom fade or other material over the live viewport, and it expands through
+a geometry root so bottom alignment is based on the sheet height instead of the
+controls' intrinsic height. The controls still add the runtime bottom safe-area
+inset back into their padding so the row stays low without clipping into the
+rounded sheet edge. iOS 26 partial-height sheets reserve and render Liquid Glass
+material at the safe-area edge, so the camera cannot rely on regular foreground
+content to paint the whole rounded container.
+`immersiveCameraSheetPresentation` keeps the iPad compact-form height fixed,
+clears the iPad material backing, and provides the custom presentation
+background that fills the entire modal. `AVCaptureSession`/`AVCapturePhotoOutput`
+are created and configured on the dedicated session queue after presentation
+begins. Camera warm-up can still take time, but it must not block the initial
+child-sheet presentation. Camera controls keep compact glass visuals with larger
+circular hit targets. Torch toggles and camera switching run through the session
+queue, update UI state on failure, turn off active torch before input
+replacement, discover front/back camera variants through `AVCaptureDevice`
+discovery, and remove the old video input before validating and attaching the
+replacement input so the old input does not make `canAddInput` fail.
 
 The shell mounts `ContentView` even before onboarding is complete. First-run
 onboarding is presented as a sheet over the shell. When `onboardingComplete` is

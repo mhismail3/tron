@@ -258,6 +258,222 @@ extension SourceGuardTests {
     }
 
 
+    @Test("Composer attachment menu stays functional-only")
+    func testComposerAttachmentMenuStaysFunctionalOnly() throws {
+        let iosRoot = iosAppRoot()
+        let checkedPaths = [
+            "Sources/UI/Chat/Composer/AttachmentMenuSheet.swift",
+            "Sources/UI/Chat/Composer/ActionButtons.swift",
+            "Sources/UI/Chat/Composer/InputBar.swift",
+        ]
+        let requiredCommands = [
+            "Take Photo",
+            "Photo Library",
+            "Choose File",
+        ]
+        let requiredLayoutFragments = [
+            "LazyVGrid",
+            "CompactActionSheetButton",
+            "compactHeightSheetPresentation",
+            ".sheet(isPresented: $showCamera)",
+            ".sheet(isPresented: $showFilePicker)",
+            ".photosPicker(",
+            "selectedImages: $state.selectedImages",
+        ]
+        let forbiddenFragments = [
+            "Add " + "Skill",
+            "Prompt " + "Library",
+            "Draft a " + "Plan",
+            "draft" + "Plan" + "Requested",
+            "Queued" + "Message",
+            "Pending" + "Queue" + "Item",
+            "show" + "Skill",
+            "skill" + "Mention",
+            "prompt" + "Library",
+            "attachment" + "Menu" + "Action",
+            "pending" + "Attachment" + "Menu" + "Action",
+            "present" + "Pending" + "Attachment" + "Menu" + "Action",
+            "onDismiss: present" + "Pending" + "Attachment" + "Menu" + "Action",
+        ]
+
+        let combined = try checkedPaths.map { relativePath in
+            try String(
+                contentsOf: iosRoot.appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+        }.joined(separator: "\n")
+
+        for command in requiredCommands {
+            #expect(combined.contains(command), "composer attachment menu must expose \(command)")
+        }
+
+        for fragment in requiredLayoutFragments {
+            #expect(combined.contains(fragment), "composer attachment menu must keep compact grid sheet layout `\(fragment)`")
+        }
+
+        for fragment in forbiddenFragments {
+            #expect(
+                !combined.contains(fragment),
+                "composer attachment menu must not restore Phase 2/review-only affordance `\(fragment)`"
+            )
+        }
+
+        let inputBarSource = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/InputBar.swift"),
+            encoding: .utf8
+        )
+        let parentSheetCloseAssignments = inputBarSource
+            .components(separatedBy: .newlines)
+            .filter { line in
+                line.contains("showAttachmentMenu = false") && !line.contains("@State")
+            }
+        #expect(
+            parentSheetCloseAssignments.isEmpty,
+            "attachment menu actions must not close the parent sheet before presenting child pickers"
+        )
+    }
+
+
+    @Test("Camera capture setup stays off the presentation path")
+    func testCameraCaptureSetupStaysOffPresentationPath() throws {
+        let iosRoot = iosAppRoot()
+        let source = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/CameraCaptureSheet.swift"),
+            encoding: .utf8
+        )
+
+        #expect(
+            source.contains("var session: AVCaptureSession?"),
+            "camera sheet should defer AVCaptureSession creation until after presentation starts"
+        )
+        #expect(
+            source.contains("let captureSession = existingSession ?? AVCaptureSession()"),
+            "camera sheet should create capture sessions inside the asynchronous setup path"
+        )
+        #expect(
+            source.contains("sessionQueue.async"),
+            "camera sheet should perform capture-session setup on its session queue"
+        )
+        #expect(
+            source.contains("private nonisolated static func configure"),
+            "camera setup should use a nonisolated helper so AVFoundation work is not forced onto MainActor"
+        )
+        #expect(
+            source.contains("private nonisolated static func cameraDevice(for position: AVCaptureDevice.Position)"),
+            "camera setup should discover front/back camera variants instead of assuming only the wide-angle device type"
+        )
+        #expect(
+            source.contains(".builtInTrueDepthCamera"),
+            "camera switching should support TrueDepth/front-camera devices"
+        )
+        #expect(
+            source.contains("ZStack(alignment: .bottom)"),
+            "camera controls should layer inside the full-bleed viewport instead of living below a framed preview"
+        )
+        #expect(
+            source.contains("GeometryReader { proxy in"),
+            "camera foreground controls should expand to the detent height before bottom alignment is applied"
+        )
+        #expect(
+            source.contains("CameraControlMetrics.bottomPadding + proxy.safeAreaInsets.bottom"),
+            "camera controls should stay low while remaining above the sheet bottom safe-area edge"
+        )
+        #expect(
+            source.contains(".immersiveCameraSheetPresentation"),
+            "camera viewport should be the sheet presentation background so sheet safe-area material cannot show below it"
+        )
+        #expect(
+            source.contains(".ignoresSafeArea(.container, edges: .all)"),
+            "camera viewport should fill the rounded sheet container instead of leaving bottom inset space"
+        )
+        #expect(
+            !source.contains(".clipped()"),
+            "camera viewport must not clip itself at the sheet content safe-area boundary"
+        )
+        #expect(
+            source.contains("private var cameraSurface: some View"),
+            "camera sheet should keep the live preview/captured image in a reusable full-presentation surface"
+        )
+        #expect(
+            source.contains("private enum CameraControlMetrics"),
+            "camera control sizing should be centralized so the immersive viewport stays visually disciplined"
+        )
+        #expect(
+            source.contains("static let bottomPadding: CGFloat = 48"),
+            "camera controls should sit close to the bottom of the viewport instead of floating high in the sheet"
+        )
+        #expect(
+            source.contains("static let captureOuterSize: CGFloat = 64"),
+            "camera capture control should stay compact enough to preserve the viewport as the primary surface"
+        )
+        #expect(
+            source.contains("static let iconHitTargetSize: CGFloat = 60"),
+            "camera side controls should keep a larger tappable area than their compact visual glass button"
+        )
+        #expect(
+            source.contains("accessibilityLabel: \"Flashlight\""),
+            "camera flashlight control should expose a stable label after moving glass styling inside the button label"
+        )
+        #expect(
+            source.contains("accessibilityLabel: \"Switch Camera\""),
+            "camera switch control should expose a stable label after moving glass styling inside the button label"
+        )
+        #expect(
+            source.contains(".contentShape(Circle())"),
+            "camera icon controls should use the full circular hit target instead of only the rendered symbol"
+        )
+        #expect(
+            source.contains("private nonisolated static func turnOffTorchIfNeeded"),
+            "camera switching should turn off the active torch before replacing the video input"
+        )
+        #expect(
+            source.contains("previousInputs.compactMap { ($0 as? AVCaptureDeviceInput)?.device }"),
+            "camera switching should inspect existing video devices before input replacement"
+        )
+        #expect(
+            source.contains("guard !isConfiguringSession, let captureSession = session else { return }"),
+            "torch toggles should not race camera input replacement"
+        )
+        #expect(
+            source.contains("defer { device.unlockForConfiguration() }"),
+            "torch configuration should always unlock the AVCaptureDevice after a successful lock"
+        )
+        #expect(
+            !source.contains(".black.opacity(0.68)"),
+            "camera sheet should not reintroduce a foreground bottom fade over the live viewport"
+        )
+        #expect(
+            !source.contains(".frame(height: 240)"),
+            "camera sheet should not reserve a tall foreground gradient region above the controls"
+        )
+        #expect(
+            !source.contains(#"Text("Take Photo")"#),
+            "camera sheet should not reserve a title/header above the immersive viewport"
+        )
+        #expect(
+            !source.contains("let session = AVCaptureSession()"),
+            "camera sheet must not eagerly allocate AVCaptureSession before the child sheet is visible"
+        )
+        #expect(
+            !source.contains("private var photoOutput = AVCapturePhotoOutput()"),
+            "camera sheet must not eagerly allocate AVCapturePhotoOutput before the child sheet is visible"
+        )
+
+        let removeInputRange = try #require(
+            source.range(of: "previousInputs.forEach { session.removeInput($0) }"),
+            "camera switch should remove the old video input before checking the replacement input"
+        )
+        let canAddInputRange = try #require(
+            source.range(of: "guard session.canAddInput(input) else"),
+            "camera switch should validate the replacement input after removing the old one"
+        )
+        #expect(
+            removeInputRange.upperBound < canAddInputRange.lowerBound,
+            "camera switch must not call canAddInput while the old camera input is still attached"
+        )
+    }
+
+
     @Test("Primitive shell has no interactive approval plane")
     func testPrimitiveShellHasNoInteractiveApprovalPlane() throws {
         let iosRoot = iosAppRoot()

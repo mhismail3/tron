@@ -1391,11 +1391,15 @@ packages/ios-app/Sources/
 - **Event plugins**: Live engine events arrive through `SessionEventRepository`, are parsed by plugins, and are dispatched by `EventDispatchCoordinator`.
 - **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
-  session navigation, prompt input, message rendering, local reconstruction,
-  diagnostics, and generic runtime surfaces. Fixed product panels,
+  session navigation, prompt input, the functional-only compact custom-height
+  composer attachment action sheet that layers native camera/photo/file pickers
+  above the parent sheet, message rendering, local reconstruction, diagnostics,
+  and generic runtime surfaces.
+  Fixed product panels,
   repository-specific panels, media workflow surfaces, assistant-management
   panels, extension-source surfaces, audio transcription, memory-retain, rules,
-  and parallel tree-only projections are removed from the primary source tree.
+  skills, prompt-library panels, prompt queues, and parallel tree-only
+  projections are removed from the primary source tree.
 - **Agent cockpit**: the chat shell shows a compact status capsule that opens a
   cockpit sheet. The sheet renders live worker lifecycle catalog rows,
   package/resource status, confirmation-backed lifecycle actions, activity, and
@@ -1442,9 +1446,30 @@ packages/ios-app/Sources/
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> [ChatMessage] -> ChatViewModel -> ChatView
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
+Attach:  InputBar -> AttachmentMenuSheet -> nested platform picker -> Attachment -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
 Cockpit: catalog/resource APIs -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
+
+The camera child sheet mounts before AVFoundation warm-up and uses the viewport
+as the sheet surface, with controls layered at the bottom. The live/captured
+camera image is installed through `immersiveCameraSheetPresentation` as the
+modal presentation background, not just foreground content, so iOS 26
+partial-sheet safe-area material cannot show through below the viewport. The
+foreground layer stays controls-only with no bottom fade, keeping the camera
+view as one continuous surface, and it uses a full-height geometry root so the
+controls align to the bottom of the sheet instead of their intrinsic content
+area. The row adds the runtime bottom safe-area inset back into its padding so
+controls stay low without clipping into the rounded sheet edge.
+`CameraCaptureSheet` defers `AVCaptureSession` and `AVCapturePhotoOutput`
+creation/configuration to its dedicated session queue so camera startup cannot
+block the initial sheet presentation. The compact flashlight/switch controls use
+larger circular hit targets than their visual glass buttons. Torch toggles and
+camera switching run through the session queue, restore UI state on AVFoundation
+failure, turn off active torch before replacing the video input, and remove the
+old video input before validating the replacement input. Camera lookup uses
+`AVCaptureDevice` discovery so front/back switching works across wide-angle,
+TrueDepth, dual, and triple camera device variants.
 
 ### Build Configurations
 

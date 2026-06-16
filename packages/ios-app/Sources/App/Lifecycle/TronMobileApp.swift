@@ -22,6 +22,9 @@ struct TronMobileApp: App {
     @State private var onboardingDetent: PresentationDetent = .medium
     @State private var onboardingAllowsDismiss = false
     @State private var onboardingSuppressed = false
+#if DEBUG
+    @State private var debugCameraSheetPresented = ProcessInfo.processInfo.arguments.contains("--tron-debug-camera-sheet")
+#endif
 
     /// First-run pairing flag. Driven by `OnboardingState.completionStorageKey`
     /// (the literal key `"onboardingComplete"`). When false, the app still
@@ -156,6 +159,11 @@ struct TronMobileApp: App {
             .onReceive(NotificationCenter.default.publisher(for: .startServerOnboarding)) { notification in
                 launchServerOnboarding(notification: notification)
             }
+#if DEBUG
+            .sheet(isPresented: $debugCameraSheetPresented) {
+                CameraCaptureSheet(onImageCaptured: { _ in })
+            }
+#endif
     }
 
     private var sessionListContent: some View {

@@ -87,66 +87,23 @@ struct GlassCircleButtonStyle: ButtonStyle {
 // MARK: - Glass Attachment Button
 
 struct GlassAttachmentButton: View {
-    let isProcessing: Bool
+    let isDisabled: Bool
     let buttonSize: CGFloat
-    let attachmentCapability: AttachmentCapability
-
-    // Sheet bindings passed from parent
-    @Binding var showCamera: Bool
-    @Binding var showingImagePicker: Bool
-    @Binding var showFilePicker: Bool
-
-    // Keyboard observer to prevent Menu opening during keyboard animation
-    private let keyboardObserver = KeyboardObserver.shared
-
-    /// Disable Menu during keyboard animation to prevent mispositioned popups
-    private var isMenuDisabled: Bool {
-        isProcessing || keyboardObserver.isAnimating
-    }
+    let onTap: () -> Void
 
     var body: some View {
-        // Separate visual (glass button) from interaction (invisible Menu overlay)
-        // This avoids the iOS 26 Menu + glassEffect transition bug
-        Image(systemName: "plus")
-            .font(TronTypography.buttonSM)
-            .foregroundStyle(isMenuDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
-            .frame(width: buttonSize, height: buttonSize)
-            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .circle)
-            .opacity(isMenuDisabled ? 0.5 : 1.0)
-            .accessibilityLabel("Add attachment")
-            .overlay {
-                // Invisible Menu overlay handles interaction only
-                Menu {
-                    if attachmentCapability.supportsImages {
-                        Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "camera") } label: {
-                            Label("Take Photo", systemImage: "camera")
-                        }
-
-                        Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "photos") } label: {
-                            Label("Photo Library", systemImage: "photo.on.rectangle")
-                        }
-                    }
-
-                    Button { NotificationCenter.default.post(name: .attachmentMenuAction, object: "files") } label: {
-                        Label("Choose File", systemImage: "folder")
-                    }
-
-                } label: {
-                    Color.clear
-                        .frame(width: buttonSize, height: buttonSize)
-                        .contentShape(Circle())
-                }
-                .disabled(isMenuDisabled)
-            }
-        .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
-            guard let action = notification.object as? String else { return }
-            switch action {
-            case "camera": showCamera = true
-            case "photos": showingImagePicker = true
-            case "files": showFilePicker = true
-            default: break
-            }
+        Button(action: onTap) {
+            Image(systemName: "plus")
+                .font(TronTypography.buttonSM)
+                .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+                .frame(width: buttonSize, height: buttonSize)
+                .contentShape(Circle())
         }
+        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .circle)
+        .opacity(isDisabled ? 0.5 : 1.0)
+        .disabled(isDisabled)
+        .accessibilityLabel("Add attachment")
+        .accessibilityHint(isDisabled ? "Attachments are unavailable while the agent is active." : "")
     }
 }
 

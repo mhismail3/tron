@@ -39,6 +39,14 @@ final class IPadSheetPresentationTests: XCTestCase {
             "Existing adaptive callers should keep their established iPhone background branch by default"
         )
         XCTAssertTrue(
+            content.contains("enum AdaptiveIPadPresentationBackground"),
+            "The helper needs an iPad background policy so full-bleed sheets can opt out of material backing"
+        )
+        XCTAssertTrue(
+            content.contains("ipadBackground: AdaptiveIPadPresentationBackground = .material"),
+            "Existing adaptive callers should keep the established iPad material background by default"
+        )
+        XCTAssertTrue(
             content.contains("case .unchanged"),
             "The helper needs an unchanged phone branch for app sheets converted from raw detents"
         )
@@ -49,6 +57,30 @@ final class IPadSheetPresentationTests: XCTestCase {
         XCTAssertTrue(
             content.contains("func popoverCompactAdaptation() -> some View"),
             "Compact-width popover adaptation should live beside the canonical presentation helpers"
+        )
+        XCTAssertTrue(
+            content.contains("func compactHeightSheetPresentation("),
+            "Short custom-height sheets should have a canonical helper instead of repeating height detent policy"
+        )
+        XCTAssertTrue(
+            content.contains("func immersiveCameraSheetPresentation<Background: View>"),
+            "Full-bleed camera sheets should have a canonical presentation-background helper"
+        )
+        XCTAssertTrue(
+            content.contains("ipadFillsHeight: Bool = false"),
+            "Immersive sheets need an opt-in path to fill the canonical iPad form height without changing compact custom-height sheets"
+        )
+        XCTAssertTrue(
+            content.contains(".frame(height: targetSize.height)"),
+            "The iPad fill-height branch should force content to occupy the full floating container"
+        )
+        XCTAssertTrue(
+            content.contains("[.height(height)]"),
+            "The compact height helper should own custom-height detent construction"
+        )
+        XCTAssertTrue(
+            content.contains(".presentationBackground(alignment: .center)"),
+            "The immersive camera helper should fill the whole modal presentation background, including sheet safe-area reservations"
         )
         XCTAssertTrue(
             content.contains("dragIndicator: Visibility = .hidden"),
@@ -68,7 +100,7 @@ final class IPadSheetPresentationTests: XCTestCase {
             ),
             (
                 ["Sources", "UI", "Chat", "Composer", "CameraCaptureSheet.swift"],
-                ".adaptivePresentationDetents([.medium], ipadSizing: .compactForm, phoneSizing: .unchanged, phoneBackground: .unchanged)"
+                ".immersiveCameraSheetPresentation"
             ),
             (
                 ["Sources", "UI", "Onboarding", "Pairing", "QRCodeScannerSheet.swift"],
@@ -103,6 +135,11 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ["Sources", "UI", "System", "LogViewer.swift"],
                 "struct LogViewer: View",
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
+            ),
+            (
+                ["Sources", "UI", "Chat", "Composer", "AttachmentMenuSheet.swift"],
+                "struct AttachmentMenuSheet: View",
+                ".compactHeightSheetPresentation(height: CompactActionSheetLayout.sheetHeight(forItemCount: actions.count))"
             )
         ]
 
