@@ -133,6 +133,7 @@ struct ChatView: View {
         .onDisappear {
             // Persist draft state before view is destroyed
             Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
+            viewModel.cancelRecording()
             viewModel.stopLiveEventStream()
             // Reset for next entry
             initialLoadComplete = false

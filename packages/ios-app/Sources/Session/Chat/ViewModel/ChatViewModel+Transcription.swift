@@ -33,6 +33,10 @@ extension ChatViewModel: ChatTranscriptionContext {
         micRecorder.stopRecording()
     }
 
+    func cancelRecording() {
+        micRecorder.cancelRecording()
+    }
+
     func transcribeAudio(data: Data, mimeType: String, fileName: String) async throws -> String {
         let result = try await services.transcription.transcribeAudio(
             data: data,
