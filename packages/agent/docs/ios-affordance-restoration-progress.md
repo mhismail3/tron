@@ -1,0 +1,296 @@
+# iOS Affordance Restoration Progress Ledger
+
+Status: `active`
+
+Last reconciled from implementation thread:
+`019ecf5d-c3ca-7062-94ed-4cc636441cfe`
+
+Implementation branch:
+`codex/ios-voice-dictation-affordance-current`
+
+Implementation worktree:
+`/Users/moose/.codex/worktrees/44a4/tron`
+
+Merged baseline:
+`84451c969 Refine camera capture confirmation controls`
+
+Merged checkpoint:
+`4e66af3022508b13a6229020d529ee248e49c5a5 Organize dashboard and title generation`
+
+## Purpose
+
+This ledger records what actually shipped while executing the early Phase 1
+iOS affordance restoration slices. It supplements the source-backed
+`ios-affordance-restoration-map-*` artifacts by tracking completed slices,
+off-plan but accepted work, user-facing behavior, validation evidence, and
+remaining backlog.
+
+The canonical map remains the planning authority. This progress ledger records
+execution state so future implementation threads do not need to reconstruct it
+from chat history.
+
+## Completed Work
+
+### Phase 1 Slice 2: Composer Voice Transcription
+
+Commits:
+
+- `c5f92eed3 Restore composer voice transcription`
+- `ec3428283 Gate composer transcription on local readiness`
+- `abd396897 Harden local transcription readiness`
+- `e095249be Cancel voice recording on chat exit`
+
+User-facing state:
+
+- The chat composer has a microphone affordance next to the send/abort control.
+- When local transcription is enabled and ready, tapping the mic records
+  temporary composer audio and inserts the returned transcript into the current
+  draft.
+- Before opening the microphone, iOS asks the server for
+  `transcription::list_models`; old servers, disabled transcription, loading
+  sidecars, and failed sidecars produce local actionable messages instead of a
+  generic recording failure.
+- Leaving chat cancels any active composer recording before the live session is
+  torn down.
+
+Server and protocol state:
+
+- The agent now has an opt-in `transcription` domain with
+  `transcription::audio`, `transcription::list_models`, and
+  `transcription::download_model`.
+- Local transcription is disabled by default in profile settings and is backed
+  by the Parakeet/MLX sidecar boundary under
+  `~/.tron/internal/transcription/`.
+- The runtime reports explicit `disabled`, `loading`, `ready`, and `failed`
+  states. The default startup path uses one worker so a single ready worker is
+  sufficient for availability.
+- iOS has typed transcription DTOs, a `TranscriptionClient`, dependency
+  injection wiring, a `ChatTranscriptionCoordinator`, and settings parity for
+  the local transcription toggle.
+
+Validated:
+
+- Rust formatting, `cargo check`, and filtered transcription Rust tests passed
+  in the implementation thread.
+- Focused iOS transcription coordinator, transcription DTO, settings parity,
+  and source-guard tests passed on the iOS 26.5 simulator.
+- `ios_affordance_restoration_map_invariants`,
+  `baseline_pre_restoration_closure_invariants`,
+  `scripts/personal-info-guard.sh`, `git diff --check`, and
+  `git ls-files -ci --exclude-standard` passed in the implementation thread.
+- A live authenticated `/engine` probe reported local transcription ready:
+  `{"cached":true,"enabled":true,"engineLoaded":true,"state":"ready"}`.
+- A physical iPhone beta install/launch completed, and the user later confirmed
+  the app-side behavior looked good on device. The final lifecycle-only cancel
+  patch was validated by tests but was not separately device-rerun in that
+  implementation thread.
+
+Deferred:
+
+- Voice notes, voice-note dashboards, persistent media upload/storage,
+  `MediaClient`, backend voice-note resources, APNs/background delivery, fake
+  transcription, and agent-execution voice surfaces remain absent.
+- Local transcription remains opt-in. If the setting is enabled after the
+  server has started, broader on-demand sidecar loading is not yet implemented;
+  a server restart may still be required for the local runtime to become ready.
+
+### Phase 1 Slice 1 Follow-Up: Native Attachment Menu
+
+Commits:
+
+- `019f3b9ce Restore native attachment menu`
+- `279fafe4e Tighten native attachment menu sizing`
+
+User-facing state:
+
+- The composer plus button now opens a native SwiftUI `Menu`.
+- The menu exposes only currently functional local actions: Camera, Photos, and
+  Files.
+- Menu rows use native icon-and-text presentation with compact sizing.
+- The removed custom attachment sheet path is gone.
+
+Validated:
+
+- `AttachmentMenuTests` cover the expected native menu labels and absence of
+  non-functional old actions.
+- Composer keyboard source guards assert the menu does not force-focus changes
+  or reintroduce the removed custom popup/sheet path.
+
+Deferred:
+
+- Skills, prompt snippets, queue controls, plugin/catalog concepts, and other
+  old attachment-menu actions remain absent until reviewed and approved as
+  separate slices.
+- The custom morphing popup explored during the thread was intentionally
+  discarded; it is not part of the final state.
+
+### Accepted Off-Plan Work: Session Dashboard Simplification
+
+Commits:
+
+- `0f58806c5 Redesign session dashboard`
+- `4e66af302 Organize dashboard and title generation`
+
+User-facing state:
+
+- The session dashboard now presents a minimal "Tron" first-screen surface
+  instead of the older session-card preview layout.
+- Sessions are grouped under workspace headers with compact one-line rows.
+- Workspace headers have tappable folder/chevron affordances for collapse and
+  expansion.
+- Session rows show the title, right-aligned last-active time, and compact
+  status icons for deleting, processing, forked, and idle states.
+- The floating new-session button was preserved and moved into its own view.
+- The old workspace style appearance setting was removed as obsolete.
+
+Code organization:
+
+- Dashboard projection and presentation moved into
+  `SessionDashboard.swift`.
+- The floating new-session control moved into
+  `FloatingNewSessionButton.swift`.
+- `SessionSidebar.swift` is now focused on shell composition, session
+  selection, archiving, and sidebar wiring.
+- Shared dashboard layout constants are centralized in
+  `SessionDashboardLayout`.
+
+Validated:
+
+- `SessionDashboardPresentationTests` cover the visible title, workspace-group
+  projection, compact row behavior, status icon mapping, and archived-session
+  filtering.
+- The user reviewed the physical-device result and confirmed it looked good.
+
+Deferred:
+
+- No work dashboard, import tree, source-control graph, or workspace analytics
+  was restored. Those remain Phase 2 agent-execution surfaces unless a future
+  server-backed contract exists.
+
+### Accepted Off-Plan Work: Native Session Title Generation
+
+Commits:
+
+- `0f58806c5 Redesign session dashboard`
+- `4e66af302 Organize dashboard and title generation`
+
+User-facing state:
+
+- New sessions can receive a short model-generated title after the first user
+  message is durably persisted.
+- Title changes are emitted through the existing `session_updated` path so the
+  current iOS session list updates through normal event reconstruction.
+
+Server behavior:
+
+- Title generation is implemented in the current Rust runtime service instead
+  of restoring the old `builtin:title-gen` hook/subagent path.
+- The request/dependency/job boundary is explicit through
+  `SessionTitleGenerationRequest` and its dependencies.
+- The generator sanitizes output, bounds title length, rechecks session state
+  before writing, and is registered with shutdown coordination.
+- The race discovered during device testing was fixed by checking that the
+  session still has exactly one user message, rather than relying on total
+  message count.
+
+Validated:
+
+- Filtered Rust `title_generation` tests passed in the implementation thread.
+- The dev server was restarted from the implementation worktree after stale
+  server binary behavior initially hid the new title generator.
+
+Deferred:
+
+- Existing sessions are not backfilled.
+- Title generation does not restore old hooks, skills, rules, or subagent
+  machinery.
+- A future title-management affordance should be reviewed separately if users
+  need editing, pinning, or title provenance controls.
+
+## Session-Level Validation Summary
+
+The implementation thread reported these final closeout checks as passing:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+- `cargo test --manifest-path packages/agent/Cargo.toml title_generation --lib -- --nocapture`
+- Focused iOS 26.5 simulator tests for `SessionDashboardPresentationTests`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+- `scripts/personal-info-guard.sh`
+- `git diff --check`
+- `git ls-files -ci --exclude-standard`
+- deterministic `xcodegen generate` project check
+
+Earlier slice-specific implementation checkpoints also passed focused
+transcription, settings, source-guard, attachment-menu, and BPRC/IARM static
+gates as recorded in
+`ios-affordance-restoration-map-evidence-manifest.md`.
+
+This orchestration checkout re-ran the following after fast-forwarding the
+implementation branch and adding this ledger:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed with 6 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml transcription --lib -- --nocapture`
+  passed with 8 filtered tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml title_generation --lib -- --nocapture`
+  passed with 7 filtered tests.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` returned no tracked ignored files.
+- `cd packages/ios-app && xcodegen generate` produced no
+  `TronMobile.xcodeproj` drift.
+- Focused `xcodebuild test` on iPhone 17 Pro, iOS 26.5 passed with 20 XCTest
+  cases and 47 Swift Testing source-guard cases across transcription,
+  attachment menu, dashboard presentation, transcription DTO, and source-guard
+  coverage.
+
+## Remaining Phase 1 Queue
+
+The next recommended restoration slice is
+`phase1_slice_3`: prompt, input history, and snippet affordance audit.
+
+Source-backed inventory row:
+
+- `IARM-SURFACE-020`
+
+Old paths:
+
+- `packages/ios-app/Sources/Views/PromptLibrary/`
+- `packages/ios-app/Sources/ViewModels/State/PromptLibraryState.swift`
+
+Current classification:
+
+- `phase1_review_only`
+
+Decision boundary for the next slice:
+
+- Review whether a prompt/snippet/input-history affordance is useful as a
+  long-term signal for a self-updating agent.
+- Prefer local-native or current-resource-backed behavior only.
+- Do not restore the old prompt-library API, `PromptLibraryClient`, skills
+  activation, queues, or agent-execution prompt routing by default.
+- The slice should start with a user review packet before implementation:
+  old surface, current gap, proposed minimal UX, entry point, immediately
+  functional behavior, deferred behavior, tests, simulator/device validation,
+  and explicit user decision.
+
+Later Phase 1 items remain:
+
+- `phase1_slice_4`: chat visual cues, status, empty/loading/error polish.
+- `phase1_slice_5`: settings, onboarding, diagnostics, and pairing polish over
+  current server facts.
+- `phase1_slice_6`: notification/inbox concept review only if it can remain
+  truthful without fake push state.
+- Remaining local-native affordance families from the inventory after review.
+
+## Phase 2 Reminder
+
+The full Phase 2 agent-execution restoration plan is still required after the
+Phase 1 local/native affordance sequence. It must cover capability discovery,
+filesystem tools, jobs/processes, worker self-extension, subagents,
+goals/queues/questions, approvals, web, git/worktrees, skills/rules/hooks,
+memory, MCP, scheduling, program execution, database/events/settings, and
+dependency restoration.
+
+The work recorded in this ledger does not restore those agent-execution
+capabilities.

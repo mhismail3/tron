@@ -391,6 +391,10 @@ Current living entry points:
   durable Phase 2 agent-execution anchor.
 - `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`:
   machine-readable IARM coverage map used by static gates.
+- `packages/agent/docs/ios-affordance-restoration-progress.md`:
+  active execution ledger for completed iOS affordance restoration slices,
+  accepted off-plan UI/runtime work, validation evidence, deferred behavior, and
+  the next Phase 1 queue item.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -1447,7 +1451,9 @@ packages/ios-app/Sources/
   The map exhaustively classifies deleted or renamed old iOS paths, defines the
   Phase 1 review queue, and preserves the requirement for a later full
   Phase 2 agent-execution restoration plan. It does not mean those affordances
-  are restored.
+  are restored. `packages/agent/docs/ios-affordance-restoration-progress.md`
+  tracks which Phase 1 slices have since shipped, what was accepted off-plan,
+  what was validated, and what remains deferred.
 
 ### Data Flow
 

@@ -82,10 +82,11 @@ Deferred/absent:
 - Voice notes, voice-note dashboards, media upload/storage, `MediaClient`,
   backend voice-note resources, APNs/background delivery, fake transcription
   results, and agent-execution voice surfaces remain absent.
-- Physical microphone recording was not fully exercised through the app UI in
-  this thread; a physical iPhone build/install/launch succeeded, but actual mic
-  permission and captured-audio transcription still require hands-on device
-  validation.
+- Physical microphone recording initially needed hands-on device validation
+  after the first build/install checkpoint. Later in the implementation thread,
+  the user confirmed the device-side app behavior looked good. The final
+  lifecycle-only cancel patch was test-validated but was not separately
+  device-rerun in that thread.
 
 Slice validation:
 
