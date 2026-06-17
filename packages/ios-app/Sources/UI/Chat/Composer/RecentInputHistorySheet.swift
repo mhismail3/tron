@@ -10,6 +10,8 @@ enum RecentInputHistoryPresentation {
     nonisolated static let clearSystemImage = "trash"
     nonisolated static let clearAccessibilityLabel = "Clear recent inputs"
     nonisolated static let rowFontSize = TronTypography.sizeBody
+    nonisolated static let rowLineLimit = 2
+    nonisolated static let rowVerticalPadding: CGFloat = 2
 
     static func shouldShowButton(
         inputHistory: InputHistoryStore?,
@@ -72,10 +74,10 @@ struct RecentInputHistorySheet: View {
                     Text(input)
                         .font(TronTypography.sans(size: RecentInputHistoryPresentation.rowFontSize))
                         .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(3)
+                        .lineLimit(RecentInputHistoryPresentation.rowLineLimit)
                         .multilineTextAlignment(.leading)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 4)
+                        .padding(.vertical, RecentInputHistoryPresentation.rowVerticalPadding)
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Insert recent input")

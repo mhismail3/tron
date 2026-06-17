@@ -58,6 +58,8 @@ final class RecentInputHistoryTests: XCTestCase {
         XCTAssertEqual(RecentInputHistoryPresentation.clearSystemImage, "trash")
         XCTAssertEqual(RecentInputHistoryPresentation.clearAccessibilityLabel, "Clear recent inputs")
         XCTAssertEqual(RecentInputHistoryPresentation.rowFontSize, TronTypography.sizeBody)
+        XCTAssertEqual(RecentInputHistoryPresentation.rowLineLimit, 2)
+        XCTAssertEqual(RecentInputHistoryPresentation.rowVerticalPadding, 2)
         XCTAssertFalse(RecentInputHistoryPresentation.title.contains("Library"))
     }
 

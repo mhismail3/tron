@@ -288,7 +288,8 @@ Validated:
   simulator validation confirmed the composer no longer shows a standalone
   recent-input button, the native attachment menu exposes Recent Inputs above
   Files/Photos/Camera when local history exists, and the Recent Inputs sheet
-  uses larger divider-free row text with an icon-only destructive clear action.
+  uses larger, concise, divider-free row text with an icon-only destructive
+  clear action.
 
 Deferred:
 
