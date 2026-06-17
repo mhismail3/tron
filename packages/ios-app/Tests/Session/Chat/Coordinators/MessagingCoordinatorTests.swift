@@ -433,6 +433,7 @@ final class MockMessagingContext: MessagingContext {
     var showErrorCalled = false
     var ensureLiveEventSubscriptionCalled = false
     var ensureLiveEventSubscriptionShouldFail = false
+    var clearLocalNotificationsCalled = false
     var callOrder: [String] = []
 
     // MARK: - Test Configuration
@@ -475,6 +476,10 @@ final class MockMessagingContext: MessagingContext {
 
     func appendMessage(_ message: ChatMessage) {
         appendedMessages.append(message)
+    }
+
+    func clearLocalNotifications() {
+        clearLocalNotificationsCalled = true
     }
 
     func appendInterruptedMessage() {

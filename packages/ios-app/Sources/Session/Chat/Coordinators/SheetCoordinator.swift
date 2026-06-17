@@ -89,6 +89,11 @@ final class SheetCoordinator {
         present(.providerErrorDetail(data))
     }
 
+    /// Show local chat error detail sheet.
+    func showLocalErrorDetail(title: String, message: String, suggestion: String?) {
+        present(.localErrorDetail(LocalErrorDetailData(title: title, message: message, suggestion: suggestion)))
+    }
+
     /// Show thinking detail sheet
     func showThinkingDetail(_ content: String) {
         present(.thinkingDetail(content))

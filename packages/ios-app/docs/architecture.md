@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-15 (IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-17 (IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -44,7 +44,8 @@ matching database/event/settings/dependency work.
   preserves composer keyboard focus while layering native camera/photo/file
   pickers above it, unified attachments for images/documents, a right-side mic
   affordance for local composer transcription when enabled, and message
-  rendering.
+  rendering with quiet empty/loading states, streamed thinking content, and
+  local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Agent cockpit status capsule and sheet for worker lifecycle catalog/resource
   state, package actions, activity, and dynamic runtime surfaces.
@@ -150,9 +151,41 @@ removing metadata.
 boundary. Runtime callback installation for streaming text, UI update queue
 drain, capability completion ordering, and live event processing lives in
 `ChatViewModel+RuntimeCallbacks.swift` so new callback behavior does not grow
-the root state object. `ChatView.swift` keeps shell composition; message-list
-scrolling, pagination, composer, and sheet rendering live in
-`ChatView+MessageList.swift` and the existing toolbar/helper extensions.
+the root state object. Chat-scoped error routing lives in
+`ChatViewModel+Errors.swift`: local failures append ephemeral
+`LocalChatNotification` timeline items with deduped replacement and are cleared
+when a new prompt starts or the chat view disappears. `ChatView.swift` keeps
+shell composition; message-list scrolling, pagination, composer, and sheet
+rendering live in `ChatView+MessageList.swift` and the existing toolbar/helper
+extensions.
+
+## Chat Visual Affordances
+
+The chat timeline owns only truthful local/session presentation state:
+
+- `ChatTimelineAuxiliaryState` derives a mutually exclusive initial loading
+  affordance (`Loading messages`) or empty affordance (`Start talking`) from
+  local initial-load completion, message count, and workspace-deleted state.
+- Connection status is app-global. Reconnecting, disconnected, and retry
+  signals route through `ToastCenter`/connection retry policy, not through
+  separate in-chat connection pills.
+- Local chat errors are temporary `LocalChatNotification` timeline messages.
+  Tapping opens `LocalErrorDetailSheet` only when structured details exist;
+  there is no tap-to-dismiss, explicit dismiss button, timer-only dismissal, or
+  persisted event claim.
+- Thinking fallback is a single app-owned `NeuralSparkIndicator`.
+  Configurable thinking styles were removed; streamed thinking text still
+  renders inline above the response when the current stream provides it.
+- Capability evidence uses `CapabilityEvidencePresentation` as the pure mapper
+  for one-line chat chips and sectioned detail sheets. Chips stay compact; the
+  detail sheet shows summary, target/input/result/error, and technical
+  provenance only when current invocation data supplies it.
+
+Deferred or rejected surfaces remain absent: process/job/subagent/source-control
+work dashboards, approvals, memory/rules/hooks status, skill activation,
+prompt-suggestion/inbox surfaces, fixed product panels, fake activity, and
+backend status that is not sourced from current local state or current server
+facts.
 
 ## Engine Client Boundary
 

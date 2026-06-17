@@ -81,6 +81,14 @@ struct MessageBubble: View {
             // Attachments-only message (no text) - show thumbnails
             AttachedFileThumbnails(attachments: attachments)
 
+        case .localNotification(let notification):
+            LocalChatNotificationView(notification: notification) { detail in
+                switch detail {
+                case .error(let title, let message, let suggestion):
+                    onTap?(.localErrorDetail(title: title, message: message, suggestion: suggestion))
+                }
+            }
+
         case .systemEvent(let event):
             SystemEventView(event: event, onTap: onTap)
 

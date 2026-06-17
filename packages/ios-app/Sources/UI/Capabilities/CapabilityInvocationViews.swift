@@ -8,6 +8,7 @@ struct CapabilityInvocationChip: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var display: CapabilityInvocationDisplayModel { data.display }
+    private var evidence: CapabilityEvidencePresentation { CapabilityEvidencePresentation(data: data) }
     private var accent: Color {
         CapabilityPresentation.statusColor(
             for: data.status,
@@ -23,21 +24,12 @@ struct CapabilityInvocationChip: View {
             HStack(spacing: 7) {
                 leadingAccessory
 
-                Text(display.chipTitle)
+                Text(evidence.chipText)
                     .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .bold))
                     .foregroundStyle(textColor)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .layoutPriority(2)
-
-                if !display.commandText.isEmpty {
-                    Text(display.commandText)
-                        .font(TronTypography.code(size: TronTypography.sizeCaption - 1, weight: .regular))
-                        .foregroundStyle(textColor.opacity(0.68))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .layoutPriority(0)
-                }
+                    .layoutPriority(1)
 
                 inlineStatusView
 
@@ -66,23 +58,24 @@ struct CapabilityInvocationChip: View {
 
     @ViewBuilder
     private var leadingAccessory: some View {
-        Image(systemName: CapabilityPresentation.symbol(for: data.identity, targetId: display.targetId))
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-            .foregroundStyle(textColor)
-            .frame(width: 18, height: 18)
-    }
-
-    @ViewBuilder
-    private var trailingAccessory: some View {
         if data.status == .running || data.status == .generating {
             ProgressView()
                 .controlSize(.small)
                 .tint(textColor.opacity(0.72))
+                .frame(width: 18, height: 18)
         } else {
-            Image(systemName: "chevron.right")
-                .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
-                .foregroundStyle(textColor.opacity(0.56))
+            Image(systemName: data.status.iconName)
+                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                .foregroundStyle(textColor)
+                .frame(width: 18, height: 18)
         }
+    }
+
+    @ViewBuilder
+    private var trailingAccessory: some View {
+        Image(systemName: "chevron.right")
+            .font(TronTypography.sans(size: TronTypography.sizeSM, weight: .semibold))
+            .foregroundStyle(textColor.opacity(0.56))
     }
 
     @ViewBuilder
@@ -133,10 +126,10 @@ struct CapabilityInvocationChip: View {
 
     private var accessibilityLabel: String {
         [
-            display.primitiveTitle,
-            display.chipTitle,
-            display.commandText.nilIfEmpty,
-            display.statusWithDuration
+            evidence.title,
+            evidence.qualifier,
+            evidence.statusLabel,
+            evidence.duration
         ]
         .compactMap { $0 }
         .joined(separator: ", ")
@@ -147,9 +140,9 @@ struct CapabilityInvocationDetailSheet: View {
     let data: CapabilityInvocationData
 
     @Environment(\.colorScheme) private var colorScheme
-    @State private var isAuditExpanded = false
 
     private var display: CapabilityInvocationDisplayModel { data.display }
+    private var evidence: CapabilityEvidencePresentation { CapabilityEvidencePresentation(data: data) }
     private var accent: Color {
         CapabilityPresentation.statusColor(
             for: data.status,
@@ -158,27 +151,19 @@ struct CapabilityInvocationDetailSheet: View {
         )
     }
     private var tint: TintedColors { TintedColors(accent: accent, colorScheme: colorScheme) }
-    private var primitive: String { CapabilityPresentation.primitiveName(for: data.identity) }
 
     var body: some View {
         CapabilityDetailSheetContainer(
-            modelPrimitiveName: display.sheetTitle,
+            modelPrimitiveName: evidence.title,
             iconName: CapabilityPresentation.symbol(for: data.identity, targetId: display.targetId),
             accent: accent
         ) {
             ScrollView(.vertical) {
                 VStack(alignment: .leading, spacing: 20) {
-                    CapabilityDetailHeader(data: data)
-                        .sheetSection()
-
-                    actionSection
-                    journeySection
-                    progressSection
-                    resultSection
-                    artifactsSection
-                    logsSection
-                    errorSection
-                    runtimeDetailsSection
+                    ForEach(evidence.sections) { section in
+                        evidenceSection(section)
+                            .sheetSection()
+                    }
                 }
                 .padding(.top, 16)
                 .padding(.bottom, 28)
@@ -187,217 +172,34 @@ struct CapabilityInvocationDetailSheet: View {
     }
 
     @ViewBuilder
-    private var actionSection: some View {
-        CapabilityDetailSection(title: "Action", accent: accent, tint: tint) {
-            VStack(alignment: .leading, spacing: 14) {
-                CapabilityReadableRows(rows: display.actionRows, tint: tint)
-
-                if !actionInputRows.isEmpty {
-                    Divider()
-                        .overlay(accent.opacity(0.16))
-                    detailSubheading("Inputs")
-                    CapabilityReadableRows(rows: actionInputRows, tint: tint)
+    private func evidenceSection(_ section: CapabilityEvidencePresentation.Section) -> some View {
+        let sectionTint = TintedColors(accent: sectionAccent(section.kind), colorScheme: colorScheme)
+        CapabilityDetailSection(title: section.title, accent: sectionTint.accent, tint: sectionTint) {
+            VStack(alignment: .leading, spacing: 12) {
+                if !section.rows.isEmpty {
+                    CapabilityReadableRows(rows: section.rows, tint: sectionTint)
                 }
-            }
-        }
-        .sheetSection()
-    }
 
-    @ViewBuilder
-    private var journeySection: some View {
-        if !display.progressSteps.isEmpty {
-            CapabilityDetailSection(title: "Progress", accent: accent, tint: tint) {
-                CapabilityProgressJourneyView(steps: display.progressSteps, tint: tint)
-            }
-            .sheetSection()
-        }
-    }
-
-    @ViewBuilder
-    private var progressSection: some View {
-        if shouldShowProgressSection {
-            CapabilityDetailSection(title: "Status", accent: accent, tint: tint) {
-                VStack(alignment: .leading, spacing: 12) {
-                    CapabilityReadableRows(rows: statusRows, tint: tint)
-
-                    if data.status == .running || data.status == .generating || data.progressPercent != nil {
-                        if let progress = boundedProgress {
-                            ProgressView(value: progress)
-                                .tint(accent)
-                            Text("\(Int((progress * 100).rounded()))%")
-                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                                .foregroundStyle(tint.secondary)
-                        } else {
-                            ProgressView()
-                                .tint(accent)
-                        }
+                if let body = section.body?.nilIfEmpty {
+                    if section.isDisclosure {
+                        CapabilityRawDisclosure(title: "Raw payload", text: body, tint: sectionTint)
+                    } else {
+                        CapabilityInvocationCodeBlock(text: body)
                     }
                 }
             }
-            .sheetSection()
         }
     }
 
-    @ViewBuilder
-    private var resultSection: some View {
-        if display.resultPreview?.nilIfEmpty != nil || data.result?.nilIfEmpty != nil || !display.resultRows.isEmpty {
-            CapabilityDetailSection(title: data.status == .error ? "Failure" : "Result", accent: accent, tint: tint) {
-                VStack(alignment: .leading, spacing: 12) {
-                    if primitive == "execute" {
-                        if !display.resultRows.isEmpty {
-                            CapabilityReadableRows(rows: display.resultRows, tint: tint)
-                        }
-                        if let preview = display.resultPreview?.nilIfEmpty {
-                            CapabilityInvocationCodeBlock(text: preview)
-                        } else if data.result?.nilIfEmpty != nil {
-                            CapabilityResultNote(
-                                text: "Structured output is available in runtime details.",
-                                tint: tint
-                            )
-                        }
-                    } else if let result = data.result, !result.isEmpty {
-                        CapabilityResultRenderer(
-                            content: result,
-                            details: data.details,
-                            identity: data.identity
-                        )
-                    }
-                }
-            }
-            .sheetSection()
+    private func sectionAccent(_ kind: CapabilityEvidencePresentation.SectionKind) -> Color {
+        switch kind {
+        case .summary, .target, .input, .result:
+            return accent
+        case .error:
+            return .tronError
+        case .technical:
+            return .tronSlate
         }
-    }
-
-    @ViewBuilder
-    private var artifactsSection: some View {
-        if !data.artifacts.isEmpty {
-            CapabilityDetailSection(title: "Artifacts", accent: .tronPurple, tint: TintedColors(accent: .tronPurple, colorScheme: colorScheme)) {
-                VStack(alignment: .leading, spacing: 10) {
-                    ForEach(data.artifacts, id: \.id) { artifact in
-                        CapabilityArtifactRow(artifact: artifact)
-                    }
-                }
-            }
-            .sheetSection()
-        }
-    }
-
-    @ViewBuilder
-    private var logsSection: some View {
-        if !data.logs.isEmpty {
-            CapabilityDetailSection(title: "Logs", accent: .tronSlate, tint: tint) {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(Array(data.logs.enumerated()), id: \.offset) { _, line in
-                        CapabilityInvocationCodeBlock(text: line)
-                    }
-                }
-            }
-            .sheetSection()
-        }
-    }
-
-    @ViewBuilder
-    private var errorSection: some View {
-        if let errorClassification = data.errorClassification {
-            CapabilityDetailSection(title: "Error", accent: .tronError, tint: TintedColors(accent: .tronError, colorScheme: colorScheme)) {
-                CapabilityReadableRows(rows: errorRows(errorClassification), tint: TintedColors(accent: .tronError, colorScheme: colorScheme))
-            }
-            .sheetSection()
-        }
-    }
-
-    @ViewBuilder
-    private var runtimeDetailsSection: some View {
-        if hasAuditContent {
-            CapabilityDetailSection(title: "Runtime Details", accent: .tronSlate, tint: tint) {
-                DisclosureGroup(isExpanded: $isAuditExpanded) {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if !display.executionGroups.isEmpty {
-                            detailSubheading("Execution path")
-                            ForEach(display.executionGroups) { group in
-                                CapabilityExecutionGroupView(group: group, tint: tint)
-                            }
-                        }
-                        if !display.technicalRows.isEmpty {
-                            detailSubheading("Metadata")
-                            CapabilityReadableRows(rows: display.technicalRows, tint: tint)
-                        }
-                        if let prettyArguments = display.prettyArguments {
-                            CapabilityRawDisclosure(title: "Raw request", text: prettyArguments, tint: tint)
-                        }
-                        if let prettyResult = display.prettyResult {
-                            CapabilityRawDisclosure(title: "Raw result", text: prettyResult, tint: tint)
-                        }
-                    }
-                    .padding(.top, 10)
-                } label: {
-                    Label("Execution path and raw payloads", systemImage: "slider.horizontal.3")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                        .foregroundStyle(tint.heading)
-                }
-            }
-            .sheetSection()
-        }
-    }
-
-    private var shouldShowProgressSection: Bool {
-        data.status == .running
-            || data.status == .generating
-            || data.progressMessage?.nilIfEmpty != nil
-            || data.progressPercent != nil
-    }
-
-    private var hasAuditContent: Bool {
-        !display.executionGroups.isEmpty
-            || !display.technicalRows.isEmpty
-            || display.prettyArguments != nil
-            || display.prettyResult != nil
-    }
-
-    private var actionInputRows: [CapabilityDisplayRow] {
-        guard primitive == "execute" else { return [] }
-        return display.requestRows.filter { row in
-            !["Intent", "Reason", "Contract", "Implementation", "Function", "Plugin", "Risk ceiling", "Trust floor", "Namespace"]
-                .contains(row.label)
-        }
-    }
-
-    private func detailSubheading(_ title: String) -> some View {
-        Text(title)
-            .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
-            .foregroundStyle(tint.subtle)
-            .textCase(.uppercase)
-    }
-
-    private var boundedProgress: Double? {
-        guard let progress = data.progressPercent else { return nil }
-        return min(max(progress, 0), 1)
-    }
-
-    private var statusRows: [CapabilityDisplayRow] {
-        var rows = [CapabilityDisplayRow(label: "State", value: display.statusText)]
-        if let progressMessage = data.progressMessage?.nilIfEmpty {
-            rows.append(CapabilityDisplayRow(label: "Update", value: progressMessage))
-        }
-        if let duration = data.formattedDuration {
-            rows.append(CapabilityDisplayRow(label: "Duration", value: duration))
-        }
-        return rows
-    }
-
-    private func errorRows(_ error: CapabilityErrorClassification) -> [CapabilityDisplayRow] {
-        var rows: [CapabilityDisplayRow] = []
-        func append(_ label: String, _ value: String?, technical: Bool = false) {
-            guard let value = value?.nilIfEmpty else { return }
-            rows.append(CapabilityDisplayRow(label: label, value: value, isTechnical: technical))
-        }
-        append("Message", error.message)
-        append("Code", error.code, technical: true)
-        append("Category", error.category)
-        if let recoverable = error.recoverable {
-            rows.append(CapabilityDisplayRow(label: "Recoverable", value: recoverable ? "Yes" : "No"))
-        }
-        return rows
     }
 }
 

@@ -11,7 +11,7 @@ enum ConnectionState: Equatable, Sendable {
     case failed(reason: String)
     /// Server rejected the WS upgrade with HTTP 401 — bearer token is missing,
     /// expired, or rotated. Read-only state; user must re-pair via the
-    /// `ConnectionStatusPill` CTA before reconnect can resume.
+    /// global connection repair UI before reconnect can resume.
     case unauthorized(reason: String)
 
     var isConnected: Bool {
@@ -36,7 +36,7 @@ enum ConnectionState: Equatable, Sendable {
 
     /// True when no further automatic reconnect is in flight and the user
     /// must take action (manual retry or re-pair). Used by the
-    /// `ConnectionStatusPill` to surface tap-to-fix CTAs.
+    /// global connection repair UI to surface tap-to-fix CTAs.
     var requiresUserAction: Bool {
         switch self {
         case .failed, .unauthorized: return true

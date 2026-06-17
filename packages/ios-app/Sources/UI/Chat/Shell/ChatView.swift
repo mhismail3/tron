@@ -83,14 +83,6 @@ struct ChatView: View {
                 onStop: { viewModel.stopDisplayStream() }
             )
         }
-        .alert("Error", isPresented: Binding(
-            get: { viewModel.errorMessage != nil },
-            set: { if !$0 { viewModel.clearError() } }
-        )) {
-            Button("OK") { viewModel.clearError() }
-        } message: {
-            Text(viewModel.errorMessage ?? "Unknown error")
-        }
         // iOS 26 menu actions route through NotificationCenter before state mutation.
         .onReceive(NotificationCenter.default.publisher(for: .chatMenuAction)) { notification in
             guard let raw = notification.object as? String,
@@ -133,6 +125,7 @@ struct ChatView: View {
         .onDisappear {
             // Persist draft state before view is destroyed
             Task { await dependencies.draftStore.saveImmediately(sessionId: sessionId, inputBarState: viewModel.inputBarState) }
+            viewModel.clearLocalNotifications()
             viewModel.cancelRecording()
             viewModel.stopLiveEventStream()
             // Reset for next entry

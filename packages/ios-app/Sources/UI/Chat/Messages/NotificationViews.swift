@@ -32,6 +32,61 @@ struct NotificationPill<Content: View>: View {
     }
 }
 
+struct LocalChatNotificationView: View {
+    let notification: LocalChatNotification
+    var onDetails: ((LocalChatNotification.Detail) -> Void)?
+
+    var body: some View {
+        NotificationPill(tint: tint, interactive: notification.detail != nil, onTap: detailAction) {
+            HStack(spacing: 8) {
+                Image(systemName: iconName)
+                    .font(TronTypography.codeSM)
+                    .foregroundStyle(tint)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(notification.title)
+                        .font(TronTypography.filePath)
+                        .foregroundStyle(tint.opacity(0.92))
+
+                    if let message = notification.message {
+                        Text(message)
+                            .font(TronTypography.codeCaption)
+                            .foregroundStyle(.tronTextSecondary)
+                            .lineLimit(2)
+                    }
+                }
+            }
+        }
+    }
+
+    private var detailAction: (() -> Void)? {
+        guard let detail = notification.detail else { return nil }
+        return { onDetails?(detail) }
+    }
+
+    private var tint: Color {
+        switch notification.severity {
+        case .info:
+            return .tronInfo
+        case .warning:
+            return .tronWarning
+        case .error:
+            return .tronError
+        }
+    }
+
+    private var iconName: String {
+        switch notification.severity {
+        case .info:
+            return "info.circle.fill"
+        case .warning:
+            return "exclamationmark.triangle.fill"
+        case .error:
+            return "exclamationmark.circle.fill"
+        }
+    }
+}
+
 // MARK: - PillBackground
 
 private struct PillBackground: ViewModifier {

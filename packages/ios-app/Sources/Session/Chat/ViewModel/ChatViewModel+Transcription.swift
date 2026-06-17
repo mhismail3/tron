@@ -59,7 +59,7 @@ extension ChatViewModel: ChatTranscriptionContext {
     }
 
     func appendTranscriptionError(_ message: String) {
-        appendToMessages(.error(message))
+        appendLocalError(dedupKey: "transcription.error", title: "Voice input failed", message: message)
     }
 
     func toggleRecording() {

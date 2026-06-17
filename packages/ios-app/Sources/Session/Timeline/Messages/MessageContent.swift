@@ -12,6 +12,7 @@ enum MessageContent: Equatable {
     case error(String)
     case images([ImageContent])
     case attachments([Attachment])
+    case localNotification(LocalChatNotification)
 
     // System events (notifications) - consolidated
     case systemEvent(SystemEvent)
@@ -82,6 +83,8 @@ enum MessageContent: Equatable {
         case .attachments(let files):
             let count = files.count
             return "[\(count) \(count == 1 ? "attachment" : "attachments")]"
+        case .localNotification(let notification):
+            return notification.textContent
         case .systemEvent(let event):
             return event.textContent
         }
@@ -98,6 +101,9 @@ enum MessageContent: Equatable {
 
     var isNotification: Bool {
         if case .systemEvent = self {
+            return true
+        }
+        if case .localNotification = self {
             return true
         }
         return false

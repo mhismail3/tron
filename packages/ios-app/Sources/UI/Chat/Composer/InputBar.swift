@@ -362,6 +362,7 @@ struct InputBar: View {
             actions.onAddAttachment(attachment)
         } catch {
             logger.warning("Failed to read document: \(error.localizedDescription)", category: .chat)
+            actions.onAttachmentError("Could not attach file", error.localizedDescription)
         }
     }
 
@@ -369,6 +370,7 @@ struct InputBar: View {
         let actualMB = actualSize / (1024 * 1024)
         let maxMB = maxSize / (1024 * 1024)
         logger.warning("File too large: \(actualMB)MB exceeds \(maxMB)MB limit", category: .chat)
+        actions.onAttachmentError("File is too large", "\(actualMB)MB exceeds the \(maxMB)MB limit.")
     }
 
 }
