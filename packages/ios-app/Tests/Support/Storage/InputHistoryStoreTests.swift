@@ -258,6 +258,18 @@ final class InputHistoryStoreTests: XCTestCase {
         XCTAssertFalse(store.isNavigating)
     }
 
+    func test_clearHistory_removesLocalUserDefaultsPayload() {
+        // Given
+        store.addToHistory("Private local prompt")
+        XCTAssertNotNil(UserDefaults.standard.data(forKey: "tron.inputHistory"))
+
+        // When
+        store.clearHistory()
+
+        // Then
+        XCTAssertNil(UserDefaults.standard.data(forKey: "tron.inputHistory"))
+    }
+
     // MARK: - Persistence Tests
 
     func test_historyPersistsAcrossInstances() {

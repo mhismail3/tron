@@ -102,4 +102,51 @@ extension SourceGuardTests {
             "The attachment action menu must not use a SwiftUI presentation that steals composer focus"
         )
     }
+
+    @Test("Composer recent input history stays local and non-routing")
+    func testComposerRecentInputHistoryStaysLocalAndNonRouting() throws {
+        let iosRoot = iosAppRoot()
+        let checkedPaths = [
+            "Sources/UI/Chat/Composer/InputBar.swift",
+            "Sources/UI/Chat/Composer/RecentInputHistorySheet.swift",
+            "Sources/Support/Storage/InputHistoryStore.swift",
+        ]
+        let combined = try checkedPaths.map { relativePath in
+            try String(
+                contentsOf: iosRoot.appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+        }.joined(separator: "\n")
+
+        let requiredFragments = [
+            "Recent Inputs",
+            "InputHistoryStore",
+            "clearHistory()",
+            "actions.onHistoryNavigate?(selected)",
+            "UserDefaults.standard.removeObject(forKey: storageKey)",
+        ]
+        let forbiddenFragments = [
+            "Prompt" + "Library",
+            "Prompt" + "Snippet",
+            "Prompt" + "Template",
+            "Prompt" + "Library" + "Client",
+            "prompt" + "_library::",
+            "prompt" + "Library",
+            "agent::" + "queue_prompt",
+            "skills::" + "activate",
+            "ui::" + "submit_action",
+            "artifact:prompt",
+        ]
+
+        for fragment in requiredFragments {
+            #expect(combined.contains(fragment), "recent input history should keep local behavior `\(fragment)`")
+        }
+
+        for fragment in forbiddenFragments {
+            #expect(
+                !combined.contains(fragment),
+                "recent input history must not restore backend prompt-library or routing behavior `\(fragment)`"
+            )
+        }
+    }
 }

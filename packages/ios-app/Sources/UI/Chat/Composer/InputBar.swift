@@ -24,6 +24,7 @@ struct InputBar: View {
     @State private var showCamera = false
     @State private var showFilePicker = false
     @State private var showingImagePicker = false
+    @State private var showRecentInputs = false
     @State private var hasAppeared = false
     @State private var showAttachmentButton = false
 
@@ -53,6 +54,14 @@ struct InputBar: View {
     }
 
     private var shouldShowStatusPills: Bool { true }
+
+    private var shouldShowRecentInputsButton: Bool {
+        RecentInputHistoryPresentation.shouldShowButton(
+            inputHistory: config.inputHistory,
+            agentPhase: config.agentPhase,
+            readOnly: config.readOnly
+        )
+    }
 
     private var micDisabled: Bool {
         if config.isRecording { return false }
@@ -114,6 +123,17 @@ struct InputBar: View {
                         .allowsHitTesting(false)
                     }
 
+                if shouldShowRecentInputsButton {
+                    GlassRecentInputsButton(
+                        onTap: {
+                            isFocused = false
+                            showRecentInputs = true
+                        },
+                        buttonSize: actionButtonSize
+                    )
+                    .transition(.scale(scale: 0.8).combined(with: .opacity))
+                }
+
                 // Send/Abort button
                 if shouldShowActionButton && !config.readOnly {
                     GlassActionButton(
@@ -172,6 +192,13 @@ struct InputBar: View {
                 onDocumentPicked: addDocumentAttachment,
                 onSizeExceeded: handleDocumentSizeExceeded
             )
+        }
+        .sheet(isPresented: $showRecentInputs) {
+            if let inputHistory = config.inputHistory {
+                RecentInputHistorySheet(historyStore: inputHistory) { selected in
+                    actions.onHistoryNavigate?(selected)
+                }
+            }
         }
         .photosPicker(
             isPresented: $showingImagePicker,

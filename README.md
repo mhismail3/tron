@@ -1403,11 +1403,12 @@ packages/ios-app/Sources/
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
   that prefer generated session titles before prompt/workspace fallbacks,
-  prompt input, the functional-only native composer
-  attachment menu that preserves keyboard focus while layering native
-  camera/photo/file pickers above it, composer mic input backed by the local transcription
-  domain after a readiness check, message rendering, local reconstruction, diagnostics,
-  and generic runtime surfaces.
+  prompt input with clearable device-local recent-input reuse, the
+  functional-only native composer attachment menu that preserves keyboard
+  focus while layering native camera/photo/file pickers above it, composer mic
+  input backed by the local transcription domain after a readiness check,
+  message rendering, local reconstruction, diagnostics, and generic runtime
+  surfaces.
   Fixed product panels,
   repository-specific panels, media workflow surfaces, assistant-management
   panels, extension-source surfaces, voice-note storage, memory-retain, rules,
@@ -1461,6 +1462,7 @@ packages/ios-app/Sources/
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> [ChatMessage] -> ChatViewModel -> ChatView
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
+Recent:  InputBar -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
 Cockpit: catalog/resource APIs -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet

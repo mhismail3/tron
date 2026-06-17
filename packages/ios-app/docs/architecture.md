@@ -8,7 +8,8 @@
 
 The iOS app is a SwiftUI `/engine` client. In the current primitive baseline it
 is intentionally a shell: it pairs with a local Tron server, sends prompts,
-records composer mic input for opt-in local transcription, renders session
+keeps a clearable local recent-input history for composer reuse, records
+composer mic input for opt-in local transcription, renders session
 messages, persists a local event cache for reconstruction, and renders generic
 runtime surfaces emitted by the engine. The current user-facing Agent cockpit
 surfaces live worker lifecycle catalog entries, package/resource status,
@@ -38,11 +39,12 @@ matching database/event/settings/dependency work.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
 - Grouped session dashboard with collapsible workspace headers and compact
-  one-line session rows, session creation/fork/resume, prompt composer, a
-  functional-only native attachment menu that preserves composer keyboard focus
-  while layering native camera/photo/file pickers above it, unified attachments
-  for images/documents, a right-side mic affordance for local composer
-  transcription when enabled, and message rendering.
+  one-line session rows, session creation/fork/resume, prompt composer with a
+  local recent-input picker, a functional-only native attachment menu that
+  preserves composer keyboard focus while layering native camera/photo/file
+  pickers above it, unified attachments for images/documents, a right-side mic
+  affordance for local composer transcription when enabled, and message
+  rendering.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Agent cockpit status capsule and sheet for worker lifecycle catalog/resource
   state, package actions, activity, and dynamic runtime surfaces.
@@ -92,6 +94,7 @@ icon catalog, or fork-row state model.
 
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
+Recent:  InputBar -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> ComposerMicRecorder -> transcription::audio -> InputBar
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
@@ -240,6 +243,11 @@ Pairing is device-local `UserDefaults` state, bearer tokens are per-server
 Keychain secrets, drafts and input history are local workflow state, pending
 share content is App Group handoff state cleared after consumption, and
 MetricKit payloads are bounded Application Support diagnostics buffers.
+Recent input history is stored only on the device through
+`InputHistoryStore`, capped at 100 sent text prompts, exposed from the
+composer only while local history exists and the session is idle/editable, and
+clearable from the Recent Inputs sheet. It is not a server prompt-library
+resource, snippet catalog, routing plane, or generated management surface.
 
 ## Event Handling
 

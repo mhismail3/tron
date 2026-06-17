@@ -6,10 +6,10 @@ Last reconciled from implementation thread:
 `019ecf5d-c3ca-7062-94ed-4cc636441cfe`
 
 Implementation branch:
-`codex/ios-voice-dictation-affordance-current`
+`codex/ios-prompt-input-snippet-affordance-current`
 
 Implementation worktree:
-`/Users/moose/.codex/worktrees/44a4/tron`
+`/Users/<USER>/.codex/worktrees/0ecf/tron`
 
 Merged baseline:
 `84451c969 Refine camera capture confirmation controls`
@@ -244,39 +244,64 @@ implementation branch and adding this ledger:
   attachment menu, dashboard presentation, transcription DTO, and source-guard
   coverage.
 
+### Phase 1 Slice 3: Recent Input History
+
+Commits:
+
+- Implementation commit on
+  `codex/ios-prompt-input-snippet-affordance-current`.
+
+User-facing state:
+
+- The chat composer exposes a compact recent-input history button only when
+  local sent-input history exists and the session is idle/editable.
+- The Recent Inputs sheet lists device-local sent text prompts. Tapping a row
+  inserts that text into the current composer draft.
+- The sheet includes a local Clear action that removes the device-local history
+  payload.
+
+Data ownership and privacy:
+
+- Recent input history remains owned by iOS local workflow state through
+  `InputHistoryStore`.
+- The store uses the existing `tron.inputHistory` `UserDefaults` payload,
+  dedupes entries, and caps retention at 100 sent text prompts.
+- No prompt-library server API, `PromptLibraryClient`, generated management
+  surface, skill activation, queueing, prompt routing, subagent behavior, or
+  fixed template catalog was restored.
+
+Validated:
+
+- `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/RecentInputHistoryTests -only-testing:TronMobileTests/InputHistoryStoreTests -only-testing:TronMobileTests/AttachmentMenuTests -only-testing:TronMobileTests/SourceGuardTests`
+  passed on iOS 26.5 simulator with 31 XCTest cases and 46 Swift Testing
+  source-guard cases.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed with 6 tests.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` returned no tracked ignored files.
+- `cd packages/ios-app && xcodegen generate` produced expected
+  `TronMobile.xcodeproj` membership updates for the new source/test files.
+- The current simulator app bundle was explicitly installed and launched on
+  iPhone 17 Pro, iOS 26.5. A connected/editable chat composer screenshot was
+  not captured because the clean simulator install had no paired server or
+  cached editable session; the recent-input button and sheet states were
+  covered by SwiftUI construction tests and source guards instead.
+
+Deferred:
+
+- User-authored snippets, reusable templates, slash-command suggestions,
+  server-owned prompt history/snippet resources, generated prompt management
+  surfaces, skill activation, prompt queues, and agent-execution routing remain
+  absent until a future approved Phase 2/current-resource design exists.
+
 ## Remaining Phase 1 Queue
 
 The next recommended restoration slice is
-`phase1_slice_3`: prompt, input history, and snippet affordance audit.
-
-Source-backed inventory row:
-
-- `IARM-SURFACE-020`
-
-Old paths:
-
-- `packages/ios-app/Sources/Views/PromptLibrary/`
-- `packages/ios-app/Sources/ViewModels/State/PromptLibraryState.swift`
-
-Current classification:
-
-- `phase1_review_only`
-
-Decision boundary for the next slice:
-
-- Review whether a prompt/snippet/input-history affordance is useful as a
-  long-term signal for a self-updating agent.
-- Prefer local-native or current-resource-backed behavior only.
-- Do not restore the old prompt-library API, `PromptLibraryClient`, skills
-  activation, queues, or agent-execution prompt routing by default.
-- The slice should start with a user review packet before implementation:
-  old surface, current gap, proposed minimal UX, entry point, immediately
-  functional behavior, deferred behavior, tests, simulator/device validation,
-  and explicit user decision.
+`phase1_slice_4`: chat visual cues, status, empty/loading/error polish.
 
 Later Phase 1 items remain:
 
-- `phase1_slice_4`: chat visual cues, status, empty/loading/error polish.
 - `phase1_slice_5`: settings, onboarding, diagnostics, and pairing polish over
   current server facts.
 - `phase1_slice_6`: notification/inbox concept review only if it can remain
