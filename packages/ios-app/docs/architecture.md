@@ -228,7 +228,10 @@ origin/topic/filter for ACK coalescing and diagnostics only; session history is
 reconstructed through server APIs, not replayed from cursor storage.
 Session list projection keeps server titles and last-message previews together:
 dashboard rows prefer generated or explicit session titles, then the latest user
-prompt preview, then the workspace display name.
+prompt preview, then the workspace display name. `SessionSidebar` composes the
+dashboard surface and shell actions; `SessionDashboard.swift` owns workspace
+grouping, expansion state, row status mapping, and header/row presentation
+metrics.
 
 Server settings shown in the iOS settings UI are snapshots from
 `settings::get`/`settings::reset`; local state exists only to render the active

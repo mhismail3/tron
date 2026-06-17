@@ -37,4 +37,4 @@ pub(super) use execute::execute_prompt_run;
 pub(super) use plan::PromptRunPlan;
 pub use request::PromptRequest;
 pub use spawn::spawn_prompt_run;
-use title_generation::spawn_session_title_generation;
+use title_generation::{SessionTitleGenerationRequest, spawn_session_title_generation};

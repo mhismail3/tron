@@ -23,39 +23,57 @@ use crate::shared::protocol::messages::{Context, Message, extract_assistant_text
 
 const TITLE_GENERATION_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_TITLE_CHARS: usize = 80;
+const DEFAULT_SESSION_TITLES: &[&str] = &["chat", "workspace", "untitled", "untitled session"];
+const TITLE_LABEL_PREFIXES: &[&str] = &["Title:", "Session title:", "Generated title:"];
+
+pub(super) struct SessionTitleGenerationRequest {
+    pub(super) session_id: String,
+    pub(super) model: String,
+    pub(super) prompt: String,
+    pub(super) working_dir: String,
+    pub(super) server_origin: String,
+}
+
+struct SessionTitleGenerationDeps {
+    responder_factory: Arc<dyn ModelResponderFactory>,
+    event_store: Arc<EventStore>,
+    broadcast: Arc<EventEmitter>,
+}
+
+struct SessionTitleGenerationJob {
+    deps: SessionTitleGenerationDeps,
+    request: SessionTitleGenerationRequest,
+    cancel: CancellationToken,
+}
 
 pub(super) fn spawn_session_title_generation(
     responder_factory: Arc<dyn ModelResponderFactory>,
     event_store: Arc<EventStore>,
     broadcast: Arc<EventEmitter>,
     shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
-    session_id: String,
-    model: String,
-    prompt: String,
-    working_dir: String,
-    server_origin: String,
+    request: SessionTitleGenerationRequest,
 ) {
     let cancel = shutdown_coordinator
         .as_ref()
         .map_or_else(CancellationToken::new, |coordinator| coordinator.token());
     let task_cancel = cancel.clone();
+    let session_id = request.session_id.clone();
+    let deps = SessionTitleGenerationDeps {
+        responder_factory,
+        event_store,
+        broadcast,
+    };
     let handle = tokio::spawn(async move {
         if task_cancel.is_cancelled() {
             return;
         }
         let completed = tokio::time::timeout(
             TITLE_GENERATION_TIMEOUT,
-            run_session_title_generation(
-                responder_factory,
-                event_store,
-                broadcast,
-                session_id.clone(),
-                model,
-                prompt,
-                working_dir,
-                server_origin,
-                task_cancel,
-            ),
+            run_session_title_generation(SessionTitleGenerationJob {
+                deps,
+                request,
+                cancel: task_cancel,
+            }),
         )
         .await;
 
@@ -72,18 +90,18 @@ pub(super) fn spawn_session_title_generation(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-async fn run_session_title_generation(
-    responder_factory: Arc<dyn ModelResponderFactory>,
-    event_store: Arc<EventStore>,
-    broadcast: Arc<EventEmitter>,
-    session_id: String,
-    model: String,
-    prompt: String,
-    working_dir: String,
-    server_origin: String,
-    cancel: CancellationToken,
-) -> bool {
+async fn run_session_title_generation(job: SessionTitleGenerationJob) -> bool {
+    let SessionTitleGenerationJob {
+        deps:
+            SessionTitleGenerationDeps {
+                responder_factory,
+                event_store,
+                broadcast,
+            },
+        request,
+        cancel,
+    } = job;
+    let session_id = request.session_id;
     let Ok(Some(session)) = event_store.get_session(&session_id) else {
         return false;
     };
@@ -94,10 +112,10 @@ async fn run_session_title_generation(
     let title = match generate_title(
         responder_factory,
         &session_id,
-        &model,
-        &prompt,
-        &working_dir,
-        &server_origin,
+        &request.model,
+        &request.prompt,
+        &request.working_dir,
+        &request.server_origin,
         cancel,
     )
     .await
@@ -204,10 +222,8 @@ fn session_needs_generated_title(title: Option<&str>) -> bool {
         return true;
     };
 
-    matches!(
-        title.to_ascii_lowercase().as_str(),
-        "chat" | "workspace" | "untitled" | "untitled session"
-    )
+    let normalized = title.to_ascii_lowercase();
+    DEFAULT_SESSION_TITLES.contains(&normalized.as_str())
 }
 
 fn session_can_accept_generated_title(event_store: &EventStore, session: &SessionRow) -> bool {
@@ -245,7 +261,7 @@ fn clean_generated_title(raw: &str) -> Option<String> {
         .trim_matches(|char| matches!(char, '"' | '\'' | '`'))
         .trim();
 
-    for prefix in ["Title:", "Session title:", "Generated title:"] {
+    for &prefix in TITLE_LABEL_PREFIXES {
         if title
             .get(..prefix.len())
             .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
@@ -361,16 +377,12 @@ mod tests {
         let emitter = Arc::new(EventEmitter::new());
         let mut receiver = emitter.subscribe();
 
-        let updated = run_session_title_generation(
-            Arc::new(StaticTitleFactory("Implement Runtime Changes".to_owned())),
+        let updated = run_title_generation(
             store.clone(),
             emitter,
-            created.session.id.clone(),
-            "mock-title".to_owned(),
-            "please implement the runtime changes".to_owned(),
-            "/tmp/project".to_owned(),
-            "localhost:9847".to_owned(),
-            CancellationToken::new(),
+            &created.session.id,
+            "please implement the runtime changes",
+            "Implement Runtime Changes",
         )
         .await;
 
@@ -396,16 +408,12 @@ mod tests {
         append_user_message(&store, &created.session.id, "please replace");
         let emitter = Arc::new(EventEmitter::new());
 
-        let updated = run_session_title_generation(
-            Arc::new(StaticTitleFactory("Replacement".to_owned())),
+        let updated = run_title_generation(
             store.clone(),
             emitter,
-            created.session.id.clone(),
-            "mock-title".to_owned(),
-            "please replace".to_owned(),
-            "/tmp/project".to_owned(),
-            "localhost:9847".to_owned(),
-            CancellationToken::new(),
+            &created.session.id,
+            "please replace",
+            "Replacement",
         )
         .await;
 
@@ -424,16 +432,12 @@ mod tests {
         append_assistant_message(&store, &created.session.id, "sure");
         let emitter = Arc::new(EventEmitter::new());
 
-        let updated = run_session_title_generation(
-            Arc::new(StaticTitleFactory("Summarize Architecture".to_owned())),
+        let updated = run_title_generation(
             store.clone(),
             emitter,
-            created.session.id.clone(),
-            "mock-title".to_owned(),
-            "summarize the architecture".to_owned(),
-            "/tmp/project".to_owned(),
-            "localhost:9847".to_owned(),
-            CancellationToken::new(),
+            &created.session.id,
+            "summarize the architecture",
+            "Summarize Architecture",
         )
         .await;
 
@@ -450,16 +454,12 @@ mod tests {
             .unwrap();
         let emitter = Arc::new(EventEmitter::new());
 
-        let updated = run_session_title_generation(
-            Arc::new(StaticTitleFactory("Missing Prompt Title".to_owned())),
+        let updated = run_title_generation(
             store.clone(),
             emitter,
-            created.session.id.clone(),
-            "mock-title".to_owned(),
-            "not yet persisted".to_owned(),
-            "/tmp/project".to_owned(),
-            "localhost:9847".to_owned(),
-            CancellationToken::new(),
+            &created.session.id,
+            "not yet persisted",
+            "Missing Prompt Title",
         )
         .await;
 
@@ -478,16 +478,12 @@ mod tests {
         append_user_message(&store, &created.session.id, "second prompt");
         let emitter = Arc::new(EventEmitter::new());
 
-        let updated = run_session_title_generation(
-            Arc::new(StaticTitleFactory("Late Prompt Title".to_owned())),
+        let updated = run_title_generation(
             store.clone(),
             emitter,
-            created.session.id.clone(),
-            "mock-title".to_owned(),
-            "second prompt".to_owned(),
-            "/tmp/project".to_owned(),
-            "localhost:9847".to_owned(),
-            CancellationToken::new(),
+            &created.session.id,
+            "second prompt",
+            "Late Prompt Title",
         )
         .await;
 
@@ -503,6 +499,31 @@ mod tests {
             run_migrations(&conn).unwrap();
         }
         EventStore::new(pool)
+    }
+
+    async fn run_title_generation(
+        store: Arc<EventStore>,
+        emitter: Arc<EventEmitter>,
+        session_id: &str,
+        prompt: &str,
+        generated_title: &str,
+    ) -> bool {
+        run_session_title_generation(SessionTitleGenerationJob {
+            deps: SessionTitleGenerationDeps {
+                responder_factory: Arc::new(StaticTitleFactory(generated_title.to_owned())),
+                event_store: store,
+                broadcast: emitter,
+            },
+            request: SessionTitleGenerationRequest {
+                session_id: session_id.to_owned(),
+                model: "mock-title".to_owned(),
+                prompt: prompt.to_owned(),
+                working_dir: "/tmp/project".to_owned(),
+                server_origin: "localhost:9847".to_owned(),
+            },
+            cancel: CancellationToken::new(),
+        })
+        .await
     }
 
     fn append_user_message(store: &EventStore, session_id: &str, prompt: &str) {

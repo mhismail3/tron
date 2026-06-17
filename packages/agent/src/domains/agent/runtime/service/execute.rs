@@ -6,9 +6,9 @@ use super::agent_build::{BuiltPromptAgent, build_prompt_agent};
 use super::completion::{PromptRunCompletion, finalize_prompt_run};
 use super::context::load_agent_state_context;
 use super::{
-    PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, ShutdownCancelForwarder,
-    build_user_content_override, build_user_event_payload, persist_user_message_event,
-    resume_prompt_session, run_agent, spawn_session_title_generation,
+    PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, SessionTitleGenerationRequest,
+    ShutdownCancelForwarder, build_user_content_override, build_user_event_payload,
+    persist_user_message_event, resume_prompt_session, run_agent, spawn_session_title_generation,
 };
 
 pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
@@ -158,11 +158,13 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             event_store.clone(),
             broadcast.clone(),
             shutdown_coordinator,
-            session_id.clone(),
-            model.clone(),
-            prompt.clone(),
-            working_dir.clone(),
-            server_origin.clone(),
+            SessionTitleGenerationRequest {
+                session_id: session_id.clone(),
+                model: model.clone(),
+                prompt: prompt.clone(),
+                working_dir: working_dir.clone(),
+                server_origin: server_origin.clone(),
+            },
         );
     }
 

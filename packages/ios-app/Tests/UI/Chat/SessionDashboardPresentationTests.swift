@@ -69,6 +69,10 @@ final class SessionDashboardPresentationTests: XCTestCase {
         XCTAssertEqual(SessionDashboardLayout.outerHorizontalPadding, 24)
         XCTAssertEqual(SessionDashboardLayout.iconColumnWidth, 18)
         XCTAssertEqual(SessionDashboardLayout.iconTextSpacing, 8)
+        XCTAssertEqual(SessionDashboardLayout.minimumRowHeight, 34)
+        XCTAssertEqual(SessionDashboardLayout.listTopContentMargin, 38)
+        XCTAssertEqual(SessionDashboardLayout.listBottomContentMargin, 92)
+        XCTAssertEqual(SessionDashboardLayout.floatingButtonSize, 56)
     }
 
     private func makeSession(
