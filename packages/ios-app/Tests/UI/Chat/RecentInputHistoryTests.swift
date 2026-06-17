@@ -19,10 +19,10 @@ final class RecentInputHistoryTests: XCTestCase {
         XCTAssertNotNil(host.view)
     }
 
-    func testRecentInputHistoryButtonVisibilityRequiresLocalHistoryIdleAndEditable() {
+    func testRecentInputHistoryMenuActionVisibilityRequiresLocalHistoryIdleAndEditable() {
         let history = InputHistoryStore()
 
-        XCTAssertFalse(RecentInputHistoryPresentation.shouldShowButton(
+        XCTAssertFalse(RecentInputHistoryPresentation.shouldShowMenuAction(
             inputHistory: history,
             agentPhase: .idle,
             readOnly: false
@@ -30,22 +30,22 @@ final class RecentInputHistoryTests: XCTestCase {
 
         history.addToHistory("Summarize the current workspace")
 
-        XCTAssertTrue(RecentInputHistoryPresentation.shouldShowButton(
+        XCTAssertTrue(RecentInputHistoryPresentation.shouldShowMenuAction(
             inputHistory: history,
             agentPhase: .idle,
             readOnly: false
         ))
-        XCTAssertFalse(RecentInputHistoryPresentation.shouldShowButton(
+        XCTAssertFalse(RecentInputHistoryPresentation.shouldShowMenuAction(
             inputHistory: history,
             agentPhase: .processing,
             readOnly: false
         ))
-        XCTAssertFalse(RecentInputHistoryPresentation.shouldShowButton(
+        XCTAssertFalse(RecentInputHistoryPresentation.shouldShowMenuAction(
             inputHistory: history,
             agentPhase: .idle,
             readOnly: true
         ))
-        XCTAssertFalse(RecentInputHistoryPresentation.shouldShowButton(
+        XCTAssertFalse(RecentInputHistoryPresentation.shouldShowMenuAction(
             inputHistory: nil,
             agentPhase: .idle,
             readOnly: false
@@ -54,7 +54,6 @@ final class RecentInputHistoryTests: XCTestCase {
 
     func testRecentInputHistoryLabelsUseApprovedCopy() {
         XCTAssertEqual(RecentInputHistoryPresentation.title, "Recent Inputs")
-        XCTAssertEqual(RecentInputHistoryPresentation.buttonAccessibilityLabel, "Show recent inputs")
         XCTAssertEqual(RecentInputHistoryPresentation.clearSystemImage, "trash")
         XCTAssertEqual(RecentInputHistoryPresentation.clearAccessibilityLabel, "Clear recent inputs")
         XCTAssertEqual(RecentInputHistoryPresentation.rowFontSize, TronTypography.sizeBody)

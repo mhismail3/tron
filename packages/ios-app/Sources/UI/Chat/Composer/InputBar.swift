@@ -56,7 +56,7 @@ struct InputBar: View {
     private var shouldShowStatusPills: Bool { true }
 
     private var shouldShowRecentInputsMenuAction: Bool {
-        RecentInputHistoryPresentation.shouldShowButton(
+        RecentInputHistoryPresentation.shouldShowMenuAction(
             inputHistory: config.inputHistory,
             agentPhase: config.agentPhase,
             readOnly: config.readOnly

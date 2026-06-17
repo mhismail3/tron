@@ -3,8 +3,6 @@ import SwiftUI
 @MainActor
 enum RecentInputHistoryPresentation {
     nonisolated static let title = "Recent Inputs"
-    nonisolated static let buttonAccessibilityLabel = "Show recent inputs"
-    nonisolated static let buttonAccessibilityHint = "Choose a recent message to insert into the composer."
     nonisolated static let emptyTitle = "No recent inputs"
     nonisolated static let emptyMessage = "Messages you send from this device will appear here."
     nonisolated static let clearSystemImage = "trash"
@@ -13,7 +11,7 @@ enum RecentInputHistoryPresentation {
     nonisolated static let rowLineLimit = 2
     nonisolated static let rowVerticalPadding: CGFloat = 2
 
-    static func shouldShowButton(
+    static func shouldShowMenuAction(
         inputHistory: InputHistoryStore?,
         agentPhase: AgentPhase,
         readOnly: Bool
