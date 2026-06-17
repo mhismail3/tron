@@ -53,7 +53,7 @@ final class EventStoreManager {
         SessionSynchronizer(engineClient: engineClient, eventDB: eventDB)
     }()
 
-    /// Manages live streaming buffers for session list rows
+    /// Manages bounded live activity snapshots for session metadata persistence.
     @ObservationIgnored
     private(set) lazy var sessionActivityStreamManager = SessionActivityStreamManager()
 

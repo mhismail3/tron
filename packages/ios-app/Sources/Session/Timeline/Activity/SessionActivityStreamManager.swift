@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - SessionStreamBuffer
 
-/// Per-session ring buffer of recent activity lines for session list display.
+/// Per-session ring buffer of recent activity lines for metadata persistence.
 /// Capped at `maxStreamBufferLines` to bound memory. Text deltas coalesce into a single
 /// `.text` line until a non-text event arrives. Each capability invocation gets its own
 /// `.capabilityInvocationStarted` line with summary, duration, and status.
@@ -178,10 +178,10 @@ struct SessionStreamBuffer {
 
 // MARK: - SessionActivityStreamManager
 
-/// Manages live streaming buffers for all session list rows.
-/// Each in-progress session accumulates activity lines that the sidebar
-/// cards render as a mini-terminal. Blocks post-completion events from
-/// leaking into cards.
+/// Manages live streaming buffers for session metadata snapshots.
+/// Each in-progress session accumulates bounded activity lines that can be
+/// persisted with session metadata. Blocks post-completion events from leaking
+/// into completed-session snapshots.
 ///
 /// Text deltas are batched at ~60fps to avoid choppy re-renders. Structural
 /// events (capability start/end, completion) flush immediately for responsiveness.

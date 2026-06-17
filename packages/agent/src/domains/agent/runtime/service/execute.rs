@@ -8,7 +8,7 @@ use super::context::load_agent_state_context;
 use super::{
     PromptRequest, PromptRunCleanup, PromptRunPlan, RunContext, ShutdownCancelForwarder,
     build_user_content_override, build_user_event_payload, persist_user_message_event,
-    resume_prompt_session, run_agent,
+    resume_prompt_session, run_agent, spawn_session_title_generation,
 };
 
 pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
@@ -20,6 +20,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         responder_factory,
         event_store,
         shutdown_token,
+        shutdown_coordinator,
         engine_host,
         engine_causality,
         sequence_counter,
@@ -44,6 +45,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
     let cancel_token = run_cleanup.cancel_token();
     let _shutdown_forwarder = ShutdownCancelForwarder::new(shutdown_token, cancel_token.clone());
     let settings = crate::domains::settings::get_settings();
+    let title_responder_factory = responder_factory.clone();
 
     let (state, persister) = match resume_prompt_session(
         session_manager.clone(),
@@ -99,7 +101,7 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         &session_id,
         &model,
         &working_dir,
-        server_origin,
+        server_origin.clone(),
         messages,
         initial_turn_count,
         resolved_workspace_id.clone(),
@@ -133,14 +135,34 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             );
         }
     }
-    if let Err(error) =
-        persist_user_message_event(event_store.clone(), session_id.clone(), user_event_payload)
-            .await
+    let user_message_persisted = match persist_user_message_event(
+        event_store.clone(),
+        session_id.clone(),
+        user_event_payload,
+    )
+    .await
     {
-        warn!(
-            session_id = %session_id,
-            error = %error,
-            "failed to persist message.user event"
+        Ok(()) => true,
+        Err(error) => {
+            warn!(
+                session_id = %session_id,
+                error = %error,
+                "failed to persist message.user event"
+            );
+            false
+        }
+    };
+    if user_message_persisted {
+        spawn_session_title_generation(
+            title_responder_factory,
+            event_store.clone(),
+            broadcast.clone(),
+            shutdown_coordinator,
+            session_id.clone(),
+            model.clone(),
+            prompt.clone(),
+            working_dir.clone(),
+            server_origin.clone(),
         );
     }
 

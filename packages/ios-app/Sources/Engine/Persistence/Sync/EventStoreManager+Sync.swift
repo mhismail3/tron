@@ -149,6 +149,8 @@ extension EventStoreManager {
         session.source = info.source
         session.profile = info.profile
         session.isProcessing = info.isRunning ?? false
+        session.lastUserPrompt = info.lastUserPrompt
+        session.lastAssistantResponse = info.lastAssistantResponse
         if let serverLines = info.activityLines {
             session.lastActivityLines = serverLines.map { $0.toActivityLine() }
         }
@@ -188,6 +190,8 @@ extension EventStoreManager {
         session.source = serverInfo.source ?? existing.source
         session.profile = serverInfo.profile ?? existing.profile
         session.isProcessing = serverInfo.isRunning ?? existing.isProcessing
+        session.lastUserPrompt = serverInfo.lastUserPrompt ?? existing.lastUserPrompt
+        session.lastAssistantResponse = serverInfo.lastAssistantResponse ?? existing.lastAssistantResponse
         if let serverLines = serverInfo.activityLines {
             session.lastActivityLines = serverLines.map { $0.toActivityLine() }
         } else {

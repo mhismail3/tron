@@ -30,6 +30,26 @@ extension CachedSession {
         return (workingDirectory as NSString).lastPathComponent
     }
 
+    var dashboardTitle: String {
+        if let title = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty,
+           title != "Chat" {
+            return title
+        }
+
+        if let prompt = lastUserPrompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !prompt.isEmpty {
+            return prompt
+        }
+
+        let directoryName = Self.workspaceDisplayName(for: workingDirectory)
+        if !directoryName.isEmpty {
+            return directoryName
+        }
+
+        return "Untitled session"
+    }
+
     var formattedDate: String {
         DateParser.formatRelativeOrAbsolute(lastActivityAt)
     }
@@ -46,6 +66,13 @@ extension CachedSession {
         workingDirectory.abbreviatingHomeDirectory
     }
 
+    static func workspaceDisplayName(for path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "Workspace" }
+        let name = URL(fileURLWithPath: trimmed).lastPathComponent
+        return name.isEmpty ? "Workspace" : name
+    }
+
     /// Unique workspace paths from a list of sessions, ordered by first appearance.
     /// Sessions should be pre-sorted (e.g. by most recent activity).
     /// Filters out sessions with empty workingDirectory.
@@ -55,7 +82,7 @@ extension CachedSession {
         for session in sessions {
             let path = session.workingDirectory
             guard !path.isEmpty, seen.insert(path).inserted else { continue }
-            let name = URL(fileURLWithPath: path).lastPathComponent
+            let name = workspaceDisplayName(for: path)
             result.append((path: path, name: name))
         }
         return result

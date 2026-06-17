@@ -2,7 +2,7 @@
 //!
 //! `execute` owns the linear run-turn lifecycle, while sibling modules own the
 //! request DTO, dependency bundle, run plan, spawning, stream event publication,
-//! and the major run-turn phases.
+//! lightweight session title generation, and the major run-turn phases.
 
 use std::sync::atomic::AtomicI64;
 
@@ -29,6 +29,7 @@ mod execute;
 mod plan;
 mod request;
 mod spawn;
+mod title_generation;
 
 pub use deps::{PromptEngineCausality, PromptRuntimeDeps};
 pub(super) use events::publish_prompt_runtime_stream;
@@ -36,3 +37,4 @@ pub(super) use execute::execute_prompt_run;
 pub(super) use plan::PromptRunPlan;
 pub use request::PromptRequest;
 pub use spawn::spawn_prompt_run;
+use title_generation::spawn_session_title_generation;

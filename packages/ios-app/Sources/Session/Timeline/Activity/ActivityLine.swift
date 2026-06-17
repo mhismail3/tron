@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Activity Line Kind
 
-/// The type of content in a session list activity line.
+/// The type of content in a persisted session activity line.
 /// Used by both live streaming buffers and persisted card data.
 enum ActivityLineKind: String, Codable, Equatable, CaseIterable, Sendable {
     case text
@@ -73,7 +73,7 @@ enum CapabilityColor: String, Codable, Equatable, CaseIterable, Sendable {
 
 // MARK: - Session Activity Constants
 
-/// Centralized constants for session list row display.
+/// Centralized constants for bounded session activity snapshots.
 enum SessionActivityConstants {
     static let maxUserPromptLength = 100
     static let maxAssistantTextLength = 200
@@ -85,7 +85,7 @@ enum SessionActivityConstants {
 
 // MARK: - Activity Line
 
-/// A single line in a session list row's mini-chat view.
+/// A single persisted session activity line.
 /// Unified type used by both live streaming buffers and persisted card data.
 ///
 /// `id` is excluded from Codable — generated fresh on decode for SwiftUI identity.

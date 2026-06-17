@@ -37,10 +37,11 @@ matching database/event/settings/dependency work.
   selection.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
-- Session list, session creation/fork/resume, prompt composer, a functional-only
-  native attachment menu that preserves composer keyboard focus while layering
-  native camera/photo/file pickers above it, unified attachments for
-  images/documents, a right-side mic affordance for local composer
+- Grouped session dashboard with collapsible workspace headers and compact
+  one-line session rows, session creation/fork/resume, prompt composer, a
+  functional-only native attachment menu that preserves composer keyboard focus
+  while layering native camera/photo/file pickers above it, unified attachments
+  for images/documents, a right-side mic affordance for local composer
   transcription when enabled, and message rendering.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Agent cockpit status capsule and sheet for worker lifecycle catalog/resource
@@ -225,6 +226,9 @@ refetches event rows, and fork ancestor rows remain source-session history
 rather than copied client truth. Engine stream cursors are stored per server
 origin/topic/filter for ACK coalescing and diagnostics only; session history is
 reconstructed through server APIs, not replayed from cursor storage.
+Session list projection keeps server titles and last-message previews together:
+dashboard rows prefer generated or explicit session titles, then the latest user
+prompt preview, then the workspace display name.
 
 Server settings shown in the iOS settings UI are snapshots from
 `settings::get`/`settings::reset`; local state exists only to render the active

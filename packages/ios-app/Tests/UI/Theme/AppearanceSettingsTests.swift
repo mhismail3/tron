@@ -69,26 +69,4 @@ struct AppearanceSettingsTests {
         settings.mode = originalMode
     }
 
-    // MARK: - Workspace Pills Setting
-
-    @Test func showWorkspacePillsDefaultsToTrue() {
-        UserDefaults.standard.removeObject(forKey: "showWorkspacePills")
-        let value = UserDefaults.standard.object(forKey: "showWorkspacePills") as? Bool ?? true
-        #expect(value == true)
-    }
-
-    @Test func showWorkspacePillsPersistsToUserDefaults() {
-        let settings = AppearanceSettings.shared
-        let original = settings.showWorkspacePills
-
-        settings.showWorkspacePills = false
-        #expect(UserDefaults.standard.bool(forKey: "showWorkspacePills") == false)
-
-        settings.showWorkspacePills = true
-        #expect(UserDefaults.standard.bool(forKey: "showWorkspacePills") == true)
-
-        // Restore
-        settings.showWorkspacePills = original
-    }
-
 }

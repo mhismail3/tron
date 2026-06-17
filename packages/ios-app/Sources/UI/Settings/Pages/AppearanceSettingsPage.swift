@@ -8,7 +8,6 @@ struct AppearanceSettingsPage: View {
     var body: some View {
         SettingsPageContainer(title: "App") {
             themeCard
-            workspacePillsCard
             confirmArchivingCard
             fontCard
             codeFontCard
@@ -18,24 +17,10 @@ struct AppearanceSettingsPage: View {
 
     // MARK: - Behavior Cards
 
-    private var workspacePillsCard: some View {
+    private var confirmArchivingCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsSectionHeader(title: "Behavior")
 
-            SettingsCard {
-                SettingsRow(icon: "line.3.horizontal.decrease", label: "Workspace Pills") {
-                    Toggle("", isOn: $appearanceSettings.showWorkspacePills)
-                        .labelsHidden()
-                        .tint(.tronEmerald)
-                }
-            }
-
-            SettingsCaption(text: "Show workspace filter pills on the session list.")
-        }
-    }
-
-    private var confirmArchivingCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
             SettingsCard {
                 SettingsRow(icon: "questionmark.circle", label: "Confirm Archiving") {
                     Toggle("", isOn: $confirmArchive)
