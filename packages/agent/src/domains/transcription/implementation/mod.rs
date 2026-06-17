@@ -13,5 +13,5 @@ pub mod venv;
 pub use mlx::MlxEngine;
 pub use types::{
     ResultExt, SharedTranscriptionEngine, TranscriptionEngine, TranscriptionError,
-    TranscriptionResult,
+    TranscriptionResult, TranscriptionRuntimeState, TranscriptionRuntimeStatus,
 };

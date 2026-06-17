@@ -68,6 +68,7 @@ pub(crate) fn worker_module(
 
 fn list_models_value(deps: &Deps) -> Result<Value, CapabilityError> {
     let engine_loaded = deps.transcription_engine.get().is_some();
+    let status = deps.transcription_engine.status();
     let enabled = deps
         .profile_runtime
         .current()
@@ -86,6 +87,8 @@ fn list_models_value(deps: &Deps) -> Result<Value, CapabilityError> {
                 "enabled": enabled,
                 "cached": engine_loaded,
                 "engineLoaded": engine_loaded,
+                "state": status.state.as_str(),
+                "message": status.message,
             }
         ]
     }))
@@ -128,6 +131,7 @@ async fn transcribe_audio_value(payload: &Value, deps: &Deps) -> Result<Value, C
 
 fn download_model_value(deps: &Deps) -> Value {
     let engine_loaded = deps.transcription_engine.get().is_some();
+    let status = deps.transcription_engine.status();
     let enabled = deps
         .profile_runtime
         .current()
@@ -151,10 +155,18 @@ fn download_model_value(deps: &Deps) -> Value {
         });
     }
 
+    if status.state == TranscriptionRuntimeState::Loading {
+        return json!({
+            "started": false,
+            "reason": "already_loading",
+            "message": status.message.unwrap_or_else(|| "Local transcription model is already loading.".to_string()),
+        });
+    }
+
     json!({
         "started": false,
         "reason": "sidecar_manages_model_download",
-        "message": "Model downloads automatically when the sidecar starts. Restart Tron Server to retry.",
+        "message": status.message.unwrap_or_else(|| "Model downloads automatically when the sidecar starts. Restart Tron Server to retry.".to_string()),
     })
 }
 

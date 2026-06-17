@@ -14,7 +14,7 @@ use crate::domains::transcription::{
 };
 use crate::shared::foundation::paths;
 
-const DEFAULT_POOL_SIZE: usize = 2;
+const DEFAULT_POOL_SIZE: usize = 1;
 
 struct TempFile(PathBuf);
 

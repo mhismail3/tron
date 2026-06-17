@@ -48,7 +48,7 @@ impl DomainRegistrationContext {
             orchestrator: Arc::clone(&ctx.orchestrator),
             session_manager: Arc::clone(&ctx.session_manager),
             event_store: Arc::clone(&ctx.event_store),
-            transcription_engine: Arc::clone(&ctx.transcription_engine),
+            transcription_engine: ctx.transcription_engine.clone(),
             agent_deps: ctx.agent_deps.clone(),
             profile_runtime: Arc::clone(&ctx.profile_runtime),
             shutdown_coordinator: ctx.shutdown_coordinator.clone(),

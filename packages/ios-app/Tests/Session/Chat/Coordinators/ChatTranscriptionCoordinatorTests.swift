@@ -92,6 +92,18 @@ final class ChatTranscriptionCoordinatorTests: XCTestCase {
         ])
     }
 
+    func testToggleRecordingShowsLoadingStateBeforeMicrophone() async {
+        let coordinator = ChatTranscriptionCoordinator()
+        let context = MockTranscriptionContext()
+        context.readinessError = ChatTranscriptionAvailabilityError.loading("Local transcription model is loading.")
+
+        await coordinator.toggleRecording(context: context)
+
+        XCTAssertEqual(context.readinessCallCount, 1)
+        XCTAssertEqual(context.startRecordingCallCount, 0)
+        XCTAssertEqual(context.errors, ["Local transcription model is loading."])
+    }
+
     func testToggleRecordingMapsMissingServerFunctionToRestartMessage() async {
         let coordinator = ChatTranscriptionCoordinator()
         let context = MockTranscriptionContext()

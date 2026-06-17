@@ -264,7 +264,7 @@ async fn init_services(
     let agent_deps = Some(AgentDeps {
         responder_factory: responder_factory.clone(),
     });
-    let transcription_engine = Arc::new(std::sync::OnceLock::new());
+    let transcription_engine = crate::domains::transcription::SharedTranscriptionEngine::new();
 
     Ok(ServiceState {
         event_store,
@@ -281,10 +281,12 @@ fn register_transcription_sidecar(
     transcription_engine: crate::domains::transcription::SharedTranscriptionEngine,
 ) {
     if !enabled {
+        transcription_engine.mark_disabled();
         tracing::info!("transcription sidecar disabled");
         return;
     }
 
+    transcription_engine.mark_loading("Local transcription model is loading.");
     let shutdown = server.shutdown().token();
     let task = tokio::spawn(async move {
         tokio::select! {
@@ -292,11 +294,12 @@ fn register_transcription_sidecar(
                 match engine {
                     Ok(engine) => {
                         let engine: Arc<dyn crate::domains::transcription::TranscriptionEngine> = engine;
-                        if transcription_engine.set(engine).is_ok() {
+                        if transcription_engine.mark_ready(engine) {
                             tracing::info!("transcription sidecar ready (parakeet-mlx)");
                         }
                     }
                     Err(error) => {
+                        transcription_engine.mark_failed(error.to_string());
                         tracing::warn!(error = %error, "transcription sidecar setup failed");
                     }
                 }

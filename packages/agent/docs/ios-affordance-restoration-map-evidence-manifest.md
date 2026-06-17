@@ -66,6 +66,10 @@ Scope restored:
 - iOS checks `transcription::list_models` before opening the microphone so old
   servers, disabled local transcription, and unloaded sidecars produce
   actionable local messages instead of a generic transcription failure.
+- The local transcription runtime now publishes explicit
+  disabled/loading/ready/failed state; startup uses a single Parakeet worker by
+  default so one ready worker makes the model usable without waiting for a
+  second heavyweight worker.
 - The server owns an opt-in `transcription` domain with
   `transcription::audio`, `transcription::list_models`, and
   `transcription::download_model`.
@@ -92,7 +96,13 @@ Slice validation:
 | `cargo test --manifest-path packages/agent/Cargo.toml transcription --lib` | passed | 7 filtered tests passed, including transcription cleanup, base64 normalization, temp-file cleanup, settings decode, and transcription path helpers. |
 | `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatTranscriptionCoordinatorTests -only-testing:TronMobileTests/ServerSettingsTests -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/SettingsParityTests` | passed | 28 selected tests passed on iOS 26.5 simulator. |
 | `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatTranscriptionCoordinatorTests` | passed | 9 selected tests passed after adding pre-microphone readiness checks and actionable messages for old-server/disabled transcription states. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | passed | Re-run after adding observable transcription runtime state and single-worker startup; existing provider dead-code warnings remain. |
+| `cargo test --manifest-path packages/agent/Cargo.toml transcription --lib` | passed | 8 filtered tests passed after adding shared transcription runtime-state coverage. |
+| `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatTranscriptionCoordinatorTests` | passed | 10 selected tests passed after adding loading-state messaging. |
+| `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatTranscriptionCoordinatorTests -only-testing:TronMobileTests/EngineProtocolTypesTranscriptionTests` | passed | 10 coordinator tests and 2 Swift Testing DTO tests passed after adding optional runtime-state decoding. |
 | `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SourceGuardTests` | passed | 43 source guard tests passed; updated file-count budgets explicitly include transcription client/coordinator tests. |
+| authenticated `/engine` probe for `transcription::list_models` on dev server PID 34581 | passed | Live server reported `{"cached":true,"enabled":true,"engineLoaded":true,"state":"ready"}` after restart. |
+| `env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta install` | partial | Physical iPhone build and install succeeded for `com.tron.mobile.beta`; launch was denied because the device was locked. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | passed | 6 IARM tests passed. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants` | passed | 8 BPRC tests passed after narrowing the old-domain absence guard to allow restored local transcription. |
 | `scripts/personal-info-guard.sh` | passed | Full scan reported no personal-info leaks. |

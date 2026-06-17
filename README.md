@@ -864,7 +864,8 @@ Startup registration currently keeps only loop infrastructure domains:
 `worker_lifecycle` owner is the explicit exception for local package
 proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before
-recording and does not store media or voice notes. Product/tool domains such as `filesystem`,
+recording, the server reports explicit disabled/loading/ready/failed model
+state, and no media or voice notes are stored. Product/tool domains such as `filesystem`,
 `process`, `program`, `web`, `git`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, `notifications`, `voice_notes`, and media/import surfaces are

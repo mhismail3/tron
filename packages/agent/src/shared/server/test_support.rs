@@ -162,7 +162,7 @@ pub fn make_test_context() -> ServerRuntimeContext {
         session_manager: mgr,
         event_store: store,
         engine_host: crate::engine::EngineHostHandle::new_in_memory().unwrap(),
-        transcription_engine: Arc::new(std::sync::OnceLock::new()),
+        transcription_engine: crate::domains::transcription::SharedTranscriptionEngine::new(),
         settings_path,
         profile_runtime,
         agent_deps: None,

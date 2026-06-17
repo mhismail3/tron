@@ -31,6 +31,8 @@ struct TranscriptionModel: Decodable, Equatable, Identifiable {
     let enabled: Bool
     let cached: Bool
     let engineLoaded: Bool
+    let state: String?
+    let message: String?
 }
 
 struct TranscriptionDownloadModelResult: Decodable, Equatable {

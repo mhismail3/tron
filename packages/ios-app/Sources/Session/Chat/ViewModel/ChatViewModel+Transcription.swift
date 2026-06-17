@@ -14,6 +14,12 @@ extension ChatViewModel: ChatTranscriptionContext {
             throw ChatTranscriptionAvailabilityError.disabled
         }
         guard model.engineLoaded else {
+            if model.state == "loading" {
+                throw ChatTranscriptionAvailabilityError.loading(model.message)
+            }
+            if model.state == "failed" {
+                throw ChatTranscriptionAvailabilityError.failed(model.message)
+            }
             throw ChatTranscriptionAvailabilityError.engineNotLoaded
         }
     }

@@ -121,6 +121,8 @@ struct AudioFileTooSmallError: Error {
 enum ChatTranscriptionAvailabilityError: LocalizedError, Equatable {
     case noModel
     case disabled
+    case loading(String?)
+    case failed(String?)
     case engineNotLoaded
 
     var errorDescription: String? {
@@ -129,6 +131,13 @@ enum ChatTranscriptionAvailabilityError: LocalizedError, Equatable {
             return "No local transcription model is registered on this Mac server."
         case .disabled:
             return "Local transcription is off. Enable Local transcription in Settings, restart Tron Server, then try again."
+        case .loading(let message):
+            return message ?? "Local transcription is still loading the model. Wait a moment, then try again."
+        case .failed(let message):
+            if let message, !message.isEmpty {
+                return "Local transcription failed to load: \(message)"
+            }
+            return "Local transcription failed to load. Restart Tron Server to retry."
         case .engineNotLoaded:
             return "Local transcription is enabled but the model is not loaded. Restart Tron Server to load the local model, then try again."
         }
