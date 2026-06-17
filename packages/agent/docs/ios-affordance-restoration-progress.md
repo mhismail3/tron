@@ -2,8 +2,10 @@
 
 Status: `active`
 
-Last reconciled from implementation thread:
-`019ecf5d-c3ca-7062-94ed-4cc636441cfe`
+Last reconciled from implementation threads:
+
+- `019ecf5d-c3ca-7062-94ed-4cc636441cfe`
+- `019ed6d5-c564-7e20-89b2-d7d2e7a74c3a`
 
 Implementation branch:
 `codex/ios-prompt-input-snippet-affordance-current`
@@ -15,6 +17,9 @@ Merged baseline:
 `84451c969 Refine camera capture confirmation controls`
 
 Merged checkpoint:
+`d69afc6a16d7d89e05a1eca54167a94065a48449 Rename attachment menu actions`
+
+Previous merged checkpoint:
 `4e66af3022508b13a6229020d529ee248e49c5a5 Organize dashboard and title generation`
 
 ## Purpose
@@ -100,6 +105,7 @@ Commits:
 
 - `019f3b9ce Restore native attachment menu`
 - `279fafe4e Tighten native attachment menu sizing`
+- `d69afc6a1 Rename attachment menu actions`
 
 User-facing state:
 
@@ -248,8 +254,28 @@ implementation branch and adding this ledger:
 
 Commits:
 
-- Implementation commit on
-  `codex/ios-prompt-input-snippet-affordance-current`.
+- `16586ae07 Restore local recent input history`
+- `3740b33a2 Refine recent input history affordance`
+- `ad777a3dd Tighten recent input history rows`
+- `0655e7131 Clean up recent input menu naming`
+- `d69afc6a1 Rename attachment menu actions`
+
+Review-packet findings:
+
+- The old prompt surface was `IARM-SURFACE-020`, with old paths under
+  `packages/ios-app/Sources/Views/PromptLibrary/` and
+  `packages/ios-app/Sources/ViewModels/State/PromptLibraryState.swift`.
+- The old tree had a two-tab Prompt Library for snippets and searchable,
+  paginated prompt history. It depended on old server-backed
+  `prompt_library::*` calls and generated management UI for create, update,
+  delete, and clear behavior.
+- Current code already had local sent-input persistence through
+  `InputHistoryStore`, stored in device `UserDefaults` under
+  `tron.inputHistory`, capped at 100 entries, with existing add/dedupe/clear
+  and navigation tests. The live composer gap was discoverability and
+  management, not data capture.
+- The approved first-principles slice was recent input history only. Snippets,
+  templates, server prompt-library APIs, and command-like routing were left out.
 
 User-facing state:
 
@@ -260,6 +286,18 @@ User-facing state:
   inserts that text into the current composer draft.
 - The sheet includes an icon-only local clear action that removes the
   device-local history payload.
+- The row presentation was refined after simulator review: larger text,
+  divider-free rows, two-line maximum previews, and tighter vertical padding.
+- The original attachment actions were renamed for clearer commands:
+  Attach Files, Select Photos, and Take Photo.
+
+Superseded intermediate work:
+
+- A standalone Recent Inputs composer button was explored during the slice and
+  then removed. The final approved entry point is the native attachment menu so
+  the composer row stays compact.
+- Stale helper names left over from the standalone-button shape were removed in
+  `0655e7131`; the source now describes the feature as a menu action.
 
 Data ownership and privacy:
 
@@ -290,13 +328,26 @@ Validated:
   Attach Files/Select Photos/Take Photo when local history exists, and the
   Recent Inputs sheet uses larger, concise, divider-free row text with an
   icon-only destructive clear action.
+- Simulator evidence screenshots were saved under
+  `/tmp/tron-ios-affordance-validation/`:
+  `recent-inputs-attachment-menu.png`, `recent-input-sheet.png`,
+  `recent-input-inserted.png`, `recent-inputs-sheet-icon-clear-large-font.png`,
+  `recent-inputs-sheet-divider-free.png`,
+  `recent-inputs-sheet-concise-rows.png`, and
+  `attachment-menu-renamed-actions.png`.
 
 Deferred:
 
-- User-authored snippets, reusable templates, slash-command suggestions,
-  server-owned prompt history/snippet resources, generated prompt management
-  surfaces, skill activation, prompt queues, and agent-execution routing remain
-  absent until a future approved Phase 2/current-resource design exists.
+- User-authored local snippets and manually defined local templates remain
+  review-only follow-ups. They are not scheduled in the current Phase 1 queue;
+  revisit only if the user explicitly wants another local-native composer
+  affordance after higher-priority Phase 1 slices.
+- Search, pagination, use counts, last-used metadata, server-owned prompt
+  history/snippet resources, old `PromptLibraryClient`,
+  `prompt_library::*` methods, generated prompt-management surfaces, skill
+  activation, prompt queues, slash-command-like suggestions, and
+  agent-execution routing remain absent until a future approved
+  Phase 2/current-resource design exists.
 
 ## Remaining Phase 1 Queue
 
