@@ -1462,7 +1462,7 @@ packages/ios-app/Sources/
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> EventDispatchCoordinator -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> [ChatMessage] -> ChatViewModel -> ChatView
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
-Recent:  InputBar -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
+Recent:  InputBar -> native attachment menu -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
 Cockpit: catalog/resource APIs -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet

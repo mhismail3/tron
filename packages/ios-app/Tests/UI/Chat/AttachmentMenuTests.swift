@@ -33,11 +33,23 @@ final class AttachmentMenuTests: XCTestCase {
         )
     }
 
+    func testAttachmentMenuIncludesRecentInputsOnlyWhenLocalHistoryExists() {
+        XCTAssertEqual(
+            AttachmentMenuAction.availableActions(for: .default, includeRecentInputs: true),
+            [.camera, .photoLibrary, .files, .recentInputs]
+        )
+        XCTAssertEqual(
+            AttachmentMenuAction.availableActions(for: noImageCapability, includeRecentInputs: true),
+            [.files, .recentInputs]
+        )
+    }
+
     func testAttachmentMenuActionTitlesAreTheApprovedCommands() {
         XCTAssertEqual(AttachmentMenuAction.allCases.map(\.title), [
             "Camera",
             "Photos",
-            "Files"
+            "Files",
+            "Recent Inputs"
         ])
     }
 
@@ -46,6 +58,7 @@ final class AttachmentMenuTests: XCTestCase {
             GlassAttachmentButton(
                 isDisabled: false,
                 attachmentCapability: .default,
+                includeRecentInputs: true,
                 onSelect: { _ in },
                 buttonSize: 40
             )
@@ -54,6 +67,7 @@ final class AttachmentMenuTests: XCTestCase {
             GlassAttachmentButton(
                 isDisabled: true,
                 attachmentCapability: noImageCapability,
+                includeRecentInputs: false,
                 onSelect: { _ in },
                 buttonSize: 40
             )

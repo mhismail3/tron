@@ -55,7 +55,7 @@ struct InputBar: View {
 
     private var shouldShowStatusPills: Bool { true }
 
-    private var shouldShowRecentInputsButton: Bool {
+    private var shouldShowRecentInputsMenuAction: Bool {
         RecentInputHistoryPresentation.shouldShowButton(
             inputHistory: config.inputHistory,
             agentPhase: config.agentPhase,
@@ -93,6 +93,7 @@ struct InputBar: View {
                     GlassAttachmentButton(
                         isDisabled: config.agentPhase.isActive || config.readOnly,
                         attachmentCapability: config.attachmentCapability,
+                        includeRecentInputs: shouldShowRecentInputsMenuAction,
                         onSelect: presentAttachmentAction,
                         buttonSize: actionButtonSize
                     )
@@ -122,17 +123,6 @@ struct InputBar: View {
                         // Prevent overlay from intercepting text selection drag gestures
                         .allowsHitTesting(false)
                     }
-
-                if shouldShowRecentInputsButton {
-                    GlassRecentInputsButton(
-                        onTap: {
-                            isFocused = false
-                            showRecentInputs = true
-                        },
-                        buttonSize: actionButtonSize
-                    )
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
-                }
 
                 // Send/Abort button
                 if shouldShowActionButton && !config.readOnly {
@@ -328,6 +318,9 @@ struct InputBar: View {
             showingImagePicker = true
         case .files:
             showFilePicker = true
+        case .recentInputs:
+            isFocused = false
+            showRecentInputs = true
         }
     }
 

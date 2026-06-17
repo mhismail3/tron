@@ -2,12 +2,14 @@ import SwiftUI
 
 @MainActor
 enum RecentInputHistoryPresentation {
-    static let title = "Recent Inputs"
-    static let buttonAccessibilityLabel = "Show recent inputs"
-    static let buttonAccessibilityHint = "Choose a recent message to insert into the composer."
-    static let emptyTitle = "No recent inputs"
-    static let emptyMessage = "Messages you send from this device will appear here."
-    static let clearLabel = "Clear"
+    nonisolated static let title = "Recent Inputs"
+    nonisolated static let buttonAccessibilityLabel = "Show recent inputs"
+    nonisolated static let buttonAccessibilityHint = "Choose a recent message to insert into the composer."
+    nonisolated static let emptyTitle = "No recent inputs"
+    nonisolated static let emptyMessage = "Messages you send from this device will appear here."
+    nonisolated static let clearSystemImage = "trash"
+    nonisolated static let clearAccessibilityLabel = "Clear recent inputs"
+    nonisolated static let rowFontSize = TronTypography.sizeBody
 
     static func shouldShowButton(
         inputHistory: InputHistoryStore?,
@@ -16,27 +18,6 @@ enum RecentInputHistoryPresentation {
     ) -> Bool {
         guard !readOnly, agentPhase.isIdle else { return false }
         return inputHistory?.history.isEmpty == false
-    }
-}
-
-struct GlassRecentInputsButton: View {
-    let onTap: () -> Void
-    let buttonSize: CGFloat
-
-    var body: some View {
-        Button(action: onTap) {
-            Image(systemName: "clock.arrow.circlepath")
-                .font(TronTypography.buttonSM)
-                .foregroundStyle(.tronEmerald)
-                .frame(width: buttonSize, height: buttonSize)
-                .contentShape(Circle())
-        }
-        .glassEffect(
-            .regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(),
-            in: .circle
-        )
-        .accessibilityLabel(RecentInputHistoryPresentation.buttonAccessibilityLabel)
-        .accessibilityHint(RecentInputHistoryPresentation.buttonAccessibilityHint)
     }
 }
 
@@ -66,10 +47,10 @@ struct RecentInputHistorySheet: View {
                         Button(role: .destructive) {
                             historyStore.clearHistory()
                         } label: {
-                            Text(RecentInputHistoryPresentation.clearLabel)
+                            Image(systemName: RecentInputHistoryPresentation.clearSystemImage)
                                 .foregroundStyle(.red)
                         }
-                        .accessibilityLabel("Clear recent inputs")
+                        .accessibilityLabel(RecentInputHistoryPresentation.clearAccessibilityLabel)
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
@@ -89,7 +70,7 @@ struct RecentInputHistorySheet: View {
                     dismiss()
                 } label: {
                     Text(input)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM))
+                        .font(TronTypography.sans(size: RecentInputHistoryPresentation.rowFontSize))
                         .foregroundStyle(.tronTextPrimary)
                         .lineLimit(3)
                         .multilineTextAlignment(.leading)
@@ -100,7 +81,7 @@ struct RecentInputHistorySheet: View {
                 .accessibilityLabel("Insert recent input")
                 .accessibilityValue(input)
                 .listRowBackground(Color.clear)
-                .listRowSeparatorTint(.tronEmerald.opacity(0.15))
+                .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)

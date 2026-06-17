@@ -8,11 +8,13 @@ extension SourceGuardTests {
         let checkedPaths = [
             "Sources/UI/Chat/Composer/ActionButtons.swift",
             "Sources/UI/Chat/Composer/InputBar.swift",
+            "Sources/UI/Chat/Composer/RecentInputHistorySheet.swift",
         ]
         let requiredCommands = [
             "Camera",
             "Photos",
             "Files",
+            "Recent Inputs",
         ]
         let requiredLayoutFragments = [
             "Menu {",
@@ -22,6 +24,7 @@ extension SourceGuardTests {
             "NotificationCenter.default.post(name: .attachmentMenuAction, object: action)",
             ".onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction))",
             ".matchedGeometryEffect(id: \"attachmentMorph\"",
+            "includeRecentInputs: shouldShowRecentInputsMenuAction",
             ".sheet(isPresented: $showCamera)",
             ".sheet(isPresented: $showFilePicker)",
             ".photosPicker(",
@@ -45,6 +48,7 @@ extension SourceGuardTests {
             "preferredElementSize",
             "AttachmentMenuPopup",
             "AttachmentMenuSheet",
+            "GlassRecentInputsButton",
             ".overlay(alignment: .bottomLeading)",
             ".popover(isPresented: $showAttachmentMenu",
             ".sheet(isPresented: $showAttachmentMenu",
@@ -93,7 +97,8 @@ extension SourceGuardTests {
         )
         #expect(
             source.contains("GlassAttachmentButton(") &&
-                source.contains("attachmentCapability: config.attachmentCapability"),
+                source.contains("attachmentCapability: config.attachmentCapability") &&
+                source.contains("includeRecentInputs: shouldShowRecentInputsMenuAction"),
             "The attachment action menu should stay attached to the composer plus button with the current model capability"
         )
         #expect(
@@ -122,6 +127,9 @@ extension SourceGuardTests {
             "Recent Inputs",
             "InputHistoryStore",
             "clearHistory()",
+            "case .recentInputs:",
+            "showRecentInputs = true",
+            ".listRowSeparator(.hidden)",
             "actions.onHistoryNavigate?(selected)",
             "UserDefaults.standard.removeObject(forKey: storageKey)",
         ]

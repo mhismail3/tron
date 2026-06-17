@@ -253,12 +253,13 @@ Commits:
 
 User-facing state:
 
-- The chat composer exposes a compact recent-input history button only when
-  local sent-input history exists and the session is idle/editable.
+- The chat composer exposes Recent Inputs as an option in the native attachment
+  menu only when local sent-input history exists and the session is
+  idle/editable.
 - The Recent Inputs sheet lists device-local sent text prompts. Tapping a row
   inserts that text into the current composer draft.
-- The sheet includes a local Clear action that removes the device-local history
-  payload.
+- The sheet includes an icon-only local clear action that removes the
+  device-local history payload.
 
 Data ownership and privacy:
 
@@ -273,20 +274,21 @@ Data ownership and privacy:
 Validated:
 
 - `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/RecentInputHistoryTests -only-testing:TronMobileTests/InputHistoryStoreTests -only-testing:TronMobileTests/AttachmentMenuTests -only-testing:TronMobileTests/SourceGuardTests`
-  passed on iOS 26.5 simulator with 31 XCTest cases and 46 Swift Testing
+  passed on iOS 26.5 simulator with 32 XCTest cases and 46 Swift Testing
   source-guard cases.
 - `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
   passed with 6 tests.
 - `scripts/personal-info-guard.sh` passed.
 - `git diff --check` passed.
 - `git ls-files -ci --exclude-standard` returned no tracked ignored files.
-- `cd packages/ios-app && xcodegen generate` produced expected
-  `TronMobile.xcodeproj` membership updates for the new source/test files.
+- `cd packages/ios-app && xcodegen generate` completed without unintended
+  `TronMobile.xcodeproj` drift.
 - The current simulator app bundle was explicitly installed and launched on
-  iPhone 17 Pro, iOS 26.5. A connected/editable chat composer screenshot was
-  not captured because the clean simulator install had no paired server or
-  cached editable session; the recent-input button and sheet states were
-  covered by SwiftUI construction tests and source guards instead.
+  iPhone 17 Pro, iOS 26.5, paired to the local development server. Manual
+  simulator validation confirmed the composer no longer shows a standalone
+  recent-input button, the native attachment menu exposes Recent Inputs above
+  Files/Photos/Camera when local history exists, and the Recent Inputs sheet
+  uses larger divider-free row text with an icon-only destructive clear action.
 
 Deferred:
 

@@ -94,7 +94,7 @@ icon catalog, or fork-row state model.
 
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
-Recent:  InputBar -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
+Recent:  InputBar -> native attachment menu -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> ComposerMicRecorder -> transcription::audio -> InputBar
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
@@ -245,8 +245,9 @@ share content is App Group handoff state cleared after consumption, and
 MetricKit payloads are bounded Application Support diagnostics buffers.
 Recent input history is stored only on the device through
 `InputHistoryStore`, capped at 100 sent text prompts, exposed from the
-composer only while local history exists and the session is idle/editable, and
-clearable from the Recent Inputs sheet. It is not a server prompt-library
+composer attachment menu only while local history exists and the session is
+idle/editable, and clearable from the Recent Inputs sheet with an icon-only
+destructive toolbar action. It is not a server prompt-library
 resource, snippet catalog, routing plane, or generated management surface.
 
 ## Event Handling

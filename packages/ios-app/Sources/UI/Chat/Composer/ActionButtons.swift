@@ -90,15 +90,22 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
     case camera
     case photoLibrary
     case files
+    case recentInputs
 
     var id: String { rawValue }
 
-    static func availableActions(for capability: AttachmentCapability) -> [AttachmentMenuAction] {
+    static func availableActions(
+        for capability: AttachmentCapability,
+        includeRecentInputs: Bool = false
+    ) -> [AttachmentMenuAction] {
         var actions: [AttachmentMenuAction] = []
         if capability.supportsImages {
             actions += [.camera, .photoLibrary]
         }
         actions.append(.files)
+        if includeRecentInputs {
+            actions.append(.recentInputs)
+        }
         return actions
     }
 
@@ -110,6 +117,8 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
             return "Photos"
         case .files:
             return "Files"
+        case .recentInputs:
+            return RecentInputHistoryPresentation.title
         }
     }
 
@@ -121,6 +130,8 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
             return "photo.on.rectangle"
         case .files:
             return "folder"
+        case .recentInputs:
+            return "clock.arrow.circlepath"
         }
     }
 }
@@ -128,6 +139,7 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
 struct GlassAttachmentButton: View {
     let isDisabled: Bool
     let attachmentCapability: AttachmentCapability
+    let includeRecentInputs: Bool
     let onSelect: (AttachmentMenuAction) -> Void
     let buttonSize: CGFloat
 
@@ -144,7 +156,10 @@ struct GlassAttachmentButton: View {
             .opacity(menuDisabled ? 0.5 : 1.0)
             .overlay {
                 Menu {
-                    ForEach(AttachmentMenuAction.availableActions(for: attachmentCapability)) { action in
+                    ForEach(AttachmentMenuAction.availableActions(
+                        for: attachmentCapability,
+                        includeRecentInputs: includeRecentInputs
+                    )) { action in
                         Button {
                             NotificationCenter.default.post(name: .attachmentMenuAction, object: action)
                         } label: {

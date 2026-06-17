@@ -55,20 +55,16 @@ final class RecentInputHistoryTests: XCTestCase {
     func testRecentInputHistoryLabelsUseApprovedCopy() {
         XCTAssertEqual(RecentInputHistoryPresentation.title, "Recent Inputs")
         XCTAssertEqual(RecentInputHistoryPresentation.buttonAccessibilityLabel, "Show recent inputs")
-        XCTAssertEqual(RecentInputHistoryPresentation.clearLabel, "Clear")
+        XCTAssertEqual(RecentInputHistoryPresentation.clearSystemImage, "trash")
+        XCTAssertEqual(RecentInputHistoryPresentation.clearAccessibilityLabel, "Clear recent inputs")
+        XCTAssertEqual(RecentInputHistoryPresentation.rowFontSize, TronTypography.sizeBody)
         XCTAssertFalse(RecentInputHistoryPresentation.title.contains("Library"))
     }
 
-    func testRecentInputsButtonAndSheetConstruct() {
+    func testRecentInputsSheetConstructs() {
         let history = InputHistoryStore()
         history.addToHistory("Draft a short release note")
 
-        render(
-            GlassRecentInputsButton(
-                onTap: {},
-                buttonSize: 40
-            )
-        )
         render(
             RecentInputHistorySheet(
                 historyStore: history,
