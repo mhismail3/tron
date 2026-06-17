@@ -86,24 +86,84 @@ struct GlassCircleButtonStyle: ButtonStyle {
 
 // MARK: - Glass Attachment Button
 
+enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
+    case camera
+    case photoLibrary
+    case files
+
+    var id: String { rawValue }
+
+    static func availableActions(for capability: AttachmentCapability) -> [AttachmentMenuAction] {
+        var actions: [AttachmentMenuAction] = []
+        if capability.supportsImages {
+            actions += [.camera, .photoLibrary]
+        }
+        actions.append(.files)
+        return actions
+    }
+
+    var title: String {
+        switch self {
+        case .camera:
+            return "Camera"
+        case .photoLibrary:
+            return "Photos"
+        case .files:
+            return "Files"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .camera:
+            return "camera"
+        case .photoLibrary:
+            return "photo.on.rectangle"
+        case .files:
+            return "folder"
+        }
+    }
+}
+
 struct GlassAttachmentButton: View {
     let isDisabled: Bool
+    let attachmentCapability: AttachmentCapability
+    let onSelect: (AttachmentMenuAction) -> Void
     let buttonSize: CGFloat
-    let onTap: () -> Void
+
+    private var menuDisabled: Bool {
+        isDisabled || KeyboardObserver.shared.isAnimating
+    }
 
     var body: some View {
-        Button(action: onTap) {
-            Image(systemName: "plus")
-                .font(TronTypography.buttonSM)
-                .foregroundStyle(isDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
-                .frame(width: buttonSize, height: buttonSize)
-                .contentShape(Circle())
-        }
-        .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .circle)
-        .opacity(isDisabled ? 0.5 : 1.0)
-        .disabled(isDisabled)
-        .accessibilityLabel("Add attachment")
-        .accessibilityHint(isDisabled ? "Attachments are unavailable while the agent is active." : "")
+        Image(systemName: "plus")
+            .font(TronTypography.buttonSM)
+            .foregroundStyle(menuDisabled ? Color.tronEmerald.opacity(0.3) : Color.tronEmerald)
+            .frame(width: buttonSize, height: buttonSize)
+            .glassEffect(.regular.tint(Color.tronPhthaloGreen.opacity(0.25)).interactive(), in: .circle)
+            .opacity(menuDisabled ? 0.5 : 1.0)
+            .overlay {
+                Menu {
+                    ForEach(AttachmentMenuAction.availableActions(for: attachmentCapability)) { action in
+                        Button {
+                            NotificationCenter.default.post(name: .attachmentMenuAction, object: action)
+                        } label: {
+                            Label(action.title, systemImage: action.systemImage)
+                        }
+                    }
+                } label: {
+                    Color.clear
+                        .frame(width: buttonSize, height: buttonSize)
+                        .contentShape(Circle())
+                }
+                .disabled(menuDisabled)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in
+                guard let action = notification.object as? AttachmentMenuAction else { return }
+                onSelect(action)
+            }
+            .accessibilityLabel("Add attachment")
+            .accessibilityHint(menuDisabled ? "Attachments are unavailable while the agent is active." : "")
     }
 }
 

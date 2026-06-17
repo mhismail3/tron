@@ -38,8 +38,8 @@ matching database/event/settings/dependency work.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
 - Session list, session creation/fork/resume, prompt composer, a functional-only
-  compact custom-height attachment action sheet that layers native
-  camera/photo/file pickers above the parent sheet, unified attachments for
+  native attachment menu that preserves composer keyboard focus while layering
+  native camera/photo/file pickers above it, unified attachments for
   images/documents, a right-side mic affordance for local composer
   transcription when enabled, and message rendering.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
@@ -91,7 +91,7 @@ icon catalog, or fork-row state model.
 
 ```
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
-Attach:  InputBar -> AttachmentMenuSheet -> nested platform picker -> Attachment -> agent::prompt
+Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> ComposerMicRecorder -> transcription::audio -> InputBar
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView

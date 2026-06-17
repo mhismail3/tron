@@ -1,4 +1,5 @@
 import SwiftUI
+import PhotosUI
 
 // ARCHITECTURE: coordinates keyboard handling, attachment picking, and send
 // flow for the primitive prompt composer.
@@ -20,7 +21,9 @@ struct InputBar: View {
     // MARK: - Private State
 
     @FocusState private var isFocused: Bool
-    @State private var showAttachmentMenu = false
+    @State private var showCamera = false
+    @State private var showFilePicker = false
+    @State private var showingImagePicker = false
     @State private var hasAppeared = false
     @State private var showAttachmentButton = false
 
@@ -80,11 +83,9 @@ struct InputBar: View {
                 if showAttachmentButton {
                     GlassAttachmentButton(
                         isDisabled: config.agentPhase.isActive || config.readOnly,
-                        buttonSize: actionButtonSize,
-                        onTap: {
-                            isFocused = false
-                            showAttachmentMenu = true
-                        }
+                        attachmentCapability: config.attachmentCapability,
+                        onSelect: presentAttachmentAction,
+                        buttonSize: actionButtonSize
                     )
                     .matchedGeometryEffect(id: "attachmentMorph", in: attachmentButtonNamespace)
                     .transition(.scale(scale: 0.8).combined(with: .opacity))
@@ -162,15 +163,22 @@ struct InputBar: View {
         }
         // Focus management — no blockFocusUntil; user can tap to refocus after the turn.
         .animation(nil, value: isFocused)
-        .sheet(isPresented: $showAttachmentMenu) {
-            AttachmentMenuSheet(
+        .sheet(isPresented: $showCamera) {
+            CameraCaptureSheet(onImageCaptured: addCameraImageAttachment)
+        }
+        .sheet(isPresented: $showFilePicker) {
+            DocumentPicker(
                 capability: config.attachmentCapability,
-                selectedImages: $state.selectedImages,
-                onCameraImageCaptured: addCameraImageAttachment,
                 onDocumentPicked: addDocumentAttachment,
-                onDocumentSizeExceeded: handleDocumentSizeExceeded
+                onSizeExceeded: handleDocumentSizeExceeded
             )
         }
+        .photosPicker(
+            isPresented: $showingImagePicker,
+            selection: $state.selectedImages,
+            maxSelectionCount: 5,
+            matching: .images
+        )
         .onChange(of: config.isProcessing) { wasProcessing, isNowProcessing in
             if !wasProcessing && isNowProcessing {
                 // Processing started - dismiss keyboard IMMEDIATELY using both methods
@@ -285,6 +293,17 @@ struct InputBar: View {
         return .handled
     }
 
+    private func presentAttachmentAction(_ action: AttachmentMenuAction) {
+        switch action {
+        case .camera:
+            showCamera = true
+        case .photoLibrary:
+            showingImagePicker = true
+        case .files:
+            showFilePicker = true
+        }
+    }
+
     private func addCameraImageAttachment(_ capturedImage: UIImage) {
         Task {
             // Camera always produces JPEG.
@@ -338,6 +357,7 @@ struct InputBar: View {
 
 extension Notification.Name {
     /// iOS 26 Menu bug: State mutations in button actions break gesture handling
+    static let attachmentMenuAction = Notification.Name("attachmentMenuAction")
     static let modelPickerAction = Notification.Name("modelPickerAction")
     static let reasoningLevelAction = Notification.Name("reasoningLevelAction")
 }

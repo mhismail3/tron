@@ -135,11 +135,6 @@ final class IPadSheetPresentationTests: XCTestCase {
                 ["Sources", "UI", "System", "LogViewer.swift"],
                 "struct LogViewer: View",
                 ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"
-            ),
-            (
-                ["Sources", "UI", "Chat", "Composer", "AttachmentMenuSheet.swift"],
-                "struct AttachmentMenuSheet: View",
-                ".compactHeightSheetPresentation(height: CompactActionSheetLayout.sheetHeight(forItemCount: actions.count))"
             )
         ]
 
