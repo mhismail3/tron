@@ -46,9 +46,9 @@ final class AttachmentMenuTests: XCTestCase {
 
     func testAttachmentMenuActionTitlesAreTheApprovedCommands() {
         XCTAssertEqual(AttachmentMenuAction.allCases.map(\.title), [
-            "Camera",
-            "Photos",
-            "Files",
+            "Take Photo",
+            "Select Photos",
+            "Attach Files",
             "Recent Inputs"
         ])
     }

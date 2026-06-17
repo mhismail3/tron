@@ -112,11 +112,11 @@ enum AttachmentMenuAction: String, CaseIterable, Identifiable, Equatable {
     var title: String {
         switch self {
         case .camera:
-            return "Camera"
+            return "Take Photo"
         case .photoLibrary:
-            return "Photos"
+            return "Select Photos"
         case .files:
-            return "Files"
+            return "Attach Files"
         case .recentInputs:
             return RecentInputHistoryPresentation.title
         }

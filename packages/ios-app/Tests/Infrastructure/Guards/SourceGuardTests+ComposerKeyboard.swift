@@ -11,9 +11,9 @@ extension SourceGuardTests {
             "Sources/UI/Chat/Composer/RecentInputHistorySheet.swift",
         ]
         let requiredCommands = [
-            "Camera",
-            "Photos",
-            "Files",
+            "Take Photo",
+            "Select Photos",
+            "Attach Files",
             "Recent Inputs",
         ]
         let requiredLayoutFragments = [

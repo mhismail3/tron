@@ -104,8 +104,8 @@ Commits:
 User-facing state:
 
 - The composer plus button now opens a native SwiftUI `Menu`.
-- The menu exposes only currently functional local actions: Camera, Photos, and
-  Files.
+- The menu exposes only currently functional local actions: Take Photo, Select
+  Photos, and Attach Files.
 - Menu rows use native icon-and-text presentation with compact sizing.
 - The removed custom attachment sheet path is gone.
 
@@ -287,9 +287,9 @@ Validated:
   iPhone 17 Pro, iOS 26.5, paired to the local development server. Manual
   simulator validation confirmed the composer no longer shows a standalone
   recent-input button, the native attachment menu exposes Recent Inputs above
-  Files/Photos/Camera when local history exists, and the Recent Inputs sheet
-  uses larger, concise, divider-free row text with an icon-only destructive
-  clear action.
+  Attach Files/Select Photos/Take Photo when local history exists, and the
+  Recent Inputs sheet uses larger, concise, divider-free row text with an
+  icon-only destructive clear action.
 
 Deferred:
 
