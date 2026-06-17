@@ -4,7 +4,7 @@ import SwiftUI
 
 /// A non-blocking toast banner stack rendered at the top safe area. Driven by `ToastCenter`.
 ///
-/// Visual language matches `ConnectionStatusPill` — liquid-glass rounded rect, severity-tinted
+/// Visual language is liquid-glass rounded rect, severity-tinted
 /// text/icons, smooth enter/exit transitions. Each toast is individually tappable (dismiss),
 /// drag-up-to-dismiss, and supports an optional Retry button.
 enum ToastBannerLayout {

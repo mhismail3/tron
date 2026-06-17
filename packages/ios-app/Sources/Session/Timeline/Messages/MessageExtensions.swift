@@ -44,6 +44,10 @@ extension ChatMessage {
         ChatMessage(role: .assistant, content: .error(text))
     }
 
+    static func localNotification(_ notification: LocalChatNotification) -> ChatMessage {
+        ChatMessage(id: notification.id, role: .system, content: .localNotification(notification))
+    }
+
     /// In-chat notification for model changes
     static func modelChange(from: String, to: String) -> ChatMessage {
         ChatMessage(role: .system, content: .modelChange(from: from, to: to))

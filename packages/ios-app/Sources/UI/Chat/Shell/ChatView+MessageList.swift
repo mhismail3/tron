@@ -40,6 +40,9 @@ extension ChatView {
                         onAbort: viewModel.abortAgent,
                         onAddAttachment: viewModel.addAttachment,
                         onRemoveAttachment: viewModel.removeAttachment,
+                        onAttachmentError: { title, message in
+                            viewModel.appendLocalError(dedupKey: "attachment.error.\(title)", title: title, message: message)
+                        },
                         onMicTap: viewModel.toggleRecording,
                         onHistoryNavigate: { newText in viewModel.inputText = newText }
                     )
@@ -70,6 +73,8 @@ extension ChatView {
             viewModel.abortCapabilityInvocation(invocationId: id, idempotencyKey: .userAction("agent.abortCapabilityInvocation"))
         case .providerError(let data):
             sheetCoordinator.showProviderErrorDetail(data)
+        case .localErrorDetail(let title, let message, let suggestion):
+            sheetCoordinator.showLocalErrorDetail(title: title, message: message, suggestion: suggestion)
         case .retryTurn:
             // C7: user tapped the "Retry" button on a recoverable
             // `turn.failed` notification. Re-issues the last user prompt
@@ -85,6 +90,8 @@ extension ChatView {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
+                        timelineAuxiliaryView
+
                         // Load more messages button (like iOS Messages)
                         if viewModel.hasMoreMessages {
                             loadMoreButton
@@ -127,22 +134,6 @@ extension ChatView {
                                 .animation(.smooth(duration: 0.3), value: initialLoadComplete)
                                 .id("workspaceDeleted")
                         }
-
-                        // Connection status pill - appears when not connected.
-                        // Retry routes through ConnectionManager so manual retry shares the
-                        // same codepath as the session list toast/banner retry button.
-                        //
-                        // .unauthorized repair goes straight to the app-level pairing sheet
-                        // so it does not depend on a nested Settings page being mounted.
-                        ConnectionStatusPill(
-                            connectionState: viewModel.connectionState,
-                            isReady: initialLoadComplete,
-                            onRePair: {
-                                ServerOnboardingLauncher.post(prefill: dependencies.pairedServerStore.activeServer)
-                            },
-                            onRetry: dependencies.connectionManager.manualRetry
-                        )
-                        .id("connectionStatusPill")
 
                         // Bottom anchor for scrolling
                         Color.clear
@@ -231,19 +222,6 @@ extension ChatView {
                         }
                     }
                 }
-                // Auto-scroll when ConnectionStatusPill appears/disappears
-                .onChange(of: viewModel.connectionState) { _, _ in
-                    guard initialLoadComplete else { return }
-                    guard scrollCoordinator.shouldAutoScroll else { return }
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(100))
-                        if scrollCoordinator.shouldAutoScroll {
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo("bottom", anchor: .bottom)
-                            }
-                        }
-                    }
-                }
                 // Restore scroll position after loading older messages
                 .onChange(of: viewModel.isLoadingMoreMessages) { wasLoading, isLoading in
                     if wasLoading && !isLoading {
@@ -280,6 +258,28 @@ extension ChatView {
             }
         }
         .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowNewContentPill)
+    }
+
+    // MARK: - Timeline Auxiliary State
+
+    @ViewBuilder
+    var timelineAuxiliaryView: some View {
+        let state = ChatTimelineAuxiliaryState.derive(
+            initialLoadComplete: initialLoadComplete,
+            messagesIsEmpty: viewModel.messages.isEmpty,
+            workspaceDeleted: workspaceDeleted
+        )
+
+        switch state {
+        case .loading:
+            ChatTimelineLoadingView(title: state.title)
+                .id("timelineLoading")
+        case .empty:
+            ChatTimelineEmptyView(title: state.title)
+                .id("timelineEmpty")
+        case .none:
+            EmptyView()
+        }
     }
 
     // MARK: - Scroll to Bottom Button
@@ -381,5 +381,35 @@ extension ChatView {
         }
         .disabled(viewModel.isLoadingMoreMessages)
         .padding(.bottom, 8)
+    }
+}
+
+struct ChatTimelineLoadingView: View {
+    let title: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ProgressView()
+                .scaleEffect(0.72)
+                .tint(.tronEmerald)
+            Text(title)
+                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
+                .foregroundStyle(.tronTextSecondary)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.top, 120)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct ChatTimelineEmptyView: View {
+    let title: String
+
+    var body: some View {
+        Text(title)
+            .font(TronTypography.messageBody)
+            .foregroundStyle(.tronTextSecondary)
+            .frame(maxWidth: .infinity)
+            .padding(.top, 120)
     }
 }

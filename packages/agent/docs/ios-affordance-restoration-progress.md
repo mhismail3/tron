@@ -349,15 +349,82 @@ Deferred:
   agent-execution routing remain absent until a future approved
   Phase 2/current-resource design exists.
 
+## Phase 1 Slice 4: Chat Visual Cues, Status, And Error Affordances
+
+Branch:
+`codex/ios-chat-visual-cues-status-affordance-current`
+
+Approved and shipped:
+
+- Empty/loading timeline affordance: `ChatTimelineAuxiliaryState` derives
+  either `Loading messages`, `Start talking`, or no auxiliary state from local
+  initial-load completion, message count, and workspace-deleted state.
+- Connection status is centralized through global `ToastCenter` connection
+  notifications. The old in-chat `ConnectionStatusPill` surface is removed and
+  guarded against returning.
+- Composer disabled reasons remain accessibility/help-only; no visible disabled
+  explanation panel was added.
+- Thinking fallback is simplified to one app-owned `NeuralSparkIndicator`.
+  `ThinkingIndicatorStyle`, `PhaseWaveIndicator`, and
+  `OrbitingParticleIndicator` were removed. Streaming thinking text still
+  renders inline when supplied by current stream state.
+- Chat-scoped local failures route through a central paved path:
+  `ChatViewModel+Errors.swift` appends deduped ephemeral
+  `LocalChatNotification` timeline items, clears them on new sends/view exit,
+  and opens `LocalErrorDetailSheet` only when details exist.
+- Initial local error producers include generic fatal chat errors, server send
+  and retry failures, capability abort failure, model switch failure, message
+  delete failure, transcription failure/no speech, photo processing failure,
+  file-read failure, and file-too-large validation.
+- Capability invocation chat chips now use
+  `CapabilityEvidencePresentation`: inline chips are one line and details move
+  to a sectioned sheet with summary, target/input/result/error, and technical
+  provenance only when current invocation data provides it.
+
+Data ownership:
+
+- Empty/loading state: local iOS timeline state only.
+- Connection status: existing engine connection/retry state rendered through
+  the app-global toast owner.
+- Chat-local errors: local iOS workflow state; not persisted as server events
+  and not promoted to backend truth.
+- Thinking content: existing stream/thinking state from current server events,
+  with a local visual fallback only.
+- Capability chip/detail content: existing capability invocation data and
+  current server facts already delivered to the iOS timeline.
+
+Rejected or deferred:
+
+- Process/job/subagent/source-control/work dashboards, approvals,
+  memory/rules/hooks status, skill activation, prompt suggestions, inbox-style
+  notifications, fixed product panels, fake activity, and backend status with
+  no current source of truth remain absent.
+- Notification expansion beyond local errors is deferred until a current
+  resource/event owner exists for each notification family.
+- Rich connection detail sheets are deferred; global connection toasts remain
+  the only visible connection affordance for this slice.
+
+Validated:
+
+- `cd packages/ios-app && xcodegen generate` completed.
+- `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatTimelineAuxiliaryStateTests -only-testing:TronMobileTests/LocalChatNotificationTests -only-testing:TronMobileTests/CapabilityEvidencePresentationTests -only-testing:TronMobileTests/AnimatedThinkingLineTests -only-testing:TronMobileTests/CapabilityInvocationDetailViewTests -only-testing:TronMobileTests/MessagingCoordinatorTests -only-testing:TronMobileTests/SourceGuardTests`
+  passed on iPhone 17 Pro, iOS 26.5 simulator.
+- `TRON_VISUAL_ARTIFACT_DIR=/tmp/tron-ios-affordance-validation/slice4 xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatAffordanceVisualRenderTests -only-testing:TronMobileTests/CapabilityInvocationDetailViewTests`
+  passed on iPhone 17 Pro, iOS 26.5 simulator. The test runner wrote to the
+  simulator container, then the PNGs were copied to
+  `/tmp/tron-ios-affordance-validation/slice4/`:
+  `chat-normal.png`, `chat-empty.png`, `chat-loading.png`,
+  `chat-local-error-pill.png`, `chat-thinking-neural-spark.png`,
+  `chat-capability-chip.png`, `chat-connection-toast.png`, and
+  `capability-invocation-detail-action-render.png`.
+
 ## Remaining Phase 1 Queue
 
-The next recommended restoration slice is
-`phase1_slice_4`: chat visual cues, status, empty/loading/error polish.
+The next recommended restoration slice is `phase1_slice_5`: settings,
+onboarding, diagnostics, and pairing polish over current server facts.
 
 Later Phase 1 items remain:
 
-- `phase1_slice_5`: settings, onboarding, diagnostics, and pairing polish over
-  current server facts.
 - `phase1_slice_6`: notification/inbox concept review only if it can remain
   truthful without fake push state.
 - Remaining local-native affordance families from the inventory after review.

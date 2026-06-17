@@ -86,6 +86,7 @@ extension ChatViewModel {
                 _ = try await services.agent.abortCapabilityInvocation(invocationId: invocationId, idempotencyKey: idempotencyKey)
             } catch {
                 logError("Failed to abort capability \(invocationId): \(error.localizedDescription)")
+                appendLocalError(dedupKey: "capability.abort.\(invocationId)", title: "Could not cancel action", message: error.localizedDescription)
             }
         }
     }
@@ -143,7 +144,7 @@ extension ChatViewModel {
                 )
             } catch {
                 logError("Retry failed: \(error.localizedDescription)")
-                showError("Could not retry: \(error.localizedDescription)")
+                appendLocalError(dedupKey: "turn.retry.failed", title: "Could not retry", message: error.localizedDescription)
             }
         }
     }
@@ -184,6 +185,7 @@ extension ChatViewModel {
                 limits: limits
             ) else {
                 logger.warning("Failed to process library image", category: .chat)
+                appendLocalError(dedupKey: "attachment.photo.failed", title: "Could not attach photo", message: "The selected photo could not be processed.")
                 continue
             }
 

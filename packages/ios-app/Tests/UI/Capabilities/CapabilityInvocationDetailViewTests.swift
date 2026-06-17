@@ -4,13 +4,15 @@ import XCTest
 
 @MainActor
 final class CapabilityInvocationDetailViewTests: XCTestCase {
-    func testCapabilityInvocationDetailSourceKeepsRawProtocolDataAuditOnly() throws {
+    func testCapabilityInvocationDetailSourceUsesEvidencePresentationMapper() throws {
         let source = try source(pathComponents: ["Sources", "UI", "Capabilities", "CapabilityInvocationViews.swift"])
 
-        XCTAssertTrue(source.contains(#"CapabilityDetailSection(title: "Action""#))
-        XCTAssertTrue(source.contains(#"CapabilityDetailSection(title: "Runtime Details""#))
-        XCTAssertTrue(source.contains(#"CapabilityRawDisclosure(title: "Raw request""#))
-        XCTAssertTrue(source.contains(#"CapabilityRawDisclosure(title: "Raw result""#))
+        XCTAssertTrue(source.contains("CapabilityEvidencePresentation(data: data)"))
+        XCTAssertTrue(source.contains("ForEach(evidence.sections)"))
+        XCTAssertTrue(source.contains("case .technical"))
+        XCTAssertTrue(source.contains("CapabilityRawDisclosure"))
+        XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Action""#))
+        XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Runtime Details""#))
         XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Request""#))
         XCTAssertFalse(source.contains(#"CapabilityDetailSection(title: "Advanced""#))
         XCTAssertFalse(source.contains("Approval state"))

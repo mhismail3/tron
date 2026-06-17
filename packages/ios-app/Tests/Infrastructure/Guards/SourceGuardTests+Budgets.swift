@@ -78,7 +78,7 @@ extension SourceGuardTests {
             ),
             HierarchyBudget(
                 relativePath: "Sources/UI/Components",
-                minimumFileCount: 12,
+                minimumFileCount: 11,
                 maximumFileCount: 14,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: []

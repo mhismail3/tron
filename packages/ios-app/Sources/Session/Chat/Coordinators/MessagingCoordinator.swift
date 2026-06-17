@@ -44,6 +44,8 @@ protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTracka
 
     /// Append a message to the chat
     func appendMessage(_ message: ChatMessage)
+    /// Clear temporary local notifications after a new user action supersedes them.
+    func clearLocalNotifications()
 
     /// Append the interrupted message
     func appendInterruptedMessage()
@@ -99,6 +101,7 @@ final class MessagingCoordinator {
         }
 
         context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
+        context.clearLocalNotifications()
         do {
             try await context.ensureLiveEventSubscription()
         } catch {

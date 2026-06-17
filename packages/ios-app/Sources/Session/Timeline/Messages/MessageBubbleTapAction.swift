@@ -11,6 +11,7 @@ enum MessageBubbleTapAction {
     /// the in-flight invocation without aborting the rest of the turn.
     case cancelCapabilityInvocation(id: String)
     case providerError(ProviderErrorDetailData)
+    case localErrorDetail(title: String, message: String, suggestion: String?)
     /// User tapped the "Retry" button on a `turn.failed` notification (C7).
     /// Handler re-issues the last user prompt so the agent tries the turn
     /// again. Only surfaced when the server marked the failure recoverable.

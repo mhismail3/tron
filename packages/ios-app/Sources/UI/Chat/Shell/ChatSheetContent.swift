@@ -67,6 +67,9 @@ struct ChatSheetContent: View {
         case .providerErrorDetail(let data):
             ProviderErrorDetailSheet(data: data)
 
+        case .localErrorDetail(let data):
+            LocalErrorDetailSheet(data: data)
+
         }
     }
 

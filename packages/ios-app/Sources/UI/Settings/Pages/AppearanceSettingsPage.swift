@@ -11,7 +11,6 @@ struct AppearanceSettingsPage: View {
             confirmArchivingCard
             fontCard
             codeFontCard
-            thinkingIndicatorCard
         }
     }
 
@@ -322,74 +321,4 @@ struct AppearanceSettingsPage: View {
         }
     }
 
-    // MARK: - Thinking Indicator Card
-
-    private var thinkingIndicatorCard: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SettingsSectionHeader(title: "Thinking Indicator")
-
-            SettingsCard {
-                // Current indicator preview
-                HStack(spacing: 12) {
-                    Image(systemName: appearanceSettings.thinkingIndicatorStyle.icon)
-                        .font(TronTypography.sans(size: TronTypography.sizeXL))
-                        .foregroundStyle(.tronEmerald)
-                        .frame(width: 24)
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(appearanceSettings.thinkingIndicatorStyle.displayName)
-                            .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .medium))
-                            .foregroundStyle(.tronTextPrimary)
-                        Text("Thinking animation")
-                            .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                            .foregroundStyle(.tronTextSecondary)
-                    }
-
-                    Spacer()
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 12)
-                .padding(.bottom, 10)
-
-                Divider().padding(.leading, 12)
-
-                // Indicator style chips
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(ThinkingIndicatorStyle.allCases) { style in
-                            indicatorChip(style)
-                        }
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 10)
-                }
-            }
-
-            SettingsCaption(text: "Animation shown while the model is thinking.")
-        }
-    }
-
-    private func indicatorChip(_ style: ThinkingIndicatorStyle) -> some View {
-        let isSelected = appearanceSettings.thinkingIndicatorStyle == style
-        return Button {
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                appearanceSettings.thinkingIndicatorStyle = style
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: style.icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                Text(style.displayName)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
-            }
-            .foregroundStyle(isSelected ? .tronSurface : .tronTextPrimary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(isSelected ? Color.tronEmerald : Color.tronEmerald.opacity(0.1))
-            )
-        }
-        .buttonStyle(.plain)
-    }
 }

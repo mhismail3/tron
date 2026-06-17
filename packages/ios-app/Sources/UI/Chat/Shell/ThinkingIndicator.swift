@@ -1,17 +1,8 @@
 import SwiftUI
 
-/// Parent view that switches between different thinking indicator animations based on user settings
+/// App-owned fallback thinking indicator shown only when no richer live cue is available.
 struct AnimatedThinkingLine: View {
-    @State private var appearanceSettings = AppearanceSettings.shared
-
     var body: some View {
-        switch appearanceSettings.thinkingIndicatorStyle {
-        case .neuralSpark:
-            NeuralSparkIndicator()
-        case .phaseWaves:
-            PhaseWaveIndicator()
-        case .orbitingParticles:
-            OrbitingParticleIndicator()
-        }
+        NeuralSparkIndicator()
     }
 }

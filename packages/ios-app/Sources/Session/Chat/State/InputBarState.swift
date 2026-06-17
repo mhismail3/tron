@@ -195,6 +195,7 @@ struct InputBarActions {
     // MARK: - Attachments
     let onAddAttachment: (Attachment) -> Void
     let onRemoveAttachment: (Attachment) -> Void
+    let onAttachmentError: (String, String) -> Void
     let onMicTap: () -> Void
 
     // MARK: - History
@@ -208,6 +209,7 @@ struct InputBarActions {
         onAbort: @escaping () -> Void = {},
         onAddAttachment: @escaping (Attachment) -> Void = { _ in },
         onRemoveAttachment: @escaping (Attachment) -> Void = { _ in },
+        onAttachmentError: @escaping (String, String) -> Void = { _, _ in },
         onMicTap: @escaping () -> Void = {},
         onHistoryNavigate: ((String) -> Void)? = nil,
         onContextTap: (() -> Void)? = nil
@@ -216,6 +218,7 @@ struct InputBarActions {
         self.onAbort = onAbort
         self.onAddAttachment = onAddAttachment
         self.onRemoveAttachment = onRemoveAttachment
+        self.onAttachmentError = onAttachmentError
         self.onMicTap = onMicTap
         self.onHistoryNavigate = onHistoryNavigate
         self.onContextTap = onContextTap
