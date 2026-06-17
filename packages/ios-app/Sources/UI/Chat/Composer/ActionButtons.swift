@@ -149,6 +149,7 @@ struct GlassAttachmentButton: View {
                             NotificationCenter.default.post(name: .attachmentMenuAction, object: action)
                         } label: {
                             Label(action.title, systemImage: action.systemImage)
+                                .labelStyle(.titleAndIcon)
                         }
                     }
                 } label: {
@@ -156,6 +157,7 @@ struct GlassAttachmentButton: View {
                         .frame(width: buttonSize, height: buttonSize)
                         .contentShape(Circle())
                 }
+                .controlSize(.small)
                 .disabled(menuDisabled)
             }
             .onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction)) { notification in

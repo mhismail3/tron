@@ -17,6 +17,8 @@ extension SourceGuardTests {
         let requiredLayoutFragments = [
             "Menu {",
             "Label(action.title, systemImage: action.systemImage)",
+            ".labelStyle(.titleAndIcon)",
+            ".controlSize(.small)",
             "NotificationCenter.default.post(name: .attachmentMenuAction, object: action)",
             ".onReceive(NotificationCenter.default.publisher(for: .attachmentMenuAction))",
             ".matchedGeometryEffect(id: \"attachmentMorph\"",
@@ -38,6 +40,9 @@ extension SourceGuardTests {
             "pending" + "Attachment" + "Menu" + "Action",
             "present" + "Pending" + "Attachment" + "Menu" + "Action",
             "onDismiss: present" + "Pending" + "Attachment" + "Menu" + "Action",
+            "AttachmentNativeMenuOverlay",
+            "UIViewRepresentable",
+            "preferredElementSize",
             "AttachmentMenuPopup",
             "AttachmentMenuSheet",
             ".overlay(alignment: .bottomLeading)",
