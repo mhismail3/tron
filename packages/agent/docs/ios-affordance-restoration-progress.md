@@ -356,9 +356,9 @@ Branch:
 
 Approved and shipped:
 
-- Empty/loading timeline affordance: `ChatTimelineAuxiliaryState` derives
-  either `Loading messages`, `Start talking`, or no auxiliary state from local
-  initial-load completion, message count, and workspace-deleted state.
+- Loading/blank-empty timeline affordance: `ChatTimelineAuxiliaryState`
+  derives `Loading messages` only before initial load completes. Once initial
+  load completes, a chat with no messages stays visually blank.
 - Connection status is centralized through global `ToastCenter` connection
   notifications. The old in-chat `ConnectionStatusPill` surface is removed and
   guarded against returning.
@@ -383,7 +383,7 @@ Approved and shipped:
 
 Data ownership:
 
-- Empty/loading state: local iOS timeline state only.
+- Loading/blank-empty state: local iOS timeline state only.
 - Connection status: existing engine connection/retry state rendered through
   the app-global toast owner.
 - Chat-local errors: local iOS workflow state; not persisted as server events
@@ -413,7 +413,7 @@ Validated:
   passed on iPhone 17 Pro, iOS 26.5 simulator. The test runner wrote to the
   simulator container, then the PNGs were copied to
   `/tmp/tron-ios-affordance-validation/slice4/`:
-  `chat-normal.png`, `chat-empty.png`, `chat-loading.png`,
+  `chat-normal.png`, `chat-loading.png`,
   `chat-local-error-pill.png`, `chat-thinking-neural-spark.png`,
   `chat-capability-chip.png`, `chat-connection-toast.png`, and
   `capability-invocation-detail-action-render.png`.

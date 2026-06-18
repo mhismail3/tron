@@ -7,7 +7,6 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
     func testApprovedChatAffordancesRenderForVisualQA() throws {
         let samples: [(String, AnyView, CGSize)] = [
             ("chat-normal.png", AnyView(Self.normalChatView), CGSize(width: 430, height: 360)),
-            ("chat-empty.png", AnyView(Self.auxiliaryView(ChatTimelineEmptyView(title: "Start talking"))), CGSize(width: 430, height: 320)),
             ("chat-loading.png", AnyView(Self.auxiliaryView(ChatTimelineLoadingView(title: "Loading messages"))), CGSize(width: 430, height: 320)),
             ("chat-local-error-pill.png", AnyView(Self.localErrorView), CGSize(width: 430, height: 180)),
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),

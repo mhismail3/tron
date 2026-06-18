@@ -1407,7 +1407,7 @@ packages/ios-app/Sources/
   functional-only native composer attachment menu that preserves keyboard
   focus while layering native camera/photo/file pickers above it, composer mic
   input backed by the local transcription domain after a readiness check,
-  quiet empty/loading states, app-global connection toasts, ephemeral in-chat
+  a blank empty chat, initial loading state, app-global connection toasts, ephemeral in-chat
   local error notifications, streamed thinking content with one app-owned
   neural-spark fallback indicator, one-line generic capability evidence chips,
   local reconstruction, diagnostics, and generic runtime surfaces.

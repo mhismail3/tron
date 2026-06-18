@@ -250,19 +250,3 @@ private struct SessionDashboardStatusIcon: View {
         .accessibilityHidden(true)
     }
 }
-
-struct SessionDashboardEmptyState: View {
-    var body: some View {
-        VStack(spacing: 16) {
-            Image("TronLogo")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(height: 80)
-
-            Text("Start talking")
-                .font(TronTypography.messageBody)
-                .foregroundStyle(.tronTextMuted)
-        }
-        .allowsHitTesting(false)
-    }
-}
