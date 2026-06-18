@@ -8,6 +8,7 @@ struct ConnectionSettingsPage: View {
     @Environment(\.dependencies) private var dependencies
     @State private var serverPendingRemoval: PairedServer?
     @State private var serverRemovalError: String?
+    @State private var showLogViewer = false
 
     init(
         settingsState: SettingsState,
@@ -38,6 +39,9 @@ struct ConnectionSettingsPage: View {
         } message: {
             Text(serverRemovalError ?? "The pairing token could not be removed from Keychain.")
         }
+        .sheet(isPresented: $showLogViewer) {
+            LogViewer()
+        }
     }
 
     @ViewBuilder
@@ -45,6 +49,7 @@ struct ConnectionSettingsPage: View {
         serverInfoCard
         pairedServersSection
         serverBackedContent
+        diagnosticsSection
     }
 
     private var landscapeContent: some View {
@@ -60,6 +65,7 @@ struct ConnectionSettingsPage: View {
 
                 VStack(spacing: 16) {
                     serverBackedContent
+                    diagnosticsSection
                 }
                 .frame(maxWidth: .infinity, alignment: .top)
             }
@@ -386,6 +392,32 @@ struct ConnectionSettingsPage: View {
             }
 
             SettingsCaption(text: "The server owns trace records, retained logs, compression, and storage cleanup. iOS only requests the policy.")
+        }
+    }
+
+    private var diagnosticsSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsSectionHeader(title: ConnectionSettingsDiagnosticsCopy.sectionTitle)
+
+            SettingsCard(interactive: true) {
+                Button {
+                    showLogViewer = true
+                } label: {
+                    SettingsRow(icon: "doc.text.magnifyingglass", label: ConnectionSettingsDiagnosticsCopy.logsLabel) {
+                        HStack(spacing: 5) {
+                            Text(ConnectionSettingsDiagnosticsCopy.logsAction)
+                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                                .foregroundStyle(.tronEmerald)
+                            Image(systemName: "chevron.right")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                                .foregroundStyle(.tronTextMuted)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            SettingsCaption(text: ConnectionSettingsDiagnosticsCopy.caption)
         }
     }
 

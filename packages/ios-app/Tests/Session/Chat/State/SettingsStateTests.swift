@@ -8,6 +8,7 @@ final class SettingsStateTests: XCTestCase {
 
     func testInitialValuesMatchDefaults() {
         let state = SettingsState()
+        XCTAssertEqual(state.defaultProvider, "")
         XCTAssertEqual(state.defaultModel, "")
         XCTAssertEqual(state.quickSessionWorkspace, AppConstants.defaultWorkspace)
         XCTAssertEqual(state.preserveRecentCount, 5)
@@ -60,6 +61,7 @@ final class SettingsStateTests: XCTestCase {
 
         state.applyServerSettings(ServerSettingsSnapshot(settings))
 
+        XCTAssertEqual(state.defaultProvider, "anthropic")
         XCTAssertEqual(state.observabilityLogLevel, "debug")
         XCTAssertEqual(state.observabilityVerboseRetentionDays, 3)
         XCTAssertFalse(state.storageRetentionEnabled)
@@ -83,11 +85,12 @@ final class SettingsStateTests: XCTestCase {
         let state = SettingsState()
         let settings = try JSONDecoder().decode(
             ServerSettings.self,
-            from: try ServerSettingsFixture.data(#"{"server":{"defaultModel":"claude-opus-4-6"}}"#)
+            from: try ServerSettingsFixture.data(#"{"server":{"defaultProvider":"google","defaultModel":"claude-opus-4-6"}}"#)
         )
 
         state.applyServerSettings(ServerSettingsSnapshot(settings))
 
+        XCTAssertEqual(state.defaultProvider, "google")
         XCTAssertEqual(state.defaultModel, "claude-opus-4-6")
     }
 
@@ -124,11 +127,13 @@ final class SettingsStateTests: XCTestCase {
         let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/loaded"}}"#))
         state.applyServerSettings(ServerSettingsSnapshot(settings))
         state.quickSessionWorkspace = "/optimistic"
+        state.defaultProvider = "google"
         state.defaultModel = "locally-selected-before-server-accepted"
 
         state.rollbackToLastLoadedSettings(message: "save failed")
 
         XCTAssertEqual(state.quickSessionWorkspace, "/loaded")
+        XCTAssertEqual(state.defaultProvider, "anthropic")
         XCTAssertEqual(state.defaultModel, "claude-sonnet-4-6")
         XCTAssertEqual(state.loadError, "save failed")
         XCTAssertTrue(state.isLoaded)

@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-17 (IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-18 (IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -134,9 +134,13 @@ input replacement, discover front/back camera variants through `AVCaptureDevice`
 discovery, and remove the old video input before validating and attaching the
 replacement input so the old input does not make `canAddInput` fail.
 
-The shell mounts `ContentView` even before onboarding is complete. First-run
-onboarding is presented as a sheet over the shell. When `onboardingComplete` is
-true but no active paired server exists, the shell stays visible.
+The shell mounts `ContentView` even before onboarding is complete.
+`TronMobileApp` owns one onboarding presenter for first-run setup, Server-page
+pairing, and pairing URLs. `OnboardingSheetPresentation` keeps that flow on the
+large detent so the connect form, QR-first pairing card, and setup pages share
+one geometry instead of splitting into separate medium/full variants. When
+`onboardingComplete` is true but no active paired server exists, the shell stays
+visible.
 
 Pairing accepts only bare DNS names, IPv4 addresses, or unbracketed IPv6
 addresses from QR/deep-link paste and manual entry. Full URLs, paths, query
@@ -145,7 +149,10 @@ rejected before a WebSocket probe or `PairedServerStore` write. The pairing
 commit path stores bearer tokens only in `PairedServerTokenStore`, rolls back
 failed setup hydration by restoring the previous token or removing the
 candidate token, and forgetting a server deletes the Keychain token before
-removing metadata.
+removing metadata. Settings-launched repair for an existing paired server uses
+the same large onboarding sheet, stays on the connect step, and closes after a
+successful token refresh when the host and port still match that local server;
+edited host/port values are treated as a new pairing and continue into setup.
 
 `ChatViewModel.swift` keeps the mounted session state and orchestration
 boundary. Runtime callback installation for streaming text, UI update queue
@@ -321,6 +328,12 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 `SettingsServerSupport.swift`; and shared row/card primitives stay in
 `SettingsSupport.swift`.
 
+Server identity, reachability, diagnostics, and pairing controls stay inside
+the Servers page or the disconnected warning card; Settings main does not grow
+a server-health dashboard. Agent settings owns server-backed quick-session
+defaults, including `server.defaultProvider`, `server.defaultModel`, and
+`server.defaultWorkspace`. Provider credential state remains in Providers.
+
 `ModelPickerSheet.swift` owns the model-picker sheet frame and loading/error
 state. Provider, family, model-card, reasoning-visibility, and reasoning
 popover rendering live in `ModelPickerSheet+Sections.swift`. `TronColors.swift`
@@ -332,12 +345,14 @@ primary accent, and success/warning/error remain separate semantic colors.
 
 ## Diagnostics And Build Identity
 
-The settings toolbar exposes Logs in every build configuration. The client log
-ingestion service mirrors bounded client logs into the server `logs` table while
-connected. iOS redacts before buffering and again at the send boundary, and the
-server redacts bearer/API/OAuth fields again before durable `logs` storage, so
-diagnostics do not rely on one client-only scrubber. Successful ingest transport
-chatter is filtered to prevent a self-feeding diagnostics loop.
+The settings toolbar and the Servers page Diagnostics section expose Logs in
+every build configuration. The Logs sheet shows redacted local iOS log entries;
+the client log ingestion service mirrors bounded client logs into the server
+`logs` table while connected. iOS redacts before buffering and again at the
+send boundary, and the server redacts bearer/API/OAuth fields again before
+durable `logs` storage, so diagnostics do not rely on one client-only scrubber.
+Successful ingest transport chatter is filtered to prevent a self-feeding
+diagnostics loop.
 `DiagnosticsBundleBuilder.swift` owns bundle assembly; DTOs, event sanitization,
 hashing, and host classification live in `DiagnosticsBundleTypes.swift`.
 Diagnostics support consumes `DiagnosticsEngineEndpoint` and

@@ -11,6 +11,7 @@ final class SettingsState {
 
     // MARK: - Server-Authoritative Settings
 
+    var defaultProvider: String = ""
     var defaultModel: String = ""
     var quickSessionWorkspace: String = AppConstants.defaultWorkspace
     var preserveRecentCount: Int = 5
@@ -131,6 +132,7 @@ final class SettingsState {
     /// default or a missing optional field.
     func applyServerSettings(_ settings: ServerSettingsSnapshot) {
         lastLoadedSettings = settings
+        defaultProvider = settings.defaultProvider
         defaultModel = settings.defaultModel
         preserveRecentCount = settings.compactionPreserveRecentCount
         triggerTokenThreshold = settings.compactionTriggerTokenThreshold

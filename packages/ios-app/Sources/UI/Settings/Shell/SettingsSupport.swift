@@ -435,6 +435,13 @@ struct ConnectionSettingsServerControlsStatus: Equatable, Sendable {
     }
 }
 
+enum ConnectionSettingsDiagnosticsCopy {
+    static let sectionTitle = "Diagnostics"
+    static let logsLabel = "Logs"
+    static let logsAction = "View"
+    static let caption = "Shows redacted local iOS logs. Connected servers receive deduplicated copies automatically; feedback bundles attach local and server logs when available."
+}
+
 enum ServerSettingsSummary {
     struct Context: Equatable, Sendable {
         let activeServerLabel: String?

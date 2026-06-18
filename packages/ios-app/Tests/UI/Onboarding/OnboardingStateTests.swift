@@ -57,31 +57,31 @@ struct OnboardingStateTests {
 
     @Test("Preparation page copy matches the sheet flow")
     func preparationPageCopyMatchesFlow() {
-        #expect(OnboardingCopy.welcomeSubtitle == "Tron is a local, private AI agent that runs on your machine. Unlike other agents, you talk to Tron from your iPhone.")
+        #expect(OnboardingCopy.welcomeSubtitle == "Pair this iPhone with the Mac running Tron.")
         #expect(OnboardingCopy.welcomeRows.map(\.title) == [
-            "Install the Mac server",
-            "Connect privately",
-            "Pair seamlessly",
+            "Run Tron on Mac",
+            "Use your private network",
+            "Scan or paste the code",
         ])
         #expect(OnboardingCopy.welcomeRows.map(\.subtitle) == [
-            "Tron runs in the background on your Mac device",
-            "Tron uses your Tailscale account to securely and privately link your devices",
-            "Use the QR code provided during Mac installation to quickly pair your iPhone",
+            "The server stays local to your machine",
+            "Tailscale links this iPhone to the Mac",
+            "The pairing token is stored in Keychain",
         ])
 
-        #expect(OnboardingCopy.tailscaleSubtitle == "Tron uses your Tailscale account to link your devices on your private tailnet. This requires the Tailscale VPN to be set up on this iPhone.")
+        #expect(OnboardingCopy.tailscaleSubtitle == "Use the same Tailscale account on this iPhone and the Mac.")
         #expect(OnboardingCopy.tailscaleRows.map(\.title) == [
-            "Download the Tailscale app",
-            "Sign in to your account",
-            "Come back here when connected",
+            "Install Tailscale",
+            "Sign in",
+            "Return connected",
         ])
         #expect(OnboardingCopy.tailscaleRows.map(\.subtitle) == [
-            "Use the link below to download Tailscale from the App Store",
-            "Use the same account you use to sign in on your Mac",
-            "Tron verifies reachability when you connect to the Mac server",
+            "Open the App Store if it is not already installed",
+            "Use the account connected to your Mac",
+            "Tron verifies reachability before saving the pairing",
         ])
 
-        #expect(OnboardingCopy.installMacSubtitle == "Tron runs on your own Mac device in the background. Install the Tron server on your Mac, then come back here when the installer shows the QR code pairing screen.")
+        #expect(OnboardingCopy.installMacSubtitle == "Install Tron on the Mac, then use the pairing screen shown by the Mac app.")
         #expect(OnboardingCopy.installMacCopyButtonTitle == "Copy Link")
         #expect(OnboardingCopy.installMacCopiedButtonTitle == "Copied")
         #expect(OnboardingCopy.installMacReleasesButtonTitle == "Open Releases page")
@@ -160,6 +160,33 @@ struct OnboardingStateTests {
         #expect(state.setupSnapshot.defaultWorkspace == AppConstants.defaultWorkspace)
     }
 
+    @Test("prepareFirstRunOnboarding returns to the intro without changing form values")
+    func prepareFirstRunOnboardingReturnsToIntro() throws {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let settings = try JSONDecoder().decode(ServerSettings.self, from: try ServerSettingsFixture.data(#"{"server":{"defaultWorkspace":"/stale"}}"#))
+        state.prepareServerOnboarding(prefill: .init(id: "studio", label: "Studio", host: "100.64.0.7", port: 9847))
+        state.pairingToken = "stored-token"
+        state.currentStep = .model
+        state.hasPairedMac = true
+        state.isConnecting = true
+        state.pairingError = .unauthorized
+        state.hydrateSetup(serverId: "old-server", settings: ServerSettingsSnapshot(settings), authState: nil)
+
+        state.prepareFirstRunOnboarding()
+
+        #expect(state.currentStep == .welcome)
+        #expect(state.hasPairedMac == false)
+        #expect(state.pairingHost == "")
+        #expect(state.pairingPort == AppConstants.prodPort)
+        #expect(state.pairingToken == "")
+        #expect(state.pairingLabel == "My Mac")
+        #expect(state.isConnecting == false)
+        #expect(state.pairingError == nil)
+        #expect(state.pairingPrefilledServerId == nil)
+        #expect(state.completesAfterPairing == false)
+        #expect(state.setupSnapshot.serverId == nil)
+    }
+
     @Test("prepareServerOnboarding starts Settings-launched onboarding at connect")
     func prepareServerOnboardingStartsAtConnect() throws {
         let state = OnboardingState(defaults: ephemeralDefaults())
@@ -204,6 +231,7 @@ struct OnboardingStateTests {
         #expect(state.pairingToken == "")
         #expect(state.pairingLabel == "Studio")
         #expect(state.pairingPrefilledServerId == "studio")
+        #expect(state.completesAfterPairing == true)
         #expect(state.canAttemptPairing == true)
         #expect(state.validatedPairingPayload == nil)
         #expect(state.validatedPairingPayload(storedToken: "stored-token")?.token == "stored-token")
@@ -219,6 +247,7 @@ struct OnboardingStateTests {
         state.pairingLabel = "Studio"
 
         #expect(state.pairingPrefilledServerId == nil)
+        #expect(state.completesAfterPairing == false)
         #expect(state.validatedPairingPayload(storedToken: "ignored-token") == nil)
         #expect(state.canAttemptPairing == false)
 
@@ -241,6 +270,7 @@ struct OnboardingStateTests {
         state.prepareServerOnboarding(prefill: server)
         state.pairingHost = "other.tailnet.ts.net"
 
+        #expect(state.completesAfterPairing == true)
         #expect(state.canAttemptPairing == false)
         #expect(state.validatedPairingPayload(storedToken: "stored-token") == nil)
 
@@ -249,6 +279,72 @@ struct OnboardingStateTests {
         #expect(state.validatedPairingPayload?.host == "other.tailnet.ts.net")
         #expect(state.validatedPairingPayload?.token == "fresh-token")
         #expect(state.canAttemptPairing == true)
+
+        state.beginPairingAttempt(for: state.validatedPairingPayload!)
+
+        #expect(state.completesAfterPairing == false)
+    }
+
+    @Test("pairing attempt preserves Settings repair mode for retry")
+    func pairingAttemptPreservesSettingsRepairModeForRetry() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let server = PairedServer(
+            id: "studio",
+            label: "Studio",
+            host: "studio.tailnet.ts.net",
+            port: 9847
+        )
+
+        state.prepareServerOnboarding(prefill: server)
+        state.beginPairingAttempt(for: state.validatedPairingPayload(storedToken: "stored-token")!)
+
+        #expect(state.currentStep == .connect)
+        #expect(state.pairingPrefilledServerId == "studio")
+        #expect(state.completesAfterPairing == true)
+        #expect(state.canAttemptPairing == true)
+    }
+
+    @Test("scanned token for same prefilled server completes repair after pairing")
+    func scannedTokenForSamePrefilledServerCompletesRepairAfterPairing() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let server = PairedServer(
+            id: "studio",
+            label: "Studio",
+            host: "Studio.Tailnet.TS.Net",
+            port: 9847
+        )
+        state.prepareServerOnboarding(prefill: server)
+
+        state.acceptPairingPayload(.init(
+            host: "studio.tailnet.ts.net",
+            port: 9847,
+            token: "fresh-token",
+            label: "Studio"
+        ))
+
+        #expect(state.completesAfterPairing == true)
+        #expect(state.validatedPairingPayload?.token == "fresh-token")
+    }
+
+    @Test("scanned token for different server keeps setup flow")
+    func scannedTokenForDifferentServerKeepsSetupFlow() {
+        let state = OnboardingState(defaults: ephemeralDefaults())
+        let server = PairedServer(
+            id: "studio",
+            label: "Studio",
+            host: "studio.tailnet.ts.net",
+            port: 9847
+        )
+        state.prepareServerOnboarding(prefill: server)
+
+        state.acceptPairingPayload(.init(
+            host: "new.tailnet.ts.net",
+            port: 9847,
+            token: "fresh-token",
+            label: "New"
+        ))
+
+        #expect(state.completesAfterPairing == false)
     }
 
     @Test("setup steps cannot be selected before a fresh pairing succeeds")
@@ -354,6 +450,7 @@ struct OnboardingStateTests {
         #expect(state.pairingToken.isEmpty)
         #expect(state.pairingLabel == "My Mac")
         #expect(state.pairingPrefilledServerId == nil)
+        #expect(state.completesAfterPairing == false)
         #expect(defaults.bool(forKey: OnboardingState.completionStorageKey) == false)
     }
 

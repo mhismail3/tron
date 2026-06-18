@@ -20,6 +20,19 @@ struct ProviderInfo: Identifiable {
         ProviderInfo(id: "exa", displayName: "Exa", assetIcon: "", color: .tronAmber, supportsOAuth: false),
     ]
 
+    static func displayName(for id: String) -> String {
+        modelProviders.first { $0.id == id }?.displayName ?? id
+    }
+
+    static func settingsOptions(including currentProvider: String) -> [(value: String, label: String)] {
+        var options = modelProviders.map { (value: $0.id, label: $0.displayName) }
+        let trimmed = currentProvider.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty, !options.contains(where: { $0.value == trimmed }) {
+            options.append((value: trimmed, label: trimmed))
+        }
+        return options
+    }
+
     var serviceSystemIcon: String {
         switch id {
         case "brave": return "magnifyingglass"

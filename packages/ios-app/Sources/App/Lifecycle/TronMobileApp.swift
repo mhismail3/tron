@@ -19,7 +19,7 @@ struct TronMobileApp: App {
     // dismissed and the session list remains mounted.
     @State private var onboardingState = OnboardingState()
     @State private var isOnboardingSheetPresented = false
-    @State private var onboardingDetent: PresentationDetent = .medium
+    @State private var onboardingDetent: PresentationDetent = OnboardingSheetPresentation.initialDetent
     @State private var onboardingAllowsDismiss = false
     @State private var onboardingSuppressed = false
 #if DEBUG
@@ -28,8 +28,8 @@ struct TronMobileApp: App {
 
     /// First-run pairing flag. Driven by `OnboardingState.completionStorageKey`
     /// (the literal key `"onboardingComplete"`). When false, the app still
-    /// mounts the session list and presents `OnboardingFlowView` as a medium
-    /// sheet.
+    /// mounts the session list and presents `OnboardingFlowView` through the
+    /// central onboarding sheet presenter.
     @AppStorage("onboardingComplete") private var onboardingComplete: Bool = false
 
     @Environment(\.scenePhase) private var scenePhase
@@ -149,7 +149,7 @@ struct TronMobileApp: App {
                 )
                 .environment(\.dependencies, container)
                 .environment(\.interactionPolicy, container.interactionPolicy)
-                .adaptivePresentationDetents([.medium, .large], selection: $onboardingDetent, ipadSizing: .largeForm, phoneBackground: .clear)
+                .adaptivePresentationDetents(OnboardingSheetPresentation.detents, selection: $onboardingDetent, ipadSizing: .largeForm, phoneBackground: .clear)
                 .interactiveDismissDisabled(!onboardingComplete && !onboardingAllowsDismiss)
             }
             .onAppear(perform: syncOnboardingSheetPresentation)
@@ -178,12 +178,20 @@ struct TronMobileApp: App {
     }
 
     private func syncOnboardingSheetPresentation() {
-        let shouldPresent = !onboardingComplete && !onboardingSuppressed
+        let shouldPresent = OnboardingSheetPresentation.shouldAutoPresent(
+            onboardingComplete: onboardingComplete,
+            onboardingSuppressed: onboardingSuppressed
+        )
         if shouldPresent && !isOnboardingSheetPresented {
-            onboardingDetent = .medium
-            onboardingAllowsDismiss = false
+            presentOnboarding(.firstRun) {
+                onboardingState.prepareFirstRunOnboarding()
+            }
+            return
         }
-        isOnboardingSheetPresented = shouldPresent
+        if !shouldPresent {
+            isOnboardingSheetPresented = false
+            return
+        }
     }
 
     private func dismissOnboardingFromSettings() {
@@ -192,18 +200,26 @@ struct TronMobileApp: App {
         isOnboardingSheetPresented = false
     }
 
+    private func presentOnboarding(
+        _ source: OnboardingLaunchSource,
+        prepare: () -> Void
+    ) {
+        prepare()
+        onboardingSuppressed = false
+        onboardingAllowsDismiss = source.allowsDismiss(onboardingComplete: onboardingComplete)
+        onboardingDetent = OnboardingSheetPresentation.initialDetent
+        isOnboardingSheetPresented = true
+    }
+
     private func launchServerOnboarding(notification: Notification) {
         let serverId = notification.userInfo?[ServerOnboardingLauncher.serverIdUserInfoKey] as? String
         let server = serverId.flatMap { id in
             container.pairedServerStore.servers.first { $0.id == id }
         }
 
-        onboardingState.prepareServerOnboarding(prefill: server)
-
-        onboardingSuppressed = false
-        onboardingAllowsDismiss = true
-        onboardingDetent = .large
-        isOnboardingSheetPresented = true
+        presentOnboarding(.serverSettings) {
+            onboardingState.prepareServerOnboarding(prefill: server)
+        }
     }
 
     @discardableResult
@@ -211,12 +227,9 @@ struct TronMobileApp: App {
         guard case .success(let payload) = PairingURLParser.parse(url.absoluteString) else {
             return false
         }
-        onboardingState.acceptPairingPayload(payload)
-        onboardingDetent = .large
-        isOnboardingSheetPresented = true
-        onboardingAllowsDismiss = false
-        onboardingSuppressed = false
-        onboardingComplete = false
+        presentOnboarding(.pairingURL) {
+            onboardingState.acceptPairingPayload(payload)
+        }
         return true
     }
 

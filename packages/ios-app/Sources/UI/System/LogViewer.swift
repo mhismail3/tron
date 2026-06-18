@@ -99,7 +99,7 @@ struct LogViewer: View {
                 .padding(.horizontal, 10)
             }
 
-            Text("\(filteredLogs.count) entries • Server sync is automatic while connected")
+            Text("\(filteredLogs.count) local entries • Server sync runs while connected")
                 .font(.system(.caption, design: .monospaced, weight: .bold))
                 .foregroundStyle(.tronTextMuted)
                 .frame(maxWidth: .infinity, alignment: .leading)

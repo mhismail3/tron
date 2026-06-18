@@ -13,6 +13,19 @@ struct ProvidersSettingsPageTests {
         #expect(SettingsLabels.providers == "Providers")
     }
 
+    @Test("provider display helpers preserve server-provided provider IDs")
+    func providerDisplayHelpersPreserveServerProviderIds() {
+        #expect(ProviderInfo.displayName(for: "anthropic") == "Anthropic")
+        #expect(ProviderInfo.displayName(for: "future-provider") == "future-provider")
+
+        let knownOptions = ProviderInfo.settingsOptions(including: "google")
+        #expect(knownOptions.map(\.value) == ["anthropic", "openai-codex", "google", "minimax", "kimi"])
+
+        let unknownOptions = ProviderInfo.settingsOptions(including: "future-provider")
+        #expect(unknownOptions.last?.value == "future-provider")
+        #expect(unknownOptions.last?.label == "future-provider")
+    }
+
     @Test("provider auth action result only commits local form changes after success")
     func providerAuthActionResultCommitsLocalFormChangesOnlyAfterSuccess() {
         #expect(ProviderAuthActionResult.succeeded.shouldCommitLocalFormChanges)

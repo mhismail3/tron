@@ -9,19 +9,19 @@ Last reconciled from implementation threads:
 - `019ed71f-a1c5-7451-a026-8ddbc664ffda`
 
 Latest implementation branch:
-`codex/ios-chat-visual-cues-status-affordance-current`
+`codex/ios-settings-onboarding-diagnostics-pairing-current`
 
 Latest implementation worktree:
-`/Users/<USER>/.codex/worktrees/15e6/tron`
+`/Users/<USER>/.codex/worktrees/f028/tron`
 
 Current orchestration checkpoint:
-`09d155bda Remove empty chat placeholder`
+`f4cb11d68 Reconcile chat visual affordance progress`
 
 Previous orchestration checkpoint:
-`48054db64 Reconcile prompt input restoration progress`
+`09d155bda Remove empty chat placeholder`
 
 Previous implementation checkpoint:
-`4e66af3022508b13a6229020d529ee248e49c5a5 Organize dashboard and title generation`
+`09d155bda Remove empty chat placeholder`
 
 ## Purpose
 
@@ -464,41 +464,100 @@ Additional orchestration observations:
   event to the retained `stream.thinking_complete` model or suppress empty
   thinking-end chatter.
 
+## Phase 1 Slice 5: Settings, Onboarding, Diagnostics, And Pairing Polish
+
+Branch:
+`codex/ios-settings-onboarding-diagnostics-pairing-current`
+
+Implementation state:
+
+- The delegated thread first produced a source-backed review packet for
+  `IARM-SURFACE-010`, `IARM-SURFACE-017`, and `IARM-SURFACE-018`, then paused
+  for UI/UX approval before implementation.
+- The approved design kept server-health detail inside the Server page or the
+  disconnected Settings card, kept model/provider/auth state inside Agent and
+  Providers, retained the existing footer feedback button, and added only a
+  minimal Diagnostics section.
+- After implementation review, the user requested one standardized
+  onboarding/connect presentation. The final state routes first-run setup,
+  Server-page pairing/repair, and pairing URLs through the same
+  `OnboardingFlowView` and `OnboardingSheetPresentation` large-detent policy.
+
+User-facing state:
+
+- Settings main remains a compact launcher grid. It does not grow a
+  server-health dashboard or fixed feature index.
+- The Server page remains the owner for paired-server identity, reachability,
+  runtime-evidence settings, pairing/reconnect/forget controls, and the new
+  minimal Diagnostics section. Diagnostics exposes one Logs row with compact
+  copy explaining local redacted logs and automatic server sync while
+  connected.
+- The Logs sheet text now says local entries and server sync, avoiding a false
+  implication that the sheet browses canonical server logs.
+- Agent settings now surfaces `server.defaultProvider` beside default model and
+  workspace. Known provider ids render friendly labels; unknown server-returned
+  provider ids stay visible as server ids instead of being replaced with fake
+  assumptions.
+- Onboarding preparation copy is shorter and action-oriented. Server
+  Settings-launched repair for an already paired server closes after a
+  successful token refresh when the host and port still match; edited origins
+  continue as fresh pairing and setup.
+- Feedback remains the existing Settings footer action. With no configured
+  recipient, it shows the existing local alert instead of opening a send flow.
+
+Data ownership:
+
+- Settings values: existing `settings::get`, `settings::update`, and
+  `settings::reset` snapshots through `SettingsState` and the settings
+  repository boundary.
+- Provider/model/auth presentation: existing settings snapshot, model list, and
+  masked auth state; no local provider truth is invented.
+- Server identity and reachability: local paired-server store plus current
+  engine connection state.
+- Pairing: local pairing form state, strict local host validation, Keychain
+  token storage, existing pairing probe, and current settings/auth hydration.
+- Diagnostics/logs: bounded local iOS logs, existing client-log ingestion to
+  server logs while connected, and existing feedback bundle assembly.
+
+Rejected or deferred:
+
+- Old fixed product dashboards, notification inboxes, APNs/device-broker
+  behavior, skills/rules/memory/worktree/process/job/goal/subagent/approval
+  state, web/research state, source-control surfaces, queue dashboards, and
+  placeholder backend facts remain absent.
+- No new public `/engine` method, server setting, database table, provider
+  behavior, auth behavior, background service, or fake server-health fact was
+  added.
+- Legacy setup/settings concepts are not permanently banned, but they remain
+  deferred until a current server/resource owner exists and the user approves a
+  specific modern design.
+
+Validated:
+
+- `cd packages/ios-app && xcodegen generate` completed after adding
+  `OnboardingFlowPresentation.swift`.
+- Focused iOS 26.5 simulator tests passed:
+  `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ServerSettingsTests -only-testing:TronMobileTests/SettingsStateTests -only-testing:TronMobileTests/SettingsParityTests -only-testing:TronMobileTests/ServerSettingsPageTests -only-testing:TronMobileTests/ProvidersSettingsPageTests -only-testing:TronMobileTests/AgentSettingsPageLayoutTests -only-testing:TronMobileTests/OnboardingStateTests -only-testing:TronMobileTests/OnboardingFlowLayoutTests -only-testing:TronMobileTests/IPadSheetPresentationTests -only-testing:TronMobileTests/SourceGuardTests -quiet`.
+- Computer Use validation on iPhone 17 Pro, iOS 26.5 confirmed Settings main,
+  Server reachability, Server Diagnostics, Logs from Server Diagnostics,
+  Agent provider/model defaults, feedback unconfigured alert, and the
+  standardized large Server-launched pairing sheet. Screenshot evidence lives
+  under `/tmp/tron-ios-affordance-validation/slice5/`, including
+  `settings-main-beta.png`, `server-page-connected-beta.png`,
+  `server-diagnostics-bottom-beta.png`,
+  `logs-from-server-diagnostics-beta.png`,
+  `agent-provider-model-beta.png`, `feedback-unconfigured-alert-beta.png`, and
+  `pairing-connect-large-centralized-beta.png`.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed with 6 tests.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` returned no tracked ignored files.
+
 ## Remaining Phase 1 Queue
 
-The next recommended restoration slice is `phase1_slice_5`: settings,
-onboarding, diagnostics, and pairing polish over current server facts.
-
-Recommended Slice 5 starting scope:
-
-- Start with a review packet, not implementation.
-- Inspect old evidence rows `IARM-SURFACE-010`, `IARM-SURFACE-017`, and
-  `IARM-SURFACE-018`, covering support services, settings, onboarding,
-  provider/model state, pairing, logs, feedback, and diagnostics.
-- Compare only against current server facts and local iOS state: paired-server
-  store, pairing host validation, onboarding hydration, settings snapshots,
-  provider/auth/model state, logs, feedback bundle, diagnostics, and current
-  connection status.
-- Propose minimal native UI/UX polish for real daily-use surfaces: first-run
-  pairing/onboarding clarity, settings information architecture, model/provider
-  state clarity, diagnostics/logs discoverability, feedback failure states, and
-  pairing/server health affordances.
-- Do not restore fixed product dashboards, old notification inboxes, APNs,
-  server device broker behavior, skills/rules/memory/worktree/process status,
-  or any backend capability not already available through current server facts.
-- Ask the user about visual density, how explicit onboarding should be, where
-  diagnostics/log affordances belong, and which old setup/settings concepts
-  should be rejected rather than redesigned.
-- Required validation should include focused Swift tests for any touched
-  settings/onboarding/diagnostics/pairing state mappers and views, source guards
-  against fake server facts, iOS 26.5 simulator screenshots for approved visible
-  states, `xcodegen generate` when Swift/project files change,
-  `ios_affordance_restoration_map_invariants`, `scripts/personal-info-guard.sh`,
-  `git diff --check`, `git ls-files -ci --exclude-standard`, and clean status.
-
-Later Phase 1 items remain:
-
-- `phase1_slice_6`: notification/inbox concept review only if it can remain
+The next recommended restoration slice is `phase1_slice_6`:
+notification/inbox concept review only if it can remain
   truthful without fake push state.
 - Remaining local-native affordance families from the inventory after review.
 

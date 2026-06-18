@@ -7,6 +7,7 @@ import Foundation
 /// This mirrors the primitive server settings surface. Product policy planes
 /// and fixed workflow settings are intentionally absent.
 struct ServerSettings: Decodable {
+    let defaultProvider: String
     let defaultModel: String
     let defaultWorkspace: String?
     let tailscaleIp: String?
@@ -24,7 +25,7 @@ struct ServerSettings: Decodable {
     }
 
     private enum ServerKeys: String, CodingKey {
-        case defaultModel, defaultWorkspace, tailscaleIp, transcription
+        case defaultProvider, defaultModel, defaultWorkspace, tailscaleIp, transcription
     }
 
     private enum ContextKeys: String, CodingKey {
@@ -47,6 +48,7 @@ struct ServerSettings: Decodable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
         let serverContainer = try container.nestedContainer(keyedBy: ServerKeys.self, forKey: .server)
+        defaultProvider = try serverContainer.decode(String.self, forKey: .defaultProvider)
         defaultModel = try serverContainer.decode(String.self, forKey: .defaultModel)
         defaultWorkspace = try serverContainer.decodeIfPresent(String.self, forKey: .defaultWorkspace)
         tailscaleIp = try serverContainer.decodeIfPresent(String.self, forKey: .tailscaleIp)
@@ -100,6 +102,7 @@ struct ServerSettingsUpdate: Encodable {
     var storage: StorageUpdate?
 
     struct ServerUpdate: Encodable {
+        var defaultProvider: String?
         var defaultModel: String?
         var defaultWorkspace: String?
         var tailscaleIp: String?

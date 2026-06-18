@@ -65,6 +65,7 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
     func testAgentSettingsPrimitiveCardsRenderForVisualQA() throws {
         let settingsState = SettingsState()
         settingsState.isLoaded = true
+        settingsState.defaultProvider = "openai-codex"
         settingsState.quickSessionWorkspace = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("tron-visual-qa")
             .path
@@ -181,6 +182,19 @@ final class AgentSettingsPageLayoutTests: XCTestCase {
         XCTAssertTrue(
             content.contains("ForEach(ProviderInfo.services)"),
             "Services must stay visible in the Providers landscape projection"
+        )
+    }
+
+    func testAgentSettingsSurfacesDefaultProviderInsideAgentPageOnly() throws {
+        let agent = try settingsPageSource(named: "AgentSettingsPage.swift")
+        let settingsMain = try source(pathComponents: ["Sources", "UI", "Settings", "Shell", "SettingsView+MainSection.swift"])
+
+        XCTAssertTrue(agent.contains("label: \"Provider\""))
+        XCTAssertTrue(agent.contains("ProviderInfo.settingsOptions(including: settingsState.defaultProvider)"))
+        XCTAssertTrue(agent.contains("updateServerSetting(.defaultProvider(newValue))"))
+        XCTAssertFalse(
+            settingsMain.contains("defaultProvider"),
+            "Default provider should stay inside Agent/Providers pages, not the Settings main grid"
         )
     }
 

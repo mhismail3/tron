@@ -72,7 +72,8 @@ final class OnboardingState {
     ///
     /// The sheet is swipeable, but setup pages depend on a live paired
     /// server for settings/auth engine protocols. Keep this transient: onboarding
-    /// completion is only persisted after the final setup page.
+    /// completion is persisted after the final setup page, except Settings
+    /// repair of an existing server can close immediately after pairing.
     var hasPairedMac = false
 
     var pairingHost: String = ""
@@ -90,6 +91,10 @@ final class OnboardingState {
 
     /// Inline failure for the Connect button. `nil` clears the label.
     var pairingError: PairingStepValidator.Failure?
+
+    /// Settings-launched repair of an existing server should close after a
+    /// successful probe/token refresh instead of replaying first-run setup.
+    var completesAfterPairing = false
 
     /// True while a `system::ping` round-trip is in flight; the View disables
     /// the form and shows a progress indicator.
@@ -155,6 +160,7 @@ final class OnboardingState {
     /// Delegates the field-distribution rule (including the "treat 'My Mac'
     /// as placeholder" semantics) to `PairingPayload.distributing(...)`.
     func acceptPairingPayload(_ payload: PairingURLParser.PairingPayload) {
+        let shouldCompleteAfterPairing = completesAfterPairing && payloadMatchesPrefilledServer(payload)
         beginPairingEntry()
         let distributed = payload.distributing(currentLabel: pairingLabel)
         currentStep = .connect
@@ -162,6 +168,7 @@ final class OnboardingState {
         pairingPort = distributed.port
         pairingToken = distributed.token
         pairingLabel = distributed.label
+        completesAfterPairing = shouldCompleteAfterPairing
         clearPairingPrefill()
         pairingError = nil
     }
@@ -219,7 +226,26 @@ final class OnboardingState {
         selectStep(nextStep)
     }
 
-    /// Prepares the dismissible Settings-launched onboarding sheet.
+    /// Prepares the first-run onboarding sheet from a clean intro state.
+    ///
+    /// Server Settings and pairing URLs can reopen the same view at the
+    /// connect step. First-run presentation must not inherit that transient
+    /// state when the persisted completion flag is still false.
+    func prepareFirstRunOnboarding() {
+        currentStep = .welcome
+        hasPairedMac = false
+        pairingHost = ""
+        pairingPort = AppConstants.prodPort
+        pairingToken = ""
+        pairingLabel = "My Mac"
+        pairingError = nil
+        isConnecting = false
+        setupSnapshot.reset()
+        clearPairingPrefill()
+        completesAfterPairing = false
+    }
+
+    /// Prepares the dismissible Server-settings-launched onboarding sheet.
     ///
     /// Settings can reopen onboarding after first-run completion. That path
     /// must skip the welcome/install pages, clear any prior server-backed setup
@@ -235,6 +261,7 @@ final class OnboardingState {
         pairingPrefilledServerId = server?.id
         pairingPrefilledServerHost = server?.host
         pairingPrefilledServerPort = server.map { String($0.port) }
+        completesAfterPairing = server != nil
     }
 
     /// Clears setup state before the user pairs a server.
@@ -249,6 +276,23 @@ final class OnboardingState {
         isConnecting = false
         setupSnapshot.reset()
         clearPairingPrefill()
+        completesAfterPairing = false
+    }
+
+    /// Starts one Connect attempt without discarding Settings-launched repair
+    /// metadata. If the attempt fails, stored-token retry remains available.
+    func beginPairingAttempt(for payload: PairingURLParser.PairingPayload) {
+        let shouldCompleteAfterPairing = completesAfterPairing && payloadMatchesPrefilledServer(payload)
+        beginPairingAttempt()
+        completesAfterPairing = shouldCompleteAfterPairing
+    }
+
+    private func beginPairingAttempt() {
+        currentStep = .connect
+        hasPairedMac = false
+        pairingError = nil
+        isConnecting = false
+        setupSnapshot.reset()
     }
 
     /// Reset the sheet to its initial state. Used by tests and any
@@ -262,9 +306,20 @@ final class OnboardingState {
         pairingToken = ""
         pairingLabel = "My Mac"
         clearPairingPrefill()
+        completesAfterPairing = false
         pairingError = nil
         isConnecting = false
         setupSnapshot.reset()
+    }
+
+    private func payloadMatchesPrefilledServer(_ payload: PairingURLParser.PairingPayload) -> Bool {
+        guard let prefilledHost = pairingPrefilledServerHost,
+              let prefilledPort = pairingPrefilledServerPort else {
+            return false
+        }
+
+        return PairingPersistor.normalizeHost(payload.host) == PairingPersistor.normalizeHost(prefilledHost)
+            && String(payload.port) == prefilledPort
     }
 
     private var canUseStoredPairingToken: Bool {

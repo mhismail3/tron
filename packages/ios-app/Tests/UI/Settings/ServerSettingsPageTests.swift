@@ -13,6 +13,15 @@ struct ServerSettingsPageTests {
         #expect(SettingsLabels.loadingServerSettingsDescription == "Loading server settings from the active server.")
     }
 
+    @Test("server page diagnostics copy stays local and minimal")
+    func serverPageDiagnosticsCopyStaysLocalAndMinimal() {
+        #expect(ConnectionSettingsDiagnosticsCopy.sectionTitle == "Diagnostics")
+        #expect(ConnectionSettingsDiagnosticsCopy.logsLabel == "Logs")
+        #expect(ConnectionSettingsDiagnosticsCopy.logsAction == "View")
+        #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("redacted local iOS logs"))
+        #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("server logs when available"))
+    }
+
     @Test("paired server menu uses server-specific actions")
     func pairedServerMenuUsesServerSpecificActions() {
         #expect(PairedServerMenuAction.allCases.map(\.title) == [

@@ -45,8 +45,13 @@ struct OnboardingFlowView: View {
                         dependencies: dependencies,
                         onPaired: {
                             withAnimation(.snappy(duration: 0.28)) {
-                                state.hasPairedMac = true
-                                state.currentStep = .workspace
+                                if state.completesAfterPairing {
+                                    state.complete()
+                                    onComplete()
+                                } else {
+                                    state.hasPairedMac = true
+                                    state.currentStep = .workspace
+                                }
                             }
                         }
                     )
@@ -205,45 +210,45 @@ internal struct OnboardingInfoCopy: Equatable {
 }
 
 internal enum OnboardingCopy {
-    static let welcomeSubtitle = "Tron is a local, private AI agent that runs on your machine. Unlike other agents, you talk to Tron from your iPhone."
+    static let welcomeSubtitle = "Pair this iPhone with the Mac running Tron."
     static let welcomeRows = [
         OnboardingInfoCopy(
             systemImage: "desktopcomputer",
-            title: "Install the Mac server",
-            subtitle: "Tron runs in the background on your Mac device"
+            title: "Run Tron on Mac",
+            subtitle: "The server stays local to your machine"
         ),
         OnboardingInfoCopy(
             systemImage: "network",
-            title: "Connect privately",
-            subtitle: "Tron uses your Tailscale account to securely and privately link your devices"
+            title: "Use your private network",
+            subtitle: "Tailscale links this iPhone to the Mac"
         ),
         OnboardingInfoCopy(
             systemImage: "qrcode.viewfinder",
-            title: "Pair seamlessly",
-            subtitle: "Use the QR code provided during Mac installation to quickly pair your iPhone"
+            title: "Scan or paste the code",
+            subtitle: "The pairing token is stored in Keychain"
         ),
     ]
 
-    static let tailscaleSubtitle = "Tron uses your Tailscale account to link your devices on your private tailnet. This requires the Tailscale VPN to be set up on this iPhone."
+    static let tailscaleSubtitle = "Use the same Tailscale account on this iPhone and the Mac."
     static let tailscaleRows = [
         OnboardingInfoCopy(
             systemImage: "app.badge",
-            title: "Download the Tailscale app",
-            subtitle: "Use the link below to download Tailscale from the App Store"
+            title: "Install Tailscale",
+            subtitle: "Open the App Store if it is not already installed"
         ),
         OnboardingInfoCopy(
             systemImage: "person.crop.circle",
-            title: "Sign in to your account",
-            subtitle: "Use the same account you use to sign in on your Mac"
+            title: "Sign in",
+            subtitle: "Use the account connected to your Mac"
         ),
         OnboardingInfoCopy(
             systemImage: "checkmark.shield",
-            title: "Come back here when connected",
-            subtitle: "Tron verifies reachability when you connect to the Mac server"
+            title: "Return connected",
+            subtitle: "Tron verifies reachability before saving the pairing"
         ),
     ]
 
-    static let installMacSubtitle = "Tron runs on your own Mac device in the background. Install the Tron server on your Mac, then come back here when the installer shows the QR code pairing screen."
+    static let installMacSubtitle = "Install Tron on the Mac, then use the pairing screen shown by the Mac app."
     static let installMacCopyButtonTitle = "Copy Link"
     static let installMacCopiedButtonTitle = "Copied"
     static let installMacReleasesButtonTitle = "Open Releases page"

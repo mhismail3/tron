@@ -35,6 +35,10 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Shell/SettingsView.swift"),
             encoding: .utf8
         )
+        let connectionSettingsPage = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
+            encoding: .utf8
+        )
         let logViewer = try String(
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/System/LogViewer.swift"),
             encoding: .utf8
@@ -75,11 +79,16 @@ extension SourceGuardTests {
         #expect(settingsView.contains("Button { showLogViewer = true }"))
         #expect(settingsView.contains("LogViewer()"))
         #expect(!settingsView.contains("#if DEBUG || BETA"))
+        #expect(connectionSettingsPage.contains("@State private var showLogViewer = false"))
+        #expect(connectionSettingsPage.contains("SettingsSectionHeader(title: ConnectionSettingsDiagnosticsCopy.sectionTitle)"))
+        #expect(connectionSettingsPage.contains("showLogViewer = true"))
+        #expect(connectionSettingsPage.contains("LogViewer()"))
         #expect(!logViewer.hasPrefix("#if DEBUG || BETA"))
         #expect(!logViewer.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("#endif"))
         #expect(!logViewer.contains("exportLogsToServer"))
         #expect(!logViewer.contains("square.and.arrow.up"))
-        #expect(logViewer.contains("Server sync is automatic while connected"))
+        #expect(logViewer.contains("local entries • Server sync runs while connected"))
+        #expect(!logViewer.contains("Server sync is automatic while connected"))
         #expect(ingestionService.contains("ClientLogIngestionPlanner"))
         #expect(ingestionService.contains("ios:client-log-ingest:"))
         #expect(ingestionService.contains("uploadedEntryFingerprints"))
@@ -104,10 +113,11 @@ extension SourceGuardTests {
         #expect(!ingestBlock.contains("#if DEBUG || BETA"))
         #expect(!ingestBlock.contains("logger.info"))
 
-        #expect(architectureDoc.contains("The settings toolbar exposes Logs in every build configuration."))
-        #expect(architectureDoc.contains("mirrors bounded client logs into the server `logs` table"))
-        #expect(architectureDoc.contains("self-feeding diagnostics loop"))
-        #expect(rootReadme.contains("Settings also exposes the Logs sheet in every iOS build configuration"))
+        #expect(architectureDoc.contains("The settings toolbar and the Servers page Diagnostics section expose Logs in"))
+        #expect(architectureDoc.contains("client log ingestion service mirrors bounded client logs into the server"))
+        #expect(architectureDoc.contains("`logs` table while connected"))
+        #expect(architectureDoc.contains("Successful ingest transport chatter is filtered"))
+        #expect(rootReadme.contains("Settings also exposes the Logs sheet in every iOS build configuration from the toolbar and the Servers page Diagnostics section"))
         #expect(rootReadme.contains("automatically ingests deduplicated client logs"))
         #expect(rootReadme.contains("self-feeding diagnostics loops"))
     }

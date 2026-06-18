@@ -269,7 +269,7 @@ struct PairingStep: View {
     }
 
     private func runValidatedConnect(_ payload: PairingURLParser.PairingPayload) {
-        state.beginPairingEntry()
+        state.beginPairingAttempt(for: payload)
         scanError = nil
         state.isConnecting = true
         Task { await runProbe(payload: payload) }

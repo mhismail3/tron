@@ -33,6 +33,7 @@ protocol SessionEventRepository: AnyObject {
 /// UI/session-facing settings snapshot. The engine repository maps the wire
 /// `ServerSettings` DTO into this contract before it crosses into SwiftUI.
 struct ServerSettingsSnapshot: Equatable, Sendable {
+    let defaultProvider: String
     let defaultModel: String
     let defaultWorkspace: String?
     let compactionPreserveRecentCount: Int
@@ -44,6 +45,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
     let transcriptionEnabled: Bool
 
     init(
+        defaultProvider: String,
         defaultModel: String,
         defaultWorkspace: String?,
         compactionPreserveRecentCount: Int,
@@ -54,6 +56,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
         storageMaxDatabaseMb: UInt64,
         transcriptionEnabled: Bool
     ) {
+        self.defaultProvider = defaultProvider
         self.defaultModel = defaultModel
         self.defaultWorkspace = defaultWorkspace
         self.compactionPreserveRecentCount = compactionPreserveRecentCount
@@ -67,6 +70,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
 
     init(_ settings: ServerSettings) {
         self.init(
+            defaultProvider: settings.defaultProvider,
             defaultModel: settings.defaultModel,
             defaultWorkspace: settings.defaultWorkspace,
             compactionPreserveRecentCount: settings.compaction.preserveRecentCount,
@@ -83,6 +87,7 @@ struct ServerSettingsSnapshot: Equatable, Sendable {
 /// UI-owned settings mutation vocabulary translated to wire DTOs inside the
 /// settings repository boundary.
 enum SettingsMutation {
+    case defaultProvider(String)
     case defaultWorkspace(String)
     case defaultModel(String)
     case compactionTriggerTokenThreshold(Double)

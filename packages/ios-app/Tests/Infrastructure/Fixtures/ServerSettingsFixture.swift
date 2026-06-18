@@ -19,6 +19,7 @@ enum ServerSettingsFixture {
         let json = """
         {
             "server": {
+                "defaultProvider": "anthropic",
                 "defaultModel": "claude-sonnet-4-6",
                 "transcription": {
                     "enabled": false

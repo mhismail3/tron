@@ -582,6 +582,7 @@
 		E059D93A27AAA61E4345AE76 /* CapabilityClassifiedErrorSection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C543DE93BEB24B5F08697EC /* CapabilityClassifiedErrorSection.swift */; };
 		E0E646355406FA3A1B5CB661 /* DecodedImageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E27FC7BC1318430C64A04D0 /* DecodedImageView.swift */; };
 		E1502E4E36C30E1B04D320A8 /* EventStoreManager+RefreshCoordination.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE839ACED250897F76A00180 /* EventStoreManager+RefreshCoordination.swift */; };
+		E171D9EE183ED05BCB2EF7BA /* OnboardingFlowPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5162879FD4FA35303833EAB4 /* OnboardingFlowPresentation.swift */; };
 		E201C62862B99D46F195903B /* ClientLogIngestionService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF974D3E406349AD812D1FE4 /* ClientLogIngestionService.swift */; };
 		E223303DDBA6E092BD72A760 /* SessionEventSummaryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8C5C2E1F613BA27BF19278F9 /* SessionEventSummaryTests.swift */; };
 		E2297D3D46A237091C5F6E11 /* TokenRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2A65D382D74B62A81220DD38 /* TokenRecord.swift */; };
@@ -905,6 +906,7 @@
 		5043827F34D6E8F380678A39 /* PairingValidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingValidationTests.swift; sourceTree = "<group>"; };
 		5114C2492FC510C3C00E9D67 /* DiffFormattingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiffFormattingTests.swift; sourceTree = "<group>"; };
 		5148FA115DE109E5F8083A13 /* SettingsRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsRow.swift; sourceTree = "<group>"; };
+		5162879FD4FA35303833EAB4 /* OnboardingFlowPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingFlowPresentation.swift; sourceTree = "<group>"; };
 		51873BF6C3F8705F32527666 /* DateParserCachingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DateParserCachingTests.swift; sourceTree = "<group>"; };
 		51A34CF46E7822233DD1B974 /* ModelClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelClientTests.swift; sourceTree = "<group>"; };
 		51BD420D4470906A029BB42A /* ChatView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatView.swift; sourceTree = "<group>"; };
@@ -3057,6 +3059,7 @@
 		E78485F330BDC6DC45F154A9 /* Flow */ = {
 			isa = PBXGroup;
 			children = (
+				5162879FD4FA35303833EAB4 /* OnboardingFlowPresentation.swift */,
 				7452461BC5C74C7C694E6668 /* OnboardingFlowView.swift */,
 				4B05D15A2FB94806E36BAD6B /* OnboardingShell.swift */,
 			);
@@ -3760,6 +3763,7 @@
 				0F558A11B6837D4A9242802E /* OAuthLoginSheet.swift in Sources */,
 				D4AA837CE174B62737114AA2 /* OAuthLoopbackServer.swift in Sources */,
 				4FBB6C52D85CAD842179B8AA /* OAuthWebView.swift in Sources */,
+				E171D9EE183ED05BCB2EF7BA /* OnboardingFlowPresentation.swift in Sources */,
 				03488B68047FE5B0FDF35CA1 /* OnboardingFlowView.swift in Sources */,
 				DEED372E2B670ABD019B13B7 /* OnboardingSetupSnapshot.swift in Sources */,
 				702FC02D5C4FC09872D61D06 /* OnboardingShell.swift in Sources */,

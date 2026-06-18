@@ -36,6 +36,55 @@ final class OnboardingFlowLayoutTests: XCTestCase {
         )
     }
 
+    func testOnboardingLaunchesUseOneLargeSheetPresenter() throws {
+        let app = try source(pathComponents: [
+            "Sources",
+            "App",
+            "Lifecycle",
+            "TronMobileApp.swift",
+        ])
+        let presentation = try source(pathComponents: [
+            "Sources",
+            "UI",
+            "Onboarding",
+            "Flow",
+            "OnboardingFlowPresentation.swift",
+        ])
+
+        XCTAssertTrue(
+            presentation.contains("static let detents: Set<PresentationDetent> = [.large]"),
+            "Onboarding and pairing should share one large sheet policy"
+        )
+        XCTAssertTrue(
+            app.contains("private func presentOnboarding("),
+            "App lifecycle should centralize onboarding sheet presentation"
+        )
+        XCTAssertTrue(
+            app.contains("presentOnboarding(.firstRun)"),
+            "First-run launch should use the central presenter"
+        )
+        XCTAssertTrue(
+            app.contains("presentOnboarding(.serverSettings)"),
+            "Server-page pairing launch should use the central presenter"
+        )
+        XCTAssertTrue(
+            app.contains("presentOnboarding(.pairingURL)"),
+            "Pairing URLs should use the central presenter"
+        )
+        XCTAssertTrue(
+            app.contains(".adaptivePresentationDetents(OnboardingSheetPresentation.detents"),
+            "The sheet modifier should consume the central onboarding detent policy"
+        )
+        XCTAssertFalse(
+            app.contains(".adaptivePresentationDetents([.medium, .large]"),
+            "Onboarding should not reintroduce a separate medium-detent connect flow"
+        )
+        XCTAssertFalse(
+            app.contains("onboardingComplete = false\n        return true"),
+            "Pairing URLs should not fake first-run onboarding completion state"
+        )
+    }
+
     private func source(pathComponents: [String]) throws -> String {
         var url = try projectRoot()
         for component in pathComponents {
