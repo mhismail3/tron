@@ -652,6 +652,9 @@ User-facing state:
   of edge-to-edge flat interactive backgrounds.
 - The row containers use the existing `sectionFill` liquid-glass helper with
   restrained emerald stroke/shadow and pressed-state feedback.
+- A follow-up bug fix moved the pressed-state treatment onto an explicit outer
+  row glass surface so the container itself responds to touch, not only the
+  text/icon content inside it.
 - Existing dashboard behavior remains intact: workspace headers stay larger
   than session rows, rows remain compact and one-line, and untitled sessions
   still display as `New Session`.
@@ -678,10 +681,17 @@ Validated:
   `com.tron.mobile.beta` on iPhone 17 Pro, iOS 26.5. It confirmed the dashboard
   rows are inset from the screen edges, render as liquid-glass containers, keep
   `New Session` text legible, and still open the selected chat on tap.
+  The follow-up container-level press fix was validated with a recorded row tap
+  showing the outer glass surface participates in the touch response.
   Screenshot evidence:
   `/tmp/tron-ios-dashboard-row-glass-validation/ui/01-dashboard-inset-glass-rows.png`
   and
   `/tmp/tron-ios-dashboard-row-glass-validation/ui/02-dashboard-after-row-tap.png`.
+  Follow-up evidence:
+  `/tmp/tron-ios-dashboard-row-container-press-validation/ui/01-before-row-press.png`,
+  `/tmp/tron-ios-dashboard-row-container-press-validation/ui/02-after-row-tap-returned.png`,
+  and
+  `/tmp/tron-ios-dashboard-row-container-press-validation/ui/row-container-press.mp4`.
 
 ## Remaining Phase 1 Queue
 

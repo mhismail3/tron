@@ -64,6 +64,7 @@ enum SessionDashboardLayout {
     static let rowTrailingMinimumSpacing: CGFloat = 10
     static let rowContainerCornerRadius: CGFloat = 12
     static let rowPressedScale: CGFloat = 0.988
+    static let rowPressedBrightness: Double = 0.035
     static let deletingRowOpacity = 0.45
     static let floatingButtonSize: CGFloat = 56
     static let floatingButtonTrailingPadding: CGFloat = 20
@@ -201,13 +202,12 @@ struct SessionDashboardRowButtonStyle: ButtonStyle {
             style: .continuous
         )
 
-        configuration.label
-            .sectionFill(
-                .tronEmerald,
-                cornerRadius: SessionDashboardLayout.rowContainerCornerRadius,
-                subtle: !isSelected,
-                interactive: true
-            )
+        ZStack(alignment: .leading) {
+            rowContainerSurface(isPressed: configuration.isPressed)
+
+            configuration.label
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
             .clipShape(shape)
             .overlay {
                 shape
@@ -222,6 +222,17 @@ struct SessionDashboardRowButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.94 : 1)
             .contentShape(shape)
             .animation(.smooth(duration: 0.14), value: configuration.isPressed)
+    }
+
+    private func rowContainerSurface(isPressed: Bool) -> some View {
+        Color.clear
+            .sectionFill(
+                .tronEmerald,
+                cornerRadius: SessionDashboardLayout.rowContainerCornerRadius,
+                subtle: !isSelected && !isPressed,
+                interactive: true
+            )
+            .brightness(isPressed ? SessionDashboardLayout.rowPressedBrightness : 0)
     }
 
     private func borderColor(isPressed: Bool) -> Color {
