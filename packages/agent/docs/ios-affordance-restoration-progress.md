@@ -6,20 +6,21 @@ Last reconciled from implementation threads:
 
 - `019ecf5d-c3ca-7062-94ed-4cc636441cfe`
 - `019ed6d5-c564-7e20-89b2-d7d2e7a74c3a`
+- `019ed71f-a1c5-7451-a026-8ddbc664ffda`
 
-Implementation branch:
-`codex/ios-prompt-input-snippet-affordance-current`
+Latest implementation branch:
+`codex/ios-chat-visual-cues-status-affordance-current`
 
-Implementation worktree:
-`/Users/<USER>/.codex/worktrees/0ecf/tron`
+Latest implementation worktree:
+`/Users/<USER>/.codex/worktrees/15e6/tron`
 
-Merged baseline:
-`84451c969 Refine camera capture confirmation controls`
+Current orchestration checkpoint:
+`09d155bda Remove empty chat placeholder`
 
-Merged checkpoint:
-`d69afc6a16d7d89e05a1eca54167a94065a48449 Rename attachment menu actions`
+Previous orchestration checkpoint:
+`48054db64 Reconcile prompt input restoration progress`
 
-Previous merged checkpoint:
+Previous implementation checkpoint:
 `4e66af3022508b13a6229020d529ee248e49c5a5 Organize dashboard and title generation`
 
 ## Purpose
@@ -354,6 +355,29 @@ Deferred:
 Branch:
 `codex/ios-chat-visual-cues-status-affordance-current`
 
+Commits:
+
+- `bb9057148 Restore chat visual affordances`
+- `09d155bda Remove empty chat placeholder`
+
+Session analysis:
+
+- The delegated thread first completed a review packet and stopped for user
+  approval. It found that several old visual/status surfaces were already
+  present or migrated under current owners, including thinking rendering,
+  capability status/error rendering, turn failure notifications, and global
+  connection toasts.
+- The user approved a narrow implementation register: loading state, connection
+  centralization, no visible composer-disabled microcopy, one thinking fallback,
+  paved local error notifications, and compact capability evidence.
+- The first implementation commit included a minimal empty-chat `Start talking`
+  placeholder. The user rejected that final visual shape. The follow-up commit
+  removed the placeholder entirely, removed the dashboard/no-selection tagline,
+  and deleted the now-dead empty-state sidebar wrapper.
+- Final behavior is intentionally quieter than both the old tree and the first
+  Slice 4 implementation: after initial load, an empty selected chat renders as
+  blank content with the normal shell/navigation/composer affordances only.
+
 Approved and shipped:
 
 - Loading/blank-empty timeline affordance: `ChatTimelineAuxiliaryState`
@@ -417,11 +441,60 @@ Validated:
   `chat-local-error-pill.png`, `chat-thinking-neural-spark.png`,
   `chat-capability-chip.png`, `chat-connection-toast.png`, and
   `capability-invocation-detail-action-render.png`.
+- After the placeholder removal, the implementation thread reran
+  `xcodegen generate`, the focused chat affordance Swift tests, rebuilt and
+  reinstalled the final app bundle on the iPhone 17 Pro simulator, verified
+  the blank content area through Computer Use, and reran final repository
+  guards.
+- Final closeout reported `scripts/personal-info-guard.sh`, `git diff --check`,
+  `git ls-files -ci --exclude-standard`, and clean `git status` as passing.
+
+Additional orchestration observations:
+
+- A live gpt-5.5 session showed hidden reasoning tokens without visible
+  provider-returned thinking summary content. The existing thinking block path
+  is still intact and recently produced visible thinking in another gpt-5.5
+  session; future UI should not fake unavailable chain-of-thought. A later
+  diagnostics/metadata polish slice may truthfully surface "reasoning used,
+  summary unavailable" when token records show reasoning output but no thinking
+  block exists.
+- iOS logs currently treat an empty live `agent.thinking_end` payload as an
+  unknown event. That did not suppress useful content in the observed session,
+  but a future diagnostics/event-polish pass should either normalize the live
+  event to the retained `stream.thinking_complete` model or suppress empty
+  thinking-end chatter.
 
 ## Remaining Phase 1 Queue
 
 The next recommended restoration slice is `phase1_slice_5`: settings,
 onboarding, diagnostics, and pairing polish over current server facts.
+
+Recommended Slice 5 starting scope:
+
+- Start with a review packet, not implementation.
+- Inspect old evidence rows `IARM-SURFACE-010`, `IARM-SURFACE-017`, and
+  `IARM-SURFACE-018`, covering support services, settings, onboarding,
+  provider/model state, pairing, logs, feedback, and diagnostics.
+- Compare only against current server facts and local iOS state: paired-server
+  store, pairing host validation, onboarding hydration, settings snapshots,
+  provider/auth/model state, logs, feedback bundle, diagnostics, and current
+  connection status.
+- Propose minimal native UI/UX polish for real daily-use surfaces: first-run
+  pairing/onboarding clarity, settings information architecture, model/provider
+  state clarity, diagnostics/logs discoverability, feedback failure states, and
+  pairing/server health affordances.
+- Do not restore fixed product dashboards, old notification inboxes, APNs,
+  server device broker behavior, skills/rules/memory/worktree/process status,
+  or any backend capability not already available through current server facts.
+- Ask the user about visual density, how explicit onboarding should be, where
+  diagnostics/log affordances belong, and which old setup/settings concepts
+  should be rejected rather than redesigned.
+- Required validation should include focused Swift tests for any touched
+  settings/onboarding/diagnostics/pairing state mappers and views, source guards
+  against fake server facts, iOS 26.5 simulator screenshots for approved visible
+  states, `xcodegen generate` when Swift/project files change,
+  `ios_affordance_restoration_map_invariants`, `scripts/personal-info-guard.sh`,
+  `git diff --check`, `git ls-files -ci --exclude-standard`, and clean status.
 
 Later Phase 1 items remain:
 
