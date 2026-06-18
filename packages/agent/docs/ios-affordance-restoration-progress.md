@@ -554,6 +554,86 @@ Validated:
 - `git diff --check` passed.
 - `git ls-files -ci --exclude-standard` returned no tracked ignored files.
 
+### Accepted Follow-Up Work: Cockpit Placement And Dashboard Row Polish
+
+Branch:
+`codex/ios-cockpit-placement-cleanup-current`
+
+Commits:
+
+- `becbc0e95` - `Clean up iOS cockpit chat placement`
+- `34c53dc93` - `Polish iOS dashboard row glass styling`
+- `22cb96e72` - `Fix dashboard row container press feedback`
+- `9d172aa27` - `Use native glass dashboard rows`
+- `0176379ba` - `Align dashboard header and row columns`
+
+User-facing state:
+
+- The passive Agent cockpit banner was removed from the primary chat surface.
+  It had become a prominent idle diagnostics strip rather than an
+  attention-worthy chat signal.
+- Runtime Cockpit access is retained as an operator/diagnostics surface under
+  Settings -> Servers -> Diagnostics. The cockpit sheet was restyled with the
+  app's standard liquid-glass sheet chrome and shared segmented tabs.
+- Chat loading/empty content remains visually quiet. The temporary
+  `Loading messages` spinner row was removed, and empty/loading chat no longer
+  renders explanatory timeline content.
+- Dashboard workspace headers remain larger than session row text, untitled new
+  sessions render as `New Session`, and session rows are inset from the screen
+  edges.
+- The row styling went through two validated corrections. A custom
+  content-level glass treatment was first moved to an outer row surface after
+  user feedback that the container itself felt static. The final accepted state
+  superseded that custom surface with SwiftUI's native interactive liquid-glass
+  row behavior so the platform owns container response, hit testing, and touch
+  affordance.
+- Header and row columns were aligned so the workspace folder icon column lines
+  up with row status icons and the workspace title aligns with session titles.
+
+Deferred or explicitly not changed:
+
+- No notification inbox, APNs, device broker, server notification API, durable
+  inbox state, agent-execution notification family, worker launch flow, or Phase
+  2 agent capability was restored.
+- A chat-level runtime signal may return later only for attention-worthy states
+  with a real owner, such as approval needed, degraded runtime, or a
+  session-relevant active worker. Passive `Idle` diagnostics should not occupy
+  chat.
+- The Agent cockpit remains a server-fact diagnostics surface pending a future
+  first-principles placement review before Phase 2 agent-execution UI.
+
+Validation evidence:
+
+- XcodeGen completed for the touched iOS project after each Swift checkpoint.
+- Focused iOS tests on iPhone 17 Pro, iOS 26.5 passed for dashboard,
+  source-guard, chat visual, cockpit state/view-model, and Settings placement
+  coverage as appropriate to each checkpoint.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed after plan/progress updates.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants -- --nocapture`
+  passed after updating the IOSAC proof for diagnostics placement and standard
+  cockpit sheet styling.
+- `scripts/personal-info-guard.sh`, `git diff --check`, and
+  `git ls-files -ci --exclude-standard` passed.
+- Simulator/Computer Use validation used the current iPhone 17 Pro, iOS 26.5
+  app builds. Evidence includes:
+  `/tmp/tron-ios-cockpit-placement-validation/ui/01-beta-dashboard.png`,
+  `/tmp/tron-ios-cockpit-placement-validation/ui/02-beta-chat-no-cockpit-banner.png`,
+  `/tmp/tron-ios-cockpit-placement-validation/ui/03-beta-runtime-cockpit-sheet.png`,
+  `/tmp/tron-ios-dashboard-row-glass-validation/ui/01-dashboard-inset-glass-rows.png`,
+  `/tmp/tron-ios-dashboard-row-container-press-validation/ui/row-container-press.mp4`,
+  `/tmp/tron-ios-dashboard-row-native-glass-validation/ui/native-glass-row-tap.mp4`,
+  and
+  `/tmp/tron-ios-dashboard-row-alignment-validation/ui/01-dashboard-header-row-alignment.png`.
+
+Effect on Phase 1 queue:
+
+- This was accepted off-plan cleanup/polish of existing restored shell surfaces.
+  It does not consume or replace Slice 6.
+- The next recommended restoration item remains `phase1_slice_6`:
+  notification/inbox concept review only if it can remain truthful without fake
+  push, device-broker, server notification, or agent-execution state.
+
 ## Remaining Phase 1 Queue
 
 The next recommended restoration slice is `phase1_slice_6`: notification/inbox
