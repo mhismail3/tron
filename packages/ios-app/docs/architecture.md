@@ -40,7 +40,8 @@ matching database/event/settings/dependency work.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
 - Grouped session dashboard with collapsible workspace headers and compact
-  one-line session rows, session creation/fork/resume, prompt composer with a
+  inset liquid-glass one-line session rows, session creation/fork/resume,
+  prompt composer with a
   local recent-input picker, a functional-only native attachment menu that
   preserves composer keyboard focus while layering native camera/photo/file
   pickers above it, unified attachments for images/documents, a right-side mic
@@ -280,7 +281,7 @@ dashboard rows prefer generated or explicit session titles, then the latest user
 prompt preview, then `New Session` for untitled new rows. `SessionSidebar`
 composes the dashboard surface and shell actions; `SessionDashboard.swift` owns
 workspace grouping, expansion state, row status mapping, interactive row
-backgrounds, and header/row presentation metrics.
+liquid-glass containers, and header/row presentation metrics.
 
 Server settings shown in the iOS settings UI are snapshots from
 `settings::get`/`settings::reset`; local state exists only to render the active

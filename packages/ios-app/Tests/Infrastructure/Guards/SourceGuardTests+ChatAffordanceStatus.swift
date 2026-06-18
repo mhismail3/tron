@@ -57,6 +57,33 @@ extension SourceGuardTests {
         #expect(serverSettings.contains("AgentCockpitSheet("))
     }
 
+    @Test("Session dashboard rows use inset liquid glass containers")
+    func testSessionDashboardRowsUseInsetLiquidGlassContainers() throws {
+        let iosRoot = iosAppRoot()
+        let dashboard = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionDashboard.swift"),
+            encoding: .utf8
+        )
+        let sidebar = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/SessionSidebar.swift"),
+            encoding: .utf8
+        )
+
+        #expect(dashboard.contains("struct SessionDashboardRowButtonStyle: ButtonStyle"))
+        #expect(dashboard.contains("static let rowContainerHorizontalInset: CGFloat = 16"))
+        #expect(dashboard.contains("static let rowContentHorizontalPadding: CGFloat = 12"))
+        #expect(dashboard.contains("static let rowContainerCornerRadius: CGFloat = 12"))
+        #expect(dashboard.contains("leading: rowContainerHorizontalInset"))
+        #expect(dashboard.contains("trailing: rowContainerHorizontalInset"))
+        #expect(dashboard.contains(".sectionFill("))
+        #expect(dashboard.contains("interactive: true"))
+        #expect(dashboard.contains(".strokeBorder(borderColor(isPressed: configuration.isPressed), lineWidth: 0.75)"))
+        #expect(dashboard.contains(".shadow("))
+        #expect(dashboard.contains(".scaleEffect(configuration.isPressed ? SessionDashboardLayout.rowPressedScale : 1)"))
+        #expect(sidebar.contains(".buttonStyle(SessionDashboardRowButtonStyle(isSelected: session.id == selectedSessionId))"))
+        #expect(sidebar.contains(".listRowInsets(SessionDashboardLayout.rowInsets)"))
+    }
+
     @Test("Thinking indicator is app-owned Neural Spark only")
     func testThinkingIndicatorIsNeuralSparkOnly() throws {
         let iosRoot = iosAppRoot()

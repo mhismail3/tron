@@ -1402,8 +1402,8 @@ packages/ios-app/Sources/
 - **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
-  that prefer generated session titles before prompt fallbacks and show
-  untitled rows as `New Session`,
+  that use inset liquid-glass interactive containers, prefer generated session
+  titles before prompt fallbacks, and show untitled rows as `New Session`,
   prompt input with clearable device-local recent-input reuse, the
   functional-only native composer attachment menu that preserves keyboard
   focus while layering native camera/photo/file pickers above it, composer mic

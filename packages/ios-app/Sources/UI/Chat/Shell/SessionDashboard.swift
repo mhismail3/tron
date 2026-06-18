@@ -51,17 +51,19 @@ struct SessionDashboardWorkspaceExpansion: Equatable {
 
 enum SessionDashboardLayout {
     static let outerHorizontalPadding: CGFloat = 24
+    static let rowContainerHorizontalInset: CGFloat = 16
+    static let rowContentHorizontalPadding: CGFloat = 12
     static let iconColumnWidth: CGFloat = 18
     static let iconTextSpacing: CGFloat = 8
-    static let minimumRowHeight: CGFloat = 34
+    static let minimumRowHeight: CGFloat = 38
     static let listTopContentMargin: CGFloat = 38
     static let listBottomContentMargin: CGFloat = 92
     static let headerTopPadding: CGFloat = 10
     static let headerBottomPadding: CGFloat = 3
-    static let rowVerticalPadding: CGFloat = 5
+    static let rowVerticalPadding: CGFloat = 7
     static let rowTrailingMinimumSpacing: CGFloat = 10
-    static let selectedRowCornerRadius: CGFloat = 9
-    static let rowPressedScale: CGFloat = 0.985
+    static let rowContainerCornerRadius: CGFloat = 12
+    static let rowPressedScale: CGFloat = 0.988
     static let deletingRowOpacity = 0.45
     static let floatingButtonSize: CGFloat = 56
     static let floatingButtonTrailingPadding: CGFloat = 20
@@ -77,7 +79,12 @@ enum SessionDashboardLayout {
     }
 
     static var rowInsets: EdgeInsets {
-        EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 0)
+        EdgeInsets(
+            top: 2,
+            leading: rowContainerHorizontalInset,
+            bottom: 2,
+            trailing: rowContainerHorizontalInset
+        )
     }
 }
 
@@ -189,39 +196,40 @@ struct SessionDashboardRowButtonStyle: ButtonStyle {
     let isSelected: Bool
 
     func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(
+            cornerRadius: SessionDashboardLayout.rowContainerCornerRadius,
+            style: .continuous
+        )
+
         configuration.label
-            .background {
-                let shape = RoundedRectangle(
-                    cornerRadius: SessionDashboardLayout.selectedRowCornerRadius,
-                    style: .continuous
-                )
-
-                ZStack {
-                    shape
-                        .fill(backgroundColor(isPressed: configuration.isPressed))
-
-                    shape
-                        .strokeBorder(borderColor(isPressed: configuration.isPressed), lineWidth: 1)
-                }
+            .sectionFill(
+                .tronEmerald,
+                cornerRadius: SessionDashboardLayout.rowContainerCornerRadius,
+                subtle: !isSelected,
+                interactive: true
+            )
+            .clipShape(shape)
+            .overlay {
+                shape
+                    .strokeBorder(borderColor(isPressed: configuration.isPressed), lineWidth: 0.75)
             }
+            .shadow(
+                color: Color.tronEmerald.opacity(configuration.isPressed ? 0.14 : 0.08),
+                radius: configuration.isPressed ? 6 : 4,
+                y: configuration.isPressed ? 2 : 1
+            )
             .scaleEffect(configuration.isPressed ? SessionDashboardLayout.rowPressedScale : 1)
-            .animation(.smooth(duration: 0.12), value: configuration.isPressed)
-    }
-
-    private func backgroundColor(isPressed: Bool) -> Color {
-        if isSelected {
-            return Color.tronEmerald.opacity(isPressed ? 0.18 : 0.12)
-        }
-
-        return Color.tronOverlay(isPressed ? 0.08 : 0.035)
+            .opacity(configuration.isPressed ? 0.94 : 1)
+            .contentShape(shape)
+            .animation(.smooth(duration: 0.14), value: configuration.isPressed)
     }
 
     private func borderColor(isPressed: Bool) -> Color {
         if isSelected {
-            return Color.tronEmerald.opacity(isPressed ? 0.34 : 0.22)
+            return Color.tronEmerald.opacity(isPressed ? 0.42 : 0.28)
         }
 
-        return Color.tronEmerald.opacity(isPressed ? 0.16 : 0.06)
+        return Color.tronEmerald.opacity(isPressed ? 0.22 : 0.10)
     }
 }
 
@@ -259,7 +267,7 @@ struct SessionDashboardRow: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, SessionDashboardLayout.outerHorizontalPadding)
+        .padding(.horizontal, SessionDashboardLayout.rowContentHorizontalPadding)
         .padding(.vertical, SessionDashboardLayout.rowVerticalPadding)
         .contentShape(Rectangle())
         .hoverEffect(.highlight)

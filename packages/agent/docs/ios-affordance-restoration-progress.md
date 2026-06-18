@@ -641,6 +641,48 @@ Validated:
   and
   `/tmp/tron-ios-cockpit-placement-validation/ui/03-beta-runtime-cockpit-sheet.png`.
 
+### Accepted Follow-Up Work: Dashboard Session Row Liquid Glass
+
+Branch:
+`codex/ios-cockpit-placement-cleanup-current`
+
+User-facing state:
+
+- Session dashboard rows now render as inset liquid-glass row containers instead
+  of edge-to-edge flat interactive backgrounds.
+- The row containers use the existing `sectionFill` liquid-glass helper with
+  restrained emerald stroke/shadow and pressed-state feedback.
+- Existing dashboard behavior remains intact: workspace headers stay larger
+  than session rows, rows remain compact and one-line, and untitled sessions
+  still display as `New Session`.
+
+Validation commands for this checkpoint:
+
+- `cd packages/ios-app && xcodegen generate`
+- `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SessionDashboardPresentationTests -only-testing:TronMobileTests/SourceGuardTests`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+- `scripts/personal-info-guard.sh`
+- `git diff --check`
+- `git ls-files -ci --exclude-standard`
+
+Validated:
+
+- `cd packages/ios-app && xcodegen generate` passed.
+- The focused iOS run first caught one stale source-guard string for the new row
+  inset constant wiring. After correcting the guard to assert the actual
+  `rowInsets` contract, `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SessionDashboardPresentationTests -only-testing:TronMobileTests/SourceGuardTests`
+  passed with 5 selected XCTest cases and 51 Swift Testing source-guard cases.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed with 6 tests.
+- Simulator/Computer Use validation used the current Beta bundle
+  `com.tron.mobile.beta` on iPhone 17 Pro, iOS 26.5. It confirmed the dashboard
+  rows are inset from the screen edges, render as liquid-glass containers, keep
+  `New Session` text legible, and still open the selected chat on tap.
+  Screenshot evidence:
+  `/tmp/tron-ios-dashboard-row-glass-validation/ui/01-dashboard-inset-glass-rows.png`
+  and
+  `/tmp/tron-ios-dashboard-row-glass-validation/ui/02-dashboard-after-row-tap.png`.
+
 ## Remaining Phase 1 Queue
 
 The next recommended restoration slice is `phase1_slice_6`: notification/inbox

@@ -63,20 +63,26 @@ final class SessionDashboardPresentationTests: XCTestCase {
     }
 
     func testDashboardLayoutAlignsHeaderAndSessionColumns() {
-        XCTAssertEqual(SessionDashboardLayout.headerInsets.leading, SessionDashboardLayout.rowInsets.leading)
-        XCTAssertEqual(SessionDashboardLayout.headerInsets.trailing, SessionDashboardLayout.rowInsets.trailing)
         XCTAssertEqual(SessionDashboardLayout.headerInsets.leading, 0)
+        XCTAssertEqual(SessionDashboardLayout.headerInsets.trailing, 0)
+        XCTAssertEqual(SessionDashboardLayout.rowInsets.leading, SessionDashboardLayout.rowContainerHorizontalInset)
+        XCTAssertEqual(SessionDashboardLayout.rowInsets.trailing, SessionDashboardLayout.rowContainerHorizontalInset)
+        XCTAssertEqual(SessionDashboardLayout.rowInsets.top, 2)
+        XCTAssertEqual(SessionDashboardLayout.rowInsets.bottom, 2)
         XCTAssertEqual(SessionDashboardLayout.outerHorizontalPadding, 24)
+        XCTAssertEqual(SessionDashboardLayout.rowContainerHorizontalInset, 16)
+        XCTAssertEqual(SessionDashboardLayout.rowContentHorizontalPadding, 12)
         XCTAssertEqual(SessionDashboardLayout.iconColumnWidth, 18)
         XCTAssertEqual(SessionDashboardLayout.iconTextSpacing, 8)
         XCTAssertGreaterThan(SessionDashboardLayout.headerTitleSize, SessionDashboardLayout.rowTitleSize)
         XCTAssertEqual(SessionDashboardLayout.headerTitleSize, TronTypography.sizeBodyLG)
         XCTAssertEqual(SessionDashboardLayout.rowTitleSize, TronTypography.sizeBody3)
-        XCTAssertEqual(SessionDashboardLayout.minimumRowHeight, 34)
+        XCTAssertEqual(SessionDashboardLayout.minimumRowHeight, 38)
         XCTAssertEqual(SessionDashboardLayout.listTopContentMargin, 38)
         XCTAssertEqual(SessionDashboardLayout.listBottomContentMargin, 92)
         XCTAssertEqual(SessionDashboardLayout.floatingButtonSize, 56)
-        XCTAssertEqual(SessionDashboardLayout.rowPressedScale, 0.985)
+        XCTAssertEqual(SessionDashboardLayout.rowContainerCornerRadius, 12)
+        XCTAssertEqual(SessionDashboardLayout.rowPressedScale, 0.988)
     }
 
     private func makeSession(
