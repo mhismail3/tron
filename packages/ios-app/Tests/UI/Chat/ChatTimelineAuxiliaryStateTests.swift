@@ -6,21 +6,19 @@ final class ChatTimelineAuxiliaryStateTests: XCTestCase {
         XCTAssertEqual(
             ChatTimelineAuxiliaryState.derive(
                 initialLoadComplete: false,
-                messagesIsEmpty: true,
-                workspaceDeleted: false
+                messagesIsEmpty: true
             ),
             .loading
         )
     }
 
-    func testEmptyShowsOnlyAfterInitialLoadWithNoMessages() {
+    func testEmptyChatAfterInitialLoadStaysBlank() {
         XCTAssertEqual(
             ChatTimelineAuxiliaryState.derive(
                 initialLoadComplete: true,
-                messagesIsEmpty: true,
-                workspaceDeleted: false
+                messagesIsEmpty: true
             ),
-            .empty
+            .none
         )
     }
 
@@ -28,19 +26,7 @@ final class ChatTimelineAuxiliaryStateTests: XCTestCase {
         XCTAssertEqual(
             ChatTimelineAuxiliaryState.derive(
                 initialLoadComplete: false,
-                messagesIsEmpty: false,
-                workspaceDeleted: false
-            ),
-            .none
-        )
-    }
-
-    func testWorkspaceDeletedSuppressesEmptyState() {
-        XCTAssertEqual(
-            ChatTimelineAuxiliaryState.derive(
-                initialLoadComplete: true,
-                messagesIsEmpty: true,
-                workspaceDeleted: true
+                messagesIsEmpty: false
             ),
             .none
         )

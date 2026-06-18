@@ -44,7 +44,7 @@ matching database/event/settings/dependency work.
   preserves composer keyboard focus while layering native camera/photo/file
   pickers above it, unified attachments for images/documents, a right-side mic
   affordance for local composer transcription when enabled, and message
-  rendering with quiet empty/loading states, streamed thinking content, and
+  rendering with a quiet blank empty chat, an initial loading state, streamed thinking content, and
   local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
 - Agent cockpit status capsule and sheet for worker lifecycle catalog/resource
@@ -163,9 +163,9 @@ extensions.
 
 The chat timeline owns only truthful local/session presentation state:
 
-- `ChatTimelineAuxiliaryState` derives a mutually exclusive initial loading
-  affordance (`Loading messages`) or empty affordance (`Start talking`) from
-  local initial-load completion, message count, and workspace-deleted state.
+- `ChatTimelineAuxiliaryState` derives only the initial loading affordance
+  (`Loading messages`) from local initial-load completion and message count.
+  Once initial load completes, a chat with no messages stays visually blank.
 - Connection status is app-global. Reconnecting, disconnected, and retry
   signals route through `ToastCenter`/connection retry policy, not through
   separate in-chat connection pills.

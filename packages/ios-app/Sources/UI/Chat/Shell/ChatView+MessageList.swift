@@ -266,17 +266,13 @@ extension ChatView {
     var timelineAuxiliaryView: some View {
         let state = ChatTimelineAuxiliaryState.derive(
             initialLoadComplete: initialLoadComplete,
-            messagesIsEmpty: viewModel.messages.isEmpty,
-            workspaceDeleted: workspaceDeleted
+            messagesIsEmpty: viewModel.messages.isEmpty
         )
 
         switch state {
         case .loading:
             ChatTimelineLoadingView(title: state.title)
                 .id("timelineLoading")
-        case .empty:
-            ChatTimelineEmptyView(title: state.title)
-                .id("timelineEmpty")
         case .none:
             EmptyView()
         }
@@ -399,17 +395,5 @@ struct ChatTimelineLoadingView: View {
         .frame(maxWidth: .infinity)
         .padding(.top, 120)
         .accessibilityElement(children: .combine)
-    }
-}
-
-struct ChatTimelineEmptyView: View {
-    let title: String
-
-    var body: some View {
-        Text(title)
-            .font(TronTypography.messageBody)
-            .foregroundStyle(.tronTextSecondary)
-            .frame(maxWidth: .infinity)
-            .padding(.top, 120)
     }
 }

@@ -67,11 +67,6 @@ struct SessionSidebar: View {
             .environment(\.defaultMinListRowHeight, SessionDashboardLayout.minimumRowHeight)
             .contentMargins(.top, SessionDashboardLayout.listTopContentMargin)
             .contentMargins(.bottom, SessionDashboardLayout.listBottomContentMargin)
-            .overlay {
-                if eventStoreManager.sortedSessions.isEmpty {
-                    SessionDashboardEmptyState()
-                }
-            }
 
             let canCreate = interactionPolicy?.canCreateSession ?? false
             FloatingNewSessionButton(action: onNewSession, size: SessionDashboardLayout.floatingButtonSize)

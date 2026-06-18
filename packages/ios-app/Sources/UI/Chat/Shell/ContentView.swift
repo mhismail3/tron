@@ -259,25 +259,8 @@ struct ContentView: View {
     // MARK: - Event Handlers
 
     private var selectSessionPrompt: some View {
-        // Match WelcomePage structure for consistent UI when sessions exist but none selected
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
-                // Centered content - positioned higher to match WelcomePage
-                VStack(spacing: 16) {
-                    // Circuit logo
-                    Image("TronLogo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 80)
-
-                    // Subtle tagline
-                    Text("Choose a session")
-                        .font(TronTypography.messageBody)
-                        .foregroundStyle(.tronTextSecondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .offset(y: -60)
-
                 // Floating button hidden when the sidebar is visible to avoid duplicates.
                 if !isSidebarVisible {
                     HStack(spacing: 12) {
@@ -431,22 +414,6 @@ struct WelcomePage: View {
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
-                // Centered content - positioned higher
-                VStack(spacing: 16) {
-                    // Circuit logo
-                    Image("TronLogo")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(height: 80)
-
-                    // Subtle tagline
-                    Text("Start talking")
-                        .font(TronTypography.messageBody)
-                        .foregroundStyle(.tronTextSecondary)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .offset(y: -60)
-
                 // Floating button hidden when the sidebar is visible to avoid duplicates.
                 if !isSidebarVisible {
                     HStack(spacing: 12) {
