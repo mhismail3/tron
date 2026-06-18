@@ -11,6 +11,7 @@ const EVIDENCE_PATH: &str =
     "packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md";
 const INVENTORY_PATH: &str = "packages/agent/docs/ios-affordance-restoration-map-inventory.md";
 const INVENTORY_TSV_PATH: &str = "packages/agent/docs/ios-affordance-restoration-map-inventory.tsv";
+const PROGRESS_PATH: &str = "packages/agent/docs/ios-affordance-restoration-progress.md";
 const TARGET_PATH: &str = "packages/agent/tests/ios_affordance_restoration_map_invariants.rs";
 const TARGET_NAME: &str = "ios_affordance_restoration_map_invariants";
 const OLD_REFERENCE: &str = "ad5e484722c6f7abbe764126409494026216ad92";
@@ -253,6 +254,7 @@ fn artifacts_lineage_and_docs_wiring_exist() {
         EVIDENCE_PATH,
         INVENTORY_PATH,
         INVENTORY_TSV_PATH,
+        PROGRESS_PATH,
         TARGET_PATH,
     ] {
         assert!(repo_path(path).exists(), "missing IARM artifact: {path}");
@@ -295,6 +297,8 @@ fn artifacts_lineage_and_docs_wiring_exist() {
             "iOS Affordance Restoration Map",
             "functional-only",
             "does not restore deleted product panels",
+            "Notification and inbox affordances remain deferred",
+            "server-owned APNs/device/capability resource",
             "Phase 2 agent-execution restoration plan",
         ],
     );
@@ -548,6 +552,33 @@ fn phase_two_anchor_covers_deferred_agent_execution_buckets() {
             "IARM inventory must link deferred bucket {bucket}"
         );
     }
+}
+
+#[test]
+fn slice_six_notification_inbox_decision_is_deferred_until_apns_restoration() {
+    assert_contains_all(
+        PROGRESS_PATH,
+        &[
+            "Phase 1 Slice 6: Notification/Inbox Concept Review",
+            "Do not implement a Phase 1 notification/inbox affordance.",
+            "central engine/resource mechanism",
+            "This is not a permanent rejection of APNs.",
+            "Current production source has no notification bell",
+            "Direct inspection of the local Tron SQLite database",
+            "Rejected for Phase 1: fake unread counts",
+            "Deferred to Phase 2/restoration: APNs",
+            "No Swift UI, public `/engine` methods, database tables",
+            "Simulator validation:",
+            "Not required. Slice 6 made no Swift or UI changes",
+            "Phase 1 map should now get a closeout pass",
+        ],
+    );
+
+    let progress = read_repo_file(PROGRESS_PATH);
+    assert!(
+        !progress.contains("The next recommended restoration slice is `phase1_slice_6`"),
+        "Slice 6 is no longer the next recommended slice after the defer decision"
+    );
 }
 
 #[test]

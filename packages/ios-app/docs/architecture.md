@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-18 (IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-18 (IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -22,6 +22,15 @@ The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
 may cache and render server facts, but it must not invent capability policy,
 source-control state, worker state, or product panels locally.
+
+Notification and inbox affordances remain deferred in the current Phase 1
+shell. Local chat error pills, app-global connection toasts, timeline system
+events, Logs, Server Diagnostics, and feedback are the current attention
+surfaces. A notification bell, unread inbox, APNs registration, push delivery,
+device broker behavior, notification read state, and notification delivery
+chips return only with a future server-owned APNs/device/capability resource
+mechanism; iOS must not create a local substitute that implies hidden backend
+truth.
 
 The iOS Affordance Restoration Map is the active planning artifact for
 functional-only Phase 1 iOS UX restoration. It classifies every deleted or
