@@ -82,8 +82,6 @@ final class SessionDashboardPresentationTests: XCTestCase {
         XCTAssertEqual(SessionDashboardLayout.listBottomContentMargin, 92)
         XCTAssertEqual(SessionDashboardLayout.floatingButtonSize, 56)
         XCTAssertEqual(SessionDashboardLayout.rowContainerCornerRadius, 12)
-        XCTAssertEqual(SessionDashboardLayout.rowPressedScale, 0.988)
-        XCTAssertEqual(SessionDashboardLayout.rowPressedBrightness, 0.035)
     }
 
     private func makeSession(

@@ -650,11 +650,15 @@ User-facing state:
 
 - Session dashboard rows now render as inset liquid-glass row containers instead
   of edge-to-edge flat interactive backgrounds.
-- The row containers use the existing `sectionFill` liquid-glass helper with
-  restrained emerald stroke/shadow and pressed-state feedback.
+- The row containers use SwiftUI's native interactive liquid glass on normal
+  row buttons, with restrained emerald tint and the platform-owned touch
+  behavior.
 - A follow-up bug fix moved the pressed-state treatment onto an explicit outer
   row glass surface so the container itself responds to touch, not only the
   text/icon content inside it.
+- A later correction removed the attempted custom drag/offset/spring row
+  behavior and kept the rows on the same native `.glassEffect(...interactive())`
+  model used by the composer input bar.
 - Existing dashboard behavior remains intact: workspace headers stay larger
   than session rows, rows remain compact and one-line, and untitled sessions
   still display as `New Session`.
@@ -682,7 +686,9 @@ Validated:
   rows are inset from the screen edges, render as liquid-glass containers, keep
   `New Session` text legible, and still open the selected chat on tap.
   The follow-up container-level press fix was validated with a recorded row tap
-  showing the outer glass surface participates in the touch response.
+  showing the outer glass surface participates in the touch response. The later
+  native-glass correction must be validated with a fresh simulator recording
+  before closeout.
   Screenshot evidence:
   `/tmp/tron-ios-dashboard-row-glass-validation/ui/01-dashboard-inset-glass-rows.png`
   and
@@ -692,6 +698,11 @@ Validated:
   `/tmp/tron-ios-dashboard-row-container-press-validation/ui/02-after-row-tap-returned.png`,
   and
   `/tmp/tron-ios-dashboard-row-container-press-validation/ui/row-container-press.mp4`.
+  Native-glass correction evidence:
+  `/tmp/tron-ios-dashboard-row-native-glass-validation/ui/01-native-glass-dashboard.png`,
+  `/tmp/tron-ios-dashboard-row-native-glass-validation/ui/02-native-glass-row-opened-chat.png`,
+  and
+  `/tmp/tron-ios-dashboard-row-native-glass-validation/ui/native-glass-row-tap.mp4`.
 
 ## Remaining Phase 1 Queue
 

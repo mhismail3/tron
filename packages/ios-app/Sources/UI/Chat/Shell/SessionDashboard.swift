@@ -63,8 +63,6 @@ enum SessionDashboardLayout {
     static let rowVerticalPadding: CGFloat = 7
     static let rowTrailingMinimumSpacing: CGFloat = 10
     static let rowContainerCornerRadius: CGFloat = 12
-    static let rowPressedScale: CGFloat = 0.988
-    static let rowPressedBrightness: Double = 0.035
     static let deletingRowOpacity = 0.45
     static let floatingButtonSize: CGFloat = 56
     static let floatingButtonTrailingPadding: CGFloat = 20
@@ -190,57 +188,6 @@ struct SessionWorkspaceHeader: View {
         .accessibilityLabel(title)
         .accessibilityValue(isExpanded ? "expanded" : "collapsed")
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")
-    }
-}
-
-struct SessionDashboardRowButtonStyle: ButtonStyle {
-    let isSelected: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        let shape = RoundedRectangle(
-            cornerRadius: SessionDashboardLayout.rowContainerCornerRadius,
-            style: .continuous
-        )
-
-        ZStack(alignment: .leading) {
-            rowContainerSurface(isPressed: configuration.isPressed)
-
-            configuration.label
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-            .clipShape(shape)
-            .overlay {
-                shape
-                    .strokeBorder(borderColor(isPressed: configuration.isPressed), lineWidth: 0.75)
-            }
-            .shadow(
-                color: Color.tronEmerald.opacity(configuration.isPressed ? 0.14 : 0.08),
-                radius: configuration.isPressed ? 6 : 4,
-                y: configuration.isPressed ? 2 : 1
-            )
-            .scaleEffect(configuration.isPressed ? SessionDashboardLayout.rowPressedScale : 1)
-            .opacity(configuration.isPressed ? 0.94 : 1)
-            .contentShape(shape)
-            .animation(.smooth(duration: 0.14), value: configuration.isPressed)
-    }
-
-    private func rowContainerSurface(isPressed: Bool) -> some View {
-        Color.clear
-            .sectionFill(
-                .tronEmerald,
-                cornerRadius: SessionDashboardLayout.rowContainerCornerRadius,
-                subtle: !isSelected && !isPressed,
-                interactive: true
-            )
-            .brightness(isPressed ? SessionDashboardLayout.rowPressedBrightness : 0)
-    }
-
-    private func borderColor(isPressed: Bool) -> Color {
-        if isSelected {
-            return Color.tronEmerald.opacity(isPressed ? 0.42 : 0.28)
-        }
-
-        return Color.tronEmerald.opacity(isPressed ? 0.22 : 0.10)
     }
 }
 
