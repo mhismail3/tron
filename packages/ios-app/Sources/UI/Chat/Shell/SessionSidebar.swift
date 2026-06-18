@@ -8,15 +8,15 @@ struct SessionSidebar: View {
     @Binding var selectedSessionId: String?
     @State private var sessionToArchive: String?
     @State private var showArchiveConfirmation = false
-    @State private var workspaceExpansion = SessionDashboardWorkspaceExpansion()
+    @State private var workspaceExpansion = SessionListWorkspaceExpansion()
 
     private var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
     let onNewSession: () -> Void
     let onDeleteSession: (String) -> Void
     let actions: ShellToolbarActions
 
-    private var workspaceGroups: [SessionDashboardWorkspaceGroup] {
-        SessionDashboardWorkspaceGroup.groups(from: eventStoreManager.sortedSessions)
+    private var workspaceGroups: [SessionListWorkspaceGroup] {
+        SessionListWorkspaceGroup.groups(from: eventStoreManager.sortedSessions)
     }
 
     var body: some View {
@@ -26,27 +26,7 @@ struct SessionSidebar: View {
                     Section {
                         if workspaceExpansion.isExpanded(group.id) {
                             ForEach(group.sessions) { session in
-                                SessionDashboardRow(
-                                    session: session,
-                                    isSelected: session.id == selectedSessionId
-                                )
-                                .tag(session.id)
-                                .listRowBackground(Color.clear)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(SessionDashboardLayout.rowInsets)
-                                .opacity(session.isDeleting ? SessionDashboardLayout.deletingRowOpacity : 1.0)
-                                .allowsHitTesting(!session.isDeleting)
-                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                    if !session.isDeleting && (interactionPolicy?.canMutateSession ?? false) {
-                                        Button {
-                                            sessionToArchive = session.id
-                                            showArchiveConfirmation = true
-                                        } label: {
-                                            Image(systemName: "archivebox")
-                                        }
-                                        .tint(.tronEmerald)
-                                    }
-                                }
+                                sessionRow(session)
                             }
                         }
                     } header: {
@@ -54,7 +34,7 @@ struct SessionSidebar: View {
                             title: group.name,
                             isExpanded: workspaceExpansion.isExpanded(group.id)
                         ) {
-                            withAnimation(SessionDashboardLayout.expansionAnimation) {
+                            withAnimation(SessionListLayout.expansionAnimation) {
                                 workspaceExpansion.toggle(group.id)
                             }
                         }
@@ -64,16 +44,16 @@ struct SessionSidebar: View {
             .tint(.clear)
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .environment(\.defaultMinListRowHeight, SessionDashboardLayout.minimumRowHeight)
-            .contentMargins(.top, SessionDashboardLayout.listTopContentMargin)
-            .contentMargins(.bottom, SessionDashboardLayout.listBottomContentMargin)
+            .environment(\.defaultMinListRowHeight, SessionListLayout.minimumRowHeight)
+            .contentMargins(.top, SessionListLayout.listTopContentMargin)
+            .contentMargins(.bottom, SessionListLayout.listBottomContentMargin)
 
             let canCreate = interactionPolicy?.canCreateSession ?? false
-            FloatingNewSessionButton(action: onNewSession, size: SessionDashboardLayout.floatingButtonSize)
+            FloatingNewSessionButton(action: onNewSession, size: SessionListLayout.floatingButtonSize)
                 .disabled(!canCreate)
                 .opacity(canCreate ? 1.0 : 0.4)
-                .padding(.trailing, SessionDashboardLayout.floatingButtonTrailingPadding)
-                .padding(.bottom, SessionDashboardLayout.floatingButtonBottomPadding)
+                .padding(.trailing, SessionListLayout.floatingButtonTrailingPadding)
+                .padding(.bottom, SessionListLayout.floatingButtonBottomPadding)
         }
         .background {
             Color.clear
@@ -95,6 +75,48 @@ struct SessionSidebar: View {
         .toolbar(removing: .sidebarToggle)
         .toolbar {
             ShellToolbarContent(title: "Tron", accent: .tronEmerald, actions: actions)
+        }
+    }
+
+    @ViewBuilder
+    private func sessionRow(_ session: CachedSession) -> some View {
+        let isSelected = session.id == selectedSessionId
+        let shape = RoundedRectangle(
+            cornerRadius: SessionListLayout.rowContainerCornerRadius,
+            style: .continuous
+        )
+
+        Button {
+            selectedSessionId = session.id
+        } label: {
+            SessionListRow(session: session, isSelected: isSelected)
+                .glassEffect(
+                    .regular.tint(Color.tronEmerald.opacity(isSelected ? 0.22 : 0.14)).interactive(),
+                    in: shape
+                )
+        }
+        .buttonStyle(.plain)
+        .tag(session.id)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .listRowInsets(SessionListLayout.rowInsets)
+        .opacity(session.isDeleting ? SessionListLayout.deletingRowOpacity : 1.0)
+        .allowsHitTesting(!session.isDeleting)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            archiveSwipeAction(for: session)
+        }
+    }
+
+    @ViewBuilder
+    private func archiveSwipeAction(for session: CachedSession) -> some View {
+        if !session.isDeleting && (interactionPolicy?.canMutateSession ?? false) {
+            Button {
+                sessionToArchive = session.id
+                showArchiveConfirmation = true
+            } label: {
+                Image(systemName: "archivebox")
+            }
+            .tint(.tronEmerald)
         }
     }
 }

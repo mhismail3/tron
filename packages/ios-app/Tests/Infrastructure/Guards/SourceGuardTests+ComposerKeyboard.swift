@@ -153,7 +153,7 @@ extension SourceGuardTests {
         for fragment in forbiddenFragments {
             #expect(
                 !combined.contains(fragment),
-                "recent input history must not restore backend prompt-library or routing behavior `\(fragment)`"
+                "recent input history must not restore backend prompt-history or routing behavior `\(fragment)`"
             )
         }
     }

@@ -96,6 +96,10 @@ resources, events, grants, conformance checks, and generated or justified native
 UI. It must not restore the old hardcoded harness or fixed product panels by
 default.
 
+Agent cockpit placement review: current server-fact diagnostics surface;
+passive chat banner removed; re-evaluate from first principles before Phase 2
+agent-execution UI.
+
 ## Current Boundary
 
 This map does not restore any UI or backend behavior. It records what should be

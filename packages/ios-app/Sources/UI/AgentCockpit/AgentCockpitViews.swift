@@ -1,70 +1,5 @@
 import SwiftUI
 
-struct AgentStatusCapsuleView: View {
-    let overview: AgentCockpitOverview
-    let isRefreshing: Bool
-    let action: () -> Void
-
-    var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: overview.status.systemImage)
-                .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .semibold))
-                .foregroundStyle(statusColor)
-                .frame(width: 20)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(overview.status.title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                Text(overview.status.detail)
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption))
-                    .foregroundStyle(.tronTextSecondary)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: 8)
-            if overview.packages.contains(where: { $0.kind == .proposal }) {
-                Text("\(overview.packages.filter { $0.kind == .proposal }.count)")
-                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .bold))
-                    .countBadge(.tronWarning)
-            }
-            if isRefreshing {
-                ProgressView()
-                    .controlSize(.mini)
-            } else {
-                Image(systemName: "slider.horizontal.3")
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextMuted)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .contentShape(Capsule())
-        .glassEffect(.regular.tint(Color.tronSurface.opacity(0.55)).interactive(), in: .capsule)
-        .overlay {
-            Capsule()
-                .stroke(statusColor.opacity(0.25), lineWidth: 0.75)
-        }
-        .onTapGesture(perform: action)
-        .accessibilityLabel("Agent cockpit")
-        .accessibilityValue("\(overview.status.title), \(overview.status.detail)")
-        .accessibilityAddTraits(.isButton)
-    }
-
-    private var statusColor: Color {
-        switch overview.status.kind {
-        case .offline, .connecting:
-            return .tronTextMuted
-        case .idle, .ready:
-            return .tronInfo
-        case .running:
-            return .tronCyan
-        case .awaitingApproval:
-            return .tronWarning
-        case .degraded:
-            return .tronError
-        }
-    }
-}
-
 struct AgentCockpitSheet: View {
     @Bindable var viewModel: AgentCockpitViewModel
     let repository: any WorkerLifecycleRepository
@@ -85,17 +20,24 @@ struct AgentCockpitSheet: View {
                 .padding(18)
             }
             .scrollContentBackground(.hidden)
-            .tronScreenBackground()
-            .navigationTitle("Agent")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackgroundVisibility(.hidden, for: .navigationBar)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
+                ToolbarItem(placement: .principal) {
+                    SheetTitle(title: "Runtime Cockpit", color: .tronEmerald)
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    SheetPrimaryActionButton(
+                        icon: "arrow.clockwise",
+                        accent: .tronEmerald,
+                        isBusy: viewModel.isRefreshing,
+                        accessibilityLabel: "Refresh runtime cockpit"
+                    ) {
                         Task { await refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
                     }
-                    .disabled(viewModel.isRefreshing)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    SheetDismissButton(color: .tronEmerald)
                 }
             }
             .task {
@@ -125,6 +67,8 @@ struct AgentCockpitSheet: View {
                 Text(viewModel.pendingConfirmation?.message ?? "")
             }
         }
+        .adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)
+        .tint(.tronEmerald)
     }
 
     private var confirmationPresented: Binding<Bool> {
@@ -159,16 +103,15 @@ struct AgentCockpitSheet: View {
             MetricStrip(overview: viewModel.overview)
         }
         .padding(14)
-        .glassEffect(.regular.tint(Color.tronSurface.opacity(0.45)), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .sectionFill(.tronEmerald, cornerRadius: 12, interactive: false)
     }
 
     private var tabPicker: some View {
-        Picker("Cockpit", selection: $selectedTab) {
-            ForEach(AgentCockpitTab.allCases) { tab in
-                Label(tab.title, systemImage: tab.systemImage).tag(tab)
-            }
-        }
-        .pickerStyle(.segmented)
+        TronSegmentedControl(
+            options: AgentCockpitTab.allCases.map { (label: $0.title, value: $0) },
+            selection: $selectedTab,
+            accent: .tronEmerald
+        )
     }
 
     @ViewBuilder
@@ -312,7 +255,7 @@ private struct MetricStrip: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(9)
-        .background(Color.tronSurfaceElevated.opacity(0.34), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .sectionFill(.tronEmerald, cornerRadius: 8, subtle: true, interactive: false)
     }
 }
 
@@ -349,11 +292,7 @@ private struct WorkerCard: View {
                 .foregroundStyle(.tronTextMuted)
         }
         .padding(13)
-        .background(Color.tronSurface.opacity(0.7), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.tronBorder.opacity(0.55), lineWidth: 0.75)
-        }
+        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
     }
 
     @ViewBuilder
@@ -403,22 +342,27 @@ private struct PackageCard: View {
             if !actions.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(actions) { action in
-                        Button(action.title) {
+                        Button {
                             onAction(action)
+                        } label: {
+                            Text(action.title)
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                                .foregroundStyle(action.isEnabled ? .tronEmerald : .tronTextDisabled)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .glassEffect(
+                                    .regular.tint(Color.tronEmerald.opacity(0.18)).interactive(action.isEnabled),
+                                    in: .capsule
+                                )
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.plain)
                         .disabled(!action.isEnabled)
                     }
                 }
             }
         }
         .padding(13)
-        .background(Color.tronSurface.opacity(0.7), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.tronBorder.opacity(0.55), lineWidth: 0.75)
-        }
+        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
     }
 }
 
@@ -448,7 +392,7 @@ private struct ActivityRow: View {
             Spacer()
         }
         .padding(11)
-        .background(Color.tronSurface.opacity(0.55), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .sectionFill(.tronEmerald, cornerRadius: 10, subtle: true, interactive: false)
     }
 }
 
@@ -464,7 +408,7 @@ private struct WrapRow: View {
                     .foregroundStyle(tint)
                     .padding(.horizontal, 7)
                     .padding(.vertical, 4)
-                    .background(tint.opacity(0.11), in: Capsule())
+                    .glassEffect(.regular.tint(tint.opacity(0.16)), in: .capsule)
             }
         }
     }
@@ -491,6 +435,6 @@ private struct CockpitEmptyState: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, 28)
         .padding(.horizontal, 18)
-        .background(Color.tronSurface.opacity(0.55), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .sectionFill(.tronEmerald, cornerRadius: 12, subtle: true, interactive: false)
     }
 }

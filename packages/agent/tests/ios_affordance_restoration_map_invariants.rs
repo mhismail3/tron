@@ -75,6 +75,18 @@ fn git_output(args: &[&str]) -> String {
     String::from_utf8(output.stdout).expect("git output should be UTF-8")
 }
 
+fn tracked_text_under(paths: &[&str]) -> String {
+    let mut args = vec!["ls-files"];
+    args.extend(paths);
+    git_output(&args)
+        .lines()
+        .filter(|path| path.ends_with(".swift"))
+        .filter(|path| repo_path(path).exists())
+        .map(|path| format!("\n// FILE: {path}\n{}", read_repo_file(path)))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn assert_contains_all(path: &str, required: &[&str]) {
     let content = read_repo_file(path);
     for needle in required {
@@ -297,6 +309,8 @@ fn artifacts_lineage_and_docs_wiring_exist() {
             "iOS Affordance Restoration Map",
             "functional-only",
             "does not restore deleted product panels",
+            "Notification and inbox affordances remain deferred",
+            "server-owned APNs/device/capability resource",
             "Phase 2 agent-execution restoration plan",
         ],
     );
@@ -568,7 +582,8 @@ fn slice_six_notification_inbox_decision_is_deferred_until_apns_restoration() {
             "No Swift UI, public `/engine` methods, database tables",
             "Simulator validation:",
             "Not required. Slice 6 made no Swift or UI changes",
-            "Phase 1 map should now get a closeout pass",
+            "## Phase 1 Closeout",
+            "No remaining Phase 1 slice is queued.",
         ],
     );
 
@@ -576,6 +591,60 @@ fn slice_six_notification_inbox_decision_is_deferred_until_apns_restoration() {
     assert!(
         !progress.contains("The next recommended restoration slice is `phase1_slice_6`"),
         "Slice 6 is no longer the next recommended slice after the defer decision"
+    );
+}
+
+#[test]
+fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
+    assert_contains_all(
+        PROGRESS_PATH,
+        &[
+            "## Phase 1 Closeout",
+            "Phase 1 local-native/user-facing affordance restoration is closed",
+            "No remaining Phase 1 slice is queued",
+            "session-list/cockpit placement cleanup",
+            "moved Runtime Cockpit access into Servers -> Diagnostics",
+            "No old notification bell",
+            "No chat-mounted passive worker-runtime banner",
+            "No temporary chat timeline loading spinner/text row",
+            "No custom fallback session list row press implementation remains",
+            "The next planned body of work is the full Phase 2 agent-execution restoration",
+            "central engine/resource mechanism",
+        ],
+    );
+
+    let source_text = tracked_text_under(&["packages/ios-app/Sources"]);
+    for retired in [
+        "ChatTimelineAuxiliaryState",
+        "ChatTimelineLoadingView",
+        "Loading messages",
+        "AgentStatusCapsuleView",
+        "showAgentCockpit",
+        "agentCockpit.refresh",
+        "NotificationBell",
+        "NotificationInbox",
+        "NotificationStore",
+        "NotificationClient",
+        "PushNotificationService",
+        "APNsEnvironment",
+        "NotificationDelivery",
+        concat!("Session", "Dashboard", "RowButtonStyle"),
+        "SessionListRowButtonStyle",
+        "rowContainerSurface",
+        "rowPressedScale",
+        "rowPressedBrightness",
+        "outerHorizontalPadding",
+    ] {
+        assert!(
+            !source_text.contains(retired),
+            "retired Phase 1 scaffolding still appears in iOS source: {retired}"
+        );
+    }
+
+    let chat_source_text = tracked_text_under(&["packages/ios-app/Sources/UI/Chat"]);
+    assert!(
+        !chat_source_text.contains("AgentCockpitViewModel()"),
+        "chat source must not instantiate the diagnostics-owned Agent cockpit"
     );
 }
 

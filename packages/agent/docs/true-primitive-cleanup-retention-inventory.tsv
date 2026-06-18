@@ -967,8 +967,6 @@ packages/ios-app/Sources/UI/Chat/Composer/WrappingHStackLayout.swift	implementat
 packages/ios-app/Sources/UI/Chat/Messages/DecodedImageView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Messages/ImagesContentView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Messages/Indicators/NeuralSparkIndicator.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Chat/Messages/Indicators/OrbitingParticleIndicator.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Chat/Messages/Indicators/PhaseWaveIndicator.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Messages/MarkdownBlockParser.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Messages/MarkdownBlockView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Chat/Messages/MessageBubble.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
@@ -997,7 +995,6 @@ packages/ios-app/Sources/UI/Chat/Shell/ShellToolbarContent.swift	implementation	
 packages/ios-app/Sources/UI/Chat/Shell/ThinkingIndicator.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Components/CachedSession+Display.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Components/CardEntranceModifier.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Components/ConnectionStatusPill.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Components/FlowLayout.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Components/LineNumberedContentView.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Components/SessionTitleIcons.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
@@ -1059,7 +1056,6 @@ packages/ios-app/Sources/UI/System/ProviderErrorDetailSheet.swift	implementation
 packages/ios-app/Sources/UI/Theme/AppearanceSettings.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Theme/FontFamily.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Theme/FontSettings.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
-packages/ios-app/Sources/UI/Theme/ThinkingIndicatorStyle.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Theme/TronColors.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Theme/TronFontLoader.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
 packages/ios-app/Sources/UI/Theme/TronIcons.swift	implementation	ios_ui	TPC-8	SwiftUI primitive shell, settings, onboarding, or generic runtime rendering
@@ -1273,7 +1269,6 @@ packages/ios-app/Tests/UI/System/InitializationErrorViewTests.swift	test	test_ha
 packages/ios-app/Tests/UI/Theme/AppearanceSettingsTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/Theme/ChipStyleModifierTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/Theme/FontSettingsTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
-packages/ios-app/Tests/UI/Theme/ThinkingIndicatorStyleTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/Theme/TronColorsTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/Tests/UI/Theme/TronTypographyTests.swift	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/ios-app/docs/architecture.md	docs	docs/static gates	TPC-10	durable architecture, scorecard, inventory, or evidence documentation
@@ -1570,8 +1565,91 @@ packages/agent/docs/self-sufficient-agent-runtime-readiness-evidence-manifest.md
 packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.md	docs	ssarr_docs	SSARR-10	Self-Sufficient Agent Runtime Readiness inventory retained as closeout documentation.
 packages/agent/docs/self-sufficient-agent-runtime-readiness-inventory.tsv	docs	ssarr_docs	SSARR-10	Self-Sufficient Agent Runtime Readiness machine inventory retained as closeout documentation.
 packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs	test	test_harness	SSARR-10	Self-Sufficient Agent Runtime Readiness invariant target retained as static closeout proof.
+packages/agent/src/engine/tests/invocation/meta_promotion.rs	test	test_harness	Phase1-closeout	Engine meta promotion tests split from meta_primitives to keep hard budget closed.
+packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants/successor_guards.rs	test	test_harness	Phase1-closeout	SSARR successor-surface guards split from the main invariant target to keep hard budget closed.
+packages/ios-app/Sources/UI/Chat/Composer/CameraModel.swift	implementation	ios_ui	Phase1-closeout	Camera capture model split from the sheet view to keep composer UI ownership below hard budget.
+packages/ios-app/Sources/UI/Chat/Composer/CameraPreviewView.swift	implementation	ios_ui	Phase1-closeout	Camera preview bridge split from the sheet view to keep composer UI ownership below hard budget.
 packages/agent/docs/primitive-minimality-closure-scorecard.md	docs	pmc_docs	PMC-9	Primitive Minimality Closure scorecard retained as closeout documentation.
 packages/agent/docs/primitive-minimality-closure-evidence-manifest.md	docs	pmc_docs	PMC-9	Primitive Minimality Closure evidence manifest retained as closeout documentation.
 packages/agent/docs/primitive-minimality-closure-inventory.md	docs	pmc_docs	PMC-9	Primitive Minimality Closure inventory retained as closeout documentation.
 packages/agent/docs/primitive-minimality-closure-inventory.tsv	docs	pmc_docs	PMC-9	Primitive Minimality Closure machine inventory retained as closeout documentation.
 packages/agent/tests/primitive_minimality_closure_invariants.rs	test	test_harness	PMC-9	Primitive Minimality Closure invariant target retained as static closeout proof.
+packages/agent/docs/baseline-pre-restoration-closure-evidence-manifest.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/baseline-pre-restoration-closure-inventory.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/baseline-pre-restoration-closure-scorecard.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/ios-affordance-restoration-map-inventory.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/ios-affordance-restoration-map-inventory.tsv	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/ios-affordance-restoration-map-scorecard.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/ios-affordance-restoration-progress.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-scorecard.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/primitive-baseline-vs-modular-capability-engine-feature-index.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/self-updating-worker-runtime-foundation-evidence-manifest.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/self-updating-worker-runtime-foundation-inventory.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/self-updating-worker-runtime-foundation-inventory.tsv	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/docs/self-updating-worker-runtime-foundation-scorecard.md	docs	docs/static gates	Phase1-closeout	Phase 1 and baseline restoration documentation retained for current closeout provenance.
+packages/agent/src/domains/agent/runtime/service/title_generation.rs	implementation	agent_runtime	Phase1-closeout	Session-title generation retained as current metadata-only runtime behavior.
+packages/agent/src/domains/transcription/contract.rs	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/transcription/deps.rs	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/transcription/handlers.rs	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/transcription/implementation/mod.rs	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/transcription/implementation/runtime/mod.rs	implementation	transcription	Phase1-closeout	Local transcription runtime module root retained to expose MLX and venv submodules without path aliases.
+packages/agent/src/domains/transcription/implementation/runtime/mlx.rs	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/transcription/implementation/runtime/venv.rs	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/transcription/implementation/sidecar/requirements.txt	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/transcription/implementation/sidecar/worker.py	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/transcription/implementation/types.rs	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/transcription/mod.rs	implementation	transcription	Phase1-closeout	Local transcription runtime surface retained as Phase 1 voice-input implementation.
+packages/agent/src/domains/worker_lifecycle/authority.rs	implementation	worker_lifecycle	Phase1-closeout	Worker lifecycle fact rendering retained as current generic runtime state.
+packages/agent/src/domains/worker_lifecycle/contract.rs	implementation	worker_lifecycle	Phase1-closeout	Worker lifecycle fact rendering retained as current generic runtime state.
+packages/agent/src/domains/worker_lifecycle/errors.rs	implementation	worker_lifecycle	Phase1-closeout	Worker lifecycle fact rendering retained as current generic runtime state.
+packages/agent/src/domains/worker_lifecycle/handlers.rs	implementation	worker_lifecycle	Phase1-closeout	Worker lifecycle fact rendering retained as current generic runtime state.
+packages/agent/src/domains/worker_lifecycle/launcher.rs	implementation	worker_lifecycle	Phase1-closeout	Worker lifecycle fact rendering retained as current generic runtime state.
+packages/agent/src/domains/worker_lifecycle/manifest.rs	implementation	worker_lifecycle	Phase1-closeout	Worker lifecycle fact rendering retained as current generic runtime state.
+packages/agent/src/domains/worker_lifecycle/mod.rs	implementation	worker_lifecycle	Phase1-closeout	Worker lifecycle fact rendering retained as current generic runtime state.
+packages/agent/src/domains/worker_lifecycle/params.rs	implementation	worker_lifecycle	Phase1-closeout	Worker lifecycle fact rendering retained as current generic runtime state.
+packages/agent/src/domains/worker_lifecycle/resources.rs	implementation	worker_lifecycle	Phase1-closeout	Worker lifecycle fact rendering retained as current generic runtime state.
+packages/agent/src/domains/worker_lifecycle/tests.rs	test	test_harness	Phase1-closeout	Phase 1 static or focused regression coverage retained for closeout proof.
+packages/agent/tests/baseline_pre_restoration_closure_invariants.rs	test	test_harness	Phase1-closeout	Phase 1 static or focused regression coverage retained for closeout proof.
+packages/agent/tests/ios_affordance_restoration_map_invariants.rs	test	test_harness	Phase1-closeout	Phase 1 static or focused regression coverage retained for closeout proof.
+packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs	test	test_harness	Phase1-closeout	Phase 1 static or focused regression coverage retained for closeout proof.
+packages/agent/tests/self_updating_worker_runtime_foundation_invariants.rs	test	test_harness	Phase1-closeout	Phase 1 static or focused regression coverage retained for closeout proof.
+packages/ios-app/Sources/Engine/Protocol/Transcription/EngineProtocolTypes+Transcription.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
+packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+WorkerLifecycle.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
+packages/ios-app/Sources/Engine/Transport/Clients/TranscriptionClient.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
+packages/ios-app/Sources/Engine/Transport/Clients/WorkerLifecycleClient.swift	implementation	ios_engine	Phase1-closeout	Phase 1 iOS engine protocol/client surface retained under typed engine ownership.
+packages/ios-app/Sources/Session/Chat/Coordinators/ChatTranscriptionCoordinator.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Errors.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Transcription.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityEvidencePresentation.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
+packages/ios-app/Sources/Session/Timeline/Messages/LocalChatNotification.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
+packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
+packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
+packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
+packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
+packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Sources/UI/Chat/Shell/FloatingNewSessionButton.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Sources/UI/Chat/Shell/SessionList.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingFlowPresentation.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Tests/Engine/Protocol/EngineProtocolTypesTranscriptionTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Engine/Protocol/WorkerLifecycleDTOTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Engine/Transport/Clients/WorkerLifecycleClientTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ChatAffordanceStatus.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ComposerKeyboard.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+VoiceTranscription.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Session/Chat/Coordinators/ChatTranscriptionCoordinatorTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Session/Timeline/Messages/CapabilityEvidencePresentationTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Session/Timeline/Messages/LocalChatNotificationTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/UI/Chat/AttachmentMenuTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/UI/Chat/ChatAffordanceVisualRenderTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/UI/Chat/RecentInputHistoryTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.
+packages/ios-app/Tests/UI/Chat/SessionListPresentationTests.swift	test	test_harness	Phase1-closeout	Phase 1 iOS focused regression coverage retained for closeout proof.

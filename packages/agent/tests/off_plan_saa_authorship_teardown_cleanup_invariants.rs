@@ -662,7 +662,10 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         }
         _ if path.contains("self-sufficient-agent-runtime-readiness")
             || path
-                == "packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs" =>
+                == "packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants.rs"
+            || path.starts_with(
+                "packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants/",
+            ) =>
         {
             Some(ResidueClass::FutureReadinessWording)
         }

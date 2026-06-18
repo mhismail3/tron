@@ -67,8 +67,8 @@ pub(crate) fn worker_module(
 }
 
 fn list_models_value(deps: &Deps) -> Result<Value, CapabilityError> {
-    let engine_loaded = deps.transcription_engine.get().is_some();
-    let status = deps.transcription_engine.status();
+    let engine_loaded = deps.transcription_runtime.get().is_some();
+    let status = deps.transcription_runtime.status();
     let enabled = deps
         .profile_runtime
         .current()
@@ -130,8 +130,8 @@ async fn transcribe_audio_value(payload: &Value, deps: &Deps) -> Result<Value, C
 }
 
 fn download_model_value(deps: &Deps) -> Value {
-    let engine_loaded = deps.transcription_engine.get().is_some();
-    let status = deps.transcription_engine.status();
+    let engine_loaded = deps.transcription_runtime.get().is_some();
+    let status = deps.transcription_runtime.status();
     let enabled = deps
         .profile_runtime
         .current()
@@ -198,7 +198,7 @@ async fn transcribe_audio_full(
     }
 
     let engine = deps
-        .transcription_engine
+        .transcription_runtime
         .get()
         .ok_or(CapabilityError::NotAvailable {
             message: "Transcription engine not loaded".into(),

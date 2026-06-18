@@ -3,7 +3,7 @@
 //! This service is deliberately metadata-only: it derives a compact title from
 //! the initial user prompt, persists it on the session row, and broadcasts a
 //! normal `session_updated` event. It does not restore the old hook/subagent
-//! surface or add dashboard-specific behavior to the runtime.
+//! surface or add presentation-specific behavior to the runtime.
 
 use std::sync::Arc;
 use std::time::Duration;

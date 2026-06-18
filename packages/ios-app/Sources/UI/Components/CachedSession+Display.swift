@@ -30,7 +30,7 @@ extension CachedSession {
         return (workingDirectory as NSString).lastPathComponent
     }
 
-    var dashboardTitle: String {
+    var listTitle: String {
         if let title = title?.trimmingCharacters(in: .whitespacesAndNewlines),
            !title.isEmpty,
            title != "Chat" {
@@ -42,12 +42,7 @@ extension CachedSession {
             return prompt
         }
 
-        let directoryName = Self.workspaceDisplayName(for: workingDirectory)
-        if !directoryName.isEmpty {
-            return directoryName
-        }
-
-        return "Untitled session"
+        return "New Session"
     }
 
     var formattedDate: String {

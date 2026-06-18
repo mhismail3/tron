@@ -93,7 +93,7 @@ Validated:
 
 Deferred:
 
-- Voice notes, voice-note dashboards, persistent media upload/storage,
+- Voice notes, voice-note session lists, persistent media upload/storage,
   `MediaClient`, backend voice-note resources, APNs/background delivery, fake
   transcription, and agent-execution voice surfaces remain absent.
 - Local transcription remains opt-in. If the setting is enabled after the
@@ -131,16 +131,16 @@ Deferred:
 - The custom morphing popup explored during the thread was intentionally
   discarded; it is not part of the final state.
 
-### Accepted Off-Plan Work: Session Dashboard Simplification
+### Accepted Off-Plan Work: Session List Simplification
 
 Commits:
 
-- `0f58806c5 Redesign session dashboard`
-- `4e66af302 Organize dashboard and title generation`
+- `0f58806c5 Redesign session list`
+- `4e66af302 Organize session list and title generation`
 
 User-facing state:
 
-- The session dashboard now presents a minimal "Tron" first-screen surface
+- The session list now presents a minimal "Tron" first-screen surface
   instead of the older session-card preview layout.
 - Sessions are grouped under workspace headers with compact one-line rows.
 - Workspace headers have tappable folder/chevron affordances for collapse and
@@ -152,25 +152,25 @@ User-facing state:
 
 Code organization:
 
-- Dashboard projection and presentation moved into
-  `SessionDashboard.swift`.
+- Session-list projection and presentation moved into
+  `SessionList.swift`.
 - The floating new-session control moved into
   `FloatingNewSessionButton.swift`.
 - `SessionSidebar.swift` is now focused on shell composition, session
   selection, archiving, and sidebar wiring.
-- Shared dashboard layout constants are centralized in
-  `SessionDashboardLayout`.
+- Shared session list layout constants are centralized in
+  `SessionListLayout`.
 
 Validated:
 
-- `SessionDashboardPresentationTests` cover the visible title, workspace-group
+- `SessionListPresentationTests` cover the visible title, workspace-group
   projection, compact row behavior, status icon mapping, and archived-session
   filtering.
 - The user reviewed the physical-device result and confirmed it looked good.
 
 Deferred:
 
-- No work dashboard, import tree, source-control graph, or workspace analytics
+- No work overview, import tree, source-control graph, or workspace analytics
   was restored. Those remain Phase 2 agent-execution surfaces unless a future
   server-backed contract exists.
 
@@ -178,8 +178,8 @@ Deferred:
 
 Commits:
 
-- `0f58806c5 Redesign session dashboard`
-- `4e66af302 Organize dashboard and title generation`
+- `0f58806c5 Redesign session list`
+- `4e66af302 Organize session list and title generation`
 
 User-facing state:
 
@@ -220,7 +220,7 @@ The implementation thread reported these final closeout checks as passing:
 
 - `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
 - `cargo test --manifest-path packages/agent/Cargo.toml title_generation --lib -- --nocapture`
-- Focused iOS 26.5 simulator tests for `SessionDashboardPresentationTests`
+- Focused iOS 26.5 simulator tests for `SessionListPresentationTests`
 - `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
 - `scripts/personal-info-guard.sh`
 - `git diff --check`
@@ -248,7 +248,7 @@ implementation branch and adding this ledger:
   `TronMobile.xcodeproj` drift.
 - Focused `xcodebuild test` on iPhone 17 Pro, iOS 26.5 passed with 20 XCTest
   cases and 47 Swift Testing source-guard cases across transcription,
-  attachment menu, dashboard presentation, transcription DTO, and source-guard
+  attachment menu, session list presentation, transcription DTO, and source-guard
   coverage.
 
 ### Phase 1 Slice 3: Recent Input History
@@ -263,11 +263,10 @@ Commits:
 
 Review-packet findings:
 
-- The old prompt surface was `IARM-SURFACE-020`, with old paths under
-  `packages/ios-app/Sources/Views/PromptLibrary/` and
-  `packages/ios-app/Sources/ViewModels/State/PromptLibraryState.swift`.
-- The old tree had a two-tab Prompt Library for snippets and searchable,
-  paginated prompt history. It depended on old server-backed
+- The old prompt surface was `IARM-SURFACE-020`, with old paths under retired
+  prompt-history view and state folders.
+- The old tree had a two-tab prompt-history surface for snippets and searchable,
+  paginated history. It depended on old server-backed
   `prompt_library::*` calls and generated management UI for create, update,
   delete, and clear behavior.
 - Current code already had local sent-input persistence through
@@ -276,7 +275,7 @@ Review-packet findings:
   and navigation tests. The live composer gap was discoverability and
   management, not data capture.
 - The approved first-principles slice was recent input history only. Snippets,
-  templates, server prompt-library APIs, and command-like routing were left out.
+  templates, server prompt-history APIs, and command-like routing were left out.
 
 User-facing state:
 
@@ -306,7 +305,7 @@ Data ownership and privacy:
   `InputHistoryStore`.
 - The store uses the existing `tron.inputHistory` `UserDefaults` payload,
   dedupes entries, and caps retention at 100 sent text prompts.
-- No prompt-library server API, `PromptLibraryClient`, generated management
+- No server prompt-history API, old server prompt-history client, generated management
   surface, skill activation, queueing, prompt routing, subagent behavior, or
   fixed template catalog was restored.
 
@@ -344,7 +343,7 @@ Deferred:
   revisit only if the user explicitly wants another local-native composer
   affordance after higher-priority Phase 1 slices.
 - Search, pagination, use counts, last-used metadata, server-owned prompt
-  history/snippet resources, old `PromptLibraryClient`,
+  history/snippet resources, old server prompt-history client,
   `prompt_library::*` methods, generated prompt-management surfaces, skill
   activation, prompt queues, slash-command-like suggestions, and
   agent-execution routing remain absent until a future approved
@@ -372,7 +371,7 @@ Session analysis:
   paved local error notifications, and compact capability evidence.
 - The first implementation commit included a minimal empty-chat `Start talking`
   placeholder. The user rejected that final visual shape. The follow-up commit
-  removed the placeholder entirely, removed the dashboard/no-selection tagline,
+  removed the placeholder entirely, removed the session list/no-selection tagline,
   and deleted the now-dead empty-state sidebar wrapper.
 - Final behavior is intentionally quieter than both the old tree and the first
   Slice 4 implementation: after initial load, an empty selected chat renders as
@@ -380,18 +379,20 @@ Session analysis:
 
 Approved and shipped:
 
-- Loading/blank-empty timeline affordance: `ChatTimelineAuxiliaryState`
-  derives `Loading messages` only before initial load completes. Once initial
-  load completes, a chat with no messages stays visually blank.
+- Loading/blank-empty timeline affordance: Slice 4 initially shipped a narrow
+  local loading row. The later session list/cockpit placement cleanup removed
+  that row at user request. Current loading and empty chat content stays
+  visually blank unless current server or local state supplies a real
+  user-facing event.
 - Connection status is centralized through global `ToastCenter` connection
-  notifications. The old in-chat `ConnectionStatusPill` surface is removed and
-  guarded against returning.
+  notifications. The old in-chat status-pill surface is removed and guarded
+  against returning.
 - Composer disabled reasons remain accessibility/help-only; no visible disabled
   explanation panel was added.
 - Thinking fallback is simplified to one app-owned `NeuralSparkIndicator`.
-  `ThinkingIndicatorStyle`, `PhaseWaveIndicator`, and
-  `OrbitingParticleIndicator` were removed. Streaming thinking text still
-  renders inline when supplied by current stream state.
+  The retired configurable theme and alternate animated indicator variants were
+  removed. Streaming thinking text still renders inline when supplied by current
+  stream state.
 - Chat-scoped local failures route through a central paved path:
   `ChatViewModel+Errors.swift` appends deduped ephemeral
   `LocalChatNotification` timeline items, clears them on new sends/view exit,
@@ -407,7 +408,8 @@ Approved and shipped:
 
 Data ownership:
 
-- Loading/blank-empty state: local iOS timeline state only.
+- Loading/blank-empty state: local iOS load state only; no timeline row or
+  explanatory spinner is rendered.
 - Connection status: existing engine connection/retry state rendered through
   the app-global toast owner.
 - Chat-local errors: local iOS workflow state; not persisted as server events
@@ -419,7 +421,7 @@ Data ownership:
 
 Rejected or deferred:
 
-- Process/job/subagent/source-control/work dashboards, approvals,
+- Process/job/subagent/source-control/work session lists, approvals,
   memory/rules/hooks status, skill activation, prompt suggestions, inbox-style
   notifications, fixed product panels, fake activity, and backend status with
   no current source of truth remain absent.
@@ -431,8 +433,10 @@ Rejected or deferred:
 Validated:
 
 - `cd packages/ios-app && xcodegen generate` completed.
-- `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatTimelineAuxiliaryStateTests -only-testing:TronMobileTests/LocalChatNotificationTests -only-testing:TronMobileTests/CapabilityEvidencePresentationTests -only-testing:TronMobileTests/AnimatedThinkingLineTests -only-testing:TronMobileTests/CapabilityInvocationDetailViewTests -only-testing:TronMobileTests/MessagingCoordinatorTests -only-testing:TronMobileTests/SourceGuardTests`
-  passed on iPhone 17 Pro, iOS 26.5 simulator.
+- Focused chat loading-row, local-notification, capability evidence, animated
+  thinking, invocation detail, messaging coordinator, and source-guard tests
+  passed on iPhone 17 Pro, iOS 26.5 simulator before the later loading-row
+  removal.
 - `TRON_VISUAL_ARTIFACT_DIR=/tmp/tron-ios-affordance-validation/slice4 xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/ChatAffordanceVisualRenderTests -only-testing:TronMobileTests/CapabilityInvocationDetailViewTests`
   passed on iPhone 17 Pro, iOS 26.5 simulator. The test runner wrote to the
   simulator container, then the PNGs were copied to
@@ -486,7 +490,7 @@ Implementation state:
 User-facing state:
 
 - Settings main remains a compact launcher grid. It does not grow a
-  server-health dashboard or fixed feature index.
+  server-health session list or fixed feature index.
 - The Server page remains the owner for paired-server identity, reachability,
   runtime-evidence settings, pairing/reconnect/forget controls, and the new
   minimal Diagnostics section. Diagnostics exposes one Logs row with compact
@@ -521,9 +525,9 @@ Data ownership:
 
 Rejected or deferred:
 
-- Old fixed product dashboards, notification inboxes, APNs/device-broker
+- Old fixed product session lists, notification inboxes, APNs/device-broker
   behavior, skills/rules/memory/worktree/process/job/goal/subagent/approval
-  state, web/research state, source-control surfaces, queue dashboards, and
+  state, web/research state, source-control surfaces, queue session lists, and
   placeholder backend facts remain absent.
 - No new public `/engine` method, server setting, database table, provider
   behavior, auth behavior, background service, or fake server-health fact was
@@ -554,7 +558,7 @@ Validated:
 - `git diff --check` passed.
 - `git ls-files -ci --exclude-standard` returned no tracked ignored files.
 
-### Accepted Follow-Up Work: Cockpit Placement And Dashboard Row Polish
+### Accepted Follow-Up Work: Cockpit Placement And Session-List Row Polish
 
 Branch:
 `codex/ios-cockpit-placement-cleanup-current`
@@ -562,10 +566,10 @@ Branch:
 Commits:
 
 - `becbc0e95` - `Clean up iOS cockpit chat placement`
-- `34c53dc93` - `Polish iOS dashboard row glass styling`
-- `22cb96e72` - `Fix dashboard row container press feedback`
-- `9d172aa27` - `Use native glass dashboard rows`
-- `0176379ba` - `Align dashboard header and row columns`
+- `34c53dc93` - `Polish iOS session list row glass styling`
+- `22cb96e72` - `Fix session list row container press feedback`
+- `9d172aa27` - `Use native glass session list rows`
+- `0176379ba` - `Align session list header and row columns`
 
 User-facing state:
 
@@ -578,7 +582,7 @@ User-facing state:
 - Chat loading/empty content remains visually quiet. The temporary
   `Loading messages` spinner row was removed, and empty/loading chat no longer
   renders explanatory timeline content.
-- Dashboard workspace headers remain larger than session row text, untitled new
+- Session-list workspace headers remain larger than session row text, untitled new
   sessions render as `New Session`, and session rows are inset from the screen
   edges.
 - The row styling went through two validated corrections. A custom
@@ -605,7 +609,7 @@ Deferred or explicitly not changed:
 Validation evidence:
 
 - XcodeGen completed for the touched iOS project after each Swift checkpoint.
-- Focused iOS tests on iPhone 17 Pro, iOS 26.5 passed for dashboard,
+- Focused iOS tests on iPhone 17 Pro, iOS 26.5 passed for session list,
   source-guard, chat visual, cockpit state/view-model, and Settings placement
   coverage as appropriate to each checkpoint.
 - `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
@@ -616,15 +620,11 @@ Validation evidence:
 - `scripts/personal-info-guard.sh`, `git diff --check`, and
   `git ls-files -ci --exclude-standard` passed.
 - Simulator/Computer Use validation used the current iPhone 17 Pro, iOS 26.5
-  app builds. Evidence includes:
-  `/tmp/tron-ios-cockpit-placement-validation/ui/01-beta-dashboard.png`,
-  `/tmp/tron-ios-cockpit-placement-validation/ui/02-beta-chat-no-cockpit-banner.png`,
-  `/tmp/tron-ios-cockpit-placement-validation/ui/03-beta-runtime-cockpit-sheet.png`,
-  `/tmp/tron-ios-dashboard-row-glass-validation/ui/01-dashboard-inset-glass-rows.png`,
-  `/tmp/tron-ios-dashboard-row-container-press-validation/ui/row-container-press.mp4`,
-  `/tmp/tron-ios-dashboard-row-native-glass-validation/ui/native-glass-row-tap.mp4`,
-  and
-  `/tmp/tron-ios-dashboard-row-alignment-validation/ui/01-dashboard-header-row-alignment.png`.
+  app builds. Screenshot and video evidence was written under the cockpit
+  placement and row-polish validation directories in `/tmp/`, covering the
+  beta list surface, chat without the cockpit banner, the Runtime Cockpit sheet,
+  inset glass rows, row container press feedback, native interactive glass, and
+  header/row alignment.
 
 Effect on Phase 1 queue:
 
@@ -733,13 +733,53 @@ Simulator validation:
 - Not required. Slice 6 made no Swift or UI changes; the approved outcome was a
   documentation/static-guard decision to defer notification/inbox restoration.
 
-## Remaining Phase 1 Queue
+## Phase 1 Closeout
 
-Slice 6 is closed as deferred. The Phase 1 map should now get a closeout pass to
-check whether any local-native affordance families remain after Slices 1-6. If
-none remain, the next major planning step is the full Phase 2 agent-execution
-restoration goal plan, including APNs/device notification capability restoration
-through the central engine/resource mechanism.
+Phase 1 local-native/user-facing affordance restoration is closed after Slices
+1-6 and the session-list/cockpit placement cleanup. No remaining Phase 1 slice is queued.
+The IARM inventory remains historical coverage evidence, not a live Phase 1
+implementation queue.
+
+Closed Phase 1 work:
+
+- Slice 1 restored the functional composer attachment/menu structure without
+  restoring old hardcoded skills, server prompt history panels, or agent-execution
+  actions.
+- Slice 2 restored local composer dictation/audio capture affordances without
+  restoring voice-note storage or server transcription orchestration.
+- Slice 3 restored local recent-input reuse as the accepted minimal prompt
+  history affordance without restoring the old prompt history.
+- Slice 4 restored chat visual cues around local errors, thinking, generic
+  capability evidence, and quiet empty/loading behavior without restoring stale
+  loading rows or fixed product indicators.
+- Slice 5 restored settings, onboarding, diagnostics, pairing, provider/model,
+  and feedback affordances over current server facts and local support state.
+- The session-list/cockpit placement cleanup removed the passive chat worker
+  banner, moved Runtime Cockpit access into Servers -> Diagnostics, removed the
+  temporary chat loading row, and retained inset liquid-glass interactive
+  session rows with `New Session` untitled rows.
+- Slice 6 reviewed notification/inbox affordances and deferred them until a
+  server-owned APNs/device/capability resource mechanism exists.
+
+Closeout cleanup expectations:
+
+- No old notification bell, local inbox, APNs registration service, device
+  broker substitute, unread badge, delivery chip, or fake notification store
+  remains in current iOS source.
+- No chat-mounted passive worker-runtime banner remains in the primary chat
+  shell. Runtime Cockpit remains a settings diagnostics surface until Phase 2
+  defines attention-worthy, session-relevant runtime signals.
+- No temporary chat timeline loading spinner/text row remains. Empty and
+  loading chat content stay visually blank unless current server/local state
+  supplies a real user-facing event.
+- No custom fallback session list row press implementation remains. Session rows
+  use native SwiftUI liquid-glass interactive containers.
+- Historical IARM rows remain as evidence and classification records; they are
+  not a live queue to implement legacy surfaces by default.
+
+The next planned body of work is the full Phase 2 agent-execution restoration
+goal plan, including APNs/device notification capability restoration through the
+central engine/resource mechanism.
 
 ## Phase 2 Reminder
 

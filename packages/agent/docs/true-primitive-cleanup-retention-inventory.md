@@ -42,31 +42,32 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 106 |
-| implementation | 497 |
-| support | 382 |
-| test | 481 |
-| docs | 100 |
+| implementation | 533 |
+| support | 385 |
+| test | 504 |
+| docs | 126 |
 | delete | 0 |
 
 ## Owner Summary
 
 | Owner | Count |
 |-------|------:|
-| `agent_runtime` | 71 |
+| `agent_runtime` | 72 |
 | `app_bootstrap` | 11 |
 | `auth` | 19 |
 | `capability` | 1 |
 | `capability_execute` | 8 |
-| `docs/static gates` | 100 |
+| `docs/static gates` | 118 |
 | `domain_worker` | 6 |
 | `engine` | 101 |
-| `ios` | 95 |
-| `ios_engine` | 132 |
-| `ios_session` | 67 |
-| `ios_ui` | 134 |
+| `ios` | 98 |
+| `ios_engine` | 136 |
+| `ios_session` | 74 |
+| `ios_ui` | 138 |
 | `mac` | 76 |
 | `model_provider` | 78 |
 | `platform` | 2 |
+| `pmc_docs` | 4 |
 | `protocol` | 1 |
 | `registration` | 5 |
 | `rust_crate` | 2 |
@@ -77,8 +78,11 @@ The TSV covers tracked and newly introduced files under:
 | `session_store` | 3 |
 | `settings` | 16 |
 | `shared_foundation` | 45 |
-| `test_harness` | 481 |
+| `ssarr_docs` | 4 |
+| `test_harness` | 504 |
+| `transcription` | 11 |
 | `transport` | 25 |
+| `worker_lifecycle` | 9 |
 
 ## Delete Candidates
 

@@ -144,7 +144,7 @@ fn scorecard_weights_sum_to_100_and_are_closed() {
         ("IOSAC-2", ("Cockpit projection model", 10)),
         ("IOSAC-3", ("Lifecycle actions and confirmations", 10)),
         ("IOSAC-4", ("Dynamic runtime surfaces", 10)),
-        ("IOSAC-5", ("Chat shell integration", 10)),
+        ("IOSAC-5", ("Diagnostics placement", 10)),
         ("IOSAC-6", ("Neutral glass visual baseline", 8)),
         ("IOSAC-7", ("Focused Swift tests", 12)),
         ("IOSAC-8", ("Static gates", 10)),
@@ -335,8 +335,11 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
     assert_contains_all(
         "packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift",
         &[
-            "struct AgentStatusCapsuleView",
             "struct AgentCockpitSheet",
+            "SheetTitle(title: \"Runtime Cockpit\", color: .tronEmerald)",
+            "SheetDismissButton(color: .tronEmerald)",
+            "TronSegmentedControl(",
+            ".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)",
             "GeneratedRuntimeSurfaceView(",
             "resourceRef: runtimeSurface.resourceRef",
             "observedVersionId: runtimeSurface.resourceRef.versionId",
@@ -346,6 +349,14 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
 
     let cockpit =
         read_repo_file("packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift");
+    assert!(
+        !cockpit.contains("AgentStatusCapsuleView"),
+        "passive chat status capsule should remain removed from cockpit UI"
+    );
+    assert!(
+        !cockpit.contains("Picker(\"Cockpit\""),
+        "cockpit tabs should use the app shared glass segmented control, not the native segmented picker"
+    );
     for forbidden in [
         "sampleGeneratedSurface",
         "agent-cockpit-runtime-surface-placeholder",
@@ -359,16 +370,23 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
     }
 
     assert_contains_all(
-        "packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift",
+        "packages/ios-app/Sources/UI/Settings/Pages/ConnectionSettingsPage.swift",
         &[
-            "agentCockpit = AgentCockpitViewModel()",
-            "AgentStatusCapsuleView(",
-            "sheetCoordinator.showAgentCockpit()",
+            "ConnectionSettingsDiagnosticsSheet",
+            "ConnectionSettingsDiagnosticsCopy.runtimeCockpitLabel",
+            "AgentCockpitSheet(",
+            "repository: dependencies.workerLifecycleRepository",
+            "sessionId: nil",
+            "workspaceId: nil",
         ],
     );
     assert_contains_all(
-        "packages/ios-app/Sources/UI/Chat/Shell/ChatSheetContent.swift",
-        &["AgentCockpitSheet("],
+        "packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift",
+        &["Runtime Cockpit", "server-sourced runtime diagnostics"],
+    );
+    assert_contains_all(
+        "packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift",
+        &["messagesScrollView", "safeAreaInset(edge: .bottom"],
     );
     assert_contains_all(
         "packages/ios-app/Sources/UI/Chat/Shell/ChatSheetModifier.swift",
@@ -376,6 +394,24 @@ fn cockpit_ui_is_generic_and_not_placeholder_backed() {
             "let observedActiveSheet = sheetCoordinator.activeSheet",
             ".sheet(item: sheetBinding(observedActiveSheet)",
         ],
+    );
+
+    let chat_view = read_repo_file("packages/ios-app/Sources/UI/Chat/Shell/ChatView.swift");
+    for forbidden in [
+        "AgentStatusCapsuleView",
+        "AgentCockpitViewModel",
+        "agentCockpit.refresh",
+        "showAgentCockpit",
+    ] {
+        assert!(
+            !chat_view.contains(forbidden),
+            "primary chat must not mount passive cockpit placement: {forbidden}"
+        );
+    }
+    let chat_sheet = read_repo_file("packages/ios-app/Sources/Session/Chat/State/ChatSheet.swift");
+    assert!(
+        !chat_sheet.contains("agentCockpit"),
+        "chat sheet routing must not retain cockpit presentation state"
     );
 }
 

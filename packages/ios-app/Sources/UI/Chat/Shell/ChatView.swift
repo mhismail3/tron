@@ -13,7 +13,6 @@ struct ChatView: View {
     @Environment(\.dismiss) var dismiss
     @Environment(\.dependencies) var dependencies
     @State var viewModel: ChatViewModel
-    @State var agentCockpit = AgentCockpitViewModel()
 
     // Convenience accessor
     var eventStoreManager: EventStoreManager { dependencies.eventStoreManager }
@@ -72,7 +71,6 @@ struct ChatView: View {
         .chatSheets(
             coordinator: sheetCoordinator,
             viewModel: viewModel,
-            agentCockpit: agentCockpit,
             sessionId: sessionId,
             workspaceDeleted: workspaceDeleted
         )
@@ -167,10 +165,6 @@ struct ChatView: View {
             logger.debug("[INIT] starting connectAndReconstruct", category: .ui)
             await viewModel.connectAndReconstruct()
             logger.debug("[INIT] connectAndReconstruct done, messages=\(viewModel.messages.count)", category: .ui)
-            await agentCockpit.refresh(
-                repository: services.workerLifecycle,
-                connectionState: viewModel.connectionState
-            )
 
             // Handle message visibility and set initialLoadComplete
             // NOTE: initialLoadComplete is set INSIDE handleInitialMessageVisibility()
@@ -189,17 +183,6 @@ struct ChatView: View {
                         // First connection — use initial connect flow
                         await viewModel.connectAndReconstruct()
                     }
-                    await agentCockpit.refresh(
-                        repository: services.workerLifecycle,
-                        connectionState: viewModel.connectionState
-                    )
-                }
-            } else if !newState.isConnected {
-                Task {
-                    await agentCockpit.refresh(
-                        repository: services.workerLifecycle,
-                        connectionState: newState
-                    )
                 }
             }
             // Input-bar read-only mode is derived from `interactionPolicy` (500ms
@@ -258,17 +241,6 @@ struct ChatView: View {
             )
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 inputAreaContent
-            }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                AgentStatusCapsuleView(
-                    overview: agentCockpit.overview,
-                    isRefreshing: agentCockpit.isRefreshing
-                ) {
-                    sheetCoordinator.showAgentCockpit()
-                }
-                .padding(.horizontal, 14)
-                .padding(.top, 6)
-                .padding(.bottom, 4)
             }
             .scrollContentBackground(.hidden)
             .tronScreenBackground()

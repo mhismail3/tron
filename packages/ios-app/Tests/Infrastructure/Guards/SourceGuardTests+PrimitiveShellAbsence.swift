@@ -264,29 +264,33 @@ extension SourceGuardTests {
             contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/CameraCaptureSheet.swift"),
             encoding: .utf8
         )
+        let cameraModelSource = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Composer/CameraModel.swift"),
+            encoding: .utf8
+        )
 
         #expect(
-            source.contains("var session: AVCaptureSession?"),
-            "camera sheet should defer AVCaptureSession creation until after presentation starts"
+            cameraModelSource.contains("var session: AVCaptureSession?"),
+            "camera model should own AVCaptureSession creation after presentation starts"
         )
         #expect(
-            source.contains("let captureSession = existingSession ?? AVCaptureSession()"),
-            "camera sheet should create capture sessions inside the asynchronous setup path"
+            cameraModelSource.contains("let captureSession = existingSession ?? AVCaptureSession()"),
+            "camera model should create capture sessions inside the asynchronous setup path"
         )
         #expect(
-            source.contains("sessionQueue.async"),
-            "camera sheet should perform capture-session setup on its session queue"
+            cameraModelSource.contains("sessionQueue.async"),
+            "camera model should perform capture-session setup on its session queue"
         )
         #expect(
-            source.contains("private nonisolated static func configure"),
+            cameraModelSource.contains("private nonisolated static func configure"),
             "camera setup should use a nonisolated helper so AVFoundation work is not forced onto MainActor"
         )
         #expect(
-            source.contains("private nonisolated static func cameraDevice(for position: AVCaptureDevice.Position)"),
+            cameraModelSource.contains("private nonisolated static func cameraDevice(for position: AVCaptureDevice.Position)"),
             "camera setup should discover front/back camera variants instead of assuming only the wide-angle device type"
         )
         #expect(
-            source.contains(".builtInTrueDepthCamera"),
+            cameraModelSource.contains(".builtInTrueDepthCamera"),
             "camera switching should support TrueDepth/front-camera devices"
         )
         #expect(
@@ -410,19 +414,19 @@ extension SourceGuardTests {
             "camera icon controls should use the full circular hit target instead of only the rendered symbol"
         )
         #expect(
-            source.contains("private nonisolated static func turnOffTorchIfNeeded"),
+            cameraModelSource.contains("private nonisolated static func turnOffTorchIfNeeded"),
             "camera switching should turn off the active torch before replacing the video input"
         )
         #expect(
-            source.contains("previousInputs.compactMap { ($0 as? AVCaptureDeviceInput)?.device }"),
+            cameraModelSource.contains("previousInputs.compactMap { ($0 as? AVCaptureDeviceInput)?.device }"),
             "camera switching should inspect existing video devices before input replacement"
         )
         #expect(
-            source.contains("guard !isConfiguringSession, let captureSession = session else { return }"),
+            cameraModelSource.contains("guard !isConfiguringSession, let captureSession = session else { return }"),
             "torch toggles should not race camera input replacement"
         )
         #expect(
-            source.contains("defer { device.unlockForConfiguration() }"),
+            cameraModelSource.contains("defer { device.unlockForConfiguration() }"),
             "torch configuration should always unlock the AVCaptureDevice after a successful lock"
         )
         #expect(
@@ -447,11 +451,11 @@ extension SourceGuardTests {
         )
 
         let removeInputRange = try #require(
-            source.range(of: "previousInputs.forEach { session.removeInput($0) }"),
+            cameraModelSource.range(of: "previousInputs.forEach { session.removeInput($0) }"),
             "camera switch should remove the old video input before checking the replacement input"
         )
         let canAddInputRange = try #require(
-            source.range(of: "guard session.canAddInput(input) else"),
+            cameraModelSource.range(of: "guard session.canAddInput(input) else"),
             "camera switch should validate the replacement input after removing the old one"
         )
         #expect(

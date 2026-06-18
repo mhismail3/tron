@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-18 (IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-18 (IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -11,7 +11,8 @@ is intentionally a shell: it pairs with a local Tron server, sends prompts,
 keeps a clearable local recent-input history for composer reuse, records
 composer mic input for opt-in local transcription, renders session
 messages, persists a local event cache for reconstruction, and renders generic
-runtime surfaces emitted by the engine. The current user-facing Agent cockpit
+runtime surfaces emitted by the engine. The current user-facing Agent cockpit is
+a diagnostics surface opened from Servers -> Diagnostics -> Runtime Cockpit. It
 surfaces live worker lifecycle catalog entries, package/resource status,
 confirmation-backed lifecycle actions, activity, and active `ui_surface`
 resources without adding fixed product panels. The app does not own
@@ -22,6 +23,15 @@ The Rust server remains authoritative for provider communication, session/event
 truth, model routing, execution, state, logs, and generated runtime data. iOS
 may cache and render server facts, but it must not invent capability policy,
 source-control state, worker state, or product panels locally.
+
+Notification and inbox affordances remain deferred in the current Phase 1
+shell. Local chat error pills, app-global connection toasts, timeline system
+events, Logs, Server Diagnostics, and feedback are the current attention
+surfaces. A notification bell, unread inbox, APNs registration, push delivery,
+device broker behavior, notification read state, and notification delivery
+chips return only with a future server-owned APNs/device/capability resource
+mechanism; iOS must not create a local substitute that implies hidden backend
+truth.
 
 The iOS Affordance Restoration Map is the active planning artifact for
 functional-only Phase 1 iOS UX restoration. It classifies every deleted or
@@ -39,16 +49,19 @@ matching database/event/settings/dependency work.
 - Settings needed to reach the server, configure providers, choose models, and
   inspect local diagnostics.
 - Grouped session dashboard with collapsible workspace headers and compact
-  one-line session rows, session creation/fork/resume, prompt composer with a
+  inset liquid-glass one-line session rows, session creation/fork/resume,
+  prompt composer with a
   local recent-input picker, a functional-only native attachment menu that
   preserves composer keyboard focus while layering native camera/photo/file
   pickers above it, unified attachments for images/documents, a right-side mic
   affordance for local composer transcription when enabled, and message
-  rendering with a quiet blank empty chat, an initial loading state, streamed thinking content, and
+  rendering with quiet blank empty/loading chat content, streamed thinking content, and
   local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
-- Agent cockpit status capsule and sheet for worker lifecycle catalog/resource
-  state, package actions, activity, and dynamic runtime surfaces.
+- Servers diagnostics Runtime Cockpit row and sheet for worker lifecycle
+  catalog/resource state, package actions, activity, and dynamic runtime
+  surfaces. The primary chat shell does not mount passive worker-runtime
+  diagnostics.
 - Generic capability invocation chips and generic generated runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, hashed
   server-log correlation IDs, and bounded local event cache integrity.
@@ -101,7 +114,7 @@ Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models 
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
-Cockpit: WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
+Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 
 `CameraCaptureSheet` keeps the tap-to-sheet path light and immersive: the
@@ -170,9 +183,8 @@ extensions.
 
 The chat timeline owns only truthful local/session presentation state:
 
-- `ChatTimelineAuxiliaryState` derives only the initial loading affordance
-  (`Loading messages`) from local initial-load completion and message count.
-  Once initial load completes, a chat with no messages stays visually blank.
+- Empty/loading chat content stays blank. Session loading does not render a
+  spinner or explanatory timeline row.
 - Connection status is app-global. Reconnecting, disconnected, and retry
   signals route through `ToastCenter`/connection retry policy, not through
   separate in-chat connection pills.
@@ -187,6 +199,10 @@ The chat timeline owns only truthful local/session presentation state:
   for one-line chat chips and sectioned detail sheets. Chips stay compact; the
   detail sheet shows summary, target/input/result/error, and technical
   provenance only when current invocation data supplies it.
+- Passive worker-runtime diagnostics stay out of the chat shell. A chat-level
+  agent signal can return only for attention-worthy states such as approval
+  required, degraded runtime, an active session-relevant worker, or a generated
+  surface requiring user action.
 
 Deferred or rejected surfaces remain absent: process/job/subagent/source-control
 work dashboards, approvals, memory/rules/hooks status, skill activation,
@@ -271,10 +287,10 @@ origin/topic/filter for ACK coalescing and diagnostics only; session history is
 reconstructed through server APIs, not replayed from cursor storage.
 Session list projection keeps server titles and last-message previews together:
 dashboard rows prefer generated or explicit session titles, then the latest user
-prompt preview, then the workspace display name. `SessionSidebar` composes the
-dashboard surface and shell actions; `SessionDashboard.swift` owns workspace
-grouping, expansion state, row status mapping, and header/row presentation
-metrics.
+prompt preview, then `New Session` for untitled new rows. `SessionSidebar`
+composes the dashboard surface and shell actions; `SessionDashboard.swift` owns
+workspace grouping, expansion state, row status mapping, interactive row
+liquid-glass containers, and header/row presentation metrics.
 
 Server settings shown in the iOS settings UI are snapshots from
 `settings::get`/`settings::reset`; local state exists only to render the active
@@ -313,11 +329,14 @@ payloads supplied by the runtime surface. Pure icon, formatting, array, and row
 preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
 
-The Agent cockpit's Surfaces tab lists active `ui_surface` resources through
-the same generic `resource::list`/`resource::inspect` substrate, decodes current
-`UiSurfaceDTO` payloads, and passes resource/version refs into
-`GeneratedRuntimeSurfaceView`. Empty state is allowed when no runtime surface is
-published; a hardcoded sample surface is not.
+The Agent cockpit opens from Servers -> Diagnostics -> Runtime Cockpit. Its
+Surfaces tab lists active `ui_surface` resources through the same generic
+`resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
+payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.
+The sheet uses the standard liquid-glass sheet toolbar, title, dismiss control,
+and shared `TronSegmentedControl` tabs rather than a native segmented picker.
+Empty state is allowed when no runtime surface is published; a hardcoded sample
+surface is not.
 
 ## Settings And Theme Boundaries
 
@@ -330,7 +349,8 @@ live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
 
 Server identity, reachability, diagnostics, and pairing controls stay inside
 the Servers page or the disconnected warning card; Settings main does not grow
-a server-health dashboard. Agent settings owns server-backed quick-session
+a server-health dashboard. Servers diagnostics owns the compact Logs and
+Runtime Cockpit entries. Agent settings owns server-backed quick-session
 defaults, including `server.defaultProvider`, `server.defaultModel`, and
 `server.defaultWorkspace`. Provider credential state remains in Providers.
 

@@ -140,6 +140,7 @@ packages/agent/src/domains/agent/runtime/service/mod.rs	retain	rust agent	PCC-10
 packages/agent/src/domains/agent/runtime/service/plan.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/runtime/service/request.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/runtime/service/spawn.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/agent/runtime/service/title_generation.rs	retain	rust agent	Phase1-closeout	Session-title generation is retained as current metadata-only runtime behavior; it avoids old hook/subagent machinery and is covered by title-generation tests.
 packages/agent/src/domains/agent/stream.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/worker.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/auth/contract.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -365,6 +366,21 @@ packages/agent/src/domains/settings/profile/types/context.rs	retain	rust agent	P
 packages/agent/src/domains/settings/profile/types/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/settings/profile/types/server.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/settings/profile/types/ui.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/transcription/contract.rs	retain	transcription domain	Phase1-closeout	Local transcription capability contracts are retained for approved composer dictation/audio capture; no voice-note storage or fake agent execution surface is introduced.
+packages/agent/src/domains/transcription/deps.rs	retain	transcription domain	Phase1-closeout	Transcription dependency boundary is retained so sidecar state stays injected and testable instead of hidden in bootstrap glue.
+packages/agent/src/domains/transcription/handlers.rs	retain	transcription domain	Phase1-closeout	Transcription handlers are retained as the current typed engine boundary for audio, model listing, and model download readiness.
+packages/agent/src/domains/transcription/implementation/mod.rs	retain	transcription domain	Phase1-closeout	Transcription implementation facade is retained to isolate sidecar runtime details from public domain handlers.
+packages/agent/src/domains/transcription/implementation/runtime/mod.rs	retain	transcription sidecar	Phase1-closeout	Transcription runtime module root is retained to avoid path aliases while owning MLX and venv submodules.
+packages/agent/src/engine/tests/invocation/meta_promotion.rs	retain	rust test	Phase1-closeout	Engine meta promotion tests split from meta_primitives to keep test ownership under hard budget.
+packages/agent/tests/self_sufficient_agent_runtime_readiness_invariants/successor_guards.rs	retain	rust test	Phase1-closeout	SSARR successor-surface guards split from the main invariant target to keep hard budget closed.
+packages/ios-app/Sources/UI/Chat/Composer/CameraModel.swift	retain	ios ui	Phase1-closeout	Camera capture model split from the sheet view to keep composer UI ownership below hard budget.
+packages/ios-app/Sources/UI/Chat/Composer/CameraPreviewView.swift	retain	ios ui	Phase1-closeout	Camera preview bridge split from the sheet view to keep composer UI ownership below hard budget.
+packages/agent/src/domains/transcription/implementation/runtime/mlx.rs	retain	transcription sidecar	Phase1-closeout	MLX sidecar runtime is retained for local on-device transcription readiness and startup validation.
+packages/agent/src/domains/transcription/implementation/runtime/venv.rs	retain	transcription sidecar	Phase1-closeout	Virtualenv setup is retained because the approved local sidecar depends on an isolated Python runtime.
+packages/agent/src/domains/transcription/implementation/sidecar/requirements.txt	retain	transcription sidecar	Phase1-closeout	Sidecar requirements are retained as the explicit dependency manifest for the local transcription runtime.
+packages/agent/src/domains/transcription/implementation/sidecar/worker.py	retain	transcription sidecar	Phase1-closeout	Python sidecar worker is retained as the minimal local audio transcription process boundary.
+packages/agent/src/domains/transcription/implementation/types.rs	retain	transcription domain	Phase1-closeout	Transcription DTO/state types are retained for readiness, result, and model-list protocol stability.
+packages/agent/src/domains/transcription/mod.rs	retain	transcription domain	Phase1-closeout	Transcription module root is retained for the approved Phase 1 local composer dictation capability.
 packages/agent/src/domains/system/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/authority/compensation.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/authority/grants/authorization.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -933,8 +949,6 @@ packages/ios-app/Sources/UI/Chat/Composer/WrappingHStackLayout.swift	retain	ios 
 packages/ios-app/Sources/UI/Chat/Messages/DecodedImageView.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Messages/ImagesContentView.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Messages/Indicators/NeuralSparkIndicator.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Sources/UI/Chat/Messages/Indicators/OrbitingParticleIndicator.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Sources/UI/Chat/Messages/Indicators/PhaseWaveIndicator.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Messages/MarkdownBlockParser.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Messages/MarkdownBlockView.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Chat/Messages/MessageBubble.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -962,7 +976,6 @@ packages/ios-app/Sources/UI/Chat/Shell/ShellToolbarContent.swift	retain	ios ui	P
 packages/ios-app/Sources/UI/Chat/Shell/ThinkingIndicator.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Components/CachedSession+Display.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Components/CardEntranceModifier.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Sources/UI/Components/ConnectionStatusPill.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Components/FlowLayout.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Components/LineNumberedContentView.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Components/SessionTitleIcons.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1019,7 +1032,6 @@ packages/ios-app/Sources/UI/System/ProviderErrorDetailSheet.swift	retain	ios ui	
 packages/ios-app/Sources/UI/Theme/AppearanceSettings.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Theme/FontFamily.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Theme/FontSettings.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Sources/UI/Theme/ThinkingIndicatorStyle.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Theme/TronColors.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Theme/TronFontLoader.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Sources/UI/Theme/TronIcons.swift	retain	ios ui	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1231,7 +1243,6 @@ packages/ios-app/Tests/UI/System/InitializationErrorViewTests.swift	retain	ios t
 packages/ios-app/Tests/UI/Theme/AppearanceSettingsTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/Theme/ChipStyleModifierTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/Theme/FontSettingsTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
-packages/ios-app/Tests/UI/Theme/ThinkingIndicatorStyleTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/Theme/TronColorsTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/Tests/UI/Theme/TronTypographyTests.swift	retain	ios test	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/ios-app/TronMobile.xcodeproj/project.pbxproj	generated	ios app	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1626,6 +1637,12 @@ packages/agent/docs/baseline-pre-restoration-closure-evidence-manifest.md	retain
 packages/agent/docs/baseline-pre-restoration-closure-inventory.md	retain	bprc docs	BPRC-8	Baseline Pre-Restoration Closure inventory retained for iii-aligned backlog classification.
 packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv	retain	bprc docs	BPRC-8	Baseline Pre-Restoration Closure machine inventory retained for static gates.
 packages/agent/tests/baseline_pre_restoration_closure_invariants.rs	retain	bprc rust test	BPRC-10	Baseline Pre-Restoration Closure invariant target retained for static baseline-restoration gates.
+packages/agent/docs/ios-affordance-restoration-map-scorecard.md	retain	iarm docs	IARM-9	iOS Affordance Restoration Map scorecard retained for exhaustive iOS affordance restoration planning proof.
+packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md	retain	iarm docs	IARM-9	iOS Affordance Restoration Map evidence manifest retained for old-tree census and validation provenance.
+packages/agent/docs/ios-affordance-restoration-map-inventory.md	retain	iarm docs	IARM-8	iOS Affordance Restoration Map inventory retained for classification, Phase 1 closure, and Phase 2 deferral anchors.
+packages/agent/docs/ios-affordance-restoration-map-inventory.tsv	retain	iarm docs	IARM-7	iOS Affordance Restoration Map machine inventory retained for static coverage gates.
+packages/agent/docs/ios-affordance-restoration-progress.md	retain	iarm docs	IARM-9	iOS Affordance Restoration progress ledger retained for completed slice decisions, validation evidence, and Phase 1 closeout state.
+packages/agent/tests/ios_affordance_restoration_map_invariants.rs	retain	iarm rust test	IARM-7	iOS Affordance Restoration Map invariant target retained for static map, closure, and source-absence gates.
 packages/agent/docs/self-updating-worker-runtime-foundation-scorecard.md	retain	suwrf docs	SUWRF-10	Self-Updating Worker Runtime Foundation scorecard retained for worker lifecycle closeout proof.
 packages/agent/docs/self-updating-worker-runtime-foundation-evidence-manifest.md	retain	suwrf docs	SUWRF-10	Self-Updating Worker Runtime Foundation evidence manifest retained for command, source, and simulator-proof provenance.
 packages/agent/docs/self-updating-worker-runtime-foundation-inventory.md	retain	suwrf docs	SUWRF-6	Self-Updating Worker Runtime Foundation inventory retained for worker package lifecycle surface classification.
@@ -1655,3 +1672,29 @@ packages/ios-app/Tests/Engine/Protocol/WorkerLifecycleDTOTests.swift	retain	ios 
 packages/ios-app/Tests/Engine/Transport/Clients/WorkerLifecycleClientTests.swift	retain	ios test	IOSAC-7	Worker lifecycle client tests retained for existing function id and resource primitive coverage.
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift	retain	ios test	IOSAC-7	Agent cockpit state tests retained for projection, action, and confirmation coverage.
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTests.swift	retain	ios test	IOSAC-7	Agent cockpit view model tests retained for refresh, proposal install, disabled actions, and ui_surface decoding.
+packages/ios-app/Sources/Engine/Protocol/Transcription/EngineProtocolTypes+Transcription.swift	retain	ios engine protocol	Phase1-closeout	Transcription DTOs retained for approved local composer dictation readiness and result decoding.
+packages/ios-app/Sources/Engine/Transport/Clients/TranscriptionClient.swift	retain	ios engine client	Phase1-closeout	Transcription client retained as a thin typed wrapper over current engine functions.
+packages/ios-app/Sources/Session/Chat/Coordinators/ChatTranscriptionCoordinator.swift	retain	ios chat state	Phase1-closeout	Chat transcription coordinator retained for local mic capture, readiness checks, cancellation, and draft insertion.
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Errors.swift	retain	ios chat state	Phase1-closeout	Chat local-error routing retained as the paved replacement for generic alert surfaces.
+packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Transcription.swift	retain	ios chat state	Phase1-closeout	Chat transcription view-model extension retained for composer voice input lifecycle wiring.
+packages/ios-app/Sources/Session/Timeline/Messages/CapabilityEvidencePresentation.swift	retain	ios timeline presentation	Phase1-closeout	Capability evidence presentation retained for compact current invocation facts without fixed legacy capability panels.
+packages/ios-app/Sources/Session/Timeline/Messages/LocalChatNotification.swift	retain	ios timeline presentation	Phase1-closeout	Local chat notifications retained for ephemeral iOS-owned errors without durable fake inbox state.
+packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift	retain	ios audio support	Phase1-closeout	Composer mic capture engine retained for approved local dictation capture.
+packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	retain	ios audio support	Phase1-closeout	Composer mic recorder retained as the AVFoundation boundary for temporary local audio.
+packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	retain	ios audio support	Phase1-closeout	Microphone availability monitor retained for local readiness and permission-safe composer affordances.
+packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	retain	ios chat ui	Phase1-closeout	Recent input sheet retained as the approved local prompt-history affordance.
+packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	retain	ios chat ui	Phase1-closeout	Local error detail sheet retained for user-inspectable local chat failures.
+packages/ios-app/Sources/UI/Chat/Shell/FloatingNewSessionButton.swift	retain	ios chat shell	Phase1-closeout	Floating new-session button retained after session-list shell simplification.
+packages/ios-app/Sources/UI/Chat/Shell/SessionList.swift	retain	ios chat shell	Phase1-closeout	Session list retained as the minimal grouped first-screen chat shell surface.
+packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingFlowPresentation.swift	retain	ios onboarding ui	Phase1-closeout	Onboarding presentation helper retained for shared first-run and server-repair pairing sheets.
+packages/ios-app/Tests/Engine/Protocol/EngineProtocolTypesTranscriptionTests.swift	retain	ios test	Phase1-closeout	Transcription DTO tests retained for protocol decoding coverage.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ChatAffordanceStatus.swift	retain	ios guard test	Phase1-closeout	Chat affordance source guards retained to keep passive cockpit, loading row, and custom row fallback code out.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ComposerKeyboard.swift	retain	ios guard test	Phase1-closeout	Composer source guards retained for attachment menu and recent-input affordance boundaries.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+VoiceTranscription.swift	retain	ios guard test	Phase1-closeout	Voice transcription source guards retained for local audio capture and no voice-note/backend expansion boundaries.
+packages/ios-app/Tests/Session/Chat/Coordinators/ChatTranscriptionCoordinatorTests.swift	retain	ios test	Phase1-closeout	Chat transcription coordinator tests retained for readiness, cancellation, and draft insertion behavior.
+packages/ios-app/Tests/Session/Timeline/Messages/CapabilityEvidencePresentationTests.swift	retain	ios test	Phase1-closeout	Capability evidence presentation tests retained for compact invocation rendering.
+packages/ios-app/Tests/Session/Timeline/Messages/LocalChatNotificationTests.swift	retain	ios test	Phase1-closeout	Local chat notification tests retained for dedupe and display rules.
+packages/ios-app/Tests/UI/Chat/AttachmentMenuTests.swift	retain	ios test	Phase1-closeout	Attachment menu tests retained for native menu actions and absence of nonfunctional legacy entries.
+packages/ios-app/Tests/UI/Chat/ChatAffordanceVisualRenderTests.swift	retain	ios test	Phase1-closeout	Chat visual render tests retained for local errors, thinking, capability evidence, and quiet loading/empty states.
+packages/ios-app/Tests/UI/Chat/RecentInputHistoryTests.swift	retain	ios test	Phase1-closeout	Recent input history tests retained for local sheet insertion and clearing behavior.
+packages/ios-app/Tests/UI/Chat/SessionListPresentationTests.swift	retain	ios test	Phase1-closeout	Session list presentation tests retained for grouping, untitled rows, status, and layout alignment.

@@ -8,9 +8,7 @@ final class TranscriptionClient: EngineDomainClient {
     ) async throws -> TranscribeAudioResult {
         _ = try requireTransport().requireConnection()
 
-        let audioBase64 = await Task.detached(priority: .utility) {
-            audioData.base64EncodedString()
-        }.value
+        let audioBase64 = audioData.base64EncodedString()
 
         let params = TranscribeAudioParams(
             sessionId: currentTransport?.currentSessionId,

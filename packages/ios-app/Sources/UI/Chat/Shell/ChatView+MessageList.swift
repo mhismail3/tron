@@ -90,8 +90,6 @@ extension ChatView {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        timelineAuxiliaryView
-
                         // Load more messages button (like iOS Messages)
                         if viewModel.hasMoreMessages {
                             loadMoreButton
@@ -260,24 +258,6 @@ extension ChatView {
         .animation(.easeOut(duration: 0.2), value: scrollCoordinator.shouldShowNewContentPill)
     }
 
-    // MARK: - Timeline Auxiliary State
-
-    @ViewBuilder
-    var timelineAuxiliaryView: some View {
-        let state = ChatTimelineAuxiliaryState.derive(
-            initialLoadComplete: initialLoadComplete,
-            messagesIsEmpty: viewModel.messages.isEmpty
-        )
-
-        switch state {
-        case .loading:
-            ChatTimelineLoadingView(title: state.title)
-                .id("timelineLoading")
-        case .none:
-            EmptyView()
-        }
-    }
-
     // MARK: - Scroll to Bottom Button
 
     var scrollToBottomButton: some View {
@@ -377,23 +357,5 @@ extension ChatView {
         }
         .disabled(viewModel.isLoadingMoreMessages)
         .padding(.bottom, 8)
-    }
-}
-
-struct ChatTimelineLoadingView: View {
-    let title: String
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ProgressView()
-                .scaleEffect(0.72)
-                .tint(.tronEmerald)
-            Text(title)
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .medium))
-                .foregroundStyle(.tronTextSecondary)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.top, 120)
-        .accessibilityElement(children: .combine)
     }
 }

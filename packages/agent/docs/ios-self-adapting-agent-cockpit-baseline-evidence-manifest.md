@@ -28,9 +28,9 @@ implementation.
 - IOSAC-4: the Surfaces tab lists active `ui_surface` resources, inspects
   current versions, decodes `UiSurfaceDTO`, and renders through the retained
   generated UI renderer with resource/version refs.
-- IOSAC-5: `ChatView` owns the mounted cockpit view model, displays
-  `AgentStatusCapsuleView`, and presents `AgentCockpitSheet` through the
-  existing sheet coordinator.
+- IOSAC-5: the original proof mounted a compact chat cockpit capsule; the
+  2026-06-18 placement cleanup removed passive chat presence and retained the
+  sheet under Servers -> Diagnostics -> Runtime Cockpit.
 - IOSAC-6: `TronColors` now defines neutral glass backgrounds and emerald primary
   accent tokens; `TronColorsTests` lock the light/dark values.
 - IOSAC-7: focused Swift tests cover DTO decoding, RPC function IDs and
@@ -118,8 +118,10 @@ Simulator validation is required for this slice because Swift/UI behavior
 changed. The expected user-facing baseline to validate is:
 
 - App launches and connects to the local server.
-- The chat shell shows the agent status capsule above the message surface.
-- Tapping the status capsule opens the Agent cockpit sheet.
+- The chat shell does not show a passive agent status capsule above the message
+  surface.
+- Servers -> Diagnostics shows a compact Runtime Cockpit row that opens the
+  Agent cockpit sheet.
 - Workers, Packages, Activity, and Surfaces tabs are present.
 - Empty states render without overlap when no worker lifecycle resources exist.
 - When active `ui_surface` resources exist, the Surfaces tab renders them through
@@ -131,12 +133,10 @@ Observed simulator evidence on iPhone 17 Pro, iOS 26.5:
 - `/tmp/tron-prod-sessions-after-clean-launch.png`: Prod app launches without
   onboarding after simulator pairing state is present and displays the connected
   Sessions surface.
-- `/tmp/tron-chat-deeplink-cockpit-entry.png`: the chat route displays the new
-  `AgentStatusCapsuleView` above the message surface with Idle status and the
-  cockpit icon.
-- `/tmp/tron-prod-chat-capsule-unambiguous.png`: after uninstalling the
-  simulator Beta bundle, only the Prod bundle remains running during the
-  attempted session deep link; iOS shows its "Open in Tron?" confirmation prompt.
+- Historical IOSAC screenshots such as
+  `/tmp/tron-chat-deeplink-cockpit-entry.png` and
+  `/tmp/tron-prod-chat-capsule-unambiguous.png` prove the original baseline
+  entry, not current placement.
 - `/tmp/tron-prod-sessions-final-precloseout.png`: the prompt was cleared by a
   clean Prod relaunch and the app returned to the connected Sessions baseline.
 - `/tmp/tron-prod-fresh-launch-after-reboot.png`: after hard Simulator restart,
@@ -158,8 +158,9 @@ Observed simulator evidence on iPhone 17 Pro, iOS 26.5:
 
 Because Computer Use could inspect but not interact after recovery, and `simctl`
 does not expose tap injection, final screenshot validation proves launch,
-pairing, connection, and session-list rendering. Earlier simulator screenshots
-prove chat-level cockpit entry visibility. The cockpit sheet internals are
-covered by focused Swift state/view-model tests, source invariants, generated
-surface renderer tests, and the live `/engine` resource-read probe rather than
-an interactive screenshot.
+pairing, connection, and session-list rendering. Current placement is covered
+by focused Swift/source-guard tests and the later placement-cleanup validation
+recorded in `ios-affordance-restoration-progress.md`. The cockpit sheet
+internals are covered by focused Swift state/view-model tests, source
+invariants, generated surface renderer tests, and the live `/engine`
+resource-read probe rather than an interactive screenshot.

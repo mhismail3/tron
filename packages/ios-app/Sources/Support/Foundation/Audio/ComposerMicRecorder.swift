@@ -23,6 +23,13 @@ final class ComposerMicRecorder {
     private let engine = ComposerMicCaptureEngine()
     private var autoStopTask: Task<Void, Never>?
 
+    deinit {
+        MainActor.assumeIsolated {
+            autoStopTask?.cancel()
+            engine.cancel()
+        }
+    }
+
     func startRecording(maxDuration: TimeInterval) async throws {
         guard !isRecording else { return }
         guard await engine.requestPermission() else {

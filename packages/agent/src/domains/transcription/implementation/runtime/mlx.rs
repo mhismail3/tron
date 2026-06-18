@@ -9,9 +9,8 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, info, warn};
 
-use crate::domains::transcription::{
-    TranscriptionEngine, TranscriptionError, TranscriptionResult, venv,
-};
+use super::venv;
+use crate::domains::transcription::{TranscriptionEngine, TranscriptionError, TranscriptionResult};
 use crate::shared::foundation::paths;
 
 const DEFAULT_POOL_SIZE: usize = 1;

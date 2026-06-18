@@ -1,15 +1,15 @@
 import SwiftUI
 
-// MARK: - Dashboard Projection
+// MARK: - List Projection
 
-struct SessionDashboardWorkspaceGroup: Identifiable {
+struct SessionListWorkspaceGroup: Identifiable {
     let path: String
     let name: String
     let sessions: [CachedSession]
 
     var id: String { path.isEmpty ? "__default_workspace__" : path }
 
-    static func groups(from sessions: [CachedSession]) -> [SessionDashboardWorkspaceGroup] {
+    static func groups(from sessions: [CachedSession]) -> [SessionListWorkspaceGroup] {
         var orderedPaths: [String] = []
         var sessionsByPath: [String: [CachedSession]] = [:]
 
@@ -24,7 +24,7 @@ struct SessionDashboardWorkspaceGroup: Identifiable {
 
         return orderedPaths.compactMap { path in
             guard let sessions = sessionsByPath[path], !sessions.isEmpty else { return nil }
-            return SessionDashboardWorkspaceGroup(
+            return SessionListWorkspaceGroup(
                 path: path,
                 name: CachedSession.workspaceDisplayName(for: path),
                 sessions: sessions
@@ -33,7 +33,7 @@ struct SessionDashboardWorkspaceGroup: Identifiable {
     }
 }
 
-struct SessionDashboardWorkspaceExpansion: Equatable {
+struct SessionListWorkspaceExpansion: Equatable {
     private(set) var collapsedGroupIds: Set<String> = []
 
     func isExpanded(_ groupId: String) -> Bool {
@@ -49,24 +49,33 @@ struct SessionDashboardWorkspaceExpansion: Equatable {
     }
 }
 
-enum SessionDashboardLayout {
-    static let outerHorizontalPadding: CGFloat = 24
+enum SessionListLayout {
+    static let rowContainerHorizontalInset: CGFloat = 16
+    static let rowContentHorizontalPadding: CGFloat = 12
+    static var headerLeadingPadding: CGFloat {
+        rowContainerHorizontalInset + rowContentHorizontalPadding
+    }
+    static var headerTrailingPadding: CGFloat {
+        rowContainerHorizontalInset
+    }
     static let iconColumnWidth: CGFloat = 18
     static let iconTextSpacing: CGFloat = 8
-    static let minimumRowHeight: CGFloat = 34
+    static let minimumRowHeight: CGFloat = 38
     static let listTopContentMargin: CGFloat = 38
     static let listBottomContentMargin: CGFloat = 92
     static let headerTopPadding: CGFloat = 10
     static let headerBottomPadding: CGFloat = 3
-    static let rowVerticalPadding: CGFloat = 5
+    static let rowVerticalPadding: CGFloat = 7
     static let rowTrailingMinimumSpacing: CGFloat = 10
-    static let selectedRowCornerRadius: CGFloat = 9
+    static let rowContainerCornerRadius: CGFloat = 12
     static let deletingRowOpacity = 0.45
     static let floatingButtonSize: CGFloat = 56
     static let floatingButtonTrailingPadding: CGFloat = 20
     static let floatingButtonBottomPadding: CGFloat = 8
     static let headerIconSize: CGFloat = 14
     static let headerChevronSize: CGFloat = 10
+    static let headerTitleSize: CGFloat = TronTypography.sizeBodyLG
+    static let rowTitleSize: CGFloat = TronTypography.sizeBody3
     static let expansionAnimation = Animation.snappy(duration: 0.14)
 
     static var headerInsets: EdgeInsets {
@@ -74,11 +83,16 @@ enum SessionDashboardLayout {
     }
 
     static var rowInsets: EdgeInsets {
-        EdgeInsets(top: 1, leading: 0, bottom: 1, trailing: 0)
+        EdgeInsets(
+            top: 2,
+            leading: rowContainerHorizontalInset,
+            bottom: 2,
+            trailing: rowContainerHorizontalInset
+        )
     }
 }
 
-enum SessionDashboardStatus: Equatable {
+enum SessionListStatus: Equatable {
     case deleting
     case processing
     case forked
@@ -136,7 +150,7 @@ enum SessionDashboardStatus: Equatable {
     }
 }
 
-// MARK: - Dashboard Views
+// MARK: - List Views
 
 struct SessionWorkspaceHeader: View {
     let title: String
@@ -145,70 +159,71 @@ struct SessionWorkspaceHeader: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+            HStack(alignment: .center, spacing: SessionListLayout.iconTextSpacing) {
                 Image(systemName: isExpanded ? "folder.fill" : "folder")
-                    .font(.system(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
+                    .font(.system(size: SessionListLayout.headerIconSize, weight: .semibold))
                     .frame(
-                        width: SessionDashboardLayout.iconColumnWidth,
-                        height: SessionDashboardLayout.iconColumnWidth
+                        width: SessionListLayout.iconColumnWidth,
+                        height: SessionListLayout.iconColumnWidth
                     )
                     .contentTransition(.symbolEffect(.replace))
                     .accessibilityHidden(true)
 
                 Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
+                    .font(TronTypography.sans(size: SessionListLayout.headerTitleSize, weight: .bold))
                     .lineLimit(1)
                     .truncationMode(.tail)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: SessionDashboardLayout.headerChevronSize, weight: .bold))
+                    .font(.system(size: SessionListLayout.headerChevronSize, weight: .bold))
                     .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     .accessibilityHidden(true)
             }
             .foregroundStyle(.tronEmerald)
-            .padding(.horizontal, SessionDashboardLayout.outerHorizontalPadding)
+            .padding(.leading, SessionListLayout.headerLeadingPadding)
+            .padding(.trailing, SessionListLayout.headerTrailingPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .animation(SessionDashboardLayout.expansionAnimation, value: isExpanded)
+            .animation(SessionListLayout.expansionAnimation, value: isExpanded)
         }
         .buttonStyle(.plain)
         .textCase(nil)
-        .padding(.top, SessionDashboardLayout.headerTopPadding)
-        .padding(.bottom, SessionDashboardLayout.headerBottomPadding)
-        .listRowInsets(SessionDashboardLayout.headerInsets)
+        .padding(.top, SessionListLayout.headerTopPadding)
+        .padding(.bottom, SessionListLayout.headerBottomPadding)
+        .listRowInsets(SessionListLayout.headerInsets)
         .accessibilityLabel(title)
         .accessibilityValue(isExpanded ? "expanded" : "collapsed")
         .accessibilityHint(isExpanded ? "Double tap to hide sessions" : "Double tap to show sessions")
     }
 }
 
-struct SessionDashboardRow: View {
+struct SessionListRow: View {
     let session: CachedSession
     let isSelected: Bool
 
-    private var status: SessionDashboardStatus {
-        SessionDashboardStatus(session: session)
+    private var status: SessionListStatus {
+        SessionListStatus(session: session)
     }
 
     private var accessibilityLabel: String {
-        "\(session.dashboardTitle), \(status.accessibilityLabel), last active \(session.formattedDate)"
+        "\(session.listTitle), \(status.accessibilityLabel), last active \(session.formattedDate)"
     }
 
     var body: some View {
-        HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
-            SessionDashboardStatusIcon(status: status)
+        HStack(alignment: .center, spacing: SessionListLayout.iconTextSpacing) {
+            SessionListStatusIcon(status: status)
                 .frame(
-                    width: SessionDashboardLayout.iconColumnWidth,
-                    height: SessionDashboardLayout.iconColumnWidth
+                    width: SessionListLayout.iconColumnWidth,
+                    height: SessionListLayout.iconColumnWidth
                 )
 
-            Text(session.dashboardTitle)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+            Text(session.listTitle)
+                .font(TronTypography.sans(size: SessionListLayout.rowTitleSize, weight: .medium))
                 .foregroundStyle(.tronTextPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
 
-            Spacer(minLength: SessionDashboardLayout.rowTrailingMinimumSpacing)
+            Spacer(minLength: SessionListLayout.rowTrailingMinimumSpacing)
 
             Text(session.compactDate)
                 .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
@@ -216,14 +231,8 @@ struct SessionDashboardRow: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(.horizontal, SessionDashboardLayout.outerHorizontalPadding)
-        .padding(.vertical, SessionDashboardLayout.rowVerticalPadding)
-        .background {
-            if isSelected {
-                RoundedRectangle(cornerRadius: SessionDashboardLayout.selectedRowCornerRadius, style: .continuous)
-                    .fill(Color.tronEmerald.opacity(0.12))
-            }
-        }
+        .padding(.horizontal, SessionListLayout.rowContentHorizontalPadding)
+        .padding(.vertical, SessionListLayout.rowVerticalPadding)
         .contentShape(Rectangle())
         .hoverEffect(.highlight)
         .accessibilityElement(children: .ignore)
@@ -232,8 +241,8 @@ struct SessionDashboardRow: View {
     }
 }
 
-private struct SessionDashboardStatusIcon: View {
-    let status: SessionDashboardStatus
+private struct SessionListStatusIcon: View {
+    let status: SessionListStatus
 
     var body: some View {
         Group {

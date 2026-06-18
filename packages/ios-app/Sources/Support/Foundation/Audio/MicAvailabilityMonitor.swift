@@ -20,10 +20,20 @@ final class MicAvailabilityMonitor {
         })
         notificationTasks.append(Task { [weak self] in
             for await _ in NotificationCenter.default.notifications(named: AVAudioSession.routeChangeNotification) {
-                try? await Task.sleep(for: .milliseconds(300))
+                do {
+                    try await Task.sleep(for: .milliseconds(300))
+                } catch {
+                    break
+                }
                 await self?.checkAvailabilityAsync()
             }
         })
+    }
+
+    deinit {
+        MainActor.assumeIsolated {
+            notificationTasks.forEach { $0.cancel() }
+        }
     }
 
     func checkAvailabilityAsync() async {

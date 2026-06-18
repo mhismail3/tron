@@ -19,11 +19,14 @@ Self-Updating Worker Runtime Foundation artifacts.
   runtime surface rows.
 - `AgentCockpitViewModel` refreshes server facts, executes confirmed lifecycle
   actions, and decodes active `ui_surface` resources.
-- `AgentCockpitSheet` and `AgentStatusCapsuleView` are the user-facing cockpit
-  shell. They render generic engine facts; they do not hardcode successor
-  feature panels.
-- `ChatSheetModifier` observes the single-sheet coordinator state while
-  constructing its binding so the cockpit capsule reliably presents the sheet.
+- `AgentCockpitSheet` is the retained user-facing cockpit diagnostics shell. It
+  renders generic engine facts with standard liquid-glass sheet chrome and the
+  shared segmented tab control; it does not hardcode successor feature panels.
+- `ConnectionSettingsPage` exposes a compact Servers diagnostics row labeled
+  `Runtime Cockpit` that opens the sheet.
+- `ChatView` no longer mounts the passive cockpit capsule or refreshes cockpit
+  data on session load. A future chat-level signal requires a fresh
+  attention-worthy placement review.
 - `TronColors` owns the neutral glass baseline used by chat, onboarding,
   settings, generated surfaces, and the cockpit.
 - Existing `resource::list` and `resource::inspect` primitives are system-visible
@@ -38,6 +41,8 @@ Self-Updating Worker Runtime Foundation artifacts.
 - No successor capability implementation is bundled into the app.
 - No worker package manifest is authored by iOS in this slice.
 - No `ui_surface` action result is interpreted as a fixed iOS workflow.
+- No passive always-visible worker-runtime banner is mounted in the primary
+  chat surface.
 
 ## Regression Gates
 

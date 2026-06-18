@@ -47,15 +47,7 @@ extension ChatViewModel: ChatTranscriptionContext {
     }
 
     func loadAudioData(from url: URL) async throws -> Data {
-        try await Task.detached(priority: .utility) { () throws -> Data in
-            defer { try? FileManager.default.removeItem(at: url) }
-            let fileAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
-            let fileSize = (fileAttributes[.size] as? NSNumber)?.intValue ?? 0
-            if fileSize < 1024 {
-                throw AudioFileTooSmallError(size: fileSize)
-            }
-            return try Data(contentsOf: url)
-        }.value
+        try await ChatTranscriptionAudioFileLoader.shared.load(from: url)
     }
 
     func appendTranscriptionError(_ message: String) {
@@ -70,5 +62,19 @@ extension ChatViewModel: ChatTranscriptionContext {
 
     func handleRecordingFinished(url: URL?, success: Bool) async {
         await transcriptionCoordinator.handleRecordingFinished(url: url, success: success, context: self)
+    }
+}
+
+private actor ChatTranscriptionAudioFileLoader {
+    static let shared = ChatTranscriptionAudioFileLoader()
+
+    func load(from url: URL) throws -> Data {
+        defer { try? FileManager.default.removeItem(at: url) }
+        let fileAttributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        let fileSize = (fileAttributes[.size] as? NSNumber)?.intValue ?? 0
+        if fileSize < 1024 {
+            throw AudioFileTooSmallError(size: fileSize)
+        }
+        return try Data(contentsOf: url)
     }
 }
