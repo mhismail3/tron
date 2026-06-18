@@ -556,10 +556,44 @@ Validated:
 
 ## Remaining Phase 1 Queue
 
-The next recommended restoration slice is `phase1_slice_6`:
-notification/inbox concept review only if it can remain
-  truthful without fake push state.
-- Remaining local-native affordance families from the inventory after review.
+The next recommended restoration slice is `phase1_slice_6`: notification/inbox
+concept review only if it can remain truthful without fake push state.
+
+Recommended Slice 6 starting scope:
+
+- Start with a review packet, not implementation.
+- Inspect `IARM-SURFACE-019` and old evidence paths:
+  `packages/ios-app/Sources/Views/Notifications/`,
+  `packages/ios-app/Sources/Services/NotificationStore.swift`,
+  `packages/ios-app/Sources/Services/Notifications/`,
+  `packages/ios-app/Sources/Views/Capabilities/NotificationDelivery/`,
+  `packages/ios-app/Sources/Views/MessageBubble/NotificationViews.swift`, and
+  `packages/ios-app/Sources/ViewModels/Handlers/ChatNotificationCoordinator.swift`.
+- Compare only against current truthful sources: local in-app notifications,
+  toast/local error state, existing timeline events, existing diagnostics/log
+  surfaces, and current server facts already delivered to the app.
+- Treat APNs, device-broker delivery, background push, server notification
+  resources, notification send/list/mark-read APIs, durable inbox state, and
+  agent-execution notification families as Phase 2 unless a current owner
+  exists in source.
+- Evaluate three possible outcomes explicitly: reject the old inbox concept,
+  defer it wholly to Phase 2, or approve a smaller local-only attention surface
+  that consolidates already-visible local errors/status events without creating
+  fake backend truth.
+- Ask the user whether a notification/inbox affordance is still useful in the
+  long-term self-adapting-agent UI now that chat has local error pills, global
+  connection toasts, Server Diagnostics, feedback, and logs.
+- Required validation if implementation is approved: focused Swift tests for
+  local notification state and visibility rules, source guards against APNs and
+  server notification API resurrection, iOS 26.5 simulator screenshots for the
+  approved visible states, `xcodegen generate` when Swift files change,
+  `ios_affordance_restoration_map_invariants`, `scripts/personal-info-guard.sh`,
+  `git diff --check`, `git ls-files -ci --exclude-standard`, and clean status.
+
+After Slice 6 is reviewed, the Phase 1 map should be closed out by checking for
+any remaining local-native affordance families in the inventory. If none remain,
+the next major planning step is the full Phase 2 agent-execution restoration
+goal plan.
 
 ## Phase 2 Reminder
 
