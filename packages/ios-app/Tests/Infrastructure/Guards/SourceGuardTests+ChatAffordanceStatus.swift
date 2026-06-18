@@ -17,6 +17,46 @@ extension SourceGuardTests {
         #expect(!FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent("Sources/UI/Components/ConnectionStatusPill.swift").path))
     }
 
+    @Test("Chat shell does not mount passive agent cockpit")
+    func testChatShellDoesNotMountPassiveAgentCockpit() throws {
+        let iosRoot = iosAppRoot()
+        let chatSources = [
+            "Sources/UI/Chat/Shell/ChatView.swift",
+            "Sources/UI/Chat/Shell/ChatSheetContent.swift",
+            "Sources/UI/Chat/Shell/ChatSheetModifier.swift",
+            "Sources/Session/Chat/Coordinators/SheetCoordinator.swift",
+            "Sources/Session/Chat/State/ChatSheet.swift",
+        ]
+
+        for path in chatSources {
+            let source = try String(contentsOf: iosRoot.appendingPathComponent(path), encoding: .utf8)
+            #expect(!source.contains("AgentStatusCapsuleView"))
+            #expect(!source.contains("AgentCockpitViewModel()"))
+            #expect(!source.contains("showAgentCockpit"))
+            #expect(!source.contains("agentCockpit.refresh"))
+            #expect(!source.contains("case agentCockpit"))
+        }
+
+        let cockpitViews = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/AgentCockpit/AgentCockpitViews.swift"),
+            encoding: .utf8
+        )
+        #expect(cockpitViews.contains("struct AgentCockpitSheet"))
+        #expect(!cockpitViews.contains("struct AgentStatusCapsuleView"))
+        #expect(cockpitViews.contains(#"SheetTitle(title: "Runtime Cockpit", color: .tronEmerald)"#))
+        #expect(cockpitViews.contains("SheetDismissButton(color: .tronEmerald)"))
+        #expect(cockpitViews.contains("TronSegmentedControl("))
+        #expect(!cockpitViews.contains(#"Picker("Cockpit""#))
+        #expect(cockpitViews.contains(".adaptivePresentationDetents([.medium, .large], ipadSizing: .largeForm)"))
+
+        let serverSettings = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Settings/Pages/ConnectionSettingsPage.swift"),
+            encoding: .utf8
+        )
+        #expect(serverSettings.contains("ConnectionSettingsDiagnosticsSheet"))
+        #expect(serverSettings.contains("AgentCockpitSheet("))
+    }
+
     @Test("Thinking indicator is app-owned Neural Spark only")
     func testThinkingIndicatorIsNeuralSparkOnly() throws {
         let iosRoot = iosAppRoot()

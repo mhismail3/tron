@@ -554,6 +554,93 @@ Validated:
 - `git diff --check` passed.
 - `git ls-files -ci --exclude-standard` returned no tracked ignored files.
 
+### Accepted Off-Plan Work: Agent Cockpit Placement Cleanup
+
+Branch:
+`codex/ios-cockpit-placement-cleanup-current`
+
+Implementation state:
+
+- The Agent cockpit was originally added in IOSAC commit `9e97759dc` as a
+  proof/user-facing shell for current worker lifecycle catalog facts, package
+  lifecycle evidence, activity, and generated runtime `ui_surface` resources.
+- That proof placed a compact status capsule above chat so the new sheet could
+  be discovered while the cockpit baseline was being validated.
+- Product review found the passive chat placement too prominent and
+  counterintuitive for current behavior: the primary conversation could show
+  `Idle / No active workers published yet` while the sheet showed zero workers
+  and many functions.
+
+User-facing state:
+
+- The primary chat UI no longer mounts the passive Agent cockpit/status banner.
+- Chat session load and reconnect paths no longer refresh cockpit data just to
+  keep hidden or passive chrome current.
+- The cockpit implementation remains available from Settings -> Servers ->
+  Diagnostics -> Runtime Cockpit. Opening that row presents the existing
+  `AgentCockpitSheet`, which refreshes current server facts on demand and now
+  uses the same liquid-glass sheet chrome, typography, and shared segmented tab
+  control as current app sheets.
+
+Data ownership:
+
+- The cockpit remains a diagnostics/operator surface over current
+  `WorkerLifecycleRepository`, catalog, resource, and runtime-surface facts.
+- No server primitive, public `/engine` route, database table, setting,
+  APNs/push behavior, notification inbox, agent-execution capability, worker,
+  subagent, skill/rule/memory surface, source-control panel, or fake backend
+  truth was added.
+
+Deferred:
+
+- Phase 2 agent-execution UI still needs a first-principles placement review.
+- A chat-level agent signal may return only for attention-worthy states such as
+  approval needed, degraded runtime, an active session-relevant worker, or a
+  generated surface requiring user action.
+- Passive `Idle` worker-runtime diagnostics must not occupy chat.
+
+Validation commands for this checkpoint:
+
+- `cd packages/ios-app && xcodegen generate`
+- `cd packages/ios-app && xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/SessionDashboardPresentationTests -only-testing:TronMobileTests/ChatAffordanceVisualRenderTests -only-testing:TronMobileTests/AgentCockpitStateTests -only-testing:TronMobileTests/AgentCockpitViewModelTests -only-testing:TronMobileTests/ServerSettingsPageTests -only-testing:TronMobileTests/SourceGuardTests`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants -- --nocapture`
+- `scripts/personal-info-guard.sh`
+- `git diff --check`
+- `git ls-files -ci --exclude-standard`
+
+Validated:
+
+- `cd packages/ios-app && xcodegen generate` passed.
+- The first focused iOS test run caught a stale source guard that still expected
+  the old `showLogViewer` boolean on the Servers page. After updating that
+  guard to the new enum-backed diagnostics sheet route, the same focused
+  command passed on iPhone 17 Pro, iOS 26.5, with 6 selected XCTest cases and
+  77 Swift Testing cases. After restyling the cockpit sheet to use standard
+  liquid-glass sheet chrome and shared `TronSegmentedControl` tabs, the same
+  focused command passed again with the same selected test coverage.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed with 6 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants -- --nocapture`
+  passed with 11 tests after updating the IOSAC static proof for diagnostics
+  placement and standard cockpit sheet styling.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` returned no tracked ignored files.
+- Simulator/Computer Use validation used the current Beta bundle
+  `com.tron.mobile.beta` on iPhone 17 Pro, iOS 26.5. It confirmed the dashboard
+  still shows larger workspace headers, interactive row backgrounds, and
+  `New Session` for the untitled row; chat no longer shows the passive cockpit
+  banner; Servers -> Diagnostics exposes `Runtime Cockpit`; and the row opens
+  the liquid-glass cockpit sheet with shared segmented tabs and no text overlap.
+  Screenshot evidence:
+  `/tmp/tron-ios-cockpit-placement-validation/ui/01-beta-dashboard.png`,
+  `/tmp/tron-ios-cockpit-placement-validation/ui/02-beta-chat-no-cockpit-banner.png`,
+  and
+  `/tmp/tron-ios-cockpit-placement-validation/ui/03-beta-runtime-cockpit-sheet.png`.
+
 ## Remaining Phase 1 Queue
 
 The next recommended restoration slice is `phase1_slice_6`: notification/inbox

@@ -1402,12 +1402,13 @@ packages/ios-app/Sources/
 - **History transformer**: stored events reconstructed into `ChatMessage` arrays by `Session/Timeline/Reconstruction/UnifiedEventTransformer.swift`
 - **Primitive chat shell**: the app keeps connection/onboarding/settings,
   collapsible workspace-grouped session navigation with compact one-line rows
-  that prefer generated session titles before prompt/workspace fallbacks,
+  that prefer generated session titles before prompt fallbacks and show
+  untitled rows as `New Session`,
   prompt input with clearable device-local recent-input reuse, the
   functional-only native composer attachment menu that preserves keyboard
   focus while layering native camera/photo/file pickers above it, composer mic
   input backed by the local transcription domain after a readiness check,
-  a blank empty chat, initial loading state, app-global connection toasts, ephemeral in-chat
+  a blank empty/loading chat, app-global connection toasts, ephemeral in-chat
   local error notifications, streamed thinking content with one app-owned
   neural-spark fallback indicator, one-line generic capability evidence chips,
   local reconstruction, diagnostics, and generic runtime surfaces.
@@ -1416,10 +1417,12 @@ packages/ios-app/Sources/
   panels, extension-source surfaces, voice-note storage, memory-retain, rules,
   skills, prompt-library panels, prompt queues, and parallel tree-only
   projections are removed from the primary source tree.
-- **Agent cockpit**: the chat shell shows a compact status capsule that opens a
-  cockpit sheet. The sheet renders live worker lifecycle catalog rows,
-  package/resource status, confirmation-backed lifecycle actions, activity, and
-  active `ui_surface` resources through generic engine data.
+- **Agent cockpit**: Servers -> Diagnostics exposes a compact Runtime Cockpit
+  row that opens the cockpit sheet. The sheet renders live worker lifecycle
+  catalog rows, package/resource status, confirmation-backed lifecycle actions,
+  activity, and active `ui_surface` resources through generic engine data using
+  the standard liquid-glass sheet chrome and shared segmented tab control. The
+  primary chat shell does not mount a passive worker-runtime banner.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`.
 - **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; first-run setup, Settings-launched server pairing, and pairing URLs all present the same large-detent `OnboardingFlowView` through the central onboarding presenter. Settings can reopen the flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token and a bare DNS, IPv4, or unbracketed IPv6 host before Connect is enabled; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are rejected before any probe. An already paired server row can reuse that server's Keychain token unless the user edits its host or port. Successful repair of an existing server closes after the probe/settings refresh when the host and port still match; new or edited server origins continue into setup. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
@@ -1467,7 +1470,7 @@ Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  InputBar -> native attachment menu -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Surface: Generated runtime data -> GeneratedRuntimeSurfaceView
-Cockpit: catalog/resource APIs -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
+Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 
 The camera child sheet mounts before AVFoundation warm-up and uses the viewport

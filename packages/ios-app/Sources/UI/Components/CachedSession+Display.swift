@@ -42,12 +42,7 @@ extension CachedSession {
             return prompt
         }
 
-        let directoryName = Self.workspaceDisplayName(for: workingDirectory)
-        if !directoryName.isEmpty {
-            return directoryName
-        }
-
-        return "Untitled session"
+        return "New Session"
     }
 
     var formattedDate: String {

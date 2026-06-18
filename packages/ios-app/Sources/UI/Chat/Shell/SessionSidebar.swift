@@ -26,10 +26,15 @@ struct SessionSidebar: View {
                     Section {
                         if workspaceExpansion.isExpanded(group.id) {
                             ForEach(group.sessions) { session in
-                                SessionDashboardRow(
-                                    session: session,
-                                    isSelected: session.id == selectedSessionId
-                                )
+                                Button {
+                                    selectedSessionId = session.id
+                                } label: {
+                                    SessionDashboardRow(
+                                        session: session,
+                                        isSelected: session.id == selectedSessionId
+                                    )
+                                }
+                                .buttonStyle(SessionDashboardRowButtonStyle(isSelected: session.id == selectedSessionId))
                                 .tag(session.id)
                                 .listRowBackground(Color.clear)
                                 .listRowSeparator(.hidden)

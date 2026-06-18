@@ -7,7 +7,6 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
     func testApprovedChatAffordancesRenderForVisualQA() throws {
         let samples: [(String, AnyView, CGSize)] = [
             ("chat-normal.png", AnyView(Self.normalChatView), CGSize(width: 430, height: 360)),
-            ("chat-loading.png", AnyView(Self.auxiliaryView(ChatTimelineLoadingView(title: "Loading messages"))), CGSize(width: 430, height: 320)),
             ("chat-local-error-pill.png", AnyView(Self.localErrorView), CGSize(width: 430, height: 180)),
             ("chat-thinking-neural-spark.png", AnyView(Self.thinkingView), CGSize(width: 430, height: 180)),
             ("chat-capability-chip.png", AnyView(Self.capabilityChipView), CGSize(width: 430, height: 180)),
@@ -28,12 +27,6 @@ final class ChatAffordanceVisualRenderTests: XCTestCase {
         }
         .padding(20)
         .background(Color(uiColor: .systemBackground))
-    }
-
-    private static func auxiliaryView(_ content: some View) -> some View {
-        content
-            .padding(20)
-            .background(Color(uiColor: .systemBackground))
     }
 
     private static var localErrorView: some View {

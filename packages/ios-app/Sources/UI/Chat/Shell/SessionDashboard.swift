@@ -61,12 +61,15 @@ enum SessionDashboardLayout {
     static let rowVerticalPadding: CGFloat = 5
     static let rowTrailingMinimumSpacing: CGFloat = 10
     static let selectedRowCornerRadius: CGFloat = 9
+    static let rowPressedScale: CGFloat = 0.985
     static let deletingRowOpacity = 0.45
     static let floatingButtonSize: CGFloat = 56
     static let floatingButtonTrailingPadding: CGFloat = 20
     static let floatingButtonBottomPadding: CGFloat = 8
     static let headerIconSize: CGFloat = 14
     static let headerChevronSize: CGFloat = 10
+    static let headerTitleSize: CGFloat = TronTypography.sizeBodyLG
+    static let rowTitleSize: CGFloat = TronTypography.sizeBody3
     static let expansionAnimation = Animation.snappy(duration: 0.14)
 
     static var headerInsets: EdgeInsets {
@@ -156,7 +159,7 @@ struct SessionWorkspaceHeader: View {
                     .accessibilityHidden(true)
 
                 Text(title)
-                    .font(TronTypography.sans(size: TronTypography.sizeBody, weight: .bold))
+                    .font(TronTypography.sans(size: SessionDashboardLayout.headerTitleSize, weight: .bold))
                     .lineLimit(1)
                     .truncationMode(.tail)
 
@@ -182,6 +185,46 @@ struct SessionWorkspaceHeader: View {
     }
 }
 
+struct SessionDashboardRowButtonStyle: ButtonStyle {
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .background {
+                let shape = RoundedRectangle(
+                    cornerRadius: SessionDashboardLayout.selectedRowCornerRadius,
+                    style: .continuous
+                )
+
+                ZStack {
+                    shape
+                        .fill(backgroundColor(isPressed: configuration.isPressed))
+
+                    shape
+                        .strokeBorder(borderColor(isPressed: configuration.isPressed), lineWidth: 1)
+                }
+            }
+            .scaleEffect(configuration.isPressed ? SessionDashboardLayout.rowPressedScale : 1)
+            .animation(.smooth(duration: 0.12), value: configuration.isPressed)
+    }
+
+    private func backgroundColor(isPressed: Bool) -> Color {
+        if isSelected {
+            return Color.tronEmerald.opacity(isPressed ? 0.18 : 0.12)
+        }
+
+        return Color.tronOverlay(isPressed ? 0.08 : 0.035)
+    }
+
+    private func borderColor(isPressed: Bool) -> Color {
+        if isSelected {
+            return Color.tronEmerald.opacity(isPressed ? 0.34 : 0.22)
+        }
+
+        return Color.tronEmerald.opacity(isPressed ? 0.16 : 0.06)
+    }
+}
+
 struct SessionDashboardRow: View {
     let session: CachedSession
     let isSelected: Bool
@@ -203,7 +246,7 @@ struct SessionDashboardRow: View {
                 )
 
             Text(session.dashboardTitle)
-                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                .font(TronTypography.sans(size: SessionDashboardLayout.rowTitleSize, weight: .medium))
                 .foregroundStyle(.tronTextPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -218,12 +261,6 @@ struct SessionDashboardRow: View {
         }
         .padding(.horizontal, SessionDashboardLayout.outerHorizontalPadding)
         .padding(.vertical, SessionDashboardLayout.rowVerticalPadding)
-        .background {
-            if isSelected {
-                RoundedRectangle(cornerRadius: SessionDashboardLayout.selectedRowCornerRadius, style: .continuous)
-                    .fill(Color.tronEmerald.opacity(0.12))
-            }
-        }
         .contentShape(Rectangle())
         .hoverEffect(.highlight)
         .accessibilityElement(children: .ignore)

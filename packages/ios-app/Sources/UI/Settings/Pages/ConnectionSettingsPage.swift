@@ -8,7 +8,8 @@ struct ConnectionSettingsPage: View {
     @Environment(\.dependencies) private var dependencies
     @State private var serverPendingRemoval: PairedServer?
     @State private var serverRemovalError: String?
-    @State private var showLogViewer = false
+    @State private var activeDiagnosticsSheet: ConnectionSettingsDiagnosticsSheet?
+    @State private var agentCockpit = AgentCockpitViewModel()
 
     init(
         settingsState: SettingsState,
@@ -39,8 +40,19 @@ struct ConnectionSettingsPage: View {
         } message: {
             Text(serverRemovalError ?? "The pairing token could not be removed from Keychain.")
         }
-        .sheet(isPresented: $showLogViewer) {
-            LogViewer()
+        .sheet(item: $activeDiagnosticsSheet) { sheet in
+            switch sheet {
+            case .logs:
+                LogViewer()
+            case .runtimeCockpit:
+                AgentCockpitSheet(
+                    viewModel: agentCockpit,
+                    repository: dependencies.workerLifecycleRepository,
+                    sessionId: nil,
+                    workspaceId: nil,
+                    connectionState: dependencies.connectionRepository.connectionState
+                )
+            }
         }
     }
 
@@ -401,11 +413,29 @@ struct ConnectionSettingsPage: View {
 
             SettingsCard(interactive: true) {
                 Button {
-                    showLogViewer = true
+                    activeDiagnosticsSheet = .logs
                 } label: {
                     SettingsRow(icon: "doc.text.magnifyingglass", label: ConnectionSettingsDiagnosticsCopy.logsLabel) {
                         HStack(spacing: 5) {
                             Text(ConnectionSettingsDiagnosticsCopy.logsAction)
+                                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
+                                .foregroundStyle(.tronEmerald)
+                            Image(systemName: "chevron.right")
+                                .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .medium))
+                                .foregroundStyle(.tronTextMuted)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+
+                SettingsRowDivider()
+
+                Button {
+                    activeDiagnosticsSheet = .runtimeCockpit
+                } label: {
+                    SettingsRow(icon: "slider.horizontal.3", label: ConnectionSettingsDiagnosticsCopy.runtimeCockpitLabel) {
+                        HStack(spacing: 5) {
+                            Text(ConnectionSettingsDiagnosticsCopy.runtimeCockpitAction)
                                 .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .medium))
                                 .foregroundStyle(.tronEmerald)
                             Image(systemName: "chevron.right")
@@ -457,4 +487,11 @@ struct ConnectionSettingsPage: View {
             set: { if !$0 { serverPendingRemoval = nil } }
         )
     }
+}
+
+private enum ConnectionSettingsDiagnosticsSheet: String, Identifiable {
+    case logs
+    case runtimeCockpit
+
+    var id: String { rawValue }
 }

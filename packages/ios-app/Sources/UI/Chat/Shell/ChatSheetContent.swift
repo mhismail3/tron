@@ -6,7 +6,6 @@ import SwiftUI
 struct ChatSheetContent: View {
     let sheet: ChatSheet
     let viewModel: ChatViewModel
-    let agentCockpit: AgentCockpitViewModel
     let sessionId: String
     let workspaceDeleted: Bool
     let sheetCoordinator: SheetCoordinator?
@@ -33,15 +32,6 @@ struct ChatSheetContent: View {
                 ServerOnboardingLauncher.post(prefill: server)
             }
                 .environment(\.dependencies, dependencies)
-
-        case .agentCockpit:
-            AgentCockpitSheet(
-                viewModel: agentCockpit,
-                repository: viewModel.services.workerLifecycle,
-                sessionId: sessionId,
-                workspaceId: viewModel.workspaceId.nilIfEmpty,
-                connectionState: viewModel.connectionState
-            )
 
         case .compactionDetail(let data):
             CompactionDetailSheet(

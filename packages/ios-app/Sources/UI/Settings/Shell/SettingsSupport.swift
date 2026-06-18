@@ -439,7 +439,9 @@ enum ConnectionSettingsDiagnosticsCopy {
     static let sectionTitle = "Diagnostics"
     static let logsLabel = "Logs"
     static let logsAction = "View"
-    static let caption = "Shows redacted local iOS logs. Connected servers receive deduplicated copies automatically; feedback bundles attach local and server logs when available."
+    static let runtimeCockpitLabel = "Runtime Cockpit"
+    static let runtimeCockpitAction = "Open"
+    static let caption = "Shows redacted local iOS logs and current server-sourced runtime diagnostics."
 }
 
 enum ServerSettingsSummary {

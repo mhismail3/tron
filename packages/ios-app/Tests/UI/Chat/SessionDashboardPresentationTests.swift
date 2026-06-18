@@ -17,7 +17,7 @@ final class SessionDashboardPresentationTests: XCTestCase {
         XCTAssertEqual(groups[1].sessions.map(\.id), ["b"])
     }
 
-    func testDashboardTitlePrefersTitleThenPromptThenWorkspace() {
+    func testDashboardTitlePrefersTitleThenPromptThenNewSession() {
         XCTAssertEqual(
             makeSession(id: "title", title: "Implement runtime changes").dashboardTitle,
             "Implement runtime changes"
@@ -28,11 +28,11 @@ final class SessionDashboardPresentationTests: XCTestCase {
         )
         XCTAssertEqual(
             makeSession(id: "workspace", workingDirectory: "/tmp/tron-fixtures/Project", title: nil).dashboardTitle,
-            "Project"
+            "New Session"
         )
         XCTAssertEqual(
             makeSession(id: "empty", workingDirectory: "", title: nil).dashboardTitle,
-            "Workspace"
+            "New Session"
         )
     }
 
@@ -69,10 +69,14 @@ final class SessionDashboardPresentationTests: XCTestCase {
         XCTAssertEqual(SessionDashboardLayout.outerHorizontalPadding, 24)
         XCTAssertEqual(SessionDashboardLayout.iconColumnWidth, 18)
         XCTAssertEqual(SessionDashboardLayout.iconTextSpacing, 8)
+        XCTAssertGreaterThan(SessionDashboardLayout.headerTitleSize, SessionDashboardLayout.rowTitleSize)
+        XCTAssertEqual(SessionDashboardLayout.headerTitleSize, TronTypography.sizeBodyLG)
+        XCTAssertEqual(SessionDashboardLayout.rowTitleSize, TronTypography.sizeBody3)
         XCTAssertEqual(SessionDashboardLayout.minimumRowHeight, 34)
         XCTAssertEqual(SessionDashboardLayout.listTopContentMargin, 38)
         XCTAssertEqual(SessionDashboardLayout.listBottomContentMargin, 92)
         XCTAssertEqual(SessionDashboardLayout.floatingButtonSize, 56)
+        XCTAssertEqual(SessionDashboardLayout.rowPressedScale, 0.985)
     }
 
     private func makeSession(

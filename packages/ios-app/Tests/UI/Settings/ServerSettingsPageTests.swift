@@ -18,8 +18,10 @@ struct ServerSettingsPageTests {
         #expect(ConnectionSettingsDiagnosticsCopy.sectionTitle == "Diagnostics")
         #expect(ConnectionSettingsDiagnosticsCopy.logsLabel == "Logs")
         #expect(ConnectionSettingsDiagnosticsCopy.logsAction == "View")
+        #expect(ConnectionSettingsDiagnosticsCopy.runtimeCockpitLabel == "Runtime Cockpit")
+        #expect(ConnectionSettingsDiagnosticsCopy.runtimeCockpitAction == "Open")
         #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("redacted local iOS logs"))
-        #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("server logs when available"))
+        #expect(ConnectionSettingsDiagnosticsCopy.caption.contains("server-sourced runtime diagnostics"))
     }
 
     @Test("paired server menu uses server-specific actions")
