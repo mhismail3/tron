@@ -71,9 +71,15 @@ extension SourceGuardTests {
 
         #expect(dashboard.contains("static let rowContainerHorizontalInset: CGFloat = 16"))
         #expect(dashboard.contains("static let rowContentHorizontalPadding: CGFloat = 12"))
+        #expect(dashboard.contains("static var headerLeadingPadding: CGFloat"))
+        #expect(dashboard.contains("rowContainerHorizontalInset + rowContentHorizontalPadding"))
+        #expect(dashboard.contains("static var headerTrailingPadding: CGFloat"))
         #expect(dashboard.contains("static let rowContainerCornerRadius: CGFloat = 12"))
         #expect(dashboard.contains("leading: rowContainerHorizontalInset"))
         #expect(dashboard.contains("trailing: rowContainerHorizontalInset"))
+        #expect(dashboard.contains(".padding(.leading, SessionDashboardLayout.headerLeadingPadding)"))
+        #expect(dashboard.contains(".padding(.trailing, SessionDashboardLayout.headerTrailingPadding)"))
+        #expect(dashboard.contains("HStack(alignment: .center, spacing: SessionDashboardLayout.iconTextSpacing)"))
         #expect(sidebar.contains("Button {"))
         #expect(sidebar.contains("selectedSessionId = session.id"))
         #expect(sidebar.contains(".glassEffect("))
@@ -84,7 +90,10 @@ extension SourceGuardTests {
         #expect(!dashboard.contains("@GestureState"))
         #expect(!dashboard.contains(".offset(boundedDragOffset)"))
         #expect(!dashboard.contains("rowPressedScale"))
+        #expect(!dashboard.contains("rowPressedBrightness"))
         #expect(!dashboard.contains("SessionDashboardRowButtonStyle"))
+        #expect(!dashboard.contains("outerHorizontalPadding"))
+        #expect(!dashboard.contains(".sectionFill("))
     }
 
     @Test("Thinking indicator is app-owned Neural Spark only")

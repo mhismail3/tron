@@ -69,9 +69,17 @@ final class SessionDashboardPresentationTests: XCTestCase {
         XCTAssertEqual(SessionDashboardLayout.rowInsets.trailing, SessionDashboardLayout.rowContainerHorizontalInset)
         XCTAssertEqual(SessionDashboardLayout.rowInsets.top, 2)
         XCTAssertEqual(SessionDashboardLayout.rowInsets.bottom, 2)
-        XCTAssertEqual(SessionDashboardLayout.outerHorizontalPadding, 24)
         XCTAssertEqual(SessionDashboardLayout.rowContainerHorizontalInset, 16)
         XCTAssertEqual(SessionDashboardLayout.rowContentHorizontalPadding, 12)
+        XCTAssertEqual(
+            SessionDashboardLayout.headerLeadingPadding,
+            SessionDashboardLayout.rowContainerHorizontalInset + SessionDashboardLayout.rowContentHorizontalPadding
+        )
+        XCTAssertEqual(SessionDashboardLayout.headerTrailingPadding, SessionDashboardLayout.rowContainerHorizontalInset)
+        XCTAssertEqual(
+            SessionDashboardLayout.headerLeadingPadding + SessionDashboardLayout.iconColumnWidth + SessionDashboardLayout.iconTextSpacing,
+            SessionDashboardLayout.rowInsets.leading + SessionDashboardLayout.rowContentHorizontalPadding + SessionDashboardLayout.iconColumnWidth + SessionDashboardLayout.iconTextSpacing
+        )
         XCTAssertEqual(SessionDashboardLayout.iconColumnWidth, 18)
         XCTAssertEqual(SessionDashboardLayout.iconTextSpacing, 8)
         XCTAssertGreaterThan(SessionDashboardLayout.headerTitleSize, SessionDashboardLayout.rowTitleSize)

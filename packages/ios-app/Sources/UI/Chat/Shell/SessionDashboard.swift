@@ -50,9 +50,14 @@ struct SessionDashboardWorkspaceExpansion: Equatable {
 }
 
 enum SessionDashboardLayout {
-    static let outerHorizontalPadding: CGFloat = 24
     static let rowContainerHorizontalInset: CGFloat = 16
     static let rowContentHorizontalPadding: CGFloat = 12
+    static var headerLeadingPadding: CGFloat {
+        rowContainerHorizontalInset + rowContentHorizontalPadding
+    }
+    static var headerTrailingPadding: CGFloat {
+        rowContainerHorizontalInset
+    }
     static let iconColumnWidth: CGFloat = 18
     static let iconTextSpacing: CGFloat = 8
     static let minimumRowHeight: CGFloat = 38
@@ -154,7 +159,7 @@ struct SessionWorkspaceHeader: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+            HStack(alignment: .center, spacing: SessionDashboardLayout.iconTextSpacing) {
                 Image(systemName: isExpanded ? "folder.fill" : "folder")
                     .font(.system(size: SessionDashboardLayout.headerIconSize, weight: .semibold))
                     .frame(
@@ -175,7 +180,8 @@ struct SessionWorkspaceHeader: View {
                     .accessibilityHidden(true)
             }
             .foregroundStyle(.tronEmerald)
-            .padding(.horizontal, SessionDashboardLayout.outerHorizontalPadding)
+            .padding(.leading, SessionDashboardLayout.headerLeadingPadding)
+            .padding(.trailing, SessionDashboardLayout.headerTrailingPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
             .animation(SessionDashboardLayout.expansionAnimation, value: isExpanded)
@@ -204,7 +210,7 @@ struct SessionDashboardRow: View {
     }
 
     var body: some View {
-        HStack(spacing: SessionDashboardLayout.iconTextSpacing) {
+        HStack(alignment: .center, spacing: SessionDashboardLayout.iconTextSpacing) {
             SessionDashboardStatusIcon(status: status)
                 .frame(
                     width: SessionDashboardLayout.iconColumnWidth,

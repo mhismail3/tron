@@ -653,12 +653,12 @@ User-facing state:
 - The row containers use SwiftUI's native interactive liquid glass on normal
   row buttons, with restrained emerald tint and the platform-owned touch
   behavior.
-- A follow-up bug fix moved the pressed-state treatment onto an explicit outer
-  row glass surface so the container itself responds to touch, not only the
-  text/icon content inside it.
-- A later correction removed the attempted custom drag/offset/spring row
-  behavior and kept the rows on the same native `.glassEffect(...interactive())`
-  model used by the composer input bar.
+- The current row implementation intentionally has no custom row `ButtonStyle`,
+  drag gesture, offset, pressed-scale, or `sectionFill` fallback; source guards
+  reject those remnants so the platform owns the liquid-glass interaction.
+- The workspace header icon and title columns derive from the row container and
+  content insets, keeping the folder icon column aligned with row icons and the
+  header title aligned with session titles.
 - Existing dashboard behavior remains intact: workspace headers stay larger
   than session rows, rows remain compact and one-line, and untitled sessions
   still display as `New Session`.
@@ -703,6 +703,8 @@ Validated:
   `/tmp/tron-ios-dashboard-row-native-glass-validation/ui/02-native-glass-row-opened-chat.png`,
   and
   `/tmp/tron-ios-dashboard-row-native-glass-validation/ui/native-glass-row-tap.mp4`.
+  Header/row alignment evidence:
+  `/tmp/tron-ios-dashboard-row-alignment-validation/ui/01-dashboard-header-row-alignment.png`.
 
 ## Remaining Phase 1 Queue
 
