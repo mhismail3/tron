@@ -7,17 +7,15 @@
 //! capability API.
 
 mod capability_invocations;
+mod failure;
+mod params;
 mod persistence;
 mod result;
 mod turn_context;
 
-use std::sync::Arc;
-use std::sync::atomic::AtomicI64;
 use std::time::Instant;
 
-use crate::domains::agent::context::context_manager::ContextManager;
-use crate::domains::model::responder::{ModelResponder, ModelResponseRequest};
-use crate::shared::protocol::events::{BaseEvent, turn_failed_event};
+use crate::domains::model::responder::ModelResponseRequest;
 use crate::shared::server::failure::{
     ASSISTANT_PERSIST_FAILED, ENGINE_TOOL_SURFACE_FAILED, FailureCategory, FailureEnvelope,
     FailureOrigin, JOURNAL_CREATE_FAILED, MODEL_PROVIDER_REQUEST_AUDIT_PERSIST_FAILED,
@@ -27,6 +25,8 @@ use metrics::{counter, histogram};
 use tracing::{error, info, instrument, trace, warn};
 
 use self::capability_invocations::CapabilityInvocationPhaseParams;
+use self::failure::emit_turn_failure;
+pub use self::params::TurnParams;
 use self::persistence::{
     add_assistant_message_to_context, build_completed_assistant_payload,
     build_interrupted_message_payload, build_token_record_json, emit_response_complete,
@@ -35,87 +35,10 @@ use self::persistence::{
 };
 use self::result::determine_turn_stop_reason;
 use self::turn_context::{build_turn_context, resolve_provider_primitive_surface};
-use crate::domains::agent::r#loop::compaction_handler::CompactionHandler;
 use crate::domains::agent::r#loop::errors::StopReason;
-use crate::domains::agent::r#loop::event_emitter::EventEmitter;
-use crate::domains::agent::r#loop::orchestrator::event_persister::EventPersister;
-use crate::domains::agent::r#loop::orchestrator::invocation_abort_registry::InvocationAbortRegistry;
 use crate::domains::agent::r#loop::orchestrator::streaming_journal::StreamingJournal;
 use crate::domains::agent::r#loop::stream_processor;
-use crate::domains::agent::r#loop::types::{RunContext, TurnResult};
-
-fn run_base(session_id: &str, run_context: &RunContext) -> BaseEvent {
-    BaseEvent::now(session_id).with_trace_context(
-        run_context
-            .engine_trace_id
-            .as_ref()
-            .map(|id| id.as_str().to_owned()),
-        run_context
-            .parent_invocation_id
-            .as_ref()
-            .map(|id| id.as_str().to_owned()),
-    )
-}
-
-fn emit_turn_failure(
-    emitter: &Arc<EventEmitter>,
-    session_id: &str,
-    turn: u32,
-    run_context: &RunContext,
-    sequence_counter: Option<&AtomicI64>,
-    failure: &FailureEnvelope,
-    partial_content: Option<String>,
-) {
-    let event = turn_failed_event(
-        run_base(session_id, run_context),
-        turn,
-        failure,
-        partial_content,
-    );
-    if let Some(counter) = sequence_counter {
-        let _ = emitter.emit_sequenced(event, counter);
-    } else {
-        let _ = emitter.emit(event);
-    }
-}
-
-/// Parameters for a single turn of the agent loop.
-pub struct TurnParams<'a> {
-    /// Current turn number (1-indexed).
-    pub turn: u32,
-    /// Context manager owning messages, agent state summaries, and token tracking.
-    pub context_manager: &'a mut ContextManager,
-    /// Model responder for streaming.
-    pub responder: &'a Arc<dyn ModelResponder>,
-    /// Compaction handler for pre-turn context checks.
-    pub compaction: &'a CompactionHandler,
-    /// Session identifier.
-    pub session_id: &'a str,
-    /// Event emitter for broadcasting agent lifecycle events.
-    pub emitter: &'a Arc<EventEmitter>,
-    /// Cancellation token for aborting the turn.
-    pub cancel: &'a tokio_util::sync::CancellationToken,
-    /// Run-scoped context for reasoning level, trace ids, and agent-owned state.
-    pub run_context: &'a RunContext,
-    /// Optional event persister for inline event storage.
-    pub persister: Option<&'a EventPersister>,
-    /// Previous turn's context window token count (for delta tracking).
-    pub previous_context_baseline: u64,
-    /// Optional retry configuration for provider stream retries.
-    pub retry_config: Option<&'a crate::shared::foundation::retry::RetryConfig>,
-    /// Workspace ID for scoping capability context (e.g. memory recall).
-    pub workspace_id: Option<&'a str>,
-    /// Server origin (e.g. `"localhost:9847"`) for system prompt.
-    pub server_origin: Option<&'a str>,
-    /// Optional per-session sequence counter for monotonic event ordering.
-    pub sequence_counter: Option<&'a AtomicI64>,
-    /// Optional per-invocation abort registry. Threaded into `CapabilityInvocationExecutionContext`
-    /// so each in-flight capability invocation registers a child `CancellationToken` that
-    /// `agent.abortCapabilityInvocation` can cancel independently of the turn token.
-    pub invocation_abort_registry: Option<&'a Arc<InvocationAbortRegistry>>,
-    /// Optional engine host for engine-owned capability invocation.
-    pub engine_host: Option<&'a crate::engine::EngineHostHandle>,
-}
+use crate::domains::agent::r#loop::types::TurnResult;
 
 /// Execute a single turn of the agent loop.
 #[allow(clippy::too_many_lines, clippy::cast_possible_truncation)]

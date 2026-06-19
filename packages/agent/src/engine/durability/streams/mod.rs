@@ -2,7 +2,9 @@
 //!
 //! Streams are resumable cursor views over engine-visible change records. They
 //! are not a transport: engine clients, agent capabilities, and external workers can
-//! all poll the same stream cursor model.
+//! all poll the same stream cursor model. Package-owned lifecycle topics such
+//! as `catalog.discovery` and `approval.lifecycle` publish durable evidence
+//! transitions through this substrate without becoming typed session events.
 //!
 //! INVARIANT: live subscriptions that omit an explicit cursor start at the
 //! topic tail. Historical replay is explicit (`afterCursor` / `cursor`) and

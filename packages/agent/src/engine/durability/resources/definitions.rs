@@ -4,7 +4,8 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::types::{
-    CATALOG_DISCOVERY_REPORT_KIND, CATALOG_DISCOVERY_REPORT_SCHEMA_ID,
+    APPROVAL_DECISION_KIND, APPROVAL_DECISION_SCHEMA_ID, APPROVAL_REQUEST_KIND,
+    APPROVAL_REQUEST_SCHEMA_ID, CATALOG_DISCOVERY_REPORT_KIND, CATALOG_DISCOVERY_REPORT_SCHEMA_ID,
     EngineResourceTypeDefinition, EngineResourceVersioningMode, RegisterResourceType,
     UI_SURFACE_KIND, UI_SURFACE_SCHEMA_ID,
 };
@@ -167,6 +168,116 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "enforces_revocation",
             ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
+        ),
+        builtin_type(
+            APPROVAL_REQUEST_KIND,
+            APPROVAL_REQUEST_SCHEMA_ID,
+            json!({
+                "type": "object",
+                "required": [
+                    "schemaVersion",
+                    "state",
+                    "requester",
+                    "action",
+                    "scope",
+                    "riskClass",
+                    "createdAt",
+                    "expiresAt",
+                    "denialBehavior",
+                    "idempotency",
+                    "revision"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "schemaVersion": {"type": "string"},
+                    "state": {"type": "string", "enum": ["pending", "decided", "expired", "revoked"]},
+                    "requester": {"type": "object"},
+                    "action": {"type": "object"},
+                    "scope": {"type": "object"},
+                    "riskClass": {"type": "string"},
+                    "createdAt": {"type": "string"},
+                    "expiresAt": {"type": "string"},
+                    "freshness": {"type": "object"},
+                    "evidenceRefs": {"type": "array"},
+                    "resourceSelectors": {"type": "array"},
+                    "traceRefs": {"type": "array"},
+                    "replayRefs": {"type": "array"},
+                    "denialBehavior": {"type": "object"},
+                    "idempotency": {"type": "object"},
+                    "revision": {"type": "object"}
+                }
+            }),
+            vec!["pending", "decided", "expired", "revoked", "archived"],
+            vec![
+                "requested_by",
+                "evidence_for",
+                "supported_by",
+                "derived_from",
+                "decided_by",
+                "supersedes",
+                "revoked_by",
+            ],
+            json!({
+                "read": ["approval.read", "resource.read"],
+                "write": ["approval.write", "resource.write"]
+            }),
+        ),
+        builtin_type(
+            APPROVAL_DECISION_KIND,
+            APPROVAL_DECISION_SCHEMA_ID,
+            json!({
+                "type": "object",
+                "required": [
+                    "schemaVersion",
+                    "requestResourceId",
+                    "requestVersionId",
+                    "state",
+                    "decisionActor",
+                    "decidedAt",
+                    "expiresAt",
+                    "action",
+                    "scope",
+                    "riskClass",
+                    "denialBehavior",
+                    "idempotency",
+                    "revision"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "schemaVersion": {"type": "string"},
+                    "requestResourceId": {"type": "string"},
+                    "requestVersionId": {"type": "string"},
+                    "state": {"type": "string", "enum": ["approved", "denied", "revoked"]},
+                    "decisionActor": {"type": "object"},
+                    "decidedAt": {"type": "string"},
+                    "expiresAt": {"type": "string"},
+                    "freshnessUntil": {"type": "string"},
+                    "action": {"type": "object"},
+                    "scope": {"type": "object"},
+                    "riskClass": {"type": "string"},
+                    "evidenceRefs": {"type": "array"},
+                    "resourceSelectors": {"type": "array"},
+                    "traceRefs": {"type": "array"},
+                    "replayRefs": {"type": "array"},
+                    "denialBehavior": {"type": "object"},
+                    "idempotency": {"type": "object"},
+                    "revision": {"type": "object"}
+                }
+            }),
+            vec!["approved", "denied", "revoked", "expired", "archived"],
+            vec![
+                "decision_for",
+                "requested_by",
+                "evidence_for",
+                "supported_by",
+                "derived_from",
+                "supersedes",
+                "revokes",
+            ],
+            json!({
+                "read": ["approval.read", "resource.read"],
+                "write": ["approval.write", "resource.write"]
+            }),
         ),
         builtin_type(
             CATALOG_DISCOVERY_REPORT_KIND,

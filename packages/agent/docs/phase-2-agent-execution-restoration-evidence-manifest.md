@@ -100,6 +100,42 @@ Focused validation:
 | `cd packages/ios-app && xcodegen generate` | exit 0 | Xcode project regenerated after Swift DTO/view-model/UI changes. |
 | `xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/WorkerLifecycleDTOTests -only-testing:TronMobileTests/WorkerLifecycleClientTests -only-testing:TronMobileTests/AgentCockpitStateTests -only-testing:TronMobileTests/AgentCockpitViewModelTests` | exit 0 | 20 iOS simulator tests passed across DTO decoding, worker lifecycle client, cockpit projection, and cockpit view model report creation. |
 
+## Slice 2 Implementation Evidence
+
+Branch: `codex/phase-2-approval-safety-freshness-current`
+
+Baseline HEAD: `f95d3b02efbffe15798d4164ae494e743a6332a5`
+
+Scope implemented:
+
+- Added the `approval` domain worker with `approval::request`,
+  `approval::decide`, and `approval::check`.
+- Added durable `approval_request` and `approval_decision` resource type
+  definitions with requester, action, scope, risk class, expiry/freshness,
+  evidence refs, resource selectors, trace/replay refs, decision actor/state,
+  denial behavior, idempotency, and revision metadata.
+- Added `approval.lifecycle` stream publication for requested, decided,
+  denied, and revoked lifecycle transitions. Stream payloads record that
+  approval is not authority and point execution permission back to existing
+  engine authority grants.
+- Added idempotent decision recording bound to the expected request resource
+  version and a reusable fail-closed check path for approved, denied, expired,
+  pending, missing, malformed, stale, and scope-mismatch outcomes.
+- Added structured replay/evidence explanations for every check outcome,
+  including request/decision resource ids, versions, evidence refs, resource
+  selectors, trace refs, replay refs, denial behavior, and revision metadata.
+- Did not add native iOS approval UI, filesystem/jobs/git/web/memory/subagent/
+  scheduling behavior, notifications, deployment behavior, or a default risky
+  approval policy.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::approval -- --nocapture` | exit 0 | 5 Rust approval tests passed, covering request resource/stream creation, approved explanation, fail-closed denial/expiry/pending/missing/malformed/stale/scope mismatch, idempotent decision replay, stale revision conflict, and freshness timeout. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib stream_state -- --nocapture` | exit 0 | Focused agent-loop stream-state tests passed after extracting stream-message helpers to keep the TPC file budget green without behavior changes. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib turn_runner -- --nocapture` | exit 0 | 17 focused turn-runner tests passed after extracting turn parameters and failure emission helpers to keep the TPC file budget green without behavior changes. |
+
 ## Validation Log
 
 | Command | Result | Evidence |
@@ -111,13 +147,19 @@ Focused validation:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 tests passed; all BPRC feature buckets remain mapped. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | 8 tests passed; successor-term planning language is classified. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 tests passed; Phase 2 planning docs remain future/readiness wording, not a completed autonomous-authorship architecture. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 tests passed; SACB inventory covers 735 rows including Phase 2 planning artifacts. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 tests passed; PCC file inventory covers the new artifacts. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 tests passed; TPC retention inventory and summary counts match. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 tests passed; HRA file and ownership inventories cover the new artifacts. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::approval -- --nocapture` | exit 0 | 5 Slice 2 approval tests passed, covering durable resources, lifecycle streams, fail-closed outcomes, idempotency/revision conflicts, and replay/evidence explanations. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib stream_state -- --nocapture` | exit 0 | Focused stream-state tests passed after the non-behavioral helper split. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib turn_runner -- --nocapture` | exit 0 | 17 focused turn-runner tests passed after the non-behavioral helper split. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 tests passed; SACB inventory covers 757 rows including the approval worker, contracts, resources, lifecycle stream, and not-authority boundary. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 tests passed; PCC file inventory covers 1736 retained files including approval and helper-split files. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 tests passed; TPC retention inventory covers 1691 retained rows and the touched Rust files remain within the 750-line hard budget. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 tests passed; TMB inventory covers 1068 rows and classifies approval as a package-owned module using engine/resource facades. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 tests passed; HRA file and ownership inventories cover 1736 files including approval and helper-split ownership. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 0 | 17 tests passed after documenting `domains/approval` as an approved UTC audit/freshness owner while retaining `check_approval_at` as the deterministic replay seam. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 tests passed after adding the split `turn_runner/params.rs` cancellation-token owner to the CSD inventory. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture` | exit 0 | 10 tests passed; iOS architecture docs still preserve thin-client shell boundaries. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants -- --nocapture` | exit 0 | 11 tests passed; Agent cockpit docs remain generic runtime-surface oriented. |
-| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 1 code, docs, invariant, and entropy fixes. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 2 approval work, DRC allow-list documentation, and CSD inventory refresh. |
 | `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git diff --cached --check` | exit 0 | No whitespace errors were reported in the staged diff. |

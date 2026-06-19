@@ -36,6 +36,7 @@ fn replay_critical_entropy_is_allow_listed() {
             allowed_paths: &[
                 "packages/agent/src/app/",
                 "packages/agent/src/domains/agent/",
+                "packages/agent/src/domains/approval/",
                 "packages/agent/src/domains/auth/",
                 "packages/agent/src/domains/capability/operations/",
                 "packages/agent/src/domains/model/",

@@ -122,3 +122,11 @@ Cockpit discovery rendering, and resource-backed conformance evidence are
 recorded on rows `P2AER-INV-002`, `P2AER-INV-025`, and `P2AER-INV-035`.
 Rows with remaining provider-reasoning or future-native-surface questions stay
 planned until their own contract work lands.
+
+Slice 2 is represented as current backend evidence on rows `P2AER-INV-011`
+and `P2AER-INV-034`: approval requests, approval decisions, lifecycle stream
+events, idempotent decision recording, reusable fail-closed checks, and
+replay/evidence explanations now exist as a modular approval package. The
+slice intentionally leaves native iOS approval UI, risk-class taxonomy, default
+expiry policy, interruption behavior, and per-package risky-action triggers to
+future user decisions.

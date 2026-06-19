@@ -96,11 +96,14 @@ packages/agent/src/domains/agent/loop/stream_processor/tests/drain.rs	test	test_
 packages/agent/src/domains/agent/loop/stream_processor/tests/mod.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/stream_processor/tests/stream_state.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/stream_state.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
+packages/agent/src/domains/agent/loop/stream_message.rs	implementation	agent_runtime	P2AER-S2	stream message helper split to keep stream state under the TPC hard budget
 packages/agent/src/domains/agent/loop/tron_agent/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/tron_agent/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/domains/agent/loop/turn_runner/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
+packages/agent/src/domains/agent/loop/turn_runner/failure.rs	implementation	agent_runtime	P2AER-S2	turn failure helper split to keep turn runner under the TPC hard budget
+packages/agent/src/domains/agent/loop/turn_runner/params.rs	implementation	agent_runtime	P2AER-S2	turn parameter contract split to keep turn runner under the TPC hard budget
 packages/agent/src/domains/agent/loop/turn_runner/persistence/mod.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
 packages/agent/src/domains/agent/loop/turn_runner/persistence/tests.rs	test	test_harness	TPC-6	concern-owned persistence verification split from agent loop cleanup
 packages/agent/src/domains/agent/loop/turn_runner/provider.rs	implementation	agent_runtime	TPC-6	prompt loop, context, session runtime, or stream implementation
@@ -1678,3 +1681,12 @@ packages/agent/src/domains/catalog_discovery/projection.rs	implementation	catalo
 packages/agent/src/domains/catalog_discovery/report.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery report retained for conformance checks and stream publication.
 packages/agent/src/domains/catalog_discovery/service.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery service retained for current catalog/resource/stream-backed facts.
 packages/agent/src/domains/catalog_discovery/tests.rs	test	test_harness	Phase2-Slice1	Catalog discovery tests retained for protected visibility, no target invocation, and report durability coverage.
+packages/agent/src/domains/approval/mod.rs	implementation	approval	Phase2-Slice2	Approval domain facade retained for durable evidence and freshness checks without minting authority.
+packages/agent/src/domains/approval/contract.rs	implementation	approval	Phase2-Slice2	Approval contracts retained for request, decision, check schemas, idempotency, and authority metadata.
+packages/agent/src/domains/approval/errors.rs	implementation	approval	Phase2-Slice2	Approval errors retained for malformed-request and fail-closed failure semantics.
+packages/agent/src/domains/approval/explanation.rs	implementation	approval	Phase2-Slice2	Approval explanation helpers retained for replay and evidence details on every check outcome.
+packages/agent/src/domains/approval/handlers.rs	implementation	approval	Phase2-Slice2	Approval handlers retained as narrow invocation entrypoints for the approval package.
+packages/agent/src/domains/approval/service.rs	implementation	approval	Phase2-Slice2	Approval service retained for resource-backed requests, decisions, streams, and fail-closed checks.
+packages/agent/src/domains/approval/support.rs	implementation	approval	Phase2-Slice2	Approval support helpers retained for payload parsing, stream events, idempotency, and resource refs.
+packages/agent/src/domains/approval/tests.rs	test	test_harness	Phase2-Slice2	Approval focused tests retained for durable resources, idempotent decisions, and fail-closed checks.
+packages/agent/src/domains/approval/types.rs	implementation	approval	Phase2-Slice2	Approval record types retained for durable request, decision, and check schemas.

@@ -22,6 +22,7 @@ pub mod orchestrator;
 pub(crate) mod pipeline;
 pub mod primitive_surface;
 pub mod profile_runtime;
+mod stream_message;
 pub mod stream_processor;
 mod stream_state;
 pub mod tron_agent;

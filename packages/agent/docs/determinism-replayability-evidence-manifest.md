@@ -89,6 +89,9 @@ Proof:
   `ORDER BY timestamp`.
 - The test failed before fix on unlisted OAuth flow timing and an agent-runner
   test UUID owner, then passed after those owners were explicitly allowed.
+- P2AER-S2 refreshed the allow-list for `domains/approval`: live
+  request/decision handlers write UTC audit/freshness timestamps, and replayed
+  approval checks use the deterministic `check_approval_at` timestamp seam.
 
 Open rows after DRC-2: DRC-4, DRC-5, DRC-6, DRC-7, DRC-8, DRC-9, and DRC-10.
 DRC-5/DRC-6 must keep replay builders out of the entropy allow-list and prove

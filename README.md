@@ -676,6 +676,10 @@ the loop, ledger, audit, or iOS DTO layers.
 provider-neutral stream options, opens provider streams, applies retry, maps
 provider errors to canonical failure envelopes, and redacts/bounds
 `model.provider_request` audit payloads before persistence.
+`domains/approval` owns durable `approval_request` and `approval_decision`
+resources plus the reusable fail-closed freshness check consumed by future tool
+packages. Approval evidence is never an authority grant; existing engine
+authority grants remain the execution-permission primitive.
 `domains/worker_lifecycle` owns local package proposals,
 `tron.worker_package.v1` manifest validation, install/enable/disable/launch/
 stop/retire functions, scoped token minting, conformance reports, and
@@ -898,13 +902,16 @@ Current primitive operations:
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks. |
 
 Startup registration currently keeps only loop infrastructure domains:
-`system`, `capability`, `catalog_discovery`, `filesystem`, `blob`, `message`,
+`system`, `capability`, `catalog_discovery`, `approval`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
 `worker_lifecycle`, and model-provider modules. The
 `filesystem` domain is a narrow iOS workspace-browser exception limited to
 `filesystem::get_home`, `filesystem::list_dir`, and `filesystem::create_dir`;
 agent-facing file read/write/process behavior remains under
-`capability::execute`. The post-baseline
+`capability::execute`. The `approval` domain is a backend evidence/freshness
+gate with `approval::request`, `approval::decide`, and `approval::check`
+engine functions; it does not add a provider-visible approval tool, native iOS
+approval UI, or default risky-action policy. The post-baseline
 `worker_lifecycle` owner is the explicit exception for local package
 proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before
@@ -1047,7 +1054,11 @@ agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
 reads bounded retained logs and `replay_manifest` reads the canonical replay
 snapshot through the same single tool. Catalog discovery reads current
 catalog/resource truth and writes only append-oriented `catalog_discovery_report`
-evidence. The replay snapshot includes resolved
+evidence. Approval requests and decisions are generic resources with lifecycle
+events on `approval.lifecycle`; replay/evidence explanations point back to
+request, decision, trace, resource-selector, and replay refs for each approved,
+denied, expired, pending, missing, malformed, stale, or scope-mismatch check
+outcome. The replay snapshot includes resolved
 session events, provider request audits, trace records, engine idempotency
 entries, engine invocations, engine stream rows, and engine queue rows. It adds
 stable section hashes plus request/result/outcome/payload hashes where the
@@ -1157,12 +1168,13 @@ The replay manifest is a capability result, not a persisted event type, so iOS
 does not need a separate replay event decoder.
 
 Agent authority is declared before the loop starts through the causal authority
-envelope and the one model-visible `execute` primitive. The engine does not
-create a runtime permission prompt or resumable permission ledger for autonomous work:
-schema, idempotency, resource leases, compensation contracts, allowed scopes,
-and the selected primitive operation either validate before execution or return
-a normal policy error. The trace record for that `execute` call captures the
-authority grant id, scopes, provider/model metadata, request/result hashes, and
+envelope and the one model-visible `execute` primitive. Approval records are
+package-owned evidence/freshness gates, not authority grants or an engine-minted
+permission ledger: schema, idempotency, resource leases, compensation
+contracts, allowed scopes, existing grants, and the selected primitive
+operation either validate before execution or return a normal policy error. The
+trace record for that `execute` call captures the authority grant id, scopes,
+provider/model metadata, request/result hashes, and
 file/VCS attribution so the agent can inspect why an action did or did not run.
 
 The `EngineStreamEventPump` routes retained neutral engine/session stream

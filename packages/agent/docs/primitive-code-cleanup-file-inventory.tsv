@@ -110,11 +110,14 @@ packages/agent/src/domains/agent/loop/stream_processor/tests/drain.rs	retain	rus
 packages/agent/src/domains/agent/loop/stream_processor/tests/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/stream_processor/tests/stream_state.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/stream_state.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/agent/loop/stream_message.rs	retain	rust agent	P2AER-S2	Stream message helper retained after splitting the over-budget stream state file.
 packages/agent/src/domains/agent/loop/tron_agent/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/tron_agent/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/agent/loop/turn_runner/failure.rs	retain	rust agent	P2AER-S2	Turn failure event helper retained after splitting the over-budget turn runner file.
+packages/agent/src/domains/agent/loop/turn_runner/params.rs	retain	rust agent	P2AER-S2	Turn parameter contract retained after splitting the over-budget turn runner file.
 packages/agent/src/domains/agent/loop/turn_runner/persistence/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/result.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/agent/loop/turn_runner/tests.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1723,3 +1726,12 @@ packages/agent/src/domains/catalog_discovery/projection.rs	retain	phase2 catalog
 packages/agent/src/domains/catalog_discovery/report.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery report helpers retained for conformance checks and stream publication.
 packages/agent/src/domains/catalog_discovery/service.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery service retained for truthful catalog/resource/stream-backed evidence.
 packages/agent/src/domains/catalog_discovery/tests.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery focused tests retained for protected visibility, no side effects, and durable report evidence.
+packages/agent/src/domains/approval/mod.rs	retain	phase2 approval	P2AER-S2	Approval domain facade retained for durable evidence and freshness checks without minting authority.
+packages/agent/src/domains/approval/contract.rs	retain	phase2 approval	P2AER-S2	Approval contracts retained for request, decision, check schemas, idempotency, and authority metadata.
+packages/agent/src/domains/approval/errors.rs	retain	phase2 approval	P2AER-S2	Approval errors retained for malformed-request and fail-closed failure semantics.
+packages/agent/src/domains/approval/explanation.rs	retain	phase2 approval	P2AER-S2	Approval explanation helpers retained for replay and evidence details on every check outcome.
+packages/agent/src/domains/approval/handlers.rs	retain	phase2 approval	P2AER-S2	Approval handlers retained as narrow invocation entrypoints for the approval package.
+packages/agent/src/domains/approval/service.rs	retain	phase2 approval	P2AER-S2	Approval service retained for resource-backed requests, decisions, streams, and fail-closed checks.
+packages/agent/src/domains/approval/support.rs	retain	phase2 approval	P2AER-S2	Approval support helpers retained for payload parsing, stream events, idempotency, and resource refs.
+packages/agent/src/domains/approval/tests.rs	retain	phase2 approval	P2AER-S2	Approval focused tests retained for durable resources, idempotent decisions, and fail-closed checks.
+packages/agent/src/domains/approval/types.rs	retain	phase2 approval	P2AER-S2	Approval record types retained for durable request, decision, and check schemas.

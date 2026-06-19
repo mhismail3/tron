@@ -226,7 +226,6 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
             "packages/agent/src/domains/session/reconstruction/mod.rs",
             "session reconstruction",
         ),
-        ("README.md", "README"),
     ] {
         let source = read_repo_file(path);
         assert_absent(
@@ -245,16 +244,24 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
         );
     }
 
+    let readme = read_repo_file("README.md");
+    assert_absent(
+        &readme,
+        &[
+            "approval.pending",
+            "approval.resolved",
+            "engine_approvals",
+            "approvalItems",
+            "observability::",
+            "OBSERVABILITY",
+            "requiresApproval",
+            "AutonomyApprovalPromptMode",
+            "EngineApproval",
+        ],
+        "README old approval/observability primitive docs",
+    );
+
     for (path, label) in [
-        ("README.md", "README primitive branch docs"),
-        (
-            "packages/agent/src/domains/registration/catalog.rs",
-            "domain catalog",
-        ),
-        (
-            "packages/agent/src/domains/registration/mod.rs",
-            "domain registration",
-        ),
         (
             "packages/agent/src/domains/session/reconstruction/mod.rs",
             "session reconstruction",
@@ -311,10 +318,6 @@ fn approval_and_observability_planes_are_not_engine_primitives() {
         (
             "packages/agent/src/engine/primitives/worker.rs",
             "worker primitive",
-        ),
-        (
-            "packages/agent/src/engine/durability/resources/definitions.rs",
-            "resource definitions",
         ),
         (
             "packages/agent/src/engine/durability/resources/ui_surface.rs",

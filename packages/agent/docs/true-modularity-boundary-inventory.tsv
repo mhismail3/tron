@@ -70,11 +70,14 @@ packages/agent/src/domains/agent/loop/stream_processor/tests/drain.rs	rust	test-
 packages/agent/src/domains/agent/loop/stream_processor/tests/mod.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
 packages/agent/src/domains/agent/loop/stream_processor/tests/stream_state.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
 packages/agent/src/domains/agent/loop/stream_state.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/stream_message.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/agent/loop/tron_agent/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/agent/loop/tron_agent/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/agent/loop/turn_runner/capability_invocations/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
 packages/agent/src/domains/agent/loop/turn_runner/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/agent/loop/turn_runner/failure.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/agent/loop/turn_runner/params.rs	rust	contract	rust:domain-agent	may be shared across the owning boundary without concrete implementation imports
 packages/agent/src/domains/agent/loop/turn_runner/persistence/mod.rs	rust	facade	rust:domain-agent	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/agent/loop/turn_runner/persistence/tests.rs	rust	test-support	rust:domain-agent	test-only helper; production code must not depend on it
 packages/agent/src/domains/agent/loop/turn_runner/result.rs	rust	implementation	rust:domain-agent	owner-private; callers must enter through the owner facade or contract
@@ -1055,3 +1058,12 @@ packages/agent/src/domains/catalog_discovery/projection.rs	rust	implementation	a
 packages/agent/src/domains/catalog_discovery/report.rs	rust	implementation	agent:catalog-discovery	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/catalog_discovery/service.rs	rust	implementation	agent:catalog-discovery	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/catalog_discovery/tests.rs	rust	test-support	agent:catalog-discovery	test-only helper; production code must not depend on it
+packages/agent/src/domains/approval/mod.rs	rust	facade	agent:approval	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/approval/contract.rs	rust	contract	agent:approval	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/approval/errors.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/approval/explanation.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/approval/handlers.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/approval/service.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/approval/support.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/approval/tests.rs	rust	test-support	agent:approval	test-only helper; production code must not depend on it
+packages/agent/src/domains/approval/types.rs	rust	contract	agent:approval	may be shared across the owning boundary without concrete implementation imports

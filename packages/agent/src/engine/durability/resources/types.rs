@@ -17,6 +17,14 @@ pub const UI_SURFACE_SCHEMA_VERSION: u64 = 1;
 pub const CATALOG_DISCOVERY_REPORT_KIND: &str = "catalog_discovery_report";
 /// Built-in catalog discovery report resource schema id.
 pub const CATALOG_DISCOVERY_REPORT_SCHEMA_ID: &str = "tron.resource.catalog_discovery_report.v1";
+/// Built-in approval request resource kind.
+pub const APPROVAL_REQUEST_KIND: &str = "approval_request";
+/// Built-in approval request resource schema id.
+pub const APPROVAL_REQUEST_SCHEMA_ID: &str = "tron.resource.approval_request.v1";
+/// Built-in approval decision resource kind.
+pub const APPROVAL_DECISION_KIND: &str = "approval_decision";
+/// Built-in approval decision resource schema id.
+pub const APPROVAL_DECISION_SCHEMA_ID: &str = "tron.resource.approval_decision.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
