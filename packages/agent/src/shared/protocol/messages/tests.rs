@@ -344,6 +344,7 @@ fn context_serde_roundtrip() {
         capabilities: None,
         working_directory: Some("/tmp".into()),
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     };
     let json = serde_json::to_string(&ctx).unwrap();

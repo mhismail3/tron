@@ -17,7 +17,8 @@ scoped worker-token derivation, conformance evidence, rollback records, and
 generic resource/stream visibility. It does not restore MCP, skills, memory,
 web/browser research, scheduler, subagents, prompt library, program execution,
 fixed iOS product panels, provider-visible tool widening, or production deploy
-behavior.
+behavior; later approved Phase 2 restorations must be tracked in the Phase 2
+inventory and remain outside SUWRF's worker-lifecycle scope.
 
 | Row | Name | Points | Status | Closure |
 | --- | --- | ---: | --- | --- |

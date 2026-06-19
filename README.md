@@ -680,6 +680,12 @@ provider errors to canonical failure envelopes, and redacts/bounds
 resources plus the reusable fail-closed freshness check consumed by future tool
 packages. Approval evidence is never an authority grant; existing engine
 authority grants remain the execution-permission primitive.
+`domains/memory` owns the Phase 2 memory foundation: source-backed memory
+engine/policy/record/prompt-trace/eval-run/migration resource contracts,
+explicit disabled/active/shadow/compare policy state, redacted record audit, and
+provider-safe prompt trace text. It does not implement semantic retrieval,
+embeddings, ranking, summarization, procedural rules, or automatic prompt
+memory.
 `domains/worker_lifecycle` owns local package proposals,
 `tron.worker_package.v1` manifest validation, install/enable/disable/launch/
 stop/retire functions, scoped token minting, conformance reports, and
@@ -896,13 +902,16 @@ Current primitive operations:
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
+| `memory_status` | Read the current session memory policy/mode, active engine identity, and prompt-inclusion contract with explicit disabled fallback. |
+| `memory_list` | List redacted memory records for the current session; record body refs stay redacted. |
+| `memory_inspect` | Inspect one redacted memory record and its version history within the current session. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 | `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, and report evidence without invoking catalog targets. |
 | `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution. |
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks. |
 
 Startup registration currently keeps only loop infrastructure domains:
-`system`, `capability`, `catalog_discovery`, `approval`, `filesystem`, `blob`, `message`,
+`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
 `worker_lifecycle`, and model-provider modules. The
 `filesystem` domain is a narrow iOS workspace-browser exception limited to
@@ -912,6 +921,12 @@ agent-facing file read/write/process behavior remains under
 gate with `approval::request`, `approval::decide`, and `approval::check`
 engine functions; it does not add a provider-visible approval tool, native iOS
 approval UI, or default risky-action policy. The post-baseline
+`memory` domain is a backend contract/audit surface with `memory::status`,
+`memory::configure_policy`, `memory::retain`, `memory::edit`,
+`memory::tombstone`, `memory::list`, `memory::inspect`,
+`memory::record_prompt_trace`, and migration import/export functions; the model
+sees only read-only `execute` memory audit operations, and prompt assembly
+receives only mode/count/trace facts, never retained memory body content.
 `worker_lifecycle` owner is the explicit exception for local package
 proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before
@@ -1328,9 +1343,12 @@ See [`packages/agent/src/app/lifecycle/onboarding/mod.rs`](packages/agent/src/ap
 
 The context system manages the LLM's input window for the primitive loop. Each
 turn assembles only the agent soul/system prompt, the compact agent-owned state
-projection, environment metadata, conversation history, and any pending
-`execute` results. Built-in rules, skills, worker guides, hooks, and profile
-policy primers are not model-context planes on this branch.
+projection, an explicit memory prompt-trace audit, environment metadata,
+conversation history, and any pending `execute` results. The memory audit
+records disabled/active/shadow/compare mode, considered/included/excluded
+counts, and the prompt-trace resource id; retained memory body content is never
+injected. Built-in rules, skills, worker guides, hooks, and profile policy
+primers are not model-context planes on this branch.
 
 The prompt loop records context totals in session events and trace metadata.
 Before a provider call this is the chars/4 local component estimate; after a
@@ -1366,6 +1384,7 @@ capabilities.
 ```
 Agent soul / system prompt
   + Agent-owned state summary
+  + Memory prompt trace audit
   + Environment metadata
   + History reconstructed from session truth
   + Pending user prompt and execute results
@@ -1422,7 +1441,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 
@@ -1487,6 +1506,7 @@ packages/ios-app/Sources/
   row that opens the cockpit sheet. The sheet renders live worker lifecycle
   catalog rows, capability discovery families, schema/health gaps, durable
   `catalog_discovery_report` history, package/resource status,
+  redacted memory resource status through generic resource facts,
   confirmation-backed lifecycle actions, activity, and active `ui_surface`
   resources through generic engine data using the standard liquid-glass sheet
   chrome and shared segmented tab control. The primary chat shell does not mount
@@ -1751,9 +1771,9 @@ Base directories for `profiles`, `workspace`, and `internal` in the tree below a
 |   +-- knowledge/                 Curated wiki/research experiment
 |   +-- vault/                     Local fast secret storage for agent-owned workspace state
 |   +-- workers/                   Approved local worker-package root for `tron.worker_package.v1` manifests
-+-- memory/                       User-authored memory and rule notes loaded by sessions
-|   +-- rules/                     Detail files for memory-backed rules
-|   +-- sessions/                  Session-scoped memory material
++-- memory/                       User-authored memory/rule notes reserved for explicit future import
+|   +-- rules/                     Reserved detail files; not auto-injected by the current memory contract
+|   +-- sessions/                  Reserved session-scoped material; not a hidden prompt plane
 +-- internal/                     Tron-owned runtime machinery
     +-- database/                  Unified SQLite engine storage and archives
     |   +-- tron.sqlite            Events, sessions, logs, blobs, engine ledger, streams, state, queues, typed resources, leases, compensation, workers

@@ -21,8 +21,10 @@
 //!
 //! ## Key Invariant
 //!
-//! The model-facing prompt begins with the static soul seed and the compact
-//! agent-owned state projection loaded through engine state primitives.
+//! The model-facing prompt begins with the static soul seed, the compact
+//! agent-owned state projection loaded through engine state primitives, and a
+//! provider-safe memory prompt-trace audit that carries only mode/count/ref
+//! evidence.
 //! Compaction uses token pressure to decide when to compact context, and only
 //! commits when an older message window can be summarized and the result
 //! reduces the durable context.

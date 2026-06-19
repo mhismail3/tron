@@ -1,9 +1,9 @@
 //! Domain worker registration.
 //!
 //! This module registers the retained in-process workers for the primitive
-//! engine branch. Startup intentionally excludes retired product domains; those
-//! surfaces are being torn down to the checked-in primitives documented by the
-//! scorecard.
+//! engine branch. Startup intentionally excludes unapproved retired product
+//! domains; restored Phase 2 surfaces must enter through source-backed domain
+//! contracts and inventory lineage rather than old product modules.
 //!
 //! `capability` owns the only model-facing tool, `capability::execute`, and
 //! that tool performs direct primitive operations rather than catalog routing.
@@ -30,8 +30,8 @@ use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, approval, auth, blob, capability, catalog_discovery, filesystem, logs, message, model,
-    session, settings, system, transcription, worker_lifecycle,
+    agent, approval, auth, blob, capability, catalog_discovery, filesystem, logs, memory, message,
+    model, session, settings, system, transcription, worker_lifecycle,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
@@ -62,6 +62,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         capability::worker_module(&deps)?,
         catalog_discovery::worker_module(&deps)?,
         approval::worker_module(&deps)?,
+        memory::worker_module(&deps)?,
         filesystem::worker_module(&deps)?,
         blob::worker_module(&deps)?,
         message::worker_module(&deps)?,
@@ -247,6 +248,25 @@ mod tests {
                 .any(|function_id| function_id == "capability::execute"),
             "primitive execute must stay registered: {function_ids:?}"
         );
+        for expected in [
+            "memory::configure_policy",
+            "memory::edit",
+            "memory::inspect",
+            "memory::list",
+            "memory::migrate_export",
+            "memory::migrate_import",
+            "memory::record_prompt_trace",
+            "memory::retain",
+            "memory::status",
+            "memory::tombstone",
+        ] {
+            assert!(
+                function_ids
+                    .iter()
+                    .any(|function_id| function_id == expected),
+                "approved Slice 3 memory function missing from startup catalog: {expected}"
+            );
+        }
         for retired_prefix in retired_startup_prefixes() {
             assert!(
                 !function_ids
@@ -353,7 +373,6 @@ mod tests {
             "import".to_owned(),
             "job".to_owned(),
             "mcp".to_owned(),
-            "memory".to_owned(),
             "notifications".to_owned(),
             "plan".to_owned(),
             "process".to_owned(),

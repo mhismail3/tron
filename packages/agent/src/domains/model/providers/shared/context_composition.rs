@@ -44,6 +44,23 @@ pub fn compose_context_blocks(context: &Context) -> Vec<ContextBlock> {
         ));
     }
 
+    if let Some(ref memory) = context.memory_prompt_context
+        && !memory.is_empty()
+    {
+        let mut block = context_block_for_text(
+            "agent.memoryPromptTrace",
+            "Memory Prompt Trace",
+            TronHome::Workspace,
+            memory.clone(),
+            ContextCacheClass::Turn,
+            25,
+        );
+        block.sensitivity = ContextSensitivity::Private;
+        block.inclusion_reason =
+            "memory prompt inclusion trace attached without retained body content".into();
+        blocks.push(block);
+    }
+
     if let Some(ref origin) = context.server_origin
         && !origin.is_empty()
     {
@@ -151,6 +168,7 @@ mod tests {
             capabilities: None,
             working_directory: Some("/Users/test/project".into()),
             agent_state_context: Some("state summary".into()),
+            memory_prompt_context: Some("memory status".into()),
             server_origin: Some("localhost:9847".into()),
         }
     }
@@ -159,11 +177,12 @@ mod tests {
     fn compose_parts_has_primitive_order() {
         let parts = compose_context_parts(&make_context());
 
-        assert_eq!(parts.len(), 4);
+        assert_eq!(parts.len(), 5);
         assert_eq!(parts[0], "Soul seed");
         assert_eq!(parts[1], "state summary");
-        assert_eq!(parts[2], "Server: localhost:9847");
-        assert_eq!(parts[3], "Current working directory: /Users/test/project");
+        assert_eq!(parts[2], "memory status");
+        assert_eq!(parts[3], "Server: localhost:9847");
+        assert_eq!(parts[4], "Current working directory: /Users/test/project");
     }
 
     #[test]
@@ -171,7 +190,10 @@ mod tests {
         let grouped = compose_context_parts_grouped(&make_context());
 
         assert_eq!(grouped.stable.len(), 3);
-        assert_eq!(grouped.volatile, vec!["state summary".to_owned()]);
+        assert_eq!(
+            grouped.volatile,
+            vec!["state summary".to_owned(), "memory status".to_owned()]
+        );
     }
 
     #[test]
@@ -203,6 +225,7 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(ids.contains(&"agent.soul".to_owned()));
         assert!(ids.contains(&"agent.state".to_owned()));
+        assert!(ids.contains(&"agent.memoryPromptTrace".to_owned()));
         assert!(ids.contains(&"capabilities.schemas".to_owned()));
         assert!(ids.contains(&"conversation.messages".to_owned()));
     }

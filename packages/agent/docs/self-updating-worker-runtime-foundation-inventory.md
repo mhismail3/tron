@@ -57,5 +57,7 @@ observe them without fixed native product panels.
 
 SUWRF does not restore MCP, skills, memory, hooks, rules, web/browser research,
 scheduler, subagents, prompt library, program execution, fixed iOS product
-panels, or provider-visible tool widening. Agent self-adaptation in this slice
-means inert proposals plus trusted apply paths, not autonomous code activation.
+panels, or provider-visible tool widening. Later approved Phase 2 restorations
+must be tracked in the Phase 2 inventory and remain outside SUWRF's
+worker-lifecycle scope. Agent self-adaptation in this slice means inert
+proposals plus trusted apply paths, not autonomous code activation.

@@ -139,6 +139,60 @@ Focused validation:
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib stream_state -- --nocapture` | exit 0 | Focused agent-loop stream-state tests passed after extracting stream-message helpers to keep the TPC file budget green without behavior changes. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib turn_runner -- --nocapture` | exit 0 | 17 focused turn-runner tests passed after extracting turn parameters and failure emission helpers to keep the TPC file budget green without behavior changes. |
 
+## Slice 3 Implementation Evidence
+
+Branch: `codex/phase-2-memory-foundation-current`
+
+Baseline HEAD: `301f61bc3af24e69decbe0281d829b9a9f7ada8e`
+
+Scope implemented:
+
+- Added the `memory` domain worker with policy/status, retain, edit,
+  tombstone, list, inspect, prompt-trace recording, and migration import/export
+  contracts.
+- Added built-in resource definitions for `memory_engine`, `memory_policy`,
+  `memory_record`, `memory_prompt_trace`, `memory_eval_run`, and
+  `memory_migration_envelope`.
+- Added source-backed protocol DTOs for memory modes, engines, policy,
+  records, prompt decisions/traces, eval runs, and migration envelopes.
+- Added read-only model `execute` operations for `memory_status`,
+  `memory_list`, and `memory_inspect`; mutating memory functions remain
+  backend domain contracts, not provider-visible tools.
+- Wired prompt assembly to include only explicit memory status/count/ref facts
+  through a private audit block and to record prompt traces without logging
+  private body content.
+- Added a deterministic resource-backed engine shell that supports disabled,
+  active, shadow, and compare modes, redacted body refs, lifecycle metadata,
+  provenance, sensitivity/privacy class, confidence, expiry/retention, source
+  refs, trace/replay refs, tombstone state, and migration metadata.
+- Did not add semantic/vector retrieval, embeddings, ranking, summarization,
+  procedural rules/hooks/skills, automatic retention, native iOS memory UI,
+  filesystem/jobs/git/web/subagents/scheduling behavior, or deployment
+  behavior.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::memory -- --nocapture` | exit 0 | 8 memory tests passed, covering disabled writes, source-backed schema/output drift, lifecycle/versioning, inline body-ref rejection, prompt trace privacy, absent-context explicitness, and redacted migration export/import. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed; the memory domain and capability operations are classified without widening provider-visible authority. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 HRA tests passed; memory files and resource-definition split ownership are covered. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 TMB tests passed; memory crosses engine/resource boundaries through domain contracts and engine facades. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 TPC tests passed; new memory source files are classified and remain under the 750-line hard budget after service/prompt/migration/resource-definition splits. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 PCC tests passed; retained memory implementation, test, protocol, and resource files are inventoried. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 0 | 17 DRC tests passed after classifying memory UTC timestamps as resource/prompt-trace audit metadata, not replay ordering keys. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | 8 SSARR tests passed; successor/runtime wording remains classified and does not claim old autonomous-authorship behavior. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 CSD tests passed; Slice 3 adds no unmanaged timers, sleeps, or task ownership. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed after narrowing the old-memory-surface guard to allow only the P2AER-tracked Slice 3 foundation while still rejecting semantic/vector/procedural memory engines. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 IARM tests passed; Slice 3 keeps iOS to generic resource/runtime facts and does not add native memory panels. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 OPSAA tests passed; memory foundation does not restore removed learned-rule/skill runtime surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | exit 0 | 9 SUWRF tests passed after narrowing the removed-feature guard to allow only the P2AER-tracked Slice 3 foundation outside worker-lifecycle scope. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed after adding Slice 3 evidence rows. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after the memory foundation implementation, historical guard narrowing, and inventory/evidence updates. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |
+
 ## Validation Log
 
 | Command | Result | Evidence |

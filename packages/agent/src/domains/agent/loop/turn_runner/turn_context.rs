@@ -21,11 +21,15 @@ pub(super) fn build_turn_context(
     context
         .agent_state_context
         .clone_from(&run_context.agent_state_context);
+    context
+        .memory_prompt_context
+        .clone_from(&run_context.memory_prompt_context);
     context.server_origin = server_origin.map(String::from);
 
     debug!(
         capability_count = context.capabilities.as_ref().map_or(0, Vec::len),
         has_agent_state = context.agent_state_context.is_some(),
+        has_memory_prompt_context = context.memory_prompt_context.is_some(),
         "primitive turn context"
     );
 

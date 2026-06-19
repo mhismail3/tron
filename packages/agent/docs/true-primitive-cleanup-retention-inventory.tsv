@@ -1691,3 +1691,15 @@ packages/agent/src/domains/approval/service.rs	implementation	approval	Phase2-Sl
 packages/agent/src/domains/approval/support.rs	implementation	approval	Phase2-Slice2	Approval support helpers retained for payload parsing, stream events, idempotency, and resource refs.
 packages/agent/src/domains/approval/tests.rs	test	test_harness	Phase2-Slice2	Approval focused tests retained for durable resources, idempotent decisions, and fail-closed checks.
 packages/agent/src/domains/approval/types.rs	implementation	approval	Phase2-Slice2	Approval record types retained for durable request, decision, and check schemas.
+packages/agent/src/domains/capability/operations/memory.rs	implementation	capability	Phase2-Slice3	Memory execute operation retained as a read-only audit adapter behind the singular execute primitive.
+packages/agent/src/domains/memory/mod.rs	implementation	memory	Phase2-Slice3	Memory domain facade retained for source-backed contract resources and lifecycle streams.
+packages/agent/src/domains/memory/contract.rs	implementation	memory	Phase2-Slice3	Memory contracts retained for policy, records, prompt traces, eval-run custody, migration, idempotency, and output refs.
+packages/agent/src/domains/memory/errors.rs	implementation	memory	Phase2-Slice3	Memory error helpers retained for fail-closed disabled or malformed policy behavior.
+packages/agent/src/domains/memory/handlers.rs	implementation	memory	Phase2-Slice3	Memory handlers retained as narrow domain invocation bindings.
+packages/agent/src/domains/memory/migration.rs	implementation	memory	Phase2-Slice3	Memory migration helpers retained for redacted export/import envelopes without embedding/index engines.
+packages/agent/src/domains/memory/prompt_trace.rs	implementation	memory	Phase2-Slice3	Memory prompt-trace helper retained for provider-safe audit context without hidden body content.
+packages/agent/src/domains/memory/schema_tests.rs	test	test_harness	Phase2-Slice3	Memory schema alignment tests retained to prevent resource contract drift.
+packages/agent/src/domains/memory/service.rs	implementation	memory	Phase2-Slice3	Memory service retained for resource-backed policy, record lifecycle, and migration operations.
+packages/agent/src/domains/memory/support.rs	implementation	memory	Phase2-Slice3	Memory support helpers retained for parsing, redaction, resource refs, and stream publication.
+packages/agent/src/domains/memory/tests.rs	test	test_harness	Phase2-Slice3	Memory focused tests retained for disabled mode, record lifecycle, redaction, prompt trace, and migration coverage.
+packages/agent/src/engine/durability/resources/memory_definitions.rs	primitive	engine	Phase2-Slice3	Memory resource type definitions retained as engine-owned contract schemas without memory algorithms.

@@ -389,7 +389,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "import",
         "job",
         "mcp",
-        "memory",
         "notifications",
         "plan",
         "process",
@@ -408,6 +407,33 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             !domain_root.join(forbidden).exists(),
             "old product domain was restored in baseline: {forbidden}"
         );
+    }
+    let memory_root = domain_root.join("memory");
+    if memory_root.exists() {
+        let phase_two_inventory =
+            read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv");
+        assert!(
+            phase_two_inventory.contains("P2AER-INV-014\tmemory core contract")
+                && phase_two_inventory
+                    .contains("current_baseline\tBPRC-FEATURE-10\tIARM-SURFACE-034"),
+            "memory domain is allowed only as the approved Slice 3 foundation tracked by P2AER"
+        );
+        for forbidden in [
+            "semantic",
+            "vector",
+            "embedding",
+            "embeddings",
+            "hooks",
+            "procedural",
+            "rules",
+            "skills",
+        ] {
+            assert!(
+                !memory_root.join(forbidden).exists()
+                    && !memory_root.join(format!("{forbidden}.rs")).exists(),
+                "Slice 3 memory foundation must not restore old memory engine/runtime surface: {forbidden}"
+            );
+        }
     }
     let filesystem_contract = read_repo_file("packages/agent/src/domains/filesystem/contract.rs");
     for required in [

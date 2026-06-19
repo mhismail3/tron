@@ -39,6 +39,7 @@ fn replay_critical_entropy_is_allow_listed() {
                 "packages/agent/src/domains/approval/",
                 "packages/agent/src/domains/auth/",
                 "packages/agent/src/domains/capability/operations/",
+                "packages/agent/src/domains/memory/",
                 "packages/agent/src/domains/model/",
                 "packages/agent/src/domains/session/event_store/envelope/",
                 "packages/agent/src/domains/session/event_store/identity.rs",

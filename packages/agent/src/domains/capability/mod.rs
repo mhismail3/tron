@@ -8,6 +8,9 @@
 //! trace record. Catalog-discovery operations are inspect-only additions to the
 //! same primitive: search/inspect read current metadata, while conformance
 //! writes only durable catalog-discovery report evidence.
+//! Memory audit operations are also inspect-only additions: they expose
+//! resource-backed memory status/list/inspect facts without retaining or
+//! injecting private memory body content.
 //!
 //! ## Submodules
 //!

@@ -34,7 +34,7 @@ Machine-readable inventory:
 
 | Pattern | Current owner examples | Replay stance | Gap owner |
 |---------|------------------------|---------------|-----------|
-| `chrono::Utc::now` / `Utc::now` | event/store identity owner, approval request/decision audit timestamps, session rows, engine ledger, queues, streams, traces, storage maintenance, settings, tests | Static guard allow-lists approved owners; replay-critical event/session constructors now accept explicit IDs/timestamps, and approval checks expose `check_approval_at` for replayed freshness evaluation. | DRC-2/DRC-3 passed; DRC-5/DRC-6 guard replay builders; P2AER-S2 approval refresh |
+| `chrono::Utc::now` / `Utc::now` | event/store identity owner, approval request/decision audit timestamps, session rows, engine ledger, queues, streams, traces, memory resource/prompt-trace audit timestamps, storage maintenance, settings, tests | Static guard allow-lists approved owners; replay-critical event/session constructors now accept explicit IDs/timestamps, approval checks expose `check_approval_at` for replayed freshness evaluation, and memory timestamps stay append-only audit metadata rather than replay ordering keys. | DRC-2/DRC-3 passed; DRC-5/DRC-6 guard replay builders; P2AER-S2 approval refresh; P2AER-S3 memory foundation |
 | `std::time::SystemTime::now` | provider cache pruning, Gemini/Ollama stream helpers | Allowed only for provider/runtime non-replay jitter or diagnostics unless audit fields depend on it. | DRC-2 |
 | `std::time::Instant::now` | health, bootstrap, shutdown, provider duration, turn timing, capability duration, transcription sidecar elapsed time | Allowed for durations and health timing; replay hashes use persisted values, not live instants. Transcription elapsed time is sidecar execution diagnostics, not replay identity. | DRC-2 |
 | `Uuid::now_v7` | `event_store::identity`, engine ID helpers, streams, payload refs, OAuth flow IDs, transcription sidecar temp/request IDs | Replay-critical event/session/workspace/fork IDs get deterministic constructors; security/platform and sidecar-local correlation IDs stay allowed by path. | DRC-2/DRC-3 passed; DRC-5/DRC-8 consume seams |
@@ -79,6 +79,10 @@ Machine-readable inventory:
 - `approval::check_approval_at` is the deterministic freshness seam for
   replaying approval checks against an explicit timestamp; live approval
   request/decision handlers keep UTC timestamps as durable audit evidence.
+- Memory foundation UTC timestamps are limited to resource lifecycle,
+  migration-envelope, and prompt-trace audit fields; replay paths must continue
+  to use explicit resource refs/hashes and stable row ordering rather than live
+  clocks.
 - Replay builders are guarded against new raw clock/UUID/RNG calls and
   timestamp-only ordering.
 

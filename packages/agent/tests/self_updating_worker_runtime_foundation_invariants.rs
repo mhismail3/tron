@@ -358,7 +358,6 @@ fn no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets() {
         "packages/ios-app/Sources/UI/Memory",
         "packages/agent/src/domains/mcp",
         "packages/agent/src/domains/skills",
-        "packages/agent/src/domains/memory",
         "packages/agent/src/domains/scheduler",
         "packages/agent/src/domains/program_execution",
     ] {
@@ -366,6 +365,33 @@ fn no_provider_tool_sprawl_fixed_panels_or_removed_feature_buckets() {
             !repo_path(forbidden).exists(),
             "SUWRF must not restore fixed/product surface {forbidden}"
         );
+    }
+    let memory_root = repo_path("packages/agent/src/domains/memory");
+    if memory_root.exists() {
+        let phase_two_inventory =
+            read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv");
+        assert!(
+            phase_two_inventory.contains("P2AER-INV-014\tmemory core contract")
+                && phase_two_inventory
+                    .contains("current_baseline\tBPRC-FEATURE-10\tIARM-SURFACE-034"),
+            "domains/memory is allowed only as the P2AER-tracked Slice 3 foundation"
+        );
+        for forbidden in [
+            "semantic",
+            "vector",
+            "embedding",
+            "embeddings",
+            "hooks",
+            "procedural",
+            "rules",
+            "skills",
+        ] {
+            assert!(
+                !memory_root.join(forbidden).exists()
+                    && !memory_root.join(format!("{forbidden}.rs")).exists(),
+                "SUWRF must not restore old memory engine/runtime surface: {forbidden}"
+            );
+        }
     }
     let readme = read_repo_file("README.md");
     assert!(

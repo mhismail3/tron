@@ -1736,3 +1736,15 @@ packages/agent/src/domains/approval/service.rs	retain	phase2 approval	P2AER-S2	A
 packages/agent/src/domains/approval/support.rs	retain	phase2 approval	P2AER-S2	Approval support helpers retained for payload parsing, stream events, idempotency, and resource refs.
 packages/agent/src/domains/approval/tests.rs	retain	phase2 approval	P2AER-S2	Approval focused tests retained for durable resources, idempotent decisions, and fail-closed checks.
 packages/agent/src/domains/approval/types.rs	retain	phase2 approval	P2AER-S2	Approval record types retained for durable request, decision, and check schemas.
+packages/agent/src/domains/capability/operations/memory.rs	retain	phase2 memory	P2AER-S3	Memory execute adapter retained for read-only status/list/inspect audit operations behind the singular execute primitive.
+packages/agent/src/domains/memory/mod.rs	retain	phase2 memory	P2AER-S3	Memory domain facade retained for the resource-backed memory foundation without semantic retrieval.
+packages/agent/src/domains/memory/contract.rs	retain	phase2 memory	P2AER-S3	Memory contracts retained for policy, record, prompt trace, migration, and resource-backed output schemas.
+packages/agent/src/domains/memory/errors.rs	retain	phase2 memory	P2AER-S3	Memory errors retained for malformed payload and fail-closed disabled-policy semantics.
+packages/agent/src/domains/memory/handlers.rs	retain	phase2 memory	P2AER-S3	Memory handlers retained as narrow invocation entrypoints for memory contract operations.
+packages/agent/src/domains/memory/migration.rs	retain	phase2 memory	P2AER-S3	Memory migration helpers retained for redacted export/import envelopes without embedding/index engines.
+packages/agent/src/domains/memory/prompt_trace.rs	retain	phase2 memory	P2AER-S3	Memory prompt-trace assembly retained to expose provider-safe mode/count/ref audit text without private body content.
+packages/agent/src/domains/memory/schema_tests.rs	retain	phase2 memory	P2AER-S3	Memory schema alignment tests retained to guard resource kind, schema id, output contract, and required field drift.
+packages/agent/src/domains/memory/service.rs	retain	phase2 memory	P2AER-S3	Memory service retained for resource-backed policy, retain/edit/tombstone/list/inspect, and migration behavior.
+packages/agent/src/domains/memory/support.rs	retain	phase2 memory	P2AER-S3	Memory support helpers retained for payload parsing, redaction, stream events, and resource refs.
+packages/agent/src/domains/memory/tests.rs	retain	phase2 memory	P2AER-S3	Memory focused tests retained for disabled mode, redaction, lifecycle, prompt trace, and migration coverage.
+packages/agent/src/engine/durability/resources/memory_definitions.rs	retain	phase2 memory	P2AER-S3	Memory resource definitions retained for engine-owned memory contract resource kinds.

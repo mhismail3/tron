@@ -5,7 +5,7 @@
 //! | [`content`] | User/assistant content block DTOs |
 //! | [`document_extractor`] | Document text extraction helpers for protocol content |
 //! | [`events`] | Runtime event payloads and stream event DTOs |
-//! | [`memory`] | Session memory DTOs |
+//! | [`memory`] | Source-backed memory contract DTOs: policy, records, prompt traces, evals, and migration |
 //! | [`messages`] | Chat message DTOs |
 //! | [`model_audit`] | Provider request audit DTOs consumed by replay manifests; redacted and bounded before persistence |
 //! | [`model_capabilities`] | Model-facing capability result DTOs |

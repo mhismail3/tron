@@ -426,8 +426,11 @@ The first engine may be a simple deterministic local resource engine; vector or
 semantic engines arrive later under the same contract.
 
 Likely files/areas: `engine/durability/resources`,
-`domains/agent/context`, `domains/settings/profile/types`,
-`shared/protocol/memory`, future `domains/memory`, iOS settings/audit protocol.
+`domains/agent/context`, `domains/capability/operations`,
+`shared/protocol/memory`, `domains/memory`, README and memory/static
+inventories. Slice 3 does not add profile settings or native iOS controls;
+memory policy is resource-backed and iOS remains on generic resource/runtime
+facts until a workflow proves native settings/audit UI is needed.
 
 Old evidence paths: `BPRC-FEATURE-10`, `IARM-SURFACE-034`,
 feature index section 10.
@@ -437,11 +440,12 @@ confidence, expiry, sensitivity, edit/delete/export/migration state; disabled
 mode is explicit; prompt inclusion is traceable; swap/shadow mode is possible.
 
 Focused tests: memory contract schema, record lifecycle, prompt inclusion trace,
-redaction, deletion, disabled mode, migration export/import, settings parity,
-personal-info guard, SSARR successor guard.
+redaction, deletion, disabled mode, migration export/import, provider-safe
+context audit, resource-backed output contracts, personal-info guard, SSARR
+successor guard.
 
-iOS validation: simulator screenshots and Computer Use for memory settings and
-audit if UI lands.
+iOS validation: no native iOS UI lands in the foundation slice; generic
+resource/runtime rendering remains the client path.
 
 Docs/static updates: README context/settings/database, iOS architecture, memory
 inventory, SSARR allowlist, source guards.

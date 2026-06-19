@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use super::memory_definitions::memory_resource_type_definitions;
 use super::types::{
     APPROVAL_DECISION_KIND, APPROVAL_DECISION_SCHEMA_ID, APPROVAL_REQUEST_KIND,
     APPROVAL_REQUEST_SCHEMA_ID, CATALOG_DISCOVERY_REPORT_KIND, CATALOG_DISCOVERY_REPORT_SCHEMA_ID,
@@ -15,7 +16,7 @@ use crate::engine::kernel::ids::WorkerId;
 /// Built-in resource kinds for the collapsed modular substrate.
 #[must_use]
 pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
-    vec![
+    let mut definitions = vec![
         builtin_type(
             "artifact",
             "tron.resource.artifact.v1",
@@ -676,7 +677,9 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             ],
             json!({"read": ["worker.lifecycle.read", "resource.read"], "write": ["worker.lifecycle.write", "resource.write"]}),
         ),
-    ]
+    ];
+    definitions.extend(memory_resource_type_definitions());
+    definitions
 }
 
 pub(crate) fn type_definition_from_request(

@@ -256,6 +256,7 @@ fn system_instruction_empty_when_no_context() {
         capabilities: None,
         working_directory: None,
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     };
     let si = GoogleProvider::build_system_instruction(&context);
@@ -270,6 +271,7 @@ fn system_instruction_from_prompt() {
         capabilities: None,
         working_directory: None,
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     };
     let si = GoogleProvider::build_system_instruction(&context).unwrap();
@@ -293,6 +295,7 @@ fn oauth_request_body_standard_gemini() {
         capabilities: None,
         working_directory: None,
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     };
     let opts = ProviderStreamOptions::default();
@@ -318,6 +321,7 @@ fn request_body_same_format_for_oauth_and_api_key() {
         capabilities: None,
         working_directory: None,
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     };
 
@@ -345,6 +349,7 @@ fn api_key_request_body() {
         capabilities: None,
         working_directory: None,
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     };
     let opts = ProviderStreamOptions::default();
@@ -408,6 +413,7 @@ fn api_key_body_thinking_nested_not_top_level() {
         capabilities: None,
         working_directory: None,
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     };
     let gc = provider.build_generation_config(&ProviderStreamOptions::default());
@@ -440,6 +446,7 @@ fn oauth_body_thinking_nested_not_top_level() {
         capabilities: None,
         working_directory: None,
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     };
     let gc = provider.build_generation_config(&ProviderStreamOptions::default());
@@ -468,6 +475,7 @@ fn api_key_body_no_thinking_for_flash() {
         capabilities: None,
         working_directory: None,
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     };
     let gc = provider.build_generation_config(&ProviderStreamOptions::default());

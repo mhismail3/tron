@@ -103,6 +103,12 @@ package: deterministic resource memory, vector memory, episodic trace memory,
 procedural memory, or future engines can be enabled, disabled, compared, and
 migrated without changing the prompt loop contract.
 
+Slice 3 implements only the foundation layer of that architecture: resource
+definitions, policy/mode state, redacted record custody, prompt-trace audit
+text, eval-run custody, and migration envelopes. It deliberately leaves
+semantic/vector retrieval, episodic event retrieval, procedural rules/hooks, and
+automatic retention as future packages behind the memory contract.
+
 iOS remains a thin client. The default Phase 2 iOS answer is generic runtime
 surface or server-fact rendering. Native surfaces are justified only when the
 workflow is stable, frequent, and platform-specific: approvals, questions,

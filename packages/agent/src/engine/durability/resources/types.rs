@@ -25,6 +25,30 @@ pub const APPROVAL_REQUEST_SCHEMA_ID: &str = "tron.resource.approval_request.v1"
 pub const APPROVAL_DECISION_KIND: &str = "approval_decision";
 /// Built-in approval decision resource schema id.
 pub const APPROVAL_DECISION_SCHEMA_ID: &str = "tron.resource.approval_decision.v1";
+/// Built-in memory engine descriptor resource kind.
+pub const MEMORY_ENGINE_KIND: &str = "memory_engine";
+/// Built-in memory engine descriptor resource schema id.
+pub const MEMORY_ENGINE_SCHEMA_ID: &str = "tron.resource.memory_engine.v1";
+/// Built-in memory policy resource kind.
+pub const MEMORY_POLICY_KIND: &str = "memory_policy";
+/// Built-in memory policy resource schema id.
+pub const MEMORY_POLICY_SCHEMA_ID: &str = "tron.resource.memory_policy.v1";
+/// Built-in memory record resource kind.
+pub const MEMORY_RECORD_KIND: &str = "memory_record";
+/// Built-in memory record resource schema id.
+pub const MEMORY_RECORD_SCHEMA_ID: &str = "tron.resource.memory_record.v1";
+/// Built-in memory prompt inclusion trace resource kind.
+pub const MEMORY_PROMPT_TRACE_KIND: &str = "memory_prompt_trace";
+/// Built-in memory prompt inclusion trace resource schema id.
+pub const MEMORY_PROMPT_TRACE_SCHEMA_ID: &str = "tron.resource.memory_prompt_trace.v1";
+/// Built-in memory eval-run resource kind.
+pub const MEMORY_EVAL_RUN_KIND: &str = "memory_eval_run";
+/// Built-in memory eval-run resource schema id.
+pub const MEMORY_EVAL_RUN_SCHEMA_ID: &str = "tron.resource.memory_eval_run.v1";
+/// Built-in memory migration/export/import envelope resource kind.
+pub const MEMORY_MIGRATION_ENVELOPE_KIND: &str = "memory_migration_envelope";
+/// Built-in memory migration/export/import envelope resource schema id.
+pub const MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID: &str = "tron.resource.memory_migration_envelope.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

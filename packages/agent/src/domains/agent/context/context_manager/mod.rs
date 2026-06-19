@@ -369,6 +369,7 @@ impl ContextManager {
             capabilities: None,
             working_directory: Some(self.get_working_directory().to_owned()),
             agent_state_context: None,
+            memory_prompt_context: None,
             server_origin: None,
         }
     }

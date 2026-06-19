@@ -1068,3 +1068,15 @@ packages/agent/src/domains/approval/service.rs	rust	implementation	agent:approva
 packages/agent/src/domains/approval/support.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/approval/tests.rs	rust	test-support	agent:approval	test-only helper; production code must not depend on it
 packages/agent/src/domains/approval/types.rs	rust	contract	agent:approval	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/capability/operations/memory.rs	rust	implementation	agent:capability	owner-private execute adapter; callers enter through capability::execute
+packages/agent/src/domains/memory/mod.rs	rust	facade	agent:memory	domain root owns registration and docs; implementation stays in owner modules
+packages/agent/src/domains/memory/contract.rs	rust	contract	agent:memory	may be shared across registration while preserving memory owner schemas
+packages/agent/src/domains/memory/errors.rs	rust	implementation	agent:memory	owner-private error helpers; callers receive capability errors through facade
+packages/agent/src/domains/memory/handlers.rs	rust	implementation	agent:memory	owner-private handler bindings; external callers use registered functions
+packages/agent/src/domains/memory/migration.rs	rust	implementation	agent:memory	owner-private migration envelope behavior; callers use memory service facade
+packages/agent/src/domains/memory/prompt_trace.rs	rust	implementation	agent:memory	owner-private prompt trace assembly; callers use memory service facade
+packages/agent/src/domains/memory/schema_tests.rs	rust	test-support	agent:memory	test-only schema alignment guard; production code must not depend on it
+packages/agent/src/domains/memory/service.rs	rust	implementation	agent:memory	owner-private service; callers must enter through domain functions or explicit service facade
+packages/agent/src/domains/memory/support.rs	rust	implementation	agent:memory	owner-private helpers; external code must not import parsing/redaction internals
+packages/agent/src/domains/memory/tests.rs	rust	test-support	agent:memory	test-only helper; production code must not depend on it
+packages/agent/src/engine/durability/resources/memory_definitions.rs	rust	implementation	rust:engine	owner-private resource definition module; callers use engine resource facade

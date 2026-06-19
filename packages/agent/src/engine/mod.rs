@@ -163,7 +163,11 @@ pub use durability::resources::{
     CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
     EngineResourceLink, EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
     EngineResourceVersion, EngineResourceVersioningMode, LinkResources, ListResources,
-    RegisterResourceType, UI_SURFACE_KIND, UpdateResource,
+    MEMORY_ENGINE_KIND, MEMORY_ENGINE_SCHEMA_ID, MEMORY_EVAL_RUN_KIND, MEMORY_EVAL_RUN_SCHEMA_ID,
+    MEMORY_MIGRATION_ENVELOPE_KIND, MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID, MEMORY_POLICY_KIND,
+    MEMORY_POLICY_SCHEMA_ID, MEMORY_PROMPT_TRACE_KIND, MEMORY_PROMPT_TRACE_SCHEMA_ID,
+    MEMORY_RECORD_KIND, MEMORY_RECORD_SCHEMA_ID, RegisterResourceType, UI_SURFACE_KIND,
+    UpdateResource,
 };
 pub use durability::state::{EngineStateEntry, EngineStateScope};
 pub use durability::streams::{

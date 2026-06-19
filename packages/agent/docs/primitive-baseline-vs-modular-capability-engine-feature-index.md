@@ -460,9 +460,16 @@ Old surface:
 Current state:
 
 - Context assembly is reduced to system/soul prompt, agent-owned state summary,
-  environment metadata, history, and primitive execution results.
+  explicit memory prompt-trace audit, environment metadata, history, and
+  primitive execution results.
+- Slice 3 restores only the source-backed memory foundation:
+  `memory_engine`, `memory_policy`, `memory_record`, `memory_prompt_trace`,
+  `memory_eval_run`, and `memory_migration_envelope` resources plus redacted
+  provider-safe audit operations. It does not restore `memory::auto_retain_fire`
+  or semantic/vector/procedural memory engines.
 - Managed repo skills are intentionally absent.
-- No skills, rules, hooks, or memory domain roots remain.
+- No skills, rules, hooks, managed first-party skill bundles, or automatic
+  memory-retention roots remain.
 
 Reintroduction constraint:
 

@@ -425,6 +425,10 @@ pub struct Context {
     /// Compact projection of agent-authored state from the primitive state store.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_state_context: Option<String>,
+    /// Memory prompt inclusion audit/status text. This carries refs and counts,
+    /// never retained memory body content.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub memory_prompt_context: Option<String>,
     /// Server origin (e.g. `"localhost:9847"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub server_origin: Option<String>,

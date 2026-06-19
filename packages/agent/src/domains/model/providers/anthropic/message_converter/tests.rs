@@ -11,6 +11,7 @@ fn simple_context() -> Context {
         capabilities: None,
         working_directory: None,
         agent_state_context: None,
+        memory_prompt_context: None,
         server_origin: None,
     }
 }

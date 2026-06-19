@@ -102,6 +102,7 @@ fn build_request_compiles_primitive_context_into_instructions() {
         capabilities: Some(vec![test_tool()]),
         working_directory: Some("/workspace".into()),
         agent_state_context: Some("Remember the teardown scorecard.".into()),
+        memory_prompt_context: None,
         server_origin: Some("localhost:9847".into()),
     };
 

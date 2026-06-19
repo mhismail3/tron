@@ -5,9 +5,10 @@
 //! host primitive operation and returns a model-visible observation with engine
 //! details for audit. Catalog search/inspect/conformance operations are
 //! discovery-only: they inspect metadata and write only catalog-discovery
-//! evidence. `replay_manifest` is the only read-only operation that bypasses
-//! trace-record creation; tracing that read would mutate the manifest it
-//! returns.
+//! evidence. Memory operations are read-only audit views over the resource
+//! memory contract and return redacted status/list/inspect facts only.
+//! `replay_manifest` is the only read-only operation that bypasses trace-record
+//! creation; tracing that read would mutate the manifest it returns.
 //!
 //! The operation gate is intentionally stricter than the provider schema:
 //! `execute` accepts only trusted agent/system runtime contexts, rejects
@@ -32,6 +33,7 @@ use tracing::{info, warn};
 mod catalog;
 mod filesystem;
 mod logs;
+mod memory;
 mod process;
 mod replay;
 mod state;
@@ -40,6 +42,7 @@ mod trace;
 use catalog::{catalog_conformance, catalog_inspect, catalog_search};
 use filesystem::{file_read, file_write};
 use logs::log_recent;
+use memory::{memory_inspect, memory_list, memory_status};
 use process::process_run;
 use replay::replay_manifest;
 use state::{state_get, state_list, state_set};
@@ -191,9 +194,8 @@ fn validate_execute_context(
     }
     match operation {
         "state_get" | "state_set" | "state_list" => validate_state_scope(invocation),
-        "trace_list" | "trace_get" | "log_recent" | "replay_manifest" => {
-            require_current_session(invocation, operation)
-        }
+        "trace_list" | "trace_get" | "log_recent" | "replay_manifest" | "memory_status"
+        | "memory_list" | "memory_inspect" => require_current_session(invocation, operation),
         "catalog_conformance" => require_idempotency_key(invocation, operation),
         _ => Ok(()),
     }
@@ -263,10 +265,13 @@ async fn execute_operation(
         "catalog_search" => catalog_search(invocation, deps).await?,
         "catalog_inspect" => catalog_inspect(invocation, deps).await?,
         "catalog_conformance" => catalog_conformance(invocation, deps).await?,
+        "memory_status" => memory_status(invocation, deps).await?,
+        "memory_list" => memory_list(invocation, deps).await?,
+        "memory_inspect" => memory_inspect(invocation, deps).await?,
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, or catalog_conformance."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }
