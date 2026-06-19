@@ -65,12 +65,10 @@ struct WorkspaceDirectoryActionPill: View {
                     .foregroundStyle(.tronEmerald)
                     .lineLimit(1)
                     .minimumScaleFactor(0.88)
-
-                Spacer()
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+            .frame(minHeight: 38, alignment: .leading)
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
