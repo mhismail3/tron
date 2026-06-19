@@ -1404,7 +1404,9 @@ packages/ios-app/Sources/
   collapsible workspace-grouped session navigation with compact one-line rows
   that use inset liquid-glass interactive containers, prefer generated session
   titles before prompt fallbacks, and show untitled rows as `New Session`,
-  prompt input with clearable device-local recent-input reuse, the
+  new-session workspace selection from the configured default workspace,
+  recent sessions, or a manual paired-Mac path, prompt input with clearable
+  device-local recent-input reuse, the
   functional-only native composer attachment menu that preserves keyboard
   focus while layering native camera/photo/file pickers above it, composer mic
   input backed by the local transcription domain after a readiness check,

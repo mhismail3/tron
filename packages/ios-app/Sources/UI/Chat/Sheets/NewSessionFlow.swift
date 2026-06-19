@@ -9,6 +9,7 @@ struct NewSessionFlow: View {
     let modelRepository: any ModelRepository
     let sessionRepository: any NetworkSessionRepository
     let defaultModel: String
+    let defaultWorkspace: String
     let eventStoreManager: EventStoreManager
     let onSessionCreated: (NewSessionCreated) -> Void
 
@@ -47,6 +48,13 @@ struct NewSessionFlow: View {
     /// Unique workspace paths from recent sessions, ordered by most recent activity.
     private var recentWorkspaces: [(path: String, name: String)] {
         CachedSession.recentWorkspaces(from: eventStoreManager.sortedSessions)
+    }
+
+    private var workspaceSelectionOptions: [WorkspaceSelectionOption] {
+        WorkspaceSelectionOptionBuilder.options(
+            defaultWorkspace: defaultWorkspace,
+            recentWorkspaces: recentWorkspaces
+        )
     }
 
     var body: some View {
@@ -91,7 +99,8 @@ struct NewSessionFlow: View {
             }
             .sheet(isPresented: $showWorkspaceSelector) {
                 WorkspaceSelector(
-                    selectedPath: $workingDirectory
+                    selectedPath: $workingDirectory,
+                    options: workspaceSelectionOptions
                 )
             }
             .sheet(isPresented: $showModelPicker) {

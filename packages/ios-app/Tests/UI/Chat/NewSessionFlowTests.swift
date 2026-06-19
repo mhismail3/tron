@@ -45,6 +45,88 @@ final class NewSessionFlowTests: XCTestCase {
         XCTAssertEqual(intent?.model, "claude-sonnet-4-6")
     }
 
+    func testWorkspaceSelectionOptionsIncludeDefaultThenRecentWorkspaces() {
+        let options = WorkspaceSelectionOptionBuilder.options(
+            defaultWorkspace: "  /tmp/tron-fixtures/default  ",
+            recentWorkspaces: [
+                (path: "/tmp/tron-fixtures/recent-a", name: "recent-a"),
+                (path: "/tmp/tron-fixtures/recent-b", name: "recent-b"),
+            ]
+        )
+
+        XCTAssertEqual(options.map(\.path), [
+            "/tmp/tron-fixtures/default",
+            "/tmp/tron-fixtures/recent-a",
+            "/tmp/tron-fixtures/recent-b",
+        ])
+        XCTAssertEqual(options.map(\.source), [.defaultWorkspace, .recent, .recent])
+        XCTAssertEqual(options[0].title, "Default workspace")
+        XCTAssertEqual(options[1].title, "recent-a")
+    }
+
+    func testWorkspaceSelectionOptionsDeduplicateDefaultAndRecentWorkspaces() {
+        let options = WorkspaceSelectionOptionBuilder.options(
+            defaultWorkspace: "/tmp/tron-fixtures/project",
+            recentWorkspaces: [
+                (path: "/tmp/tron-fixtures/project", name: "project"),
+                (path: "  /tmp/tron-fixtures/other  ", name: ""),
+                (path: "/tmp/tron-fixtures/other", name: "other"),
+                (path: " ", name: "blank"),
+            ]
+        )
+
+        XCTAssertEqual(options.map(\.path), [
+            "/tmp/tron-fixtures/project",
+            "/tmp/tron-fixtures/other",
+        ])
+        XCTAssertEqual(options[1].title, "other")
+    }
+
+    func testWorkspaceSelectorStaysLocalSuggestionPlusManualPath() throws {
+        let combined = try [
+            "Sources/UI/Chat/Sheets/NewSessionFlow.swift",
+            "Sources/UI/Chat/Sheets/NewSessionFlowTypes.swift",
+            "Sources/UI/Chat/Sheets/WorkspaceSelector.swift",
+            "Sources/UI/Chat/Shell/ContentView.swift",
+        ].map { relativePath in
+            try String(
+                contentsOf: iosAppRoot().appendingPathComponent(relativePath),
+                encoding: .utf8
+            )
+        }.joined(separator: "\n")
+
+        for fragment in [
+            "WorkspaceSelectionOptionBuilder.options(",
+            "defaultWorkspace: dependencies.quickSessionWorkspace",
+            "options: workspaceSelectionOptions",
+            "Text(\"Suggested\")",
+            "Text(\"Manual path\")",
+        ] {
+            XCTAssertTrue(
+                combined.contains(fragment),
+                "new-session workspace selector missing current local suggestion marker: \(fragment)"
+            )
+        }
+
+        for fragment in [
+            "Engine" + "Client",
+            "Filesystem" + "Client",
+            "." + "filesystem",
+            "get" + "Home(",
+            "list" + "Directory(",
+            "create" + "Directory(",
+            "Directory" + "Entry",
+            "New" + " Folder",
+            "show" + "Hidden",
+            "Folder" + "Name" + "Validator",
+        ] {
+            XCTAssertFalse(
+                combined.contains(fragment),
+                "new-session workspace selector must not restore the old filesystem browser surface: \(fragment)"
+            )
+        }
+    }
+
     func testPreferredModelKeepsAvailableDefaultModel() {
         let defaultModel = makeModel(
             id: "claude-sonnet-4-6",
@@ -160,5 +242,13 @@ final class NewSessionFlowTests: XCTestCase {
             ),
             "Opus 4.6"
         )
+    }
+
+    private func iosAppRoot() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
 }

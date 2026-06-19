@@ -631,6 +631,51 @@ Effect on Phase 1 queue:
 - This was accepted off-plan cleanup/polish of existing restored shell surfaces.
   It does not consume or replace Slice 6.
 
+### Accepted Follow-Up Work: New-Session Workspace Selector
+
+Branch:
+`codex/ios-affordance-restoration-map-current`
+
+User-facing state:
+
+- Tapping the Workspace card in the New Session sheet now opens a selector
+  with Suggested and Manual path sections.
+- Suggested choices are built from the configured quick/default workspace plus
+  recent session workspaces reconstructed from the current cached session list.
+- Tapping a suggested row selects that workspace immediately. The manual field
+  remains available for entering any path that exists on the paired Mac.
+- The New Session sheet still keeps the compact recent-workspace chips as a
+  fast inline path, but the selector itself is now the richer workspace-picking
+  surface.
+
+Data ownership:
+
+- Default workspace comes from the existing iOS dependency container value that
+  mirrors current server settings.
+- Recent workspaces come from current cached session projections via
+  `CachedSession.recentWorkspaces`.
+- Manual entry remains local sheet state until `session::create` receives the
+  selected working directory.
+
+Rejected or deferred:
+
+- The old remote filesystem browser, hidden-file toggle, directory navigation,
+  and inline folder creation were not restored. Those depended on the deleted
+  typed filesystem client/capability surface and remain Phase 2 work until a
+  current server/resource contract owns them.
+- No public `/engine` method, filesystem DTO, filesystem client, folder-create
+  action, agent-execution surface, or fake workspace validation was added.
+
+Validation evidence:
+
+- `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/NewSessionFlowTests -only-testing:TronMobileTests/SourceGuardTests -quiet`
+  passed after moving the static guard into the new-session feature tests so
+  the broad primitive-shell absence guard stayed below its near-budget line
+  threshold.
+- Focused new-session tests cover default/recent option ordering, trimming,
+  deduplication, configured default workspace injection, and absence of the old
+  filesystem browser/client surface.
+
 ### Phase 1 Slice 6: Notification/Inbox Concept Review
 
 Branch:

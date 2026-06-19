@@ -234,6 +234,7 @@ struct ContentView: View {
             modelRepository: dependencies.modelRepository,
             sessionRepository: dependencies.sessionRepository,
             defaultModel: defaultModel,
+            defaultWorkspace: dependencies.quickSessionWorkspace,
             eventStoreManager: eventStoreManager,
             onSessionCreated: { created in
                 Task {

@@ -50,7 +50,8 @@ matching database/event/settings/dependency work.
   inspect local diagnostics.
 - Grouped session dashboard with collapsible workspace headers and compact
   inset liquid-glass one-line session rows, session creation/fork/resume,
-  prompt composer with a
+  a new-session workspace selector over the configured default workspace,
+  recent session workspaces, and manual Mac paths, prompt composer with a
   local recent-input picker, a functional-only native attachment menu that
   preserves composer keyboard focus while layering native camera/photo/file
   pickers above it, unified attachments for images/documents, a right-side mic
@@ -111,11 +112,19 @@ Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  InputBar -> native attachment menu -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> ComposerMicRecorder -> transcription::audio -> InputBar
+New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
+
+`WorkspaceSelector` is a local/session-fact selector, not a restored remote
+filesystem browser. It offers the configured quick/default workspace, recent
+workspaces reconstructed from cached sessions, and a manual path field for paths
+that exist on the paired Mac. It must not call old filesystem browsing methods,
+create folders, or restore the deleted typed filesystem client until a future
+Phase 2 server/resource contract explicitly owns that capability.
 
 `CameraCaptureSheet` keeps the tap-to-sheet path light and immersive: the
 camera viewport is the sheet surface, controls layer at the bottom of that

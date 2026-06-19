@@ -142,9 +142,11 @@ pages only when the successful pairing payload still matches that server's
 host and port.
 
 - **Default workspace** reuses `WorkspaceSelector` from the new-session
-  flow and writes `server.defaultWorkspace`. The selected path also
-  updates the local quick-chat workspace so long-press plus uses it
-  immediately.
+  flow and writes `server.defaultWorkspace`. The selector offers the
+  current default workspace, recent session workspaces when supplied by
+  the caller, and a manual Mac path field; it does not browse or create
+  remote folders. The selected path also updates the local quick-chat
+  workspace so long-press plus uses it immediately.
 - **Anthropic** and **OpenAI** reuse `OAuthLoginSheet` for OAuth and
   expose a named API-key field for users who prefer keys. Saved OAuth
   credentials render as one compact status row: status icon, account label,

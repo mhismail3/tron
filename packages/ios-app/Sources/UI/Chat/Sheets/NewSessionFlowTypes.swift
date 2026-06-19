@@ -64,4 +64,67 @@ enum NewSessionModelCardValue: Equatable, Sendable {
     }
 }
 
+// MARK: - Workspace Selection
+
+struct WorkspaceSelectionOption: Identifiable, Equatable, Sendable {
+    enum Source: Equatable, Sendable {
+        case defaultWorkspace
+        case recent
+    }
+
+    let path: String
+    let title: String
+    let subtitle: String
+    let source: Source
+
+    var id: String {
+        "\(source.key):\(path)"
+    }
+}
+
+enum WorkspaceSelectionOptionBuilder {
+    static func options(
+        defaultWorkspace: String,
+        recentWorkspaces: [(path: String, name: String)]
+    ) -> [WorkspaceSelectionOption] {
+        var seen = Set<String>()
+        var result: [WorkspaceSelectionOption] = []
+
+        let trimmedDefault = defaultWorkspace.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedDefault.isEmpty, seen.insert(trimmedDefault).inserted {
+            result.append(WorkspaceSelectionOption(
+                path: trimmedDefault,
+                title: "Default workspace",
+                subtitle: trimmedDefault.abbreviatingHomeDirectory,
+                source: .defaultWorkspace
+            ))
+        }
+
+        for workspace in recentWorkspaces {
+            let trimmedPath = workspace.path.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedPath.isEmpty, seen.insert(trimmedPath).inserted else { continue }
+            let trimmedName = workspace.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            result.append(WorkspaceSelectionOption(
+                path: trimmedPath,
+                title: trimmedName.isEmpty ? CachedSession.workspaceDisplayName(for: trimmedPath) : trimmedName,
+                subtitle: trimmedPath.abbreviatingHomeDirectory,
+                source: .recent
+            ))
+        }
+
+        return result
+    }
+}
+
+private extension WorkspaceSelectionOption.Source {
+    var key: String {
+        switch self {
+        case .defaultWorkspace:
+            return "default"
+        case .recent:
+            return "recent"
+        }
+    }
+}
+
 // MARK: - New Session Flow
