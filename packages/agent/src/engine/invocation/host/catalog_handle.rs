@@ -197,6 +197,11 @@ impl EngineHostHandle {
         self.inner.lock().await.catalog.inspect_worker(id)
     }
 
+    /// List workers visible to an actor through the host boundary.
+    pub async fn visible_workers(&self, actor: &ActorContext) -> Vec<WorkerDefinition> {
+        self.inner.lock().await.visible_workers(actor)
+    }
+
     /// Return whether a worker is a volatile runtime registration.
     pub async fn worker_is_volatile(&self, id: &WorkerId) -> Option<bool> {
         self.inner.lock().await.catalog.worker_is_volatile(id)
@@ -222,6 +227,11 @@ impl EngineHostHandle {
     /// Inspect a trigger type through the host boundary.
     pub async fn inspect_trigger_type(&self, id: &TriggerTypeId) -> Result<TriggerTypeDefinition> {
         self.inner.lock().await.catalog.inspect_trigger_type(id)
+    }
+
+    /// List trigger types visible to an actor through the host boundary.
+    pub async fn visible_trigger_types(&self, actor: &ActorContext) -> Vec<TriggerTypeDefinition> {
+        self.inner.lock().await.visible_trigger_types(actor)
     }
 
     /// Watch catalog changes through the host boundary.

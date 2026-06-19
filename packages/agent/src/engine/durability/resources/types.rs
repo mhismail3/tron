@@ -13,6 +13,10 @@ pub const UI_SURFACE_KIND: &str = "ui_surface";
 pub const UI_SURFACE_SCHEMA_ID: &str = "tron.resource.ui_surface.v1";
 /// Runtime UI surface schema version rendered by the client shell.
 pub const UI_SURFACE_SCHEMA_VERSION: u64 = 1;
+/// Built-in catalog discovery report resource kind.
+pub const CATALOG_DISCOVERY_REPORT_KIND: &str = "catalog_discovery_report";
+/// Built-in catalog discovery report resource schema id.
+pub const CATALOG_DISCOVERY_REPORT_SCHEMA_ID: &str = "tron.resource.catalog_discovery_report.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

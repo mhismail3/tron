@@ -78,6 +78,7 @@ struct FunctionCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiabl
     var effectClass: String?
     var riskLevel: String?
     var health: String?
+    var opaqueResponse: Bool?
     var requiredAuthority: [String: AnyCodable]?
     var requestSchema: AnyCodable?
     var responseSchema: AnyCodable?
@@ -97,6 +98,8 @@ struct FunctionCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiabl
         case riskLevel
         case riskLevelSnake = "risk_level"
         case health
+        case opaqueResponse
+        case opaqueResponseSnake = "opaque_response"
         case requiredAuthority
         case requiredAuthoritySnake = "required_authority"
         case requestSchema
@@ -116,6 +119,7 @@ struct FunctionCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiabl
         effectClass: String? = nil,
         riskLevel: String? = nil,
         health: String? = nil,
+        opaqueResponse: Bool? = nil,
         requiredAuthority: [String: AnyCodable]? = nil,
         requestSchema: AnyCodable? = nil,
         responseSchema: AnyCodable? = nil,
@@ -131,6 +135,7 @@ struct FunctionCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiabl
         self.effectClass = effectClass
         self.riskLevel = riskLevel
         self.health = health
+        self.opaqueResponse = opaqueResponse
         self.requiredAuthority = requiredAuthority
         self.requestSchema = requestSchema
         self.responseSchema = responseSchema
@@ -149,6 +154,7 @@ struct FunctionCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifiabl
         effectClass = try container.decodeStringIfPresent(first: .effectClass, fallback: .effectClassSnake)
         riskLevel = try container.decodeStringIfPresent(first: .riskLevel, fallback: .riskLevelSnake)
         health = try container.decodeIfPresent(String.self, forKey: .health)
+        opaqueResponse = try container.decodeBoolIfPresent(first: .opaqueResponse, fallback: .opaqueResponseSnake)
         requiredAuthority = try container.decodeDictionaryIfPresent(first: .requiredAuthority, fallback: .requiredAuthoritySnake)
         requestSchema = try container.decodeAnyCodableIfPresent(first: .requestSchema, fallback: .requestSchemaSnake)
         responseSchema = try container.decodeAnyCodableIfPresent(first: .responseSchema, fallback: .responseSchemaSnake)
@@ -306,6 +312,28 @@ struct WorkerLifecycleStopRequestDTO: Codable, Equatable, Sendable {
     var workspaceId: String?
 }
 
+struct CatalogDiscoveryReportRequestDTO: Codable, Equatable, Sendable {
+    var reason: String?
+    var includeProtectedCounts: Bool?
+    var sessionId: String?
+    var workspaceId: String?
+}
+
+struct CatalogDiscoveryResourceRefDTO: Codable, Equatable, Sendable {
+    var kind: String
+    var resourceId: String
+    var versionId: String?
+    var role: String?
+}
+
+struct CatalogDiscoveryReportResultDTO: Codable, Equatable, Sendable {
+    var status: String
+    var reportResourceId: String?
+    var streamCursor: UInt64?
+    var summary: [String: AnyCodable]?
+    var resourceRefs: [CatalogDiscoveryResourceRefDTO]?
+}
+
 struct WorkerLifecycleResultDTO: Codable, Equatable, Sendable {
     var status: String
     var packageResourceId: String?
@@ -325,6 +353,7 @@ enum WorkerLifecycleResourceKind: String, CaseIterable, Sendable {
     case proposal = "worker_package_proposal"
     case conformanceReport = "worker_package_conformance_report"
     case launchAttempt = "worker_launch_attempt"
+    case catalogDiscoveryReport = "catalog_discovery_report"
     case uiSurface = "ui_surface"
 }
 
@@ -445,6 +474,13 @@ private extension KeyedDecodingContainer {
             return value
         }
         return try decodeIfPresent([String].self, forKey: fallback)
+    }
+
+    func decodeBoolIfPresent(first: Key, fallback: Key) throws -> Bool? {
+        if let value = try decodeIfPresent(Bool.self, forKey: first) {
+            return value
+        }
+        return try decodeIfPresent(Bool.self, forKey: fallback)
     }
 
     func decodeDictionaryIfPresent(first: Key, fallback: Key) throws -> [String: AnyCodable]? {

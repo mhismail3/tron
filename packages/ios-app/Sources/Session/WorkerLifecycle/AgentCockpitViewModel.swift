@@ -28,6 +28,7 @@ final class AgentCockpitViewModel {
             let conformanceReports = try await repository.listResources(kind: .conformanceReport, lifecycle: nil, limit: 100)
             let launchAttempts = try await repository.listResources(kind: .launchAttempt, lifecycle: nil, limit: 100)
             let runtimeSurfaceResources = try await repository.listResources(kind: .uiSurface, lifecycle: "active", limit: 25)
+            let discoveryReports = try await repository.listResources(kind: .catalogDiscoveryReport, lifecycle: nil, limit: 25)
             let runtimeSurfaces = try await inspectRuntimeSurfaces(
                 runtimeSurfaceResources.resources,
                 repository: repository
@@ -45,6 +46,7 @@ final class AgentCockpitViewModel {
                 snapshot: catalog,
                 resources: resourceResults,
                 runtimeSurfaces: runtimeSurfaces,
+                discoveryReports: discoveryReports.resources,
                 connectionState: connectionState
             )
             lastError = nil
@@ -57,6 +59,28 @@ final class AgentCockpitViewModel {
     func requestConfirmation(for action: AgentCockpitAction) {
         guard action.isEnabled else { return }
         pendingConfirmation = AgentCockpitProjection.confirmation(for: action)
+    }
+
+    func verifyCatalogDiscovery(
+        repository: any WorkerLifecycleRepository,
+        sessionId: String?,
+        workspaceId: String?,
+        connectionState: ConnectionState
+    ) async {
+        guard connectionState.isConnected else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+        do {
+            _ = try await repository.createCatalogDiscoveryReport(
+                reason: "runtime cockpit verification",
+                sessionId: sessionId,
+                workspaceId: workspaceId,
+                idempotencyKey: .userAction("catalogDiscovery.conformanceReport")
+            )
+            await refresh(repository: repository, connectionState: connectionState)
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     func clearConfirmation() {

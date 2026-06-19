@@ -15,6 +15,13 @@ struct AgentCockpitStateTests {
                     lifecycle: "proposed"
                 )
             ],
+            discoveryReports: [
+                sampleResource(
+                    id: "catalog_discovery_report:2:invocation-2",
+                    kind: .catalogDiscoveryReport,
+                    lifecycle: "passed"
+                )
+            ],
             connectionState: .connected
         )
 
@@ -24,6 +31,9 @@ struct AgentCockpitStateTests {
         #expect(overview.functions.first?.id == "local.echo::reply")
         #expect(overview.triggers.first?.targetFunction == "local.echo::reply")
         #expect(overview.packages.first?.packageId == "local.echo")
+        #expect(overview.discovery.title == "Verified")
+        #expect(overview.discovery.families.first?.id == "local.echo")
+        #expect(overview.discovery.reports.first?.lifecycle == "passed")
         #expect(overview.activity.contains { $0.title.contains("worker package proposal") })
     }
 
@@ -37,6 +47,44 @@ struct AgentCockpitStateTests {
 
         #expect(overview.status.kind == .degraded)
         #expect(overview.status.title == "Degraded")
+    }
+
+    @Test("Projection marks missing schema evidence")
+    func projectionMarksMissingSchemaEvidence() {
+        let snapshot = CatalogWatchSnapshotDTO(
+            changes: [],
+            snapshot: CatalogSnapshotDTO(
+                functions: [
+                    AnyCodable([
+                        "id": "local.echo::reply",
+                        "owner_worker": "local.echo",
+                        "description": "Reply from local echo",
+                        "visibility": "Agent",
+                        "effect_class": "PureRead",
+                        "risk_level": "Low",
+                        "health": "Healthy",
+                        "tags": ["echo"]
+                    ])
+                ],
+                workers: [],
+                triggers: [],
+                triggerTypes: []
+            ),
+            currentRevision: 2,
+            nextRevision: 3,
+            hasMore: false
+        )
+
+        let overview = AgentCockpitProjection.project(
+            snapshot: snapshot,
+            resources: [],
+            connectionState: .connected
+        )
+
+        #expect(overview.status.kind == .degraded)
+        #expect(overview.discovery.title == "Schema Gaps")
+        #expect(overview.discovery.missingSchemaCount == 1)
+        #expect(overview.discovery.families.first?.missingSchemaCount == 1)
     }
 
     @Test("Projection reports offline without calling lifecycle data")
@@ -95,7 +143,9 @@ struct AgentCockpitStateTests {
                         "effect_class": "PureRead",
                         "risk_level": "Low",
                         "health": functionHealth,
-                        "tags": ["echo"]
+                        "tags": ["echo"],
+                        "request_schema": ["type": "object"],
+                        "response_schema": ["type": "object"]
                     ])
                 ],
                 workers: [

@@ -2,16 +2,17 @@
 //!
 //! Each declared child module is part of the retained bare loop: startup and
 //! system metadata, provider/auth/settings setup, session/message/log truth,
-//! model providers, blobs, and the single model-facing
-//! `capability::execute` primitive, plus the narrow iOS workspace-browser
-//! filesystem domain. Product/tool domains are otherwise intentionally not
-//! declared on this branch.
+//! model providers, blobs, catalog-discovery evidence, and the single
+//! model-facing `capability::execute` primitive, plus the narrow iOS
+//! workspace-browser filesystem domain. Product/tool domains are otherwise
+//! intentionally not declared on this branch.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `capability` | Single model-facing `execute` primitive |
+//! | `catalog_discovery` | Native catalog search, inspect, and conformance evidence |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
 //! | `filesystem` | Human-facing workspace picker: home, directory list, folder creation |
 //! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, transcription, and worker lifecycle |
@@ -67,6 +68,7 @@ pub mod agent;
 pub mod auth;
 pub mod blob;
 pub mod capability;
+pub mod catalog_discovery;
 pub mod filesystem;
 pub mod logs;
 pub mod message;

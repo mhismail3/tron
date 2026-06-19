@@ -42,9 +42,9 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 106 |
-| implementation | 540 |
+| implementation | 551 |
 | support | 385 |
-| test | 506 |
+| test | 507 |
 | docs | 130 |
 | delete | 0 |
 
@@ -55,16 +55,17 @@ The TSV covers tracked and newly introduced files under:
 | `agent_runtime` | 72 |
 | `app_bootstrap` | 11 |
 | `auth` | 19 |
-| `capability` | 1 |
+| `capability` | 2 |
 | `capability_execute` | 8 |
+| `catalog_discovery` | 8 |
 | `docs/static gates` | 122 |
 | `domain_worker` | 6 |
 | `engine` | 101 |
 | `filesystem` | 4 |
 | `ios` | 98 |
 | `ios_engine` | 138 |
-| `ios_session` | 74 |
-| `ios_ui` | 139 |
+| `ios_session` | 75 |
+| `ios_ui` | 140 |
 | `mac` | 76 |
 | `model_provider` | 78 |
 | `platform` | 2 |
@@ -80,7 +81,7 @@ The TSV covers tracked and newly introduced files under:
 | `settings` | 16 |
 | `shared_foundation` | 45 |
 | `ssarr_docs` | 4 |
-| `test_harness` | 506 |
+| `test_harness` | 507 |
 | `transcription` | 11 |
 | `transport` | 25 |
 | `worker_lifecycle` | 9 |

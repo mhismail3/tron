@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::types::{
+    CATALOG_DISCOVERY_REPORT_KIND, CATALOG_DISCOVERY_REPORT_SCHEMA_ID,
     EngineResourceTypeDefinition, EngineResourceVersioningMode, RegisterResourceType,
     UI_SURFACE_KIND, UI_SURFACE_SCHEMA_ID,
 };
@@ -166,6 +167,47 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "enforces_revocation",
             ],
             json!({"read": ["resource.read"], "write": ["resource.write"]}),
+        ),
+        builtin_type(
+            CATALOG_DISCOVERY_REPORT_KIND,
+            CATALOG_DISCOVERY_REPORT_SCHEMA_ID,
+            json!({
+                "type": "object",
+                "required": [
+                    "schemaVersion",
+                    "status",
+                    "catalogRevision",
+                    "summary",
+                    "checks",
+                    "protected"
+                ],
+                "additionalProperties": true,
+                "properties": {
+                    "schemaVersion": {"type": "string"},
+                    "status": {"type": "string"},
+                    "catalogRevision": {"type": "integer"},
+                    "reason": {"type": "string"},
+                    "actor": {"type": "object"},
+                    "summary": {"type": "object"},
+                    "checks": {"type": "array"},
+                    "visible": {"type": "object"},
+                    "protected": {"type": "object"},
+                    "resourceEvidence": {"type": "object"}
+                }
+            }),
+            vec!["passed", "failed", "quarantined", "archived"],
+            vec![
+                "evidence_for",
+                "derived_from",
+                "supersedes",
+                "supports",
+                "supported_by",
+                "renders",
+            ],
+            json!({
+                "read": ["catalog_discovery.read", "resource.read"],
+                "write": ["catalog_discovery.write", "resource.write"]
+            }),
         ),
         builtin_type(
             UI_SURFACE_KIND,

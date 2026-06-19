@@ -1670,8 +1670,10 @@ packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs	reta
 packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+WorkerLifecycle.swift	retain	ios engine protocol	IOSAC-1	Worker lifecycle protocol DTOs retained for catalog/resource decoding and generic ui_surface resource kind.
 packages/ios-app/Sources/Engine/Transport/Clients/WorkerLifecycleClient.swift	retain	ios engine client	IOSAC-1	Worker lifecycle client retained as thin existing-engine-function wrapper.
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift	retain	ios session state	IOSAC-2	Agent cockpit projection state retained for server-derived rows, actions, confirmations, activity, and runtime surfaces.
+packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitDiscoveryState.swift	retain	ios session state	P2AER-S1	Agent cockpit discovery projection state retained for catalog families, schema gaps, and report history.
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift	retain	ios session state	IOSAC-3	Agent cockpit view model retained for refresh, confirmations, lifecycle mutations, and ui_surface decoding.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	retain	ios ui	IOSAC-5	Agent cockpit views retained as the user-facing worker lifecycle and runtime surface shell.
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	retain	ios ui	P2AER-S1	Agent cockpit discovery views retained for high-signal capability families and conformance report history.
 packages/ios-app/Tests/Engine/Protocol/WorkerLifecycleDTOTests.swift	retain	ios test	IOSAC-7	Worker lifecycle DTO tests retained for catalog/resource decoding coverage.
 packages/ios-app/Tests/Engine/Transport/Clients/WorkerLifecycleClientTests.swift	retain	ios test	IOSAC-7	Worker lifecycle client tests retained for existing function id and resource primitive coverage.
 packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift	retain	ios test	IOSAC-7	Agent cockpit state tests retained for projection, action, and confirmation coverage.
@@ -1711,3 +1713,13 @@ packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md	retain	phas
 packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md	retain	phase2 docs	Phase2-plan	Phase 2 planning evidence manifest retained for source audit and validation provenance.
 packages/agent/docs/phase-2-agent-execution-restoration-inventory.md	retain	phase2 docs	Phase2-plan	Phase 2 narrative inventory retained for feature-family classification and handoff guidance.
 packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv	retain	phase2 docs	Phase2-plan	Phase 2 machine-readable feature-family inventory retained for future slice planning.
+packages/agent/src/domains/capability/operations/catalog.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery execute adapter retained for inspect-only search, inspect, and conformance operations behind the singular execute primitive.
+packages/agent/src/domains/catalog_discovery/mod.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery domain facade retained for native self-inspection without public engine expansion.
+packages/agent/src/domains/catalog_discovery/contract.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery contracts retained for schemas, metadata, and conformance evidence only.
+packages/agent/src/domains/catalog_discovery/errors.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery errors retained to fail protected or missing inspection targets closed.
+packages/agent/src/domains/catalog_discovery/handlers.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery handlers retained as narrow invocation entrypoints that never execute discovered functions.
+packages/agent/src/domains/catalog_discovery/params.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery request parsing and visibility helpers retained as a narrow owner-private module.
+packages/agent/src/domains/catalog_discovery/projection.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery projection helpers retained for summaries, filtering, schema hints, and resource evidence.
+packages/agent/src/domains/catalog_discovery/report.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery report helpers retained for conformance checks and stream publication.
+packages/agent/src/domains/catalog_discovery/service.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery service retained for truthful catalog/resource/stream-backed evidence.
+packages/agent/src/domains/catalog_discovery/tests.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery focused tests retained for protected visibility, no side effects, and durable report evidence.

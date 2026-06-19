@@ -461,7 +461,11 @@ fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
 
     assert!(result.contains("Use ONLY this model-facing tool"));
     assert!(result.contains("Each `execute` call performs one direct host operation"));
-    assert!(result.contains("Do not send `target`, `contractId`, `functionId`, `arguments`"));
+    assert!(result.contains("catalog_search"));
+    assert!(result.contains("catalog_inspect"));
+    assert!(result.contains("catalog_conformance"));
+    assert!(result.contains("Do not send `target`, `contractId`, `functionId`, or `arguments`"));
+    assert!(result.contains("Catalog discovery operations inspect metadata/conformance only"));
     assert!(result.contains("Put operation fields at the top level"));
     assert!(result.contains("Use one operation per `execute` call"));
     assert!(result.contains("When authority is unavailable"));

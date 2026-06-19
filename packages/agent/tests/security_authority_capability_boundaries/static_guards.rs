@@ -316,6 +316,7 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         "workspace state requires trusted workspace context",
         "capability::execute cannot read or write system-scoped state",
         "requires trusted current session context",
+        "\"catalog_conformance\" => require_idempotency_key(invocation, operation)",
     ] {
         assert!(
             operations.contains(required),
@@ -341,6 +342,7 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         "RUNTIME_METADATA_WORKING_DIRECTORY",
         "normalize_working_directory(raw)",
         "resolve_invocation_path(invocation, raw)",
+        "matches!(operation, \"file_read\" | \"file_write\" | \"process_run\")",
     ] {
         assert!(
             grant_authorization.contains(required),
@@ -389,6 +391,7 @@ fn sacb_capability_execute_is_least_privilege_and_trusted_runtime_only() {
         "execute_rejects_bootstrap_authority_grants",
         "execute_rejects_system_scoped_state",
         "execute_process_run_requires_none_network_policy",
+        "execute_catalog_search_does_not_require_working_directory_metadata",
     ] {
         assert!(
             trace_tests.contains(required),

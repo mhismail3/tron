@@ -49,13 +49,15 @@ The current baseline is intentionally smaller and harder:
 - First-class domain contracts moved from 187 old IDs to 41 current IDs.
 - 40 first-class domain contracts overlap.
 - 147 old first-class domain contracts are absent.
-- `session::replay_manifest` is the only new first-class domain contract in the
-  current baseline.
+- `session::replay_manifest` and the `catalog_discovery::{search,inspect,conformance_report}`
+  contracts are current first-class domain contracts absent from the frozen
+  primitive baseline.
 - Current provider-visible model surface is the single `capability::execute`
   primitive.
 - Current execute operations are `observe`, `state_get`, `state_set`,
   `state_list`, `file_read`, `file_write`, `process_run`, `trace_list`,
-  `trace_get`, `log_recent`, and `replay_manifest`.
+  `trace_get`, `log_recent`, `replay_manifest`, `catalog_search`,
+  `catalog_inspect`, and `catalog_conformance`.
 - iOS moved from product-specific `Core`, `Database`, `Models`, `Services`,
   `ViewModels`, and `Views` trees to a thinner `Engine`, `Session`, `Support`,
   and `UI` runtime shell.
@@ -85,6 +87,9 @@ Retained first-class domain contracts:
 - `auth::set_active`
 - `auth::update`
 - `blob::get`
+- `catalog_discovery::conformance_report`
+- `catalog_discovery::inspect`
+- `catalog_discovery::search`
 - `logs::ingest`
 - `logs::recent`
 - `message::delete`

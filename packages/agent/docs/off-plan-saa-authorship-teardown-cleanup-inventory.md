@@ -39,7 +39,8 @@ Machine-readable inventory:
 `capability::execute` remains limited to these model-visible operations:
 `observe`, `state_get`, `state_set`, `state_list`, `file_read`, `file_write`,
 `process_run`, `trace_list`, `trace_get`, `log_recent`, and
-`replay_manifest`.
+`replay_manifest`, plus inspect/evidence-only `catalog_search`,
+`catalog_inspect`, and `catalog_conformance`.
 
 The underlying engine `resource::*` primitive worker remains available to
 trusted engine callers. This cleanup only removes the off-plan provider-facing

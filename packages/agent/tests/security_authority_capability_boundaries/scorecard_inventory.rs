@@ -23,7 +23,7 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
         "| SACB-3 | Transport context trust: remove/deny untrusted authority scope and runtime metadata injection | 14 | passed_after_fix |",
         "| SACB-4 | Authority grant model: derivation, file roots, network policy, budgets, bootstrap grants | 12 | passed_after_fix |",
         "| SACB-5 | Catalog visibility and direct invocation boundaries, including `engine::invoke` delegation | 10 | passed_after_fix |",
-        "| SACB-6 | `capability::execute` least privilege for file/process/state/trace/log/replay operations | 12 | passed_after_fix |",
+        "| SACB-6 | `capability::execute` least privilege for file/process/state/trace/log/replay/catalog-discovery operations | 12 | passed_after_fix |",
         "| SACB-7 | External worker protocol isolation: scoped token, namespace, trigger, stream, result ownership | 8 | passed_after_fix |",
         "| SACB-8 | Secrets, token storage, redaction, auth.json permissions, provider credential custody | 7 | passed_after_fix |",
         "| SACB-9 | iOS/Mac pairing lifecycle: Keychain, QR/deep-link parsing, forget/re-pair/unauthorized flow | 7 | passed_after_fix |",

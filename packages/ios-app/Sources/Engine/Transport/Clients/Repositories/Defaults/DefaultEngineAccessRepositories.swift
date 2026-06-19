@@ -418,6 +418,21 @@ final class DefaultWorkerLifecycleRepository: WorkerLifecycleRepository {
         )
     }
 
+    func createCatalogDiscoveryReport(
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> CatalogDiscoveryReportResultDTO {
+        try await client.createCatalogDiscoveryReport(
+            reason: reason,
+            includeProtectedCounts: true,
+            sessionId: sessionId,
+            workspaceId: workspaceId,
+            idempotencyKey: idempotencyKey
+        )
+    }
+
     func retirePackage(
         packageId: String,
         packageVersion: String,

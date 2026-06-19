@@ -168,6 +168,27 @@ final class WorkerLifecycleClient: EngineDomainClient {
         )
     }
 
+    func createCatalogDiscoveryReport(
+        reason: String? = nil,
+        includeProtectedCounts: Bool = true,
+        sessionId: String? = nil,
+        workspaceId: String? = nil,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> CatalogDiscoveryReportResultDTO {
+        let request = CatalogDiscoveryReportRequestDTO(
+            reason: reason,
+            includeProtectedCounts: includeProtectedCounts,
+            sessionId: sessionId,
+            workspaceId: workspaceId
+        )
+        return try await invokeWrite(
+            "catalog_discovery::conformance_report",
+            request,
+            idempotencyKey: idempotencyKey,
+            context: invocationContext(sessionId: sessionId, workspaceId: workspaceId)
+        )
+    }
+
     func retirePackage(
         packageId: String,
         packageVersion: String,

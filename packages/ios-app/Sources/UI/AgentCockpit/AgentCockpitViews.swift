@@ -7,7 +7,7 @@ struct AgentCockpitSheet: View {
     let workspaceId: String?
     let connectionState: ConnectionState
 
-    @State private var selectedTab: AgentCockpitTab = .workers
+    @State private var selectedTab: AgentCockpitTab = .discovery
 
     var body: some View {
         NavigationStack {
@@ -117,6 +117,8 @@ struct AgentCockpitSheet: View {
     @ViewBuilder
     private var tabContent: some View {
         switch selectedTab {
+        case .discovery:
+            discoveryTab
         case .workers:
             workersTab
         case .packages:
@@ -125,6 +127,38 @@ struct AgentCockpitSheet: View {
             activityTab
         case .surfaces:
             surfacesTab
+        }
+    }
+
+    private var discoveryTab: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            DiscoverySummaryCard(overview: viewModel.overview.discovery) {
+                Task {
+                    await viewModel.verifyCatalogDiscovery(
+                        repository: repository,
+                        sessionId: sessionId,
+                        workspaceId: workspaceId,
+                        connectionState: connectionState
+                    )
+                }
+            }
+            if viewModel.overview.discovery.families.isEmpty {
+                CockpitEmptyState(symbol: "questionmark.folder", title: "No catalog", detail: "The connected engine has not published visible capability families.")
+            } else {
+                ForEach(viewModel.overview.discovery.families) { family in
+                    CapabilityFamilyCard(family: family)
+                }
+            }
+            if !viewModel.overview.discovery.reports.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Reports")
+                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .foregroundStyle(.tronTextSecondary)
+                    ForEach(viewModel.overview.discovery.reports.prefix(4)) { report in
+                        DiscoveryReportRow(report: report)
+                    }
+                }
+            }
         }
     }
 
@@ -203,6 +237,7 @@ struct AgentCockpitSheet: View {
 }
 
 private enum AgentCockpitTab: String, CaseIterable, Identifiable {
+    case discovery
     case workers
     case packages
     case activity
@@ -212,6 +247,7 @@ private enum AgentCockpitTab: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
+        case .discovery: return "Discovery"
         case .workers: return "Workers"
         case .packages: return "Packages"
         case .activity: return "Activity"
@@ -221,6 +257,7 @@ private enum AgentCockpitTab: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
+        case .discovery: return "checkmark.shield"
         case .workers: return "cpu"
         case .packages: return "shippingbox"
         case .activity: return "clock"
@@ -236,8 +273,8 @@ private struct MetricStrip: View {
         HStack(spacing: 8) {
             metric("Workers", value: overview.workers.count, icon: "cpu")
             metric("Functions", value: overview.functions.count, icon: "curlybraces")
-            metric("Triggers", value: overview.triggers.count, icon: "bolt")
-            metric("Packages", value: overview.packages.count, icon: "shippingbox")
+            metric("Issues", value: overview.discovery.missingSchemaCount + overview.discovery.degradedFunctionCount, icon: "exclamationmark.triangle")
+            metric("Reports", value: overview.discovery.reports.count, icon: "checkmark.shield")
         }
     }
 
@@ -396,7 +433,7 @@ private struct ActivityRow: View {
     }
 }
 
-private struct WrapRow: View {
+struct WrapRow: View {
     let items: [String]
     let tint: Color
 

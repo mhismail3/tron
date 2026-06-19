@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-19 (Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-19 (Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -13,9 +13,11 @@ composer mic input for opt-in local transcription, renders session
 messages, persists a local event cache for reconstruction, and renders generic
 runtime surfaces emitted by the engine. The current user-facing Agent cockpit is
 a diagnostics surface opened from Servers -> Diagnostics -> Runtime Cockpit. It
-surfaces live worker lifecycle catalog entries, package/resource status,
-confirmation-backed lifecycle actions, activity, and active `ui_surface`
-resources without adding fixed product panels. The app does not own
+surfaces live worker lifecycle catalog entries, capability discovery families,
+schema/health gaps, durable `catalog_discovery_report` history,
+package/resource status, confirmation-backed lifecycle actions, activity, and
+active `ui_surface` resources without adding fixed product panels. The app does
+not own
 repository-specific panels, media workflow surfaces, saved voice notes,
 assistant-management panels, extension-source surfaces, memory-retain, or rules.
 
@@ -60,10 +62,10 @@ and matching database/event/settings/dependency work.
   rendering with quiet blank empty/loading chat content, streamed thinking content, and
   local in-chat error notifications.
 - Live event plugins plus stored-event reconstruction into `ChatMessage`.
-- Servers diagnostics Runtime Cockpit row and sheet for worker lifecycle
-  catalog/resource state, package actions, activity, and dynamic runtime
-  surfaces. The primary chat shell does not mount passive worker-runtime
-  diagnostics.
+- Servers diagnostics Runtime Cockpit row and sheet for catalog discovery,
+  worker lifecycle catalog/resource state, package actions, activity, and
+  dynamic runtime surfaces. The primary chat shell does not mount passive
+  worker-runtime diagnostics.
 - Generic capability invocation chips and generic generated runtime surfaces.
 - Local logs, feedback bundles, MetricKit payload retention, hashed
   server-log correlation IDs, and bounded local event cache integrity.
@@ -253,8 +255,9 @@ for mounted chat sessions, `AppConnectionRepository` for connection state,
 snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
 the existing model/session/agent/message repositories for chat workflows.
 `WorkerLifecycleRepository` is the cockpit-facing boundary for catalog,
-resource, and worker lifecycle calls. `AgentCockpitProjection` remains a pure
-mapper from server-owned facts to UI rows; it does not own worker truth.
+resource, catalog-discovery report, and worker lifecycle calls.
+`AgentCockpitProjection` remains a pure mapper from server-owned facts to UI
+rows; it does not own worker truth.
 `Support/Composition` is the production composition root allowed to wire those
 protocols to engine-owned clients.
 
@@ -352,6 +355,10 @@ preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
 It must not map fixed feature names into custom sheets.
 
 The Agent cockpit opens from Servers -> Diagnostics -> Runtime Cockpit. Its
+Discovery tab groups visible functions by namespace, summarizes schema and
+health gaps, lists recent `catalog_discovery_report` resources, and can request
+a new `catalog_discovery::conformance_report`. That action writes durable
+report/stream evidence only; it does not execute discovered functions. Its
 Surfaces tab lists active `ui_surface` resources through the same generic
 `resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
 payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.

@@ -388,6 +388,13 @@ protocol WorkerLifecycleRepository: AnyObject {
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerLifecycleResultDTO
 
+    func createCatalogDiscoveryReport(
+        reason: String?,
+        sessionId: String?,
+        workspaceId: String?,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> CatalogDiscoveryReportResultDTO
+
     func retirePackage(
         packageId: String,
         packageVersion: String,

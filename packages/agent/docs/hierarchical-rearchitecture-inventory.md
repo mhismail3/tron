@@ -2,7 +2,7 @@
 
 Status: `completed`
 
-Generated from the live checkout after HRA-16, then refreshed during AHA-6, AHA-8, AHA-9, TPC-11, SOL-10, SACB-POST-2, ODA-10, OPSAA-6, DSEMD-0, PPACD-0, PMBD-9, PERF-9, CPE-8, RIURD-8, IOSTC-9, DXRHA-8, and DESI-5 to keep the current ownership TSVs aligned with post-HRA cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test current ownership map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs. TPC-11 refreshed the maps after True Primitive Cleanup split additional Rust/iOS owners and converted same-name Rust file/folder pairs to folder-owned modules. SOL-10 refreshed the maps after the State Ownership Lifecycle invariant target was split into focused modules. SACB-POST-2 refreshed the maps after the delegated engine-invoke budget-ordering regression module split. ODA-10 refreshed the maps for observability artifacts, OPSAA-6 refreshed them after removing off-plan authorship artifacts, DSEMD-0 refreshed them for storage integrity artifacts, PPACD-0 refreshed them for public protocol artifacts, PMBD-9 refreshed them for provider/model boundary artifacts, PERF/CPE/RIURD/IOSTC/DXRHA refreshed them for later original-slice artifacts, and DESI-5 refreshed them for documentation/evidence integrity artifacts.
+Generated from the live checkout after HRA-16, then refreshed during AHA-6, AHA-8, AHA-9, TPC-11, SOL-10, SACB-POST-2, ODA-10, OPSAA-6, DSEMD-0, PPACD-0, PMBD-9, PERF-9, CPE-8, RIURD-8, IOSTC-9, DXRHA-8, DESI-5, and P2AER-S1 to keep the current ownership TSVs aligned with post-HRA cleanup checkpoints. HRA-0/HRA-1 recorded the baseline; HRA-2 through HRA-7 updated the Rust source, engine, domain, session/event-store, test, and progressive-doc hierarchy without compatibility shim modules. HRA-8 added the iOS SourceGuard red gates and source/test current ownership map, HRA-9 consumed the Engine rows, HRA-10 consumed the Session rows, HRA-11 consumed the UI rows, HRA-12 consumed the App/Support rows, HRA-13 consumed the iOS test rows by moving Swift tests into feature-owned mirrors, HRA-14 consumed the Mac wrapper rows, HRA-15 closed live docs/scripts/workflow old-path claims, and HRA-16 closed adversarial findings for old database paths, generic iOS projection buckets, WebSocket test mirroring, same-name Rust event modules, and stale live docs. TPC-11 refreshed the maps after True Primitive Cleanup split additional Rust/iOS owners and converted same-name Rust file/folder pairs to folder-owned modules. SOL-10 refreshed the maps after the State Ownership Lifecycle invariant target was split into focused modules. SACB-POST-2 refreshed the maps after the delegated engine-invoke budget-ordering regression module split. ODA-10 refreshed the maps for observability artifacts, OPSAA-6 refreshed them after removing off-plan authorship artifacts, DSEMD-0 refreshed them for storage integrity artifacts, PPACD-0 refreshed them for public protocol artifacts, PMBD-9 refreshed them for provider/model boundary artifacts, PERF/CPE/RIURD/IOSTC/DXRHA refreshed them for later original-slice artifacts, DESI-5 refreshed them for documentation/evidence integrity artifacts, and P2AER-S1 refreshed them for catalog discovery artifacts.
 
 Baseline: HRA-0 checkpoint `f14f7b60c`; evidence hash checkpoint `4127619be`.
 
@@ -36,11 +36,11 @@ current_path	target_path	owner	phase	classification	status	reason
 
 | Metric | Count |
 | --- | --- |
-| Tracked files after PMBD | 1580 |
-| Files under `packages/agent/src` | 577 |
-| Files under `packages/agent/tests` | 100 |
-| Files under `packages/ios-app/Sources` | 428 |
-| Files under `packages/ios-app/Tests` | 211 |
+| Tracked files after P2AER-S1 | 1724 |
+| Files under `packages/agent/src` | 615 |
+| Files under `packages/agent/tests` | 113 |
+| Files under `packages/ios-app/Sources` | 451 |
+| Files under `packages/ios-app/Tests` | 227 |
 | Files under `packages/mac-app/Sources` | 76 |
 | Files under `packages/mac-app/Tests` | 38 |
 
@@ -48,14 +48,14 @@ current_path	target_path	owner	phase	classification	status	reason
 
 | Extension | Count |
 | --- | --- |
-| .swift | 678 |
-| .rs | 673 |
-| .md | 58 |
+| .swift | 717 |
+| .rs | 725 |
+| .md | 105 |
 | .json | 20 |
 | .png | 20 |
 | .ttf | 20 |
 | .sh | 12 |
-| .tsv | 14 |
+| .tsv | 29 |
 | .toml | 10 |
 | .svg | 9 |
 | .yml | 9 |
@@ -71,7 +71,7 @@ current_path	target_path	owner	phase	classification	status	reason
 | .xcworkspacedata | 1 |
 | .xcprivacy | 1 |
 | .sql | 1 |
-| .py | 1 |
+| .py | 2 |
 | .pbxproj | 1 |
 | .mjs | 1 |
 | .env | 1 |
@@ -80,8 +80,8 @@ current_path	target_path	owner	phase	classification	status	reason
 
 | Package | Count |
 | --- | --- |
-| agent | 746 |
-| ios-app | 663 |
+| agent | 862 |
+| ios-app | 702 |
 | mac-app | 123 |
 | scripts | 22 |
 | github | 8 |

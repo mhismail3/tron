@@ -153,6 +153,36 @@ impl CapabilityContract {
         self
     }
 
+    /// Attach a human-readable discovery description.
+    pub(crate) fn description(mut self, description: &'static str) -> Self {
+        self.description = Some(description);
+        self
+    }
+
+    /// Attach search/discovery tags.
+    pub(crate) fn tags(mut self, tags: Vec<&'static str>) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// Attach compact usage examples.
+    pub(crate) fn examples(mut self, examples: Vec<Value>) -> Self {
+        self.examples = examples;
+        self
+    }
+
+    /// Attach lifecycle metadata.
+    pub(crate) fn lifecycle(mut self, lifecycle: Value) -> Self {
+        self.lifecycle = Some(lifecycle);
+        self
+    }
+
+    /// Attach native client presentation hints.
+    pub(crate) fn presentation_hints(mut self, hints: Value) -> Self {
+        self.presentation_hints = Some(hints);
+        self
+    }
+
     /// Attach mutating idempotency metadata.
     pub(crate) fn idempotency(mut self, contract: IdempotencyContract) -> Self {
         self.idempotency = Some(contract);
@@ -168,6 +198,12 @@ impl CapabilityContract {
     /// Attach compensation metadata.
     pub(crate) fn compensation(mut self, contract: CompensationContract) -> Self {
         self.compensation = Some(contract);
+        self
+    }
+
+    /// Attach a durable output contract.
+    pub(crate) fn output_contract(mut self, contract: DurableOutputContract) -> Self {
+        self.output_contract = contract;
         self
     }
 
@@ -307,6 +343,7 @@ fn default_theme_color(function_id: &str) -> Option<&'static str> {
         "agent" => Some("#8B5CF6"),
         "auth" => Some("#0EA5E9"),
         "blob" => Some("#64748B"),
+        "catalog_discovery" => Some("#14B8A6"),
         "context" => Some("#F97316"),
         "logs" => Some("#22C55E"),
         "message" => Some("#A855F7"),

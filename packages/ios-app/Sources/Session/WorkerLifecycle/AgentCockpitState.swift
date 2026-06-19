@@ -1,5 +1,4 @@
 import Foundation
-
 enum AgentCockpitStatusKind: String, Equatable, Sendable {
     case offline
     case connecting
@@ -9,14 +8,12 @@ enum AgentCockpitStatusKind: String, Equatable, Sendable {
     case awaitingApproval
     case degraded
 }
-
 struct AgentCockpitStatusSummary: Equatable, Sendable {
     var kind: AgentCockpitStatusKind
     var title: String
     var detail: String
     var systemImage: String
 }
-
 struct AgentCockpitWorkerRow: Equatable, Identifiable, Sendable {
     var id: String
     var kind: String
@@ -40,6 +37,13 @@ struct AgentCockpitFunctionRow: Equatable, Identifiable, Sendable {
     var riskLevel: String
     var health: String
     var tags: [String]
+    var requestSchemaPresent: Bool
+    var responseSchemaPresent: Bool
+    var opaqueResponse: Bool
+
+    var schemaComplete: Bool {
+        requestSchemaPresent && (responseSchemaPresent || opaqueResponse)
+    }
 }
 
 struct AgentCockpitTriggerRow: Equatable, Identifiable, Sendable {
@@ -123,6 +127,7 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var triggerTypes: [TriggerTypeCatalogDefinitionDTO]
     var packages: [AgentCockpitPackageRow]
     var runtimeSurfaces: [AgentCockpitRuntimeSurface]
+    var discovery: AgentCockpitDiscoveryOverview
     var activity: [AgentCockpitActivityItem]
     var currentRevision: UInt64?
     var nextRevision: UInt64?
@@ -141,6 +146,7 @@ struct AgentCockpitOverview: Equatable, Sendable {
             triggerTypes: [],
             packages: [],
             runtimeSurfaces: [],
+            discovery: .empty,
             activity: [],
             currentRevision: nil,
             nextRevision: nil
@@ -153,6 +159,7 @@ enum AgentCockpitProjection {
         snapshot: CatalogWatchSnapshotDTO,
         resources: [EngineResourceDTO],
         runtimeSurfaces: [AgentCockpitRuntimeSurface] = [],
+        discoveryReports: [EngineResourceDTO] = [],
         connectionState: ConnectionState
     ) -> AgentCockpitOverview {
         let snapshotBody = snapshot.snapshot
@@ -174,6 +181,13 @@ enum AgentCockpitProjection {
                 return lhs.packageId < rhs.packageId
             }
         let activity = activityItems(changes: snapshot.changes ?? [], packages: packages)
+        let discovery = discoveryOverview(
+            workers: workers,
+            functions: functions,
+            triggers: triggers,
+            triggerTypes: triggerTypes,
+            reports: discoveryReports
+        )
         return AgentCockpitOverview(
             status: status(
                 connectionState: connectionState,
@@ -187,6 +201,7 @@ enum AgentCockpitProjection {
             triggerTypes: triggerTypes,
             packages: packages,
             runtimeSurfaces: runtimeSurfaces.sorted { $0.surface.title < $1.surface.title },
+            discovery: discovery,
             activity: activity,
             currentRevision: snapshot.currentRevision,
             nextRevision: snapshot.nextRevision
@@ -243,7 +258,7 @@ enum AgentCockpitProjection {
             )
         }
         if workers.contains(where: { normalized($0.lifecycle) == "degraded" })
-            || functions.contains(where: { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) }) {
+            || functions.contains(where: { ["degraded", "unhealthy", "unknown"].contains(normalized($0.health)) || !$0.schemaComplete }) {
             return .init(
                 kind: .degraded,
                 title: "Degraded",
@@ -353,6 +368,8 @@ enum AgentCockpitProjection {
                     isDestructive: true
                 )
             ]
+        case .catalogDiscoveryReport:
+            return []
         case .conformanceReport:
             return []
         case .uiSurface:
@@ -421,7 +438,10 @@ enum AgentCockpitProjection {
             effectClass: function.effectClass ?? "unknown",
             riskLevel: function.riskLevel ?? "unknown",
             health: function.health ?? "unknown",
-            tags: function.tags ?? []
+            tags: function.tags ?? [],
+            requestSchemaPresent: function.requestSchema != nil,
+            responseSchemaPresent: function.responseSchema != nil,
+            opaqueResponse: function.opaqueResponse ?? false
         )
     }
 
@@ -439,6 +459,9 @@ enum AgentCockpitProjection {
     private static func packageRow(_ resource: EngineResourceDTO) -> AgentCockpitPackageRow? {
         guard let kind = WorkerLifecycleResourceKind(rawValue: resource.kind) else { return nil }
         guard kind != .uiSurface else { return nil }
+        guard [.package, .installation, .proposal, .conformanceReport, .launchAttempt].contains(kind) else {
+            return nil
+        }
         let parts = resource.resourceId.split(separator: ":", omittingEmptySubsequences: false).map(String.init)
         let packageId = parts.count > 1 ? parts[1] : ""
         let packageVersion = parts.count > 2 ? parts[2] : ""
@@ -493,7 +516,7 @@ enum AgentCockpitProjection {
         }
     }
 
-    private static func normalized(_ value: String) -> String {
+    static func normalized(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "_", with: "")
             .lowercased()

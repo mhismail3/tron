@@ -36,6 +36,9 @@ const RETAINED_EXECUTE_OPS: &[&str] = &[
     "trace_get",
     "log_recent",
     "replay_manifest",
+    "catalog_search",
+    "catalog_inspect",
+    "catalog_conformance",
 ];
 
 const POST_PPACD_STALE_BRANCHES: &[&str] = &[

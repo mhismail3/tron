@@ -156,10 +156,11 @@ pub use durability::queue::{
 };
 pub(crate) use durability::replay::EngineReplaySnapshot;
 pub use durability::resources::{
-    CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
-    EngineResourceLink, EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
+    CATALOG_DISCOVERY_REPORT_KIND, CATALOG_DISCOVERY_REPORT_SCHEMA_ID, CreateResource,
+    EngineResource, EngineResourceEvent, EngineResourceInspection, EngineResourceLink,
+    EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
     EngineResourceVersion, EngineResourceVersioningMode, LinkResources, ListResources,
-    RegisterResourceType, UpdateResource,
+    RegisterResourceType, UI_SURFACE_KIND, UpdateResource,
 };
 pub use durability::state::{EngineStateEntry, EngineStateScope};
 pub use durability::streams::{

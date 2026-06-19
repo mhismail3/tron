@@ -51,6 +51,55 @@ audit covered:
 | P2AER-8 | passed | Companion narrative inventory and TSV exist with stable columns for old evidence, current replacement/gap, classification, owners, iOS surface, memory involvement, backend dependency, slice, user decision, validation, and status. | Inventory artifacts. |
 | P2AER-9 | passed | The handoff packet requires first-principles UX review, architecture review, source evidence, user questions, and validation plan before coding. | Scorecard Handoff Packet section. |
 
+## Slice 1 Implementation Evidence
+
+Branch: `codex/phase-2-catalog-discovery-evidence-current`
+
+Baseline HEAD: `7db72c1ee46ff4c974ad408f36e9c169da34dfd1`
+
+Scope implemented:
+
+- Added the `catalog_discovery` domain worker with
+  `catalog_discovery::search`, `catalog_discovery::inspect`, and
+  `catalog_discovery::conformance_report`.
+- Added `catalog_search`, `catalog_inspect`, and `catalog_conformance` as
+  inspect/evidence-only `capability::execute` operations while keeping the
+  provider-visible tool list singular.
+- Added resource-backed `catalog_discovery_report` evidence with explicit
+  idempotency, a report lease, event-sourced compensation metadata, an output
+  contract, and `catalog.discovery` stream publication.
+- Kept protected/internal/admin functions protected: search reports omission
+  counts by visibility and report checks aggregate protected failure counts
+  without storing hidden ids.
+- Added Runtime Cockpit Discovery rendering backed by live catalog DTOs and
+  `catalog_discovery_report` resources; chat remains quiet unless a separate
+  attention-worthy state exists.
+- Did not add target routing, intent execution, broad public `/engine`
+  expansion, generated `ui_surface` publication, fixed legacy panels, schema
+  repair, or copied old modules.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib catalog_discovery -- --nocapture` | exit 0 | 20 Rust catalog tests passed, covering catalog registry behavior plus search/inspect/report no-target-invocation and protected-name omission. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution execute_catalog_search_does_not_require_working_directory_metadata -- --nocapture` | exit 0 | 1 integration test passed, proving catalog discovery through `execute` works without trusted working-directory metadata. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 tests passed; HRA inventories cover the new catalog-discovery Rust files, Swift Runtime Cockpit files, and Xcode project membership. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 tests passed; SACB guards cover provider-visible `execute`, protected-function visibility, idempotency, and working-directory scope for catalog ops. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 tests passed; PCC file inventory classifies the new domain, tests, DTOs, and cockpit files as retained implementation/test surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 tests passed; TPC retention inventory and file-budget scans include the split catalog discovery service/projection/report modules. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 tests passed; TMB confirmed catalog discovery crosses engine/resource boundaries through the engine facade rather than private stores. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 tests passed; Phase 2 docs do not reclaim removed autonomous-authorship/generated-worker completion claims. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 tests passed; BPRC feature coverage remains mapped while Slice 1 restores catalog/discovery evidence. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 tests passed; IARM Runtime Cockpit and generated-surface anchors remain classified as server-fact rendering, not fixed legacy panels. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants -- --nocapture` | exit 0 | 11 tests passed; Runtime Cockpit discovery uses live worker/function/resource facts and preserves generic runtime-surface boundaries. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture` | exit 0 | 12 tests passed; the iOS architecture remains a thin client over typed server/runtime facts. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 tests passed; Slice 1 adds no unmanaged schedulers/timers while using async resource/catalog reads. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants capability_registry_recipe_and_conformance_scaffolding_is_deleted -- --nocapture` | exit 0 | 1 targeted teardown test passed; old capability registry/recipe/conformance scaffolding remains deleted while the new `catalog_conformance` report op is allowed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants replay_critical_entropy_is_allow_listed -- --nocapture` | exit 0 | 1 targeted determinism test passed; catalog discovery reports no longer add payload-local wall-clock timestamps outside durable resource/stream envelopes. |
+| `cd packages/ios-app && xcodegen generate` | exit 0 | Xcode project regenerated after Swift DTO/view-model/UI changes. |
+| `xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/WorkerLifecycleDTOTests -only-testing:TronMobileTests/WorkerLifecycleClientTests -only-testing:TronMobileTests/AgentCockpitStateTests -only-testing:TronMobileTests/AgentCockpitViewModelTests` | exit 0 | 20 iOS simulator tests passed across DTO decoding, worker lifecycle client, cockpit projection, and cockpit view model report creation. |
+
 ## Validation Log
 
 | Command | Result | Evidence |
@@ -61,13 +110,14 @@ audit covered:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 tests passed; Phase 1 deferral anchors remain intact. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 tests passed; all BPRC feature buckets remain mapped. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | 8 tests passed; successor-term planning language is classified. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 tests passed; Phase 2 planning docs remain future/readiness wording, not current SAA architecture. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 tests passed; Phase 2 planning docs remain future/readiness wording, not a completed autonomous-authorship architecture. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 tests passed; SACB inventory covers 735 rows including Phase 2 planning artifacts. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 tests passed; PCC file inventory covers the new artifacts. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 tests passed; TPC retention inventory and summary counts match. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 tests passed; HRA file and ownership inventories cover the new artifacts. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture` | exit 0 | 10 tests passed; iOS architecture docs still preserve thin-client shell boundaries. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants -- --nocapture` | exit 0 | 11 tests passed; Agent cockpit docs remain generic runtime-surface oriented. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 1 code, docs, invariant, and entropy fixes. |
 | `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git diff --cached --check` | exit 0 | No whitespace errors were reported in the staged diff. |

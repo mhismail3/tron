@@ -5,7 +5,9 @@
 //! operations after the trusted agent runtime derives a least-privilege child
 //! grant for the current call. `replay_manifest` is the read-only evidence
 //! operation: it returns the current session replay manifest without creating a
-//! trace record.
+//! trace record. Catalog-discovery operations are inspect-only additions to the
+//! same primitive: search/inspect read current metadata, while conformance
+//! writes only durable catalog-discovery report evidence.
 //!
 //! ## Submodules
 //!
@@ -24,9 +26,11 @@
 //! model-id string parsing, shell aliases, caller-supplied public context, or
 //! process-cwd fallback. `capability::execute` rejects bootstrap/root grants and
 //! runs only with derived scoped grants whose file roots, state authority, and
-//! network policy match the requested primitive operation. Replay manifest reads
-//! deliberately bypass trace insertion so the exported manifest is not changed
-//! by the read.
+//! network policy match the requested primitive operation. Working-directory
+//! metadata is required only for file/process operations; catalog discovery must
+//! remain pure metadata inspection or resource-backed report creation. Replay
+//! manifest reads deliberately bypass trace insertion so the exported manifest
+//! is not changed by the read.
 
 pub(crate) mod contract;
 mod operations;

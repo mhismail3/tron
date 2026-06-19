@@ -61,6 +61,72 @@ async fn execute_replay_manifest_is_read_only_and_does_not_create_trace_record()
 }
 
 #[tokio::test]
+async fn execute_catalog_search_does_not_require_working_directory_metadata() {
+    let runtime = test_runtime();
+    let workspace = tempfile::tempdir().unwrap();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "gpt-5.5",
+            workspace.path().to_str().unwrap(),
+            Some("catalog discovery"),
+            Some("openai"),
+        )
+        .unwrap();
+    let trace_id = TraceId::generate();
+    let actor_id = ActorId::new(format!("agent:{}", created.session.id)).unwrap();
+    let grant_id = derive_capability_execute_grant(
+        &runtime.ctx,
+        &actor_id,
+        trace_id.clone(),
+        &created.session.id,
+        &created.session.workspace_id,
+        workspace.path().to_str().unwrap(),
+        "provider-call-catalog-1",
+        "none",
+    )
+    .await;
+
+    let value = invoke_execute(
+        &runtime.ctx,
+        json!({
+            "operation": "catalog_search",
+            "text": "catalog",
+            "includeProtectedCounts": true
+        }),
+        CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id.clone())
+            .with_scope("capability.execute")
+            .with_session_id(created.session.id.clone())
+            .with_workspace_id(created.session.workspace_id.clone())
+            .with_idempotency_key("trace-catalog-search-1")
+            .with_runtime_metadata(
+                RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+                "provider-call-catalog-1",
+            )
+            .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
+            .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
+            .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, "run_catalog_search_test")
+            .with_runtime_metadata(RUNTIME_METADATA_TURN, "1"),
+    )
+    .await;
+
+    let result: CapabilityResult = serde_json::from_value(value).unwrap();
+    let details = result.details.as_ref().unwrap();
+    assert_eq!(details["primitiveOperation"], "catalog_search");
+    assert!(
+        details["catalogDiscovery"]["summary"]["functions"]["visible"]
+            .as_u64()
+            .unwrap_or_default()
+            > 0
+    );
+    assert_eq!(
+        details["catalogDiscovery"]["continuity"]["reportResourceKind"],
+        "catalog_discovery_report"
+    );
+}
+
+#[tokio::test]
 async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
     let runtime = test_runtime();
     let workspace = tempfile::tempdir().unwrap();

@@ -1632,11 +1632,13 @@ packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Transcription.swif
 packages/ios-app/Sources/Session/Timeline/Messages/CapabilityEvidencePresentation.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
 packages/ios-app/Sources/Session/Timeline/Messages/LocalChatNotification.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
+packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitDiscoveryState.swift	implementation	ios_session	Phase2-Slice1	Agent cockpit discovery projection state retained under session ownership.
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift	implementation	ios_session	Phase1-closeout	Phase 1 session/chat state or presentation surface retained under session ownership.
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
 packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	support	ios	Phase1-closeout	Phase 1 local platform support retained for native iOS affordances.
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	implementation	ios_ui	Phase2-Slice1	Agent cockpit discovery card and report views retained under UI ownership.
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
 packages/ios-app/Sources/UI/Chat/Shell/FloatingNewSessionButton.swift	implementation	ios_ui	Phase1-closeout	Phase 1 iOS UI affordance retained under the current minimal shell.
@@ -1666,3 +1668,13 @@ packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md	docs	docs/s
 packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation
 packages/agent/docs/phase-2-agent-execution-restoration-inventory.md	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation
 packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation
+packages/agent/src/domains/capability/operations/catalog.rs	implementation	capability	Phase2-Slice1	Catalog discovery execute operation retained as an inspect/conformance adapter behind the singular execute primitive.
+packages/agent/src/domains/catalog_discovery/mod.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery domain facade retained for native inspect/search/conformance surfaces.
+packages/agent/src/domains/catalog_discovery/contract.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery contracts retained for schemas, metadata, and durable conformance evidence.
+packages/agent/src/domains/catalog_discovery/errors.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery errors retained for protected-target and malformed-request failure semantics.
+packages/agent/src/domains/catalog_discovery/handlers.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery handlers retained as side-effect-free inspection entrypoints except report-resource writes.
+packages/agent/src/domains/catalog_discovery/params.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery params retained for request parsing, actor context, scopes, and visibility checks.
+packages/agent/src/domains/catalog_discovery/projection.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery projection retained for summaries, schema hints, filtering, and resource evidence.
+packages/agent/src/domains/catalog_discovery/report.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery report retained for conformance checks and stream publication.
+packages/agent/src/domains/catalog_discovery/service.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery service retained for current catalog/resource/stream-backed facts.
+packages/agent/src/domains/catalog_discovery/tests.rs	test	test_harness	Phase2-Slice1	Catalog discovery tests retained for protected visibility, no target invocation, and report durability coverage.

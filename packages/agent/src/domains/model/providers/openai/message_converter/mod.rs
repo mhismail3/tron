@@ -145,12 +145,16 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         ## Execute Operations\n\
         Each `execute` call performs one direct host operation. Set `operation` to exactly one of: \
         `observe`, `state_get`, `state_set`, `state_list`, `file_read`, `file_write`, `process_run`, \
-        `trace_list`, `trace_get`, `log_recent`, or `replay_manifest`. Do not send `target`, `contractId`, `functionId`, `arguments`, \
-        or catalog-search constraints. Put operation fields at the top level of the execute payload. \
+        `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, `catalog_search`, `catalog_inspect`, \
+        or `catalog_conformance`. Do not send `target`, `contractId`, `functionId`, or `arguments`. \
+        Catalog discovery operations inspect metadata/conformance only and never execute discovered \
+        functions. Put operation fields at the top level of the execute payload. \
         Use `observe` to record reasoning-relevant facts, state operations for agent-owned memory, \
         file operations for files under the current working directory, `process_run` for bounded shell \
-        commands, trace/log operations to inspect durable execution records, and `replay_manifest` to \
-        export the current session's `tron.replay.v1` audit manifest. Mutating operations should \
+        commands, trace/log operations to inspect durable execution records, `replay_manifest` to \
+        export the current session's `tron.replay.v1` audit manifest, and catalog operations to inspect \
+        available workers/functions/schemas/conformance evidence through the same execute primitive. \
+        Mutating operations should \
         include a short `reason`; repeated writes or commands should include a stable `idempotencyKey` \
         when retry safety matters. Except for read-only `replay_manifest`, the engine records a trace \
         record for each execute operation with status, timing, provider/model context, authority metadata, \

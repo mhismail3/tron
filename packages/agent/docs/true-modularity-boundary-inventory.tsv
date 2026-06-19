@@ -973,11 +973,13 @@ packages/ios-app/Sources/Session/Chat/ViewModel/ChatViewModel+Transcription.swif
 packages/ios-app/Sources/Session/Timeline/Messages/CapabilityEvidencePresentation.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/Timeline/Messages/LocalChatNotification.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitDiscoveryState.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift	swift	implementation	ios:session	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicCaptureEngine.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Support/Foundation/Audio/ComposerMicRecorder.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/Support/Foundation/Audio/MicAvailabilityMonitor.swift	swift	implementation	ios:support	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/UI/AgentCockpit/AgentCockpitDiscoveryViews.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Composer/RecentInputHistorySheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Sheets/LocalErrorDetailSheet.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
 packages/ios-app/Sources/UI/Chat/Shell/FloatingNewSessionButton.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
@@ -1036,3 +1038,20 @@ packages/mac-app/Sources/Wizard/Steps/PairingInfoStep.swift	swift	implementation
 packages/mac-app/Sources/Wizard/Steps/PermissionsStep.swift	swift	implementation	project	owner-private; callers must enter through the owner facade or contract
 packages/mac-app/Sources/Wizard/Steps/TailscaleStep.swift	swift	implementation	project	owner-private; callers must enter through the owner facade or contract
 packages/mac-app/Sources/Wizard/Steps/WelcomeStep.swift	swift	implementation	project	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/filesystem/contract.rs	rust	contract	agent:filesystem	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/filesystem/handlers.rs	rust	implementation	agent:filesystem	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/filesystem/mod.rs	rust	facade	agent:filesystem	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/filesystem/service.rs	rust	implementation	agent:filesystem	owner-private; callers must enter through the owner facade or contract
+packages/ios-app/Sources/Engine/Protocol/Filesystem/EngineProtocolTypes+Filesystem.swift	swift	generated-wire-dto	ios:engine-protocol	wire/protocol-shaped DTOs; callers should translate before domain or UI logic
+packages/ios-app/Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift	swift	adapter	ios:engine-transport	may depend inward on contracts and outward on one concrete external backend only
+packages/ios-app/Sources/UI/Chat/Sheets/WorkspaceSelectorRows.swift	swift	implementation	ios:ui	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/capability/operations/catalog.rs	rust	implementation	agent:capability	owner-private; callers enter through capability operation registry
+packages/agent/src/domains/catalog_discovery/mod.rs	rust	facade	agent:catalog-discovery	callers may depend on this narrow owner-approved surface only
+packages/agent/src/domains/catalog_discovery/contract.rs	rust	contract	agent:catalog-discovery	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/catalog_discovery/errors.rs	rust	implementation	agent:catalog-discovery	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/catalog_discovery/handlers.rs	rust	implementation	agent:catalog-discovery	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/catalog_discovery/params.rs	rust	implementation	agent:catalog-discovery	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/catalog_discovery/projection.rs	rust	implementation	agent:catalog-discovery	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/catalog_discovery/report.rs	rust	implementation	agent:catalog-discovery	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/catalog_discovery/service.rs	rust	implementation	agent:catalog-discovery	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/catalog_discovery/tests.rs	rust	test-support	agent:catalog-discovery	test-only helper; production code must not depend on it

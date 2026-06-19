@@ -271,6 +271,7 @@ fn rust_model_domain_uses_routing_and_protocol_owners() {
 #[test]
 fn rust_capability_execute_operations_are_decomposed() {
     let required = [
+        "packages/agent/src/domains/capability/operations/catalog.rs",
         "packages/agent/src/domains/capability/operations/filesystem.rs",
         "packages/agent/src/domains/capability/operations/logs.rs",
         "packages/agent/src/domains/capability/operations/process.rs",
@@ -300,6 +301,9 @@ fn rust_capability_execute_operations_are_decomposed() {
         "fn trace_list",
         "fn trace_get",
         "async fn log_recent",
+        "async fn catalog_search",
+        "async fn catalog_inspect",
+        "async fn catalog_conformance",
     ] {
         assert!(
             !root_source.contains(banned),

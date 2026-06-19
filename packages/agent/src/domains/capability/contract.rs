@@ -38,17 +38,17 @@ pub(crate) fn capabilities() -> EngineResult<Vec<CapabilitySpec>> {
 pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
     match function_id {
         EXECUTE_FUNCTION_ID => json!({
-            "capabilityPrimitive": true,
-            "modelPrimitiveName": "execute",
-            "capabilityOrder": 10,
-            "capabilityExecutionMode": {"kind": "serialized", "group": "capability-execute"},
-            "capabilitySchema": {
-                "name": "execute",
-                "description": concat!(
-                    "Primitive host operation for the bare Tron loop. ",
-                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, and inspect agent trace/log records. ",
+                    "capabilityPrimitive": true,
+                    "modelPrimitiveName": "execute",
+                    "capabilityOrder": 10,
+                    "capabilityExecutionMode": {"kind": "serialized", "group": "capability-execute"},
+                    "capabilitySchema": {
+                        "name": "execute",
+                        "description": concat!(
+                            "Primitive host operation for the bare Tron loop. ",
+                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, inspect agent trace/log records, and inspect catalog discovery evidence. ",
                     "It can also export the current session replay manifest without side effects. ",
-                    "Choose one operation per call. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
+                    "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
                 "parameters": execute_model_request_schema()
             }
@@ -69,7 +69,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "properties": {
             "operation": {
                 "type": "string",
-                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, or replay_manifest."
+                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, or catalog_conformance."
             },
             "input": {"type": "string", "description": "Text to record for observe."},
             "scope": {"type": "string", "description": "State scope: session, workspace, or system."},
@@ -81,6 +81,15 @@ fn execute_model_request_schema() -> serde_json::Value {
             "command": {"type": "string", "description": "Shell command for process_run."},
             "traceId": {"type": "string", "description": "Optional trace id filter for trace_list and log_recent."},
             "traceRecordId": {"type": "string", "description": "Trace record id for trace_get."},
+            "kind": {"type": "string", "description": "Catalog item kind for catalog_inspect: function, worker, trigger_type, or trigger."},
+            "id": {"type": "string", "description": "Catalog item id for catalog_inspect."},
+            "text": {"type": "string", "description": "Catalog search text for catalog_search or catalog_conformance."},
+            "namespacePrefix": {"type": "string", "description": "Catalog namespace prefix filter."},
+            "visibility": {"type": "string", "description": "Catalog visibility filter."},
+            "effectClass": {"type": "string", "description": "Catalog effect-class filter."},
+            "maxRisk": {"type": "string", "description": "Catalog maximum risk filter."},
+            "health": {"type": "string", "description": "Catalog health filter."},
+            "includeProtectedCounts": {"type": "boolean", "description": "Include aggregate protected omission counts without protected ids."},
             "limit": {"type": "integer", "minimum": 1, "maximum": 500},
             "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 120000},
             "maxOutputBytes": {"type": "integer", "minimum": 1, "maximum": 200000},

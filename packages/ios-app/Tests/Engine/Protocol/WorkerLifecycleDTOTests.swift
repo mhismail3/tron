@@ -114,6 +114,33 @@ struct WorkerLifecycleDTOTests {
         #expect(result.workerToken?["pluginId"]?.stringValue == "alpha")
     }
 
+    @Test("Catalog discovery report result decodes resource evidence")
+    func catalogDiscoveryReportResultDecodesResourceEvidence() throws {
+        let json = """
+        {
+          "status": "passed",
+          "reportResourceId": "catalog_discovery_report:7:invocation-1",
+          "streamCursor": 44,
+          "summary": {"functions": {"visible": 3}},
+          "resourceRefs": [
+            {
+              "kind": "catalog_discovery_report",
+              "resourceId": "catalog_discovery_report:7:invocation-1",
+              "versionId": "version-1",
+              "role": "catalog_discovery_report"
+            }
+          ]
+        }
+        """
+
+        let result = try JSONDecoder().decode(CatalogDiscoveryReportResultDTO.self, from: Data(json.utf8))
+
+        #expect(result.status == "passed")
+        #expect(result.reportResourceId == "catalog_discovery_report:7:invocation-1")
+        #expect(result.streamCursor == 44)
+        #expect(result.resourceRefs?.first?.kind == WorkerLifecycleResourceKind.catalogDiscoveryReport.rawValue)
+    }
+
     @Test("Resource inspection decodes package manifest payload")
     func resourceInspectionDecodesPackageManifestPayload() throws {
         let json = """

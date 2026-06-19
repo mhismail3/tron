@@ -1,11 +1,13 @@
 //! Primitive execute operations for the bare engine loop.
 //!
 //! `capability::execute` is the only model-facing tool on this branch. It does
-//! not search, inspect, route, bind, approve, or execute catalog targets. It
-//! performs one direct host primitive operation and returns a model-visible
-//! observation with engine details for audit. `replay_manifest` is the only
-//! read-only operation that bypasses trace-record creation; tracing that read
-//! would mutate the manifest it returns.
+//! not route, bind, approve, or execute catalog targets. It performs one direct
+//! host primitive operation and returns a model-visible observation with engine
+//! details for audit. Catalog search/inspect/conformance operations are
+//! discovery-only: they inspect metadata and write only catalog-discovery
+//! evidence. `replay_manifest` is the only read-only operation that bypasses
+//! trace-record creation; tracing that read would mutate the manifest it
+//! returns.
 //!
 //! The operation gate is intentionally stricter than the provider schema:
 //! `execute` accepts only trusted agent/system runtime contexts, rejects
@@ -26,6 +28,7 @@ use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::errors::CapabilityError;
 
+mod catalog;
 mod filesystem;
 mod logs;
 mod process;
@@ -33,6 +36,7 @@ mod replay;
 mod state;
 mod trace;
 
+use catalog::{catalog_conformance, catalog_inspect, catalog_search};
 use filesystem::{file_read, file_write};
 use logs::log_recent;
 use process::process_run;
@@ -49,7 +53,6 @@ pub(crate) async fn execute_value(
     if operation == "replay_manifest" {
         return result_value(replay_manifest(invocation, deps).await?);
     }
-    let _root = filesystem::working_directory(invocation)?;
 
     let started_at = Utc::now().to_rfc3339();
     let start = Instant::now();
@@ -124,6 +127,7 @@ fn validate_execute_context(
         "trace_list" | "trace_get" | "log_recent" | "replay_manifest" => {
             require_current_session(invocation, operation)
         }
+        "catalog_conformance" => require_idempotency_key(invocation, operation),
         _ => Ok(()),
     }
 }
@@ -158,6 +162,20 @@ fn require_current_session(
     Ok(())
 }
 
+fn require_idempotency_key(
+    invocation: &Invocation,
+    operation: &str,
+) -> Result<(), CapabilityError> {
+    if invocation.causal_context.idempotency_key.is_none()
+        && optional_str(&invocation.payload, "idempotencyKey")?.is_none()
+    {
+        return Err(invalid(format!(
+            "{operation} writes durable evidence and requires an idempotencyKey"
+        )));
+    }
+    Ok(())
+}
+
 async fn execute_operation(
     operation: &str,
     invocation: &Invocation,
@@ -175,10 +193,13 @@ async fn execute_operation(
         "trace_get" => trace_get(invocation, deps)?,
         "log_recent" => log_recent(invocation, deps).await?,
         "replay_manifest" => replay_manifest(invocation, deps).await?,
+        "catalog_search" => catalog_search(invocation, deps).await?,
+        "catalog_inspect" => catalog_inspect(invocation, deps).await?,
+        "catalog_conformance" => catalog_conformance(invocation, deps).await?,
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, or replay_manifest."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, or catalog_conformance."
                 ),
             });
         }

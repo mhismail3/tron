@@ -222,7 +222,9 @@ fn capability_execute_requires_working_directory(invocation: &Invocation) -> boo
             .payload
             .get("operation")
             .and_then(Value::as_str)
-            .is_some_and(|operation| operation != "replay_manifest")
+            .is_some_and(|operation| {
+                matches!(operation, "file_read" | "file_write" | "process_run")
+            })
 }
 
 fn capability_working_directory(invocation: &Invocation) -> Result<PathBuf> {

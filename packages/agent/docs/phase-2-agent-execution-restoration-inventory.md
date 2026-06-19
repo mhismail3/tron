@@ -115,3 +115,10 @@ handoff packet required by the scorecard before implementation. A row marked
 `planned` does not approve code by itself; it only records that the family is
 in scope for Phase 2 and identifies the required owner, validation, and user
 decision.
+
+Slice 1 is now represented as current baseline evidence in the TSV where
+implemented: catalog discovery search/inspect/report contracts, Runtime
+Cockpit discovery rendering, and resource-backed conformance evidence are
+recorded on rows `P2AER-INV-002`, `P2AER-INV-025`, and `P2AER-INV-035`.
+Rows with remaining provider-reasoning or future-native-surface questions stay
+planned until their own contract work lands.

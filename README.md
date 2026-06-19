@@ -371,7 +371,8 @@ Current living entry points:
 - `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-scorecard.md`:
   completed iOS Self-Adapting Agent Cockpit Baseline scorecard for the
   user-facing worker lifecycle catalog, package actions, runtime `ui_surface`
-  rendering, and neutral glass cockpit shell.
+  rendering, and neutral glass cockpit shell; Phase 2 Slice 1 extends that
+  shell with catalog discovery and report evidence.
 - `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`:
   companion evidence manifest for focused Swift tests, simulator validation,
   static gates, and closeout commands.
@@ -554,7 +555,8 @@ Current living entry points:
   completed IOSAC gates for cockpit scorecard/evidence/inventory integrity,
   worker lifecycle client function ids, dynamic `ui_surface` rendering,
   protocol/repository boundaries, neutral glass theme tokens, focused Swift
-  test coverage, README/iOS docs, and local/GitHub static-gate parity.
+  test coverage, README/iOS docs, and local/GitHub static-gate parity. Phase 2
+  catalog discovery coverage is recorded in the P2AER inventory/evidence.
 - `packages/agent/tests/ios_affordance_restoration_map_invariants.rs`:
   completed IARM gates for old iOS tree coverage, affordance classification
   vocabulary, Phase 1 review queue, Phase 2 deferral anchor, README/iOS docs,
@@ -845,17 +847,20 @@ surface is intentionally collapsed to one provider-visible function:
 schema requires an `operation` field and accepts only operation-specific
 primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
 `path`, `content`, `command`, `traceId`, `traceRecordId`, `limit`,
-`timeoutMs`, `maxOutputBytes`, `idempotencyKey`, and `reason`.
+`timeoutMs`, `maxOutputBytes`, `kind`, `id`, catalog search filters,
+`idempotencyKey`, and `reason`.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
 runtime metadata under a per-call derived authority grant. The child grant is
-scoped to the exact primitive function, the canonical working directory, no
+scoped to the exact primitive function, no
 namespace authority, state read/write support, and `networkPolicy: none`; the
 worker rejects bootstrap grants, public caller contexts, and system-scoped
-state. Trace records use those trusted facts directly instead of inferring
-provider ownership from model id strings. `replay_manifest` is the read-only
-exception: it returns the current session replay manifest without creating a
-trace record, so the read does not mutate the manifest it exports.
+state. File and process operations additionally require trusted working
+directory metadata before resolving paths. Trace records use those trusted facts
+directly instead of inferring provider ownership from model id strings.
+`replay_manifest` is the read-only exception: it returns the current session
+replay manifest without creating a trace record, so the read does not mutate
+the manifest it exports.
 
 Current primitive operations:
 
@@ -872,10 +877,14 @@ Current primitive operations:
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
+| `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, and report evidence without invoking catalog targets. |
+| `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution. |
+| `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks. |
 
 Startup registration currently keeps only loop infrastructure domains:
-`system`, `capability`, `filesystem`, `blob`, `message`, `settings`, `auth`,
-`agent`, `logs`, `session`, `transcription`, and model-provider modules. The
+`system`, `capability`, `catalog_discovery`, `filesystem`, `blob`, `message`,
+`settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
+`worker_lifecycle`, and model-provider modules. The
 `filesystem` domain is a narrow iOS workspace-browser exception limited to
 `filesystem::get_home`, `filesystem::list_dir`, and `filesystem::create_dir`;
 agent-facing file read/write/process behavior remains under
@@ -1016,10 +1025,13 @@ Engine substrate primitives provide host infrastructure behind the loop:
 state, streams, queues, triggers, grants, generic resources, storage operations,
 and bounded internal projections. They are not exported as model tools. The
 agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
-`log_recent`, and `replay_manifest`; trace operations read durable
+`log_recent`, `replay_manifest`, `catalog_search`, `catalog_inspect`, and
+`catalog_conformance`; trace operations read durable
 `trace_records` emitted around effectful `execute` calls, while `log_recent`
 reads bounded retained logs and `replay_manifest` reads the canonical replay
-snapshot through the same single tool. The replay snapshot includes resolved
+snapshot through the same single tool. Catalog discovery reads current
+catalog/resource truth and writes only append-oriented `catalog_discovery_report`
+evidence. The replay snapshot includes resolved
 session events, provider request audits, trace records, engine idempotency
 entries, engine invocations, engine stream rows, and engine queue rows. It adds
 stable section hashes plus request/result/outcome/payload hashes where the
@@ -1344,13 +1356,15 @@ server/iOS logs, and compressed content-addressed blobs share that same SQLite
 file. Large correctness and audit payloads flow through blob refs where the
 owning row needs them; compact rows keep human/agent-readable JSON inline. The
 model-visible evidence read path is `capability::execute` with `trace_list`,
-`trace_get`, `log_recent`, and `replay_manifest`; those reads require trusted
-current-session context. Trace reads are backed by `trace_records`; effectful
-`execute` calls insert a running record before the effect runs and update that
-same record with status, duration, result/error hashes, authority,
-provider/model metadata, VCS revision when available, and file
-attribution/content hashes after completion. The `replay_manifest` operation is
-read-only and does not insert a trace record; it reads session events, provider
+`trace_get`, `log_recent`, `replay_manifest`, `catalog_search`,
+`catalog_inspect`, and `catalog_conformance`; trace/log/replay reads require
+trusted current-session context, and catalog conformance requires idempotency.
+Trace reads are backed by `trace_records`; effectful `execute` calls insert a
+running record before the effect runs and update that same record with status,
+duration, result/error hashes, authority, provider/model metadata, VCS revision
+when available, and file attribution/content hashes after completion. The
+`replay_manifest` operation is read-only and does not insert a trace record; it
+reads session events, provider
 audits, trace records, idempotency entries, invocation ledger rows, stream rows,
 and queue rows through owner APIs and returns canonical section hashes plus the
 overall `replayHash`. The direct `logs::recent` worker and `tron logs` CLI both
@@ -1437,10 +1451,12 @@ packages/ios-app/Sources/
   projections are removed from the primary source tree.
 - **Agent cockpit**: Servers -> Diagnostics exposes a compact Runtime Cockpit
   row that opens the cockpit sheet. The sheet renders live worker lifecycle
-  catalog rows, package/resource status, confirmation-backed lifecycle actions,
-  activity, and active `ui_surface` resources through generic engine data using
-  the standard liquid-glass sheet chrome and shared segmented tab control. The
-  primary chat shell does not mount a passive worker-runtime banner.
+  catalog rows, capability discovery families, schema/health gaps, durable
+  `catalog_discovery_report` history, package/resource status,
+  confirmation-backed lifecycle actions, activity, and active `ui_surface`
+  resources through generic engine data using the standard liquid-glass sheet
+  chrome and shared segmented tab control. The primary chat shell does not mount
+  a passive worker-runtime banner.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`.
 - **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; first-run setup, Settings-launched server pairing, and pairing URLs all present the same large-detent `OnboardingFlowView` through the central onboarding presenter. Settings can reopen the flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token and a bare DNS, IPv4, or unbracketed IPv6 host before Connect is enabled; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are rejected before any probe. An already paired server row can reuse that server's Keychain token unless the user edits its host or port. Successful repair of an existing server closes after the probe/settings refresh when the host and port still match; new or edited server origins continue into setup. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.
@@ -1462,9 +1478,9 @@ packages/ios-app/Sources/
   `packages/agent/docs/ios-self-adapting-agent-cockpit-baseline-inventory.tsv`,
   and
   `packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs`
-  are the current static proof for the Agent cockpit, worker lifecycle catalog
+  are the baseline static proof for the Agent cockpit, worker lifecycle catalog
   bridge, package action confirmations, dynamic `ui_surface` rendering, and
-  neutral glass baseline.
+  neutral glass baseline; P2AER Slice 1 adds catalog discovery evidence on top.
 - **IARM proof**:
   `packages/agent/docs/ios-affordance-restoration-map-scorecard.md`,
   `packages/agent/docs/ios-affordance-restoration-map-evidence-manifest.md`,

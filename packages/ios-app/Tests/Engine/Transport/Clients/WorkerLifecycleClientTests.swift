@@ -178,6 +178,49 @@ struct WorkerLifecycleClientTests {
         _ = try await client.listResources(kind: .uiSurface, lifecycle: "active", limit: 25)
     }
 
+    @Test("Catalog discovery report write uses catalog discovery function")
+    func catalogDiscoveryReportWriteUsesCatalogDiscoveryFunction() async throws {
+        let transport = connectedTransport()
+        let client = WorkerLifecycleClient(transport: transport)
+
+        transport.writeHandler = { functionId, payload, idempotencyKey, options in
+            #expect(functionId.rawValue == "catalog_discovery::conformance_report")
+            #expect(idempotencyKey.rawValue.contains("ios:user-action:"))
+            #expect(options.context?.sessionId == "session-1")
+            #expect(options.context?.workspaceId == "workspace-1")
+            let request = try #require(payload as? CatalogDiscoveryReportRequestDTO)
+            #expect(request.reason == "runtime cockpit verification")
+            #expect(request.includeProtectedCounts == true)
+            #expect(request.sessionId == "session-1")
+            #expect(request.workspaceId == "workspace-1")
+            return CatalogDiscoveryReportResultDTO(
+                status: "passed",
+                reportResourceId: "catalog_discovery_report:7:invocation-1",
+                streamCursor: 44,
+                summary: ["functions": AnyCodable(["visible": 3])],
+                resourceRefs: [
+                    CatalogDiscoveryResourceRefDTO(
+                        kind: "catalog_discovery_report",
+                        resourceId: "catalog_discovery_report:7:invocation-1",
+                        versionId: "version-1",
+                        role: "catalog_discovery_report"
+                    )
+                ]
+            )
+        }
+
+        let result = try await client.createCatalogDiscoveryReport(
+            reason: "runtime cockpit verification",
+            sessionId: "session-1",
+            workspaceId: "workspace-1",
+            idempotencyKey: .userAction("catalogDiscovery.report")
+        )
+
+        #expect(result.status == "passed")
+        #expect(result.reportResourceId == "catalog_discovery_report:7:invocation-1")
+        #expect(result.resourceRefs?.first?.kind == "catalog_discovery_report")
+    }
+
     @Test("Manifest lifecycle writes keep manifest dynamic")
     func manifestWritesKeepManifestDynamic() async throws {
         let transport = connectedTransport()
