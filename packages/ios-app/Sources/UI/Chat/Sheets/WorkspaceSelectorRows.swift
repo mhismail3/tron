@@ -9,57 +9,47 @@ struct WorkspaceQuickPath: Identifiable, Equatable {
     var id: String { path }
 }
 
-struct WorkspaceQuickPathRow: View {
+struct WorkspaceQuickPathPill: View {
     let row: WorkspaceQuickPath
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: 8) {
                 Image(systemName: row.icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(.tronEmerald)
-                    .frame(width: 18)
+                    .frame(width: 14)
 
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(row.title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                        .foregroundStyle(.tronTextPrimary)
-                        .lineLimit(1)
-
-                    Text(row.subtitle)
-                        .font(TronTypography.codeCaption)
-                        .foregroundStyle(.tronTextMuted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-
-                Spacer(minLength: 8)
+                Text(row.title)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .glassEffect(
-            .regular.tint(Color.tronEmerald.opacity(isSelected ? 0.22 : 0.11)).interactive(),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .regular.tint(Color.tronEmerald.opacity(isSelected ? 0.2 : 0.08)).interactive(),
+            in: Capsule()
         )
+        .accessibilityLabel("\(row.title), \(row.subtitle)")
     }
 }
 
-struct WorkspaceDirectoryActionRow: View {
+struct WorkspaceDirectoryActionPill: View {
     let icon: String
     let title: String
     let subtitle: String?
-    let isEmphasized: Bool
     let action: () -> Void
 
     var body: some View {
@@ -74,6 +64,7 @@ struct WorkspaceDirectoryActionRow: View {
                     Text(title)
                         .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
+
                     if let subtitle {
                         Text(subtitle)
                             .font(TronTypography.codeCaption)
@@ -85,13 +76,14 @@ struct WorkspaceDirectoryActionRow: View {
 
                 Spacer()
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 12)
+            .padding(.horizontal, 12)
+            .padding(.vertical, subtitle == nil ? 10 : 9)
+            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
         .glassEffect(
-            .regular.tint(Color.tronEmerald.opacity(isEmphasized ? 0.12 : 0.07)).interactive(),
+            .regular.tint(Color.tronEmerald.opacity(0.1)).interactive(),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
     }

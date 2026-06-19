@@ -113,7 +113,7 @@ struct WorkspaceSelector: View {
 
     private var directoryBrowser: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 16) {
                 if let errorMessage {
                     inlineError(message: errorMessage)
                 }
@@ -122,8 +122,9 @@ struct WorkspaceSelector: View {
                     quickPathSection
                 }
 
-                pathHeader
-                navigationRows
+                locationSection
+                actionSection
+                directorySection
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 18)
@@ -132,17 +133,28 @@ struct WorkspaceSelector: View {
     }
 
     private var quickPathSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            sectionLabel("Quick paths")
-            VStack(spacing: 8) {
-                ForEach(quickPathRows) { row in
-                    WorkspaceQuickPathRow(
-                        row: row,
-                        isSelected: row.path == currentPath,
-                        action: { navigateTo(row.path) }
-                    )
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Shortcuts")
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(quickPathRows) { row in
+                        WorkspaceQuickPathPill(
+                            row: row,
+                            isSelected: row.path == currentPath,
+                            action: { navigateTo(row.path) }
+                        )
+                    }
                 }
+                .padding(.vertical, 1)
             }
+            .scrollClipDisabled()
+        }
+    }
+
+    private var locationSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Current folder")
+            pathHeader
         }
     }
 
@@ -153,11 +165,18 @@ struct WorkspaceSelector: View {
                 .foregroundStyle(.tronEmerald)
                 .frame(width: 18)
 
-            Text(currentPath.abbreviatingHomeDirectory)
-                .font(TronTypography.codeContent)
-                .foregroundStyle(.tronTextPrimary)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(currentFolderTitle)
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronTextPrimary)
+                    .lineLimit(1)
+
+                Text(currentPath.abbreviatingHomeDirectory)
+                    .font(TronTypography.codeCaption)
+                    .foregroundStyle(.tronTextMuted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
 
             Spacer(minLength: 8)
 
@@ -175,27 +194,29 @@ struct WorkspaceSelector: View {
         )
     }
 
-    private var navigationRows: some View {
-        VStack(spacing: 8) {
-            if parentPath != nil {
-                WorkspaceDirectoryActionRow(
-                    icon: "arrow.up.circle",
-                    title: "Go Up",
-                    subtitle: parentPath?.abbreviatingHomeDirectory,
-                    isEmphasized: true,
-                    action: navigateUp
-                )
-            }
+    private var actionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionLabel("Actions")
 
-            newFolderRow
-
-            if displayedDirectories.isEmpty && !isLoading {
-                emptyDirectoryRow
+            if isCreatingFolder {
+                newFolderRow
             } else {
-                ForEach(displayedDirectories) { entry in
-                    WorkspaceDirectoryEntryRow(entry: entry) {
-                        navigateTo(entry.path)
+                HStack(spacing: 8) {
+                    if let parentPath {
+                        WorkspaceDirectoryActionPill(
+                            icon: "arrow.up.circle",
+                            title: "Go Up",
+                            subtitle: parentPath.abbreviatingHomeDirectory,
+                            action: navigateUp
+                        )
                     }
+
+                    WorkspaceDirectoryActionPill(
+                        icon: "folder.badge.plus",
+                        title: "New Folder",
+                        subtitle: nil,
+                        action: startFolderCreation
+                    )
                 }
             }
         }
@@ -252,14 +273,34 @@ struct WorkspaceSelector: View {
                 in: RoundedRectangle(cornerRadius: 14, style: .continuous)
             )
             .onAppear { folderNameFieldFocused = true }
-        } else {
-            WorkspaceDirectoryActionRow(
-                icon: "folder.badge.plus",
-                title: "New Folder",
-                subtitle: nil,
-                isEmphasized: true,
-                action: startFolderCreation
-            )
+        }
+    }
+
+    private var directorySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                sectionLabel("Folders")
+
+                Spacer()
+
+                if !isLoading {
+                    Text("\(displayedDirectories.count)")
+                        .font(TronTypography.caption)
+                        .foregroundStyle(.tronTextMuted)
+                }
+            }
+
+            VStack(spacing: 8) {
+                if displayedDirectories.isEmpty && !isLoading {
+                    emptyDirectoryRow
+                } else {
+                    ForEach(displayedDirectories) { entry in
+                        WorkspaceDirectoryEntryRow(entry: entry) {
+                            navigateTo(entry.path)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -313,6 +354,18 @@ struct WorkspaceSelector: View {
         !isSubmittingFolder
             && FolderNameValidator.validationError(for: newFolderName) == nil
             && !currentPath.isEmpty
+    }
+
+    private var currentFolderTitle: String {
+        let abbreviated = currentPath.abbreviatingHomeDirectory
+        if abbreviated == "~" {
+            return "Home"
+        }
+        if currentPath == "/" {
+            return "Root"
+        }
+        let name = URL(fileURLWithPath: currentPath).lastPathComponent
+        return name.isEmpty ? abbreviated : name
     }
 
     private func sectionLabel(_ text: String) -> some View {

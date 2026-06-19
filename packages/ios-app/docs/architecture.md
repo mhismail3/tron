@@ -120,13 +120,16 @@ Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> AgentCockpitProjec
 ```
 
 `WorkspaceSelector` is a narrow server-backed workspace browser, not the old
-general filesystem tool surface. It offers configured quick/default workspace
-and recent-workspace shortcuts, then browses the paired Mac through
-`WorkspaceBrowserRepository` over `filesystem::get_home`,
-`filesystem::list_dir`, and `filesystem::create_dir`. Hidden folders are a
-toolbar toggle, and inline folder creation selects the created folder. The
-selector must not restore old read/write/edit/search/diff/apply-patch/import or
-agent-execution filesystem behavior without a Phase 2 module contract.
+general filesystem tool surface. Its hierarchy is navigation-first: configured
+quick/default and recent workspace shortcuts are compact horizontal chips,
+the current folder is a labeled location block, navigation actions are separate
+compact controls, and existing server directories own the main list. It browses
+the paired Mac through `WorkspaceBrowserRepository` over
+`filesystem::get_home`, `filesystem::list_dir`, and
+`filesystem::create_dir`. Hidden folders are a toolbar toggle, and inline
+folder creation selects the created folder. The selector must not restore old
+read/write/edit/search/diff/apply-patch/import or agent-execution filesystem
+behavior without a Phase 2 module contract.
 
 `CameraCaptureSheet` keeps the tap-to-sheet path light and immersive: the
 camera viewport is the sheet surface, controls layer at the bottom of that

@@ -87,6 +87,7 @@ final class NewSessionFlowTests: XCTestCase {
             "Sources/UI/Chat/Sheets/NewSessionFlow.swift",
             "Sources/UI/Chat/Sheets/NewSessionFlowTypes.swift",
             "Sources/UI/Chat/Sheets/WorkspaceSelector.swift",
+            "Sources/UI/Chat/Sheets/WorkspaceSelectorRows.swift",
             "Sources/UI/Chat/Shell/ContentView.swift",
             "Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift",
             "Sources/Engine/Protocol/Filesystem/EngineProtocolTypes+Filesystem.swift",
@@ -108,8 +109,13 @@ final class NewSessionFlowTests: XCTestCase {
             "filesystem::list_dir",
             "filesystem::create_dir",
             "showHidden",
+            "Shortcuts",
+            "Current folder",
+            "Folders",
             "New Folder",
             "FolderNameValidator",
+            "WorkspaceQuickPathPill",
+            "WorkspaceDirectoryActionPill",
             "Workspace browser is not available on this server",
         ] {
             XCTAssertTrue(
