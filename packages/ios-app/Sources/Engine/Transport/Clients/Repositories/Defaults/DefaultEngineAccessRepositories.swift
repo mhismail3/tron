@@ -261,6 +261,37 @@ final class DefaultTranscriptionRepository: TranscriptionRepository {
     }
 }
 
+// MARK: - Default Workspace Browser Repository
+
+@MainActor
+final class DefaultWorkspaceBrowserRepository: WorkspaceBrowserRepository {
+    private let client: WorkspaceBrowserClient
+
+    init(client: WorkspaceBrowserClient) {
+        self.client = client
+    }
+
+    func getHome() async throws -> WorkspaceHomeResult {
+        try await client.getHome()
+    }
+
+    func listDirectory(path: String?, showHidden: Bool) async throws -> WorkspaceDirectoryListResult {
+        try await client.listDirectory(path: path, showHidden: showHidden)
+    }
+
+    func createDirectory(
+        path: String,
+        recursive: Bool,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkspaceCreateDirectoryResult {
+        try await client.createDirectory(
+            path: path,
+            recursive: recursive,
+            idempotencyKey: idempotencyKey
+        )
+    }
+}
+
 // MARK: - Default Worker Lifecycle Repository
 
 @MainActor

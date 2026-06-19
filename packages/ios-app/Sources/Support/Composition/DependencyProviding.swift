@@ -44,6 +44,9 @@ protocol DependencyProviding: AnyObject {
     /// Local transcription repository.
     var transcriptionRepository: any TranscriptionRepository { get }
 
+    /// Server-backed workspace browser repository.
+    var workspaceBrowserRepository: any WorkspaceBrowserRepository { get }
+
     /// Worker lifecycle repository for the agent cockpit.
     var workerLifecycleRepository: any WorkerLifecycleRepository { get }
 

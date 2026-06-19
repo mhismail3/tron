@@ -8,6 +8,7 @@ struct NewSessionFlow: View {
     let connectionRepository: any AppConnectionRepository
     let modelRepository: any ModelRepository
     let sessionRepository: any NetworkSessionRepository
+    let workspaceBrowserRepository: any WorkspaceBrowserRepository
     let defaultModel: String
     let defaultWorkspace: String
     let eventStoreManager: EventStoreManager
@@ -100,7 +101,9 @@ struct NewSessionFlow: View {
             .sheet(isPresented: $showWorkspaceSelector) {
                 WorkspaceSelector(
                     selectedPath: $workingDirectory,
-                    options: workspaceSelectionOptions
+                    options: workspaceSelectionOptions,
+                    connectionRepository: connectionRepository,
+                    workspaceBrowserRepository: workspaceBrowserRepository
                 )
             }
             .sheet(isPresented: $showModelPicker) {

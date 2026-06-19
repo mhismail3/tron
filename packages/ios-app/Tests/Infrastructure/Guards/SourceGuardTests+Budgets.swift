@@ -12,7 +12,7 @@ extension SourceGuardTests {
             HierarchyBudget(
                 relativePath: "Sources/Engine/Transport/Clients",
                 minimumFileCount: 21,
-                maximumFileCount: 25,
+                maximumFileCount: 26,
                 maximumLineCount: hardLineLimit,
                 allowedImmediateSubdirectories: ["Repositories"],
                 requiredFiles: [
@@ -20,6 +20,7 @@ extension SourceGuardTests {
                     "Sources/Engine/Transport/Clients/MessageClient.swift",
                     "Sources/Engine/Transport/Clients/LogsClient.swift",
                     "Sources/Engine/Transport/Clients/TranscriptionClient.swift",
+                    "Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift",
                 ]
             ),
             HierarchyBudget(

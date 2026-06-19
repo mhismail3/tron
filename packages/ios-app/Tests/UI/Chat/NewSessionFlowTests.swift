@@ -82,12 +82,14 @@ final class NewSessionFlowTests: XCTestCase {
         XCTAssertEqual(options[1].title, "other")
     }
 
-    func testWorkspaceSelectorStaysLocalSuggestionPlusManualPath() throws {
+    func testWorkspaceSelectorUsesServerBackedBrowserWithLocalQuickPaths() throws {
         let combined = try [
             "Sources/UI/Chat/Sheets/NewSessionFlow.swift",
             "Sources/UI/Chat/Sheets/NewSessionFlowTypes.swift",
             "Sources/UI/Chat/Sheets/WorkspaceSelector.swift",
             "Sources/UI/Chat/Shell/ContentView.swift",
+            "Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift",
+            "Sources/Engine/Protocol/Filesystem/EngineProtocolTypes+Filesystem.swift",
         ].map { relativePath in
             try String(
                 contentsOf: iosAppRoot().appendingPathComponent(relativePath),
@@ -99,32 +101,53 @@ final class NewSessionFlowTests: XCTestCase {
             "WorkspaceSelectionOptionBuilder.options(",
             "defaultWorkspace: dependencies.quickSessionWorkspace",
             "options: workspaceSelectionOptions",
-            "Text(\"Suggested\")",
-            "Text(\"Manual path\")",
+            "workspaceBrowserRepository: dependencies.workspaceBrowserRepository",
+            "WorkspaceBrowserClient",
+            "WorkspaceBrowserRepository",
+            "filesystem::get_home",
+            "filesystem::list_dir",
+            "filesystem::create_dir",
+            "showHidden",
+            "New Folder",
+            "FolderNameValidator",
         ] {
             XCTAssertTrue(
                 combined.contains(fragment),
-                "new-session workspace selector missing current local suggestion marker: \(fragment)"
+                "workspace selector missing restored browser marker: \(fragment)"
             )
         }
 
         for fragment in [
-            "Engine" + "Client",
-            "Filesystem" + "Client",
-            "." + "filesystem",
-            "get" + "Home(",
-            "list" + "Directory(",
-            "create" + "Directory(",
-            "Directory" + "Entry",
-            "New" + " Folder",
-            "show" + "Hidden",
-            "Folder" + "Name" + "Validator",
+            "read_file",
+            "write_file",
+            "edit_file",
+            "search_text",
+            "apply_patch",
+            "Sources/Engine/Network/Clients/" + "Filesystem" + "Client.swift",
+            "Sources/Engine/Protocol/DTOs/EngineProtocolTypes+Filesystem.swift",
         ] {
             XCTAssertFalse(
                 combined.contains(fragment),
-                "new-session workspace selector must not restore the old filesystem browser surface: \(fragment)"
+                "workspace selector restored a broad legacy filesystem surface: \(fragment)"
             )
         }
+    }
+
+    func testFolderNameValidatorAllowsHiddenFoldersButRejectsPathSegments() {
+        XCTAssertNil(FolderNameValidator.validationError(for: "Project"))
+        XCTAssertNil(FolderNameValidator.validationError(for: ".config"))
+        XCTAssertEqual(
+            FolderNameValidator.validationError(for: " "),
+            "Folder name cannot be empty"
+        )
+        XCTAssertEqual(
+            FolderNameValidator.validationError(for: ".."),
+            "Folder name cannot be .."
+        )
+        XCTAssertEqual(
+            FolderNameValidator.validationError(for: "parent/child"),
+            "Folder name cannot contain /"
+        )
     }
 
     func testPreferredModelKeepsAvailableDefaultModel() {

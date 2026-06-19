@@ -385,7 +385,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "device",
         "display",
         "events",
-        "filesystem",
         "git",
         "import",
         "job",
@@ -408,6 +407,32 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         assert!(
             !domain_root.join(forbidden).exists(),
             "old product domain was restored in baseline: {forbidden}"
+        );
+    }
+    let filesystem_contract = read_repo_file("packages/agent/src/domains/filesystem/contract.rs");
+    for required in [
+        "filesystem::get_home",
+        "filesystem::list_dir",
+        "filesystem::create_dir",
+    ] {
+        assert!(
+            filesystem_contract.contains(required),
+            "approved iOS workspace-browser filesystem subset missing: {required}"
+        );
+    }
+    for forbidden in [
+        "filesystem::read_file",
+        "filesystem::write_file",
+        "filesystem::edit_file",
+        "filesystem::find",
+        "filesystem::glob",
+        "filesystem::search_text",
+        "filesystem::diff",
+        "filesystem::apply_patch",
+    ] {
+        assert!(
+            !filesystem_contract.contains(forbidden),
+            "Phase 1 filesystem browser must not restore old agent/tool operation: {forbidden}"
         );
     }
     assert!(

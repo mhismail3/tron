@@ -114,6 +114,10 @@ final class EngineClient: EngineTransport {
     @ObservationIgnored
     lazy var workerLifecycle: WorkerLifecycleClient = WorkerLifecycleClient(transport: self)
 
+    /// Server-backed workspace browser for human workspace selection.
+    @ObservationIgnored
+    lazy var workspaceBrowser: WorkspaceBrowserClient = WorkspaceBrowserClient(transport: self)
+
     /// Local speech-to-text operations.
     @ObservationIgnored
     lazy var transcription: TranscriptionClient = TranscriptionClient(transport: self)

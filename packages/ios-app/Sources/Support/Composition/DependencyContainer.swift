@@ -113,6 +113,9 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
     /// Local transcription repository.
     private(set) var transcriptionRepository: any TranscriptionRepository
 
+    /// Server-backed workspace browser repository.
+    private(set) var workspaceBrowserRepository: any WorkspaceBrowserRepository
+
     /// Worker lifecycle repository for the agent cockpit.
     private(set) var workerLifecycleRepository: any WorkerLifecycleRepository
 
@@ -234,6 +237,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         authRepository = DefaultAuthRepository(authClient: client.auth)
         messageRepository = DefaultMessageRepository(messageClient: client.message)
         transcriptionRepository = DefaultTranscriptionRepository(client: client.transcription)
+        workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: client.workspaceBrowser)
         workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: client.workerLifecycle)
 
         // Wire draft store into event store manager for cleanup on session delete
@@ -475,6 +479,7 @@ final class DependencyContainer: DependencyProviding, ServerSettingsProvider, Ap
         authRepository = DefaultAuthRepository(authClient: newClient.auth)
         messageRepository = DefaultMessageRepository(messageClient: newClient.message)
         transcriptionRepository = DefaultTranscriptionRepository(client: newClient.transcription)
+        workspaceBrowserRepository = DefaultWorkspaceBrowserRepository(client: newClient.workspaceBrowser)
         workerLifecycleRepository = DefaultWorkerLifecycleRepository(client: newClient.workerLifecycle)
         eventStoreManager.loadSessions()
         activeServerSelectionVersion += 1

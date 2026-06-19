@@ -27,7 +27,9 @@ struct AgentSettingsPage: View {
                         dependencies.quickSessionWorkspace = newValue
                         updateServerSetting(.defaultWorkspace(newValue))
                     }
-                )
+                ),
+                connectionRepository: dependencies.connectionRepository,
+                workspaceBrowserRepository: dependencies.workspaceBrowserRepository
             )
         }
         .sheet(isPresented: $showDefaultModelPicker) {

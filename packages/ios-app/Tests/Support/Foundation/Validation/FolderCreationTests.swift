@@ -4,7 +4,7 @@ import XCTest
 /// Tests for folder creation feature - specifically the folder name validation logic
 /// These tests verify:
 /// - Valid folder name acceptance
-/// - Invalid folder name rejection (empty, hidden, invalid characters)
+/// - Invalid folder name rejection (empty and path traversal/segment separators)
 /// - Path construction correctness
 final class FolderCreationTests: XCTestCase {
 
@@ -45,39 +45,15 @@ final class FolderCreationTests: XCTestCase {
     }
 
     func testHiddenFolderNameDot() {
-        XCTAssertFalse(FolderNameValidator.isValid(".hidden"))
+        XCTAssertTrue(FolderNameValidator.isValid(".hidden"))
     }
 
     func testHiddenFolderNameDoubleDot() {
         XCTAssertFalse(FolderNameValidator.isValid(".."))
     }
 
-    func testInvalidCharacterLessThan() {
-        XCTAssertFalse(FolderNameValidator.isValid("folder<name"))
-    }
-
-    func testInvalidCharacterGreaterThan() {
-        XCTAssertFalse(FolderNameValidator.isValid("folder>name"))
-    }
-
-    func testInvalidCharacterColon() {
-        XCTAssertFalse(FolderNameValidator.isValid("folder:name"))
-    }
-
-    func testInvalidCharacterQuote() {
-        XCTAssertFalse(FolderNameValidator.isValid("folder\"name"))
-    }
-
-    func testInvalidCharacterPipe() {
-        XCTAssertFalse(FolderNameValidator.isValid("folder|name"))
-    }
-
-    func testInvalidCharacterQuestion() {
-        XCTAssertFalse(FolderNameValidator.isValid("folder?name"))
-    }
-
-    func testInvalidCharacterAsterisk() {
-        XCTAssertFalse(FolderNameValidator.isValid("folder*name"))
+    func testPathSeparatorIsInvalid() {
+        XCTAssertFalse(FolderNameValidator.isValid("parent/child"))
     }
 
     // MARK: - Trimming Behavior
@@ -87,9 +63,8 @@ final class FolderCreationTests: XCTestCase {
         XCTAssertTrue(FolderNameValidator.isValid("  valid-name  "))
     }
 
-    func testTrimmedResultsInHidden() {
-        // After trimming, if name starts with dot, it should be invalid
-        XCTAssertFalse(FolderNameValidator.isValid("  .hidden  "))
+    func testTrimmedHiddenNameIsAllowed() {
+        XCTAssertTrue(FolderNameValidator.isValid("  .hidden  "))
     }
 
     // MARK: - Error Message Tests
@@ -101,17 +76,17 @@ final class FolderCreationTests: XCTestCase {
         )
     }
 
-    func testHiddenNameErrorMessage() {
+    func testDotDotNameErrorMessage() {
         XCTAssertEqual(
-            FolderNameValidator.validationError(for: ".hidden"),
-            "Hidden folders not allowed"
+            FolderNameValidator.validationError(for: ".."),
+            "Folder name cannot be .."
         )
     }
 
-    func testInvalidCharacterErrorMessage() {
+    func testPathSeparatorErrorMessage() {
         XCTAssertEqual(
-            FolderNameValidator.validationError(for: "test<name"),
-            "Name contains invalid characters"
+            FolderNameValidator.validationError(for: "parent/child"),
+            "Folder name cannot contain /"
         )
     }
 

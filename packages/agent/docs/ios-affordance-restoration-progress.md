@@ -631,22 +631,27 @@ Effect on Phase 1 queue:
 - This was accepted off-plan cleanup/polish of existing restored shell surfaces.
   It does not consume or replace Slice 6.
 
-### Accepted Follow-Up Work: New-Session Workspace Selector
+### Accepted Follow-Up Work: Server-Backed Workspace Browser
 
 Branch:
 `codex/ios-affordance-restoration-map-current`
 
 User-facing state:
 
-- Tapping the Workspace card in the New Session sheet now opens a selector
-  with Suggested and Manual path sections.
-- Suggested choices are built from the configured quick/default workspace plus
-  recent session workspaces reconstructed from the current cached session list.
-- Tapping a suggested row selects that workspace immediately. The manual field
-  remains available for entering any path that exists on the paired Mac.
-- The New Session sheet still keeps the compact recent-workspace chips as a
-  fast inline path, but the selector itself is now the richer workspace-picking
-  surface.
+- Tapping the Workspace card in the New Session sheet opens a server-backed
+  workspace browser for the paired Mac.
+- The selector still starts with useful quick paths: configured quick/default
+  workspace, recent session workspaces reconstructed from current cached
+  sessions, and server-returned home suggestions.
+- The main selector browses directories from the paired Mac through
+  `filesystem::get_home` and `filesystem::list_dir`.
+- The toolbar hidden-files toggle reloads the current directory with dot
+  folders included or excluded.
+- The inline New Folder row creates a folder through `filesystem::create_dir`,
+  then selects the created folder and dismisses the sheet, matching the old
+  useful picker workflow while using current transport/repository ownership.
+- The same selector is reused by New Session, onboarding default-workspace
+  setup, and Agent settings default-workspace selection.
 
 Data ownership:
 
@@ -654,27 +659,34 @@ Data ownership:
   mirrors current server settings.
 - Recent workspaces come from current cached session projections via
   `CachedSession.recentWorkspaces`.
-- Manual entry remains local sheet state until `session::create` receives the
-  selected working directory.
+- Home path, directory entries, hidden-entry filtering, and folder creation are
+  server-owned facts/actions through the narrow `filesystem` workspace-browser
+  domain.
+- iOS consumes those facts through `WorkspaceBrowserRepository`, so SwiftUI
+  surfaces do not depend on concrete transport clients.
 
 Rejected or deferred:
 
-- The old remote filesystem browser, hidden-file toggle, directory navigation,
-  and inline folder creation were not restored. Those depended on the deleted
-  typed filesystem client/capability surface and remain Phase 2 work until a
-  current server/resource contract owns them.
-- No public `/engine` method, filesystem DTO, filesystem client, folder-create
-  action, agent-execution surface, or fake workspace validation was added.
+- Restored now: only `filesystem::get_home`, `filesystem::list_dir`, and
+  `filesystem::create_dir`.
+- Still deferred to Phase 2: old model/agent-facing filesystem read, write,
+  edit, find, glob, text search, diff, apply-patch, import, worktree, git, and
+  broader file-management/tool surfaces.
+- The restored `filesystem` domain is not provider-visible tool discovery and
+  does not expand `capability::execute`.
+- No fake validation, fake workspace analytics, import tree, session tree, or
+  source-control workspace surface was restored.
 
 Validation evidence:
 
-- `xcodebuild test -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/NewSessionFlowTests -only-testing:TronMobileTests/SourceGuardTests -quiet`
-  passed after moving the static guard into the new-session feature tests so
-  the broad primitive-shell absence guard stayed below its near-budget line
-  threshold.
-- Focused new-session tests cover default/recent option ordering, trimming,
-  deduplication, configured default workspace injection, and absence of the old
-  filesystem browser/client surface.
+- Focused validation for this follow-up must include Rust filesystem service
+  tests, New Session workspace browser tests, source guards, XcodeGen drift
+  check, `ios_affordance_restoration_map_invariants`,
+  `baseline_pre_restoration_closure_invariants`, personal-info guard,
+  `git diff --check`, and ignored-file checks.
+- New-session tests cover default/recent option ordering, trimming,
+  deduplication, configured default workspace injection, restored
+  workspace-browser markers, and absence of broad old filesystem operations.
 
 ### Phase 1 Slice 6: Notification/Inbox Concept Review
 
@@ -803,6 +815,9 @@ Closed Phase 1 work:
   banner, moved Runtime Cockpit access into Servers -> Diagnostics, removed the
   temporary chat loading row, and retained inset liquid-glass interactive
   session rows with `New Session` untitled rows.
+- The server-backed workspace browser follow-up restored paired-Mac directory
+  navigation, hidden-folder visibility, and folder creation for workspace
+  selection without restoring broad agent filesystem tools.
 - Slice 6 reviewed notification/inbox affordances and deferred them until a
   server-owned APNs/device/capability resource mechanism exists.
 

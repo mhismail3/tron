@@ -112,19 +112,21 @@ Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  InputBar -> native attachment menu -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
 Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> ComposerMicRecorder -> transcription::audio -> InputBar
-New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> SessionRepository -> session::create
+New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 
-`WorkspaceSelector` is a local/session-fact selector, not a restored remote
-filesystem browser. It offers the configured quick/default workspace, recent
-workspaces reconstructed from cached sessions, and a manual path field for paths
-that exist on the paired Mac. It must not call old filesystem browsing methods,
-create folders, or restore the deleted typed filesystem client until a future
-Phase 2 server/resource contract explicitly owns that capability.
+`WorkspaceSelector` is a narrow server-backed workspace browser, not the old
+general filesystem tool surface. It offers configured quick/default workspace
+and recent-workspace shortcuts, then browses the paired Mac through
+`WorkspaceBrowserRepository` over `filesystem::get_home`,
+`filesystem::list_dir`, and `filesystem::create_dir`. Hidden folders are a
+toolbar toggle, and inline folder creation selects the created folder. The
+selector must not restore old read/write/edit/search/diff/apply-patch/import or
+agent-execution filesystem behavior without a Phase 2 module contract.
 
 `CameraCaptureSheet` keeps the tap-to-sheet path light and immersive: the
 camera viewport is the sheet surface, controls layer at the bottom of that

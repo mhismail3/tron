@@ -233,6 +233,7 @@ struct ContentView: View {
             connectionRepository: dependencies.connectionRepository,
             modelRepository: dependencies.modelRepository,
             sessionRepository: dependencies.sessionRepository,
+            workspaceBrowserRepository: dependencies.workspaceBrowserRepository,
             defaultModel: defaultModel,
             defaultWorkspace: dependencies.quickSessionWorkspace,
             eventStoreManager: eventStoreManager,

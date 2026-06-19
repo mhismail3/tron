@@ -52,7 +52,9 @@ struct WorkspaceSetupOnboardingPage: View {
         }
         .sheet(isPresented: $showWorkspaceSelector, onDismiss: saveWorkspace) {
             WorkspaceSelector(
-                selectedPath: $selectedPath
+                selectedPath: $selectedPath,
+                connectionRepository: dependencies.connectionRepository,
+                workspaceBrowserRepository: dependencies.workspaceBrowserRepository
             )
         }
         .onAppear {

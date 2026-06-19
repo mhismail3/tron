@@ -3,7 +3,8 @@
 //! Each declared child module is part of the retained bare loop: startup and
 //! system metadata, provider/auth/settings setup, session/message/log truth,
 //! model providers, blobs, and the single model-facing
-//! `capability::execute` primitive. Product/tool domains are intentionally not
+//! `capability::execute` primitive, plus the narrow iOS workspace-browser
+//! filesystem domain. Product/tool domains are otherwise intentionally not
 //! declared on this branch.
 //!
 //! ## Submodules
@@ -12,6 +13,7 @@
 //! |--------|---------|
 //! | `capability` | Single model-facing `execute` primitive |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
+//! | `filesystem` | Human-facing workspace picker: home, directory list, folder creation |
 //! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, transcription, and worker lifecycle |
 //!
 //! Each retained domain `contract.rs` is the local source of truth for that
@@ -44,7 +46,9 @@
 //!
 //! Product/tool domains retired by the primitive teardown must remain absent
 //! from this module tree and startup registration unless a restoration slice
-//! reintroduces the behavior as a narrow worker-owned contract. The
+//! reintroduces the behavior as a narrow worker-owned contract. The filesystem
+//! domain is restored only for the iOS workspace selector and must not regain
+//! agent read/write/search/diff/apply-patch tools in Phase 1. The
 //! transcription domain is restored only as local speech-to-text for composer
 //! input; saved voice notes and media storage remain absent. The worker
 //! lifecycle domain is the post-baseline package/launch substrate for
@@ -63,6 +67,7 @@ pub mod agent;
 pub mod auth;
 pub mod blob;
 pub mod capability;
+pub mod filesystem;
 pub mod logs;
 pub mod message;
 pub mod model;

@@ -650,7 +650,7 @@ each domain's `worker_module(...)`.
 topics; each domain then keeps executable bodies under behavior owners rather
 than a shared boilerplate shape. Examples: `domains/agent/prompt`,
 `domains/agent/loop`, `domains/agent/context`, `domains/auth/oauth`,
-`domains/auth/credentials`, `domains/model/routing`,
+`domains/auth/credentials`, `domains/filesystem`, `domains/model/routing`,
 `domains/model/protocol`, and `domains/session/lifecycle`,
 `domains/session/query`, `domains/session/reconstruction`. Runtime support is
 split the same way in domain-owned folders such as `domains/agent/runtime/*`,
@@ -862,14 +862,18 @@ Current primitive operations:
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 
-Startup registration currently keeps only loop infrastructure domains:
-`system`, `capability`, `blob`, `message`, `settings`, `auth`, `agent`,
-`logs`, `session`, `transcription`, and model-provider modules. The post-baseline
+Startup registration currently keeps loop infrastructure domains:
+`system`, `capability`, `filesystem`, `blob`, `message`, `settings`, `auth`,
+`agent`, `logs`, `session`, `transcription`, and model-provider modules. The
+`filesystem` domain is a narrow iOS workspace-browser exception limited to
+`filesystem::get_home`, `filesystem::list_dir`, and `filesystem::create_dir`;
+agent-facing file read/write/process behavior remains under
+`capability::execute`. The post-baseline
 `worker_lifecycle` owner is the explicit exception for local package
 proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before
 recording, the server reports explicit disabled/loading/ready/failed model
-state, and no media or voice notes are stored. Product/tool domains such as `filesystem`,
+state, and no media or voice notes are stored. Product/tool domains such as
 `process`, `program`, `web`, `git`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, `notifications`, `voice_notes`, and media/import surfaces are
@@ -1404,8 +1408,9 @@ packages/ios-app/Sources/
   collapsible workspace-grouped session navigation with compact one-line rows
   that use inset liquid-glass interactive containers, prefer generated session
   titles before prompt fallbacks, and show untitled rows as `New Session`,
-  new-session workspace selection from the configured default workspace,
-  recent sessions, or a manual paired-Mac path, prompt input with clearable
+  server-backed new-session workspace selection with configured/recent
+  shortcuts, paired-Mac directory browsing, hidden-folder visibility, and
+  inline folder creation, prompt input with clearable
   device-local recent-input reuse, the
   functional-only native composer attachment menu that preserves keyboard
   focus while layering native camera/photo/file pickers above it, composer mic

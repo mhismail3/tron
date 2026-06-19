@@ -314,6 +314,19 @@ protocol TranscriptionRepository: AnyObject {
     func listModels() async throws -> TranscriptionModelsResult
 }
 
+// MARK: - Workspace Browser Repository
+
+@MainActor
+protocol WorkspaceBrowserRepository: AnyObject {
+    func getHome() async throws -> WorkspaceHomeResult
+    func listDirectory(path: String?, showHidden: Bool) async throws -> WorkspaceDirectoryListResult
+    func createDirectory(
+        path: String,
+        recursive: Bool,
+        idempotencyKey: EngineIdempotencyKey
+    ) async throws -> WorkspaceCreateDirectoryResult
+}
+
 // MARK: - Worker Lifecycle Repository
 
 /// Black-box worker lifecycle contract for the agent cockpit.
