@@ -70,13 +70,13 @@ struct WorkspaceDirectoryActionPill: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: 38, alignment: .leading)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
         .glassEffect(
             .regular.tint(Color.tronEmerald.opacity(0.09)).interactive(),
-            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            in: Capsule()
         )
         .accessibilityLabel(subtitle.map { "\(title), \($0)" } ?? title)
     }

@@ -111,8 +111,8 @@ struct WorkspaceSelector: View {
                     quickPathSection
                 }
 
-                locationSection
                 actionSection
+                locationSection
                 directorySection
             }
             .padding(.horizontal, 20)

@@ -122,9 +122,9 @@ Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> AgentCockpitProjec
 `WorkspaceSelector` is a narrow server-backed workspace browser, not the old
 general filesystem tool surface. Its hierarchy is navigation-first: configured
 quick/default and recent workspace shortcuts are compact horizontal chips,
-the current folder is listed as a plain left-aligned path, navigation actions
-are separate compact single-line controls, and existing server directories own
-the main list. It browses
+navigation actions are separate compact single-line capsule controls, the
+current folder is listed as a plain left-aligned path, and existing server
+directories own the main list. It browses
 the paired Mac through `WorkspaceBrowserRepository` over
 `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`. Hidden folders are toggled from the compact action
