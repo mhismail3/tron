@@ -155,10 +155,13 @@ pub use durability::queue::{
     MAX_QUEUE_PAYLOAD_BYTES, QueueAttemptOutcome, QueueItemStatus,
 };
 pub(crate) use durability::replay::EngineReplaySnapshot;
+#[cfg(test)]
+pub(crate) use durability::resources::builtin_resource_type_definitions;
 pub use durability::resources::{
-    CATALOG_DISCOVERY_REPORT_KIND, CATALOG_DISCOVERY_REPORT_SCHEMA_ID, CreateResource,
-    EngineResource, EngineResourceEvent, EngineResourceInspection, EngineResourceLink,
-    EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
+    APPROVAL_DECISION_KIND, APPROVAL_DECISION_SCHEMA_ID, APPROVAL_REQUEST_KIND,
+    APPROVAL_REQUEST_SCHEMA_ID, CATALOG_DISCOVERY_REPORT_KIND, CATALOG_DISCOVERY_REPORT_SCHEMA_ID,
+    CreateResource, EngineResource, EngineResourceEvent, EngineResourceInspection,
+    EngineResourceLink, EngineResourceLocation, EngineResourceScope, EngineResourceTypeDefinition,
     EngineResourceVersion, EngineResourceVersioningMode, LinkResources, ListResources,
     RegisterResourceType, UI_SURFACE_KIND, UpdateResource,
 };

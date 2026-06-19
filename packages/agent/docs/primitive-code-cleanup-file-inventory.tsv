@@ -1731,6 +1731,7 @@ packages/agent/src/domains/approval/contract.rs	retain	phase2 approval	P2AER-S2	
 packages/agent/src/domains/approval/errors.rs	retain	phase2 approval	P2AER-S2	Approval errors retained for malformed-request and fail-closed failure semantics.
 packages/agent/src/domains/approval/explanation.rs	retain	phase2 approval	P2AER-S2	Approval explanation helpers retained for replay and evidence details on every check outcome.
 packages/agent/src/domains/approval/handlers.rs	retain	phase2 approval	P2AER-S2	Approval handlers retained as narrow invocation entrypoints for the approval package.
+packages/agent/src/domains/approval/schema_tests.rs	retain	phase2 approval	P2AER-S2-hardening	Approval schema alignment tests retained to guard resource kind, schema id, output contract, and required field drift.
 packages/agent/src/domains/approval/service.rs	retain	phase2 approval	P2AER-S2	Approval service retained for resource-backed requests, decisions, streams, and fail-closed checks.
 packages/agent/src/domains/approval/support.rs	retain	phase2 approval	P2AER-S2	Approval support helpers retained for payload parsing, stream events, idempotency, and resource refs.
 packages/agent/src/domains/approval/tests.rs	retain	phase2 approval	P2AER-S2	Approval focused tests retained for durable resources, idempotent decisions, and fail-closed checks.

@@ -183,6 +183,11 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "riskClass",
                     "createdAt",
                     "expiresAt",
+                    "freshness",
+                    "evidenceRefs",
+                    "resourceSelectors",
+                    "traceRefs",
+                    "replayRefs",
                     "denialBehavior",
                     "idempotency",
                     "revision"
@@ -238,6 +243,10 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                     "action",
                     "scope",
                     "riskClass",
+                    "evidenceRefs",
+                    "resourceSelectors",
+                    "traceRefs",
+                    "replayRefs",
                     "denialBehavior",
                     "idempotency",
                     "revision"

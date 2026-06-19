@@ -13,6 +13,7 @@
 //! | `contract` | Request, decision, and check capability contracts |
 //! | `errors` | Domain-local error helpers |
 //! | `handlers` | Operation binding table |
+//! | `schema_tests` | Test-only resource schema drift guards |
 //! | `service` | Resource creation, decision recording, and checks |
 //! | `support` | Payload parsing, lifecycle-stream, idempotency, and resource-ref helpers |
 //! | `types` | Serializable request/decision/check records |
@@ -24,6 +25,10 @@
 //! authority grants resolved by the engine host before handlers run.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
+pub(crate) use crate::engine::{
+    APPROVAL_DECISION_KIND, APPROVAL_DECISION_SCHEMA_ID, APPROVAL_REQUEST_KIND,
+    APPROVAL_REQUEST_SCHEMA_ID,
+};
 
 pub(crate) mod contract;
 mod errors;
@@ -37,11 +42,6 @@ pub(crate) const WORKER: &str = "approval";
 pub(crate) const APPROVAL_LIFECYCLE_TOPIC: &str = "approval.lifecycle";
 pub(crate) const READ_SCOPE: &str = "approval.read";
 pub(crate) const WRITE_SCOPE: &str = "approval.write";
-
-pub(crate) const APPROVAL_REQUEST_KIND: &str = "approval_request";
-pub(crate) const APPROVAL_REQUEST_SCHEMA_ID: &str = "tron.resource.approval_request.v1";
-pub(crate) const APPROVAL_DECISION_KIND: &str = "approval_decision";
-pub(crate) const APPROVAL_DECISION_SCHEMA_ID: &str = "tron.resource.approval_decision.v1";
 
 pub(crate) const REQUEST_FUNCTION: &str = "approval::request";
 pub(crate) const DECIDE_FUNCTION: &str = "approval::decide";
@@ -72,5 +72,7 @@ pub(crate) fn worker_module(
     )
 }
 
+#[cfg(test)]
+mod schema_tests;
 #[cfg(test)]
 mod tests;

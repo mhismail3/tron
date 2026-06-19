@@ -1063,6 +1063,7 @@ packages/agent/src/domains/approval/contract.rs	rust	contract	agent:approval	may
 packages/agent/src/domains/approval/errors.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/approval/explanation.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/approval/handlers.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/approval/schema_tests.rs	rust	test-support	agent:approval	test-only schema alignment guard; production code must not depend on it
 packages/agent/src/domains/approval/service.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/approval/support.rs	rust	implementation	agent:approval	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/approval/tests.rs	rust	test-support	agent:approval	test-only helper; production code must not depend on it

@@ -126,7 +126,9 @@ planned until their own contract work lands.
 Slice 2 is represented as current backend evidence on rows `P2AER-INV-011`
 and `P2AER-INV-034`: approval requests, approval decisions, lifecycle stream
 events, idempotent decision recording, reusable fail-closed checks, and
-replay/evidence explanations now exist as a modular approval package. The
-slice intentionally leaves native iOS approval UI, risk-class taxonomy, default
-expiry policy, interruption behavior, and per-package risky-action triggers to
-future user decisions.
+replay/evidence explanations now exist as a modular approval package. A
+post-slice hardening guard prevents approval resource kind/schema ids, output
+contracts, and persisted payload required fields from drifting against the
+engine resource-kernel definitions. The slice intentionally leaves native iOS
+approval UI, risk-class taxonomy, default expiry policy, interruption behavior,
+and per-package risky-action triggers to future user decisions.
