@@ -316,6 +316,9 @@ prompt preview, then `New Session` for untitled new rows. `SessionSidebar`
 composes the dashboard surface and shell actions; `SessionDashboard.swift` owns
 workspace grouping, expansion state, row status mapping, interactive row
 liquid-glass containers, and header/row presentation metrics.
+`NewSessionFlow` owns the new-session sheet workflow and presents with medium
+and large detents so the sheet starts compactly while still allowing expansion
+for workspace and model selection.
 
 Server settings shown in the iOS settings UI are snapshots from
 `settings::get`/`settings::reset`; local state exists only to render the active

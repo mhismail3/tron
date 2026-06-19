@@ -26,8 +26,8 @@ final class NewSessionFlowTests: XCTestCase {
         )
     }
 
-    func testNewSessionFlowUsesLargeInitialPresentation() {
-        XCTAssertEqual(NewSessionFlowPresentation.detents, [.large])
+    func testNewSessionFlowStartsAtMediumPresentation() {
+        XCTAssertEqual(NewSessionFlowPresentation.detents, [.medium, .large])
     }
 
     func testCreateIntentRequiresWorkspaceAndModel() {

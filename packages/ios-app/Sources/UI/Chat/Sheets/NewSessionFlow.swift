@@ -1,7 +1,7 @@
 import SwiftUI
 
 internal enum NewSessionFlowPresentation {
-    static let detents: Set<PresentationDetent> = [.large]
+    static let detents: Set<PresentationDetent> = [.medium, .large]
 }
 
 struct NewSessionFlow: View {
