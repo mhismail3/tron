@@ -24,7 +24,7 @@ use crate::shared::server::failure::{
 };
 
 use metrics::{counter, histogram};
-use tracing::{debug, error, instrument, warn};
+use tracing::{error, info, instrument, trace, warn};
 
 use self::capability_invocations::CapabilityInvocationPhaseParams;
 use self::persistence::{
@@ -140,6 +140,28 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         engine_host,
     } = params;
     let turn_start = Instant::now();
+    let run_id = run_context.run_id.as_deref().unwrap_or("none");
+    let trace_id = run_context
+        .engine_trace_id
+        .as_ref()
+        .map(|id| id.as_str())
+        .unwrap_or("none");
+    let parent_invocation_id = run_context
+        .parent_invocation_id
+        .as_ref()
+        .map(|id| id.as_str())
+        .unwrap_or("none");
+    info!(
+        component = "agent.turn",
+        agent_event = "turn_entered",
+        session_id,
+        run_id,
+        trace_id,
+        parent_invocation_id,
+        turn,
+        model = %responder.model(),
+        "agent turn entered"
+    );
 
     // H15 INVARIANT: every turn-entry path must advance the context
     // manager's generation counter before any snapshot readers run, then
@@ -155,6 +177,16 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         .await
     {
         Err(e) => {
+            warn!(
+                component = "agent.turn",
+                agent_event = "pre_turn_compaction_failed",
+                session_id,
+                run_id,
+                trace_id,
+                turn,
+                error = %e,
+                "pre-turn compaction failed"
+            );
             counter!("compaction_total", "status" => "pre_turn_error").increment(1);
             return TurnResult {
                 success: false,
@@ -163,8 +195,18 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 ..Default::default()
             };
         }
-        Ok(true) => {}
-        Ok(false) => {}
+        Ok(compacted) => {
+            trace!(
+                component = "agent.turn",
+                agent_event = "pre_turn_compaction_checked",
+                session_id,
+                run_id,
+                trace_id,
+                turn,
+                compacted,
+                "pre-turn compaction checked"
+            );
+        }
     }
 
     // 2. Emit TurnStart and persist (TS persists stream.turn_start events)
@@ -178,7 +220,16 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
         run_context.parent_invocation_id.as_ref(),
     )
     .await;
-    debug!(session_id, turn, "turn started");
+    info!(
+        component = "agent.turn",
+        agent_event = "turn_started_event_recorded",
+        session_id,
+        run_id,
+        trace_id,
+        parent_invocation_id,
+        turn,
+        "turn start persisted and broadcast"
+    );
 
     let primitive_surface =
         match resolve_provider_primitive_surface(engine_host, session_id, workspace_id).await {
@@ -212,6 +263,17 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
                 };
             }
         };
+    info!(
+        component = "agent.turn",
+        agent_event = "primitive_surface_resolved",
+        session_id,
+        run_id,
+        trace_id,
+        turn,
+        capability_count = primitive_surface.capabilities.len(),
+        turn_stopping_capability_count = primitive_surface.turn_stopping_capabilities.len(),
+        "provider primitive surface resolved"
+    );
     // 3. Build context (base from CM, external fields from RunContext/params)
     let context = build_turn_context(
         context_manager,
@@ -259,6 +321,16 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             };
         }
     };
+    trace!(
+        component = "agent.provider",
+        agent_event = "model_provider_request_audit_built",
+        session_id,
+        run_id,
+        trace_id,
+        turn,
+        model = %responder.model(),
+        "model provider request audit built"
+    );
     if let Err(error) = persist_model_provider_request_audit(
         persister,
         session_id,
@@ -293,7 +365,27 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             ..Default::default()
         };
     }
+    info!(
+        component = "agent.provider",
+        agent_event = "model_provider_request_audit_persisted",
+        session_id,
+        run_id,
+        trace_id,
+        turn,
+        model = %responder.model(),
+        "model provider request audit persisted"
+    );
 
+    info!(
+        component = "agent.provider",
+        agent_event = "model_response_requested",
+        session_id,
+        run_id,
+        trace_id,
+        turn,
+        model = %responder.model(),
+        "model response requested"
+    );
     let response = match responder.respond(model_request).await {
         Ok(response) => response,
         Err(error) => {
@@ -330,6 +422,18 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     let provider_type = response_info.provider_type;
     let model_name = response_info.model;
     let stream = response.stream;
+    info!(
+        component = "agent.provider",
+        agent_event = "model_stream_opened",
+        session_id,
+        run_id,
+        trace_id,
+        turn,
+        provider = provider_name,
+        provider_type = %provider_type.as_str(),
+        model = %model_name,
+        "model response stream opened"
+    );
 
     // 5. Create streaming journal for crash recovery.
     //
@@ -372,6 +476,15 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             };
         }
     };
+    trace!(
+        component = "agent.stream",
+        agent_event = "streaming_journal_created",
+        session_id,
+        run_id,
+        trace_id,
+        turn,
+        "streaming journal created"
+    );
 
     // 6. Process stream (drain after turn-stopping capabilities to capture token usage cleanly)
     let stream_result = match stream_processor::process_stream_with_trace(
@@ -409,6 +522,22 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             };
         }
     };
+    info!(
+        component = "agent.stream",
+        agent_event = "model_stream_completed",
+        session_id,
+        run_id,
+        trace_id,
+        turn,
+        provider = provider_name,
+        model = %model_name,
+        stop_reason = %stream_result.stop_reason,
+        capability_invocation_count = stream_result.capability_invocations.len(),
+        has_token_usage = stream_result.token_usage.is_some(),
+        ttft_ms = stream_result.ttft_ms.unwrap_or_default(),
+        interrupted = stream_result.interrupted,
+        "model response stream completed"
+    );
 
     // Record time-to-first-token if available
     if let Some(ttft) = stream_result.ttft_ms {
@@ -530,6 +659,18 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
             ..Default::default()
         };
     }
+    info!(
+        component = "agent.turn",
+        agent_event = "assistant_message_persisted",
+        session_id,
+        run_id,
+        trace_id,
+        turn,
+        model = %model_name,
+        has_thinking,
+        has_token_usage = stream_result.token_usage.is_some(),
+        "assistant message persisted"
+    );
 
     // Persist succeeded — safe to commit the assistant turn to local context
     // and tell iOS the response is complete.
@@ -600,8 +741,13 @@ pub async fn execute_turn(params: TurnParams<'_>) -> TurnResult {
     )
     .await;
 
-    debug!(
+    info!(
+        component = "agent.turn",
+        agent_event = "turn_completed",
         session_id,
+        run_id,
+        trace_id,
+        parent_invocation_id,
         turn,
         duration_ms = duration,
         model = %model_name,

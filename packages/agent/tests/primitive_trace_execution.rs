@@ -2,6 +2,8 @@
 
 mod primitive_trace_execution_support;
 use primitive_trace_execution_support::*;
+use tracing::Level;
+use tron::shared::observability::test_utils::{CapturedEvent, capture_global_logs};
 
 #[tokio::test]
 async fn execute_replay_manifest_is_read_only_and_does_not_create_trace_record() {
@@ -123,6 +125,97 @@ async fn execute_catalog_search_does_not_require_working_directory_metadata() {
     assert_eq!(
         details["catalogDiscovery"]["continuity"]["reportResourceKind"],
         "catalog_discovery_report"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn execute_catalog_search_emits_structured_agent_logs() {
+    let logs = capture_global_logs();
+    let runtime = test_runtime();
+    let workspace = tempfile::tempdir().unwrap();
+    let created = runtime
+        .ctx
+        .event_store
+        .create_session(
+            "gpt-5.5",
+            workspace.path().to_str().unwrap(),
+            Some("catalog discovery logs"),
+            Some("openai"),
+        )
+        .unwrap();
+    let trace_id = TraceId::generate();
+    let actor_id = ActorId::new(format!("agent:{}", created.session.id)).unwrap();
+    let grant_id = derive_capability_execute_grant(
+        &runtime.ctx,
+        &actor_id,
+        trace_id.clone(),
+        &created.session.id,
+        &created.session.workspace_id,
+        workspace.path().to_str().unwrap(),
+        "provider-call-catalog-log-1",
+        "none",
+    )
+    .await;
+
+    let value = invoke_execute(
+        &runtime.ctx,
+        json!({
+            "operation": "catalog_search",
+            "text": "catalog",
+            "includeProtectedCounts": true
+        }),
+        CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id.clone())
+            .with_scope("capability.execute")
+            .with_session_id(created.session.id.clone())
+            .with_workspace_id(created.session.workspace_id.clone())
+            .with_idempotency_key("trace-catalog-search-log-1")
+            .with_runtime_metadata(
+                RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
+                "provider-call-catalog-log-1",
+            )
+            .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
+            .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
+            .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, "run_catalog_search_log_test")
+            .with_runtime_metadata(RUNTIME_METADATA_TURN, "1"),
+    )
+    .await;
+
+    let result: CapabilityResult = serde_json::from_value(value).unwrap();
+    assert_eq!(
+        result.details.as_ref().unwrap()["primitiveOperation"],
+        "catalog_search"
+    );
+
+    let events = logs.events();
+    assert_agent_log(
+        &events,
+        Level::INFO,
+        "execute_operation_started",
+        &[
+            ("operation", "catalog_search"),
+            ("session_id", created.session.id.as_str()),
+            ("trace_id", trace_id.as_str()),
+        ],
+    );
+    assert_agent_log(
+        &events,
+        Level::INFO,
+        "execute_trace_record_started",
+        &[
+            ("operation", "catalog_search"),
+            ("session_id", created.session.id.as_str()),
+            ("provider_invocation_id", "provider-call-catalog-log-1"),
+        ],
+    );
+    assert_agent_log(
+        &events,
+        Level::INFO,
+        "execute_operation_completed",
+        &[
+            ("operation", "catalog_search"),
+            ("session_id", created.session.id.as_str()),
+            ("status", "ok"),
+        ],
     );
 }
 
@@ -630,5 +723,29 @@ async fn execute_process_run_requires_none_network_policy() {
     assert!(
         error.contains("networkPolicy none"),
         "process_run without none network policy must fail closed, got: {error}"
+    );
+}
+
+fn assert_agent_log(
+    events: &[CapturedEvent],
+    level: Level,
+    agent_event: &str,
+    fields: &[(&str, &str)],
+) {
+    let matches = events.iter().any(|event| {
+        event.level == level
+            && event
+                .fields
+                .iter()
+                .any(|(key, value)| key == "agent_event" && value == agent_event)
+            && fields.iter().all(|(expected_key, expected_value)| {
+                event.fields.iter().any(|(key, value)| {
+                    key == expected_key && value.trim_matches('"') == *expected_value
+                })
+            })
+    });
+    assert!(
+        matches,
+        "missing {level:?} agent log {agent_event} with fields {fields:?}; events: {events:#?}"
     );
 }

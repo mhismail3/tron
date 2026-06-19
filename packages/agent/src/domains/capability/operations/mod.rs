@@ -27,6 +27,7 @@ use crate::engine::{ActorKind, Invocation, is_bootstrap_authority_grant_id};
 use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
 use crate::shared::server::errors::CapabilityError;
+use tracing::{info, warn};
 
 mod catalog;
 mod filesystem;
@@ -50,7 +51,34 @@ pub(crate) async fn execute_value(
 ) -> Result<Value, CapabilityError> {
     let operation = required_str(&invocation.payload, "operation")?.to_owned();
     validate_execute_context(invocation, &operation)?;
+    info!(
+        component = "agent.execute",
+        agent_event = "execute_operation_started",
+        operation = %operation,
+        trace_id = %invocation.causal_context.trace_id.as_str(),
+        invocation_id = %invocation.id.as_str(),
+        parent_invocation_id = invocation
+            .causal_context
+            .parent_invocation_id
+            .as_ref()
+            .map(|id| id.as_str())
+            .unwrap_or("none"),
+        session_id = invocation.causal_context.session_id.as_deref().unwrap_or("none"),
+        workspace_id = invocation.causal_context.workspace_id.as_deref().unwrap_or("none"),
+        actor_kind = ?invocation.causal_context.actor_kind,
+        actor_id = %invocation.causal_context.actor_id.as_str(),
+        "primitive execute operation started"
+    );
     if operation == "replay_manifest" {
+        info!(
+            component = "agent.execute",
+            agent_event = "execute_operation_trace_bypassed",
+            operation = %operation,
+            trace_id = %invocation.causal_context.trace_id.as_str(),
+            invocation_id = %invocation.id.as_str(),
+            session_id = invocation.causal_context.session_id.as_deref().unwrap_or("none"),
+            "primitive execute operation bypassed trace mutation"
+        );
         return result_value(replay_manifest(invocation, deps).await?);
     }
 
@@ -60,6 +88,18 @@ pub(crate) async fn execute_value(
     deps.event_store
         .append_trace_record(&trace_record)
         .map_err(|error| internal(format!("record trace start: {error}")))?;
+    info!(
+        component = "agent.execute",
+        agent_event = "execute_trace_record_started",
+        operation = %operation,
+        trace_record_id = %trace_record.id,
+        trace_id = %trace_record.trace_id,
+        invocation_id = %trace_record.invocation_id,
+        provider_invocation_id = trace_record.provider_invocation_id.as_deref().unwrap_or("none"),
+        session_id = trace_record.session_id.as_deref().unwrap_or("none"),
+        turn = trace_record.turn.unwrap_or_default(),
+        "primitive execute trace record started"
+    );
 
     let result = execute_operation(&operation, invocation, deps).await;
     match result {
@@ -74,6 +114,19 @@ pub(crate) async fn execute_value(
             deps.event_store
                 .update_trace_record(&trace_record)
                 .map_err(|error| internal(format!("record trace completion: {error}")))?;
+            info!(
+                component = "agent.execute",
+                agent_event = "execute_operation_completed",
+                operation = %operation,
+                trace_record_id = %trace_record.id,
+                trace_id = %trace_record.trace_id,
+                invocation_id = %trace_record.invocation_id,
+                status = %trace_record.status,
+                duration_ms = trace_record.duration_ms.unwrap_or_default(),
+                session_id = trace_record.session_id.as_deref().unwrap_or("none"),
+                turn = trace_record.turn.unwrap_or_default(),
+                "primitive execute operation completed"
+            );
             result_value(result)
         }
         Err(error) => {
@@ -87,6 +140,20 @@ pub(crate) async fn execute_value(
             deps.event_store
                 .update_trace_record(&trace_record)
                 .map_err(|store_error| internal(format!("record trace failure: {store_error}")))?;
+            warn!(
+                component = "agent.execute",
+                agent_event = "execute_operation_failed",
+                operation = %operation,
+                trace_record_id = %trace_record.id,
+                trace_id = %trace_record.trace_id,
+                invocation_id = %trace_record.invocation_id,
+                status = %trace_record.status,
+                duration_ms = trace_record.duration_ms.unwrap_or_default(),
+                session_id = trace_record.session_id.as_deref().unwrap_or("none"),
+                turn = trace_record.turn.unwrap_or_default(),
+                error = %error,
+                "primitive execute operation failed"
+            );
             Err(error)
         }
     }

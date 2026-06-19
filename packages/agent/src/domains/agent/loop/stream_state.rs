@@ -49,6 +49,16 @@ impl StreamTraceContext<'_> {
             self.parent_invocation_id.map(|id| id.as_str().to_owned()),
         )
     }
+
+    fn trace_id_str(&self) -> &str {
+        self.trace_id.map(|id| id.as_str()).unwrap_or("none")
+    }
+
+    fn parent_invocation_id_str(&self) -> &str {
+        self.parent_invocation_id
+            .map(|id| id.as_str())
+            .unwrap_or("none")
+    }
 }
 
 pub(super) struct StreamState {
@@ -100,6 +110,16 @@ impl StreamState {
         trace_context: StreamTraceContext<'_>,
     ) {
         self.record_ttft();
+        tracing::trace!(
+            component = "agent.stream",
+            agent_event = "stream_text_delta",
+            session_id,
+            trace_id = trace_context.trace_id_str(),
+            parent_invocation_id = trace_context.parent_invocation_id_str(),
+            delta_len = delta.len(),
+            text_len = self.text_acc.len() + delta.len(),
+            "model stream text delta"
+        );
         self.text_acc.push_str(&delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
@@ -126,6 +146,16 @@ impl StreamState {
         trace_context: StreamTraceContext<'_>,
     ) {
         self.record_ttft();
+        tracing::trace!(
+            component = "agent.stream",
+            agent_event = "stream_thinking_delta",
+            session_id,
+            trace_id = trace_context.trace_id_str(),
+            parent_invocation_id = trace_context.parent_invocation_id_str(),
+            delta_len = delta.len(),
+            thinking_len = self.thinking_acc.len() + delta.len(),
+            "model stream thinking delta"
+        );
         self.thinking_acc.push_str(&delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
@@ -154,6 +184,16 @@ impl StreamState {
     ) {
         self.thinking_acc.clone_from(&thinking);
         self.thinking_signature = signature;
+        tracing::trace!(
+            component = "agent.stream",
+            agent_event = "stream_thinking_end",
+            session_id,
+            trace_id = trace_context.trace_id_str(),
+            parent_invocation_id = trace_context.parent_invocation_id_str(),
+            thinking_len = self.thinking_acc.len(),
+            has_signature = self.thinking_signature.is_some(),
+            "model stream thinking ended"
+        );
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
                 TronEvent::ThinkingEnd {
@@ -189,6 +229,16 @@ impl StreamState {
         self.current_invocation_id = Some(invocation_id.clone());
         self.current_model_primitive_name = Some(name.clone());
         self.current_capability_args.clear();
+        tracing::trace!(
+            component = "agent.stream",
+            agent_event = "stream_capability_invocation_started",
+            session_id,
+            trace_id = trace_context.trace_id_str(),
+            parent_invocation_id = trace_context.parent_invocation_id_str(),
+            invocation_id = %invocation_id,
+            primitive_name = %name,
+            "model stream capability invocation started"
+        );
 
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
@@ -223,6 +273,18 @@ impl StreamState {
         counter: Option<&AtomicI64>,
         trace_context: StreamTraceContext<'_>,
     ) {
+        tracing::trace!(
+            component = "agent.stream",
+            agent_event = "stream_capability_invocation_arguments_delta",
+            session_id,
+            trace_id = trace_context.trace_id_str(),
+            parent_invocation_id = trace_context.parent_invocation_id_str(),
+            invocation_id = %invocation_id,
+            primitive_name = self.current_model_primitive_name.as_deref().unwrap_or("unknown"),
+            delta_len = arguments_delta.len(),
+            accumulated_len = self.current_capability_args.len() + arguments_delta.len(),
+            "model stream capability invocation arguments delta"
+        );
         self.current_capability_args.push_str(&arguments_delta);
         if let Some(counter) = counter {
             let _ = emitter.emit_sequenced(
@@ -334,6 +396,15 @@ impl StreamState {
         match stream_event {
             StreamEvent::Done { message, .. } => {
                 self.token_usage.clone_from(&message.token_usage);
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_drain_done",
+                    session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
+                    has_token_usage = self.token_usage.is_some(),
+                    "model stream drain completed"
+                );
                 StreamAction::Done {
                     stop_reason: "capability_invocation".into(),
                     final_message: None,
@@ -355,6 +426,19 @@ impl StreamState {
                 delay_ms,
                 error,
             } => {
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_retry",
+                    session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
+                    attempt,
+                    max_retries,
+                    delay_ms,
+                    error_category = %error.category,
+                    is_retryable = error.is_retryable,
+                    "model stream retry event"
+                );
                 if let Some(counter) = sequence_counter {
                     let _ = emitter.emit_sequenced(
                         TronEvent::ApiRetry {
@@ -408,10 +492,48 @@ impl StreamState {
                 self.handle_text_delta(delta, session_id, emitter, sequence_counter, trace_context);
             }
 
-            StreamEvent::Start | StreamEvent::TextStart | StreamEvent::TextEnd { .. } => {}
+            StreamEvent::Start => {
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_started",
+                    session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
+                    "model stream started"
+                );
+            }
+            StreamEvent::TextStart => {
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_text_started",
+                    session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
+                    "model stream text started"
+                );
+            }
+            StreamEvent::TextEnd { text, signature } => {
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_text_end",
+                    session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
+                    text_len = text.len(),
+                    has_signature = signature.is_some(),
+                    "model stream text ended"
+                );
+            }
 
             StreamEvent::ThinkingStart => {
-                tracing::debug!(session_id, "stream_state: received ThinkingStart");
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_thinking_started",
+                    session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
+                    "model stream thinking started"
+                );
                 if let Some(counter) = sequence_counter {
                     let _ = emitter.emit_sequenced(
                         TronEvent::ThinkingStart {
@@ -445,10 +567,15 @@ impl StreamState {
                 thinking,
                 signature,
             } => {
-                tracing::debug!(
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_thinking_end_received",
                     session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
                     thinking_len = thinking.len(),
-                    "stream_state: received ThinkingEnd"
+                    has_signature = signature.is_some(),
+                    "model stream thinking end received"
                 );
                 self.handle_thinking_end(
                     thinking,
@@ -491,6 +618,20 @@ impl StreamState {
             StreamEvent::CapabilityInvocationDraftEnd {
                 capability_invocation,
             } => {
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_capability_invocation_end",
+                    session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
+                    invocation_id = %capability_invocation.id,
+                    primitive_name = %capability_invocation.name,
+                    stops_turn = capability_invocation_stops_turn(
+                        &capability_invocation,
+                        turn_stopping_capabilities,
+                    ),
+                    "model stream capability invocation ended"
+                );
                 if let Some(j) = journal {
                     if let Ok(serialized) = serde_json::to_string(&capability_invocation) {
                         if let Err(e) = j.append_delta("capability_invocation", &serialized) {
@@ -513,6 +654,17 @@ impl StreamState {
                 stop_reason: sr,
             } => {
                 self.token_usage.clone_from(&message.token_usage);
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_done",
+                    session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
+                    stop_reason = %sr,
+                    has_token_usage = self.token_usage.is_some(),
+                    final_content_block_count = message.content.len(),
+                    "model stream done"
+                );
                 return StreamAction::Done {
                     stop_reason: sr,
                     final_message: Some(message),
@@ -531,6 +683,19 @@ impl StreamState {
                 delay_ms,
                 error,
             } => {
+                tracing::trace!(
+                    component = "agent.stream",
+                    agent_event = "stream_retry",
+                    session_id,
+                    trace_id = trace_context.trace_id_str(),
+                    parent_invocation_id = trace_context.parent_invocation_id_str(),
+                    attempt,
+                    max_retries,
+                    delay_ms,
+                    error_category = %error.category,
+                    is_retryable = error.is_retryable,
+                    "model stream retry event"
+                );
                 if let Some(counter) = sequence_counter {
                     let _ = emitter.emit_sequenced(
                         TronEvent::ApiRetry {
@@ -591,12 +756,13 @@ pub(super) fn finalize_capability_invocation(
         let arguments: Map<String, serde_json::Value> = match serde_json::from_str(current_args) {
             Ok(map) => map,
             Err(e) => {
-                let preview: String = current_args.chars().take(200).collect();
                 tracing::warn!(
+                    component = "agent.stream",
+                    agent_event = "stream_capability_invocation_arguments_malformed",
                     model_primitive_name = %name,
                     invocation_id = %id,
                     error = %e,
-                    args_preview = %preview,
+                    args_len = current_args.len(),
                     "malformed capability invocation arguments, using empty map"
                 );
                 Map::new()

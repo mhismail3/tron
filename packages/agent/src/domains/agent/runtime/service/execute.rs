@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tracing::{debug, warn};
+use tracing::{info, trace, warn};
 
 use super::agent_build::{BuiltPromptAgent, build_prompt_agent};
 use super::completion::{PromptRunCompletion, finalize_prompt_run};
@@ -38,6 +38,29 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         attachments,
         engine_causality: _,
     } = request;
+    let inherited_trace_id = engine_causality
+        .as_ref()
+        .map(|causality| causality.context.trace_id.as_str())
+        .unwrap_or("none");
+    let parent_invocation_id = engine_causality
+        .as_ref()
+        .and_then(|causality| causality.parent_invocation_id.as_ref())
+        .map(|id| id.as_str())
+        .unwrap_or("none");
+    let attachment_count = attachments.as_ref().map_or(0, |items| items.len());
+
+    info!(
+        component = "agent.runtime",
+        agent_event = "prompt_run_started",
+        session_id = %session_id,
+        run_id = %run_id,
+        model = %model,
+        trace_id = %inherited_trace_id,
+        parent_invocation_id = %parent_invocation_id,
+        attachment_count,
+        has_reasoning_level = reasoning_level.is_some(),
+        "agent prompt run started"
+    );
 
     let _ = session_manager.mark_processing(&session_id);
     let mut run_cleanup =
@@ -70,6 +93,16 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             (fresh_state, fresh_persister)
         }
     };
+    trace!(
+        component = "agent.runtime",
+        agent_event = "session_state_resolved",
+        session_id = %session_id,
+        run_id = %run_id,
+        message_count = state.messages.len(),
+        turn_count = state.turn_count,
+        had_working_directory = state.working_directory.is_some(),
+        "agent session state resolved"
+    );
 
     let working_dir = state.working_directory.clone().unwrap_or(working_dir);
     let resolved_workspace_id = event_store
@@ -80,6 +113,15 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         .filter(|id| !id.is_empty());
     let agent_state_context =
         load_agent_state_context(&engine_host, &session_id, resolved_workspace_id.as_deref()).await;
+    trace!(
+        component = "agent.runtime",
+        agent_event = "agent_state_context_loaded",
+        session_id = %session_id,
+        run_id = %run_id,
+        workspace_id = resolved_workspace_id.as_deref().unwrap_or("none"),
+        has_agent_state_context = agent_state_context.is_some(),
+        "agent state context loaded"
+    );
 
     let messages = state.messages.clone();
     let initial_turn_count = event_store
@@ -111,6 +153,17 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         Ok(built) => built,
         Err(()) => return,
     };
+    info!(
+        component = "agent.runtime",
+        agent_event = "prompt_agent_built",
+        session_id = %session_id,
+        run_id = %run_id,
+        provider_type = %provider_type,
+        model = %model,
+        workspace_id = resolved_workspace_id.as_deref().unwrap_or("none"),
+        initial_turn_count,
+        "agent runtime built prompt agent"
+    );
 
     agent.set_abort_token(cancel_token);
     agent.set_persister(Some(persister.clone()));
@@ -152,6 +205,14 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
             false
         }
     };
+    info!(
+        component = "agent.runtime",
+        agent_event = "user_message_persisted",
+        session_id = %session_id,
+        run_id = %run_id,
+        persisted = user_message_persisted,
+        "agent user message persistence completed"
+    );
     if user_message_persisted {
         spawn_session_title_generation(
             title_responder_factory,
@@ -187,7 +248,15 @@ pub(crate) async fn execute_prompt_run(plan: PromptRunPlan) {
         ..Default::default()
     };
 
-    debug!(session_id = %session_id, "calling primitive agent loop");
+    info!(
+        component = "agent.runtime",
+        agent_event = "agent_loop_entered",
+        session_id = %session_id,
+        run_id = %run_id,
+        trace_id = %inherited_trace_id,
+        parent_invocation_id = %parent_invocation_id,
+        "calling primitive agent loop"
+    );
     let result = run_agent(
         &mut agent,
         &prompt,

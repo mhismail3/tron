@@ -15,7 +15,7 @@ use crate::shared::protocol::content::CapabilityResultContent;
 use crate::shared::protocol::messages::{CapabilityResultMessageContent, Message};
 use serde_json::{Value, json};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, warn};
+use tracing::{debug, error, info, trace, warn};
 
 pub(super) struct CapabilityInvocationPhaseParams<'a> {
     pub turn: u32,
@@ -107,11 +107,30 @@ pub(super) async fn execute_capability_invocation_phase(
     params: CapabilityInvocationPhaseParams<'_>,
 ) -> CapabilityInvocationPhaseOutcome {
     if params.stream_result.capability_invocations.is_empty() {
+        trace!(
+            component = "agent.capability",
+            agent_event = "capability_phase_skipped",
+            session_id = params.session_id,
+            run_id = params.run_id.unwrap_or("none"),
+            trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+            turn = params.turn,
+            "agent capability phase skipped"
+        );
         return CapabilityInvocationPhaseOutcome::default();
     }
 
     let working_dir = params.context_manager.get_working_directory().to_owned();
     let mut persist_failed = false;
+    info!(
+        component = "agent.capability",
+        agent_event = "capability_phase_started",
+        session_id = params.session_id,
+        run_id = params.run_id.unwrap_or("none"),
+        trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+        turn = params.turn,
+        invocation_count = params.stream_result.capability_invocations.len(),
+        "agent capability phase started"
+    );
     for capability_invocation in &params.stream_result.capability_invocations {
         if let Some(persister) = params.persister {
             let mut payload = json!({
@@ -155,6 +174,17 @@ pub(super) async fn execute_capability_invocation_phase(
                 persist_failed = true;
                 break;
             }
+            trace!(
+                component = "agent.capability",
+                agent_event = "capability_invocation_started_persisted",
+                session_id = params.session_id,
+                run_id = params.run_id.unwrap_or("none"),
+                trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+                turn = params.turn,
+                invocation_id = %capability_invocation.id,
+                primitive_name = %capability_invocation.name,
+                "capability invocation start persisted"
+            );
         }
     }
 
@@ -170,18 +200,50 @@ pub(super) async fn execute_capability_invocation_phase(
         params.trace_id,
         params.parent_invocation_id,
     );
+    info!(
+        component = "agent.capability",
+        agent_event = "capability_invocation_batch_emitted",
+        session_id = params.session_id,
+        run_id = params.run_id.unwrap_or("none"),
+        trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+        turn = params.turn,
+        invocation_count = params.stream_result.capability_invocations.len(),
+        "capability invocation batch emitted"
+    );
 
     let waves = build_execution_waves(
         &params.stream_result.capability_invocations,
         params.primitive_surface,
     );
+    info!(
+        component = "agent.capability",
+        agent_event = "capability_execution_waves_built",
+        session_id = params.session_id,
+        run_id = params.run_id.unwrap_or("none"),
+        trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+        turn = params.turn,
+        wave_count = waves.len(),
+        invocation_count = params.stream_result.capability_invocations.len(),
+        "capability execution waves built"
+    );
     let mut results: Vec<Option<CapabilityInvocationExecutionResult>> =
         vec![None; params.stream_result.capability_invocations.len()];
 
-    for wave in &waves {
+    for (wave_index, wave) in waves.iter().enumerate() {
         if params.cancel.is_cancelled() {
             break;
         }
+        debug!(
+            component = "agent.capability",
+            agent_event = "capability_wave_started",
+            session_id = params.session_id,
+            run_id = params.run_id.unwrap_or("none"),
+            trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+            turn = params.turn,
+            wave_index,
+            wave_size = wave.len(),
+            "capability execution wave started"
+        );
 
         let futures: Vec<_> = wave
             .iter()
@@ -204,6 +266,20 @@ pub(super) async fn execute_capability_invocation_phase(
                     };
                 let working_dir = working_dir.as_str();
                 async move {
+                    let operation = operation_name_from_map(&capability_invocation.arguments)
+                        .unwrap_or_else(|| "unknown".to_owned());
+                    info!(
+                        component = "agent.capability",
+                        agent_event = "capability_invocation_execute_started",
+                        session_id = params.session_id,
+                        run_id = params.run_id.unwrap_or("none"),
+                        trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+                        turn = params.turn,
+                        invocation_id = %capability_invocation.id,
+                        primitive_name = %capability_invocation.name,
+                        operation = %operation,
+                        "capability invocation execution started"
+                    );
                     let result = capability_invocation_executor::execute_capability_invocation(
                         capability_invocation,
                         params.session_id,
@@ -211,6 +287,21 @@ pub(super) async fn execute_capability_invocation_phase(
                         &capability_ctx,
                     )
                     .await;
+                    info!(
+                        component = "agent.capability",
+                        agent_event = "capability_invocation_execute_completed",
+                        session_id = params.session_id,
+                        run_id = params.run_id.unwrap_or("none"),
+                        trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+                        turn = params.turn,
+                        invocation_id = %capability_invocation.id,
+                        primitive_name = %capability_invocation.name,
+                        operation = %operation,
+                        duration_ms = result.duration_ms,
+                        is_error = result.result.is_error.unwrap_or(false),
+                        stops_turn = result.stops_turn,
+                        "capability invocation execution completed"
+                    );
 
                     if let Some(persister) = params.persister {
                         let result_text = extract_result_text(&result);
@@ -280,6 +371,17 @@ pub(super) async fn execute_capability_invocation_phase(
         for (idx, result) in futures::future::join_all(futures).await {
             results[idx] = Some(result);
         }
+        debug!(
+            component = "agent.capability",
+            agent_event = "capability_wave_completed",
+            session_id = params.session_id,
+            run_id = params.run_id.unwrap_or("none"),
+            trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+            turn = params.turn,
+            wave_index,
+            wave_size = wave.len(),
+            "capability execution wave completed"
+        );
     }
 
     process_capability_results(results, params).await
@@ -316,6 +418,17 @@ async fn process_capability_results(
         }
     }
 
+    info!(
+        component = "agent.capability",
+        agent_event = "capability_phase_completed",
+        session_id = params.session_id,
+        run_id = params.run_id.unwrap_or("none"),
+        trace_id = params.trace_id.map(|id| id.as_str()).unwrap_or("none"),
+        turn = params.turn,
+        executed_count = outcome.capability_invocations_executed,
+        stop_turn_requested = outcome.stop_turn_requested,
+        "agent capability phase completed"
+    );
     outcome
 }
 

@@ -1,4 +1,6 @@
 use super::*;
+use crate::shared::observability::test_utils::{capture_global_logs, capture_logs};
+use tracing::Level;
 
 #[test]
 fn build_message_text_only() {
@@ -222,4 +224,98 @@ async fn abort_mid_thinking_preserves_signature() {
     if let AssistantContent::Thinking { signature, .. } = thinking_block.unwrap() {
         assert_eq!(signature.as_deref(), Some("sig-xyz"));
     }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn stream_trace_logs_metadata_without_content() {
+    let logs = capture_global_logs();
+    let emitter = make_emitter();
+    let cancel = CancellationToken::new();
+    let secret_text = "secret-body-that-must-not-be-logged";
+
+    let result = process_stream(
+        text_stream(secret_text),
+        "s1",
+        &emitter,
+        &cancel,
+        &no_stopping_capabilities(),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result.stop_reason, "end_turn");
+    let events = logs.events();
+    assert!(
+        events.iter().any(|event| {
+            event.level == Level::TRACE
+                && has_field(event, "agent_event", "stream_text_delta")
+                && has_field(event, "session_id", "s1")
+                && has_field(event, "delta_len", &secret_text.len().to_string())
+        }),
+        "missing metadata-only stream_text_delta trace event: {events:#?}"
+    );
+    assert!(
+        events.iter().all(|event| {
+            !event.message.contains(secret_text)
+                && event
+                    .fields
+                    .iter()
+                    .all(|(_, value)| !value.contains(secret_text))
+        }),
+        "stream trace logs must not include streamed text content: {events:#?}"
+    );
+}
+
+#[test]
+fn malformed_capability_arguments_log_length_not_preview() {
+    let (logs, _guard) = capture_logs();
+    let mut capability_invocations = Vec::new();
+    let mut id = Some("tc-sensitive".to_string());
+    let mut name = Some("execute".to_string());
+    let secret_args = r#"{"content":"secret-file-content""#.to_string();
+    let mut malformed_args = secret_args.clone();
+
+    finalize_capability_invocation(
+        &mut capability_invocations,
+        &mut id,
+        &mut name,
+        &mut malformed_args,
+    );
+
+    let events = logs.events();
+    assert!(
+        events.iter().any(|event| {
+            event.level == Level::WARN
+                && has_field(
+                    event,
+                    "agent_event",
+                    "stream_capability_invocation_arguments_malformed",
+                )
+                && has_field(event, "invocation_id", "tc-sensitive")
+                && has_field(event, "args_len", &secret_args.len().to_string())
+        }),
+        "missing malformed arguments warning: {events:#?}"
+    );
+    assert!(
+        events.iter().all(|event| {
+            !event.message.contains("secret-file-content")
+                && event
+                    .fields
+                    .iter()
+                    .all(|(_, value)| !value.contains("secret-file-content"))
+        }),
+        "malformed argument logs must not include argument previews: {events:#?}"
+    );
+}
+
+fn has_field(
+    event: &crate::shared::observability::test_utils::CapturedEvent,
+    key: &str,
+    value: &str,
+) -> bool {
+    event.fields.iter().any(|(candidate_key, candidate_value)| {
+        candidate_key == key && candidate_value.trim_matches('"') == value
+    })
 }

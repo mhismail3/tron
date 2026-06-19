@@ -862,6 +862,19 @@ directly instead of inferring provider ownership from model id strings.
 replay manifest without creating a trace record, so the read does not mutate
 the manifest it exports.
 
+Agent backend observability is native to this primitive surface. Prompt runs,
+turns, provider requests, streaming, capability invocation waves, and primitive
+`execute` operations emit structured logs with `component` and `agent_event`
+fields such as `agent.runtime`, `agent.loop`, `agent.turn`, `agent.provider`,
+`agent.stream`, `agent.capability`, and `agent.execute`. INFO logs mark durable
+lifecycle boundaries and include session/workspace/run/turn/trace/invocation
+IDs where available. TRACE logs add high-volume sequencing and size metadata for
+stream deltas and argument deltas without logging prompt text, generated text,
+tool arguments, or file content. Authorized content and effect evidence remain
+in session events, trace records, blobs, resources, provider audits, and replay
+manifests; retained logs are the searchable agent/backend trace that points back
+to those canonical artifacts.
+
 Current primitive operations:
 
 | Operation | Effect |
@@ -1363,6 +1376,11 @@ Trace reads are backed by `trace_records`; effectful `execute` calls insert a
 running record before the effect runs and update that same record with status,
 duration, result/error hashes, authority, provider/model metadata, VCS revision
 when available, and file attribution/content hashes after completion. The
+agent backend logs run/turn/provider/stream/capability/execute lifecycle
+metadata to the `logs` table with stable `component`, `agent_event`, session,
+workspace, trace, run, turn, invocation, resource, and status fields where those
+facts exist; verbose stream logs record sizes and sequencing rather than
+content. The
 `replay_manifest` operation is read-only and does not insert a trace record; it
 reads session events, provider
 audits, trace records, idempotency entries, invocation ledger rows, stream rows,

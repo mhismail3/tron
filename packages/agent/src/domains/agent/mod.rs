@@ -23,6 +23,11 @@
 //!    `capability::execute` engine invocations.
 //! 7. `/engine` subscriptions deliver prompt/runtime stream records to clients;
 //!    transport code does not own agent behavior.
+//! 8. The backend emits structured `component` + `agent_event` logs across
+//!    runtime, loop, turn, provider stream, capability, and primitive execute
+//!    phases. Those logs carry durable IDs and lifecycle metadata for agent and
+//!    operator inspection, while prompt text, streamed text, and tool arguments
+//!    stay in the authorized event/trace/resource surfaces instead of logs.
 //!
 //! ## Submodules
 //!

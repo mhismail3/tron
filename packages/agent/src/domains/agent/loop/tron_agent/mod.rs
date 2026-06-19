@@ -16,7 +16,7 @@ use crate::shared::protocol::events::{BaseEvent, TronEvent};
 use crate::shared::protocol::messages::{Message, TokenUsage, UserMessageContent};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 struct RunGuard<'a> {
     flag: &'a AtomicBool,
@@ -86,6 +86,13 @@ impl TronAgent {
     #[instrument(skip(self, ctx), fields(session_id = %self.session_id, model = %self.config.model))]
     pub async fn run(&mut self, content: &str, mut ctx: RunContext) -> RunResult {
         let Some(_guard) = RunGuard::new(&self.is_running) else {
+            warn!(
+                component = "agent.loop",
+                agent_event = "agent_run_rejected_already_running",
+                session_id = %self.session_id,
+                model = %self.config.model,
+                "agent run rejected because the session is already running"
+            );
             return RunResult {
                 stop_reason: StopReason::Error,
                 error: Some("Agent is already running".into()),
@@ -107,6 +114,10 @@ impl TronAgent {
             .user_content_override
             .take()
             .unwrap_or_else(|| UserMessageContent::Text(content.to_owned()));
+        let user_content_kind = match &user_content {
+            UserMessageContent::Text(_) => "text",
+            UserMessageContent::Blocks(_) => "blocks",
+        };
         self.context_manager.add_message(Message::User {
             content: user_content,
             timestamp: None,
@@ -131,7 +142,19 @@ impl TronAgent {
             is_processing: true,
         });
 
-        debug!(session_id = %self.session_id, "agent run started");
+        info!(
+            component = "agent.loop",
+            agent_event = "agent_run_started",
+            session_id = %self.session_id,
+            run_id = ctx.run_id.as_deref().unwrap_or("none"),
+            trace_id = ctx.engine_trace_id.as_ref().map(|id| id.as_str()).unwrap_or("none"),
+            parent_invocation_id = ctx.parent_invocation_id.as_ref().map(|id| id.as_str()).unwrap_or("none"),
+            model = %self.config.model,
+            max_turns = self.config.max_turns,
+            user_content_kind,
+            has_agent_state_context = ctx.agent_state_context.is_some(),
+            "agent run started"
+        );
 
         let max_turns = self.config.max_turns;
         let turn_offset = self.completed_turn_offset.load(Ordering::Relaxed);
@@ -144,6 +167,15 @@ impl TronAgent {
             run_turn += 1;
             let session_turn = turn_offset.saturating_add(run_turn);
             self.current_turn.store(session_turn, Ordering::Relaxed);
+            debug!(
+                component = "agent.loop",
+                agent_event = "agent_turn_scheduled",
+                session_id = %self.session_id,
+                run_id = ctx.run_id.as_deref().unwrap_or("none"),
+                turn = session_turn,
+                run_turn,
+                "agent turn scheduled"
+            );
 
             let result = turn_runner::execute_turn(turn_runner::TurnParams {
                 turn: session_turn,
@@ -223,7 +255,19 @@ impl TronAgent {
         self.completed_turn_offset
             .store(turn_offset.saturating_add(run_turn), Ordering::Relaxed);
 
-        debug!(session_id = %self.session_id, turns = run_turn, stop_reason = ?final_stop_reason, "agent run completed");
+        info!(
+            component = "agent.loop",
+            agent_event = "agent_run_completed",
+            session_id = %self.session_id,
+            run_id = ctx.run_id.as_deref().unwrap_or("none"),
+            trace_id = ctx.engine_trace_id.as_ref().map(|id| id.as_str()).unwrap_or("none"),
+            parent_invocation_id = ctx.parent_invocation_id.as_ref().map(|id| id.as_str()).unwrap_or("none"),
+            turns = run_turn,
+            stop_reason = ?final_stop_reason,
+            interrupted,
+            has_error = error.is_some(),
+            "agent run completed"
+        );
 
         self.emit_run_event(TronEvent::AgentEnd {
             base: run_base(&self.session_id),

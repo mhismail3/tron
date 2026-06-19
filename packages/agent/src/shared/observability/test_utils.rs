@@ -3,7 +3,7 @@
 //! Provides an in-memory test subscriber layer that captures tracing events
 //! for assertions in tests.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Once, OnceLock};
 
 use tracing::level_filters::LevelFilter;
 use tracing::{Event, Level, Subscriber};
@@ -202,6 +202,30 @@ pub fn capture_logs() -> (CapturedLogs, tracing::subscriber::DefaultGuard) {
 
     let guard = subscriber.set_default();
     (logs, guard)
+}
+
+/// Install a process-wide test subscriber and return the shared captured log
+/// buffer.
+///
+/// This is reserved for tests that need to observe logs emitted by work that can
+/// cross thread-local subscriber boundaries. The caller should assert with
+/// unique session/trace/invocation fields because other tests in the same
+/// process may also emit events into this shared buffer.
+pub fn capture_global_logs() -> CapturedLogs {
+    static GLOBAL_LOGS: OnceLock<CapturedLogs> = OnceLock::new();
+    static INIT: Once = Once::new();
+
+    let logs = GLOBAL_LOGS.get_or_init(CapturedLogs::default).clone();
+    INIT.call_once(|| {
+        let layer = CaptureLayer { logs: logs.clone() };
+        let subscriber = tracing_subscriber::registry()
+            .with(layer)
+            .with(LevelFilter::TRACE);
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("global test log subscriber should install once");
+    });
+    logs.clear();
+    logs
 }
 
 #[cfg(test)]

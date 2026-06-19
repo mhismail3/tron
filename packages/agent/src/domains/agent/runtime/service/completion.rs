@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use tracing::{debug, warn};
+use tracing::{info, warn};
 
 use super::{
     PromptEngineCausality, PromptRunCleanup, load_session_update_data,
@@ -49,6 +49,18 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         model_for_error,
     } = args;
 
+    info!(
+        component = "agent.runtime",
+        agent_event = "prompt_run_finalizing",
+        session_id = %session_id,
+        run_id = %run_id,
+        provider_type = %provider_type,
+        turns_executed = result.turns_executed,
+        interrupted = result.interrupted,
+        stop_reason = ?result.stop_reason,
+        has_error = result.error.is_some(),
+        "agent prompt run finalizing"
+    );
     let _ = persister.flush().await;
     persist_interrupted_if_needed(&persister, &session_id, &result).await;
     emit_run_error_if_needed(
@@ -66,15 +78,21 @@ pub(super) async fn finalize_prompt_run(args: PromptRunCompletion<'_>) {
         &result,
     )
     .await;
+    let agent_result_ref_count = agent_result_refs.as_ref().map_or(0, Vec::len);
 
     run_cleanup.release();
     emit_session_update(&session_manager, &event_store, &broadcast, &session_id).await;
 
-    debug!(
+    info!(
+        component = "agent.runtime",
+        agent_event = "prompt_run_completed",
         session_id = %session_id,
         run_id = %run_id,
         stop_reason = ?result.stop_reason,
         turns = result.turns_executed,
+        interrupted = result.interrupted,
+        has_error = result.error.is_some(),
+        agent_result_ref_count,
         "prompt run completed"
     );
     publish_prompt_runtime_stream(
@@ -152,12 +170,21 @@ async fn create_agent_result_resource(
         warn!(?error, run_id, "failed to create agent_result resource");
         return None;
     }
-    result.value.and_then(|value| {
+    let refs = result.value.and_then(|value| {
         value
             .get("resourceRefs")
             .and_then(serde_json::Value::as_array)
             .cloned()
-    })
+    });
+    info!(
+        component = "agent.runtime",
+        agent_event = "agent_result_resource_recorded",
+        session_id = %session_id,
+        run_id = %run_id,
+        resource_ref_count = refs.as_ref().map_or(0, Vec::len),
+        "agent result resource recorded"
+    );
+    refs
 }
 
 async fn persist_interrupted_if_needed(

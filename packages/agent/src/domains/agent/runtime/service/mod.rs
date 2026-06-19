@@ -2,7 +2,10 @@
 //!
 //! `execute` owns the linear run-turn lifecycle, while sibling modules own the
 //! request DTO, dependency bundle, run plan, spawning, stream event publication,
-//! lightweight session title generation, and the major run-turn phases.
+//! lightweight session title generation, and the major run-turn phases. The
+//! service also owns the outer structured logging lifecycle for accepted prompt
+//! runs so logs, session events, trace records, and agent-result resources share
+//! common run/session/trace identifiers.
 
 use std::sync::atomic::AtomicI64;
 
