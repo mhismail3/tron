@@ -161,6 +161,53 @@ struct EngineChildError: Decodable, Sendable {
     var failure: CanonicalFailurePayload? {
         CanonicalFailurePayload.fromDetails(details)
     }
+
+    var protocolError: EngineProtocolError {
+        if let failure {
+            return EngineProtocolError(failure: failure)
+        }
+
+        let fallbackMessage = message ?? "Engine function failed"
+        return EngineProtocolError(
+            code: fallbackCode,
+            category: kind ?? "engine_child_error",
+            message: fallbackMessage,
+            retryable: false,
+            recoverable: true,
+            origin: "engine",
+            suggestion: fallbackSuggestion,
+            details: fallbackDetails
+        )
+    }
+
+    private var fallbackCode: String {
+        switch kind {
+        case "not_found": return EngineErrorCode.capabilityNotFound.rawValue
+        case "invalid_params": return EngineErrorCode.invalidParams.rawValue
+        case "unauthorized": return EngineErrorCode.unauthorized.rawValue
+        case "idempotency_conflict": return EngineErrorCode.idempotencyConflict.rawValue
+        case "internal": return EngineErrorCode.internalError.rawValue
+        default: return "ENGINE_CHILD_ERROR"
+        }
+    }
+
+    private var fallbackSuggestion: String? {
+        if kind == "not_found" {
+            return "The connected server does not expose this function. Restart or update the server, then retry."
+        }
+        return nil
+    }
+
+    private var fallbackDetails: [String: AnyCodable]? {
+        var merged = details ?? [:]
+        if let kind {
+            merged["childErrorKind"] = AnyCodable(kind)
+        }
+        if let message {
+            merged["childErrorMessage"] = AnyCodable(message)
+        }
+        return merged.isEmpty ? nil : merged
+    }
 }
 
 /// Known engine error codes from the server.

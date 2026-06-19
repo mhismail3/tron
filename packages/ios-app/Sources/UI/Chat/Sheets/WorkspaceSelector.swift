@@ -103,7 +103,7 @@ struct WorkspaceSelector: View {
                     do {
                         try await loadDirectory(currentPath)
                     } catch {
-                        errorMessage = error.localizedDescription
+                        errorMessage = workspaceBrowserErrorMessage(error)
                     }
                 }
             }
@@ -379,7 +379,7 @@ struct WorkspaceSelector: View {
                 errorMessage = "Could not open \(target.abbreviatingHomeDirectory); showing Home."
             }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = workspaceBrowserErrorMessage(error)
         }
         isLoading = false
     }
@@ -414,7 +414,7 @@ struct WorkspaceSelector: View {
                 try await loadDirectory(path)
                 cancelFolderCreation()
             } catch {
-                errorMessage = error.localizedDescription
+                errorMessage = workspaceBrowserErrorMessage(error)
             }
         }
     }
@@ -465,10 +465,10 @@ struct WorkspaceSelector: View {
                 dismiss()
             } catch let error as EngineProtocolError {
                 isSubmittingFolder = false
-                folderCreationError = error.message
+                folderCreationError = workspaceBrowserErrorMessage(error)
             } catch {
                 isSubmittingFolder = false
-                folderCreationError = error.localizedDescription
+                folderCreationError = workspaceBrowserErrorMessage(error)
             }
         }
     }
@@ -477,5 +477,18 @@ struct WorkspaceSelector: View {
         guard canSelectCurrentPath else { return }
         selectedPath = currentPath
         dismiss()
+    }
+
+    private func workspaceBrowserErrorMessage(_ error: Error) -> String {
+        guard let protocolError = error as? EngineProtocolError else {
+            return error.localizedDescription
+        }
+        if protocolError.errorCode == .capabilityNotFound {
+            return "Workspace browser is not available on this server. Restart or update Tron, then retry."
+        }
+        if let suggestion = protocolError.suggestion, !suggestion.isEmpty {
+            return "\(protocolError.message) \(suggestion)"
+        }
+        return protocolError.message
     }
 }

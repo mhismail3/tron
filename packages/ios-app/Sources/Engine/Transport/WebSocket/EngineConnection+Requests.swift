@@ -105,11 +105,7 @@ extension EngineConnection {
         )
         let duration = CFAbsoluteTimeGetCurrent() - startTime
         if let error = envelope.child.error {
-            guard let failure = error.failure else {
-                logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: false, duration: duration, error: "Engine child error missing details.failure")
-                throw EngineConnectionError.invalidResponse
-            }
-            let protocolError = EngineProtocolError(failure: failure)
+            let protocolError = error.protocolError
             logger.logEngineResponse(functionId: functionId.rawValue, id: requestId, success: false, duration: duration, error: protocolError.diagnosticSummary)
             throw protocolError
         }

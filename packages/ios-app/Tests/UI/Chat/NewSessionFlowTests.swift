@@ -110,6 +110,7 @@ final class NewSessionFlowTests: XCTestCase {
             "showHidden",
             "New Folder",
             "FolderNameValidator",
+            "Workspace browser is not available on this server",
         ] {
             XCTAssertTrue(
                 combined.contains(fragment),

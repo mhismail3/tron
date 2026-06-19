@@ -234,6 +234,12 @@ miscellaneous facade. They must not encode product policy. Any fixed
 workflow-specific client removed in PET-8 must stay removed unless a later
 scorecard row proves it is boot infrastructure.
 
+Engine child errors are normalized at the transport boundary. Canonical
+`details.failure` payloads stay authoritative; older or setup-time child errors
+that only carry `kind`, `message`, and `details` are preserved as
+`EngineProtocolError` values so UI surfaces show the real server failure instead
+of a generic invalid-response fallback.
+
 SwiftUI and `Session/` code do not depend on concrete `EngineClient`,
 `EngineConnection`, WebSocket transport types, or settings/auth wire DTOs.
 They consume protocol-typed repositories and view models: `ChatSessionServices`
