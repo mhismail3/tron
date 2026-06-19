@@ -683,9 +683,11 @@ authority grants remain the execution-permission primitive.
 `domains/memory` owns the Phase 2 memory foundation: source-backed memory
 engine/policy/record/prompt-trace/eval-run/migration resource contracts,
 explicit disabled/active/shadow/compare policy state, redacted record audit, and
-provider-safe prompt trace text. It does not implement semantic retrieval,
-embeddings, ranking, summarization, procedural rules, or automatic prompt
-memory.
+provider-safe prompt trace text. Memory policy resolves by session, then
+workspace, then system scope; prompt-trace audit writes use trace-specific
+idempotency so later turns do not replay stale memory status. It does not
+implement semantic retrieval, embeddings, ranking, summarization, procedural
+rules, or automatic prompt memory.
 `domains/worker_lifecycle` owns local package proposals,
 `tron.worker_package.v1` manifest validation, install/enable/disable/launch/
 stop/retire functions, scoped token minting, conformance reports, and
@@ -927,6 +929,8 @@ approval UI, or default risky-action policy. The post-baseline
 `memory::record_prompt_trace`, and migration import/export functions; the model
 sees only read-only `execute` memory audit operations, and prompt assembly
 receives only mode/count/trace facts, never retained memory body content.
+Policy lookup is `session -> workspace -> system`, and prompt-trace audit
+idempotency is keyed by trace so memory status can change across turns.
 `worker_lifecycle` owner is the explicit exception for local package
 proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before
@@ -1347,7 +1351,8 @@ projection, an explicit memory prompt-trace audit, environment metadata,
 conversation history, and any pending `execute` results. The memory audit
 records disabled/active/shadow/compare mode, considered/included/excluded
 counts, and the prompt-trace resource id; retained memory body content is never
-injected. Built-in rules, skills, worker guides, hooks, and profile policy
+injected. The audit is recorded per turn trace, not reused as a session-stable
+idempotency result. Built-in rules, skills, worker guides, hooks, and profile policy
 primers are not model-context planes on this branch.
 
 The prompt loop records context totals in session events and trace metadata.

@@ -22,6 +22,18 @@ pub(super) fn resource_scope(invocation: &Invocation) -> EngineResourceScope {
     }
 }
 
+pub(super) fn policy_scope_candidates(invocation: &Invocation) -> Vec<EngineResourceScope> {
+    let mut scopes = Vec::new();
+    if let Some(session_id) = &invocation.causal_context.session_id {
+        scopes.push(EngineResourceScope::Session(session_id.clone()));
+    }
+    if let Some(workspace_id) = &invocation.causal_context.workspace_id {
+        scopes.push(EngineResourceScope::Workspace(workspace_id.clone()));
+    }
+    scopes.push(EngineResourceScope::System);
+    scopes
+}
+
 pub(super) fn policy_resource_id(scope: &EngineResourceScope) -> String {
     match scope {
         EngineResourceScope::System => "memory_policy:system".to_owned(),

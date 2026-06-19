@@ -24,6 +24,9 @@
 //! Prompt assembly may include only a memory audit/status section in this
 //! slice. Record body content is never injected into provider context; prompt
 //! traces record considered/included/excluded refs and reasons.
+//! Policy lookup is hierarchical: an explicit session policy wins, then an
+//! explicit workspace policy, then system policy, then the implicit disabled
+//! default.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 pub(crate) use crate::engine::{

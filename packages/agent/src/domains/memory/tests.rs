@@ -43,6 +43,64 @@ async fn status_defaults_disabled_and_writes_fail_closed() {
 }
 
 #[tokio::test]
+async fn workspace_policy_inherits_into_session_until_session_policy_overrides() {
+    let ctx = make_test_context();
+
+    let workspace_policy = invoke_write_with_context(
+        &ctx,
+        super::CONFIGURE_FUNCTION,
+        json!({
+            "mode": "active",
+            "provenance": {"source": "workspace_policy_test"}
+        }),
+        workspace_context("memory-workspace-policy")
+            .with_idempotency_key("memory-workspace-policy"),
+    )
+    .await;
+    assert_eq!(workspace_policy["status"], "configured");
+
+    let inherited = invoke_read(
+        &ctx,
+        super::STATUS_FUNCTION,
+        json!({}),
+        "memory-workspace-inherited-status",
+    )
+    .await
+    .expect("inherited workspace policy status");
+    assert_eq!(inherited["mode"], "active");
+    assert_eq!(
+        inherited["policy"]["scope"],
+        json!({"workspace": "memory-workspace"})
+    );
+
+    let session_policy = invoke_write(
+        &ctx,
+        super::CONFIGURE_FUNCTION,
+        json!({
+            "mode": "disabled",
+            "provenance": {"source": "session_override_test"}
+        }),
+        "memory-session-policy-override",
+    )
+    .await;
+    assert_eq!(session_policy["status"], "configured");
+
+    let overridden = invoke_read(
+        &ctx,
+        super::STATUS_FUNCTION,
+        json!({}),
+        "memory-session-overridden-status",
+    )
+    .await
+    .expect("session override status");
+    assert_eq!(overridden["mode"], "disabled");
+    assert_eq!(
+        overridden["policy"]["scope"],
+        json!({"session": "memory-session"})
+    );
+}
+
+#[tokio::test]
 async fn record_lifecycle_is_versioned_resource_backed_and_redacted() {
     let ctx = make_test_context();
     configure_active(&ctx, "memory-lifecycle-configure").await;
@@ -226,6 +284,41 @@ async fn load_prompt_memory_context_is_explicit_when_memory_is_absent() {
 }
 
 #[tokio::test]
+async fn load_prompt_memory_context_records_fresh_trace_after_policy_changes() {
+    let ctx = make_test_context();
+
+    let initial = super::service::load_prompt_memory_context(
+        &ctx.engine_host,
+        "memory-session",
+        Some("memory-workspace"),
+        Some(TraceId::new("memory-load-before-policy").unwrap()),
+    )
+    .await
+    .expect("initial memory context text");
+    assert!(initial.contains("Memory mode: disabled"));
+
+    configure_active(&ctx, "memory-fresh-context-configure").await;
+    invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        retain_payload("fresh-context-record"),
+        "memory-fresh-context-retain",
+    )
+    .await;
+
+    let refreshed = super::service::load_prompt_memory_context(
+        &ctx.engine_host,
+        "memory-session",
+        Some("memory-workspace"),
+        Some(TraceId::new("memory-load-after-policy").unwrap()),
+    )
+    .await
+    .expect("refreshed memory context text");
+    assert!(refreshed.contains("Memory mode: active"));
+    assert!(refreshed.contains("Records considered: 1"));
+}
+
+#[tokio::test]
 async fn migration_export_import_uses_redacted_portable_envelope() {
     let ctx = make_test_context();
     configure_active(&ctx, "memory-migration-configure").await;
@@ -307,12 +400,27 @@ async fn invoke_read(
     payload: Value,
     trace_id: &str,
 ) -> Option<Value> {
+    invoke_read_with_context(
+        ctx,
+        function_id,
+        payload,
+        client_context(trace_id).with_scope(super::READ_SCOPE),
+    )
+    .await
+}
+
+async fn invoke_read_with_context(
+    ctx: &ServerRuntimeContext,
+    function_id: &str,
+    payload: Value,
+    causal_context: CausalContext,
+) -> Option<Value> {
     let result = ctx
         .engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new(function_id).unwrap(),
             payload,
-            client_context(trace_id).with_scope(super::READ_SCOPE),
+            causal_context,
         ))
         .await;
     assert_eq!(result.error, None, "read failed: {:?}", result.error);
@@ -330,20 +438,46 @@ async fn invoke_write(
     result.value.expect("write value")
 }
 
+async fn invoke_write_with_context(
+    ctx: &ServerRuntimeContext,
+    function_id: &str,
+    payload: Value,
+    causal_context: CausalContext,
+) -> Value {
+    let result = invoke_write_result_with_context(ctx, function_id, payload, causal_context).await;
+    assert_eq!(result.error, None, "write failed: {:?}", result.error);
+    result.value.expect("write value")
+}
+
 async fn invoke_write_result(
     ctx: &ServerRuntimeContext,
     function_id: &str,
     payload: Value,
     key: &str,
 ) -> InvocationResult {
+    invoke_write_result_with_context(
+        ctx,
+        function_id,
+        payload,
+        client_context(key)
+            .with_scope(super::READ_SCOPE)
+            .with_scope(super::WRITE_SCOPE)
+            .with_idempotency_key(key),
+    )
+    .await
+}
+
+async fn invoke_write_result_with_context(
+    ctx: &ServerRuntimeContext,
+    function_id: &str,
+    payload: Value,
+    causal_context: CausalContext,
+) -> InvocationResult {
     ctx.engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new(function_id).unwrap(),
             payload,
-            client_context(key)
-                .with_scope(super::READ_SCOPE)
-                .with_scope(super::WRITE_SCOPE)
-                .with_idempotency_key(key),
+            causal_context,
         ))
         .await
 }
@@ -378,4 +512,16 @@ fn client_context(trace_id: &str) -> CausalContext {
     )
     .with_session_id("memory-session")
     .with_workspace_id("memory-workspace")
+}
+
+fn workspace_context(trace_id: &str) -> CausalContext {
+    CausalContext::new(
+        ActorId::new("engine-client").unwrap(),
+        ActorKind::Client,
+        AuthorityGrantId::new("engine-transport").unwrap(),
+        TraceId::new(trace_id).unwrap(),
+    )
+    .with_workspace_id("memory-workspace")
+    .with_scope(super::READ_SCOPE)
+    .with_scope(super::WRITE_SCOPE)
 }

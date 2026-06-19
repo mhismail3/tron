@@ -83,16 +83,21 @@ pub(crate) async fn load_prompt_memory_context(
     workspace_id: Option<&str>,
     trace_id: Option<TraceId>,
 ) -> Option<String> {
+    let resolved_trace_id =
+        trace_id.unwrap_or_else(|| TraceId::new("memory-context").expect("static trace id"));
     let causal = CausalContext::new(
         ActorId::new("system:memory-context").ok()?,
         ActorKind::System,
         crate::engine::AuthorityGrantId::new("engine-system").ok()?,
-        trace_id.unwrap_or_else(|| TraceId::new("memory-context").expect("static trace id")),
+        resolved_trace_id.clone(),
     )
     .with_scope(super::READ_SCOPE)
     .with_scope(super::WRITE_SCOPE)
     .with_session_id(session_id)
-    .with_idempotency_key(format!("memory-context:{session_id}"));
+    .with_idempotency_key(format!(
+        "memory-context:{session_id}:{}",
+        resolved_trace_id.as_str()
+    ));
     let causal = if let Some(workspace_id) = workspace_id {
         causal.with_workspace_id(workspace_id)
     } else {
@@ -125,7 +130,7 @@ async fn build_prompt_trace(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<MemoryPromptTrace, CapabilityError> {
-    let policy = resolve_policy(engine_host, &resource_scope(invocation), false).await?;
+    let policy = resolve_policy(engine_host, invocation, false).await?;
     let limit = payload
         .get("limit")
         .and_then(Value::as_u64)

@@ -129,7 +129,7 @@ fn write_contract(function_id: &'static str, description: &'static str) -> Capab
     .description(description)
     .tags(vec!["memory", "resource", "audit", "migration"])
     .domain_module("memory")
-    .idempotency(IdempotencyContract::caller_session_engine_ledger())
+    .idempotency(IdempotencyContract::caller_system_engine_ledger())
     .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
     .stream_topics(vec![MEMORY_LIFECYCLE_TOPIC])
     .presentation_hints(json!({"systemImage": "brain"}))

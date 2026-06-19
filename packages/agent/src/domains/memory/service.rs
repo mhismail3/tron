@@ -35,7 +35,7 @@ pub(crate) async fn status_memory_value(
     invocation: &Invocation,
     _payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let policy = resolve_policy(engine_host, &resource_scope(invocation), false).await?;
+    let policy = resolve_policy(engine_host, invocation, false).await?;
     let engine = policy.record.active_engine_id.as_deref().map(
         |engine_id| json!({"engineId": engine_id, "resourceId": engine_resource_id(engine_id)}),
     );
@@ -501,7 +501,7 @@ pub(super) async fn require_writable_policy(
     engine_host: &EngineHostHandle,
     invocation: &Invocation,
 ) -> Result<ResolvedPolicy, CapabilityError> {
-    let policy = resolve_policy(engine_host, &resource_scope(invocation), true).await?;
+    let policy = resolve_policy(engine_host, invocation, true).await?;
     if policy.record.mode == MemoryMode::Disabled {
         return Err(invalid_params(
             "memory is disabled for this scope; configure active, shadow, or compare mode before writing records",
@@ -515,17 +515,11 @@ pub(super) async fn require_writable_policy(
 
 pub(super) async fn resolve_policy(
     engine_host: &EngineHostHandle,
-    scope: &EngineResourceScope,
+    invocation: &Invocation,
     strict: bool,
 ) -> Result<ResolvedPolicy, CapabilityError> {
-    let mut scopes = Vec::new();
-    scopes.push(scope.clone());
-    if let EngineResourceScope::Session(_) = scope {
-        // Session policy falls back to workspace only through explicit caller
-        // context; if none is known, system default still applies.
-    }
-    scopes.push(EngineResourceScope::System);
-    for candidate in scopes {
+    let implicit_scope = resource_scope(invocation);
+    for candidate in policy_scope_candidates(invocation) {
         let resource_id = policy_resource_id(&candidate);
         if let Some(inspection) = engine_host
             .inspect_resource(&resource_id)
@@ -569,7 +563,7 @@ pub(super) async fn resolve_policy(
         }
     }
     Ok(ResolvedPolicy {
-        scope: scope.clone(),
+        scope: implicit_scope,
         resource_id: None,
         version_id: None,
         record: MemoryPolicyRecord::disabled_default(),

@@ -23,7 +23,7 @@ pub(crate) async fn migrate_export_value(
 ) -> Result<Value, CapabilityError> {
     let list = list_memory_value(engine_host, invocation, &json!({"limit": 500})).await?;
     let records = list["records"].as_array().cloned().unwrap_or_default();
-    let policy = resolve_policy(engine_host, &resource_scope(invocation), false).await?;
+    let policy = resolve_policy(engine_host, invocation, false).await?;
     let envelope = MemoryMigrationEnvelope {
         schema_version: MEMORY_SCHEMA_VERSION.to_owned(),
         operation: "export".to_owned(),
