@@ -210,7 +210,9 @@ pub fn capture_logs() -> (CapturedLogs, tracing::subscriber::DefaultGuard) {
 /// This is reserved for tests that need to observe logs emitted by work that can
 /// cross thread-local subscriber boundaries. The caller should assert with
 /// unique session/trace/invocation fields because other tests in the same
-/// process may also emit events into this shared buffer.
+/// process may also emit events into this shared buffer. The shared buffer is
+/// intentionally not cleared here; clearing it from one test can erase another
+/// concurrent test's events.
 pub fn capture_global_logs() -> CapturedLogs {
     static GLOBAL_LOGS: OnceLock<CapturedLogs> = OnceLock::new();
     static INIT: Once = Once::new();
@@ -224,7 +226,6 @@ pub fn capture_global_logs() -> CapturedLogs {
         tracing::subscriber::set_global_default(subscriber)
             .expect("global test log subscriber should install once");
     });
-    logs.clear();
     logs
 }
 

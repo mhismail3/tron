@@ -26,6 +26,8 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 
+use crate::shared::foundation::redaction::redact_sensitive_content;
+
 use super::types::LogLevel;
 
 /// Configuration for the `SQLite` transport.
@@ -204,17 +206,17 @@ impl EventFieldVisitor {
 
 impl Visit for EventFieldVisitor {
     fn record_str(&mut self, field: &Field, value: &str) {
+        let redacted = redact_log_text(value);
         match field.name() {
-            "message" => self.message = Some(value.to_string()),
+            "message" => self.message = Some(redacted),
             "error.message" | "error_message" => {
-                self.error_message = Some(value.to_string());
+                self.error_message = Some(redacted);
             }
-            "error.stack" | "error_stack" => self.error_stack = Some(value.to_string()),
+            "error.stack" | "error_stack" => self.error_stack = Some(redacted),
             name => {
-                let _ = self.data.insert(
-                    name.to_string(),
-                    serde_json::Value::String(value.to_string()),
-                );
+                let _ = self
+                    .data
+                    .insert(name.to_string(), serde_json::Value::String(redacted));
             }
         }
     }
@@ -241,12 +243,13 @@ impl Visit for EventFieldVisitor {
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        let redacted = redact_log_text(&format!("{value:?}"));
         if field.name() == "message" {
-            self.message = Some(format!("{value:?}"));
+            self.message = Some(redacted);
         } else {
             let _ = self.data.insert(
                 field.name().to_string(),
-                serde_json::Value::String(format!("{value:?}")),
+                serde_json::Value::String(redacted),
             );
         }
     }
@@ -381,7 +384,8 @@ fn write_batch(conn: &Connection, entries: &[PendingEntry]) -> Result<(), rusqli
         )?;
 
         for entry in entries {
-            let data = compact_log_data(&tx, entry);
+            let entry = redacted_entry(entry);
+            let data = compact_log_data(&tx, &entry);
             let _ = stmt.execute(rusqlite::params![
                 entry.timestamp,
                 entry.level,
@@ -404,6 +408,30 @@ fn write_batch(conn: &Connection, entries: &[PendingEntry]) -> Result<(), rusqli
 
     tx.commit()?;
     Ok(())
+}
+
+fn redacted_entry(entry: &PendingEntry) -> PendingEntry {
+    PendingEntry {
+        timestamp: entry.timestamp.clone(),
+        level: entry.level.clone(),
+        level_num: entry.level_num,
+        component: entry.component.clone(),
+        message: redact_log_text(&entry.message),
+        session_id: entry.session_id.clone(),
+        workspace_id: entry.workspace_id.clone(),
+        event_id: entry.event_id.clone(),
+        turn: entry.turn,
+        trace_id: entry.trace_id.clone(),
+        parent_trace_id: entry.parent_trace_id.clone(),
+        depth: entry.depth,
+        data: entry.data.as_deref().map(redact_log_text),
+        error_message: entry.error_message.as_deref().map(redact_log_text),
+        error_stack: entry.error_stack.as_deref().map(redact_log_text),
+    }
+}
+
+fn redact_log_text(text: &str) -> String {
+    redact_sensitive_content(text)
 }
 
 fn compact_log_data(conn: &Connection, entry: &PendingEntry) -> Option<String> {

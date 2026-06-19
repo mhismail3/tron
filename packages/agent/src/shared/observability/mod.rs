@@ -12,6 +12,11 @@
 //!
 //! The `SQLite` transport is implemented as a tracing [`Layer`] that batches
 //! log writes for efficiency. Warn/error/fatal levels flush immediately.
+//! Before persistence, server-side messages, structured data, and error fields
+//! pass through the shared sensitive-content redactor. Call sites should still
+//! log durable IDs, counts, statuses, and hashes instead of prompt/output/file
+//! content; transport redaction is the boundary backstop, not a reason to log
+//! raw content.
 //!
 //! [`Layer`]: tracing_subscriber::Layer
 

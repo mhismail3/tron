@@ -186,6 +186,73 @@ fn write_batch_with_all_fields() {
     assert_eq!(err_msg.as_deref(), Some("Connection refused"));
 }
 
+#[test]
+fn write_batch_redacts_server_message_data_and_errors() {
+    let conn = create_test_db();
+    let entry = PendingEntry {
+        timestamp: "2025-01-15T12:00:00.000Z".to_string(),
+        level: "warn".to_string(),
+        level_num: 40,
+        component: "AgentRunner".to_string(),
+        message: "Authorization: Bearer abcdefghijklmnopqrstuvwxyz0123456789".to_string(),
+        session_id: Some("sess_123".to_string()),
+        workspace_id: Some("ws_456".to_string()),
+        event_id: None,
+        turn: None,
+        trace_id: Some("trace_abc".to_string()),
+        parent_trace_id: None,
+        depth: None,
+        data: Some(
+            serde_json::json!({
+                "apiKey": "sk-proj-abcdefghijklmnopqrstuvwxyz",
+                "clientSecret": "client-secret-1234567890"
+            })
+            .to_string(),
+        ),
+        error_message: Some("access_token=access-token-1234567890".to_string()),
+        error_stack: Some("refreshToken: \"refresh-token-1234567890\"".to_string()),
+    };
+
+    write_batch(&conn, &[entry]).unwrap();
+
+    let (message, data, error_message, error_stack): (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT message, data, error_message, error_stack FROM logs WHERE id = 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .unwrap();
+    let stored = format!(
+        "{} {} {} {}",
+        message,
+        data.unwrap_or_default(),
+        error_message.unwrap_or_default(),
+        error_stack.unwrap_or_default()
+    );
+
+    for secret in [
+        "abcdefghijklmnopqrstuvwxyz0123456789",
+        "sk-proj-abcdefghijklmnopqrstuvwxyz",
+        "client-secret-1234567890",
+        "access-token-1234567890",
+        "refresh-token-1234567890",
+    ] {
+        assert!(
+            !stored.contains(secret),
+            "server log leaked {secret}: {stored}"
+        );
+    }
+    assert!(stored.contains("Bearer ****"));
+    assert!(stored.contains(r#""apiKey":"****""#));
+    assert!(stored.contains("clientSecret"));
+    assert!(stored.contains("access_token=****"));
+}
+
 // ── TransportConfig ──────────────────────────────────────────────
 
 #[test]

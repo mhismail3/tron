@@ -870,8 +870,11 @@ fields such as `agent.runtime`, `agent.loop`, `agent.turn`, `agent.provider`,
 lifecycle boundaries and include session/workspace/run/turn/trace/invocation
 IDs where available. TRACE logs add high-volume sequencing and size metadata for
 stream deltas and argument deltas without logging prompt text, generated text,
-tool arguments, or file content. Authorized content and effect evidence remain
-in session events, trace records, blobs, resources, provider audits, and replay
+tool arguments, or file content. The SQLite log transport redacts known
+credential/token patterns from server-side messages, structured data, and error
+fields before persistence, but call sites still treat logs as lifecycle metadata
+rather than content storage. Authorized content and effect evidence remain in
+session events, trace records, blobs, resources, provider audits, and replay
 manifests; retained logs are the searchable agent/backend trace that points back
 to those canonical artifacts.
 
@@ -1380,7 +1383,8 @@ agent backend logs run/turn/provider/stream/capability/execute lifecycle
 metadata to the `logs` table with stable `component`, `agent_event`, session,
 workspace, trace, run, turn, invocation, resource, and status fields where those
 facts exist; verbose stream logs record sizes and sequencing rather than
-content. The
+content, and the SQLite transport redacts known credential/token patterns from
+server-side messages, structured data, and error fields before persistence. The
 `replay_manifest` operation is read-only and does not insert a trace record; it
 reads session events, provider
 audits, trace records, idempotency entries, invocation ledger rows, stream rows,
