@@ -850,12 +850,12 @@ central engine/resource mechanism.
 
 ## Phase 2 Reminder
 
-The full Phase 2 agent-execution restoration plan is still required after the
-Phase 1 local/native affordance sequence. It must cover capability discovery,
-filesystem tools, jobs/processes, worker self-extension, subagents,
-goals/queues/questions, approvals, web, git/worktrees, skills/rules/hooks,
-memory, MCP, scheduling, program execution, database/events/settings, and
-dependency restoration.
+The full Phase 2 agent-execution restoration plan now lives in
+`phase-2-agent-execution-restoration-scorecard.md` after the Phase 1
+local/native affordance sequence. It covers capability discovery, filesystem
+tools, jobs/processes, worker self-extension, subagents, goals/queues/questions,
+approvals, web, git/worktrees, skills/rules/hooks, memory, MCP, scheduling,
+program execution, database/events/settings, and dependency restoration.
 
 The work recorded in this ledger does not restore those agent-execution
 capabilities.

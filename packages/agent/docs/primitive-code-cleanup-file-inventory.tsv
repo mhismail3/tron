@@ -1707,3 +1707,7 @@ packages/ios-app/Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift	r
 packages/ios-app/Sources/UI/Chat/Sheets/WorkspaceSelectorRows.swift	retain	ios chat ui	Phase1-closeout	Workspace selector row primitives retained for compact filesystem navigation, shortcuts, actions, and listings.
 packages/ios-app/Tests/Engine/Protocol/EngineProtocolChildErrorTests.swift	retain	ios test	Phase1-closeout	Filesystem browser child-error decoding tests retained for resilient typed engine error handling.
 packages/ios-app/Tests/UI/Chat/WorkspaceSelectorVisualRenderTests.swift	retain	ios test	Phase1-closeout	Workspace selector visual render tests retained for compact filesystem browser layout and affordance regression coverage.
+packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md	retain	phase2 docs	Phase2-plan	Phase 2 planning scorecard retained as durable agent-execution restoration handoff; planning only, no feature implementation.
+packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md	retain	phase2 docs	Phase2-plan	Phase 2 planning evidence manifest retained for source audit and validation provenance.
+packages/agent/docs/phase-2-agent-execution-restoration-inventory.md	retain	phase2 docs	Phase2-plan	Phase 2 narrative inventory retained for feature-family classification and handoff guidance.
+packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv	retain	phase2 docs	Phase2-plan	Phase 2 machine-readable feature-family inventory retained for future slice planning.

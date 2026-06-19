@@ -1,0 +1,117 @@
+# Phase 2 Agent Execution Restoration Inventory
+
+Status: `complete`
+
+Machine-readable inventory:
+[`phase-2-agent-execution-restoration-inventory.tsv`](phase-2-agent-execution-restoration-inventory.tsv)
+
+This inventory is the durable Phase 2 planning map for restored agent
+execution. It is grouped by feature family rather than by old file because
+future work must restore modern module contracts, not copy the old modular
+capability tree.
+
+## Controlled Vocabulary
+
+Classifications:
+
+- `true_primitive`: engine substrate or contract that is small enough to remain
+  core.
+- `modular_capability_package`: worker-owned package or module outside the
+  engine primitive set.
+- `ios_surface_only`: device-local iOS workflow state with no backend truth
+  claim.
+- `server_fact_rendering_only`: iOS or docs render current server-owned facts
+  without owning policy.
+- `deferred`: valid concept that waits for earlier slices or user decision.
+- `reject_candidate`: old behavior is recorded as evidence but should not be
+  restored in that form.
+
+Statuses:
+
+- `planned`: accepted in this Phase 2 roadmap, no feature implementation.
+- `current_baseline`: already present as primitive substrate or Phase 1 local
+  affordance.
+- `rejected_for_phase2_shape`: old shape rejected, future concept may return
+  through another row.
+
+Backend dependency values:
+
+- `none`: current local/iOS/docs surface only.
+- `engine_substrate`: requires engine primitive/resource/event/grant work.
+- `module_contract`: requires a new worker-owned function/trigger/resource
+  contract.
+- `ios_native_after_contract`: requires backend module first, then native iOS.
+- `physical_device`: requires APNs, microphone, camera, background, or device
+  validation.
+
+Memory involvement values:
+
+- `none`: no memory record or retrieval behavior.
+- `audit_only`: uses trace/log/resource provenance but no retained memory.
+- `reads_memory`: consumes memory records in context or UI.
+- `writes_memory`: creates or edits memory records.
+- `memory_core`: owns memory primitives, policy, evals, or engine swapping.
+
+## Inventory Summary
+
+The TSV carries every Phase 2 reminder from the Phase 1 progress ledger:
+capability discovery, filesystem tools, jobs/processes, worker self-extension,
+subagents, goals/queues/questions, approvals, web, git/worktrees,
+skills/rules/hooks, memory, MCP, scheduling, program execution,
+database/events/settings, dependency restoration, and APNs/device notification
+capability.
+
+It also maps every BPRC backlog row:
+
+- `BPRC-FEATURE-01`: capability discovery, routing, and intent execution.
+- `BPRC-FEATURE-02`: filesystem capability suite.
+- `BPRC-FEATURE-03`: process, jobs, and sandbox execution.
+- `BPRC-FEATURE-04`: web, browser, and research fetching.
+- `BPRC-FEATURE-05`: worktree, git, and source-control workflow.
+- `BPRC-FEATURE-06`: worker launch, sandbox workers, and self-extension.
+- `BPRC-FEATURE-07`: subagents and parallel work orchestration.
+- `BPRC-FEATURE-08`: agent queue, goals, work snapshots, and user questions.
+- `BPRC-FEATURE-09`: approval and freshness workflows.
+- `BPRC-FEATURE-10`: context, compaction, rules, hooks, skills, and memory.
+- `BPRC-FEATURE-11`: prompt artifacts.
+- `BPRC-FEATURE-12`: notifications, APNs, and device broker.
+- `BPRC-FEATURE-13`: audio capture, transcription, and media.
+- `BPRC-FEATURE-14`: MCP and external tool sources.
+- `BPRC-FEATURE-15`: program execution.
+- `BPRC-FEATURE-16`: import, repository, tree, and history tooling.
+- `BPRC-FEATURE-17`: cron, background automation, and scheduling.
+- `BPRC-FEATURE-18`: system update and diagnostics product surface.
+- `BPRC-FEATURE-19`: fixed iOS product panels.
+- `BPRC-FEATURE-20`: iOS client, DTO, event, and persistence breadth.
+- `BPRC-FEATURE-21`: event protocol surface.
+- `BPRC-FEATURE-22`: database and storage tables.
+- `BPRC-FEATURE-23`: settings and profile controls.
+- `BPRC-FEATURE-24`: dependencies that indicate removed behavior.
+
+## Architecture Notes
+
+The engine should stay a small host fabric. A feature is a true primitive only
+when it is required for safe composition of all packages: authority grants,
+invocation, resources, streams, queues, triggers, leases, compensation, event
+storage, replay, and the worker protocol. Product behavior is modular even
+when it is important.
+
+Memory is the main exception in scope, not in implementation. Memory deserves
+engine-owned contracts because privacy, provenance, prompt inclusion, deletion,
+and migration must survive engine swaps. The memory engine itself remains a
+package: deterministic resource memory, vector memory, episodic trace memory,
+procedural memory, or future engines can be enabled, disabled, compared, and
+migrated without changing the prompt loop contract.
+
+iOS remains a thin client. The default Phase 2 iOS answer is generic runtime
+surface or server-fact rendering. Native surfaces are justified only when the
+workflow is stable, frequent, and platform-specific: approvals, questions,
+notification inbox, memory audit, source-control review, or file/patch review.
+
+## Handoff Use
+
+Future threads should filter the TSV by `recommended_slice`, then present the
+handoff packet required by the scorecard before implementation. A row marked
+`planned` does not approve code by itself; it only records that the family is
+in scope for Phase 2 and identifies the required owner, validation, and user
+decision.

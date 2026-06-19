@@ -1662,3 +1662,7 @@ packages/ios-app/Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift	i
 packages/ios-app/Sources/UI/Chat/Sheets/WorkspaceSelectorRows.swift	implementation	ios_ui	Phase1-closeout	Workspace selector rows retained for compact filesystem navigation and action affordances.
 packages/ios-app/Tests/Engine/Protocol/EngineProtocolChildErrorTests.swift	test	test_harness	Phase1-closeout	Workspace browser child-error focused regression coverage retained for closeout proof.
 packages/ios-app/Tests/UI/Chat/WorkspaceSelectorVisualRenderTests.swift	test	test_harness	Phase1-closeout	Workspace selector visual render focused regression coverage retained for closeout proof.
+packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation
+packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation
+packages/agent/docs/phase-2-agent-execution-restoration-inventory.md	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation
+packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation

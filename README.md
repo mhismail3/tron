@@ -395,6 +395,17 @@ Current living entry points:
   active execution ledger for completed iOS affordance restoration slices,
   accepted off-plan UI/runtime work, validation evidence, deferred behavior, and
   the Phase 1 closeout state.
+- `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md`:
+  completed planning scorecard for the Phase 2 agent-execution restoration
+  roadmap, primitive-vs-capability classifications, memory architecture, slice
+  ordering, validation gates, and handoff packet.
+- `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`:
+  companion evidence manifest for the Phase 2 planning scorecard.
+- `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`:
+  narrative inventory for Phase 2 feature families and current gaps.
+- `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`:
+  machine-readable Phase 2 feature-family inventory used by future slice
+  handoffs.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -1466,7 +1477,12 @@ packages/ios-app/Sources/
   Phase 2 agent-execution restoration plan. It does not mean those affordances
   are restored. `packages/agent/docs/ios-affordance-restoration-progress.md`
   tracks which Phase 1 slices have since shipped, what was accepted off-plan,
-  what was validated, and what remains deferred.
+  what was validated, and what remains deferred. The durable Phase 2 plan is
+  now recorded in
+  `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md`,
+  `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`,
+  `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`, and
+  `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`.
 
 ### Data Flow
 

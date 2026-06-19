@@ -675,6 +675,9 @@ fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
         {
             Some(ResidueClass::FutureReadinessWording)
         }
+        _ if path.starts_with("packages/agent/docs/phase-2-agent-execution-restoration-") => {
+            Some(ResidueClass::FutureReadinessWording)
+        }
         _ => None,
     }
 }

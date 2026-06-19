@@ -1,6 +1,6 @@
 # iOS App Architecture
 
-> Last verified: 2026-06-18 (IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
+> Last verified: 2026-06-19 (Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
@@ -37,10 +37,11 @@ The iOS Affordance Restoration Map is the active planning artifact for
 functional-only Phase 1 iOS UX restoration. It classifies every deleted or
 renamed old iOS path before implementation, starts with local-native and
 current server-fact affordances, and does not restore deleted product panels.
-A later full Phase 2 agent-execution restoration plan is still required for
-capability discovery, filesystem, jobs, workers, subagents, approvals, web,
-git/worktrees, skills/rules/memory, MCP, scheduling, program execution, and
-matching database/event/settings/dependency work.
+The full Phase 2 agent-execution restoration plan now lives in
+`packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md` and
+covers capability discovery, filesystem, jobs, workers, subagents, approvals,
+web, git/worktrees, skills/rules/memory, MCP, scheduling, program execution,
+and matching database/event/settings/dependency work.
 
 ## Retained Surface
 
