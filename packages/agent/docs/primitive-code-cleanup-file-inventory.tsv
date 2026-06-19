@@ -176,6 +176,10 @@ packages/agent/src/domains/capability/operations/mod.rs	retain	rust agent	PCC-10
 packages/agent/src/domains/capability/operations/process.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/capability/operations/state.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/capability/operations/trace.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/domains/filesystem/contract.rs	retain	filesystem rust domain	Phase1-closeout	Workspace-browser contracts retained for approved iOS workspace selection; broad agent filesystem tools remain deferred.
+packages/agent/src/domains/filesystem/handlers.rs	retain	filesystem rust domain	Phase1-closeout	Workspace-browser handler registrations retained for approved iOS workspace selection; broad agent filesystem tools remain deferred.
+packages/agent/src/domains/filesystem/mod.rs	retain	filesystem rust domain	Phase1-closeout	Workspace-browser domain module retained for approved iOS workspace selection; broad agent filesystem tools remain deferred.
+packages/agent/src/domains/filesystem/service.rs	retain	filesystem rust domain	Phase1-closeout	Bounded local filesystem browse/create service retained for approved iOS workspace selection; broad agent filesystem tools remain deferred.
 packages/agent/src/domains/logs/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/message/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
@@ -1698,3 +1702,8 @@ packages/ios-app/Tests/UI/Chat/AttachmentMenuTests.swift	retain	ios test	Phase1-
 packages/ios-app/Tests/UI/Chat/ChatAffordanceVisualRenderTests.swift	retain	ios test	Phase1-closeout	Chat visual render tests retained for local errors, thinking, capability evidence, and quiet loading/empty states.
 packages/ios-app/Tests/UI/Chat/RecentInputHistoryTests.swift	retain	ios test	Phase1-closeout	Recent input history tests retained for local sheet insertion and clearing behavior.
 packages/ios-app/Tests/UI/Chat/SessionListPresentationTests.swift	retain	ios test	Phase1-closeout	Session list presentation tests retained for grouping, untitled rows, status, and layout alignment.
+packages/ios-app/Sources/Engine/Protocol/Filesystem/EngineProtocolTypes+Filesystem.swift	retain	ios engine protocol	Phase1-closeout	Filesystem browser DTOs retained for approved workspace selector navigation; broad agent filesystem tools remain deferred.
+packages/ios-app/Sources/Engine/Transport/Clients/WorkspaceBrowserClient.swift	retain	ios engine client	Phase1-closeout	Workspace browser client retained as a thin typed wrapper over current filesystem browse/create functions.
+packages/ios-app/Sources/UI/Chat/Sheets/WorkspaceSelectorRows.swift	retain	ios chat ui	Phase1-closeout	Workspace selector row primitives retained for compact filesystem navigation, shortcuts, actions, and listings.
+packages/ios-app/Tests/Engine/Protocol/EngineProtocolChildErrorTests.swift	retain	ios test	Phase1-closeout	Filesystem browser child-error decoding tests retained for resilient typed engine error handling.
+packages/ios-app/Tests/UI/Chat/WorkspaceSelectorVisualRenderTests.swift	retain	ios test	Phase1-closeout	Workspace selector visual render tests retained for compact filesystem browser layout and affordance regression coverage.

@@ -652,6 +652,11 @@ User-facing state:
   useful picker workflow while using current transport/repository ownership.
 - The same selector is reused by New Session, onboarding default-workspace
   setup, and Agent settings default-workspace selection.
+- Follow-up UI cleanup compacted the selector around filesystem navigation:
+  shortcuts are small chips, actions sit above the current path as
+  intrinsic-width single-line pills, the hidden-files toggle is an action pill,
+  and the current folder is a plain left-aligned path rather than another large
+  button/container.
 
 Data ownership:
 
@@ -687,6 +692,8 @@ Validation evidence:
 - New-session tests cover default/recent option ordering, trimming,
   deduplication, configured default workspace injection, restored
   workspace-browser markers, and absence of broad old filesystem operations.
+- Workspace selector visual render tests cover the compact shortcuts/action
+  layout, intrinsic-width action pills, and current-path presentation.
 
 ### Phase 1 Slice 6: Notification/Inbox Concept Review
 

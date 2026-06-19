@@ -66,7 +66,7 @@ fn sacb_campaign_harness_is_linked_and_formalized() {
 
     for required in [
         "# Security Authority Capability Boundaries Inventory",
-        "Status: SACB campaign `complete`; 730 security boundary rows inventoried and",
+        "Status: SACB campaign `complete`; 731 security boundary rows inventoried and",
         "## Boundary Classes",
         "`public_transport`",
         "`authority_grant`",

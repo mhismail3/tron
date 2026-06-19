@@ -862,7 +862,7 @@ Current primitive operations:
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
 | `replay_manifest` | Export the current session's canonical `tron.replay.v1` replay manifest, including replay hashes and cross-record references, without provider/tool/process/file/resource side effects. |
 
-Startup registration currently keeps loop infrastructure domains:
+Startup registration currently keeps only loop infrastructure domains:
 `system`, `capability`, `filesystem`, `blob`, `message`, `settings`, `auth`,
 `agent`, `logs`, `session`, `transcription`, and model-provider modules. The
 `filesystem` domain is a narrow iOS workspace-browser exception limited to

@@ -1,6 +1,6 @@
 # Concurrency Scheduling Discipline Inventory
 
-Status: CSD-10 `passed_after_fix`; 120 scheduling-surface rows and 23 static-gate/predecessor rows inventoried and classified.
+Status: CSD-10 `passed_after_fix`; 121 scheduling-surface rows and 23 static-gate/predecessor rows inventoried and classified.
 
 This inventory classifies production scheduling surfaces by owner, scheduler
 class, start site, cancellation or stop path, backpressure or capacity policy,
@@ -40,7 +40,7 @@ artifacts visible to the CSD harness:
   `DispatchQueue`, `AsyncStream`, timers, debounce/coalescing markers, and
   `AsyncSemaphore`.
 
-Scheduler class distribution for the 120 production scheduling-surface rows:
+Scheduler class distribution for the 121 production scheduling-surface rows:
 
 | Scheduler class | Rows |
 |---|---:|
@@ -51,7 +51,7 @@ Scheduler class distribution for the 120 production scheduling-surface rows:
 | `main_actor_ui` | 13 |
 | `actor_serialization` | 8 |
 | `external_callback_bridge` | 8 |
-| `view_scoped_task` | 5 |
+| `view_scoped_task` | 6 |
 | `bounded_queue` | 4 |
 | `blocking_supervisor` | 1 |
 | `ack_coalescer` | 1 |
