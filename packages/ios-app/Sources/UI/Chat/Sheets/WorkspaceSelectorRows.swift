@@ -54,15 +54,15 @@ struct WorkspaceDirectoryActionPill: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
+            HStack(spacing: 9) {
                 Image(systemName: icon)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(.tronEmerald)
-                    .frame(width: 18)
+                    .frame(width: 16)
 
-                VStack(alignment: .leading, spacing: 3) {
+                VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                         .foregroundStyle(.tronEmerald)
 
                     if let subtitle {
@@ -76,16 +76,17 @@ struct WorkspaceDirectoryActionPill: View {
 
                 Spacer()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, subtitle == nil ? 10 : 9)
-            .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-            .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)
         .glassEffect(
-            .regular.tint(Color.tronEmerald.opacity(0.1)).interactive(),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .regular.tint(Color.tronEmerald.opacity(0.09)).interactive(),
+            in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+        .accessibilityLabel(subtitle.map { "\(title), \($0)" } ?? title)
     }
 }
 

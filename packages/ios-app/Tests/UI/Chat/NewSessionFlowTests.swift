@@ -113,6 +113,7 @@ final class NewSessionFlowTests: XCTestCase {
             "Current folder",
             "Folders",
             "New Folder",
+            "Hidden",
             "FolderNameValidator",
             "WorkspaceQuickPathPill",
             "WorkspaceDirectoryActionPill",

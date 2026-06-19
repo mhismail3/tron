@@ -74,18 +74,7 @@ struct WorkspaceSelector: View {
                         .foregroundStyle(.tronEmerald)
                 }
 
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button {
-                        showHidden.toggle()
-                    } label: {
-                        Image(systemName: showHidden ? "eye" : "eye.slash")
-                            .font(TronTypography.buttonSM)
-                            .contentTransition(.symbolEffect(.replace.downUp))
-                    }
-                    .foregroundStyle(.tronEmerald)
-                    .disabled(currentPath.isEmpty)
-                    .sensoryFeedback(.selection, trigger: showHidden)
-
+                ToolbarItem(placement: .topBarTrailing) {
                     Button(action: selectCurrentPath) {
                         Image(systemName: "checkmark")
                             .font(TronTypography.buttonSM)
@@ -113,7 +102,7 @@ struct WorkspaceSelector: View {
 
     private var directoryBrowser: some View {
         ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 if let errorMessage {
                     inlineError(message: errorMessage)
                 }
@@ -127,13 +116,13 @@ struct WorkspaceSelector: View {
                 directorySection
             }
             .padding(.horizontal, 20)
-            .padding(.vertical, 18)
+            .padding(.vertical, 14)
         }
         .scrollClipDisabled()
     }
 
     private var quickPathSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionLabel("Shortcuts")
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
@@ -152,7 +141,7 @@ struct WorkspaceSelector: View {
     }
 
     private var locationSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             sectionLabel("Current folder")
             pathHeader
         }
@@ -186,16 +175,10 @@ struct WorkspaceSelector: View {
                     .tint(.tronEmerald)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .glassEffect(
-            .regular.tint(Color.tronEmerald.opacity(0.11)),
-            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
-        )
     }
 
     private var actionSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 6) {
             sectionLabel("Actions")
 
             if isCreatingFolder {
@@ -217,6 +200,15 @@ struct WorkspaceSelector: View {
                         subtitle: nil,
                         action: startFolderCreation
                     )
+
+                    WorkspaceDirectoryActionPill(
+                        icon: showHidden ? "eye" : "eye.slash",
+                        title: "Hidden",
+                        subtitle: showHidden ? "Shown" : "Off",
+                        action: toggleHiddenFiles
+                    )
+                    .disabled(currentPath.isEmpty)
+                    .sensoryFeedback(.selection, trigger: showHidden)
                 }
             }
         }
@@ -475,6 +467,11 @@ struct WorkspaceSelector: View {
     private func navigateUp() {
         guard let parentPath else { return }
         navigateTo(parentPath)
+    }
+
+    private func toggleHiddenFiles() {
+        guard !currentPath.isEmpty else { return }
+        showHidden.toggle()
     }
 
     private func startFolderCreation() {
