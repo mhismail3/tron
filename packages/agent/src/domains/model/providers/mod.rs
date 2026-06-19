@@ -52,6 +52,9 @@
 //!
 //! - Shared provider infrastructure stays under [`shared`]; this root exposes
 //!   only the canonical provider protocol helpers used by provider modules.
+//! - Provider stream retry is applied by the model responder through
+//!   [`shared::retry`]; provider config structs must not carry duplicate retry
+//!   policy.
 //! - Provider-native wire formats are converted before they reach canonical
 //!   capability history.
 //! - Malformed provider capability arguments fail closed at the stream boundary.

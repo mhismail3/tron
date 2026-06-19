@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::shared::retry::StreamRetryConfig;
 use crate::domains::model::routing::models::model_ids::{
     MINIMAX_M2, MINIMAX_M2_1, MINIMAX_M2_1_HIGHSPEED, MINIMAX_M2_5, MINIMAX_M2_5_HIGHSPEED,
     MINIMAX_M2_7, MINIMAX_M2_7_HIGHSPEED,
@@ -39,8 +38,6 @@ pub struct MiniMaxConfig {
     pub max_tokens: Option<u32>,
     /// Override base URL.
     pub base_url: Option<String>,
-    /// Retry configuration.
-    pub retry: Option<StreamRetryConfig>,
 }
 
 /// `MiniMax` model information.
@@ -50,8 +47,6 @@ pub struct MiniMaxModelInfo {
     pub id: &'static str,
     /// Human-readable name.
     pub name: &'static str,
-    /// Short name for compact display.
-    pub short_name: &'static str,
     /// Model family.
     pub family: &'static str,
     /// Context window in tokens.
@@ -85,7 +80,6 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
         MiniMaxModelInfo {
             id: MINIMAX_M2_7,
             name: "MiniMax M2.7",
-            short_name: "M2.7",
             family: "MiniMax M2",
             context_window: 204_800,
             max_output: 128_000,
@@ -105,7 +99,6 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
         MiniMaxModelInfo {
             id: MINIMAX_M2_7_HIGHSPEED,
             name: "MiniMax M2.7 Highspeed",
-            short_name: "M2.7 HS",
             family: "MiniMax M2",
             context_window: 204_800,
             max_output: 128_000,
@@ -125,7 +118,6 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
         MiniMaxModelInfo {
             id: MINIMAX_M2_5,
             name: "MiniMax M2.5",
-            short_name: "M2.5",
             family: "MiniMax M2",
             context_window: 204_800,
             max_output: 128_000,
@@ -145,7 +137,6 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
         MiniMaxModelInfo {
             id: MINIMAX_M2_5_HIGHSPEED,
             name: "MiniMax M2.5 Highspeed",
-            short_name: "M2.5 HS",
             family: "MiniMax M2",
             context_window: 204_800,
             max_output: 128_000,
@@ -165,7 +156,6 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
         MiniMaxModelInfo {
             id: MINIMAX_M2_1,
             name: "MiniMax M2.1",
-            short_name: "M2.1",
             family: "MiniMax M2",
             context_window: 204_800,
             max_output: 128_000,
@@ -185,7 +175,6 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
         MiniMaxModelInfo {
             id: MINIMAX_M2_1_HIGHSPEED,
             name: "MiniMax M2.1 Highspeed",
-            short_name: "M2.1 HS",
             family: "MiniMax M2",
             context_window: 204_800,
             max_output: 128_000,
@@ -205,7 +194,6 @@ static MINIMAX_MODELS: LazyLock<HashMap<&'static str, MiniMaxModelInfo>> = LazyL
         MiniMaxModelInfo {
             id: MINIMAX_M2,
             name: "MiniMax M2",
-            short_name: "M2",
             family: "MiniMax M2",
             context_window: 204_800,
             max_output: 128_000,
@@ -235,9 +223,9 @@ pub fn all_minimax_model_ids() -> Vec<&'static str> {
 
 impl MiniMaxModelInfo {
     /// Serialize this model to JSON for the `model.list` API response.
-    pub fn to_api_json(&self, id: &str) -> serde_json::Value {
+    pub fn to_api_json(&self) -> serde_json::Value {
         serde_json::json!({
-            "id": id,
+            "id": self.id,
             "name": self.name,
             "provider": "minimax",
             "providerDisplayName": "MiniMax",
@@ -247,6 +235,7 @@ impl MiniMaxModelInfo {
             "supportsThinking": self.supports_thinking,
             "supportsImages": self.supports_images,
             "supportsDocuments": false,
+            "supportsCapabilityPrimitives": self.supports_capabilities,
             "inputCostPerMillion": self.input_cost_per_million,
             "outputCostPerMillion": self.output_cost_per_million,
             "tier": "flagship",
@@ -262,11 +251,11 @@ impl MiniMaxModelInfo {
 
 /// All `MiniMax` models serialized for the `model.list` API, sorted by `sort_order`.
 pub fn all_minimax_models_api_json() -> Vec<serde_json::Value> {
-    let mut entries: Vec<_> = MINIMAX_MODELS.iter().collect();
-    entries.sort_by_key(|(_, info)| info.sort_order);
+    let mut entries: Vec<_> = MINIMAX_MODELS.values().collect();
+    entries.sort_by_key(|info| info.sort_order);
     entries
         .into_iter()
-        .map(|(id, info)| info.to_api_json(id))
+        .map(MiniMaxModelInfo::to_api_json)
         .collect()
 }
 
@@ -291,7 +280,7 @@ mod tests {
     #[test]
     fn get_minimax_model_m2_7_highspeed() {
         let m = get_minimax_model("MiniMax-M2.7-highspeed").unwrap();
-        assert_eq!(m.short_name, "M2.7 HS");
+        assert_eq!(m.name, "MiniMax M2.7 Highspeed");
         assert_eq!(m.context_window, 204_800);
     }
 
@@ -307,7 +296,7 @@ mod tests {
     #[test]
     fn get_minimax_model_m2_5_highspeed() {
         let m = get_minimax_model("MiniMax-M2.5-highspeed").unwrap();
-        assert_eq!(m.short_name, "M2.5 HS");
+        assert_eq!(m.name, "MiniMax M2.5 Highspeed");
         assert_eq!(m.context_window, 204_800);
     }
 
@@ -321,7 +310,7 @@ mod tests {
     #[test]
     fn get_minimax_model_m2_1_highspeed() {
         let m = get_minimax_model("MiniMax-M2.1-highspeed").unwrap();
-        assert_eq!(m.short_name, "M2.1 HS");
+        assert_eq!(m.name, "MiniMax M2.1 Highspeed");
     }
 
     #[test]
@@ -381,7 +370,7 @@ mod tests {
     #[test]
     fn to_api_json_m2_5() {
         let m = get_minimax_model("MiniMax-M2.5").unwrap();
-        let j = m.to_api_json("MiniMax-M2.5");
+        let j = m.to_api_json();
         assert_eq!(j["id"], "MiniMax-M2.5");
         assert_eq!(j["name"], "MiniMax M2.5");
         assert_eq!(j["provider"], "minimax");
@@ -389,6 +378,7 @@ mod tests {
         assert_eq!(j["maxOutput"], 128_000);
         assert_eq!(j["supportsThinking"], true);
         assert_eq!(j["supportsImages"], false);
+        assert_eq!(j["supportsCapabilityPrimitives"], true);
         assert_eq!(j["tier"], "flagship");
         assert_eq!(j["family"], "MiniMax M2");
         assert!(j["description"].is_string());

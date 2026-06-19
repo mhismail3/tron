@@ -266,6 +266,7 @@ impl GeminiModelInfo {
             "supportsThinking": self.supports_thinking,
             "supportsImages": self.supports_images,
             "supportsDocuments": true,
+            "supportsCapabilityPrimitives": self.supports_capabilities,
             "inputCostPerMillion": self.input_cost_per_million,
             "outputCostPerMillion": self.output_cost_per_million,
             "tier": self.tier,

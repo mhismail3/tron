@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::shared::retry::StreamRetryConfig;
 use crate::domains::model::routing::models::model_ids::{
     KIMI_K2_5, KIMI_K2_0711_PREVIEW, KIMI_K2_0905_PREVIEW, KIMI_K2_THINKING,
     KIMI_K2_THINKING_TURBO, KIMI_K2_TURBO_PREVIEW, MOONSHOT_V1_8K, MOONSHOT_V1_32K,
@@ -40,8 +39,6 @@ pub struct KimiConfig {
     pub max_tokens: Option<u32>,
     /// Override base URL.
     pub base_url: Option<String>,
-    /// Retry configuration.
-    pub retry: Option<StreamRetryConfig>,
 }
 
 /// Kimi model information.
@@ -51,8 +48,6 @@ pub struct KimiModelInfo {
     pub id: &'static str,
     /// Human-readable name.
     pub name: &'static str,
-    /// Short name for compact display.
-    pub short_name: &'static str,
     /// Model family.
     pub family: &'static str,
     /// Context window in tokens.
@@ -91,7 +86,6 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
         KimiModelInfo {
             id: KIMI_K2_5,
             name: "Kimi K2.5",
-            short_name: "K2.5",
             family: "Kimi K2",
             context_window: 262_144,
             max_output: 32_768,
@@ -112,7 +106,6 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
         KimiModelInfo {
             id: KIMI_K2_0905_PREVIEW,
             name: "Kimi K2 0905 Preview",
-            short_name: "K2 0905",
             family: "Kimi K2",
             context_window: 262_144,
             max_output: 32_768,
@@ -133,7 +126,6 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
         KimiModelInfo {
             id: KIMI_K2_0711_PREVIEW,
             name: "Kimi K2 0711 Preview",
-            short_name: "K2 0711",
             family: "Kimi K2",
             context_window: 131_072,
             max_output: 32_768,
@@ -154,7 +146,6 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
         KimiModelInfo {
             id: KIMI_K2_TURBO_PREVIEW,
             name: "Kimi K2 Turbo Preview",
-            short_name: "K2 Turbo",
             family: "Kimi K2",
             context_window: 262_144,
             max_output: 32_768,
@@ -175,7 +166,6 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
         KimiModelInfo {
             id: KIMI_K2_THINKING,
             name: "Kimi K2 Thinking",
-            short_name: "K2 Think",
             family: "Kimi K2",
             context_window: 262_144,
             max_output: 32_768,
@@ -196,7 +186,6 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
         KimiModelInfo {
             id: KIMI_K2_THINKING_TURBO,
             name: "Kimi K2 Thinking Turbo",
-            short_name: "K2 Think Turbo",
             family: "Kimi K2",
             context_window: 262_144,
             max_output: 32_768,
@@ -217,7 +206,6 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
         KimiModelInfo {
             id: MOONSHOT_V1_8K,
             name: "Moonshot V1 8K",
-            short_name: "V1 8K",
             family: "Moonshot V1",
             context_window: 8_192,
             max_output: 4_096,
@@ -238,7 +226,6 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
         KimiModelInfo {
             id: MOONSHOT_V1_32K,
             name: "Moonshot V1 32K",
-            short_name: "V1 32K",
             family: "Moonshot V1",
             context_window: 32_768,
             max_output: 4_096,
@@ -259,7 +246,6 @@ static KIMI_MODELS: LazyLock<HashMap<&'static str, KimiModelInfo>> = LazyLock::n
         KimiModelInfo {
             id: MOONSHOT_V1_128K,
             name: "Moonshot V1 128K",
-            short_name: "V1 128K",
             family: "Moonshot V1",
             context_window: 131_072,
             max_output: 4_096,
@@ -290,9 +276,9 @@ pub fn all_kimi_model_ids() -> Vec<&'static str> {
 
 impl KimiModelInfo {
     /// Serialize this model to JSON for the `model.list` API response.
-    pub fn to_api_json(&self, id: &str) -> serde_json::Value {
-        serde_json::json!({
-            "id": id,
+    pub fn to_api_json(&self) -> serde_json::Value {
+        let mut obj = serde_json::json!({
+            "id": self.id,
             "name": self.name,
             "provider": "kimi",
             "providerDisplayName": "Kimi",
@@ -302,6 +288,7 @@ impl KimiModelInfo {
             "supportsThinking": self.supports_thinking,
             "supportsImages": self.supports_images,
             "supportsDocuments": false,
+            "supportsCapabilityPrimitives": self.supports_capabilities,
             "inputCostPerMillion": self.input_cost_per_million,
             "outputCostPerMillion": self.output_cost_per_million,
             "tier": if self.is_retired_generation { "retired" } else { "flagship" },
@@ -311,17 +298,24 @@ impl KimiModelInfo {
             "recommended": self.recommended,
             "isLegacy": self.is_retired_generation,
             "sortOrder": self.sort_order,
-        })
+        });
+        if let Some(cache_read) = self.cache_read_cost_per_million {
+            let _ = obj.as_object_mut().unwrap().insert(
+                "cacheReadCostPerMillion".into(),
+                serde_json::json!(cache_read),
+            );
+        }
+        obj
     }
 }
 
 /// All Kimi models serialized for the `model.list` API, sorted by `sort_order`.
 pub fn all_kimi_models_api_json() -> Vec<serde_json::Value> {
-    let mut entries: Vec<_> = KIMI_MODELS.iter().collect();
-    entries.sort_by_key(|(_, info)| info.sort_order);
+    let mut entries: Vec<_> = KIMI_MODELS.values().collect();
+    entries.sort_by_key(|info| info.sort_order);
     entries
         .into_iter()
-        .map(|(id, info)| info.to_api_json(id))
+        .map(KimiModelInfo::to_api_json)
         .collect()
 }
 
@@ -336,6 +330,7 @@ mod tests {
     #[test]
     fn get_kimi_model_k2_5() {
         let m = get_kimi_model("kimi-k2.5").unwrap();
+        assert_eq!(m.id, "kimi-k2.5");
         assert_eq!(m.name, "Kimi K2.5");
         assert_eq!(m.context_window, 262_144);
         assert!(m.supports_thinking);
@@ -511,7 +506,7 @@ mod tests {
     #[test]
     fn to_api_json_k2_5() {
         let m = get_kimi_model("kimi-k2.5").unwrap();
-        let j = m.to_api_json("kimi-k2.5");
+        let j = m.to_api_json();
         assert_eq!(j["id"], "kimi-k2.5");
         assert_eq!(j["name"], "Kimi K2.5");
         assert_eq!(j["provider"], "kimi");
@@ -519,6 +514,8 @@ mod tests {
         assert_eq!(j["maxOutput"], 32_768);
         assert_eq!(j["supportsThinking"], true);
         assert_eq!(j["supportsImages"], true);
+        assert_eq!(j["supportsCapabilityPrimitives"], true);
+        assert_eq!(j["cacheReadCostPerMillion"], 0.10);
         assert_eq!(j["tier"], "flagship");
         assert_eq!(j["family"], "Kimi K2");
         assert!(j["description"].is_string());
@@ -531,7 +528,7 @@ mod tests {
     #[test]
     fn to_api_json_retired_tier() {
         let m = get_kimi_model("moonshot-v1-8k").unwrap();
-        let j = m.to_api_json("moonshot-v1-8k");
+        let j = m.to_api_json();
         assert_eq!(j["tier"], "retired");
         assert_eq!(j["isLegacy"], true);
     }

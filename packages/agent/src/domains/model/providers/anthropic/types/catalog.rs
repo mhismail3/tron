@@ -94,8 +94,10 @@ impl ClaudeModelInfo {
             "supportsThinking": self.supports_thinking,
             "supportsImages": self.supports_images,
             "supportsDocuments": true,
+            "supportsCapabilityPrimitives": self.supports_capabilities,
             "inputCostPerMillion": self.input_cost_per_million,
             "outputCostPerMillion": self.output_cost_per_million,
+            "cacheReadCostPerMillion": self.cache_read_cost_per_million,
             "tier": self.tier,
             "family": self.family,
             "description": self.description,
@@ -491,4 +493,5 @@ static CLAUDE_MODELS: LazyLock<HashMap<&'static str, ClaudeModelInfo>> = LazyLoc
 });
 
 /// Default model ID.
+#[cfg(test)]
 pub const DEFAULT_MODEL: &str = "claude-opus-4-6";

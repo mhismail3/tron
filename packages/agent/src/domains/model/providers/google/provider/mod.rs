@@ -137,6 +137,7 @@ pub struct GoogleProvider {
 
 impl GoogleProvider {
     /// Create a new Google provider.
+    #[cfg(test)]
     #[must_use]
     pub fn new(config: GoogleConfig) -> Self {
         Self::with_client(config, reqwest::Client::new())

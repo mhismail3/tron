@@ -11,10 +11,8 @@ pub const DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 pub const DEFAULT_PLATFORM_BASE_URL: &str = "https://api.openai.com";
 
 /// Default model.
+#[cfg(test)]
 pub const DEFAULT_MODEL: &str = "gpt-5.5";
-
-/// Default max output tokens for unknown models.
-pub const DEFAULT_MAX_OUTPUT_TOKENS: u32 = 128_000;
 
 /// Maximum length for capability result output strings (16 KB).
 ///

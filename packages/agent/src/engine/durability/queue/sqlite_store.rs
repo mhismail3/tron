@@ -377,32 +377,6 @@ CREATE INDEX IF NOT EXISTS idx_engine_queue_items_trace
             .collect()
     }
 
-    /// List queue items that belong to one trace.
-    pub fn list_by_trace(&self, trace_id: &str, limit: usize) -> Result<Vec<EngineQueueItem>> {
-        if limit == 0 {
-            return Err(EngineError::PolicyViolation(
-                "queue list limit must be greater than zero".to_owned(),
-            ));
-        }
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT * FROM engine_queue_items
-                 WHERE trace_id = ?1
-                 ORDER BY created_at ASC
-                 LIMIT ?2",
-            )
-            .map_err(|err| sqlite_err("queue.list_by_trace.prepare", err.to_string()))?;
-        let rows = stmt
-            .query_map(
-                params![trace_id, limit.min(MAX_QUEUE_LIST_PAGE_SIZE) as i64],
-                |row| row_to_queue_item(&self.conn, row),
-            )
-            .map_err(|err| sqlite_err("queue.list_by_trace.query", err.to_string()))?;
-        rows.map(|row| row.map_err(|err| sqlite_err("queue.list_by_trace.row", err.to_string())))
-            .collect()
-    }
-
     /// List queue items scoped to one session for replay.
     pub fn list_by_session(&self, session_id: &str) -> Result<Vec<EngineQueueItem>> {
         let mut stmt = self

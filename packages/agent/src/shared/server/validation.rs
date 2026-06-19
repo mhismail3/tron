@@ -114,6 +114,7 @@ pub fn validate_attachment_size(base64_data: &str) -> Result<(), CapabilityError
 ///
 /// Preserves user-facing messages (invalid params, not found) but strips
 /// internal details (file paths, stack traces) from internal errors.
+#[cfg(test)]
 pub fn sanitize_error_message(err: &CapabilityError) -> String {
     match err {
         CapabilityError::InvalidParams { message }

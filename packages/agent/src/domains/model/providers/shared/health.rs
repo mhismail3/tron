@@ -77,6 +77,7 @@ impl ProviderHealthTracker {
     }
 
     /// Create a tracker with custom window size and threshold.
+    #[cfg(test)]
     pub fn with_config(window_size: usize, threshold: f64) -> Self {
         Self {
             inner: Mutex::new(Inner {
@@ -98,6 +99,7 @@ impl ProviderHealthTracker {
     }
 
     /// Check if a provider is currently degraded (error rate above threshold).
+    #[cfg(test)]
     pub fn is_degraded(&self, provider: &str) -> bool {
         let inner = self.inner.lock();
         inner
@@ -107,6 +109,7 @@ impl ProviderHealthTracker {
     }
 
     /// Get the current error rate for a provider (0.0–1.0).
+    #[cfg(test)]
     pub fn error_rate(&self, provider: &str) -> f64 {
         let inner = self.inner.lock();
         inner

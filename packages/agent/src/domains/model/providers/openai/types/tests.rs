@@ -292,6 +292,15 @@ fn gpt_51_codex_mini_retired_2026_04_14() {
 }
 
 #[test]
+fn to_api_json_uses_short_display_name() {
+    let m = get_openai_model("gpt-5.1-codex-mini").unwrap();
+    assert_ne!(m.name, m.short_name);
+
+    let j = m.to_api_json(m.default_profile());
+    assert_eq!(j["name"], m.short_name);
+}
+
+#[test]
 fn gpt_53_codex_not_retired() {
     // Regression guard: supported models must not be flipped accidentally.
     let m = get_openai_model("gpt-5.3-codex").unwrap();

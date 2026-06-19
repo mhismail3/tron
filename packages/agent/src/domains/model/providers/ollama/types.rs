@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
-use crate::domains::model::providers::shared::retry::StreamRetryConfig;
 use crate::domains::model::routing::models::model_ids::{GEMMA4_26B, GEMMA4_E4B};
 
 /// Default base URL for the Ollama API.
@@ -32,8 +31,6 @@ pub struct OllamaConfig {
     pub base_url: Option<String>,
     /// Override max tokens.
     pub max_tokens: Option<u32>,
-    /// Retry configuration.
-    pub retry: Option<StreamRetryConfig>,
 }
 
 /// Ollama model information.
@@ -43,8 +40,6 @@ pub struct OllamaModelInfo {
     pub id: &'static str,
     /// Human-readable name.
     pub name: &'static str,
-    /// Short name for compact display.
-    pub short_name: &'static str,
     /// Model family.
     pub family: &'static str,
     /// Context window in tokens.
@@ -72,7 +67,6 @@ static OLLAMA_MODELS: LazyLock<HashMap<&'static str, OllamaModelInfo>> = LazyLoc
         OllamaModelInfo {
             id: GEMMA4_E4B,
             name: "Gemma 4 E4B",
-            short_name: "E4B",
             family: "Gemma 4",
             context_window: 65_536,
             max_output: 8_192,
@@ -89,7 +83,6 @@ static OLLAMA_MODELS: LazyLock<HashMap<&'static str, OllamaModelInfo>> = LazyLoc
         OllamaModelInfo {
             id: GEMMA4_26B,
             name: "Gemma 4 26B",
-            short_name: "26B",
             family: "Gemma 4",
             context_window: 65_536,
             max_output: 8_192,
@@ -116,12 +109,12 @@ pub fn all_ollama_model_ids() -> Vec<&'static str> {
 
 impl OllamaModelInfo {
     /// Serialize this model to JSON for the `model.list` API response.
-    pub fn to_api_json(&self, id: &str) -> serde_json::Value {
+    pub fn to_api_json(&self) -> serde_json::Value {
         // supportsThinking: true → iOS displays thinking blocks when they arrive.
         // supportsReasoning: false → no reasoning level picker (Gemma 4 thinking
         //   is always-on, not configurable).
         serde_json::json!({
-            "id": id,
+            "id": self.id,
             "name": self.name,
             "provider": "ollama",
             "providerDisplayName": "Ollama",
@@ -131,6 +124,7 @@ impl OllamaModelInfo {
             "supportsThinking": self.supports_thinking,
             "supportsImages": self.supports_images,
             "supportsDocuments": false,
+            "supportsCapabilityPrimitives": self.supports_capabilities,
             "inputCostPerMillion": 0.0,
             "outputCostPerMillion": 0.0,
             "tier": "local",
@@ -149,11 +143,11 @@ impl OllamaModelInfo {
 /// This is the static (sync) version — all models are listed without availability info.
 /// Prefer [`all_ollama_models_api_json_with_availability`] when an async context is available.
 pub fn all_ollama_models_api_json() -> Vec<serde_json::Value> {
-    let mut entries: Vec<_> = OLLAMA_MODELS.iter().collect();
-    entries.sort_by_key(|(_, info)| info.sort_order);
+    let mut entries: Vec<_> = OLLAMA_MODELS.values().collect();
+    entries.sort_by_key(|info| info.sort_order);
     entries
         .into_iter()
-        .map(|(id, info)| info.to_api_json(id))
+        .map(OllamaModelInfo::to_api_json)
         .collect()
 }
 
@@ -168,16 +162,13 @@ pub async fn all_ollama_models_api_json_with_availability(
     let base = base_url.unwrap_or(DEFAULT_BASE_URL);
     let pulled = query_pulled_models(base).await;
 
-    let mut entries: Vec<_> = OLLAMA_MODELS.iter().collect();
-    entries.sort_by_key(|(_, info)| info.sort_order);
-
-    entries
+    all_ollama_models_api_json()
         .into_iter()
-        .map(|(id, info)| {
-            let mut json = info.to_api_json(id);
+        .map(|mut json| {
+            let id = json["id"].as_str().unwrap_or_default().to_owned();
             match &pulled {
                 Ok(models) => {
-                    let available = models.iter().any(|m| m == id);
+                    let available = models.iter().any(|model| model == &id);
                     json["available"] = serde_json::Value::Bool(available);
                     if !available {
                         json["unavailableReason"] = serde_json::Value::String(format!(
@@ -290,7 +281,7 @@ mod tests {
     #[test]
     fn to_api_json_e4b() {
         let m = get_ollama_model("gemma4:e4b").unwrap();
-        let j = m.to_api_json("gemma4:e4b");
+        let j = m.to_api_json();
         assert_eq!(j["id"], "gemma4:e4b");
         assert_eq!(j["name"], "Gemma 4 E4B");
         assert_eq!(j["provider"], "ollama");
@@ -300,6 +291,7 @@ mod tests {
         assert_eq!(j["supportsThinking"], true);
         assert_eq!(j["supportsImages"], true);
         assert_eq!(j["supportsDocuments"], false);
+        assert_eq!(j["supportsCapabilityPrimitives"], true);
         assert_eq!(j["inputCostPerMillion"], 0.0);
         assert_eq!(j["outputCostPerMillion"], 0.0);
         assert_eq!(j["tier"], "local");

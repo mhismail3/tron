@@ -52,6 +52,7 @@ pub struct AnthropicProvider {
 
 impl AnthropicProvider {
     /// Create a new Anthropic provider.
+    #[cfg(test)]
     #[must_use]
     pub fn new(config: AnthropicConfig) -> Self {
         Self {

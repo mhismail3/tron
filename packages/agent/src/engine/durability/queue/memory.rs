@@ -254,24 +254,6 @@ impl InMemoryEngineQueueStore {
             .collect())
     }
 
-    /// List queue items that belong to one trace.
-    pub fn list_by_trace(&self, trace_id: &str, limit: usize) -> Result<Vec<EngineQueueItem>> {
-        if limit == 0 {
-            return Err(EngineError::PolicyViolation(
-                "queue list limit must be greater than zero".to_owned(),
-            ));
-        }
-        let mut items = self
-            .items
-            .values()
-            .filter(|item| item.trace_id.as_str() == trace_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        items.sort_by_key(|item| item.created_at);
-        items.truncate(limit.min(MAX_QUEUE_LIST_PAGE_SIZE));
-        Ok(items)
-    }
-
     /// List queue items scoped to one session for replay.
     pub fn list_by_session(&self, session_id: &str) -> Result<Vec<EngineQueueItem>> {
         let mut items = self

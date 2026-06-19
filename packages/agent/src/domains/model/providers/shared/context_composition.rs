@@ -1,9 +1,10 @@
 //! Provider-independent composition for the primitive agent context.
 
 use crate::shared::foundation::constitution::{
-    ContextBlock, ContextCacheClass, ContextSensitivity, ProviderSurface, TronHome,
-    context_block_for_text,
+    ContextBlock, ContextCacheClass, TronHome, context_block_for_text,
 };
+#[cfg(test)]
+use crate::shared::foundation::constitution::{ContextSensitivity, ProviderSurface};
 use crate::shared::protocol::messages::Context;
 
 /// Compose provider prompt text from the primitive context.
@@ -74,6 +75,7 @@ pub fn compose_context_blocks(context: &Context) -> Vec<ContextBlock> {
 }
 
 /// Compile the full provider-independent audit view of an LLM request.
+#[cfg(test)]
 pub fn compose_context_audit_blocks(context: &Context) -> Vec<ContextBlock> {
     let mut blocks = compose_context_blocks(context);
 

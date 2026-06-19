@@ -96,8 +96,12 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
     match event {
         AnthropicSseEvent::MessageStart { message } => {
             state.acc.input_tokens = message.usage.input_tokens;
+            state.acc.output_tokens = message.usage.output_tokens;
             state.cache_creation_tokens = message.usage.cache_creation_input_tokens;
             state.cache_read_tokens = message.usage.cache_read_input_tokens;
+            if let Some(stop_reason) = message.stop_reason.as_ref() {
+                state.stop_reason = Some(stop_reason.clone());
+            }
             if let Some(ref cc) = message.usage.cache_creation {
                 state.cache_creation_5m_tokens = cc.ephemeral_5m_input_tokens;
                 state.cache_creation_1h_tokens = cc.ephemeral_1h_input_tokens;
@@ -106,7 +110,10 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             let cache_hit = state.cache_read_tokens > 0;
             let cache_write = state.cache_creation_tokens > 0;
             debug!(
+                message_id = message.id.as_deref().unwrap_or(""),
+                model = message.model.as_deref().unwrap_or(""),
                 input_tokens = state.acc.input_tokens,
+                output_tokens = state.acc.output_tokens,
                 cache_read = state.cache_read_tokens,
                 cache_write = state.cache_creation_tokens,
                 cache_hit,
@@ -117,19 +124,48 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             vec![]
         }
 
-        AnthropicSseEvent::ContentBlockStart { content_block, .. } => match content_block {
-            SseContentBlock::Text { .. } => {
+        AnthropicSseEvent::ContentBlockStart {
+            index,
+            content_block,
+        } => match content_block {
+            SseContentBlock::Text { text } => {
+                debug!(index, "Anthropic text content block started");
                 state.current_block_type = Some(BlockType::Text);
-                // Anthropic has explicit block starts; use mark_ rather than process_.
-                state.acc.text_started = true;
-                vec![StreamEvent::TextStart]
+                let mut events = state
+                    .acc
+                    .mark_text_started()
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                if !text.is_empty() {
+                    if let Some(error) = state.acc.accumulate_text(text) {
+                        return vec![error];
+                    }
+                    events.push(StreamEvent::TextDelta {
+                        delta: text.clone(),
+                    });
+                }
+                events
             }
-            SseContentBlock::Thinking { .. } => {
+            SseContentBlock::Thinking { thinking } => {
+                debug!(index, "Anthropic thinking content block started");
                 state.current_block_type = Some(BlockType::Thinking);
-                state.acc.thinking_started = true;
-                vec![StreamEvent::ThinkingStart]
+                let mut events = state
+                    .acc
+                    .mark_thinking_started()
+                    .into_iter()
+                    .collect::<Vec<_>>();
+                if !thinking.is_empty() {
+                    if let Some(error) = state.acc.accumulate_thinking(thinking) {
+                        return vec![error];
+                    }
+                    events.push(StreamEvent::ThinkingDelta {
+                        delta: thinking.clone(),
+                    });
+                }
+                events
             }
             SseContentBlock::CapabilityInvocation { id, name } => {
+                debug!(index, invocation_id = %id, name = %name, "Anthropic capability content block started");
                 state.current_block_type = Some(BlockType::CapabilityInvocation);
                 state.current_invocation_id = Some(id.clone());
                 state
@@ -138,8 +174,9 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             }
         },
 
-        AnthropicSseEvent::ContentBlockDelta { delta, .. } => match delta {
+        AnthropicSseEvent::ContentBlockDelta { index, delta } => match delta {
             SseDelta::TextDelta { text } => {
+                debug!(index, "Anthropic text content block delta");
                 if let Some(error) = state.acc.accumulate_text(text) {
                     return vec![error];
                 }
@@ -148,6 +185,7 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
                 }]
             }
             SseDelta::ThinkingDelta { thinking } => {
+                debug!(index, "Anthropic thinking content block delta");
                 if let Some(error) = state.acc.accumulate_thinking(thinking) {
                     return vec![error];
                 }
@@ -156,10 +194,12 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
                 }]
             }
             SseDelta::SignatureDelta { signature } => {
+                debug!(index, "Anthropic signature content block delta");
                 state.acc.accumulate_signature(signature);
                 vec![]
             }
             SseDelta::InputJsonDelta { partial_json } => {
+                debug!(index, "Anthropic capability argument content block delta");
                 if let Some(ref id) = state.current_invocation_id {
                     state.acc.append_tool_args(id, partial_json)
                 } else {
@@ -168,7 +208,10 @@ pub fn process_sse_event(event: &AnthropicSseEvent, state: &mut StreamState) -> 
             }
         },
 
-        AnthropicSseEvent::ContentBlockStop { .. } => handle_content_block_stop(state),
+        AnthropicSseEvent::ContentBlockStop { index } => {
+            debug!(index, "Anthropic content block stopped");
+            handle_content_block_stop(state)
+        }
 
         AnthropicSseEvent::MessageDelta { delta, usage } => {
             state.stop_reason.clone_from(&delta.stop_reason);
