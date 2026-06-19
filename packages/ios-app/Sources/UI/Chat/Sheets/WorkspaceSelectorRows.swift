@@ -54,31 +54,23 @@ struct WorkspaceDirectoryActionPill: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
                     .foregroundStyle(.tronEmerald)
                     .frame(width: 16)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-
-                    if let subtitle {
-                        Text(subtitle)
-                            .font(TronTypography.codeCaption)
-                            .foregroundStyle(.tronTextMuted)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
+                Text(title)
+                    .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                    .foregroundStyle(.tronEmerald)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.88)
 
                 Spacer()
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
         .buttonStyle(.plain)

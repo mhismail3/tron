@@ -141,30 +141,24 @@ struct WorkspaceSelector: View {
     }
 
     private var locationSection: some View {
-        HStack(alignment: .center, spacing: 8) {
-            sectionLabel("Current folder")
-
-            Spacer(minLength: 12)
-
-            HStack(spacing: 6) {
-                if isNavigating {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .tint(.tronEmerald)
-                } else {
-                    Image(systemName: "folder.fill")
-                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
-                        .foregroundStyle(.tronEmerald)
-                }
-
-                Text(currentPath.abbreviatingHomeDirectory)
-                    .font(TronTypography.codeCaption)
-                    .foregroundStyle(.tronTextMuted)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .multilineTextAlignment(.trailing)
+        HStack(spacing: 8) {
+            if isNavigating {
+                ProgressView()
+                    .controlSize(.mini)
+                    .tint(.tronEmerald)
+            } else {
+                Image(systemName: "folder.fill")
+                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
+                    .foregroundStyle(.tronEmerald)
             }
-            .frame(maxWidth: 230, alignment: .trailing)
+
+            Text(currentPath.abbreviatingHomeDirectory)
+                .font(TronTypography.sans(size: TronTypography.sizeBody3, weight: .semibold))
+                .foregroundStyle(.tronTextMuted)
+                .lineLimit(1)
+                .truncationMode(.middle)
+
+            Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Current folder, \(currentPath.abbreviatingHomeDirectory)")
