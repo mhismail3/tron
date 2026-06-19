@@ -141,40 +141,33 @@ struct WorkspaceSelector: View {
     }
 
     private var locationSection: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        HStack(alignment: .center, spacing: 8) {
             sectionLabel("Current folder")
-            pathHeader
-        }
-    }
 
-    private var pathHeader: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "folder.fill")
-                .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                .foregroundStyle(.tronEmerald)
-                .frame(width: 18)
+            Spacer(minLength: 12)
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(currentFolderTitle)
-                    .font(TronTypography.sans(size: TronTypography.sizeBodySM, weight: .semibold))
-                    .foregroundStyle(.tronTextPrimary)
-                    .lineLimit(1)
+            HStack(spacing: 6) {
+                if isNavigating {
+                    ProgressView()
+                        .controlSize(.mini)
+                        .tint(.tronEmerald)
+                } else {
+                    Image(systemName: "folder.fill")
+                        .font(TronTypography.sans(size: TronTypography.sizeCaption, weight: .semibold))
+                        .foregroundStyle(.tronEmerald)
+                }
 
                 Text(currentPath.abbreviatingHomeDirectory)
                     .font(TronTypography.codeCaption)
                     .foregroundStyle(.tronTextMuted)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                    .multilineTextAlignment(.trailing)
             }
-
-            Spacer(minLength: 8)
-
-            if isNavigating {
-                ProgressView()
-                    .controlSize(.mini)
-                    .tint(.tronEmerald)
-            }
+            .frame(maxWidth: 230, alignment: .trailing)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Current folder, \(currentPath.abbreviatingHomeDirectory)")
     }
 
     private var actionSection: some View {
@@ -346,18 +339,6 @@ struct WorkspaceSelector: View {
         !isSubmittingFolder
             && FolderNameValidator.validationError(for: newFolderName) == nil
             && !currentPath.isEmpty
-    }
-
-    private var currentFolderTitle: String {
-        let abbreviated = currentPath.abbreviatingHomeDirectory
-        if abbreviated == "~" {
-            return "Home"
-        }
-        if currentPath == "/" {
-            return "Root"
-        }
-        let name = URL(fileURLWithPath: currentPath).lastPathComponent
-        return name.isEmpty ? abbreviated : name
     }
 
     private func sectionLabel(_ text: String) -> some View {
