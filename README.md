@@ -685,9 +685,10 @@ engine/policy/record/prompt-trace/eval-run/migration resource contracts,
 explicit disabled/active/shadow/compare policy state, redacted record audit, and
 provider-safe prompt trace text. Memory policy resolves by session, then
 workspace, then system scope; prompt-trace audit writes use trace-specific
-idempotency so later turns do not replay stale memory status. It does not
-implement semantic retrieval, embeddings, ranking, summarization, procedural
-rules, or automatic prompt memory.
+idempotency so later turns do not replay stale memory status. Direct
+record-id operations fail closed when the addressed resource is outside the
+caller memory scope. It does not implement semantic retrieval, embeddings,
+ranking, summarization, procedural rules, or automatic prompt memory.
 `domains/worker_lifecycle` owns local package proposals,
 `tron.worker_package.v1` manifest validation, install/enable/disable/launch/
 stop/retire functions, scoped token minting, conformance reports, and
@@ -931,6 +932,7 @@ sees only read-only `execute` memory audit operations, and prompt assembly
 receives only mode/count/trace facts, never retained memory body content.
 Policy lookup is `session -> workspace -> system`, and prompt-trace audit
 idempotency is keyed by trace so memory status can change across turns.
+Direct record-id inspect/edit/tombstone operations reject cross-scope resources.
 `worker_lifecycle` owner is the explicit exception for local package
 proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before

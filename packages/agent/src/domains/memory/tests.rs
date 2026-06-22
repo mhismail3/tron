@@ -184,6 +184,96 @@ async fn record_lifecycle_is_versioned_resource_backed_and_redacted() {
 }
 
 #[tokio::test]
+async fn record_id_operations_reject_cross_session_scope() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-scope-configure").await;
+    let retained = invoke_write(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        retain_payload("scope-record"),
+        "memory-scope-retain",
+    )
+    .await;
+    let record_resource_id = retained["recordResourceId"].as_str().expect("record id");
+    let retained_version_id = retained["recordVersionId"].as_str().expect("version id");
+
+    invoke_write_with_context(
+        &ctx,
+        super::CONFIGURE_FUNCTION,
+        json!({
+            "mode": "active",
+            "provenance": {"source": "other_session_scope_test"}
+        }),
+        other_session_context("memory-other-session-configure")
+            .with_scope(super::READ_SCOPE)
+            .with_scope(super::WRITE_SCOPE)
+            .with_idempotency_key("memory-other-session-configure"),
+    )
+    .await;
+
+    let inspect = invoke_read_result_with_context(
+        &ctx,
+        super::INSPECT_FUNCTION,
+        json!({"recordResourceId": record_resource_id}),
+        other_session_context("memory-other-session-inspect").with_scope(super::READ_SCOPE),
+    )
+    .await;
+    assert!(
+        inspect
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("scope mismatch")),
+        "cross-session inspect must fail closed: {:?}",
+        inspect.error
+    );
+
+    let edit = invoke_write_result_with_context(
+        &ctx,
+        super::EDIT_FUNCTION,
+        json!({
+            "recordResourceId": record_resource_id,
+            "expectedCurrentVersionId": retained_version_id,
+            "preview": "cross-session edit"
+        }),
+        other_session_context("memory-other-session-edit")
+            .with_scope(super::READ_SCOPE)
+            .with_scope(super::WRITE_SCOPE)
+            .with_idempotency_key("memory-other-session-edit"),
+    )
+    .await;
+    assert!(
+        edit.error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("scope mismatch")),
+        "cross-session edit must fail closed: {:?}",
+        edit.error
+    );
+
+    let tombstone = invoke_write_result_with_context(
+        &ctx,
+        super::TOMBSTONE_FUNCTION,
+        json!({
+            "recordResourceId": record_resource_id,
+            "expectedCurrentVersionId": retained_version_id,
+            "reason": "cross-session tombstone"
+        }),
+        other_session_context("memory-other-session-tombstone")
+            .with_scope(super::READ_SCOPE)
+            .with_scope(super::WRITE_SCOPE)
+            .with_idempotency_key("memory-other-session-tombstone"),
+    )
+    .await;
+    assert!(
+        tombstone
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("scope mismatch")),
+        "cross-session tombstone must fail closed: {:?}",
+        tombstone.error
+    );
+}
+
+#[tokio::test]
 async fn inline_body_refs_are_rejected() {
     let ctx = make_test_context();
     configure_active(&ctx, "memory-inline-configure").await;
@@ -415,16 +505,24 @@ async fn invoke_read_with_context(
     payload: Value,
     causal_context: CausalContext,
 ) -> Option<Value> {
-    let result = ctx
-        .engine_host
+    let result = invoke_read_result_with_context(ctx, function_id, payload, causal_context).await;
+    assert_eq!(result.error, None, "read failed: {:?}", result.error);
+    result.value
+}
+
+async fn invoke_read_result_with_context(
+    ctx: &ServerRuntimeContext,
+    function_id: &str,
+    payload: Value,
+    causal_context: CausalContext,
+) -> InvocationResult {
+    ctx.engine_host
         .invoke(Invocation::new_sync(
             FunctionId::new(function_id).unwrap(),
             payload,
             causal_context,
         ))
-        .await;
-    assert_eq!(result.error, None, "read failed: {:?}", result.error);
-    result.value
+        .await
 }
 
 async fn invoke_write(
@@ -524,4 +622,15 @@ fn workspace_context(trace_id: &str) -> CausalContext {
     .with_workspace_id("memory-workspace")
     .with_scope(super::READ_SCOPE)
     .with_scope(super::WRITE_SCOPE)
+}
+
+fn other_session_context(trace_id: &str) -> CausalContext {
+    CausalContext::new(
+        ActorId::new("engine-client").unwrap(),
+        ActorKind::Client,
+        AuthorityGrantId::new("engine-transport").unwrap(),
+        TraceId::new(trace_id).unwrap(),
+    )
+    .with_session_id("other-memory-session")
+    .with_workspace_id("memory-workspace")
 }

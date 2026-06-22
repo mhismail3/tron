@@ -27,6 +27,8 @@
 //! Policy lookup is hierarchical: an explicit session policy wins, then an
 //! explicit workspace policy, then system policy, then the implicit disabled
 //! default.
+//! Record-id operations must verify that the target record resource scope
+//! matches the caller's current memory scope before returning or mutating it.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 pub(crate) use crate::engine::{

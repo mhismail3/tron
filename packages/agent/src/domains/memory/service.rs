@@ -298,6 +298,7 @@ pub(crate) async fn edit_memory_value(
     let resource_id = required_string(payload, "recordResourceId")?;
     let expected = required_string(payload, "expectedCurrentVersionId")?;
     let inspection = require_memory_record(engine_host, &resource_id).await?;
+    ensure_record_scope_matches_invocation(&inspection, invocation)?;
     let (current_version_id, current_payload) = current_payload(&inspection)
         .ok_or_else(|| invalid_params("memory record has no current payload"))?;
     if current_version_id != expected {
@@ -378,6 +379,7 @@ pub(crate) async fn tombstone_memory_value(
     let resource_id = required_string(payload, "recordResourceId")?;
     let expected = required_string(payload, "expectedCurrentVersionId")?;
     let inspection = require_memory_record(engine_host, &resource_id).await?;
+    ensure_record_scope_matches_invocation(&inspection, invocation)?;
     let (current_version_id, current_payload) = current_payload(&inspection)
         .ok_or_else(|| invalid_params("memory record has no current payload"))?;
     if current_version_id != expected {
@@ -470,10 +472,12 @@ pub(crate) async fn list_memory_value(
 /// Inspect one redacted memory record.
 pub(crate) async fn inspect_memory_value(
     engine_host: &EngineHostHandle,
+    invocation: &Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     let resource_id = required_string(payload, "recordResourceId")?;
     let inspection = require_memory_record(engine_host, &resource_id).await?;
+    ensure_record_scope_matches_invocation(&inspection, invocation)?;
     let redacted_versions = inspection
         .versions
         .iter()
@@ -670,6 +674,23 @@ async fn require_memory_record(
         )));
     }
     Ok(inspection)
+}
+
+fn ensure_record_scope_matches_invocation(
+    inspection: &EngineResourceInspection,
+    invocation: &Invocation,
+) -> Result<(), CapabilityError> {
+    let expected = resource_scope(invocation);
+    if inspection.resource.scope != expected {
+        return Err(invalid_params(format!(
+            "memory record scope mismatch: expected {}:{}, actual {}:{}",
+            expected.kind(),
+            expected.value(),
+            inspection.resource.scope.kind(),
+            inspection.resource.scope.value()
+        )));
+    }
+    Ok(())
 }
 
 fn prompt_inclusion_summary(policy: &MemoryPolicyRecord) -> Value {

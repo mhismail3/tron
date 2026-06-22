@@ -25,7 +25,7 @@ operation_bindings! {
             service::list_memory_value(&deps.engine_host, invocation, &invocation.payload).await
         },
         "inspect" => |invocation, deps| {
-            service::inspect_memory_value(&deps.engine_host, &invocation.payload).await
+            service::inspect_memory_value(&deps.engine_host, invocation, &invocation.payload).await
         },
         "migrate_export" => |invocation, deps| {
             service::migrate_export_value(&deps.engine_host, invocation, &invocation.payload).await

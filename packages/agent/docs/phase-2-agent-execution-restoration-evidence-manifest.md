@@ -166,6 +166,9 @@ Scope implemented:
   workspace policy.
 - Hardened prompt-trace idempotency so each trace records fresh memory status
   instead of replaying the first session audit after policy or record changes.
+- Hardened direct record-id operations so inspect, edit, and tombstone fail
+  closed when the addressed memory record belongs to a different
+  session/workspace/system resource scope.
 - Added a deterministic resource-backed engine shell that supports disabled,
   active, shadow, and compare modes, redacted body refs, lifecycle metadata,
   provenance, sensitivity/privacy class, confidence, expiry/retention, source
@@ -179,7 +182,7 @@ Focused validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::memory -- --nocapture` | exit 0 | 10 memory tests passed, covering disabled writes, source-backed schema/output drift, workspace policy inheritance/session override, lifecycle/versioning, inline body-ref rejection, prompt trace privacy, fresh trace-specific context after policy changes, absent-context explicitness, and redacted migration export/import. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::memory -- --nocapture` | exit 0 | 11 memory tests passed, covering disabled writes, source-backed schema/output drift, workspace policy inheritance/session override, lifecycle/versioning, cross-session record-id denial for inspect/edit/tombstone, inline body-ref rejection, prompt trace privacy, fresh trace-specific context after policy changes, absent-context explicitness, and redacted migration export/import. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed; the memory domain and capability operations are classified without widening provider-visible authority. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 HRA tests passed; memory files and resource-definition split ownership are covered. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 TMB tests passed; memory crosses engine/resource boundaries through domain contracts and engine facades. |

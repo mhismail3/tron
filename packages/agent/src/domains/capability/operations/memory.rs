@@ -48,7 +48,8 @@ pub(super) async fn memory_inspect(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let record = service::inspect_memory_value(&deps.engine_host, &invocation.payload).await?;
+    let record =
+        service::inspect_memory_value(&deps.engine_host, invocation, &invocation.payload).await?;
     let resource_id = record["resource"]["resourceId"]
         .as_str()
         .unwrap_or("unknown");
