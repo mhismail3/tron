@@ -1650,12 +1650,14 @@ hit targets than their visual glass buttons; the shutter stays a minimal
 white-tinted frosted glass circle without a separate ring. After capture, the
 same center control animates into a green-tinted use-photo check button, the
 switch-camera control animates into the go-back-to-capture control, and the
-flashlight control fades out while the row geometry stays stable. Torch toggles
-and camera switching run through the session queue, restore UI state on
-AVFoundation failure, turn off active torch before replacing the video input,
-and remove the old video input before validating the replacement input. Camera
-lookup uses `AVCaptureDevice` discovery so front/back switching works across
-wide-angle, TrueDepth, dual, and triple camera device variants.
+flashlight control fades out while the row geometry stays stable. Entering
+captured-photo preview stops the live `AVCaptureSession`; retake is the path
+that leaves preview and restarts the session. Torch toggles and camera
+switching run through the session queue, restore UI state on AVFoundation
+failure, turn off active torch before replacing the video input, and remove the
+old video input before validating the replacement input. Camera lookup uses
+`AVCaptureDevice` discovery so front/back switching works across wide-angle,
+TrueDepth, dual, and triple camera device variants.
 
 ### Build Configurations
 

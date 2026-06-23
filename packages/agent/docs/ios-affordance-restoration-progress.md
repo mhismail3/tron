@@ -37,6 +37,76 @@ from chat history.
 
 ## Completed Work
 
+### Phase 1 Slice 1: Composer Attachment / Camera / Native Menu
+
+Commits:
+
+- `473cce8b3 Restore chat attachment camera sheet`
+- `62b577047 Refine camera capture glass button`
+- `84451c969 Refine camera capture confirmation controls`
+- `019f3b9ce Restore native attachment menu`
+- `279fafe4e Tighten native attachment menu sizing`
+- `d69afc6a1 Rename attachment menu actions`
+
+User-facing state:
+
+- The composer plus button opens a native SwiftUI `Menu` rather than the
+  removed custom attachment popup/sheet.
+- The menu exposes only functional local actions: Take Photo, Select Photos,
+  and Attach Files. A later accepted local-history slice may add Recent Inputs
+  only when local history exists.
+- Take Photo opens `CameraCaptureSheet`, which owns the local camera capture
+  flow, camera controls, retake path, and use-photo confirmation before adding
+  a local image attachment.
+- Select Photos uses SwiftUI `PhotosPicker` for image selection.
+- Attach Files uses the local document picker/import path and existing
+  attachment capability limits.
+- The later native-menu cleanup renamed the final labels to Take Photo, Select
+  Photos, and Attach Files without reintroducing old non-functional actions.
+
+Code and ownership boundaries:
+
+- Camera, photo-library, and file-picker behavior is iOS-local composer state.
+  It does not add a server prompt-history API, provider-visible tool,
+  backend/agent coupling, public protocol method, settings/auth change, or
+  database migration.
+- Entering captured-photo preview stops the live `AVCaptureSession`; retake is
+  the preview-to-live restart path, while dismiss/confirm cleanup still stops
+  the session on sheet disappearance.
+- Source guards preserve the native SwiftUI menu path and keep the removed
+  custom `AttachmentMenuSheet`/popup path absent.
+
+Validated:
+
+- `AttachmentMenuTests` cover functional menu action ordering, capability-based
+  hiding of image actions, final labels, native menu construction, and camera
+  sheet construction.
+- `SourceGuardTests` cover camera-sheet presentation/lifecycle source
+  invariants, camera preview/retake control behavior, the native SwiftUI menu
+  path, and absence of the removed custom attachment sheet.
+- `IPadSheetPresentationTests` cover the compact camera sheet presentation
+  boundary added with the camera sheet.
+- Current retrospective closeout validation reruns the focused simulator tests
+  and source guards listed in this ledger. Camera hardware capture itself is
+  guarded at source level because simulator execution is not deterministic for
+  real AVFoundation capture.
+
+Simulator and device validation boundaries:
+
+- Focused simulator validation is test/source-guard based for Slice 1. Do not
+  treat later manual simulator evidence from Recent Inputs or other slices as
+  direct Slice 1 manual camera/photo/file validation.
+- No physical-device manual validation is recorded for Slice 1 in this ledger.
+  Later physical-device confirmation belongs to the voice/session-list work and
+  must not be read back onto the camera/photo/file picker slice.
+
+Deferred:
+
+- Skills, prompt snippets/templates, queue controls, plugin/catalog concepts,
+  prompt-library APIs, generated management surfaces, and old non-functional
+  menu actions remain absent until reviewed and approved as separate work.
+- The discarded custom morphing popup is not part of the final state.
+
 ### Phase 1 Slice 2: Composer Voice Transcription
 
 Commits:
@@ -99,37 +169,6 @@ Deferred:
 - Local transcription remains opt-in. If the setting is enabled after the
   server has started, broader on-demand sidecar loading is not yet implemented;
   a server restart may still be required for the local runtime to become ready.
-
-### Phase 1 Slice 1 Follow-Up: Native Attachment Menu
-
-Commits:
-
-- `019f3b9ce Restore native attachment menu`
-- `279fafe4e Tighten native attachment menu sizing`
-- `d69afc6a1 Rename attachment menu actions`
-
-User-facing state:
-
-- The composer plus button now opens a native SwiftUI `Menu`.
-- The menu exposes only currently functional local actions: Take Photo, Select
-  Photos, and Attach Files.
-- Menu rows use native icon-and-text presentation with compact sizing.
-- The removed custom attachment sheet path is gone.
-
-Validated:
-
-- `AttachmentMenuTests` cover the expected native menu labels and absence of
-  non-functional old actions.
-- Composer keyboard source guards assert the menu does not force-focus changes
-  or reintroduce the removed custom popup/sheet path.
-
-Deferred:
-
-- Skills, prompt snippets, queue controls, plugin/catalog concepts, and other
-  old attachment-menu actions remain absent until reviewed and approved as
-  separate slices.
-- The custom morphing popup explored during the thread was intentionally
-  discarded; it is not part of the final state.
 
 ### Accepted Off-Plan Work: Session List Simplification
 

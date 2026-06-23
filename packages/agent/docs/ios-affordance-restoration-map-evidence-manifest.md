@@ -55,6 +55,51 @@ state is recorded in `ios-affordance-restoration-progress.md`, and the durable
 Phase 2 plan is recorded in the `phase-2-agent-execution-restoration-*`
 artifacts.
 
+## Phase 1 Slice 1 Addendum: Composer Attachment / Camera / Native Menu
+
+Commits:
+
+- `473cce8b3 Restore chat attachment camera sheet`
+- `62b577047 Refine camera capture glass button`
+- `84451c969 Refine camera capture confirmation controls`
+- `019f3b9ce Restore native attachment menu`
+- `279fafe4e Tighten native attachment menu sizing`
+- `d69afc6a1 Rename attachment menu actions`
+
+Scope restored:
+
+- The composer attachment entry point uses a native SwiftUI `Menu`.
+- The final functional local actions are Take Photo, Select Photos, and Attach
+  Files. Later local-history work may add Recent Inputs only when local history
+  exists.
+- Take Photo opens the local `CameraCaptureSheet` flow with camera controls,
+  captured-photo preview, retake, and use-photo confirmation.
+- Select Photos uses SwiftUI `PhotosPicker` for local image selection.
+- Attach Files uses the existing local document picker/import path and
+  attachment capability limits.
+- The final native-menu cleanup renamed the labels without restoring old
+  non-functional actions.
+
+Deferred/absent:
+
+- Skills, prompt snippets/templates, queue controls, plugin/catalog concepts,
+  prompt-library APIs, generated management surfaces, and old non-functional
+  menu actions remain absent.
+- No backend/agent coupling, public protocol method, provider-visible tool,
+  settings/auth behavior, or database migration was introduced for this slice.
+- The discarded custom attachment popup/sheet path is not part of the final
+  state.
+
+Slice validation and evidence boundary:
+
+| Command or evidence | Status | Notes |
+| --- | --- | --- |
+| `AttachmentMenuTests` | source-backed focused coverage | Covers menu action ordering, capability-gated image actions, final labels, native menu construction, and camera sheet construction. |
+| `SourceGuardTests` | source-backed focused coverage | Covers native SwiftUI menu preservation, absence of the removed custom attachment sheet, camera presentation invariants, captured-photo preview controls, and source-guarded camera session lifecycle. |
+| `IPadSheetPresentationTests` | source-backed focused coverage | Covers the compact camera sheet presentation boundary added with the camera sheet. |
+| Simulator validation | bounded | Focused simulator tests/source guards validate the deterministic Slice 1 surface. Real camera capture is not treated as simulator-deterministic hardware validation. |
+| Physical-device validation | not claimed | No physical-device manual validation is recorded for Slice 1; later device evidence belongs to other slices and must not be read back onto camera/photo/file picker behavior. |
+
 ## Phase 1 Slice 2 Addendum: Composer Voice Transcription
 
 Branch: `codex/ios-voice-dictation-affordance-current`

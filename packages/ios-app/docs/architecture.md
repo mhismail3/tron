@@ -167,11 +167,13 @@ visual glass buttons; the shutter stays a minimal white-tinted frosted glass
 circle without a separate ring. After capture, the same center control animates
 into a green-tinted use-photo check button, the switch-camera control animates
 into the go-back-to-capture control, and the flashlight control fades out while
-the row geometry stays stable. Torch toggles and camera switching run through
-the session queue, update UI state on failure, turn off active torch before
-input replacement, discover front/back camera variants through `AVCaptureDevice`
-discovery, and remove the old video input before validating and attaching the
-replacement input so the old input does not make `canAddInput` fail.
+the row geometry stays stable. Entering captured-photo preview stops the live
+`AVCaptureSession`; retake is the path that leaves preview and restarts the
+session. Torch toggles and camera switching run through the session queue,
+update UI state on failure, turn off active torch before input replacement,
+discover front/back camera variants through `AVCaptureDevice` discovery, and
+remove the old video input before validating and attaching the replacement
+input so the old input does not make `canAddInput` fail.
 
 The shell mounts `ContentView` even before onboarding is complete.
 `TronMobileApp` owns one onboarding presenter for first-run setup, Server-page

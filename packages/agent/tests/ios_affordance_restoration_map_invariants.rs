@@ -832,6 +832,56 @@ fn slice_six_notification_inbox_decision_is_deferred_until_apns_restoration() {
 }
 
 #[test]
+fn slice_one_attachment_camera_evidence_records_full_scope_and_boundaries() {
+    for path in [PROGRESS_PATH, EVIDENCE_PATH] {
+        assert_contains_all(
+            path,
+            &[
+                "Phase 1 Slice 1",
+                "Composer Attachment / Camera / Native Menu",
+                "473cce8b3 Restore chat attachment camera sheet",
+                "62b577047 Refine camera capture glass button",
+                "84451c969 Refine camera capture confirmation controls",
+                "019f3b9ce Restore native attachment menu",
+                "279fafe4e Tighten native attachment menu sizing",
+                "d69afc6a1 Rename attachment menu actions",
+                "Take Photo",
+                "Select Photos",
+                "Attach Files",
+                "CameraCaptureSheet",
+                "PhotosPicker",
+                "document picker",
+                "native SwiftUI `Menu`",
+                "Skills, prompt snippets/templates, queue controls, plugin/catalog concepts",
+                "menu actions remain absent",
+            ],
+        );
+    }
+
+    assert_normalized_contains_all(
+        PROGRESS_PATH,
+        &[
+            "Entering captured-photo preview stops the live `AVCaptureSession`",
+            "retake is the preview-to-live restart path",
+            "Current retrospective closeout validation reruns the focused simulator tests",
+            "No physical-device manual validation is recorded for Slice 1",
+            "must not be read back onto the camera/photo/file picker slice",
+        ],
+    );
+
+    assert_normalized_contains_all(
+        EVIDENCE_PATH,
+        &[
+            "SourceGuardTests",
+            "IPadSheetPresentationTests",
+            "Real camera capture is not treated as simulator-deterministic hardware validation",
+            "Physical-device validation",
+            "not claimed",
+        ],
+    );
+}
+
+#[test]
 fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
     assert_contains_all(
         PROGRESS_PATH,

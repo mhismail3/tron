@@ -205,6 +205,7 @@
 		4AF04C5625E9B703033517E7 /* TurnStartPluginTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7CFBCF3D602C250DC0B1BDF /* TurnStartPluginTests.swift */; };
 		4B7681803E7269139B040E4F /* AsyncClock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 791FEA34FD01771B8879BECE /* AsyncClock.swift */; };
 		4B8BC292E3222BBEA336AEF4 /* SourceGuardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A0941EEFDD7CBFB27B25428 /* SourceGuardTests.swift */; };
+		4C12796B8482D9382EB47C61 /* SourceGuardTests+CameraCaptureLifecycle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 144DBE053CC0D972063EA28F /* SourceGuardTests+CameraCaptureLifecycle.swift */; };
 		4C17FFB3699D9CD4598F3B07 /* MessagingCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A953FBDD88727D164302DFC6 /* MessagingCoordinator.swift */; };
 		4C182F515ED09D0619E3E24C /* EventStoreManager+SessionActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61A9460B18EDE7BBF17A41B1 /* EventStoreManager+SessionActivity.swift */; };
 		4C3BD40DB30A0FE0547FA31C /* RecentInputHistoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55EE456A158209717AA3EEBA /* RecentInputHistoryTests.swift */; };
@@ -741,6 +742,7 @@
 		12A4B686B0F6D853EF93D614 /* SettingsCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsCard.swift; sourceTree = "<group>"; };
 		12B308F7C413FCA9E7305EF5 /* EventRegistry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventRegistry.swift; sourceTree = "<group>"; };
 		13EE785A8F46925C04081B56 /* ActionButtons.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActionButtons.swift; sourceTree = "<group>"; };
+		144DBE053CC0D972063EA28F /* SourceGuardTests+CameraCaptureLifecycle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SourceGuardTests+CameraCaptureLifecycle.swift"; sourceTree = "<group>"; };
 		1505C25BFCBEB9B4CD3E2F4F /* NewSessionFlowTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NewSessionFlowTests.swift; sourceTree = "<group>"; };
 		1589892DCCD65D985F0B89FA /* EventStoreManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EventStoreManagerTests.swift; sourceTree = "<group>"; };
 		15EE54B592CF84A80AEA2300 /* LogViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogViewer.swift; sourceTree = "<group>"; };
@@ -2467,6 +2469,7 @@
 				6A0941EEFDD7CBFB27B25428 /* SourceGuardTests.swift */,
 				53EEEE843A10671FD3658637 /* SourceGuardTests+Budgets.swift */,
 				2359FC0D10C52BAF49E12418 /* SourceGuardTests+BuildAndProject.swift */,
+				144DBE053CC0D972063EA28F /* SourceGuardTests+CameraCaptureLifecycle.swift */,
 				7DB4C23F68B9099EA87BAF70 /* SourceGuardTests+CapabilityAbsence.swift */,
 				24C0C9A7C5B7F480254DE823 /* SourceGuardTests+ChatAffordanceStatus.swift */,
 				B65C985BDA08943B5AE7B50F /* SourceGuardTests+ComposerKeyboard.swift */,
@@ -4108,6 +4111,7 @@
 				06F393E3BBD3304408AA5654 /* SheetReadOnlyTests.swift in Sources */,
 				123761A35C24A956C52FFE32 /* SourceGuardTests+Budgets.swift in Sources */,
 				F456E6C160723E82425F7837 /* SourceGuardTests+BuildAndProject.swift in Sources */,
+				4C12796B8482D9382EB47C61 /* SourceGuardTests+CameraCaptureLifecycle.swift in Sources */,
 				782F69163A51C35681192944 /* SourceGuardTests+CapabilityAbsence.swift in Sources */,
 				A50CD691E7B78EFB6CBE7229 /* SourceGuardTests+ChatAffordanceStatus.swift in Sources */,
 				6BF41D6029234EF212308E76 /* SourceGuardTests+ComposerKeyboard.swift in Sources */,

@@ -249,6 +249,7 @@ struct CameraCaptureSheet: View {
                 capturedImage = image
                 showingPreview = true
             }
+            cameraModel.stopSession()
         }
     }
 
