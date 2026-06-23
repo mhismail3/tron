@@ -237,6 +237,7 @@ fn capability_execute_requires_working_directory(invocation: &Invocation) -> boo
                         | "filesystem_edit"
                         | "filesystem_apply_patch"
                         | "process_run"
+                        | "job_start"
                 )
             })
 }
@@ -264,6 +265,7 @@ fn wrapper_resource_kind(function_id: &str) -> Option<&'static str> {
         id if id.starts_with("materialized_file::") => Some("materialized_file"),
         id if id.starts_with("patch::") => Some("patch_proposal"),
         id if id.starts_with("ui::") => Some("ui_surface"),
+        id if id.starts_with("jobs::") => Some("job_process"),
         _ => None,
     }
 }

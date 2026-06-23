@@ -160,9 +160,14 @@ truncated snapshots cannot be overwritten or patched from partial preview
 content. Native file/patch review UI and package-wide risky-action approval
 triggers remain future user decisions.
 
-The next selected implementation row is `P2AER-INV-005` as `Slice 5A`:
-durable jobs and process lifecycle foundation. `P2AER-INV-006` stays planned
-for a later program-execution slice; Slice 5A may define only the durable job
-lifecycle envelope needed by future interpreter workers and must not restore
-language runtimes, PTY sessions, web/network research, git/source-control,
-subagents, scheduling, notifications, or native iOS process panels.
+`P2AER-INV-005` is now implemented as `Slice 5A`: durable jobs and process
+lifecycle foundation. The shipped backend adds a `jobs` domain, `job_process`
+resources, bounded `execution_output` artifacts, lifecycle stream evidence,
+start/status/list/log/cancel provider operations through the existing
+`capability::execute` primitive, direct scoped cleanup, fail-closed
+`networkPolicy: none`, cancellation terminal idempotency, retention archiving,
+and focused resource/authority/bounded-output tests. `P2AER-INV-006` stays
+planned for a later program-execution slice; Slice 5A did not restore language
+runtimes, PTY sessions, web/network research, git/source-control, subagents,
+scheduling, notifications, or native iOS process panels. Queue-backed internal
+job dispatch also remains deferred pending an explicit queued-grant design.

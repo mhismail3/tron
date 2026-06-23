@@ -147,22 +147,25 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         `observe`, `state_get`, `state_set`, `state_list`, `file_read`, `file_write`, \
         `filesystem_read`, `filesystem_list`, `filesystem_find`, `filesystem_glob`, \
         `filesystem_search_text`, `filesystem_diff`, `filesystem_write`, `filesystem_edit`, \
-        `filesystem_apply_patch`, `process_run`, `trace_list`, `trace_get`, `log_recent`, \
-        `replay_manifest`, `catalog_search`, `catalog_inspect`, or `catalog_conformance`. \
+        `filesystem_apply_patch`, `process_run`, `job_start`, `job_status`, `job_list`, \
+        `job_log`, `job_cancel`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
+        `catalog_search`, `catalog_inspect`, or `catalog_conformance`. \
         Do not send `target`, `contractId`, `functionId`, or `arguments`. \
         Catalog discovery operations inspect metadata/conformance only and never execute discovered \
         functions. Put operation fields at the top level of the execute payload. \
         Use `observe` to record reasoning-relevant facts, state operations for agent-owned memory, \
         primitive file operations for simple current-working-directory reads/writes, filesystem package \
         operations for bounded read/list/find/glob/search/diff and preview-first write/edit/patch under \
-        trusted roots, `process_run` for bounded shell commands, trace/log operations to inspect durable \
+        trusted roots, `process_run` for short bounded shell commands, job operations for durable \
+        non-interactive command lifecycle/status/log/cancel, trace/log operations to inspect durable \
         execution records, `replay_manifest` to \
         export the current session's `tron.replay.v1` audit manifest, and catalog operations to inspect \
         available workers/functions/schemas/conformance evidence through the same execute primitive. \
         Mutating filesystem package operations require a stable `idempotencyKey`; include `reason`, use \
         preview mode before commit when possible, and provide `expectedHash` when committing changes to \
-        an existing file. Other mutating operations should include a short `reason`; repeated writes or \
-        commands should include a stable `idempotencyKey` when retry safety matters. Except for read-only `replay_manifest`, the engine records a trace \
+        an existing file. `job_start` and `job_cancel` require a stable `idempotencyKey`; other mutating \
+        operations should include a short `reason`; repeated writes or commands should include a stable \
+        `idempotencyKey` when retry safety matters. Except for read-only `replay_manifest`, the engine records a trace \
         record for each execute operation with status, timing, provider/model context, authority metadata, \
         touched resources, hashes where available, errors, and implementation metadata.\n\
         \n\

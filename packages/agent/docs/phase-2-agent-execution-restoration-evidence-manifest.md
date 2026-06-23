@@ -280,6 +280,80 @@ Adversarial self-review:
   guard risks. Real guard drift found during validation was narrowed to the new
   Slice 4 package and rerun.
 
+## Slice 5A Implementation Evidence
+
+Branch: `codex/phase-2-jobs-process-lifecycle-current`
+
+Baseline: `1d35ac848` on top of `2650dd0b9`
+
+Scope shipped:
+
+- Added the modular `jobs` domain as the owner for durable non-interactive
+  local process jobs and exposed `job_start`, `job_status`, `job_list`,
+  `job_log`, and `job_cancel` through the existing provider-visible
+  `capability::execute` boundary.
+- Added built-in `job_process` resource definitions, bounded
+  `execution_output` artifact creation, `jobs.lifecycle` stream evidence,
+  trace/replay refs, authority/scope refs, cancellation metadata, terminal
+  idempotency, and retention cleanup that archives scoped terminal jobs.
+- Reused existing authority, working-directory freshness, resource, stream,
+  trace, replay, output, idempotency, and shutdown primitives. Core changes
+  were limited to generic resource/authority recognition needed by the new
+  package; no transport, DB, provider, auth, settings, or iOS DTO surfaces were
+  widened.
+- Kept `process_run` as the synchronous bounded command primitive. Durable
+  lifecycle state lives in the modular jobs package.
+- Enforced fail-closed `networkPolicy: none` for process jobs: job start denies
+  unsupported policy values and fails closed when the host cannot enforce
+  network denial.
+- Deliberately deferred PTY/interactive terminals, interpreters/runtime
+  packages, git/worktree/source-control behavior, web/network behavior,
+  subagents, scheduling, native iOS process panels, notifications, and
+  production deployment behavior.
+- Deferred queue-backed internal job dispatch. The implementation found that
+  queuing a hidden jobs runner from model-launched `execute` would require a
+  new queued-internal-grant design, which is outside Slice 5A.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::jobs -- --nocapture` | exit 0 | 6 jobs-domain tests passed, covering schema alignment, start/status/list/log/cancel behavior, terminal idempotency, bounded output, cancellation races, output/resource evidence, cleanup archiving, and fail-closed network policy. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability-domain tests passed with job execute operations registered. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture` | exit 0 | 26 provider prompt/converter tests passed after documenting the job operation names and provider-visible execute boundary. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after classifying jobs files, operations, working-directory requirements, network-policy denial, and mutating idempotency requirements. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 TMB tests passed; jobs are classified as a package owner using engine/resource facades instead of private stores. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 CSD tests passed after classifying the process runtime and shutdown/cancellation ownership. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 HRA tests passed; jobs files and ownership rows are inventoried. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 PCC tests passed with jobs retained as shipped Slice 5A package code. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 TPC tests passed after adding jobs retention rows and refreshing summary counts. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed after documenting jobs as the planned Slice 5A restoration of process/job capability, not a legacy shell revival. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 IARM tests passed; Slice 5A remains generic resource/result rendering first and does not add native iOS process UI. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 OPSAA tests passed; jobs do not restore autonomous-authorship workers, scheduling, subagents, or generated-runtime surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test performance_resource_governance_invariants -- --nocapture` | exit 0 | 7 PRG tests passed; jobs keep bounded output and process cleanup under the existing resource-governance model. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 0 | 17 DRC tests passed after documenting jobs as the owner for lifecycle audit timestamps and elapsed-time diagnostics while keeping replay identity based on resource refs/hashes and stream/trace evidence. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed after adding Slice 5A implementation evidence and deferred queue-dispatch rationale. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 5A implementation, DRC allow-list documentation, static inventory refreshes, and evidence updates; existing dead-code warnings remained warnings only. |
+
+No Swift or Xcode project files changed, so XcodeGen and iOS simulator tests
+were not run for Slice 5A.
+
+Adversarial self-review:
+
+- Fixed static inventory drift found by validation in SACB, TMB, CSD, HRA,
+  PCC, and TPC by adding explicit jobs rows and refreshing guarded counts.
+- Fixed a DRC allow-list gap caught by full CI: jobs lifecycle timestamps and
+  process elapsed-time measurements are now documented as audit/diagnostic
+  clocks, not replay identity inputs.
+- Rechecked core widening, hidden provider/auth/settings/iOS DTO expansion,
+  private engine store coupling, unbounded stdout/stderr, cancellation races,
+  terminal-state resurrection, idempotency gaps, stale registration, network
+  smuggling, and queue-backed dispatch. Queue-backed internal dispatch remains
+  intentionally deferred pending a separate grant model.
+
 ## Validation Log
 
 | Command | Result | Evidence |

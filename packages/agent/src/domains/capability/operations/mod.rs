@@ -8,7 +8,9 @@
 //! evidence. Memory operations are read-only audit views over the resource
 //! memory contract and return redacted status/list/inspect facts only.
 //! Filesystem package operations are bounded working-directory reads/searches
-//! plus preview-first write/patch operations with resource evidence.
+//! plus preview-first write/patch operations with resource evidence. Job
+//! operations expose a durable non-interactive process lifecycle over the jobs
+//! domain while leaving `process_run` as the short synchronous primitive.
 //! `replay_manifest` is the only read-only operation that bypasses trace-record
 //! creation; tracing that read would mutate the manifest it returns.
 //!
@@ -16,9 +18,9 @@
 //! `execute` accepts only trusted agent/system runtime contexts, rejects
 //! bootstrap authority grants, requires a derived least-privilege grant for
 //! every effectful call, resolves file/process roots from trusted runtime
-//! metadata, denies system-scoped state, and keeps trace/log/replay reads bound
-//! to the current session. `process_run` additionally inspects the active grant
-//! and runs only when it carries `networkPolicy none`.
+//! metadata, denies system-scoped state, and keeps trace/log/replay/job reads
+//! bound to the current session. Process primitives additionally inspect the
+//! active grant and run only when it carries `networkPolicy none`.
 
 use std::time::Instant;
 
@@ -34,6 +36,7 @@ use tracing::{info, warn};
 
 mod catalog;
 mod filesystem;
+mod jobs;
 mod logs;
 mod memory;
 mod process;
@@ -47,6 +50,7 @@ use filesystem::{
     filesystem_find, filesystem_glob, filesystem_list, filesystem_read, filesystem_search_text,
     filesystem_write,
 };
+use jobs::{job_cancel, job_list, job_log, job_start, job_status};
 use logs::log_recent;
 use memory::{memory_inspect, memory_list, memory_status};
 use process::process_run;
@@ -198,6 +202,12 @@ fn validate_execute_context(
             "capability::execute requires a derived least-privilege authority grant",
         ));
     }
+    if matches!(
+        operation,
+        "job_start" | "job_status" | "job_list" | "job_log" | "job_cancel"
+    ) {
+        require_current_session(invocation, operation)?;
+    }
     match operation {
         "state_get" | "state_set" | "state_list" => validate_state_scope(invocation),
         "trace_list" | "trace_get" | "log_recent" | "replay_manifest" | "memory_status"
@@ -205,7 +215,9 @@ fn validate_execute_context(
         "catalog_conformance"
         | "filesystem_write"
         | "filesystem_edit"
-        | "filesystem_apply_patch" => require_idempotency_key(invocation, operation),
+        | "filesystem_apply_patch"
+        | "job_start"
+        | "job_cancel" => require_idempotency_key(invocation, operation),
         _ => Ok(()),
     }
 }
@@ -276,6 +288,11 @@ async fn execute_operation(
         "filesystem_edit" => filesystem_edit(invocation, deps).await?,
         "filesystem_apply_patch" => filesystem_apply_patch(invocation, deps).await?,
         "process_run" => process_run(invocation, deps).await?,
+        "job_start" => job_start(invocation, deps).await?,
+        "job_status" => job_status(invocation, deps).await?,
+        "job_list" => job_list(invocation, deps).await?,
+        "job_log" => job_log(invocation, deps).await?,
+        "job_cancel" => job_cancel(invocation, deps).await?,
         "trace_list" => trace_list(invocation, deps)?,
         "trace_get" => trace_get(invocation, deps)?,
         "log_recent" => log_recent(invocation, deps).await?,
@@ -289,7 +306,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }

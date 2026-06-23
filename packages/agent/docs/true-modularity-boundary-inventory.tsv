@@ -1082,3 +1082,15 @@ packages/agent/src/domains/memory/service.rs	rust	implementation	agent:memory	ow
 packages/agent/src/domains/memory/support.rs	rust	implementation	agent:memory	owner-private helpers; external code must not import parsing/redaction internals
 packages/agent/src/domains/memory/tests.rs	rust	test-support	agent:memory	test-only helper; production code must not depend on it
 packages/agent/src/engine/durability/resources/memory_definitions.rs	rust	implementation	rust:engine	owner-private resource definition module; callers use engine resource facade
+packages/agent/src/domains/capability/operations/jobs.rs	rust	implementation	agent:capability	owner-private execute adapter; callers enter through capability::execute
+packages/agent/src/domains/jobs/mod.rs	rust	facade	agent:jobs	domain root owns registration, runtime setup, and docs; implementation stays in owner modules
+packages/agent/src/domains/jobs/contract.rs	rust	contract	agent:jobs	may be shared across registration while preserving jobs owner schemas
+packages/agent/src/domains/jobs/errors.rs	rust	implementation	agent:jobs	owner-private error helpers; callers receive capability errors through facade
+packages/agent/src/domains/jobs/handlers.rs	rust	implementation	agent:jobs	owner-private handler bindings; external callers use registered functions
+packages/agent/src/domains/jobs/runtime.rs	rust	implementation	agent:jobs	owner-private process runtime; callers use job service and registered functions
+packages/agent/src/domains/jobs/schema_tests.rs	rust	test-support	agent:jobs	test-only schema alignment guard; production code must not depend on it
+packages/agent/src/domains/jobs/service.rs	rust	implementation	agent:jobs	owner-private lifecycle service; callers must enter through domain functions or explicit service facade
+packages/agent/src/domains/jobs/support.rs	rust	implementation	agent:jobs	owner-private parsing, stream, idempotency, and resource helpers
+packages/agent/src/domains/jobs/tests.rs	rust	test-support	agent:jobs	test-only helper; production code must not depend on it
+packages/agent/src/domains/jobs/types.rs	rust	contract	agent:jobs	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/durability/resources/job_definitions.rs	rust	implementation	rust:engine	owner-private resource definition module; callers use engine resource facade

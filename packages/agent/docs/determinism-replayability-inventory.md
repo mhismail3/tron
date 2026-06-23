@@ -34,9 +34,9 @@ Machine-readable inventory:
 
 | Pattern | Current owner examples | Replay stance | Gap owner |
 |---------|------------------------|---------------|-----------|
-| `chrono::Utc::now` / `Utc::now` | event/store identity owner, approval request/decision audit timestamps, session rows, engine ledger, queues, streams, traces, memory resource/prompt-trace audit timestamps, storage maintenance, settings, tests | Static guard allow-lists approved owners; replay-critical event/session constructors now accept explicit IDs/timestamps, approval checks expose `check_approval_at` for replayed freshness evaluation, and memory timestamps stay append-only audit metadata rather than replay ordering keys. | DRC-2/DRC-3 passed; DRC-5/DRC-6 guard replay builders; P2AER-S2 approval refresh; P2AER-S3 memory foundation |
+| `chrono::Utc::now` / `Utc::now` | event/store identity owner, approval request/decision audit timestamps, session rows, engine ledger, queues, streams, traces, memory resource/prompt-trace audit timestamps, job lifecycle audit timestamps, storage maintenance, settings, tests | Static guard allow-lists approved owners; replay-critical event/session constructors now accept explicit IDs/timestamps, approval checks expose `check_approval_at` for replayed freshness evaluation, and memory/job timestamps stay append-only audit metadata rather than replay ordering keys. | DRC-2/DRC-3 passed; DRC-5/DRC-6 guard replay builders; P2AER-S2 approval refresh; P2AER-S3 memory foundation; P2AER Slice 5A jobs foundation |
 | `std::time::SystemTime::now` | provider cache pruning, Gemini/Ollama stream helpers | Allowed only for provider/runtime non-replay jitter or diagnostics unless audit fields depend on it. | DRC-2 |
-| `std::time::Instant::now` | health, bootstrap, shutdown, provider duration, turn timing, capability duration, transcription sidecar elapsed time | Allowed for durations and health timing; replay hashes use persisted values, not live instants. Transcription elapsed time is sidecar execution diagnostics, not replay identity. | DRC-2 |
+| `std::time::Instant::now` | health, bootstrap, shutdown, provider duration, turn timing, capability duration, transcription sidecar elapsed time, job process elapsed time and timeout checks | Allowed for durations and health timing; replay hashes use persisted values, not live instants. Transcription and job elapsed time are execution diagnostics, not replay identity. | DRC-2 |
 | `Uuid::now_v7` | `event_store::identity`, engine ID helpers, streams, payload refs, OAuth flow IDs, transcription sidecar temp/request IDs | Replay-critical event/session/workspace/fork IDs get deterministic constructors; security/platform and sidecar-local correlation IDs stay allowed by path. | DRC-2/DRC-3 passed; DRC-5/DRC-8 consume seams |
 | `rand::random` / `rand::rng` | OAuth PKCE, onboarding bearer tokens, SQLite contention jitter | Allowed for security tokens and contention jitter; rejected from replay builders. | DRC-2 |
 | `ORDER BY timestamp` | trace lists, workspace/global event lists, queue trace list | UI/diagnostic latest views may keep timestamp order; replay paths use deterministic tie-breakers. | DRC-2/DRC-6 |
@@ -83,6 +83,9 @@ Machine-readable inventory:
   migration-envelope, and prompt-trace audit fields; replay paths must continue
   to use explicit resource refs/hashes and stable row ordering rather than live
   clocks.
+- Job lifecycle UTC timestamps and elapsed-time measurements are limited to
+  durable audit state, timeout checks, and output metadata; replay paths consume
+  resource refs/hashes and stream/trace evidence, not live clocks.
 - Replay builders are guarded against new raw clock/UUID/RNG calls and
   timestamp-only ordering.
 

@@ -3,6 +3,7 @@
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
+use super::job_definitions::job_resource_type_definitions;
 use super::memory_definitions::memory_resource_type_definitions;
 use super::types::{
     APPROVAL_DECISION_KIND, APPROVAL_DECISION_SCHEMA_ID, APPROVAL_REQUEST_KIND,
@@ -678,6 +679,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             json!({"read": ["worker.lifecycle.read", "resource.read"], "write": ["worker.lifecycle.write", "resource.write"]}),
         ),
     ];
+    definitions.extend(job_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
     definitions
 }

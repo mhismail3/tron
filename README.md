@@ -867,7 +867,8 @@ surface is intentionally collapsed to one provider-visible function:
 schema requires an `operation` field and accepts only operation-specific
 primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
 `path`, `content`, `command`, `traceId`, `traceRecordId`, `limit`,
-`timeoutMs`, `maxOutputBytes`, `kind`, `id`, catalog search filters,
+`timeoutMs`, `maxOutputBytes`, `jobResourceId`, `state`, `cleanupAfterSeconds`,
+`kind`, `id`, catalog search filters,
 `idempotencyKey`, and `reason`.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
@@ -918,6 +919,11 @@ Current primitive operations:
 | `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence; truncated file previews are refused. |
 | `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
+| `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
+| `job_status` | Inspect one durable `job_process` resource in the current session scope. |
+| `job_list` | List durable `job_process` resources in the current session scope, optionally filtered by lifecycle state. |
+| `job_log` | Read bounded stdout/stderr previews and output-resource refs for one durable job. |
+| `job_cancel` | Record terminal cancellation for a running durable job and request runtime process termination; late process completion cannot resurrect a cancelled job. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -930,7 +936,7 @@ Current primitive operations:
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks. |
 
 Startup registration currently keeps only loop infrastructure domains:
-`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `filesystem`, `blob`, `message`,
+`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
 `worker_lifecycle`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
@@ -948,6 +954,15 @@ approval UI, or default risky-action policy. The post-baseline
 `memory::record_prompt_trace`, and migration import/export functions; the model
 sees only read-only `execute` memory audit operations, and prompt assembly
 receives only mode/count/trace facts, never retained memory body content.
+The `jobs` domain owns durable non-interactive process lifecycle records:
+`jobs::start`, `jobs::status`, `jobs::list`, `jobs::log`, `jobs::cancel`, and
+`jobs::cleanup` create/update scoped `job_process` resources, bounded
+`execution_output` resources, `jobs.lifecycle` stream rows, trace/replay refs,
+terminal-state idempotency, shutdown cancellation, and retention cleanup.
+Provider-visible access remains the single `execute` tool through `job_*`
+operation values; PTY sessions, interpreters, git, web/network behavior,
+subagents, scheduling, native iOS process panels, and deployment behavior are
+not part of this foundation.
 Policy lookup is `session -> workspace -> system`, and prompt-trace audit
 idempotency is keyed by trace so memory status can change across turns.
 Direct record-id inspect/edit/tombstone operations reject cross-scope resources.
@@ -1087,8 +1102,8 @@ Engine substrate primitives provide host infrastructure behind the loop:
 state, streams, queues, triggers, grants, generic resources, storage operations,
 and bounded internal projections. They are not exported as model tools. The
 agent-visible evidence path is `execute` with `trace_list`, `trace_get`,
-`log_recent`, `replay_manifest`, `catalog_search`, `catalog_inspect`, and
-`catalog_conformance`; trace operations read durable
+`log_recent`, `replay_manifest`, `catalog_search`, `catalog_inspect`,
+`catalog_conformance`, and the `job_*` lifecycle operations; trace operations read durable
 `trace_records` emitted around effectful `execute` calls, while `log_recent`
 reads bounded retained logs and `replay_manifest` reads the canonical replay
 snapshot through the same single tool. Catalog discovery reads current
@@ -1097,7 +1112,10 @@ evidence. Approval requests and decisions are generic resources with lifecycle
 events on `approval.lifecycle`; replay/evidence explanations point back to
 request, decision, trace, resource-selector, and replay refs for each approved,
 denied, expired, pending, missing, malformed, stale, or scope-mismatch check
-outcome. The replay snapshot includes resolved
+outcome. Durable jobs are generic `job_process` resources with bounded
+`execution_output` artifacts and lifecycle events on `jobs.lifecycle`;
+terminal cancellation is persisted before the runtime kill request so late
+process completion cannot turn a cancelled job into a success. The replay snapshot includes resolved
 session events, provider request audits, trace records, engine idempotency
 entries, engine invocations, engine stream rows, and engine queue rows. It adds
 stable section hashes plus request/result/outcome/payload hashes where the
@@ -1429,8 +1447,9 @@ file. Large correctness and audit payloads flow through blob refs where the
 owning row needs them; compact rows keep human/agent-readable JSON inline. The
 model-visible evidence read path is `capability::execute` with `trace_list`,
 `trace_get`, `log_recent`, `replay_manifest`, `catalog_search`,
-`catalog_inspect`, and `catalog_conformance`; trace/log/replay reads require
-trusted current-session context, and catalog conformance requires idempotency.
+`catalog_inspect`, `catalog_conformance`, and `job_*` lifecycle operations;
+trace/log/replay/job reads require trusted current-session context, and catalog
+conformance plus mutating job operations require idempotency.
 Trace reads are backed by `trace_records`; effectful `execute` calls insert a
 running record before the effect runs and update that same record with status,
 duration, result/error hashes, authority, provider/model metadata, VCS revision
@@ -1466,7 +1485,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process` lifecycle records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

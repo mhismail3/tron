@@ -691,6 +691,67 @@ Likely implementation files/domains to inspect or touch:
 - README capability, event, database/resource, testing, and progressive
   disclosure sections plus the new jobs domain `mod.rs` docs.
 
+#### Slice 5A Implementation Status
+
+Status: **implemented on branch `codex/phase-2-jobs-process-lifecycle-current`**.
+
+Shipped behavior:
+
+- Added `packages/agent/src/domains/jobs/` as the modular owner for durable
+  non-interactive local process jobs. The domain owns `jobs::start`,
+  `jobs::status`, `jobs::list`, `jobs::log`, `jobs::cancel`, and
+  `jobs::cleanup` contracts, handler bindings, resource lifecycle service,
+  bounded process runtime, schemas, and focused tests.
+- Added the built-in `job_process` resource kind
+  (`tron.resource.job_process.v1`) with running/completed/failed/timed_out/
+  cancelled/archived lifecycle states. Job records include command identity,
+  trusted working-directory provenance, authority grant/scopes, limits,
+  cancellation metadata, terminal state, bounded output refs, trace refs,
+  replay refs, retention hints, and revision.
+- Job finalization creates bounded `execution_output` resources and links them
+  from the job with `produced_output`. Output previews are capped by
+  `maxOutputBytes`; terminal records retain exit code/timed-out/cancelled/error
+  evidence without storing unbounded stdout/stderr inline.
+- Provider-visible access remains the single `capability::execute` tool via
+  `job_start`, `job_status`, `job_list`, `job_log`, and `job_cancel`
+  operation values. `jobs::cleanup` is a direct domain maintenance capability,
+  not a model/provider operation.
+- `process_run` remains the short synchronous bounded command primitive.
+  Durable lifecycle is separate package state over existing authority,
+  resources, streams, traces, replay, idempotency, and output contracts.
+- `job_start` and `job_cancel` require idempotency at the provider boundary.
+  All provider-visible job operations require current-session context.
+  `job_start` requires trusted working-directory metadata and an active
+  authority grant with `networkPolicy: none`; if the platform cannot enforce
+  network denial, job start fails closed.
+- Cancellation writes a terminal cancelled job resource before requesting
+  runtime process termination. Runtime finalization re-reads the resource and
+  returns without mutation if the job is already terminal, so late completion
+  cannot resurrect a cancelled job.
+- Domain shutdown requests cancellation for running process handles through the
+  existing shutdown coordinator when present. Terminal cleanup archives scoped
+  terminal jobs by retention criteria.
+
+Core/modular split as implemented:
+
+- Core additions were limited to one generic resource type definition and
+  existing authority helpers that recognize direct `jobs::` functions and
+  require trusted working-directory metadata for `job_start`.
+- The jobs package owns process runtime handles, lifecycle state transitions,
+  bounded output capture, stream payloads, cleanup, and tests. No filesystem,
+  git, web, subagent, scheduler, memory, iOS, provider, auth, settings, or DB
+  internals know jobs implementation details.
+- Queue integration was **not** added in Slice 5A. The implementation found
+  that queuing an internal jobs runner from model-launched `execute` would
+  require broadening derived grants or adding hidden worker targets. That is a
+  separate design problem and is deferred until a queued-internal-grant model
+  is explicitly approved.
+
+Remaining non-goals after Slice 5A: PTY/interactive terminal, interpreter or
+runtime package, git/worktree/source-control behavior, web/network behavior,
+subagents, scheduling, native iOS process panels, and production deployment
+behavior.
+
 ### Slice 6: Git, Worktrees, And Source Control
 
 Objective: restore source-control workflows over durable worktree resources.

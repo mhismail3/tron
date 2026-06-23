@@ -15,6 +15,7 @@
 //! the in-memory and SQLite persistence implementations.
 
 mod definitions;
+mod job_definitions;
 mod memory_definitions;
 mod store;
 mod types;

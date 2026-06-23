@@ -1751,3 +1751,15 @@ packages/agent/src/domains/memory/service.rs	retain	phase2 memory	P2AER-S3	Memor
 packages/agent/src/domains/memory/support.rs	retain	phase2 memory	P2AER-S3	Memory support helpers retained for payload parsing, redaction, stream events, and resource refs.
 packages/agent/src/domains/memory/tests.rs	retain	phase2 memory	P2AER-S3	Memory focused tests retained for disabled mode, redaction, lifecycle, prompt trace, and migration coverage.
 packages/agent/src/engine/durability/resources/memory_definitions.rs	retain	phase2 memory	P2AER-S3	Memory resource definitions retained for engine-owned memory contract resource kinds.
+packages/agent/src/domains/capability/operations/jobs.rs	retain	phase2 jobs	P2AER-S5A	Jobs execute adapter retained for durable job lifecycle operations behind the singular execute primitive.
+packages/agent/src/domains/jobs/mod.rs	retain	phase2 jobs	P2AER-S5A	Jobs domain facade retained for durable process lifecycle foundation without git, web, subagent, scheduler, or PTY features.
+packages/agent/src/domains/jobs/contract.rs	retain	phase2 jobs	P2AER-S5A	Jobs contracts retained for start/status/list/log/cancel/cleanup schemas, idempotency, and output refs.
+packages/agent/src/domains/jobs/errors.rs	retain	phase2 jobs	P2AER-S5A	Jobs errors retained for malformed payload and fail-closed network-policy semantics.
+packages/agent/src/domains/jobs/handlers.rs	retain	phase2 jobs	P2AER-S5A	Jobs handlers retained as narrow invocation entrypoints for jobs contract operations.
+packages/agent/src/domains/jobs/runtime.rs	retain	phase2 jobs	P2AER-S5A	Jobs runtime retained for domain-owned process handles, sandboxed execution, bounded output capture, and cancellation.
+packages/agent/src/domains/jobs/schema_tests.rs	retain	phase2 jobs	P2AER-S5A	Jobs schema alignment tests retained to guard resource kind, schema id, output contract, and required field drift.
+packages/agent/src/domains/jobs/service.rs	retain	phase2 jobs	P2AER-S5A	Jobs service retained for resource-backed lifecycle, terminal idempotency, streams, cleanup, and output evidence.
+packages/agent/src/domains/jobs/support.rs	retain	phase2 jobs	P2AER-S5A	Jobs support helpers retained for payload parsing, lifecycle streams, idempotency, and resource refs.
+packages/agent/src/domains/jobs/tests.rs	retain	phase2 jobs	P2AER-S5A	Jobs focused tests retained for lifecycle, idempotency, cancellation, cleanup, bounded output, and policy denial.
+packages/agent/src/domains/jobs/types.rs	retain	phase2 jobs	P2AER-S5A	Jobs record types retained for durable lifecycle, command, authority, limits, retention, terminal, and output schemas.
+packages/agent/src/engine/durability/resources/job_definitions.rs	retain	phase2 jobs	P2AER-S5A	Job process resource definitions retained for engine-owned job_process contract schemas.

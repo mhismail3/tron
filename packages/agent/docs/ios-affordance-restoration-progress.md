@@ -830,6 +830,11 @@ Closed Phase 1 work:
   selection without restoring broad agent filesystem tools.
 - Slice 6 reviewed notification/inbox affordances and deferred them until a
   server-owned APNs/device/capability resource mechanism exists.
+- Phase 2 Slice 5A adds backend durable job/process lifecycle resources and
+  `execute` job operations only. It does not restore a native iOS process list,
+  log viewer, terminal, PTY, or cancel panel; generic resource/runtime facts
+  remain the only iOS-visible foundation until a later server contract and UX
+  pass.
 
 Closeout cleanup expectations:
 

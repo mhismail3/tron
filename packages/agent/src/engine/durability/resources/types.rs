@@ -49,6 +49,10 @@ pub const MEMORY_EVAL_RUN_SCHEMA_ID: &str = "tron.resource.memory_eval_run.v1";
 pub const MEMORY_MIGRATION_ENVELOPE_KIND: &str = "memory_migration_envelope";
 /// Built-in memory migration/export/import envelope resource schema id.
 pub const MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID: &str = "tron.resource.memory_migration_envelope.v1";
+/// Built-in durable process job resource kind.
+pub const JOB_PROCESS_KIND: &str = "job_process";
+/// Built-in durable process job resource schema id.
+pub const JOB_PROCESS_SCHEMA_ID: &str = "tron.resource.job_process.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

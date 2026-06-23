@@ -1706,3 +1706,15 @@ packages/agent/src/domains/memory/service.rs	implementation	memory	Phase2-Slice3
 packages/agent/src/domains/memory/support.rs	implementation	memory	Phase2-Slice3	Memory support helpers retained for parsing, redaction, resource refs, and stream publication.
 packages/agent/src/domains/memory/tests.rs	test	test_harness	Phase2-Slice3	Memory focused tests retained for disabled mode, record lifecycle, redaction, prompt trace, and migration coverage.
 packages/agent/src/engine/durability/resources/memory_definitions.rs	primitive	engine	Phase2-Slice3	Memory resource type definitions retained as engine-owned contract schemas without memory algorithms.
+packages/agent/src/domains/capability/operations/jobs.rs	implementation	capability	Phase2-Slice5A	Jobs execute operation retained as a lifecycle adapter behind the singular execute primitive.
+packages/agent/src/domains/jobs/mod.rs	implementation	jobs	Phase2-Slice5A	Jobs domain facade retained for durable process lifecycle foundation without restoring unrelated runtime features.
+packages/agent/src/domains/jobs/contract.rs	implementation	jobs	Phase2-Slice5A	Jobs contracts retained for lifecycle schemas, idempotency, output refs, and authority metadata.
+packages/agent/src/domains/jobs/errors.rs	implementation	jobs	Phase2-Slice5A	Jobs error helpers retained for fail-closed malformed request and network-policy behavior.
+packages/agent/src/domains/jobs/handlers.rs	implementation	jobs	Phase2-Slice5A	Jobs handlers retained as narrow domain invocation bindings.
+packages/agent/src/domains/jobs/runtime.rs	implementation	jobs	Phase2-Slice5A	Jobs runtime retained for process handle ownership, sandbox enforcement, bounded output capture, and cancellation.
+packages/agent/src/domains/jobs/schema_tests.rs	test	test_harness	Phase2-Slice5A	Jobs schema alignment tests retained to prevent resource contract drift.
+packages/agent/src/domains/jobs/service.rs	implementation	jobs	Phase2-Slice5A	Jobs service retained for resource-backed lifecycle, terminal idempotency, stream, cleanup, and output evidence.
+packages/agent/src/domains/jobs/support.rs	implementation	jobs	Phase2-Slice5A	Jobs support helpers retained for parsing, lifecycle events, idempotency, and resource refs.
+packages/agent/src/domains/jobs/tests.rs	test	test_harness	Phase2-Slice5A	Jobs focused tests retained for lifecycle, cancellation, bounded output, cleanup, and fail-closed policy.
+packages/agent/src/domains/jobs/types.rs	implementation	jobs	Phase2-Slice5A	Jobs record types retained for durable lifecycle, authority, limits, retention, trace, replay, and output schemas.
+packages/agent/src/engine/durability/resources/job_definitions.rs	primitive	engine	Phase2-Slice5A	Job process resource type definition retained as an engine-owned contract schema without job runtime internals.

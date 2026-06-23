@@ -2,9 +2,10 @@
 //!
 //! This worker is the model-facing harness collapse point: providers see one
 //! `execute` primitive that can observe, touch agent-owned state, read/write the
-//! workspace, and run bounded local commands.
+//! workspace, run bounded local commands, and manage durable non-interactive
+//! jobs.
 
-use serde_json::json;
+use serde_json::{Map, Value, json};
 
 use crate::domains::registration::catalog::CapabilitySpec;
 use crate::domains::registration::contract::CapabilityContract;
@@ -46,7 +47,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "name": "execute",
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
-                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, inspect agent trace/log records, inspect catalog discovery evidence, and use bounded filesystem package previews under the current working directory. ",
+                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, inspect agent trace/log records, inspect catalog discovery evidence, and use bounded filesystem package previews under the current working directory. ",
                     "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
@@ -62,51 +63,182 @@ fn execute_request_schema() -> serde_json::Value {
 }
 
 fn execute_model_request_schema() -> serde_json::Value {
+    let mut properties = Map::new();
+    properties.insert(
+        "operation".to_owned(),
+        json!({
+            "type": "string",
+            "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+        }),
+    );
+    insert_string(&mut properties, "input", "Text to record for observe.");
+    insert_string(
+        &mut properties,
+        "scope",
+        "State scope: session, workspace, or system.",
+    );
+    insert_string(&mut properties, "namespace", "Agent-owned state namespace.");
+    insert_string(&mut properties, "key", "Agent-owned state key.");
+    properties.insert(
+        "value".to_owned(),
+        json!({"description": "JSON value for state_set."}),
+    );
+    insert_string(
+        &mut properties,
+        "path",
+        "Relative file path under the current working directory.",
+    );
+    insert_string(
+        &mut properties,
+        "content",
+        "UTF-8 file content for file_write.",
+    );
+    insert_string(
+        &mut properties,
+        "oldText",
+        "Exact text to replace for filesystem_edit or filesystem_apply_patch.",
+    );
+    insert_string(
+        &mut properties,
+        "newText",
+        "Replacement text for filesystem_edit or filesystem_apply_patch.",
+    );
+    insert_string(
+        &mut properties,
+        "expectedHash",
+        "Expected SHA-256 content hash before a filesystem commit.",
+    );
+    properties.insert(
+        "commit".to_owned(),
+        json!({"type": "boolean", "description": "When true, commit filesystem_write/edit/apply_patch. Default is preview only."}),
+    );
+    insert_string(
+        &mut properties,
+        "glob",
+        "Filesystem glob pattern for filesystem_glob/search_text.",
+    );
+    properties.insert(
+        "showHidden".to_owned(),
+        json!({"type": "boolean", "description": "Include hidden filesystem entries."}),
+    );
+    insert_integer(&mut properties, "maxBytes", 1, Some(262_144), None);
+    insert_integer(&mut properties, "maxFileBytes", 1, Some(262_144), None);
+    insert_integer(&mut properties, "maxDiffBytes", 1, Some(131_072), None);
+    insert_string(
+        &mut properties,
+        "command",
+        "Shell command for process_run or job_start.",
+    );
+    insert_string(
+        &mut properties,
+        "jobResourceId",
+        "Durable job_process resource id for job_status, job_log, or job_cancel.",
+    );
+    insert_string(
+        &mut properties,
+        "state",
+        "Durable job lifecycle state filter for job_list.",
+    );
+    insert_integer(
+        &mut properties,
+        "cleanupAfterSeconds",
+        0,
+        None,
+        Some("Optional retention hint recorded on a job_start resource."),
+    );
+    insert_string(
+        &mut properties,
+        "traceId",
+        "Optional trace id filter for trace_list and log_recent.",
+    );
+    insert_string(
+        &mut properties,
+        "traceRecordId",
+        "Trace record id for trace_get.",
+    );
+    insert_string(
+        &mut properties,
+        "kind",
+        "Catalog item kind for catalog_inspect: function, worker, trigger_type, or trigger.",
+    );
+    insert_string(
+        &mut properties,
+        "id",
+        "Catalog item id for catalog_inspect.",
+    );
+    insert_string(
+        &mut properties,
+        "recordResourceId",
+        "Memory record resource id for memory_inspect.",
+    );
+    insert_string(
+        &mut properties,
+        "text",
+        "Catalog search text for catalog_search or catalog_conformance.",
+    );
+    insert_string(
+        &mut properties,
+        "namespacePrefix",
+        "Catalog namespace prefix filter.",
+    );
+    insert_string(&mut properties, "visibility", "Catalog visibility filter.");
+    insert_string(
+        &mut properties,
+        "effectClass",
+        "Catalog effect-class filter.",
+    );
+    insert_string(&mut properties, "maxRisk", "Catalog maximum risk filter.");
+    insert_string(&mut properties, "health", "Catalog health filter.");
+    properties.insert(
+        "includeProtectedCounts".to_owned(),
+        json!({"type": "boolean", "description": "Include aggregate protected omission counts without protected ids."}),
+    );
+    insert_integer(&mut properties, "limit", 1, Some(500), None);
+    insert_integer(&mut properties, "timeoutMs", 1, Some(120_000), None);
+    insert_integer(&mut properties, "maxOutputBytes", 1, Some(200_000), None);
+    insert_string(
+        &mut properties,
+        "idempotencyKey",
+        "Stable caller key for writes or command side effects.",
+    );
+    insert_string(
+        &mut properties,
+        "reason",
+        "Short evidence reason for the operation.",
+    );
+
     json!({
         "type": "object",
         "additionalProperties": false,
         "required": ["operation"],
-        "properties": {
-            "operation": {
-                "type": "string",
-                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
-            },
-            "input": {"type": "string", "description": "Text to record for observe."},
-            "scope": {"type": "string", "description": "State scope: session, workspace, or system."},
-            "namespace": {"type": "string", "description": "Agent-owned state namespace."},
-            "key": {"type": "string", "description": "Agent-owned state key."},
-            "value": {"description": "JSON value for state_set."},
-            "path": {"type": "string", "description": "Relative file path under the current working directory."},
-            "content": {"type": "string", "description": "UTF-8 file content for file_write."},
-            "oldText": {"type": "string", "description": "Exact text to replace for filesystem_edit or filesystem_apply_patch."},
-            "newText": {"type": "string", "description": "Replacement text for filesystem_edit or filesystem_apply_patch."},
-            "expectedHash": {"type": "string", "description": "Expected SHA-256 content hash before a filesystem commit."},
-            "commit": {"type": "boolean", "description": "When true, commit filesystem_write/edit/apply_patch. Default is preview only."},
-            "glob": {"type": "string", "description": "Filesystem glob pattern for filesystem_glob/search_text."},
-            "showHidden": {"type": "boolean", "description": "Include hidden filesystem entries."},
-            "maxBytes": {"type": "integer", "minimum": 1, "maximum": 262144},
-            "maxFileBytes": {"type": "integer", "minimum": 1, "maximum": 262144},
-            "maxDiffBytes": {"type": "integer", "minimum": 1, "maximum": 131072},
-            "command": {"type": "string", "description": "Shell command for process_run."},
-            "traceId": {"type": "string", "description": "Optional trace id filter for trace_list and log_recent."},
-            "traceRecordId": {"type": "string", "description": "Trace record id for trace_get."},
-            "kind": {"type": "string", "description": "Catalog item kind for catalog_inspect: function, worker, trigger_type, or trigger."},
-            "id": {"type": "string", "description": "Catalog item id for catalog_inspect."},
-            "recordResourceId": {"type": "string", "description": "Memory record resource id for memory_inspect."},
-            "text": {"type": "string", "description": "Catalog search text for catalog_search or catalog_conformance."},
-            "namespacePrefix": {"type": "string", "description": "Catalog namespace prefix filter."},
-            "visibility": {"type": "string", "description": "Catalog visibility filter."},
-            "effectClass": {"type": "string", "description": "Catalog effect-class filter."},
-            "maxRisk": {"type": "string", "description": "Catalog maximum risk filter."},
-            "health": {"type": "string", "description": "Catalog health filter."},
-            "includeProtectedCounts": {"type": "boolean", "description": "Include aggregate protected omission counts without protected ids."},
-            "limit": {"type": "integer", "minimum": 1, "maximum": 500},
-            "timeoutMs": {"type": "integer", "minimum": 1, "maximum": 120000},
-            "maxOutputBytes": {"type": "integer", "minimum": 1, "maximum": 200000},
-            "idempotencyKey": {"type": "string", "description": "Stable caller key for writes or command side effects."},
-            "reason": {"type": "string", "description": "Short evidence reason for the operation."}
-        }
+        "properties": Value::Object(properties)
     })
+}
+
+fn insert_string(properties: &mut Map<String, Value>, name: &str, description: &str) {
+    properties.insert(
+        name.to_owned(),
+        json!({"type": "string", "description": description}),
+    );
+}
+
+fn insert_integer(
+    properties: &mut Map<String, Value>,
+    name: &str,
+    minimum: u64,
+    maximum: Option<u64>,
+    description: Option<&str>,
+) {
+    let mut property = Map::new();
+    property.insert("type".to_owned(), json!("integer"));
+    property.insert("minimum".to_owned(), json!(minimum));
+    if let Some(maximum) = maximum {
+        property.insert("maximum".to_owned(), json!(maximum));
+    }
+    if let Some(description) = description {
+        property.insert("description".to_owned(), json!(description));
+    }
+    properties.insert(name.to_owned(), Value::Object(property));
 }
 
 #[cfg(test)]
