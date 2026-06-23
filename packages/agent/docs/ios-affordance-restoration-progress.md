@@ -339,9 +339,10 @@ Validated:
 Deferred:
 
 - User-authored local snippets and manually defined local templates remain
-  review-only follow-ups. They are not scheduled in the current Phase 1 queue;
-  revisit only if the user explicitly wants another local-native composer
-  affordance after higher-priority Phase 1 slices.
+  review-only follow-ups. They were not scheduled in the original Phase 1
+  queue; revisit only if the user explicitly wants another local-native
+  composer affordance after the closed Phase 1 local-native/user-facing slice
+  set.
 - Search, pagination, use counts, last-used metadata, server-owned prompt
   history/snippet resources, old server prompt-history client,
   `prompt_library::*` methods, generated prompt-management surfaces, skill
@@ -626,7 +627,7 @@ Validation evidence:
   inset glass rows, row container press feedback, native interactive glass, and
   header/row alignment.
 
-Effect on Phase 1 queue:
+Historical effect on original Phase 1 queue:
 
 - This was accepted off-plan cleanup/polish of existing restored shell surfaces.
   It does not consume or replace Slice 6.

@@ -388,8 +388,8 @@ Current living entry points:
   companion evidence manifest for IARM old-tree coverage, failed-attempt
   policy, validation commands, and Phase 1 handoff.
 - `packages/agent/docs/ios-affordance-restoration-map-inventory.md`:
-  completed IARM taxonomy, first-principles review rubric, Phase 1 queue, and
-  durable Phase 2 agent-execution anchor.
+  completed IARM taxonomy, first-principles review rubric, historical Phase 1
+  queue, and original Phase 2 agent-execution anchor.
 - `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`:
   machine-readable IARM coverage map used by static gates.
 - `packages/agent/docs/ios-affordance-restoration-progress.md`:
@@ -1605,13 +1605,12 @@ packages/ios-app/Sources/
   `packages/agent/docs/ios-affordance-restoration-map-inventory.tsv`, and
   `packages/agent/tests/ios_affordance_restoration_map_invariants.rs` are the
   current static proof for the functional-only iOS affordance restoration map.
-  The map exhaustively classifies deleted or renamed old iOS paths, defines the
-  Phase 1 review queue, and preserves the requirement for a later full
-  Phase 2 agent-execution restoration plan. It does not mean those affordances
-  are restored. `packages/agent/docs/ios-affordance-restoration-progress.md`
-  tracks which Phase 1 slices have since shipped, what was accepted off-plan,
-  what was validated, and what remains deferred. The durable Phase 2 plan is
-  now recorded in
+  The map exhaustively classifies deleted or renamed old iOS paths and preserves
+  the original Phase 1 review queue as historical planning evidence. It does
+  not mean those affordances are restored.
+  `packages/agent/docs/ios-affordance-restoration-progress.md` tracks Phase 1
+  closeout, shipped slices, accepted off-plan work, validation, and deferred
+  behavior. The durable Phase 2 agent-execution restoration plan is recorded in
   `packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md`,
   `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`,
   `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`, and
