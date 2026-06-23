@@ -32,7 +32,10 @@ final class ChatTranscriptionCoordinator {
         guard !context.isProcessing && !context.isTranscribing else { return }
         do {
             try await context.requireTranscriptionReady()
+            try Task.checkCancellation()
             try await context.startRecording()
+        } catch is CancellationError {
+            return
         } catch {
             context.appendTranscriptionError(transcriptionFailureMessage(for: error))
         }
@@ -40,7 +43,14 @@ final class ChatTranscriptionCoordinator {
 
     func handleRecordingFinished(url: URL?, success: Bool, context: ChatTranscriptionContext) async {
         guard success, let url else {
-            context.appendTranscriptionError("Recording failed.")
+            if !Task.isCancelled {
+                context.appendTranscriptionError("Recording failed.")
+            }
+            return
+        }
+
+        if Task.isCancelled {
+            _ = try? await context.loadAudioData(from: url)
             return
         }
 
@@ -49,11 +59,13 @@ final class ChatTranscriptionCoordinator {
 
         do {
             let audioData = try await context.loadAudioData(from: url)
+            try Task.checkCancellation()
             let result = try await context.transcribeAudio(
                 data: audioData,
                 mimeType: mimeType(for: url),
                 fileName: url.lastPathComponent
             )
+            try Task.checkCancellation()
             let transcript = result.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !transcript.isEmpty else {
                 context.appendTranscriptionError("No speech detected.")
@@ -65,10 +77,16 @@ final class ChatTranscriptionCoordinator {
             } else {
                 context.inputText += "\n" + transcript
             }
+        } catch is CancellationError {
+            return
         } catch let error as AudioFileTooSmallError {
-            context.appendTranscriptionError("No speech detected. \(error.size) bytes captured.")
+            if !Task.isCancelled {
+                context.appendTranscriptionError("No speech detected. \(error.size) bytes captured.")
+            }
         } catch {
-            context.appendTranscriptionError(transcriptionFailureMessage(for: error))
+            if !Task.isCancelled {
+                context.appendTranscriptionError(transcriptionFailureMessage(for: error))
+            }
         }
     }
 

@@ -16,18 +16,19 @@ extension SourceGuardTests {
 
         #expect(
             transcriptionSource.contains("func cancelRecording()") &&
+                transcriptionSource.contains("transcriptionTask?.cancel()") &&
                 transcriptionSource.contains("micRecorder.cancelRecording()"),
-            "ChatViewModel must expose an explicit voice-recording cancellation boundary"
+            "ChatViewModel must expose an explicit voice-recording and transcription cancellation boundary"
         )
         #expect(
             chatViewSource.contains("viewModel.cancelRecording()") &&
                 chatViewSource.contains("viewModel.stopLiveEventStream()"),
-            "ChatView must cancel active voice capture when leaving the chat"
+            "ChatView must cancel active voice capture and transcription when leaving the chat"
         )
         #expect(
             chatViewSource.range(of: "viewModel.cancelRecording()")?.lowerBound ?? chatViewSource.endIndex
                 < chatViewSource.range(of: "viewModel.stopLiveEventStream()")?.lowerBound ?? chatViewSource.startIndex,
-            "ChatView should cancel active voice capture before tearing down live session state"
+            "ChatView should cancel active voice capture and transcription before tearing down live session state"
         )
     }
 }

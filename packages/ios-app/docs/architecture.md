@@ -117,7 +117,7 @@ icon catalog, or fork-row state model.
 Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
 Recent:  InputBar -> native attachment menu -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
 Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
-Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> ComposerMicRecorder -> transcription::audio -> InputBar
+Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> ComposerMicRecorder -> cancellable transcription::audio -> InputBar
 New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
 Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
 Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView

@@ -976,8 +976,9 @@ Direct record-id inspect/edit/tombstone operations reject cross-scope resources.
 `worker_lifecycle` owner is the explicit exception for local package
 proposal/apply/launch state. `transcription` is a local, opt-in composer
 speech-to-text domain; composer voice input probes local model readiness before
-recording, the server reports explicit disabled/loading/ready/failed model
-state, and no media or voice notes are stored. Product/tool domains such as
+recording, cancels capture and in-flight transcription when leaving chat, the
+server reports explicit disabled/loading/ready/failed model state, and no media
+or voice notes are stored. Product/tool domains such as
 `process`, `program`, `web`, `git`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, `notifications`, `voice_notes`, and media/import surfaces are
@@ -1552,7 +1553,8 @@ packages/ios-app/Sources/
   device-local recent-input reuse, the
   functional-only native composer attachment menu that preserves keyboard
   focus while layering native camera/photo/file pickers above it, composer mic
-  input backed by the local transcription domain after a readiness check,
+  input backed by the local transcription domain after a readiness check and
+  cancelled with any in-flight transcription when leaving chat,
   a blank empty/loading chat, app-global connection toasts, ephemeral in-chat
   local error notifications, streamed thinking content with one app-owned
   neural-spark fallback indicator, one-line generic capability evidence chips,

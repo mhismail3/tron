@@ -34,6 +34,10 @@ extension ChatViewModel: ChatTranscriptionContext {
     }
 
     func cancelRecording() {
+        transcriptionTaskGeneration += 1
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
+        isTranscribing = false
         micRecorder.cancelRecording()
     }
 
@@ -55,13 +59,35 @@ extension ChatViewModel: ChatTranscriptionContext {
     }
 
     func toggleRecording() {
-        Task {
-            await transcriptionCoordinator.toggleRecording(context: self)
+        launchTranscriptionTask { viewModel in
+            await viewModel.transcriptionCoordinator.toggleRecording(context: viewModel)
         }
     }
 
     func handleRecordingFinished(url: URL?, success: Bool) async {
-        await transcriptionCoordinator.handleRecordingFinished(url: url, success: success, context: self)
+        launchTranscriptionTask { viewModel in
+            await viewModel.transcriptionCoordinator.handleRecordingFinished(
+                url: url,
+                success: success,
+                context: viewModel
+            )
+        }
+    }
+
+    private func launchTranscriptionTask(
+        _ operation: @escaping @Sendable @MainActor (ChatViewModel) async -> Void
+    ) {
+        guard transcriptionTask == nil else { return }
+
+        transcriptionTaskGeneration += 1
+        let generation = transcriptionTaskGeneration
+        transcriptionTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await operation(self)
+            if self.transcriptionTaskGeneration == generation {
+                self.transcriptionTask = nil
+            }
+        }
     }
 }
 
