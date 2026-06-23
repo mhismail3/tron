@@ -121,24 +121,114 @@ fn assert_normalized_contains_all(path: &str, required: &[&str]) {
     }
 }
 
+fn normalized_casefold(text: &str) -> String {
+    text.to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn normalized_hyphen_insensitive_casefold(text: &str) -> String {
+    normalized_casefold(&text.replace('-', " "))
+}
+
+fn normalized_contains(haystack: &str, needle: &str) -> bool {
+    normalize_whitespace(haystack).contains(&normalize_whitespace(needle))
+}
+
+fn assert_normalized_not_contains(path: &str, forbidden: &str) {
+    let content = read_repo_file(path);
+    assert!(
+        !normalized_contains(&content, forbidden),
+        "{path} contains stale live IARM planning wording: {forbidden}"
+    );
+}
+
 fn is_hex_byte(byte: u8) -> bool {
     byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) || (b'A'..=b'F').contains(&byte)
 }
 
-fn contains_uuid_like_identifier(text: &str) -> bool {
+fn uuid_like_identifier_spans(text: &str) -> Vec<(usize, String)> {
     let bytes = text.as_bytes();
     if bytes.len() < 36 {
-        return false;
+        return Vec::new();
     }
-    bytes.windows(36).any(|window| {
-        window.iter().enumerate().all(|(index, byte)| {
-            if matches!(index, 8 | 13 | 18 | 23) {
-                *byte == b'-'
-            } else {
-                is_hex_byte(*byte)
-            }
+    bytes
+        .windows(36)
+        .enumerate()
+        .filter_map(|(offset, window)| {
+            let is_uuid_like = window.iter().enumerate().all(|(index, byte)| {
+                if matches!(index, 8 | 13 | 18 | 23) {
+                    *byte == b'-'
+                } else {
+                    is_hex_byte(*byte)
+                }
+            });
+            is_uuid_like.then(|| {
+                (
+                    offset,
+                    String::from_utf8_lossy(&bytes[offset..offset + 36]).to_string(),
+                )
+            })
         })
-    })
+        .collect()
+}
+
+fn mentions_physical_ios_device(text: &str) -> bool {
+    let normalized = normalized_hyphen_insensitive_casefold(text);
+    normalized.contains("physical device")
+        || normalized.contains("physical iphone")
+        || normalized.contains("physical ipad")
+}
+
+fn physical_ios_device_uuid_evidence(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    uuid_like_identifier_spans(text)
+        .into_iter()
+        .filter_map(|(offset, uuid)| {
+            let start = offset.saturating_sub(240);
+            let end = bytes.len().min(offset + 36 + 240);
+            let window = String::from_utf8_lossy(&bytes[start..end]);
+            mentions_physical_ios_device(&window).then(|| uuid)
+        })
+        .collect()
+}
+
+#[test]
+fn physical_ios_device_uuid_guard_catches_wrapped_context() {
+    let wrapped_evidence = "\
+Simulator validation stayed generic.
+
+The beta was launched on a physical
+iPhone selector captured by local logs:
+00000000-1111-2222-3333-444444444444.
+";
+
+    assert_eq!(
+        physical_ios_device_uuid_evidence(wrapped_evidence),
+        vec!["00000000-1111-2222-3333-444444444444".to_string()]
+    );
+}
+
+#[test]
+fn stale_live_planning_guard_catches_wrapped_markdown() {
+    let wrapped_phase_one = "\
+The IARM inventory defines the Phase 1 review
+queue for immediate restoration work.
+";
+    let wrapped_phase_two = "\
+The next planned body of work is the full Phase 2 agent-execution restoration
+goal plan, including notification delivery.
+";
+
+    assert!(normalized_contains(
+        wrapped_phase_one,
+        "defines the Phase 1 review queue"
+    ));
+    assert!(normalized_contains(
+        wrapped_phase_two,
+        "The next planned body of work is the full Phase 2 agent-execution restoration goal plan"
+    ));
 }
 
 fn assert_current_lineage_base() {
@@ -681,12 +771,12 @@ fn original_queue_handoff_and_phase_two_anchor_are_historical_after_closeout() {
             README_PATH,
             "preserves the requirement for a later full Phase 2 agent-execution restoration plan",
         ),
+        (
+            PROGRESS_PATH,
+            "The next planned body of work is the full Phase 2 agent-execution restoration goal plan",
+        ),
     ] {
-        let content = read_repo_file(path);
-        assert!(
-            !content.contains(forbidden),
-            "{path} contains stale live IARM planning wording: {forbidden}"
-        );
+        assert_normalized_not_contains(path, forbidden);
     }
 }
 
@@ -701,15 +791,8 @@ fn docs_do_not_store_physical_ios_device_uuid_like_identifiers() {
     let mut offenders = Vec::new();
     for path in docs {
         let content = read_repo_file(&path);
-        for (line_index, line) in content.lines().enumerate() {
-            let lower = line.to_ascii_lowercase();
-            let mentions_physical_ios_device = lower.contains("physical device")
-                || lower.contains("physical-device")
-                || lower.contains("physical iphone")
-                || lower.contains("physical ipad");
-            if mentions_physical_ios_device && contains_uuid_like_identifier(line) {
-                offenders.push(format!("{}:{}: {}", path, line_index + 1, line));
-            }
+        for uuid in physical_ios_device_uuid_evidence(&content) {
+            offenders.push(format!("{path}: UUID-like physical-device evidence {uuid}"));
         }
     }
 
@@ -762,7 +845,11 @@ fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
             "No chat-mounted passive worker-runtime banner",
             "No temporary chat timeline loading spinner/text row",
             "No custom fallback session list row press implementation remains",
-            "The next planned body of work is the full Phase 2 agent-execution restoration",
+            "Remaining live work is execution of the approved Phase 2 slices",
+            "phase-2-agent-execution-restoration-scorecard.md",
+            "phase-2-agent-execution-restoration-evidence-manifest.md",
+            "phase-2-agent-execution-restoration-inventory.md",
+            "phase-2-agent-execution-restoration-inventory.tsv",
             "central engine/resource mechanism",
         ],
     );
