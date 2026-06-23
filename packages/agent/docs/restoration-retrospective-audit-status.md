@@ -4,11 +4,11 @@ Status: `active`
 
 Created: 2026-06-23
 
-Current audit discovery checkout:
+Current audit tracker checkout:
 
-- Current checkout is detached at `0d76be40df3ec6ddf96574546ec220fb992c6478`.
-- `0d76be40df3ec6ddf96574546ec220fb992c6478` is the head of
-  `codex/phase-2-jobs-process-lifecycle-current` in this worktree.
+- Current tracker checkout is `cfdc3c29962a1407a580721acf84a888968a7ee9`.
+- `cfdc3c29962a1407a580721acf84a888968a7ee9` is the head of
+  `codex/restoration-retrospective-audit-status-current`.
 - Baseline assumption: this is the accepted restoration baseline through
   Phase 2 Slice 5A after the final job-finalization cancel-race fix.
 
@@ -48,7 +48,7 @@ completed slice.
 
 | Order | Slice | Phase | Range / final commit | Source of truth | Canonical files | Current acceptance evidence | Deferred scope to preserve | Likely audit focus |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Primitive Minimality Closure | Pre-restoration foundation | Baseline `7b03b51f`; final `1545da37d` | `codex/primitive-minimality-closure-current` | `primitive-minimality-closure-scorecard.md`; `primitive-minimality-closure-evidence-manifest.md`; `primitive-minimality-closure-inventory.md`; `primitive-minimality-closure-inventory.tsv`; `primitive_minimality_closure_invariants.rs` | Score 100/100; focused provider/stream/SSE deletion tests; full local CI, personal-info guard, XcodeGen drift, whitespace, ignored-file, and clean status recorded. | No successor features, provider-visible tool widening, settings/auth/DB/iOS DTO expansion, or deploy behavior. | Whether removed helpers were truly dead; retained suspicious surfaces are justified; README/provider docs match current code; no minimality guard overfitting. |
+| 1 | Primitive Minimality Closure | Pre-restoration foundation | Baseline `7b03b51f`; final `1545da37d` | `codex/primitive-minimality-closure-current` | `primitive-minimality-closure-scorecard.md`; `primitive-minimality-closure-evidence-manifest.md`; `primitive-minimality-closure-inventory.md`; `primitive-minimality-closure-inventory.tsv`; `primitive_minimality_closure_invariants.rs` | Accepted by audit thread `019ef654-8726-7781-91bf-5bbb6f6321cd`; no blocking or important findings; score 100/100 and focused deletion/minimality tests remain accepted. | No successor features, provider-visible tool widening, settings/auth/DB/iOS DTO expansion, or deploy behavior. | Closed. Future cleanup: align the invariant endpoint constant with the documented slice boundary. |
 | 2 | Baseline Pre-Restoration Closure | Pre-restoration foundation | Baseline `1545da37d`; final `4cb2387f1` | `codex/baseline-pre-restoration-closure-current`; tag `pre-restoration-baseline-2026-06-14` | `baseline-pre-restoration-closure-scorecard.md`; `baseline-pre-restoration-closure-evidence-manifest.md`; `baseline-pre-restoration-closure-inventory.md`; `baseline-pre-restoration-closure-inventory.tsv`; `baseline_pre_restoration_closure_invariants.rs`; `README.md` | Score 100/100; 24 restoration backlog rows; absence guards; full Rust CI, personal-info guard, XcodeGen drift, whitespace, ignored-file, push/tag handoff recorded. | No restored product domains, fixed iOS panels, MCP, web/git, prompt library, notifications, voice notes, subagents, scheduler/autostart, DB migrations, or deploy/install behavior. | Whether backlog coverage is exhaustive; absence guards still distinguish approved Phase 2 restorations; active docs do not claim future behavior. |
 | 3 | Self-Updating Worker Runtime Foundation | First post-BPRC restoration foundation | Baseline `4cb2387f1`; final `6aa395fdd` | `codex/self-updating-worker-runtime-foundation-current` | `self-updating-worker-runtime-foundation-scorecard.md`; `self-updating-worker-runtime-foundation-evidence-manifest.md`; `self-updating-worker-runtime-foundation-inventory.md`; `self-updating-worker-runtime-foundation-inventory.tsv`; `self_updating_worker_runtime_foundation_invariants.rs` | Score 100/100; worker lifecycle package resources, manifest validation, scoped launch token, conformance, rollback, and generic resource/stream visibility recorded. | No MCP, skills, memory, web/browser, scheduler, subagents, prompt library, program execution, fixed iOS product panels, provider-visible tool widening, or production deploy behavior. | Launch isolation, env clearing, token scope, conformance failure rollback, resource retention, generic iOS visibility, and package/source trust boundaries. |
 | 4 | iOS Self-Adapting Agent Cockpit Baseline | iOS baseline | Baseline `6aa395fdd`; final `a0b80c7d2` | `codex/ios-agent-cockpit-baseline-current` | `ios-self-adapting-agent-cockpit-baseline-scorecard.md`; `ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.tsv`; `ios_self_adapting_agent_cockpit_baseline_invariants.rs` | Score 100/100; generic runtime/cockpit rendering, DTO/source guard, simulator evidence, README/iOS docs, and static gate coverage recorded. | No fixed product panels or restored old agent-execution surfaces. | Whether cockpit renders only server facts, stays diagnostics/generic, and does not imply hidden runtime truth. |
@@ -69,29 +69,58 @@ completed slice.
 | 19 | Phase 2 Slice 4: Filesystem Agent Tools + Truncated Snapshot Hardening | Phase 2 agent-execution restoration | Baseline `4c35b2119`; commits `27e5847c9`, `2650dd0b9` | `codex/phase-2-filesystem-agent-tools-current` | Phase 2 scorecard/evidence/inventory; filesystem domain docs/tests; SACB/TMB/HRA/TPC/PCC/BPRC/IARM/DESI/OPSAA invariants; provider message converter tests | Bounded read/list/find/glob/search/diff/write/edit/apply-patch through `execute`; path authority; symlink/traversal denial; patch/materialized resources; truncated snapshot refusal; personal-info guard recorded. | Jobs, git, web, subagents, memory/vector/procedural/scheduling, native file/patch UI, public DTO expansion, DB/settings/auth/provider changes, and production deploy remain deferred. | Path canonicalization, symlink escapes, bounded output, binary omission, exact edit/hash guards, preview/commit idempotency, rollback evidence, and provider prompt guardrails. |
 | 20 | Phase 2 Slice 5A: Durable Jobs and Process Lifecycle + Race Hardening | Phase 2 agent-execution restoration | Baseline `1d35ac848` on `2650dd0b9`; commits `404290d06`, `4fb134c64`, `0d76be40d`; final `0d76be40d` | `codex/phase-2-jobs-process-lifecycle-current` | Phase 2 scorecard/evidence/inventory; jobs domain docs/tests; SACB/TMB/CSD/HRA/PCC/TPC/BPRC/IARM/OPSAA/PRG/DRC/DESI invariants | Durable `jobs` domain, `job_process` resources, bounded `execution_output`, lifecycle streams, start/status/list/log/cancel `execute` ops, process-group cleanup, cancellation/finalization race fixes, full Rust CI recorded. | PTY/interactive terminals, interpreter runtimes, git/source control, web/network research, subagents, scheduling, notifications, native iOS process panels, and queue-backed internal dispatch remain deferred. | Process-group cleanup, network denial fail-closed, output-drain bounds, terminal idempotency, cancel/completion races, stale-version retry, cleanup archiving, and no hidden queue grant. |
 
-## First Audit
+## Completed Audit: Primitive Minimality Closure
 
-The first slice to audit is **Primitive Minimality Closure** because it is the
-earliest included restoration-campaign foundation slice in the inspected
-history and it defines the minimal primitive baseline that later restoration
-slices are required to preserve.
+Audit thread: `019ef654-8726-7781-91bf-5bbb6f6321cd`
 
-Audit range:
+Verdict: `slice accepted`
+
+Status: accepted with no blocking or important findings.
+
+Accepted range:
 
 - Documented baseline: `7b03b51f5476f5764e3813666137897af2f3cd3d`
 - Documented final commit: `1545da37d3c6186fbc6613789bae3d4a5481f976`
-- Uncertainty to resolve in audit: the branch ref confirms the final commit,
-  but the exact current-history ancestry before the primitive-baseline tag
-  should be rechecked before making any PMC-specific finding.
+- Audit verified `7b03b51f5476f5764e3813666137897af2f3cd3d` is an ancestor
+  of `1545da37d3c6186fbc6613789bae3d4a5481f976`, and
+  `1545da37d3c6186fbc6613789bae3d4a5481f976` is an ancestor of the current
+  tracker checkout `cfdc3c29962a1407a580721acf84a888968a7ee9`.
 
-Canonical files:
+Verification recorded by the audit:
 
-- `packages/agent/docs/primitive-minimality-closure-scorecard.md`
-- `packages/agent/docs/primitive-minimality-closure-evidence-manifest.md`
-- `packages/agent/docs/primitive-minimality-closure-inventory.md`
-- `packages/agent/docs/primitive-minimality-closure-inventory.tsv`
-- `packages/agent/tests/primitive_minimality_closure_invariants.rs`
-- `README.md`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_minimality_closure_invariants -- --nocapture`
+  passed, 8 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::model::providers::anthropic --lib -- --quiet`
+  passed, 160 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::model::providers::google::stream_handler --lib -- --quiet`
+  passed, 16 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::model::providers::shared::sse --lib -- --quiet`
+  passed, 20 tests.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- `git status --short` was clean.
+
+Accepted deferred scope:
+
+- No successor features, provider-visible tool widening, settings/auth/DB/iOS
+  DTO expansion, or deploy behavior is required for this slice.
+- The audit manually verified the full
+  `7b03b51f5476f5764e3813666137897af2f3cd3d..1545da37d3c6186fbc6613789bae3d4a5481f976`
+  range had no forbidden public protocol, settings, auth, database, or iOS
+  source expansion.
+
+Non-blocking finding:
+
+- `packages/agent/tests/primitive_minimality_closure_invariants.rs` hardcodes
+  `CLOSEOUT_COMMIT` as `b7443240...`, while this tracker identifies the slice
+  final as `1545da37d3c6186fbc6613789bae3d4a5481f976`. This does not block
+  acceptance because the audit verified the documented full range manually.
+  Future cleanup should update, rename, or split the endpoint constant so the
+  gate matches the documented slice boundary.
+
+## Next Audit
+
+The next slice to audit is **Baseline Pre-Restoration Closure**.
 
 ## Per-Slice Audit Start State
 
