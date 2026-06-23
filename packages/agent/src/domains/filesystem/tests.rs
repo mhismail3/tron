@@ -362,6 +362,53 @@ async fn apply_patch_requires_hash_match_and_exact_single_match() {
 }
 
 #[tokio::test]
+async fn write_commit_refuses_unverifiable_existing_hash() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let target = root.path().join("large.txt");
+    let large = format!("header\n{}", "tail\n".repeat(70_000));
+    fs::write(&target, &large).expect("large file");
+
+    let error = invoke_error(
+        &ctx,
+        contract::WRITE_FUNCTION,
+        json!({
+            "path": "large.txt",
+            "content": "replacement\n",
+            "expectedHash": "missing",
+            "commit": true
+        }),
+        client_context(root.path(), "large-write-commit", true),
+    )
+    .await;
+    assert!(error.contains("hash is unavailable"));
+    assert_eq!(fs::read_to_string(&target).unwrap(), large);
+}
+
+#[tokio::test]
+async fn exact_patch_refuses_truncated_file_previews() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let target = root.path().join("large.txt");
+    let large = format!("needle\n{}", "tail\n".repeat(70_000));
+    fs::write(&target, &large).expect("large file");
+
+    let error = invoke_error(
+        &ctx,
+        contract::APPLY_PATCH_FUNCTION,
+        json!({
+            "path": "large.txt",
+            "oldText": "needle",
+            "newText": "changed"
+        }),
+        client_context(root.path(), "large-patch-preview", true),
+    )
+    .await;
+    assert!(error.contains("refuses files larger"));
+    assert_eq!(fs::read_to_string(&target).unwrap(), large);
+}
+
+#[tokio::test]
 async fn execute_filesystem_write_requires_idempotency_at_provider_boundary() {
     let ctx = make_test_context();
     let root = tempdir().expect("root");

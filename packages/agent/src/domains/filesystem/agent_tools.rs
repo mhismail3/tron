@@ -307,6 +307,11 @@ fn exact_replace_plan(
     if !before.exists {
         return Err(not_found(&path.canonical));
     }
+    if before.truncated {
+        return Err(invalid(
+            "exact text patch refuses files larger than the bounded preview limit",
+        ));
+    }
     if before.is_binary {
         return Err(invalid("exact text patch refuses binary files"));
     }
@@ -359,7 +364,12 @@ fn mutation_plan_with_before(
     commit: bool,
 ) -> Result<MutationPlan, CapabilityError> {
     if let Some(expected) = optional_str(payload, "expectedHash")? {
-        let actual = before.content_hash.as_deref().unwrap_or("missing");
+        let Some(actual) = before.content_hash.as_deref() else {
+            return Err(invalid(format!(
+                "cannot verify expectedHash for {} because the current file hash is unavailable",
+                path.relative
+            )));
+        };
         if expected != actual {
             return Err(invalid(format!(
                 "expectedHash mismatch for {}: expected {expected}, actual {actual}",

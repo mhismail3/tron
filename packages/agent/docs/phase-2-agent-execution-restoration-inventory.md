@@ -145,6 +145,8 @@ and write/edit/apply-patch operations through `capability::execute`, with
 trusted working-directory roots, traversal and symlink escape denial, bounded
 text previews, binary content omission, patch proposal resources,
 materialized-file resources for commits, lifecycle stream evidence, and
-provider-boundary idempotency for mutating operations. Native file/patch review
-UI and package-wide risky-action approval triggers remain future user
-decisions.
+provider-boundary idempotency for mutating operations. Follow-up orchestrator
+review hardened existing-file commits and exact-text edits so unverifiable
+truncated snapshots cannot be overwritten or patched from partial preview
+content. Native file/patch review UI and package-wide risky-action approval
+triggers remain future user decisions.

@@ -225,6 +225,10 @@ Scope implemented:
 - Added bounded read/list/search/diff output, binary body omission, bounded
   rollback previews, exact single-match text patches, expected-hash protection
   for existing-file commits, and mutating preview default behavior.
+- Post-closeout orchestrator review hardened truncated-snapshot handling:
+  existing-file commits now reject unverifiable current hashes instead of
+  accepting a `"missing"` sentinel, and exact-text patches refuse files larger
+  than the bounded preview limit rather than editing partial content.
 - Kept provider-visible filesystem results relative to the authorized root; the
   resource/audit layer may retain canonical locations for committed materialized
   files.
@@ -240,7 +244,7 @@ Focused validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::filesystem -- --nocapture` | exit 0 | 12 filesystem tests passed after the toolbox/helper split, covering workspace-browser regressions, parent traversal denial, symlink escape denial, bounded binary read preview, bounded text search with binary skip, preview/commit patch and materialized resources, hash/exact-match patch guards, and provider-boundary idempotency. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::filesystem -- --nocapture` | exit 0 | 14 filesystem tests passed after orchestrator hardening, covering workspace-browser regressions, parent traversal denial, symlink escape denial, bounded binary read preview, bounded text search with binary skip, preview/commit patch and materialized resources, hash/exact-match patch guards, truncated-snapshot write/patch refusal, and provider-boundary idempotency. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after classifying filesystem package files, provider-visible execute ops, working-directory requirements, and mutating idempotency requirements without weakening the authority guards. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 TMB tests passed; filesystem agent support crosses engine/resource boundaries through the engine host facade rather than private stores. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 HRA tests passed; new filesystem support files and ownership mappings are inventoried. |
@@ -267,6 +271,10 @@ Adversarial self-review:
   results from absolute canonical paths to `root: "working_directory"` plus a
   relative path. Resource/audit evidence may still retain canonical locations
   where committed materialized files require provenance.
+- Fixed an orchestrator-review data-loss issue: exact-text patching previously
+  could operate on a truncated preview, and existing-file commit hash validation
+  treated unavailable hashes as the string `"missing"`. Both now fail closed,
+  with regressions proving the original file remains unchanged.
 - Rechecked traversal, symlink escape, unbounded IO, binary-body disclosure,
   idempotency, expected-hash, rollback-preview, stale registration, and static
   guard risks. Real guard drift found during validation was narrowed to the new

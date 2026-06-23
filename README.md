@@ -914,9 +914,9 @@ Current primitive operations:
 | `filesystem_glob` | Walk bounded entries matching a glob-style pattern without following symlinks. |
 | `filesystem_search_text` | Search bounded UTF-8 file previews under the trusted root while skipping binary content. |
 | `filesystem_diff` | Produce a bounded preview diff between current file content and proposed text. |
-| `filesystem_write` | Create a patch proposal by default, or commit UTF-8 content with idempotency and expected-hash evidence. |
-| `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence. |
-| `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations. |
+| `filesystem_write` | Create a patch proposal by default, or commit UTF-8 content with idempotency and a verifiable expected hash for existing files. |
+| `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence; truncated file previews are refused. |
+| `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
