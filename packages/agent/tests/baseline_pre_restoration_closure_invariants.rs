@@ -11,6 +11,12 @@ const EVIDENCE_PATH: &str =
 const INVENTORY_PATH: &str = "packages/agent/docs/baseline-pre-restoration-closure-inventory.md";
 const INVENTORY_TSV_PATH: &str =
     "packages/agent/docs/baseline-pre-restoration-closure-inventory.tsv";
+const PHASE_TWO_SCORECARD_PATH: &str =
+    "packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md";
+const PHASE_TWO_EVIDENCE_PATH: &str =
+    "packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md";
+const PHASE_TWO_INVENTORY_TSV_PATH: &str =
+    "packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv";
 const FEATURE_INDEX_PATH: &str =
     "packages/agent/docs/primitive-baseline-vs-modular-capability-engine-feature-index.md";
 const TARGET_PATH: &str = "packages/agent/tests/baseline_pre_restoration_closure_invariants.rs";
@@ -120,6 +126,70 @@ fn parse_inventory_rows() -> Vec<Vec<String>> {
         .filter(|line| !line.trim().is_empty())
         .map(|line| line.split('\t').map(str::to_owned).collect::<Vec<_>>())
         .collect()
+}
+
+fn assert_bprc_feature_backlog_lineage(feature_id: &str, surface_kind: &str) {
+    let bprc_inventory = read_repo_file(INVENTORY_TSV_PATH);
+    let feature_row = bprc_inventory
+        .lines()
+        .find(|line| line.starts_with(&format!("{feature_id}\trestoration_backlog\t")))
+        .unwrap_or_else(|| panic!("missing BPRC backlog row {feature_id}"));
+    assert!(
+        feature_row.contains(surface_kind),
+        "BPRC inventory row {feature_id} must retain backlog lineage for {surface_kind}: {feature_row}"
+    );
+}
+
+fn assert_phase_two_restored_domain_lineage(
+    domain_root: &Path,
+    domain: &str,
+    phase_two_row_id: &str,
+    bprc_feature_id: &str,
+    bprc_surface_kind: &str,
+    phase_two_slice_label: &str,
+    required_inventory_text: &[&str],
+    required_evidence_text: &[&str],
+) {
+    assert!(
+        domain_root.join(domain).exists(),
+        "approved Phase 2 domain root missing: {domain}"
+    );
+
+    assert_bprc_feature_backlog_lineage(bprc_feature_id, bprc_surface_kind);
+
+    let phase_two_inventory = read_repo_file(PHASE_TWO_INVENTORY_TSV_PATH);
+    let inventory_row = phase_two_inventory
+        .lines()
+        .find(|line| line.starts_with(&format!("{phase_two_row_id}\t")))
+        .unwrap_or_else(|| panic!("missing Phase 2 inventory row {phase_two_row_id}"));
+    assert!(
+        inventory_row.contains("current_baseline")
+            && inventory_row.contains(bprc_feature_id)
+            && inventory_row.contains(domain),
+        "{domain} must have explicit current-baseline Phase 2 inventory lineage to {bprc_feature_id}: {inventory_row}"
+    );
+    for required in required_inventory_text {
+        assert!(
+            inventory_row.contains(required),
+            "{domain} Phase 2 inventory row must contain {required}: {inventory_row}"
+        );
+    }
+
+    let phase_two_scorecard = read_repo_file(PHASE_TWO_SCORECARD_PATH);
+    assert!(
+        phase_two_scorecard.contains(phase_two_slice_label)
+            && phase_two_scorecard.contains(bprc_feature_id)
+            && phase_two_scorecard.contains(domain),
+        "{domain} must be mapped in Phase 2 scorecard slice {phase_two_slice_label}"
+    );
+
+    let phase_two_evidence = read_repo_file(PHASE_TWO_EVIDENCE_PATH);
+    for required in required_evidence_text {
+        assert!(
+            phase_two_evidence.contains(required),
+            "{domain} Phase 2 evidence must contain {required}"
+        );
+    }
 }
 
 fn parse_quality_closeout_targets() -> Vec<String> {
@@ -378,17 +448,76 @@ fn bprc_inventory_is_structured_and_covers_backlog_and_artifacts() {
 #[test]
 fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
     let domain_root = repo_path("packages/agent/src/domains");
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "catalog_discovery",
+        "P2AER-INV-002",
+        "BPRC-FEATURE-01",
+        "capability_discovery",
+        "Slice 1: Catalog, Discovery, And Capability Evidence",
+        &[
+            "Slice 1 implemented native `catalog_discovery::{search,inspect,conformance_report}`",
+            "catalog_discovery package",
+            "catalog_search",
+            "catalog_inspect",
+            "catalog_conformance",
+        ],
+        &[
+            "Added the `catalog_discovery` domain worker",
+            "`catalog_discovery_report` resources",
+        ],
+    );
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "approval",
+        "P2AER-INV-011",
+        "BPRC-FEATURE-09",
+        "approval",
+        "Slice 2: Authority, Approval, Safety, And Freshness",
+        &[
+            "Slice 2 implements durable `approval_request` and `approval_decision` resources",
+            "approval package",
+            "approval.lifecycle",
+            "fail-closed check",
+        ],
+        &[
+            "Added the `approval` domain worker",
+            "`approval_request` and `approval_decision` resource type",
+        ],
+    );
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "jobs",
+        "P2AER-INV-005",
+        "BPRC-FEATURE-03",
+        "process_jobs",
+        "Slice 5A: Durable Jobs And Process Lifecycle",
+        &[
+            "Slice 5A implements durable non-interactive jobs",
+            "jobs package",
+            "job_process",
+            "jobs.lifecycle",
+        ],
+        &[
+            "Added the modular `jobs` domain",
+            "`execution_output` artifact creation",
+        ],
+    );
     for forbidden in [
+        "autostart",
         "browser",
         "context",
         "cron",
         "device",
+        "device_broker",
         "display",
         "events",
         "git",
         "import",
         "job",
         "mcp",
+        "notification",
+        "notification_device",
         "notifications",
         "plan",
         "process",
@@ -396,8 +525,10 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "prompt_library",
         "repo",
         "sandbox",
+        "scheduler",
         "self_extension",
         "skills",
+        "subagents",
         "tree",
         "voice_notes",
         "web",
@@ -410,13 +541,19 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
     }
     let memory_root = domain_root.join("memory");
     if memory_root.exists() {
-        let phase_two_inventory =
-            read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv");
-        assert!(
-            phase_two_inventory.contains("P2AER-INV-014\tmemory core contract")
-                && phase_two_inventory
-                    .contains("current_baseline\tBPRC-FEATURE-10\tIARM-SURFACE-034"),
-            "memory domain is allowed only as the approved Slice 3 foundation tracked by P2AER"
+        assert_phase_two_restored_domain_lineage(
+            &domain_root,
+            "memory",
+            "P2AER-INV-014",
+            "BPRC-FEATURE-10",
+            "context_rules_memory",
+            "Slice 3: Memory Foundation And Engine Contract",
+            &[
+                "Slice 3 implements the memory domain",
+                "memory contract",
+                "current_baseline",
+            ],
+            &["Added the `memory` domain worker", "redacted body refs"],
         );
         for forbidden in [
             "semantic",
@@ -456,8 +593,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "filesystem domain must not restore retired old filesystem operation spelling: {forbidden}"
         );
     }
-    let phase_two_inventory =
-        read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv");
+    let phase_two_inventory = read_repo_file(PHASE_TWO_INVENTORY_TSV_PATH);
     assert!(
         phase_two_inventory.contains("P2AER-INV-004\tfilesystem agent tool suite")
             && phase_two_inventory.contains("current_baseline\tBPRC-FEATURE-02\tIARM-SURFACE-035"),
@@ -554,19 +690,26 @@ fn active_docs_state_current_baseline_not_in_progress_teardown() {
         readme.contains("current primitive baseline"),
         "README must describe current primitive baseline"
     );
-    assert!(
-        !readme.contains("On the primitive teardown branch"),
-        "README intro must not present teardown as the active branch state"
-    );
     let ios_arch = read_repo_file("packages/ios-app/docs/architecture.md");
     assert!(
         ios_arch.contains("current primitive baseline"),
         "iOS architecture docs must describe current primitive baseline"
     );
-    assert!(
-        !ios_arch.contains("On the primitive teardown branch"),
-        "iOS architecture docs must not present teardown as active branch state"
-    );
+    for (name, doc) in [("README", readme), ("iOS architecture docs", ios_arch)] {
+        for stale_phrase in [
+            "On the primitive teardown branch",
+            "primitive-engine teardown path",
+            "primitive teardown branch",
+            "primitive teardown path",
+            "teardown branch state",
+            "in-progress teardown",
+        ] {
+            assert!(
+                !doc.contains(stale_phrase),
+                "{name} must not present teardown-era branch wording as active state: {stale_phrase}"
+            );
+        }
+    }
 }
 
 #[test]

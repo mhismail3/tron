@@ -860,8 +860,9 @@ cargo clippy --workspace --all-targets # Lint with Cargo.toml policy
 
 ## Capabilities
 
-This branch is in the primitive-engine teardown path. The server-side model
-surface is intentionally collapsed to one provider-visible function:
+The current restoration baseline keeps the server-side model surface collapsed
+to one provider-visible function while restored backend capabilities enter as
+operation values behind that single `execute` provider surface:
 
 | Provider tool | Engine function | Purpose |
 |---------------|-----------------|---------|

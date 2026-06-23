@@ -4,11 +4,14 @@ Status: `active`
 
 Created: 2026-06-23
 
-Current audit tracker checkout:
+Current audit tracker lineage:
 
-- Current tracker checkout is `cfdc3c29962a1407a580721acf84a888968a7ee9`.
-- `cfdc3c29962a1407a580721acf84a888968a7ee9` is the head of
-  `codex/restoration-retrospective-audit-status-current`.
+- The focused Slice 2 audit-fix branch starts from
+  `821bfd90c3460f56e87aa5c707f6cf712531291a` on
+  `codex/primitive-minimality-audit-closeout`.
+- The prior tracker checkout `cfdc3c29962a1407a580721acf84a888968a7ee9` was
+  recorded as the head of `codex/restoration-retrospective-audit-status-current`
+  before the retrospective audit-fix pass.
 - Baseline assumption: this is the accepted restoration baseline through
   Phase 2 Slice 5A after the final job-finalization cancel-race fix.
 
