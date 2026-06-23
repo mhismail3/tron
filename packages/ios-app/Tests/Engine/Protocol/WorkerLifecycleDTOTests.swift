@@ -84,14 +84,52 @@ struct WorkerLifecycleDTOTests {
         """
 
         let snapshot = try JSONDecoder().decode(CatalogWatchSnapshotDTO.self, from: Data(json.utf8))
+        let workerResult = snapshot.snapshot?.workerDefinitionResult()
+        let functionResult = snapshot.snapshot?.functionDefinitionResult()
+        let triggerResult = snapshot.snapshot?.triggerDefinitionResult()
+        let triggerTypeResult = snapshot.snapshot?.triggerTypeDefinitionResult()
 
         #expect(snapshot.changes?.first?.kind == "worker_registered")
-        #expect(snapshot.snapshot?.workerDefinitions().first?.ownerActor == "system")
-        #expect(snapshot.snapshot?.workerDefinitions().first?.namespaceClaims == ["alpha"])
-        #expect(snapshot.snapshot?.functionDefinitions().first?.ownerWorker == "worker-alpha")
-        #expect(snapshot.snapshot?.functionDefinitions().first?.effectClass == "ExternalSideEffect")
-        #expect(snapshot.snapshot?.triggerDefinitions().first?.targetFunction == "alpha::run")
-        #expect(snapshot.snapshot?.triggerTypeDefinitions().first?.allowedDeliveryModes == ["Async"])
+        #expect(workerResult?.definitions.first?.ownerActor == "system")
+        #expect(workerResult?.definitions.first?.namespaceClaims == ["alpha"])
+        #expect(functionResult?.definitions.first?.ownerWorker == "worker-alpha")
+        #expect(functionResult?.definitions.first?.effectClass == "ExternalSideEffect")
+        #expect(triggerResult?.definitions.first?.targetFunction == "alpha::run")
+        #expect(triggerTypeResult?.definitions.first?.allowedDeliveryModes == ["Async"])
+        #expect(workerResult?.issues.isEmpty == true)
+        #expect(functionResult?.issues.isEmpty == true)
+        #expect(triggerResult?.issues.isEmpty == true)
+        #expect(triggerTypeResult?.issues.isEmpty == true)
+    }
+
+    @Test("Malformed catalog entries report decode diagnostics")
+    func malformedCatalogEntriesReportDecodeDiagnostics() throws {
+        let json = """
+        {
+          "snapshot": {
+            "functions": [
+              {
+                "id": "alpha::run",
+                "owner_worker": "worker-alpha",
+                "request_schema": {"type": "object"},
+                "response_schema": {"type": "object"}
+              },
+              {
+                "owner_worker": "worker-broken",
+                "request_schema": {"type": "object"}
+              }
+            ]
+          }
+        }
+        """
+
+        let snapshot = try JSONDecoder().decode(CatalogWatchSnapshotDTO.self, from: Data(json.utf8))
+        let result = snapshot.snapshot?.functionDefinitionResult()
+
+        #expect(result?.definitions.map(\.id) == ["alpha::run"])
+        #expect(result?.issues.count == 1)
+        #expect(result?.issues.first?.category == "functions")
+        #expect(result?.issues.first?.index == 1)
     }
 
     @Test("Lifecycle result decodes dynamic worker token")

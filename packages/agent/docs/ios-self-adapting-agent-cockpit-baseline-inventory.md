@@ -16,9 +16,13 @@ Self-Updating Worker Runtime Foundation artifacts.
   clients remain inside `Support/Composition`.
 - `AgentCockpitProjection` is the pure state mapper for worker catalog rows,
   package resource rows, lifecycle actions, confirmations, activity, and
-  runtime surface rows.
+  runtime surface rows. Malformed catalog entries surface as catalog decode
+  degradation instead of being silently omitted from counts or verification
+  summaries.
 - `AgentCockpitViewModel` refreshes server facts, executes confirmed lifecycle
-  actions, and decodes active `ui_surface` resources.
+  actions, decodes active `ui_surface` resources, and preserves the last good
+  overview with an explicit degraded refresh-failure status when a connected
+  refresh fails.
 - `AgentCockpitSheet` is the retained user-facing cockpit diagnostics shell. It
   renders generic engine facts with standard liquid-glass sheet chrome and the
   shared segmented tab control; it does not hardcode successor feature panels.
@@ -47,7 +51,9 @@ Self-Updating Worker Runtime Foundation artifacts.
 ## Regression Gates
 
 - Swift focused tests: Worker lifecycle DTO/client tests, cockpit projection and
-  view-model tests, generated UI renderer tests, and theme token tests.
+  view-model tests, generated UI renderer tests, and theme token tests. The DTO,
+  projection, and view-model tests include malformed catalog decode degradation
+  and refresh-failure truthfulness regressions.
 - Rust static target:
   `ios_self_adapting_agent_cockpit_baseline_invariants`.
 - Predecessor static target:

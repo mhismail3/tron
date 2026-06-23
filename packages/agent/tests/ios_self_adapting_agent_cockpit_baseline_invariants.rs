@@ -298,12 +298,21 @@ fn cockpit_decodes_live_catalog_resources_and_runtime_surfaces() {
             "struct WorkerCatalogDefinitionDTO",
             "struct FunctionCatalogDefinitionDTO",
             "struct TriggerCatalogDefinitionDTO",
+            "struct CatalogDefinitionDecodeIssue",
             "case uiSurface = \"ui_surface\"",
             "struct EngineResourceInspectionDTO",
-            "func workerDefinitions()",
-            "func functionDefinitions()",
-            "func triggerDefinitions()",
+            "func workerDefinitionResult()",
+            "func functionDefinitionResult()",
+            "func triggerDefinitionResult()",
+            "func triggerTypeDefinitionResult()",
         ],
+    );
+    let dto_source = read_repo_file(
+        "packages/ios-app/Sources/Engine/Protocol/WorkerLifecycle/EngineProtocolTypes+WorkerLifecycle.swift",
+    );
+    assert!(
+        !dto_source.contains("return values.compactMap"),
+        "catalog definitions must not be silently dropped by lossy compactMap decoding"
     );
 
     assert_contains_all(
@@ -311,9 +320,12 @@ fn cockpit_decodes_live_catalog_resources_and_runtime_surfaces() {
         &[
             "struct AgentCockpitRuntimeSurface",
             "var runtimeSurfaces: [AgentCockpitRuntimeSurface]",
+            "var catalogDecodeIssues: [CatalogDefinitionDecodeIssue]",
             "static func project(",
+            "static func refreshFailedOverview(",
             "static func actions(for package: AgentCockpitPackageRow)",
             "static func confirmation(for action: AgentCockpitAction)",
+            "Catalog Degraded",
             "guard kind != .uiSurface else { return nil }",
         ],
     );
@@ -322,6 +334,7 @@ fn cockpit_decodes_live_catalog_resources_and_runtime_surfaces() {
         "packages/ios-app/Sources/Session/WorkerLifecycle/AgentCockpitViewModel.swift",
         &[
             "let runtimeSurfaceResources = try await repository.listResources(kind: .uiSurface, lifecycle: \"active\", limit: 25)",
+            "AgentCockpitProjection.refreshFailedOverview(",
             "inspectRuntimeSurfaces(",
             "decodeSurface(from:",
             "UiSurfaceRefDTO(",
@@ -446,6 +459,7 @@ fn focused_swift_tests_cover_cockpit_protocol_state_surfaces_and_theme() {
         "packages/ios-app/Tests/Engine/Protocol/WorkerLifecycleDTOTests.swift",
         &[
             "Catalog snapshot decodes current engine worker/function/trigger shapes",
+            "Malformed catalog entries report decode diagnostics",
             "Resource inspection decodes package manifest payload",
         ],
     );
@@ -461,6 +475,7 @@ fn focused_swift_tests_cover_cockpit_protocol_state_surfaces_and_theme() {
         "packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitStateTests.swift",
         &[
             "Projection derives workers functions packages activity and approval status",
+            "Projection reports malformed catalog entries as degraded",
             "Package actions require confirmation and disable unsafe lifecycle states",
         ],
     );
@@ -468,6 +483,7 @@ fn focused_swift_tests_cover_cockpit_protocol_state_surfaces_and_theme() {
         "packages/ios-app/Tests/Session/WorkerLifecycle/AgentCockpitViewModelTests.swift",
         &[
             "Refresh loads catalog and lifecycle resources",
+            "Refresh failure preserves last overview and reports degraded status",
             "ui_surface:surface-1",
             "Runtime",
         ],
@@ -489,6 +505,7 @@ fn docs_and_closeout_targets_reference_current_cockpit_behavior() {
             "ios-self-adapting-agent-cockpit-baseline-scorecard.md",
             "Agent cockpit",
             "worker lifecycle catalog",
+            "catalog decode degradation",
             "ui_surface",
             TARGET_NAME,
         ],
@@ -499,6 +516,7 @@ fn docs_and_closeout_targets_reference_current_cockpit_behavior() {
             "Agent cockpit",
             "WorkerLifecycleRepository",
             "AgentCockpitProjection",
+            "catalog decode degradation",
             "ui_surface",
             "neutral glass",
         ],
@@ -519,6 +537,8 @@ fn evidence_manifest_records_validation_and_simulator_baseline() {
             "WorkerLifecycleClientTests",
             "AgentCockpitStateTests",
             "AgentCockpitViewModelTests",
+            "decode degradation",
+            "refresh failure",
             "TronColorsTests",
             "GeneratedUIRendererTests",
             "scripts/tron ci fmt check clippy test",

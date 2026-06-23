@@ -51,8 +51,12 @@ final class AgentCockpitViewModel {
             )
             lastError = nil
         } catch {
-            overview = .empty(connectionState: connectionState)
             lastError = error.localizedDescription
+            overview = AgentCockpitProjection.refreshFailedOverview(
+                previous: overview,
+                connectionState: connectionState,
+                message: lastError ?? ""
+            )
         }
     }
 

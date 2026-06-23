@@ -30,6 +30,7 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
     var namespaceCount: Int
     var degradedFunctionCount: Int
     var missingSchemaCount: Int
+    var catalogDecodeIssueCount: Int
     var latestReport: AgentCockpitDiscoveryReportRow?
     var reports: [AgentCockpitDiscoveryReportRow]
     var families: [AgentCockpitCapabilityFamilyRow]
@@ -45,6 +46,7 @@ struct AgentCockpitDiscoveryOverview: Equatable, Sendable {
         namespaceCount: 0,
         degradedFunctionCount: 0,
         missingSchemaCount: 0,
+        catalogDecodeIssueCount: 0,
         latestReport: nil,
         reports: [],
         families: []
@@ -57,6 +59,7 @@ extension AgentCockpitProjection {
         functions: [AgentCockpitFunctionRow],
         triggers: [AgentCockpitTriggerRow],
         triggerTypes: [TriggerTypeCatalogDefinitionDTO],
+        catalogDecodeIssues: [CatalogDefinitionDecodeIssue],
         reports: [EngineResourceDTO]
     ) -> AgentCockpitDiscoveryOverview {
         let reportRows = reports.compactMap(discoveryReportRow)
@@ -80,7 +83,11 @@ extension AgentCockpitProjection {
         let title: String
         let detail: String
         let image: String
-        if missingSchemas > 0 {
+        if !catalogDecodeIssues.isEmpty {
+            title = "Catalog Degraded"
+            detail = catalogDecodeIssueDetail(catalogDecodeIssues.count)
+            image = "exclamationmark.triangle"
+        } else if missingSchemas > 0 {
             title = "Schema Gaps"
             detail = "\(missingSchemas) of \(functions.count) functions need schema evidence"
             image = "doc.badge.gearshape"
@@ -117,6 +124,7 @@ extension AgentCockpitProjection {
             namespaceCount: namespaceIds.count,
             degradedFunctionCount: degraded,
             missingSchemaCount: missingSchemas,
+            catalogDecodeIssueCount: catalogDecodeIssues.count,
             latestReport: latestReport,
             reports: reportRows,
             families: families

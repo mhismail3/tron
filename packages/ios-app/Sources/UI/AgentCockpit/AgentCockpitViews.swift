@@ -273,7 +273,13 @@ private struct MetricStrip: View {
         HStack(spacing: 8) {
             metric("Workers", value: overview.workers.count, icon: "cpu")
             metric("Functions", value: overview.functions.count, icon: "curlybraces")
-            metric("Issues", value: overview.discovery.missingSchemaCount + overview.discovery.degradedFunctionCount, icon: "exclamationmark.triangle")
+            metric(
+                "Issues",
+                value: overview.discovery.missingSchemaCount
+                    + overview.discovery.degradedFunctionCount
+                    + overview.discovery.catalogDecodeIssueCount,
+                icon: "exclamationmark.triangle"
+            )
             metric("Reports", value: overview.discovery.reports.count, icon: "checkmark.shield")
         }
     }
