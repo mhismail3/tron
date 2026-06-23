@@ -1,7 +1,11 @@
+use std::collections::BTreeMap;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use walkdir::WalkDir;
 
 use crate::engine::{FunctionId, RiskLevel};
 use crate::shared::server::errors::CapabilityError;
@@ -178,6 +182,13 @@ pub(super) fn validate_manifest_full(
     validate_manifest_shape(&manifest)?;
     let package_root = ensure_package_root(&deps.package_root)?;
     let source_root = canonical_under_root(&package_root, &manifest.source.path, "source.path")?;
+    let actual_digest = package_source_digest(&source_root)?;
+    if actual_digest != manifest.package_digest {
+        return Err(invalid_params(format!(
+            "packageDigest mismatch: manifest declares {}, source root hashes to {}",
+            manifest.package_digest, actual_digest
+        )));
+    }
     let working_directory = canonical_under_root(
         &source_root,
         &manifest.working_directory,
@@ -201,6 +212,79 @@ pub(super) fn validate_manifest_full(
         risk_level,
         file_roots,
     })
+}
+
+pub(super) fn package_source_digest(source_root: &Path) -> Result<String, CapabilityError> {
+    let mut files = BTreeMap::new();
+    for entry in WalkDir::new(source_root).follow_links(false) {
+        let entry = entry.map_err(|error| {
+            invalid_params(format!(
+                "walk package source root {}: {error}",
+                source_root.display()
+            ))
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type();
+        if file_type.is_dir() {
+            continue;
+        }
+        if file_type.is_symlink() || !file_type.is_file() {
+            return Err(invalid_params(format!(
+                "package source contains unsupported non-regular path {}",
+                path.display()
+            )));
+        }
+        let relative = path.strip_prefix(source_root).map_err(|error| {
+            invalid_params(format!(
+                "derive package relative path for {}: {error}",
+                path.display()
+            ))
+        })?;
+        let relative = relative_path_key(relative);
+        files.insert(relative, path.to_path_buf());
+    }
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"tron.worker_package.source_tree.v1\0");
+    for (relative, path) in files {
+        let bytes = std::fs::read(&path).map_err(|error| {
+            invalid_params(format!(
+                "read package source file {}: {error}",
+                path.display()
+            ))
+        })?;
+        hasher.update(relative.len().to_string().as_bytes());
+        hasher.update(b"\0");
+        hasher.update(&relative);
+        hasher.update(b"\0");
+        hasher.update(bytes.len().to_string().as_bytes());
+        hasher.update(b"\0");
+        hasher.update(&bytes);
+        hasher.update(b"\0");
+    }
+    Ok(format!("sha256:{}", hex::encode(hasher.finalize())))
+}
+
+fn relative_path_key(path: &Path) -> Vec<u8> {
+    let mut key = Vec::new();
+    for component in path.components() {
+        if !key.is_empty() {
+            key.push(b'/');
+        }
+        key.extend(os_str_bytes(component.as_os_str()));
+    }
+    key
+}
+
+#[cfg(unix)]
+fn os_str_bytes(value: &OsStr) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    value.as_bytes().to_vec()
+}
+
+#[cfg(not(unix))]
+fn os_str_bytes(value: &OsStr) -> Vec<u8> {
+    value.to_string_lossy().as_bytes().to_vec()
 }
 
 fn ensure_package_root(package_root: &Path) -> Result<PathBuf, CapabilityError> {

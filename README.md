@@ -702,9 +702,10 @@ and record mutating previews/commits as patch proposal and materialized-file
 resources.
 `domains/worker_lifecycle` owns local package proposals,
 `tron.worker_package.v1` manifest validation, install/enable/disable/launch/
-stop/retire functions, scoped token minting, conformance reports, and
-`worker_package` resource/event evidence. It is host lifecycle infrastructure,
-not a provider-visible toolbox, and it does not add fixed iOS product panels.
+stop/retire functions, verified source-tree package digests, scoped token
+minting, conformance reports, and `worker_package` resource/event evidence.
+It is host lifecycle infrastructure, not a provider-visible toolbox, and it
+does not add fixed iOS product panels.
 `stream.rs` publishes only that domain's declared topics. Cross-domain access
 goes through explicit domain services or shared DTOs, so an engineer can follow
 a capability by reading one domain folder instead of a central dispatch table.
@@ -1095,14 +1096,19 @@ infrastructure rather than a checked-in product lifecycle.
 `worker_lifecycle` is that explicit host infrastructure for local packages
 under `workspace/workers`. A package change starts as an inert
 `worker_package_proposal`, then a trusted non-bootstrap authority grant can
-install a canonicalized local package, enable it, launch it with an allowlisted
-environment and scoped `TRON_WORKER_TOKEN_JSON`, conformance-check the live
-catalog, and record `worker_package`, `worker_package_installation`,
-`worker_launch_attempt`, and `worker_package_conformance_report` resources on
-`worker.lifecycle`. A failed launch or conformance mismatch is recorded as
-typed resource evidence and fails closed. The provider-visible model tool
-remains `execute`; package lifecycle operations are engine capabilities
-invoked through the authenticated `/engine` protocol by trusted host surfaces.
+install a canonicalized local package only after the manifest `packageDigest`
+matches a deterministic hash of every regular file under the source root,
+enable it, launch it with an allowlisted environment and scoped
+`TRON_WORKER_TOKEN_JSON`, conformance-check the live catalog, and record
+`worker_package`, `worker_package_installation`, `worker_launch_attempt`, and
+`worker_package_conformance_report` resources on `worker.lifecycle`. Stop
+returns package/installation state to `enabled` for immediate relaunch, while
+startup reconciliation marks durable running launch attempts `unhealthy` if
+process ownership was lost. A failed launch, conformance mismatch, digest
+mismatch, or unowned stop is recorded or rejected fail-closed. The
+provider-visible model tool remains `execute`; package lifecycle operations are
+engine capabilities invoked through the authenticated `/engine` protocol by
+trusted host surfaces.
 
 Engine substrate primitives provide host infrastructure behind the loop:
 state, streams, queues, triggers, grants, generic resources, storage operations,

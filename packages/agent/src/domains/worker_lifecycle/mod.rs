@@ -5,7 +5,8 @@
 //! protocol hosts already-running loopback workers, while this domain records
 //! package provenance, validates manifests, derives scoped worker grants,
 //! launches local packages, and proves conformance before a launched worker is
-//! treated as running.
+//! treated as running. Startup reconciliation downgrades stale durable running
+//! launch attempts when no in-process owner can safely stop them.
 //!
 //! ## Submodules
 //!
@@ -78,12 +79,20 @@ pub(crate) struct Deps {
 
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
-        Self {
+        let deps = Self {
             engine_host: deps.engine_host.clone(),
             package_root: paths::worker_packages_dir(),
             launcher: Arc::new(SystemWorkerLauncher::default()),
             ws_port: deps.ws_port.clone(),
+        };
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let reconcile_deps = deps.clone();
+            handle.spawn(async move {
+                let _ =
+                    resources::reconcile_owned_launch_attempts_on_startup(&reconcile_deps).await;
+            });
         }
+        deps
     }
 
     #[cfg(test)]

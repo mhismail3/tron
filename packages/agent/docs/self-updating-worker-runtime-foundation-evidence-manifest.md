@@ -17,20 +17,24 @@ are retained here because they shaped the final implementation.
   worker in `domains::registration`; `/engine/workers` remains the external
   worker protocol host.
 - SUWRF-2: `WorkerPackageManifest` validates `tron.worker_package.v1`, package
-  identity/version/digest/provenance, local source, no-shell argv, env allowlist,
+  identity/version/provenance, local source, no-shell argv, env allowlist,
   expected functions/triggers, requested grants, conformance, and rollback.
+  Full validation computes a deterministic `sha256:` digest over every regular
+  file under the canonical source root and rejects manifest mismatches.
 - SUWRF-3: apply functions reject bootstrap grants and untrusted actor kinds;
   launch derives a narrower worker grant before minting `ScopedWorkerToken`.
 - SUWRF-4: `SystemWorkerLauncher` uses `Command`, `env_clear`, explicit env,
-  canonical package-root paths, no shell, and `TRON_WORKER_ENDPOINT` /
-  `TRON_WORKER_TOKEN_JSON`.
+  canonical package-root paths, no shell, `kill_on_drop(true)`, and
+  `TRON_WORKER_ENDPOINT` / `TRON_WORKER_TOKEN_JSON`.
 - SUWRF-5: `launch_worker` waits for live catalog conformance before returning
   `running`.
 - SUWRF-6: lifecycle state is recorded as generic resources plus
   `worker.lifecycle` stream events.
 - SUWRF-7: failed launch or failed conformance updates
-  launch/package/installation state to `failed`, and stop updates preserve the
-  schema-complete launch-attempt payload.
+  launch/package/installation state to `failed`; verified stop returns
+  package/installation state to `enabled`; unowned stop fails without writing
+  clean stopped evidence; startup reconciliation downgrades stale durable
+  running attempts to `unhealthy`.
 - SUWRF-8: no Swift DTO or native product-panel expansion was needed; generic
   resource and stream visibility is the iOS parity surface for this slice.
 - SUWRF-9: `self_updating_worker_runtime_foundation_invariants` is the static
@@ -70,6 +74,15 @@ are retained here because they shaped the final implementation.
 - Full CI then failed the post-AHA README startup-domain anchor after the domain
   registration paragraph was rewritten. Fix: restored the expected anchor while
   documenting `worker_lifecycle` as the explicit post-baseline exception.
+- Retrospective audit found three important gaps: stop left package and
+  installation resources `running`, `packageDigest` was only syntax-checked,
+  and launcher process ownership was volatile across restart. Fix: stop now
+  updates package/installation resources back to `enabled` and supports
+  immediate relaunch; install/launch full validation verifies the manifest
+  digest against deterministic source-tree bytes with no exclusions; launcher
+  stop fails when ownership is missing, child drop is fail-safe, and startup
+  reconciliation marks durable running attempts `unhealthy` while returning the
+  package/installation to relaunchable `enabled`.
 
 ## Command Evidence
 

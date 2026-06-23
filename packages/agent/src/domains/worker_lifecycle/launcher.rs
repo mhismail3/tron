@@ -47,6 +47,10 @@ pub(super) trait WorkerLauncher: Send + Sync {
     async fn stop(&self, launch_attempt_id: &str) -> Result<WorkerStopReceipt, String>;
 }
 
+/// Local process owner for workers started by this server process.
+///
+/// Children use `kill_on_drop(true)` so server shutdown or launcher replacement
+/// does not intentionally orphan package workers when explicit stop is skipped.
 #[derive(Default)]
 pub(super) struct SystemWorkerLauncher {
     children: Mutex<BTreeMap<String, Child>>,
@@ -64,7 +68,7 @@ impl WorkerLauncher for SystemWorkerLauncher {
             .current_dir(&request.working_directory)
             .env_clear()
             .envs(&request.env)
-            .kill_on_drop(false);
+            .kill_on_drop(true);
         let child = command
             .spawn()
             .map_err(|error| format!("spawn worker process: {error}"))?;
@@ -79,7 +83,9 @@ impl WorkerLauncher for SystemWorkerLauncher {
     async fn stop(&self, launch_attempt_id: &str) -> Result<WorkerStopReceipt, String> {
         let child = self.children.lock().await.remove(launch_attempt_id);
         let Some(mut child) = child else {
-            return Ok(WorkerStopReceipt { stopped: false });
+            return Err(format!(
+                "worker launch attempt {launch_attempt_id} is not owned by this launcher"
+            ));
         };
         child
             .start_kill()
@@ -140,6 +146,8 @@ pub(super) async fn derive_worker_grant(
                 "packageId": package.manifest.package_id,
                 "packageVersion": package.manifest.package_version,
                 "packageDigest": package.manifest.package_digest,
+                "packageDigestVerified": true,
+                "digestMethod": "tron.worker_package.source_tree.v1",
                 "sourceRoot": package.source_root.display().to_string(),
             }),
             trace_id: invocation.causal_context.trace_id.clone(),
@@ -175,7 +183,7 @@ pub(super) async fn worker_token_for_package(
         session_id: invocation.causal_context.session_id.clone(),
         workspace_id: invocation.causal_context.workspace_id.clone(),
         expires_at: grant.expires_at.map(|value| value.to_rfc3339()),
-        signature_status: "digest_provenance_checked".to_owned(),
+        signature_status: "package_digest_verified".to_owned(),
     })
 }
 
