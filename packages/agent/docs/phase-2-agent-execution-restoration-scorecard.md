@@ -13,6 +13,7 @@ Companion artifacts:
 - [`phase-2-agent-execution-restoration-evidence-manifest.md`](phase-2-agent-execution-restoration-evidence-manifest.md)
 - [`phase-2-agent-execution-restoration-inventory.md`](phase-2-agent-execution-restoration-inventory.md)
 - [`phase-2-agent-execution-restoration-inventory.tsv`](phase-2-agent-execution-restoration-inventory.tsv)
+- [`restoration-retrospective-audit-status.md`](restoration-retrospective-audit-status.md)
 
 ## Current Restoration Baseline
 
@@ -1144,9 +1145,10 @@ Implementation slices add:
 
 ## Closure Verdict
 
-Phase 2 remains source-backed and ready for implementation one slice at a time.
-At the 2026-06-23 discovery update, Slices 1 through 4 are complete through
-the filesystem-tool hardening baseline `2650dd0b9`. The next implementation
-slice may start as **Slice 5A: Durable Jobs And Process Lifecycle Foundation**,
-subject to the constraints and non-goals in the Slice 5A discovery packet
-above.
+Phase 2 remains source-backed and proceeds one slice at a time. At the
+2026-06-23 retrospective audit discovery update, Slices 1 through 4 and Slice
+5A are complete through the jobs process lifecycle hardening baseline
+`0d76be40df3ec6ddf96574546ec220fb992c6478`. Before starting another feature
+restoration slice, retrospective audit should begin from
+`restoration-retrospective-audit-status.md` and preserve the Slice 5A
+constraints and non-goals above.

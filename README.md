@@ -407,6 +407,10 @@ Current living entry points:
 - `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`:
   machine-readable Phase 2 feature-family inventory used by future slice
   handoffs.
+- `packages/agent/docs/restoration-retrospective-audit-status.md`: active
+  retrospective audit tracker for the ordered completed-slice queue, audit
+  constraints, first-audit target, accepted deferred scope, and current
+  Phase 2 Slice 5A baseline.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -1601,6 +1605,8 @@ packages/ios-app/Sources/
   `packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md`,
   `packages/agent/docs/phase-2-agent-execution-restoration-inventory.md`, and
   `packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv`.
+  Retrospective audit ordering and review-only constraints are tracked in
+  `packages/agent/docs/restoration-retrospective-audit-status.md`.
 
 ### Data Flow
 
