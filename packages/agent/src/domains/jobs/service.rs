@@ -3,17 +3,17 @@ use serde_json::{Value, json};
 
 use crate::engine::{
     CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
-    EngineResourceScope, EngineResourceVersion, LinkResources, ListResources, UpdateResource,
-    WorkerId,
+    EngineResourceVersion, LinkResources, ListResources, UpdateResource, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
 use super::errors::{engine_error, internal, invalid_params};
-use super::runtime::{JobRuntime, SpawnProcessRequest};
+use super::runtime::{CancelRequestResult, JobRuntime, SpawnProcessRequest};
 use super::support::{
-    current_payload, list_limit, max_output_bytes, optional_string, optional_u64,
-    publish_lifecycle_event, replay_refs, resource_policy, resource_ref, resource_scope,
-    sha256_hex, timeout_ms, to_value, trace_refs, trusted_working_directory, version_ref,
+    already_terminal_response, job_record, list_limit, max_output_bytes, optional_string,
+    optional_u64, publish_lifecycle_event, replay_refs, require_job, resource_policy, resource_ref,
+    resource_scope, sha256_hex, timeout_ms, to_value, trace_refs, trusted_working_directory,
+    version_ref,
 };
 use super::types::{
     EXECUTION_OUTPUT_KIND, EXECUTION_OUTPUT_SCHEMA_ID, JOB_SCHEMA_VERSION, JobAuthorityRecord,
@@ -130,6 +130,7 @@ pub(crate) async fn start_job_value(
                 exit_code: None,
                 timed_out: false,
                 cancelled: false,
+                cancellation_reason: None,
                 stdout: String::new(),
                 stderr: error.to_string(),
                 stdout_truncated: false,
@@ -243,52 +244,100 @@ pub(crate) async fn cancel_job_value(
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     let inspection = require_job(engine_host, invocation, payload).await?;
-    let (current_version_id, mut record) = job_record(&inspection)?;
+    let (current_version_id, record) = job_record(&inspection)?;
     if record.state.is_terminal() {
-        return Ok(json!({
-            "schemaVersion": JOB_SCHEMA_VERSION,
-            "status": "already_terminal",
-            "state": record.state.as_str(),
-            "jobResourceId": inspection.resource.resource_id,
-            "jobVersionId": current_version_id,
-            "idempotent": true,
-            "resourceRefs": [resource_ref(&inspection.resource, "job_process")]
-        }));
+        return Ok(already_terminal_response(
+            &inspection.resource,
+            &current_version_id,
+            &record,
+        ));
     }
-    record.state = JobState::Cancelled;
-    record.completed_at = Some(Utc::now());
+    let reason = optional_string(payload, "reason")?;
+    match runtime
+        .request_cancel(&inspection.resource.resource_id, reason.clone())
+        .await
+    {
+        CancelRequestResult::Requested => {}
+        CancelRequestResult::CompletionPending => {
+            return Ok(json!({
+                "schemaVersion": JOB_SCHEMA_VERSION,
+                "status": "completion_pending",
+                "state": record.state.as_str(),
+                "jobResourceId": inspection.resource.resource_id,
+                "jobVersionId": current_version_id,
+                "idempotent": true,
+                "resourceRefs": [resource_ref(&inspection.resource, "job_process")]
+            }));
+        }
+        CancelRequestResult::NotRunning => {
+            return mark_cancel_unknown(
+                engine_host,
+                invocation,
+                inspection,
+                current_version_id,
+                record,
+                reason,
+                "job runtime no longer owns this running resource",
+            )
+            .await;
+        }
+        CancelRequestResult::CleanupUnknown(error) => {
+            return mark_cancel_unknown(
+                engine_host,
+                invocation,
+                inspection,
+                current_version_id,
+                record,
+                reason,
+                &error,
+            )
+            .await;
+        }
+    }
+
+    let Some(latest) = engine_host
+        .inspect_resource(&inspection.resource.resource_id)
+        .await
+        .map_err(engine_error)?
+    else {
+        return Err(invalid_params(format!(
+            "job resource {} was not found",
+            inspection.resource.resource_id
+        )));
+    };
+    let (current_version_id, mut record) = job_record(&latest)?;
+    if record.state.is_terminal() {
+        return Ok(already_terminal_response(
+            &latest.resource,
+            &current_version_id,
+            &record,
+        ));
+    }
+    let requested_at = Utc::now();
     record.cancellation = JobCancellationRecord {
         requested: true,
-        requested_at: record.completed_at,
+        requested_at: Some(requested_at),
         requested_by: Some(invocation.causal_context.actor_id.as_str().to_owned()),
-        reason: optional_string(payload, "reason")?,
+        reason,
     };
-    record.terminal = Some(JobTerminalRecord {
-        status: JobState::Cancelled.as_str().to_owned(),
-        exit_code: None,
-        timed_out: false,
-        cancelled: true,
-        error: Some("process cancellation requested".to_owned()),
-    });
     record.revision += 1;
     let version = update_job_record(
         engine_host,
         invocation,
-        &inspection.resource.resource_id,
+        &latest.resource.resource_id,
         Some(current_version_id.clone()),
         &record,
     )
     .await?;
-    let runtime_had_job = runtime.cancel(&inspection.resource.resource_id).await;
     let cursor = publish_lifecycle_event(
         engine_host,
         invocation,
-        "jobs.cancelled",
+        "jobs.cancel_requested",
         json!({
-            "jobResourceId": inspection.resource.resource_id,
+            "jobResourceId": latest.resource.resource_id,
             "jobVersionId": version.version_id,
-            "state": JobState::Cancelled.as_str(),
-            "runtimeHadJob": runtime_had_job,
+            "state": record.state.as_str(),
+            "runtimeHadJob": true,
             "reason": record.cancellation.reason.clone()
         }),
     )
@@ -296,13 +345,14 @@ pub(crate) async fn cancel_job_value(
 
     Ok(json!({
         "schemaVersion": JOB_SCHEMA_VERSION,
-        "status": JobState::Cancelled.as_str(),
-        "jobResourceId": inspection.resource.resource_id,
+        "status": "cancel_requested",
+        "state": record.state.as_str(),
+        "jobResourceId": latest.resource.resource_id,
         "jobVersionId": version.version_id,
         "streamCursor": cursor.0,
         "idempotent": false,
-        "runtimeHadJob": runtime_had_job,
-        "resourceRefs": [version_ref(&inspection.resource, &version, "job_process")]
+        "runtimeHadJob": true,
+        "resourceRefs": [version_ref(&latest.resource, &version, "job_process")]
     }))
 }
 
@@ -417,6 +467,7 @@ pub(super) async fn finalize_job_from_runtime(
             "stdoutTruncated": outcome.stdout_truncated,
             "stderrTruncated": outcome.stderr_truncated,
             "cancelled": outcome.cancelled,
+            "cancellationReason": outcome.cancellation_reason.clone(),
             "error": outcome.error.clone()
         }
     });
@@ -461,8 +512,17 @@ pub(super) async fn finalize_job_from_runtime(
         .await
         .map_err(engine_error)?;
 
+    let completed_at = Utc::now();
     record.state = outcome.state.clone();
-    record.completed_at = Some(Utc::now());
+    record.completed_at = Some(completed_at);
+    if outcome.cancelled && !record.cancellation.requested {
+        record.cancellation = JobCancellationRecord {
+            requested: true,
+            requested_at: Some(completed_at),
+            requested_by: None,
+            reason: outcome.cancellation_reason.clone(),
+        };
+    }
     record.terminal = Some(JobTerminalRecord {
         status: outcome.state.as_str().to_owned(),
         exit_code: outcome.exit_code,
@@ -532,45 +592,64 @@ async fn ensure_no_network_grant(
     Ok(grant)
 }
 
-async fn require_job(
+async fn mark_cancel_unknown(
     engine_host: &EngineHostHandle,
     invocation: &crate::engine::Invocation,
-    payload: &Value,
-) -> Result<EngineResourceInspection, CapabilityError> {
-    let job_resource_id = super::support::required_string(payload, "jobResourceId")?;
-    let inspection = engine_host
-        .inspect_resource(&job_resource_id)
-        .await
-        .map_err(engine_error)?
-        .ok_or_else(|| invalid_params(format!("job resource {job_resource_id} was not found")))?;
-    if inspection.resource.kind != JOB_PROCESS_KIND {
-        return Err(invalid_params(format!(
-            "resource {job_resource_id} is not a job_process resource"
-        )));
-    }
-    ensure_scope(invocation, &inspection.resource.scope)?;
-    Ok(inspection)
-}
+    inspection: EngineResourceInspection,
+    current_version_id: String,
+    mut record: JobProcessRecord,
+    reason: Option<String>,
+    error: &str,
+) -> Result<Value, CapabilityError> {
+    let completed_at = Utc::now();
+    record.state = JobState::Failed;
+    record.completed_at = Some(completed_at);
+    record.cancellation = JobCancellationRecord {
+        requested: true,
+        requested_at: Some(completed_at),
+        requested_by: Some(invocation.causal_context.actor_id.as_str().to_owned()),
+        reason,
+    };
+    record.terminal = Some(JobTerminalRecord {
+        status: JobState::Failed.as_str().to_owned(),
+        exit_code: None,
+        timed_out: false,
+        cancelled: false,
+        error: Some(format!("process cancellation state unknown: {error}")),
+    });
+    record.revision += 1;
+    let version = update_job_record(
+        engine_host,
+        invocation,
+        &inspection.resource.resource_id,
+        Some(current_version_id),
+        &record,
+    )
+    .await?;
+    let cursor = publish_lifecycle_event(
+        engine_host,
+        invocation,
+        "jobs.cancel_unknown",
+        json!({
+            "jobResourceId": inspection.resource.resource_id,
+            "jobVersionId": version.version_id,
+            "state": JobState::Failed.as_str(),
+            "error": error
+        }),
+    )
+    .await?;
 
-fn ensure_scope(
-    invocation: &crate::engine::Invocation,
-    resource_scope_value: &EngineResourceScope,
-) -> Result<(), CapabilityError> {
-    let expected = resource_scope(invocation);
-    if &expected != resource_scope_value {
-        return Err(invalid_params("job resource is outside invocation scope"));
-    }
-    Ok(())
-}
-
-fn job_record(
-    inspection: &EngineResourceInspection,
-) -> Result<(String, JobProcessRecord), CapabilityError> {
-    let (version_id, payload) =
-        current_payload(inspection).ok_or_else(|| invalid_params("job resource has no version"))?;
-    let record = serde_json::from_value(payload)
-        .map_err(|error| internal(format!("decode job resource payload: {error}")))?;
-    Ok((version_id, record))
+    Ok(json!({
+        "schemaVersion": JOB_SCHEMA_VERSION,
+        "status": "cancel_unknown",
+        "state": JobState::Failed.as_str(),
+        "jobResourceId": inspection.resource.resource_id,
+        "jobVersionId": version.version_id,
+        "streamCursor": cursor.0,
+        "idempotent": false,
+        "runtimeHadJob": false,
+        "resourceRefs": [version_ref(&inspection.resource, &version, "job_process")]
+    }))
 }
 
 async fn update_job_record(

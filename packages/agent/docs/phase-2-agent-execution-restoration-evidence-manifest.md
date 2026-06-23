@@ -306,6 +306,13 @@ Scope shipped:
 - Enforced fail-closed `networkPolicy: none` for process jobs: job start denies
   unsupported policy values and fails closed when the host cannot enforce
   network denial.
+- Post-review hardening moved jobs to an owned process group on supported
+  Unix/macOS hosts, bounds output draining to timeout/cancel/shutdown cleanup,
+  and changes cancellation from "terminal write before kill" to
+  "runtime cancel request, then terminal finalization with output evidence."
+- Late cancel requests against completed processes now return
+  completion-pending/already-terminal status and cannot overwrite completion or
+  discard `execution_output` evidence.
 - Deliberately deferred PTY/interactive terminals, interpreters/runtime
   packages, git/worktree/source-control behavior, web/network behavior,
   subagents, scheduling, native iOS process panels, notifications, and
@@ -318,7 +325,7 @@ Focused validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::jobs -- --nocapture` | exit 0 | 6 jobs-domain tests passed, covering schema alignment, start/status/list/log/cancel behavior, terminal idempotency, bounded output, cancellation races, output/resource evidence, cleanup archiving, and fail-closed network policy. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::jobs -- --nocapture` | exit 0 | 10 jobs-domain tests passed, covering schema alignment, start/status/list/log/cancel behavior, terminal idempotency, bounded output, timeout terminal output, inherited-pipe background child cleanup, process-exit/cancel race, shutdown cancellation, output/resource evidence, cleanup archiving, and fail-closed network policy. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability-domain tests passed with job execute operations registered. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture` | exit 0 | 26 provider prompt/converter tests passed after documenting the job operation names and provider-visible execute boundary. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after classifying jobs files, operations, working-directory requirements, network-policy denial, and mutating idempotency requirements. |
@@ -336,7 +343,7 @@ Focused validation:
 | `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |
-| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 5A implementation, DRC allow-list documentation, static inventory refreshes, and evidence updates; existing dead-code warnings remained warnings only. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 5A process-group cancellation hardening, bounded output-drain cleanup, cancel/completion race fixes, validation evidence updates, and static inventory refreshes; existing dead-code warnings remained warnings only. |
 
 No Swift or Xcode project files changed, so XcodeGen and iOS simulator tests
 were not run for Slice 5A.
@@ -353,6 +360,12 @@ Adversarial self-review:
   terminal-state resurrection, idempotency gaps, stale registration, network
   smuggling, and queue-backed dispatch. Queue-backed internal dispatch remains
   intentionally deferred pending a separate grant model.
+- Independent review found that direct-child-only cancellation could leave
+  inherited-pipe descendants alive past timeout/cancel/shutdown, and that
+  `job_cancel` could overwrite real completion before runtime output
+  finalization. The fix moved cleanup to owned process groups, bound output
+  draining after terminal signals, and made cancellation terminal state a
+  runtime-finalized outcome rather than a pre-kill resource write.
 
 ## Validation Log
 

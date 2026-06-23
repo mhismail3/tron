@@ -724,11 +724,17 @@ Shipped behavior:
   `job_start` requires trusted working-directory metadata and an active
   authority grant with `networkPolicy: none`; if the platform cannot enforce
   network denial, job start fails closed.
-- Cancellation writes a terminal cancelled job resource before requesting
-  runtime process termination. Runtime finalization re-reads the resource and
-  returns without mutation if the job is already terminal, so late completion
-  cannot resurrect a cancelled job.
-- Domain shutdown requests cancellation for running process handles through the
+- Jobs run in an owned process group on supported Unix/macOS hosts. Timeout,
+  cancel, and shutdown paths signal that group and bound stdout/stderr draining
+  to the same lifecycle deadline so descendants that inherit output pipes
+  cannot keep a job running indefinitely.
+- Cancellation first asks the runtime to signal a live process group. The
+  resource records non-terminal cancellation-request metadata, and runtime
+  finalization writes terminal `cancelled` with bounded output evidence after
+  process cleanup. Late cancel requests against already-completed jobs return
+  completion-pending/already-terminal status instead of overwriting completion
+  and dropping output evidence.
+- Domain shutdown requests cancellation for running process groups through the
   existing shutdown coordinator when present. Terminal cleanup archives scoped
   terminal jobs by retention criteria.
 

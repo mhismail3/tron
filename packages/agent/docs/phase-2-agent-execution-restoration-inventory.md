@@ -165,8 +165,9 @@ lifecycle foundation. The shipped backend adds a `jobs` domain, `job_process`
 resources, bounded `execution_output` artifacts, lifecycle stream evidence,
 start/status/list/log/cancel provider operations through the existing
 `capability::execute` primitive, direct scoped cleanup, fail-closed
-`networkPolicy: none`, cancellation terminal idempotency, retention archiving,
-and focused resource/authority/bounded-output tests. `P2AER-INV-006` stays
+`networkPolicy: none`, owned process-group timeout/cancel/shutdown cleanup,
+cancel-request-before-terminal finalization, retention archiving, and focused
+resource/authority/bounded-output tests. `P2AER-INV-006` stays
 planned for a later program-execution slice; Slice 5A did not restore language
 runtimes, PTY sessions, web/network research, git/source-control, subagents,
 scheduling, notifications, or native iOS process panels. Queue-backed internal

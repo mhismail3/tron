@@ -125,6 +125,7 @@ pub(super) struct JobRunOutcome {
     pub(super) exit_code: Option<i32>,
     pub(super) timed_out: bool,
     pub(super) cancelled: bool,
+    pub(super) cancellation_reason: Option<String>,
     pub(super) stdout: String,
     pub(super) stderr: String,
     pub(super) stdout_truncated: bool,

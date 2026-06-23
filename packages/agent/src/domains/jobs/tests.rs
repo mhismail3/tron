@@ -1,8 +1,11 @@
 use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
+use crate::app::lifecycle::shutdown::{ShutdownCoordinator, ShutdownPhase};
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, InvocationResult,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
@@ -239,7 +242,13 @@ async fn job_output_is_bounded_and_cancel_is_terminal_idempotent() {
             "idempotencyKey": "jobs-cancel-stop"
         }))
         .await;
-    assert_eq!(jobs_details(&cancel)["status"], json!("cancelled"));
+    assert_eq!(jobs_details(&cancel)["status"], json!("cancel_requested"));
+    let cancelled = fixture.wait_for_state(&job_resource_id, "cancelled").await;
+    assert!(
+        jobs_details(&cancelled)["job"]["output"]["outputResourceId"]
+            .as_str()
+            .is_some()
+    );
 
     let replay = fixture
         .invoke_ok(json!({
@@ -252,7 +261,6 @@ async fn job_output_is_bounded_and_cancel_is_terminal_idempotent() {
     assert_eq!(jobs_details(&replay)["status"], json!("already_terminal"));
     assert_eq!(jobs_details(&replay)["idempotent"], json!(true));
 
-    tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     let status = fixture
         .invoke_ok(json!({
             "operation": "job_status",
@@ -260,6 +268,170 @@ async fn job_output_is_bounded_and_cancel_is_terminal_idempotent() {
         }))
         .await;
     assert_eq!(jobs_details(&status)["job"]["state"], json!("cancelled"));
+}
+
+#[tokio::test]
+async fn job_timeout_records_terminal_output_evidence() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    if !sandbox_available() {
+        return;
+    }
+
+    let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-timeout").await;
+    let start = fixture
+        .invoke_ok(json!({
+            "operation": "job_start",
+            "command": "printf before-timeout; sleep 10",
+            "timeoutMs": 100,
+            "maxOutputBytes": 1000,
+            "idempotencyKey": "jobs-timeout-start"
+        }))
+        .await;
+    let job_resource_id = job_resource_id(&start);
+    let status = fixture.wait_for_state(&job_resource_id, "timed_out").await;
+    let job = &jobs_details(&status)["job"];
+    assert_eq!(job["terminal"]["timedOut"], json!(true));
+    assert_eq!(job["output"]["stdoutPreview"], json!("before-timeout"));
+    assert!(job["output"]["outputResourceId"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn background_child_inherited_pipe_is_killed_at_timeout() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    if !sandbox_available() {
+        return;
+    }
+
+    let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-background-timeout").await;
+    let start = fixture
+        .invoke_ok(json!({
+            "operation": "job_start",
+            "command": "printf parent-done; (sleep 10) &",
+            "timeoutMs": 150,
+            "maxOutputBytes": 1000,
+            "idempotencyKey": "jobs-background-timeout-start"
+        }))
+        .await;
+    let job_resource_id = job_resource_id(&start);
+    let started = Instant::now();
+    let status = fixture.wait_for_state(&job_resource_id, "timed_out").await;
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "background inherited-pipe job should not wait for the child sleep"
+    );
+    let job = &jobs_details(&status)["job"];
+    assert_eq!(job["output"]["stdoutPreview"], json!("parent-done"));
+    assert_eq!(job["terminal"]["timedOut"], json!(true));
+}
+
+#[tokio::test]
+async fn cancel_after_process_exit_preserves_completion_and_output() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    if !sandbox_available() {
+        return;
+    }
+
+    let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-cancel-race").await;
+    let marker = root.path().join("done");
+    let start = fixture
+        .invoke_ok(json!({
+            "operation": "job_start",
+            "command": "dd if=/dev/zero bs=1024 count=2048 2>/dev/null | tr '\\0' x; touch done",
+            "timeoutMs": 5000,
+            "maxOutputBytes": 64,
+            "idempotencyKey": "jobs-cancel-race-start"
+        }))
+        .await;
+    let job_resource_id = job_resource_id(&start);
+    wait_for_path(&marker).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let cancel = fixture
+        .invoke_ok(json!({
+            "operation": "job_cancel",
+            "jobResourceId": job_resource_id,
+            "reason": "late cancel should not overwrite completion",
+            "idempotencyKey": "jobs-cancel-race-stop"
+        }))
+        .await;
+    assert!(
+        matches!(
+            jobs_details(&cancel)["status"].as_str(),
+            Some("completion_pending" | "already_terminal")
+        ),
+        "late cancel must not report a delivered cancellation: {}",
+        jobs_details(&cancel)
+    );
+    let status = fixture.wait_for_state(&job_resource_id, "completed").await;
+    let job = &jobs_details(&status)["job"];
+    assert_eq!(job["state"], json!("completed"));
+    assert_eq!(job["terminal"]["cancelled"], json!(false));
+    assert_eq!(job["output"]["stdoutPreview"].as_str().unwrap().len(), 64);
+    assert!(job["output"]["outputResourceId"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn shutdown_cancels_running_job_and_records_terminal_state() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    if !sandbox_available() {
+        return;
+    }
+
+    let shutdown = Arc::new(ShutdownCoordinator::new());
+    let runtime = super::runtime::JobRuntime::default();
+    let runtime_for_shutdown = runtime.clone();
+    shutdown.register_phase_callback(ShutdownPhase::Capabilities, "jobs-test", move || {
+        let runtime = runtime_for_shutdown.clone();
+        async move {
+            runtime.cancel_all("server_shutdown").await;
+        }
+    });
+
+    let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-shutdown").await;
+    let marker = root.path().join("started");
+    let payload = json!({
+        "command": "printf shutdown-started; touch started; sleep 10",
+        "timeoutMs": 10000,
+        "maxOutputBytes": 1000
+    });
+    let invocation = Invocation::new_sync(
+        FunctionId::new(super::START_FUNCTION).unwrap(),
+        payload,
+        execute_context(
+            fixture.actor_id.clone(),
+            fixture.grant_id.clone(),
+            fixture.trace_id.clone(),
+            &fixture.session_id,
+            &fixture.workspace_id,
+            fixture.root,
+            Some("jobs-shutdown-start"),
+        ),
+    );
+    let start = super::service::start_job_value(
+        &ctx.engine_host,
+        Some(shutdown.clone()),
+        runtime,
+        &invocation,
+        &invocation.payload,
+    )
+    .await
+    .expect("direct job start");
+    let job_resource_id = start["jobResourceId"].as_str().unwrap().to_owned();
+
+    wait_for_path(&marker).await;
+    shutdown
+        .graceful_shutdown(Vec::new(), Some(Duration::from_secs(3)))
+        .await;
+
+    let status = fixture.wait_for_state(&job_resource_id, "cancelled").await;
+    let job = &jobs_details(&status)["job"];
+    assert_eq!(job["terminal"]["cancelled"], json!(true));
+    assert_eq!(job["cancellation"]["reason"], json!("server_shutdown"));
+    assert_eq!(job["output"]["stdoutPreview"], json!("shutdown-started"));
 }
 
 struct ExecuteFixture<'a> {
@@ -508,6 +680,16 @@ fn job_resource_id(value: &Value) -> String {
 
 fn jobs_details(value: &Value) -> &Value {
     &value["details"]["jobs"]
+}
+
+async fn wait_for_path(path: &Path) {
+    for _ in 0..100 {
+        if path.exists() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("path {} was not created", path.display());
 }
 
 #[cfg(target_os = "macos")]

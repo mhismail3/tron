@@ -923,7 +923,7 @@ Current primitive operations:
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
 | `job_list` | List durable `job_process` resources in the current session scope, optionally filtered by lifecycle state. |
 | `job_log` | Read bounded stdout/stderr previews and output-resource refs for one durable job. |
-| `job_cancel` | Record terminal cancellation for a running durable job and request runtime process termination; late process completion cannot resurrect a cancelled job. |
+| `job_cancel` | Request cancellation for a running durable job; runtime finalization records terminal cancellation with bounded output evidence after signalling the owned process group. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -958,7 +958,8 @@ The `jobs` domain owns durable non-interactive process lifecycle records:
 `jobs::start`, `jobs::status`, `jobs::list`, `jobs::log`, `jobs::cancel`, and
 `jobs::cleanup` create/update scoped `job_process` resources, bounded
 `execution_output` resources, `jobs.lifecycle` stream rows, trace/replay refs,
-terminal-state idempotency, shutdown cancellation, and retention cleanup.
+process-group timeout/cancellation cleanup, terminal-state idempotency,
+shutdown cancellation, and retention cleanup.
 Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, git, web/network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
@@ -1114,8 +1115,9 @@ request, decision, trace, resource-selector, and replay refs for each approved,
 denied, expired, pending, missing, malformed, stale, or scope-mismatch check
 outcome. Durable jobs are generic `job_process` resources with bounded
 `execution_output` artifacts and lifecycle events on `jobs.lifecycle`;
-terminal cancellation is persisted before the runtime kill request so late
-process completion cannot turn a cancelled job into a success. The replay snapshot includes resolved
+runtime cancellation first signals the owned process group and terminal
+finalization then records bounded output evidence, so late cancel requests do
+not overwrite already-completed jobs. The replay snapshot includes resolved
 session events, provider request audits, trace records, engine idempotency
 entries, engine invocations, engine stream rows, and engine queue rows. It adds
 stable section hashes plus request/result/outcome/payload hashes where the

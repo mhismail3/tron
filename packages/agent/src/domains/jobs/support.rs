@@ -5,13 +5,15 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    EngineResource, EngineResourceInspection, EngineResourceScope, EngineResourceVersion,
-    Invocation, PublishStreamEvent, RUNTIME_METADATA_WORKING_DIRECTORY, StreamCursor,
-    VisibilityScope,
+    EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineResourceVersion, Invocation, PublishStreamEvent, RUNTIME_METADATA_WORKING_DIRECTORY,
+    StreamCursor, VisibilityScope,
 };
 use crate::shared::server::errors::CapabilityError;
 
+use super::JOB_PROCESS_KIND;
 use super::errors::{engine_error, internal, invalid_params};
+use super::types::{JOB_SCHEMA_VERSION, JobProcessRecord};
 use super::{JOBS_LIFECYCLE_TOPIC, WORKER};
 
 pub(super) const DEFAULT_JOB_TIMEOUT_MS: u64 = 30_000;
@@ -149,6 +151,63 @@ pub(super) fn current_payload(inspection: &EngineResourceInspection) -> Option<(
         .iter()
         .find(|version| &version.version_id == current)
         .map(|version| (version.version_id.clone(), version.payload.clone()))
+}
+
+pub(super) async fn require_job(
+    engine_host: &EngineHostHandle,
+    invocation: &Invocation,
+    payload: &Value,
+) -> Result<EngineResourceInspection, CapabilityError> {
+    let job_resource_id = required_string(payload, "jobResourceId")?;
+    let inspection = engine_host
+        .inspect_resource(&job_resource_id)
+        .await
+        .map_err(engine_error)?
+        .ok_or_else(|| invalid_params(format!("job resource {job_resource_id} was not found")))?;
+    if inspection.resource.kind != JOB_PROCESS_KIND {
+        return Err(invalid_params(format!(
+            "resource {job_resource_id} is not a job_process resource"
+        )));
+    }
+    ensure_scope(invocation, &inspection.resource.scope)?;
+    Ok(inspection)
+}
+
+pub(super) fn job_record(
+    inspection: &EngineResourceInspection,
+) -> Result<(String, JobProcessRecord), CapabilityError> {
+    let (version_id, payload) =
+        current_payload(inspection).ok_or_else(|| invalid_params("job resource has no version"))?;
+    let record = serde_json::from_value(payload)
+        .map_err(|error| internal(format!("decode job resource payload: {error}")))?;
+    Ok((version_id, record))
+}
+
+pub(super) fn already_terminal_response(
+    resource: &EngineResource,
+    current_version_id: &str,
+    record: &JobProcessRecord,
+) -> Value {
+    json!({
+        "schemaVersion": JOB_SCHEMA_VERSION,
+        "status": "already_terminal",
+        "state": record.state.as_str(),
+        "jobResourceId": resource.resource_id,
+        "jobVersionId": current_version_id,
+        "idempotent": true,
+        "resourceRefs": [resource_ref(resource, "job_process")]
+    })
+}
+
+fn ensure_scope(
+    invocation: &Invocation,
+    resource_scope_value: &EngineResourceScope,
+) -> Result<(), CapabilityError> {
+    let expected = resource_scope(invocation);
+    if &expected != resource_scope_value {
+        return Err(invalid_params("job resource is outside invocation scope"));
+    }
+    Ok(())
 }
 
 pub(super) fn to_value<T: Serialize>(value: &T, label: &str) -> Result<Value, CapabilityError> {
