@@ -14,6 +14,46 @@ Companion artifacts:
 - [`phase-2-agent-execution-restoration-inventory.md`](phase-2-agent-execution-restoration-inventory.md)
 - [`phase-2-agent-execution-restoration-inventory.tsv`](phase-2-agent-execution-restoration-inventory.tsv)
 
+## Current Restoration Baseline
+
+Discovery update: 2026-06-23.
+
+Canonical plan file: this scorecard. The README names this file as the durable
+Phase 2 plan, while the inventory and evidence manifest are companion
+machine-readable and validation artifacts.
+
+Current implementation baseline assumed by this update:
+`codex/phase-2-filesystem-agent-tools-current` through
+`2650dd0b9 Harden filesystem truncated snapshot mutations`, including
+`27e5847c9 Implement Phase 2 filesystem agent tools`.
+
+Checkout note: the active Codex worktree for this update was detached at
+`2650dd0b9`, matching the requested latest completed baseline. The delegated
+`/Users/<USER>/Workspace/tron` checkout was on
+`codex/phase-2-memory-foundation-current` at `4c35b2119`, behind the requested
+filesystem-tools baseline, so this plan update uses the detached
+`2650dd0b9` worktree as the source of truth.
+
+Completed Phase 2 restoration slices at this baseline:
+
+- Slice 0: planning artifacts and static entry gates;
+- Slice 1: catalog discovery, inspect, and conformance evidence;
+- Slice 2: approval/freshness evidence resources and fail-closed checks;
+- Slice 3: memory foundation, redacted record custody, prompt traces, and
+  migration envelopes;
+- Slice 4: bounded filesystem agent toolbox with resource-backed previews,
+  commits, patch evidence, and truncated-snapshot hardening.
+
+Selected next implementation slice:
+**Slice 5A: Durable Jobs And Process Lifecycle Foundation**. This is the first
+sub-slice of broad Slice 5. It should restore durable background command
+execution, logs, cancellation, timeout, terminal state, and artifact/resource
+evidence while preserving the existing synchronous `process_run` operation as a
+short bounded primitive. It should not restore PTY sessions, embedded
+interpreter runtimes, git/source-control workflows, web/network research,
+subagents, goals/questions, scheduling, notifications, or native iOS process
+panels.
+
 ## Scope
 
 This is a planning and handoff artifact only. Phase 2 execution behavior is
@@ -529,6 +569,128 @@ dependency review for `portable-pty` or runtime engines if introduced.
 User decisions: PTY support, interpreter languages, network policy, output
 retention, and approval rules.
 
+#### Selected Slice 5A Discovery Packet
+
+Exact next slice to implement: **Slice 5A: Durable Jobs And Process Lifecycle
+Foundation**.
+
+Why this slice is foundational: the current engine already has queue, stream,
+resource, lease, trace, replay, and bounded `process_run` substrates, but there
+is no package-owned durable job object that users or agents can inspect,
+cancel, replay, or cite. Without this slice, later git, web, source import,
+subagent, scheduler, notification, and program-execution work would either
+block on synchronous `process_run` or reintroduce private subprocess loops,
+hidden log stores, and inconsistent cancellation semantics.
+
+Core versus modular split:
+
+- Core/harness: reuse the existing engine queue, stream, resource, lease,
+  authority-grant, trace, replay, and output-contract primitives. Add to the
+  engine only if the jobs package exposes a missing generic primitive needed by
+  multiple package families, and prefer using existing `RegisterResourceType`,
+  stream publication, queue receipt, and lease APIs.
+- Modular package: create a jobs/process package that owns job resource types,
+  command start/status/list/log/cancel operations, bounded output
+  materialization, terminal-state transitions, lifecycle stream payloads,
+  shutdown cleanup, resource retention, and package docs/tests.
+- Synchronous primitive boundary: keep `process_run` as the short, bounded,
+  `networkPolicy: none` command operation. Durable work enters the jobs package
+  through model-facing `execute` operation values backed by package functions;
+  it does not widen the provider-visible tool surface.
+- Program execution boundary: define only the lifecycle envelope needed for a
+  future interpreter worker if it naturally falls out of the job model. Do not
+  add language runtimes, embedded JavaScript/Python execution, dependency
+  bundles, notebooks, or package-specific interpreter sandboxes in Slice 5A.
+- iOS boundary: use generic runtime/resource rendering first. Native process
+  lists, log viewers, and cancel controls require a later server-contract and
+  UX approval pass.
+
+Implementation constraints:
+
+- Every job must have an owner, session/workspace scope, authority grant,
+  working directory provenance, network policy, resource limits, timeout,
+  cancellation path, terminal state, replay refs, and retention class.
+- Default network policy is `none`; jobs that cannot prove network denial fail
+  closed. Network-enabled jobs wait for a later web/network authority slice.
+- Command output is bounded. Large stdout/stderr bodies must become
+  resource/blob-backed artifacts with hashes and previews rather than unbounded
+  inline payloads.
+- Cancellation must be durable and terminal from the receipt perspective: a
+  late process result cannot resurrect or complete a cancelled job.
+- Shutdown must either terminate owned child processes or record an
+  inspectable orphan/unknown terminal state; silent background processes are
+  not allowed.
+- Mutating command starts require idempotency; replay must not rerun completed
+  commands unless the caller supplies a new idempotency key and authority.
+- Approval integration is by contract only in this slice: expose the risk and
+  evidence hooks needed for later policy, but do not choose package-wide risky
+  approval defaults.
+- No broad dependency restoration. `portable-pty`, interpreter engines, or
+  runtime bundles require a separate dependency/security review before use.
+
+Risks and design questions resolved for Slice 5A:
+
+- PTY/TUI support is deferred; durable non-interactive jobs come first.
+- Interpreter languages are deferred; the first useful primitive is lifecycle,
+  not a language runtime.
+- Network is denied by default; web/research must not be smuggled through job
+  commands.
+- Native iOS process UI is deferred; generic runtime/resource facts are enough
+  for the foundation slice.
+- Existing `process_run` stays available for short bounded commands and should
+  not be rewritten into a durable job system as part of this slice.
+
+Required tests and verification:
+
+- Focused Rust tests for job start/status/list/log/cancel, timeout,
+  terminal-state idempotency, bounded stdout/stderr, artifact/resource hashes,
+  lifecycle stream replay, queue receipt linkage, lease expiry, shutdown
+  behavior, and late-result-after-cancel denial.
+- Authority tests for trusted working-directory metadata, `networkPolicy: none`
+  enforcement, derived grant requirements, approval evidence hooks, and denial
+  when sandboxing is unavailable.
+- Resource/schema tests for job resource definitions, output contracts,
+  lifecycle payloads, retention fields, and replay/evidence refs.
+- Static/invariant coverage: CSD for owner/backpressure/cancellation/shutdown,
+  SACB for authority/network/process boundaries, TMB for package/engine
+  separation, HRA/PCC/TPC for file ownership and line budgets, BPRC/IARM for
+  deferral classification, DESI for scorecard/evidence consistency, personal
+  info guard, and `git diff --check`.
+- iOS verification only if generic runtime rendering changes; no native Swift
+  UI is expected in Slice 5A.
+
+Explicit non-goals:
+
+- no PTY shell sessions, persistent interactive terminal, or terminal emulator;
+- no embedded code interpreter, notebook, JavaScript/Python runtime, package
+  manager, or dependency restoration;
+- no web/search/fetch/browser/network research behavior;
+- no git/worktree/source-control workflows;
+- no subagents, goals, questions, scheduler, APNs, notification inbox, or
+  native iOS process panel;
+- no production deployment behavior and no `tron deploy`;
+- no hidden subprocess daemons, private log stores, or package-specific
+  cancellation mechanisms outside the shared job lifecycle.
+
+Likely implementation files/domains to inspect or touch:
+
+- `packages/agent/src/domains/capability/operations/process.rs` and
+  `packages/agent/src/domains/capability/operations/mod.rs`;
+- future `packages/agent/src/domains/jobs/{mod.rs,contract.rs,handlers.rs,service.rs,types.rs,schema_tests.rs,tests.rs}`;
+- `packages/agent/src/domains/mod.rs` and startup registration wiring;
+- `packages/agent/src/engine/durability/queue/`,
+  `packages/agent/src/engine/durability/streams/`,
+  `packages/agent/src/engine/durability/resources/`, and
+  `packages/agent/src/engine/authority/leases.rs`;
+- `packages/agent/src/engine/authority/grants/authorization.rs` for
+  operation-to-scope/network policy checks;
+- provider prompt/schema documentation in
+  `packages/agent/src/domains/model/providers/openai/message_converter/mod.rs`;
+- focused/static tests under `packages/agent/tests/`, especially CSD, SACB,
+  TMB, HRA, PCC, TPC, BPRC, IARM, DESI, and primitive trace execution;
+- README capability, event, database/resource, testing, and progressive
+  disclosure sections plus the new jobs domain `mod.rs` docs.
+
 ### Slice 6: Git, Worktrees, And Source Control
 
 Objective: restore source-control workflows over durable worktree resources.
@@ -910,8 +1072,9 @@ Implementation slices add:
 
 ## Closure Verdict
 
-Phase 2 is now source-backed and ready for implementation one slice at a time.
-The recommended first implementation slice is Slice 1, Catalog, Discovery, And
-Capability Evidence, because it creates the inspection and conformance surface
-needed before restoring riskier filesystem, jobs, memory, web, git, approval,
-and subagent behavior.
+Phase 2 remains source-backed and ready for implementation one slice at a time.
+At the 2026-06-23 discovery update, Slices 1 through 4 are complete through
+the filesystem-tool hardening baseline `2650dd0b9`. The next implementation
+slice may start as **Slice 5A: Durable Jobs And Process Lifecycle Foundation**,
+subject to the constraints and non-goals in the Slice 5A discovery packet
+above.

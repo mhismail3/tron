@@ -139,6 +139,15 @@ engine resource-kernel definitions. The slice intentionally leaves native iOS
 approval UI, risk-class taxonomy, default expiry policy, interruption behavior,
 and per-package risky-action triggers to future user decisions.
 
+Slice 3 is represented as current backend evidence on rows `P2AER-INV-014`
+and `P2AER-INV-019`: the memory domain now owns disabled/active/shadow/compare
+policy state, memory engine/policy/record/prompt-trace/eval-run/migration
+resource definitions, redacted record lifecycle operations, migration
+import/export, and prompt-trace audit without injecting retained memory body
+content into provider context. Semantic/vector retrieval, episodic trace
+retrieval, procedural rules/hooks/skills, automatic retention, and native iOS
+memory UI remain future package or UX decisions behind that foundation.
+
 Slice 4 is represented as current backend evidence on row `P2AER-INV-004`:
 the filesystem domain now owns bounded agent read/list/find/glob/search/diff
 and write/edit/apply-patch operations through `capability::execute`, with
@@ -150,3 +159,10 @@ review hardened existing-file commits and exact-text edits so unverifiable
 truncated snapshots cannot be overwritten or patched from partial preview
 content. Native file/patch review UI and package-wide risky-action approval
 triggers remain future user decisions.
+
+The next selected implementation row is `P2AER-INV-005` as `Slice 5A`:
+durable jobs and process lifecycle foundation. `P2AER-INV-006` stays planned
+for a later program-execution slice; Slice 5A may define only the durable job
+lifecycle envelope needed by future interpreter workers and must not restore
+language runtimes, PTY sessions, web/network research, git/source-control,
+subagents, scheduling, notifications, or native iOS process panels.
