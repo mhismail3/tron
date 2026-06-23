@@ -734,6 +734,11 @@ Shipped behavior:
   process cleanup. Late cancel requests against already-completed jobs return
   completion-pending/already-terminal status instead of overwriting completion
   and dropping output evidence.
+- If cancellation-request metadata lands between finalization's resource read
+  and terminal update, finalization treats the resource-store version conflict
+  as a retryable jobs-domain race: it reloads the current nonterminal job,
+  preserves cancellation metadata, and retries the terminal update using the
+  already-created output resource/link.
 - Domain shutdown requests cancellation for running process groups through the
   existing shutdown coordinator when present. Terminal cleanup archives scoped
   terminal jobs by retention criteria.

@@ -5,15 +5,18 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 use crate::engine::{
-    EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
+    EngineError, EngineHostHandle, EngineResource, EngineResourceInspection, EngineResourceScope,
     EngineResourceVersion, Invocation, PublishStreamEvent, RUNTIME_METADATA_WORKING_DIRECTORY,
-    StreamCursor, VisibilityScope,
+    StreamCursor, UpdateResource, VisibilityScope,
 };
 use crate::shared::server::errors::CapabilityError;
 
 use super::JOB_PROCESS_KIND;
 use super::errors::{engine_error, internal, invalid_params};
-use super::types::{JOB_SCHEMA_VERSION, JobProcessRecord};
+use super::types::{
+    JOB_SCHEMA_VERSION, JobCancellationRecord, JobOutputRef, JobProcessRecord, JobRunOutcome,
+    JobTerminalRecord,
+};
 use super::{JOBS_LIFECYCLE_TOPIC, WORKER};
 
 pub(super) const DEFAULT_JOB_TIMEOUT_MS: u64 = 30_000;
@@ -22,6 +25,70 @@ pub(super) const DEFAULT_OUTPUT_BYTES: usize = 20_000;
 pub(super) const MAX_OUTPUT_BYTES: usize = 200_000;
 pub(super) const LIST_LIMIT_DEFAULT: usize = 50;
 pub(super) const LIST_LIMIT_MAX: usize = 500;
+
+#[cfg(test)]
+static FINALIZE_RACE_HOOK: std::sync::OnceLock<
+    std::sync::Mutex<Option<std::sync::Arc<FinalizeRaceHook>>>,
+> = std::sync::OnceLock::new();
+
+#[cfg(test)]
+pub(crate) struct FinalizeRaceHook {
+    job_resource_id: String,
+    cancel_after_runtime_fired: std::sync::atomic::AtomicBool,
+    finalize_before_update_fired: std::sync::atomic::AtomicBool,
+    cancel_after_runtime_reached: tokio::sync::Notify,
+    release_cancel_after_runtime: tokio::sync::Notify,
+    finalize_before_update_reached: tokio::sync::Notify,
+    release_finalize_before_update: tokio::sync::Notify,
+}
+
+#[cfg(test)]
+impl FinalizeRaceHook {
+    fn new(job_resource_id: String) -> Self {
+        Self {
+            job_resource_id,
+            cancel_after_runtime_fired: std::sync::atomic::AtomicBool::new(false),
+            finalize_before_update_fired: std::sync::atomic::AtomicBool::new(false),
+            cancel_after_runtime_reached: tokio::sync::Notify::new(),
+            release_cancel_after_runtime: tokio::sync::Notify::new(),
+            finalize_before_update_reached: tokio::sync::Notify::new(),
+            release_finalize_before_update: tokio::sync::Notify::new(),
+        }
+    }
+
+    pub(crate) async fn wait_for_cancel_after_runtime(&self) {
+        self.cancel_after_runtime_reached.notified().await;
+    }
+
+    pub(crate) fn release_cancel_after_runtime(&self) {
+        self.release_cancel_after_runtime.notify_one();
+    }
+
+    pub(crate) async fn wait_for_finalize_before_update(&self) {
+        self.finalize_before_update_reached.notified().await;
+    }
+
+    pub(crate) fn release_finalize_before_update(&self) {
+        self.release_finalize_before_update.notify_one();
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn install_finalize_race_hook(
+    job_resource_id: String,
+) -> std::sync::Arc<FinalizeRaceHook> {
+    let hook = std::sync::Arc::new(FinalizeRaceHook::new(job_resource_id));
+    let slot = FINALIZE_RACE_HOOK.get_or_init(|| std::sync::Mutex::new(None));
+    *slot.lock().expect("jobs finalize race hook poisoned") = Some(hook.clone());
+    hook
+}
+
+#[cfg(test)]
+pub(crate) fn clear_finalize_race_hook() {
+    if let Some(slot) = FINALIZE_RACE_HOOK.get() {
+        *slot.lock().expect("jobs finalize race hook poisoned") = None;
+    }
+}
 
 pub(super) fn required_string(payload: &Value, field: &str) -> Result<String, CapabilityError> {
     optional_string(payload, field)?.ok_or_else(|| invalid_params(format!("missing {field}")))
@@ -199,6 +266,89 @@ pub(super) fn already_terminal_response(
     })
 }
 
+pub(super) fn apply_runtime_terminal_outcome(
+    record: &mut JobProcessRecord,
+    outcome: &JobRunOutcome,
+    output_ref: &JobOutputRef,
+) {
+    let completed_at = chrono::Utc::now();
+    record.state = outcome.state.clone();
+    record.completed_at = Some(completed_at);
+    if outcome.cancelled && !record.cancellation.requested {
+        record.cancellation = JobCancellationRecord {
+            requested: true,
+            requested_at: Some(completed_at),
+            requested_by: None,
+            reason: outcome.cancellation_reason.clone(),
+        };
+    }
+    record.terminal = Some(JobTerminalRecord {
+        status: outcome.state.as_str().to_owned(),
+        exit_code: outcome.exit_code,
+        timed_out: outcome.timed_out,
+        cancelled: outcome.cancelled,
+        error: outcome.error.clone(),
+    });
+    record.output = Some(output_ref.clone());
+    record.revision += 1;
+}
+
+pub(super) fn is_resource_version_conflict(error: &EngineError) -> bool {
+    matches!(
+        error,
+        EngineError::PolicyViolation(message)
+            if message.contains("version conflict")
+    )
+}
+
+pub(super) async fn maybe_pause_cancel_after_runtime(job_resource_id: &str) {
+    #[cfg(test)]
+    {
+        if let Some(hook) = finalize_race_hook_for(job_resource_id) {
+            if !hook
+                .cancel_after_runtime_fired
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                hook.cancel_after_runtime_reached.notify_one();
+                hook.release_cancel_after_runtime.notified().await;
+            }
+        }
+    }
+    #[cfg(not(test))]
+    {
+        let _ = job_resource_id;
+    }
+}
+
+pub(super) async fn maybe_pause_finalize_before_update(job_resource_id: &str) {
+    #[cfg(test)]
+    {
+        if let Some(hook) = finalize_race_hook_for(job_resource_id) {
+            if !hook
+                .finalize_before_update_fired
+                .swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                hook.finalize_before_update_reached.notify_one();
+                hook.release_finalize_before_update.notified().await;
+            }
+        }
+    }
+    #[cfg(not(test))]
+    {
+        let _ = job_resource_id;
+    }
+}
+
+#[cfg(test)]
+fn finalize_race_hook_for(job_resource_id: &str) -> Option<std::sync::Arc<FinalizeRaceHook>> {
+    let slot = FINALIZE_RACE_HOOK.get()?;
+    let hook = slot
+        .lock()
+        .expect("jobs finalize race hook poisoned")
+        .clone()?;
+    (hook.job_resource_id == job_resource_id).then_some(hook)
+}
+
 fn ensure_scope(
     invocation: &Invocation,
     resource_scope_value: &EngineResourceScope,
@@ -244,4 +394,45 @@ pub(super) async fn publish_lifecycle_event(
         })
         .await
         .map_err(engine_error)
+}
+
+pub(super) async fn update_job_record(
+    engine_host: &EngineHostHandle,
+    invocation: &Invocation,
+    job_resource_id: &str,
+    expected_current_version_id: Option<String>,
+    record: &JobProcessRecord,
+) -> Result<EngineResourceVersion, CapabilityError> {
+    update_job_record_raw(
+        engine_host,
+        invocation,
+        job_resource_id,
+        expected_current_version_id,
+        record,
+    )
+    .await
+    .map_err(engine_error)
+}
+
+pub(super) async fn update_job_record_raw(
+    engine_host: &EngineHostHandle,
+    invocation: &Invocation,
+    job_resource_id: &str,
+    expected_current_version_id: Option<String>,
+    record: &JobProcessRecord,
+) -> Result<EngineResourceVersion, EngineError> {
+    engine_host
+        .update_resource(UpdateResource {
+            resource_id: job_resource_id.to_owned(),
+            expected_current_version_id,
+            lifecycle: Some(record.state.as_str().to_owned()),
+            payload: to_value(record, "job process update").map_err(|error| {
+                EngineError::HandlerFailed(format!("serialize job process update: {error}"))
+            })?,
+            state: None,
+            locations: Vec::new(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            invocation_id: Some(invocation.id.clone()),
+        })
+        .await
 }

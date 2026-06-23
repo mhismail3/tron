@@ -313,6 +313,10 @@ Scope shipped:
 - Late cancel requests against completed processes now return
   completion-pending/already-terminal status and cannot overwrite completion or
   discard `execution_output` evidence.
+- Runtime finalization now retries a stale job-resource version when a
+  cancellation-request update lands between finalization's resource read and
+  terminal update; the retry reuses the created output resource/link and
+  preserves cancellation metadata.
 - Deliberately deferred PTY/interactive terminals, interpreters/runtime
   packages, git/worktree/source-control behavior, web/network behavior,
   subagents, scheduling, native iOS process panels, notifications, and
@@ -325,7 +329,7 @@ Focused validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::jobs -- --nocapture` | exit 0 | 10 jobs-domain tests passed, covering schema alignment, start/status/list/log/cancel behavior, terminal idempotency, bounded output, timeout terminal output, inherited-pipe background child cleanup, process-exit/cancel race, shutdown cancellation, output/resource evidence, cleanup archiving, and fail-closed network policy. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::jobs -- --nocapture` | exit 0 | 11 jobs-domain tests passed, covering schema alignment, start/status/list/log/cancel behavior, terminal idempotency, bounded output, timeout terminal output, inherited-pipe background child cleanup, process-exit/cancel race, forced cancel-request/finalization version conflict retry, shutdown cancellation, output/resource evidence, cleanup archiving, and fail-closed network policy. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability-domain tests passed with job execute operations registered. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture` | exit 0 | 26 provider prompt/converter tests passed after documenting the job operation names and provider-visible execute boundary. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after classifying jobs files, operations, working-directory requirements, network-policy denial, and mutating idempotency requirements. |
@@ -366,6 +370,11 @@ Adversarial self-review:
   finalization. The fix moved cleanup to owned process groups, bound output
   draining after terminal signals, and made cancellation terminal state a
   runtime-finalized outcome rather than a pre-kill resource write.
+- Second independent review found that cancellation-request metadata could
+  still race terminal finalization's compare-and-set update. The fix added a
+  bounded finalization retry that reloads the current nonterminal job, merges
+  cancellation metadata, and attaches the existing output resource evidence
+  before writing the terminal state.
 
 ## Validation Log
 

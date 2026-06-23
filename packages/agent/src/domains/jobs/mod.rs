@@ -11,6 +11,7 @@
 //! | `contract` | Job function contracts and schemas |
 //! | `errors` | Domain-local error helpers |
 //! | `handlers` | Operation-key binding table |
+//! | `race_tests` | Test-only cancellation/finalization interleaving coverage |
 //! | `runtime` | Bounded process spawning, output capture, and cancellation handles |
 //! | `schema_tests` | Test-only resource/schema drift guards |
 //! | `service` | Job resource lifecycle, status/list/log/cancel/cleanup behavior |
@@ -95,6 +96,8 @@ pub(crate) fn worker_module(
     )
 }
 
+#[cfg(test)]
+mod race_tests;
 #[cfg(test)]
 mod schema_tests;
 #[cfg(test)]

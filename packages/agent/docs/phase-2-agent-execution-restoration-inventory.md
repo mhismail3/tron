@@ -166,8 +166,8 @@ resources, bounded `execution_output` artifacts, lifecycle stream evidence,
 start/status/list/log/cancel provider operations through the existing
 `capability::execute` primitive, direct scoped cleanup, fail-closed
 `networkPolicy: none`, owned process-group timeout/cancel/shutdown cleanup,
-cancel-request-before-terminal finalization, retention archiving, and focused
-resource/authority/bounded-output tests. `P2AER-INV-006` stays
+cancel-request-before-terminal finalization with stale-version retry, retention
+archiving, and focused resource/authority/bounded-output tests. `P2AER-INV-006` stays
 planned for a later program-execution slice; Slice 5A did not restore language
 runtimes, PTY sessions, web/network research, git/source-control, subagents,
 scheduling, notifications, or native iOS process panels. Queue-backed internal

@@ -1116,8 +1116,10 @@ denied, expired, pending, missing, malformed, stale, or scope-mismatch check
 outcome. Durable jobs are generic `job_process` resources with bounded
 `execution_output` artifacts and lifecycle events on `jobs.lifecycle`;
 runtime cancellation first signals the owned process group and terminal
-finalization then records bounded output evidence, so late cancel requests do
-not overwrite already-completed jobs. The replay snapshot includes resolved
+finalization then records bounded output evidence. If a nonterminal cancel
+request wins the resource-version race, finalization reloads, preserves the
+request metadata, and retries the terminal update so output refs stay attached.
+Late cancel requests do not overwrite already-completed jobs. The replay snapshot includes resolved
 session events, provider request audits, trace records, engine idempotency
 entries, engine invocations, engine stream rows, and engine queue rows. It adds
 stable section hashes plus request/result/outcome/payload hashes where the

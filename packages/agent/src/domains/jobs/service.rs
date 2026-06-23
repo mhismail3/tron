@@ -3,17 +3,19 @@ use serde_json::{Value, json};
 
 use crate::engine::{
     CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
-    EngineResourceVersion, LinkResources, ListResources, UpdateResource, WorkerId,
+    EngineResourceVersion, LinkResources, ListResources, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
 use super::errors::{engine_error, internal, invalid_params};
 use super::runtime::{CancelRequestResult, JobRuntime, SpawnProcessRequest};
 use super::support::{
-    already_terminal_response, job_record, list_limit, max_output_bytes, optional_string,
-    optional_u64, publish_lifecycle_event, replay_refs, require_job, resource_policy, resource_ref,
-    resource_scope, sha256_hex, timeout_ms, to_value, trace_refs, trusted_working_directory,
-    version_ref,
+    already_terminal_response, apply_runtime_terminal_outcome, is_resource_version_conflict,
+    job_record, list_limit, max_output_bytes, maybe_pause_cancel_after_runtime,
+    maybe_pause_finalize_before_update, optional_string, optional_u64, publish_lifecycle_event,
+    replay_refs, require_job, resource_policy, resource_ref, resource_scope, sha256_hex,
+    timeout_ms, to_value, trace_refs, trusted_working_directory, update_job_record,
+    update_job_record_raw, version_ref,
 };
 use super::types::{
     EXECUTION_OUTPUT_KIND, EXECUTION_OUTPUT_SCHEMA_ID, JOB_SCHEMA_VERSION, JobAuthorityRecord,
@@ -21,6 +23,8 @@ use super::types::{
     JobRunOutcome, JobState, JobTerminalRecord, JobWorkingDirectory,
 };
 use super::{JOB_PROCESS_KIND, JOB_PROCESS_SCHEMA_ID, WORKER};
+
+const FINALIZE_VERSION_CONFLICT_RETRIES: usize = 16;
 
 pub(crate) async fn start_job_value(
     engine_host: &EngineHostHandle,
@@ -294,6 +298,7 @@ pub(crate) async fn cancel_job_value(
             .await;
         }
     }
+    maybe_pause_cancel_after_runtime(&inspection.resource.resource_id).await;
 
     let Some(latest) = engine_host
         .inspect_resource(&inspection.resource.resource_id)
@@ -512,43 +517,58 @@ pub(super) async fn finalize_job_from_runtime(
         .await
         .map_err(engine_error)?;
 
-    let completed_at = Utc::now();
-    record.state = outcome.state.clone();
-    record.completed_at = Some(completed_at);
-    if outcome.cancelled && !record.cancellation.requested {
-        record.cancellation = JobCancellationRecord {
-            requested: true,
-            requested_at: Some(completed_at),
-            requested_by: None,
-            reason: outcome.cancellation_reason.clone(),
-        };
-    }
-    record.terminal = Some(JobTerminalRecord {
-        status: outcome.state.as_str().to_owned(),
-        exit_code: outcome.exit_code,
-        timed_out: outcome.timed_out,
-        cancelled: outcome.cancelled,
-        error: outcome.error.clone(),
-    });
-    record.output = Some(JobOutputRef {
+    let output_ref = JobOutputRef {
         output_resource_id: output_resource.resource_id.clone(),
-        output_version_id,
+        output_version_id: output_version_id.clone(),
         content_hash: sha256_hex(&output_bytes),
-        stdout_preview: outcome.stdout,
-        stderr_preview: outcome.stderr,
+        stdout_preview: outcome.stdout.clone(),
+        stderr_preview: outcome.stderr.clone(),
         output_truncated: outcome.stdout_truncated || outcome.stderr_truncated,
         duration_ms: outcome.duration_ms,
         exit_code: outcome.exit_code,
-    });
-    record.revision += 1;
-    let job_version = update_job_record(
-        engine_host,
-        invocation,
-        &inspection.resource.resource_id,
-        Some(current_version_id),
-        &record,
-    )
-    .await?;
+    };
+    apply_runtime_terminal_outcome(&mut record, &outcome, &output_ref);
+
+    let mut expected_version_id = current_version_id;
+    let mut version_conflicts = 0;
+    let job_version = loop {
+        maybe_pause_finalize_before_update(job_resource_id).await;
+        match update_job_record_raw(
+            engine_host,
+            invocation,
+            &inspection.resource.resource_id,
+            Some(expected_version_id.clone()),
+            &record,
+        )
+        .await
+        {
+            Ok(version) => break version,
+            Err(error)
+                if is_resource_version_conflict(&error)
+                    && version_conflicts < FINALIZE_VERSION_CONFLICT_RETRIES =>
+            {
+                version_conflicts += 1;
+                let Some(latest) = engine_host
+                    .inspect_resource(&inspection.resource.resource_id)
+                    .await
+                    .map_err(engine_error)?
+                else {
+                    return Err(invalid_params(format!(
+                        "job resource {} was not found",
+                        inspection.resource.resource_id
+                    )));
+                };
+                let (latest_version_id, latest_record) = job_record(&latest)?;
+                if latest_record.state.is_terminal() {
+                    return Ok(());
+                }
+                expected_version_id = latest_version_id;
+                record = latest_record;
+                apply_runtime_terminal_outcome(&mut record, &outcome, &output_ref);
+            }
+            Err(error) => return Err(engine_error(error)),
+        }
+    };
     let event_type = match &record.state {
         JobState::Completed => "jobs.completed",
         JobState::Failed => "jobs.failed",
@@ -650,28 +670,6 @@ async fn mark_cancel_unknown(
         "runtimeHadJob": false,
         "resourceRefs": [version_ref(&inspection.resource, &version, "job_process")]
     }))
-}
-
-async fn update_job_record(
-    engine_host: &EngineHostHandle,
-    invocation: &crate::engine::Invocation,
-    job_resource_id: &str,
-    expected_current_version_id: Option<String>,
-    record: &JobProcessRecord,
-) -> Result<EngineResourceVersion, CapabilityError> {
-    engine_host
-        .update_resource(UpdateResource {
-            resource_id: job_resource_id.to_owned(),
-            expected_current_version_id,
-            lifecycle: Some(record.state.as_str().to_owned()),
-            payload: to_value(record, "job process update")?,
-            state: None,
-            locations: Vec::new(),
-            trace_id: invocation.causal_context.trace_id.clone(),
-            invocation_id: Some(invocation.id.clone()),
-        })
-        .await
-        .map_err(engine_error)
 }
 
 async fn output_resource_version(
