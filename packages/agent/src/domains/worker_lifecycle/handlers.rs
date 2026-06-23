@@ -58,6 +58,7 @@ pub(super) async fn propose_package_change(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    deps.ensure_startup_reconciled().await?;
     ensure_proposal_authority(invocation, deps).await?;
     let manifest = manifest_from_payload(&invocation.payload)?;
     validate_manifest_shape(&manifest)?;
@@ -104,6 +105,7 @@ pub(super) async fn install_package(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    deps.ensure_startup_reconciled().await?;
     ensure_apply_authority(invocation, deps).await?;
     let package = validate_manifest_full(manifest_from_payload(&invocation.payload)?, deps)?;
     let package_write = upsert_lifecycle_resource(
@@ -164,6 +166,7 @@ pub(super) async fn set_package_enabled(
     deps: &Deps,
     enabled: bool,
 ) -> Result<Value, CapabilityError> {
+    deps.ensure_startup_reconciled().await?;
     ensure_apply_authority(invocation, deps).await?;
     let package_ref = package_ref_from_payload(&invocation.payload)?;
     let package = load_installed_package(deps, &package_ref).await?;
@@ -223,6 +226,7 @@ pub(super) async fn launch_worker(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    deps.ensure_startup_reconciled().await?;
     ensure_apply_authority(invocation, deps).await?;
     let package_ref = package_ref_from_payload(&invocation.payload)?;
     let package = load_installed_package(deps, &package_ref).await?;
@@ -345,6 +349,7 @@ pub(super) async fn stop_worker(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    deps.ensure_startup_reconciled().await?;
     ensure_apply_authority(invocation, deps).await?;
     let launch_attempt_id = required_string(&invocation.payload, "launchAttemptResourceId")?;
     let mut payload = current_resource_payload(deps, &launch_attempt_id).await?;
@@ -401,6 +406,7 @@ pub(super) async fn retire_package(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<Value, CapabilityError> {
+    deps.ensure_startup_reconciled().await?;
     ensure_apply_authority(invocation, deps).await?;
     let package_ref = package_ref_from_payload(&invocation.payload)?;
     let package = load_installed_package(deps, &package_ref).await?;

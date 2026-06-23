@@ -4,7 +4,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde_json::{Value, json};
 use tempfile::TempDir;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 
 use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, DeliveryMode, DeriveGrant, EffectClass,
@@ -22,7 +22,10 @@ use super::manifest::{
     ConformancePolicy, PackageSource, RequestedGrantPolicy, RollbackPolicy, WorkerPackageManifest,
     package_source_digest, validate_manifest_full, validate_manifest_shape,
 };
-use super::resources::{launch_attempt_resource_id, reconcile_owned_launch_attempts_on_startup};
+use super::resources::{
+    StartupReconciliationHook, launch_attempt_resource_id,
+    reconcile_owned_launch_attempts_on_startup,
+};
 use super::{
     APPLY_SCOPE, Deps, ENABLE_FUNCTION, INSTALL_FUNCTION, LAUNCH_FUNCTION, PACKAGE_SCHEMA_VERSION,
     PROPOSE_FUNCTION, PROPOSE_SCOPE, SOURCE_KIND_LOCAL_FILESYSTEM, STOP_FUNCTION,
@@ -34,6 +37,23 @@ struct FakeLauncher {
     fail_launch: bool,
     fail_stop: bool,
     stopped: bool,
+    launch_called: Option<Arc<Notify>>,
+}
+
+#[derive(Default)]
+struct PauseBeforeRunningList {
+    reached: Notify,
+    release: Notify,
+}
+
+#[async_trait]
+impl StartupReconciliationHook for PauseBeforeRunningList {
+    async fn before_lifecycle_list(&self, lifecycle: &str) {
+        if lifecycle == "running" {
+            self.reached.notify_one();
+            self.release.notified().await;
+        }
+    }
 }
 
 impl Default for FakeLauncher {
@@ -44,6 +64,7 @@ impl Default for FakeLauncher {
             fail_launch: false,
             fail_stop: false,
             stopped: true,
+            launch_called: None,
         }
     }
 }
@@ -53,6 +74,9 @@ impl WorkerLauncher for FakeLauncher {
     async fn launch(&self, request: WorkerLaunchRequest) -> Result<WorkerLaunchReceipt, String> {
         if self.fail_launch {
             return Err("fake launch failure".to_owned());
+        }
+        if let Some(launch_called) = &self.launch_called {
+            launch_called.notify_one();
         }
         self.launches.lock().await.push(request);
         Ok(WorkerLaunchReceipt {
@@ -811,4 +835,133 @@ async fn startup_reconcile_marks_durable_running_attempts_unhealthy_and_relaunch
     .await
     .expect("relaunch after startup reconcile");
     assert_eq!(relaunched["status"], "running");
+}
+
+#[tokio::test]
+async fn lifecycle_launch_waits_for_startup_reconciliation_before_spawning_process() {
+    let (temp, seeded_deps, package) = test_deps().await;
+    register_expected_worker(&seeded_deps.engine_host).await;
+    let grant = derived_lifecycle_grant(&seeded_deps.engine_host).await;
+    install_package(
+        &invocation(
+            INSTALL_FUNCTION,
+            json!({"manifest": manifest(&package)}),
+            grant.clone(),
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &seeded_deps,
+    )
+    .await
+    .unwrap();
+    set_package_enabled(
+        &invocation(
+            ENABLE_FUNCTION,
+            json!({"packageId": "local.echo", "packageVersion": "1.0.0"}),
+            grant.clone(),
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &seeded_deps,
+        true,
+    )
+    .await
+    .unwrap();
+    let stale_launch = launch_worker(
+        &invocation_with_suffix(
+            LAUNCH_FUNCTION,
+            "stale-before-restart",
+            json!({"packageId": "local.echo", "packageVersion": "1.0.0"}),
+            grant.clone(),
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &seeded_deps,
+    )
+    .await
+    .expect("seed stale running launch attempt");
+    let stale_launch_attempt_id = stale_launch["launchAttemptResourceId"]
+        .as_str()
+        .expect("stale launch attempt id")
+        .to_owned();
+
+    let launch_called = Arc::new(Notify::new());
+    let current_launcher = Arc::new(FakeLauncher {
+        launch_called: Some(launch_called.clone()),
+        ..FakeLauncher::default()
+    });
+    let pause_hook = Arc::new(PauseBeforeRunningList::default());
+    let pending_deps = Deps::for_test_pending_startup_reconciliation(
+        seeded_deps.engine_host.clone(),
+        seeded_deps.package_root.clone(),
+        current_launcher,
+        Some(pause_hook.clone()),
+    );
+
+    let reconcile_deps = pending_deps.clone();
+    let reconcile_task =
+        tokio::spawn(async move { reconcile_deps.ensure_startup_reconciled().await });
+    pause_hook.reached.notified().await;
+
+    let launch_deps = pending_deps.clone();
+    let current_invocation = invocation_with_suffix(
+        LAUNCH_FUNCTION,
+        "current-after-restart",
+        json!({"packageId": "local.echo", "packageVersion": "1.0.0"}),
+        grant,
+        ActorKind::User,
+        &[APPLY_SCOPE],
+    );
+    let launch_task =
+        tokio::spawn(async move { launch_worker(&current_invocation, &launch_deps).await });
+
+    let premature_launch = tokio::time::timeout(
+        std::time::Duration::from_millis(25),
+        launch_called.notified(),
+    )
+    .await;
+    assert!(
+        premature_launch.is_err(),
+        "launch_worker must not spawn a current-process worker while startup reconciliation is paused"
+    );
+
+    pause_hook.release.notify_waiters();
+    assert_eq!(
+        reconcile_task
+            .await
+            .expect("reconcile task join")
+            .expect("startup reconciliation"),
+        1
+    );
+    let current_launch = launch_task
+        .await
+        .expect("launch task join")
+        .expect("current launch after reconciliation");
+    let current_launch_attempt_id = current_launch["launchAttemptResourceId"]
+        .as_str()
+        .expect("current launch attempt id");
+
+    let stale_resource = pending_deps
+        .engine_host
+        .inspect_resource(&stale_launch_attempt_id)
+        .await
+        .unwrap()
+        .expect("stale launch attempt resource");
+    assert_eq!(stale_resource.resource.lifecycle, "unhealthy");
+    assert_eq!(
+        stale_resource.versions.last().unwrap().payload["ownershipLost"],
+        true
+    );
+    let current_resource = pending_deps
+        .engine_host
+        .inspect_resource(current_launch_attempt_id)
+        .await
+        .unwrap()
+        .expect("current launch attempt resource");
+    assert_eq!(current_resource.resource.lifecycle, "running");
+    assert_ne!(
+        current_resource.versions.last().unwrap().payload["ownershipLost"],
+        true
+    );
+    drop(temp);
 }
