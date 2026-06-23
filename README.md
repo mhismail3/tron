@@ -689,6 +689,13 @@ idempotency so later turns do not replay stale memory status. Direct
 record-id operations fail closed when the addressed resource is outside the
 caller memory scope. It does not implement semantic retrieval, embeddings,
 ranking, summarization, procedural rules, or automatic prompt memory.
+`domains/filesystem` owns two separate surfaces: the iOS workspace-browser
+functions for home/list/create-dir selection and the Phase 2 agent filesystem
+toolbox. Agent operations resolve only from trusted working-directory metadata,
+deny traversal and symlink escapes, bound read/search/diff output, omit binary
+content bodies, return provider-visible paths relative to the authorized root,
+and record mutating previews/commits as patch proposal and materialized-file
+resources.
 `domains/worker_lifecycle` owns local package proposals,
 `tron.worker_package.v1` manifest validation, install/enable/disable/launch/
 stop/retire functions, scoped token minting, conformance reports, and
@@ -901,6 +908,15 @@ Current primitive operations:
 | `state_list` | List agent-owned state entries for a scope/namespace. |
 | `file_read` | Read a UTF-8 file under the current working directory. |
 | `file_write` | Write UTF-8 content under the current working directory. |
+| `filesystem_read` | Read a bounded text preview under the trusted working-directory root; binary content bodies are omitted. |
+| `filesystem_list` | List bounded directory entries under the trusted working-directory root. |
+| `filesystem_find` | Walk bounded entries matching a simple name/path pattern without following symlinks. |
+| `filesystem_glob` | Walk bounded entries matching a glob-style pattern without following symlinks. |
+| `filesystem_search_text` | Search bounded UTF-8 file previews under the trusted root while skipping binary content. |
+| `filesystem_diff` | Produce a bounded preview diff between current file content and proposed text. |
+| `filesystem_write` | Create a patch proposal by default, or commit UTF-8 content with idempotency and expected-hash evidence. |
+| `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence. |
+| `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
@@ -917,10 +933,12 @@ Startup registration currently keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
 `worker_lifecycle`, and model-provider modules. The
-`filesystem` domain is a narrow iOS workspace-browser exception limited to
-`filesystem::get_home`, `filesystem::list_dir`, and `filesystem::create_dir`;
-agent-facing file read/write/process behavior remains under
-`capability::execute`. The `approval` domain is a backend evidence/freshness
+`filesystem` domain is deliberately split: workspace-browser functions remain
+limited to `filesystem::get_home`, `filesystem::list_dir`, and
+`filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/
+write/edit/apply-patch behavior is exposed only as `capability::execute`
+operation values with trusted root checks and resource-backed mutation
+evidence. The `approval` domain is a backend evidence/freshness
 gate with `approval::request`, `approval::decide`, and `approval::check`
 engine functions; it does not add a provider-visible approval tool, native iOS
 approval UI, or default risky-action policy. The post-baseline

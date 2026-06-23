@@ -672,13 +672,16 @@ Data ownership:
 
 Rejected or deferred:
 
-- Restored now: only `filesystem::get_home`, `filesystem::list_dir`, and
+- Restored in the original workspace-browser follow-up:
+  `filesystem::get_home`, `filesystem::list_dir`, and
   `filesystem::create_dir`.
-- Still deferred to Phase 2: old model/agent-facing filesystem read, write,
-  edit, find, glob, text search, diff, apply-patch, import, worktree, git, and
-  broader file-management/tool surfaces.
-- The restored `filesystem` domain is not provider-visible tool discovery and
-  does not expand `capability::execute`.
+- Restored in Phase 2 Slice 4: backend/generic-result filesystem agent
+  operations for bounded read/list/find/glob/text search/diff and
+  preview-first write/edit/apply-patch under trusted working-directory roots.
+- Still deferred: native file/patch review UI, import, worktree, git, and
+  broader file-management/product surfaces.
+- The `filesystem` domain now has separate workspace-browser and agent-toolbox
+  surfaces; it still does not add fixed native product panels.
 - No fake validation, fake workspace analytics, import tree, session tree, or
   source-control workspace surface was restored.
 

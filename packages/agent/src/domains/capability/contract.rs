@@ -46,7 +46,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "name": "execute",
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
-                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, inspect agent trace/log records, and inspect catalog discovery evidence. ",
+                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, inspect agent trace/log records, inspect catalog discovery evidence, and use bounded filesystem package previews under the current working directory. ",
                     "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
@@ -69,7 +69,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "properties": {
             "operation": {
                 "type": "string",
-                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
             },
             "input": {"type": "string", "description": "Text to record for observe."},
             "scope": {"type": "string", "description": "State scope: session, workspace, or system."},
@@ -78,6 +78,15 @@ fn execute_model_request_schema() -> serde_json::Value {
             "value": {"description": "JSON value for state_set."},
             "path": {"type": "string", "description": "Relative file path under the current working directory."},
             "content": {"type": "string", "description": "UTF-8 file content for file_write."},
+            "oldText": {"type": "string", "description": "Exact text to replace for filesystem_edit or filesystem_apply_patch."},
+            "newText": {"type": "string", "description": "Replacement text for filesystem_edit or filesystem_apply_patch."},
+            "expectedHash": {"type": "string", "description": "Expected SHA-256 content hash before a filesystem commit."},
+            "commit": {"type": "boolean", "description": "When true, commit filesystem_write/edit/apply_patch. Default is preview only."},
+            "glob": {"type": "string", "description": "Filesystem glob pattern for filesystem_glob/search_text."},
+            "showHidden": {"type": "boolean", "description": "Include hidden filesystem entries."},
+            "maxBytes": {"type": "integer", "minimum": 1, "maximum": 262144},
+            "maxFileBytes": {"type": "integer", "minimum": 1, "maximum": 262144},
+            "maxDiffBytes": {"type": "integer", "minimum": 1, "maximum": 131072},
             "command": {"type": "string", "description": "Shell command for process_run."},
             "traceId": {"type": "string", "description": "Optional trace id filter for trace_list and log_recent."},
             "traceRecordId": {"type": "string", "description": "Trace record id for trace_get."},

@@ -7,6 +7,8 @@
 //! discovery-only: they inspect metadata and write only catalog-discovery
 //! evidence. Memory operations are read-only audit views over the resource
 //! memory contract and return redacted status/list/inspect facts only.
+//! Filesystem package operations are bounded working-directory reads/searches
+//! plus preview-first write/patch operations with resource evidence.
 //! `replay_manifest` is the only read-only operation that bypasses trace-record
 //! creation; tracing that read would mutate the manifest it returns.
 //!
@@ -40,7 +42,11 @@ mod state;
 mod trace;
 
 use catalog::{catalog_conformance, catalog_inspect, catalog_search};
-use filesystem::{file_read, file_write};
+use filesystem::{
+    file_read, file_write, filesystem_apply_patch, filesystem_diff, filesystem_edit,
+    filesystem_find, filesystem_glob, filesystem_list, filesystem_read, filesystem_search_text,
+    filesystem_write,
+};
 use logs::log_recent;
 use memory::{memory_inspect, memory_list, memory_status};
 use process::process_run;
@@ -196,7 +202,10 @@ fn validate_execute_context(
         "state_get" | "state_set" | "state_list" => validate_state_scope(invocation),
         "trace_list" | "trace_get" | "log_recent" | "replay_manifest" | "memory_status"
         | "memory_list" | "memory_inspect" => require_current_session(invocation, operation),
-        "catalog_conformance" => require_idempotency_key(invocation, operation),
+        "catalog_conformance"
+        | "filesystem_write"
+        | "filesystem_edit"
+        | "filesystem_apply_patch" => require_idempotency_key(invocation, operation),
         _ => Ok(()),
     }
 }
@@ -257,6 +266,15 @@ async fn execute_operation(
         "state_list" => state_list(invocation, deps).await?,
         "file_read" => file_read(invocation).await?,
         "file_write" => file_write(invocation).await?,
+        "filesystem_read" => filesystem_read(invocation).await?,
+        "filesystem_list" => filesystem_list(invocation).await?,
+        "filesystem_find" => filesystem_find(invocation).await?,
+        "filesystem_glob" => filesystem_glob(invocation).await?,
+        "filesystem_search_text" => filesystem_search_text(invocation).await?,
+        "filesystem_diff" => filesystem_diff(invocation).await?,
+        "filesystem_write" => filesystem_write(invocation, deps).await?,
+        "filesystem_edit" => filesystem_edit(invocation, deps).await?,
+        "filesystem_apply_patch" => filesystem_apply_patch(invocation, deps).await?,
         "process_run" => process_run(invocation, deps).await?,
         "trace_list" => trace_list(invocation, deps)?,
         "trace_get" => trace_get(invocation, deps)?,
@@ -271,7 +289,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }

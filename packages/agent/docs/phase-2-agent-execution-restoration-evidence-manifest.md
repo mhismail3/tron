@@ -201,6 +201,77 @@ Focused validation:
 | `git diff --check` | exit 0 | No whitespace errors were reported. |
 | `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |
 
+## Slice 4 Implementation Evidence
+
+Branch: `codex/phase-2-filesystem-agent-tools-current`
+
+Baseline HEAD: `4c35b2119`
+
+Scope implemented:
+
+- Added a filesystem-domain agent toolbox separate from the iOS
+  workspace-browser subset.
+- Added provider-visible `capability::execute` operation values for
+  `filesystem_read`, `filesystem_list`, `filesystem_find`,
+  `filesystem_glob`, `filesystem_search_text`, `filesystem_diff`,
+  `filesystem_write`, `filesystem_edit`, and `filesystem_apply_patch` while
+  keeping `execute` as the only model-facing primitive.
+- Reused existing engine primitives for trusted working-directory authority,
+  grants, idempotency, resource leases, output contracts, resources, streams,
+  trace/replay evidence, and generic result rendering.
+- Added path authority checks that reject absolute paths, parent traversal, and
+  symlink escapes outside the trusted root; search walks do not follow
+  symlinks.
+- Added bounded read/list/search/diff output, binary body omission, bounded
+  rollback previews, exact single-match text patches, expected-hash protection
+  for existing-file commits, and mutating preview default behavior.
+- Kept provider-visible filesystem results relative to the authorized root; the
+  resource/audit layer may retain canonical locations for committed materialized
+  files.
+- Added resource-backed patch proposal evidence for previews and commits, plus
+  materialized-file resource versions and `filesystem.lifecycle` stream events
+  for commits.
+- Did not add unrelated jobs/git/web/subagent/memory/vector/procedural/
+  scheduling capabilities, native iOS file/patch UI, public DTO expansion,
+  database tables, settings, auth/provider changes, or production deployment
+  behavior.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::filesystem -- --nocapture` | exit 0 | 12 filesystem tests passed after the toolbox/helper split, covering workspace-browser regressions, parent traversal denial, symlink escape denial, bounded binary read preview, bounded text search with binary skip, preview/commit patch and materialized resources, hash/exact-match patch guards, and provider-boundary idempotency. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after classifying filesystem package files, provider-visible execute ops, working-directory requirements, and mutating idempotency requirements without weakening the authority guards. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 TMB tests passed; filesystem agent support crosses engine/resource boundaries through the engine host facade rather than private stores. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 HRA tests passed; new filesystem support files and ownership mappings are inventoried. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 TPC tests passed after adding filesystem retention rows and refreshing summary counts while keeping touched Rust files under the hard line budget. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 PCC tests passed; filesystem package implementation and tests are retained surfaces rather than deleted legacy scaffolding. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed after narrowing the deleted-filesystem guard to allow only the P2AER Slice 4 package while still rejecting retired `read_file`, `write_file`, and `edit_file` spellings. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 IARM tests passed; Slice 4 remains generic-result/resource rendering first and does not add native file/patch UI. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed after adding Slice 4 inventory and evidence rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 OPSAA tests passed after classifying the filesystem package without restoring autonomous-authorship or generated-worker surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture` | exit 0 | 26 provider prompt/converter tests passed after documenting filesystem execute operation names and mutating-operation guardrails. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability-domain tests passed with the filesystem execute operation dispatch path registered. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::registration::tests::primitive_teardown_startup_catalog_excludes_deleted_product_domains -- --nocapture` | exit 0 | 1 startup-catalog guard test passed after allowing the new Slice 4 filesystem function ids while continuing to reject retired legacy filesystem spellings. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 4 implementation, static guard updates, inventory/evidence updates, and focused filesystem tests; existing dead-code warnings remained warnings only. |
+
+No Swift or Xcode project files changed, so XcodeGen and iOS simulator tests
+were not run for Slice 4.
+
+Adversarial self-review:
+
+- Fixed a provider-visible path disclosure issue by changing filesystem execute
+  results from absolute canonical paths to `root: "working_directory"` plus a
+  relative path. Resource/audit evidence may still retain canonical locations
+  where committed materialized files require provenance.
+- Rechecked traversal, symlink escape, unbounded IO, binary-body disclosure,
+  idempotency, expected-hash, rollback-preview, stale registration, and static
+  guard risks. Real guard drift found during validation was narrowed to the new
+  Slice 4 package and rerun.
+
 ## Validation Log
 
 | Command | Result | Evidence |

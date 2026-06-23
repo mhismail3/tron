@@ -138,3 +138,13 @@ contracts, and persisted payload required fields from drifting against the
 engine resource-kernel definitions. The slice intentionally leaves native iOS
 approval UI, risk-class taxonomy, default expiry policy, interruption behavior,
 and per-package risky-action triggers to future user decisions.
+
+Slice 4 is represented as current backend evidence on row `P2AER-INV-004`:
+the filesystem domain now owns bounded agent read/list/find/glob/search/diff
+and write/edit/apply-patch operations through `capability::execute`, with
+trusted working-directory roots, traversal and symlink escape denial, bounded
+text previews, binary content omission, patch proposal resources,
+materialized-file resources for commits, lifecycle stream evidence, and
+provider-boundary idempotency for mutating operations. Native file/patch review
+UI and package-wide risky-action approval triggers remain future user
+decisions.

@@ -168,9 +168,12 @@ packages/agent/src/domains/capability/operations/process.rs	primitive	capability
 packages/agent/src/domains/capability/operations/state.rs	primitive	capability_execute	TPC-3	single model-facing execute primitive and operations
 packages/agent/src/domains/capability/operations/trace.rs	primitive	capability_execute	TPC-3	single model-facing execute primitive and operations
 packages/agent/src/domains/filesystem/contract.rs	implementation	filesystem	Phase1-closeout	Workspace-browser contract retained for approved iOS workspace selection; no model-facing filesystem expansion.
+packages/agent/src/domains/filesystem/agent_support.rs	implementation	filesystem	P2AER-Slice4	Filesystem agent toolbox helpers retained as the modular P2AER Slice 4 package; not a new engine primitive.
+packages/agent/src/domains/filesystem/agent_tools.rs	implementation	filesystem	P2AER-Slice4	Filesystem agent toolbox operations retained as the modular P2AER Slice 4 package; not a new engine primitive.
 packages/agent/src/domains/filesystem/handlers.rs	implementation	filesystem	Phase1-closeout	Workspace-browser handlers retained for approved iOS workspace selection; no model-facing filesystem expansion.
 packages/agent/src/domains/filesystem/mod.rs	implementation	filesystem	Phase1-closeout	Workspace-browser domain module retained for approved iOS workspace selection; no model-facing filesystem expansion.
 packages/agent/src/domains/filesystem/service.rs	implementation	filesystem	Phase1-closeout	Bounded workspace-browser filesystem service retained for approved iOS workspace selection; no model-facing filesystem expansion.
+packages/agent/src/domains/filesystem/tests.rs	test	filesystem	P2AER-Slice4	Filesystem toolbox tests cover path authority, bounded previews, resource evidence, and provider execute boundary.
 packages/agent/src/domains/logs/client_logs.rs	implementation	domain_worker	TPC-3	retained narrow domain worker implementation
 packages/agent/src/domains/logs/mod.rs	implementation	domain_worker	TPC-3	retained narrow domain worker implementation
 packages/agent/src/domains/message/mod.rs	implementation	domain_worker	TPC-3	retained narrow domain worker implementation

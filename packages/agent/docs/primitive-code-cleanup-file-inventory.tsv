@@ -180,9 +180,12 @@ packages/agent/src/domains/capability/operations/process.rs	retain	rust agent	PC
 packages/agent/src/domains/capability/operations/state.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/capability/operations/trace.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/filesystem/contract.rs	retain	filesystem rust domain	Phase1-closeout	Workspace-browser contracts retained for approved iOS workspace selection; broad agent filesystem tools remain deferred.
+packages/agent/src/domains/filesystem/agent_support.rs	retain	filesystem rust domain	P2AER-Slice4	Filesystem agent toolbox helper code retained as approved modular package support, not shared engine primitive code.
+packages/agent/src/domains/filesystem/agent_tools.rs	retain	filesystem rust domain	P2AER-Slice4	Filesystem agent toolbox operations retained as approved modular package code, not a legacy broad toolbox resurrection.
 packages/agent/src/domains/filesystem/handlers.rs	retain	filesystem rust domain	Phase1-closeout	Workspace-browser handler registrations retained for approved iOS workspace selection; broad agent filesystem tools remain deferred.
 packages/agent/src/domains/filesystem/mod.rs	retain	filesystem rust domain	Phase1-closeout	Workspace-browser domain module retained for approved iOS workspace selection; broad agent filesystem tools remain deferred.
 packages/agent/src/domains/filesystem/service.rs	retain	filesystem rust domain	Phase1-closeout	Bounded local filesystem browse/create service retained for approved iOS workspace selection; broad agent filesystem tools remain deferred.
+packages/agent/src/domains/filesystem/tests.rs	retain	filesystem rust tests	P2AER-Slice4	Focused filesystem package tests retained for path authority, bounded output, resource evidence, and execute boundary regression coverage.
 packages/agent/src/domains/logs/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/message/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/domains/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.

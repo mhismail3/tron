@@ -450,17 +450,19 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "filesystem::read_file",
         "filesystem::write_file",
         "filesystem::edit_file",
-        "filesystem::find",
-        "filesystem::glob",
-        "filesystem::search_text",
-        "filesystem::diff",
-        "filesystem::apply_patch",
     ] {
         assert!(
             !filesystem_contract.contains(forbidden),
-            "Phase 1 filesystem browser must not restore old agent/tool operation: {forbidden}"
+            "filesystem domain must not restore retired old filesystem operation spelling: {forbidden}"
         );
     }
+    let phase_two_inventory =
+        read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv");
+    assert!(
+        phase_two_inventory.contains("P2AER-INV-004\tfilesystem agent tool suite")
+            && phase_two_inventory.contains("current_baseline\tBPRC-FEATURE-02\tIARM-SURFACE-035"),
+        "filesystem agent tools are allowed only as the approved Slice 4 package tracked by P2AER"
+    );
     assert!(
         !repo_path("packages/agent/skills").exists(),
         "repo-managed first-party skills must remain absent"

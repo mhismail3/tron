@@ -1042,6 +1042,8 @@ packages/mac-app/Sources/Wizard/Steps/PermissionsStep.swift	swift	implementation
 packages/mac-app/Sources/Wizard/Steps/TailscaleStep.swift	swift	implementation	project	owner-private; callers must enter through the owner facade or contract
 packages/mac-app/Sources/Wizard/Steps/WelcomeStep.swift	swift	implementation	project	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/filesystem/contract.rs	rust	contract	agent:filesystem	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/domains/filesystem/agent_support.rs	rust	implementation	agent:filesystem	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/domains/filesystem/agent_tools.rs	rust	implementation	agent:filesystem	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/filesystem/handlers.rs	rust	implementation	agent:filesystem	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/domains/filesystem/mod.rs	rust	facade	agent:filesystem	callers may depend on this narrow owner-approved surface only
 packages/agent/src/domains/filesystem/service.rs	rust	implementation	agent:filesystem	owner-private; callers must enter through the owner facade or contract

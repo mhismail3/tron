@@ -223,7 +223,21 @@ fn capability_execute_requires_working_directory(invocation: &Invocation) -> boo
             .get("operation")
             .and_then(Value::as_str)
             .is_some_and(|operation| {
-                matches!(operation, "file_read" | "file_write" | "process_run")
+                matches!(
+                    operation,
+                    "file_read"
+                        | "file_write"
+                        | "filesystem_read"
+                        | "filesystem_list"
+                        | "filesystem_find"
+                        | "filesystem_glob"
+                        | "filesystem_search_text"
+                        | "filesystem_diff"
+                        | "filesystem_write"
+                        | "filesystem_edit"
+                        | "filesystem_apply_patch"
+                        | "process_run"
+                )
             })
 }
 

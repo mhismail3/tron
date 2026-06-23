@@ -297,6 +297,9 @@ fn rust_capability_execute_operations_are_decomposed() {
     for banned in [
         "async fn file_read",
         "async fn file_write",
+        "async fn filesystem_read",
+        "async fn filesystem_write",
+        "async fn filesystem_apply_patch",
         "async fn process_run",
         "fn trace_list",
         "fn trace_get",

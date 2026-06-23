@@ -249,6 +249,15 @@ mod tests {
             "primitive execute must stay registered: {function_ids:?}"
         );
         for expected in [
+            "filesystem::apply_patch",
+            "filesystem::diff",
+            "filesystem::edit",
+            "filesystem::find",
+            "filesystem::glob",
+            "filesystem::list",
+            "filesystem::read",
+            "filesystem::search_text",
+            "filesystem::write",
             "memory::configure_policy",
             "memory::edit",
             "memory::inspect",
@@ -412,11 +421,6 @@ mod tests {
             format!("filesystem::{}", "read_file"),
             format!("filesystem::{}", "write_file"),
             format!("filesystem::{}", "edit_file"),
-            format!("filesystem::{}", "find"),
-            format!("filesystem::{}", "glob"),
-            format!("filesystem::{}", "search_text"),
-            format!("filesystem::{}", "diff"),
-            format!("filesystem::{}", "apply_patch"),
         ]);
         prefixes
     }
