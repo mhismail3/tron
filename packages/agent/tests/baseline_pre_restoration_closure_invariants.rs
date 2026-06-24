@@ -549,6 +549,32 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             && !phase_two_inventory_doc.contains("evidence plus Slice 6B index-only stage/unstage"),
         "Slice 6B docs must not claim current baseline before independent acceptance and mainline integration"
     );
+    let normalized_inventory_doc = phase_two_inventory_doc
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    for sentence in normalized_inventory_doc.split(". ") {
+        let lower_sentence = sentence.to_ascii_lowercase();
+        if !lower_sentence.contains("slice 6b") {
+            continue;
+        }
+        for forbidden in [
+            "current behavior",
+            "current baseline",
+            "accepted behavior",
+            "accepted baseline",
+            "is accepted",
+            "has been accepted",
+            "is integrated",
+            "has been integrated",
+            "mainline baseline",
+        ] {
+            assert!(
+                !lower_sentence.contains(forbidden),
+                "Slice 6B docs must not overclaim pre-integration status with `{forbidden}` in sentence: {sentence}"
+            );
+        }
+    }
     let git_source = read_repo_file("packages/agent/src/domains/git/mod.rs")
         + &read_repo_file("packages/agent/src/domains/git/contract.rs")
         + &read_repo_file("packages/agent/src/domains/git/mutation.rs")

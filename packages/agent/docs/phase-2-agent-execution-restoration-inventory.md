@@ -63,13 +63,14 @@ skills/rules/hooks, memory, MCP, scheduling, program execution,
 database/events/settings, dependency restoration, and APNs/device notification
 capability.
 
-Slice 6A and Slice 6B change only the git/worktree row as a source-control
-foundation: repository status, bounded staged/unstaged diff evidence, and
-index-only stage/unstage are current behavior through `domains/git` and
-`capability::execute` operation values. Slice 6B is limited to explicit
-`git_stage`/`git_unstage` operations over trusted-root relative paths, with
-idempotency, mutation reason, expected HEAD preconditions, bounded before/after
-evidence, `git_index_change` resources, and `git.lifecycle` stream events.
+Slice 6A is the current git/worktree source-control foundation for repository
+status and bounded staged/unstaged diff evidence through `domains/git` and
+`capability::execute` operation values. Slice 6B index-only stage/unstage is an
+implementation candidate on the fix branch pending independent acceptance and
+mainline integration. It is limited to explicit `git_stage`/`git_unstage`
+operations over trusted-root relative paths, with idempotency, mutation reason,
+expected HEAD preconditions, bounded before/after evidence, `git_index_change`
+resources, and `git.lifecycle` stream events.
 Worktree graph resources, commits, branch operations, merges/rebases/resets,
 pushes/PRs, conflict resolution workflows, and native SourceChanges remain
 deferred.

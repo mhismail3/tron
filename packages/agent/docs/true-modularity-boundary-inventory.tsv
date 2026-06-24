@@ -1094,3 +1094,11 @@ packages/agent/src/domains/jobs/support.rs	rust	implementation	agent:jobs	owner-
 packages/agent/src/domains/jobs/tests.rs	rust	test-support	agent:jobs	test-only helper; production code must not depend on it
 packages/agent/src/domains/jobs/types.rs	rust	contract	agent:jobs	may be shared across the owning boundary without concrete implementation imports
 packages/agent/src/engine/durability/resources/job_definitions.rs	rust	implementation	rust:engine	owner-private resource definition module; callers use engine resource facade
+packages/agent/src/domains/capability/operations/git.rs	rust	implementation	agent:capability	owner-private execute adapter; callers enter through capability::execute
+packages/agent/src/domains/git/mod.rs	rust	facade	agent:git	domain root owns registration and docs; implementation stays in owner modules
+packages/agent/src/domains/git/contract.rs	rust	contract	agent:git	may be shared across registration while preserving git owner schemas
+packages/agent/src/domains/git/handlers.rs	rust	implementation	agent:git	owner-private handler bindings; external callers use registered functions
+packages/agent/src/domains/git/mutation.rs	rust	implementation	agent:git	owner-private index-only mutation and evidence; callers use registered functions
+packages/agent/src/domains/git/service.rs	rust	implementation	agent:git	owner-private status, diff, path, and git command service; callers use registered functions
+packages/agent/src/domains/git/types.rs	rust	implementation	agent:git	owner-private request, result, and evidence helpers; callers must use git contracts or facade
+packages/agent/src/engine/durability/resources/git_definitions.rs	rust	implementation	rust:engine	owner-private resource definition module; callers use engine resource facade

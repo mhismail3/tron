@@ -107,6 +107,7 @@ Current over-budget exceptions:
 
 | Path | Current LOC | Owner | Reason | Cleanup row |
 |------|-------------|-------|--------|-------------|
+| `packages/agent/src/domains/git/tests.rs` | 1039 | Git domain tests | Slice 6A/6B source-control tests covering status/diff evidence, index-only stage/unstage, path/conflict/idempotency/resource guards, and provider-visible `capability::execute` routing. | PCC-6/P2AER-INV-013 |
 | `packages/agent/tests/ios_affordance_restoration_map_invariants.rs` | 1106 | IARM invariant owner | Large static invariant suite covering historical map closure, stale wording, physical-device redaction, queue/phase anchors, and APNs defer guards. | PCC-6/IARM-9 |
 | `packages/ios-app/Tests/Core/Events/UnifiedEventTransformerTests.swift` | 2140 | iOS reconstruction tests | Large stored-event reconstruction suite. | PCC-6 |
 | `packages/ios-app/Tests/Infrastructure/SourceGuardTests.swift` | 1799 | iOS static guards | Primitive shell absence, source guards, and HRA hierarchy gates. | PCC-6/HRA-8/HRA-11 |
