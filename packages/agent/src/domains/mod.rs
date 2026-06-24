@@ -3,10 +3,11 @@
 //! Each declared child module is part of the retained bare loop: startup and
 //! system metadata, provider/auth/settings setup, session/message/log truth,
 //! model providers, blobs, catalog-discovery evidence, approval/freshness
-//! evidence, memory contract custody, durable non-interactive jobs, and the single model-facing
-//! `capability::execute` primitive, plus the narrow iOS workspace-browser
-//! filesystem domain. Product/tool domains are otherwise intentionally not
-//! declared on this branch.
+//! evidence, memory contract custody, durable non-interactive jobs, read-only
+//! git/worktree facts, and the single model-facing `capability::execute`
+//! primitive, plus the narrow iOS workspace-browser filesystem domain.
+//! Product/tool domains are otherwise intentionally not declared on this
+//! branch.
 //!
 //! ## Submodules
 //!
@@ -19,6 +20,7 @@
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
 //! | `filesystem` | Human-facing workspace picker: home, directory list, folder creation |
+//! | `git` | Read-only repository/worktree status and tracked diff evidence |
 //! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, transcription, and worker lifecycle |
 //!
 //! Each retained domain `contract.rs` is the local source of truth for that
@@ -57,7 +59,10 @@
 //! transcription domain is restored only as local speech-to-text for composer
 //! input; saved voice notes and media storage remain absent. The worker
 //! lifecycle domain is the post-baseline package/launch substrate for
-//! self-updating workers; it is not a restored product tool domain. New domain
+//! self-updating workers; it is not a restored product tool domain. The git
+//! domain is restored only as a read-only foundation for `git_status` and
+//! `git_diff`; staging, commits, merges, rebases, pushes, branch deletion,
+//! conflict resolution, and native SourceChanges UI remain absent. New domain
 //! behavior must add a contract, deps narrowing, handler binding, tests, and
 //! README/domain-doc updates together.
 //!
@@ -75,6 +80,7 @@ pub mod blob;
 pub mod capability;
 pub mod catalog_discovery;
 pub mod filesystem;
+pub mod git;
 pub mod jobs;
 pub mod logs;
 pub mod memory;
