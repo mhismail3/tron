@@ -159,8 +159,7 @@ extension EventStoreManager {
 
     /// Merge existing local session data with server info.
     func mergeSessionData(existing: CachedSession, serverInfo: SessionInfo, serverOrigin: String) -> CachedSession {
-        // Prefer server title if available, then keep the existing local title
-        let title = serverInfo.title ?? existing.title
+        let title = Self.mergedTitle(existing: existing, serverInfo: serverInfo)
 
         // Use server lastActivity if available, otherwise keep local
         let lastActivityAt = serverInfo.lastActivity ?? existing.lastActivityAt
@@ -198,6 +197,49 @@ extension EventStoreManager {
             session.lastActivityLines = existing.lastActivityLines
         }
         return session
+    }
+
+    /// Server-generated titles are authoritative. When the server has no title,
+    /// normalize only the pre-fix iOS cache fallback where `title` was copied
+    /// from a workspace basename. The iOS cache does not own local renames, so
+    /// other nonempty titles remain preserved until the server replaces them.
+    private static func mergedTitle(existing: CachedSession, serverInfo: SessionInfo) -> String? {
+        if let serverTitle = serverInfo.title,
+           !serverTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return serverTitle
+        }
+
+        guard let existingTitle = existing.title,
+              !existingTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !isLegacyWorkspaceTitle(
+                  existingTitle,
+                  source: existing.source,
+                  existingWorkingDirectory: existing.workingDirectory,
+                  serverWorkingDirectory: serverInfo.workingDirectory
+              )
+        else {
+            return nil
+        }
+
+        return existingTitle
+    }
+
+    private static func isLegacyWorkspaceTitle(
+        _ title: String,
+        source: String?,
+        existingWorkingDirectory: String,
+        serverWorkingDirectory: String?
+    ) -> Bool {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedTitle.isEmpty else { return false }
+        if source == "chat", normalizedTitle == "Chat" { return false }
+
+        let workspaceNames = [existingWorkingDirectory, serverWorkingDirectory]
+            .compactMap { $0 }
+            .map { ($0 as NSString).lastPathComponent.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        return workspaceNames.contains(normalizedTitle)
     }
 
     /// Convert RawEvent to SessionEvent.
