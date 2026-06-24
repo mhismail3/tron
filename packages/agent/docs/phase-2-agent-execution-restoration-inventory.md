@@ -70,10 +70,11 @@ stage/unstage through explicit `git_stage`/`git_unstage` operations over
 trusted-root relative paths, with idempotency, mutation reason, expected HEAD
 preconditions, bounded before/after evidence, `git_index_change` resources, and
 `git.lifecycle` stream events.
-The next selected source-control sub-slice is Slice 6C Git Commit Evidence
-Foundation: one commit from the already-staged index on the current named
-branch, guarded by expected HEAD, expected index tree, idempotency, reason,
-resource evidence, lifecycle events, and hook/editor/signing suppression.
+This branch carries the Slice 6C Git Commit Evidence Foundation candidate:
+one commit from the already-staged index on the current named branch, guarded
+by expected HEAD, expected index tree, idempotency, reason, resource evidence,
+lifecycle events, and hook/editor/signing suppression. Mainline acceptance is
+pending review.
 Worktree graph resources, branch operations, merges/rebases/resets,
 stash/clean, fetch/pull/push, PR handoff, conflict resolution workflows, and
 native SourceChanges remain deferred.
@@ -191,11 +192,10 @@ scheduling, notifications, or native iOS process panels. Queue-backed internal
 job dispatch also remains deferred pending an explicit queued-grant design.
 
 `P2AER-INV-013` is current baseline for Slice 6A read-only Git status/diff
-evidence and accepted Slice 6B index-only stage/unstage. The mutating boundary
-is intentionally narrow: explicit paths, resource-backed
-evidence, lifecycle stream evidence, expected HEAD freshness, idempotency, and
-static guards proving no commit, branch, merge/rebase/reset, push/PR, worktree
-graph, conflict resolution workflow, or native SourceChanges surface was added.
-The next implementation handoff is Slice 6C: add `git_commit` as staged-index
-commit creation evidence only, with detached HEAD, branch management, remotes,
-conflicts, and native UI still out of scope.
+evidence, accepted Slice 6B index-only stage/unstage, and this branch's Slice
+6C staged-index commit candidate. The mutating boundary is intentionally
+narrow: explicit paths for index mutation, resource-backed evidence, lifecycle
+stream evidence, expected HEAD freshness, expected index-tree freshness for
+commit, idempotency, and static guards proving no branch, merge/rebase/reset,
+push/PR, worktree graph, conflict resolution workflow, or native SourceChanges
+surface was added. Mainline acceptance of `git_commit` remains pending review.

@@ -18,5 +18,8 @@ operation_bindings! {
         "unstage" => |invocation, deps| {
             super::mutation::unstage_value(&deps.engine_host, invocation, &invocation.payload).await
         },
+        "commit" => |invocation, deps| {
+            super::commit::commit_value(&deps.engine_host, invocation, &invocation.payload).await
+        },
     ];
 }

@@ -975,6 +975,15 @@ Explicit non-goals:
   for a later policy decision, though the resource/event evidence should be
   sufficient for future approval checks.
 
+#### Slice 6C Candidate Implementation Note
+
+Implementation branch `codex/phase-2-slice-6c-git-commit-evidence` starts from
+`origin/main@bc469ba3458ecce8301eb84abbd82070cfd0362a`. The candidate adds
+only `git_commit` through the existing `capability::execute` and `domains/git`
+boundaries, with staged-index tree freshness, resource/stream evidence, and
+hook/editor/pager/signing/prompt suppression. It remains pending independent
+review and is not yet recorded as an accepted mainline baseline.
+
 Review focus and risks:
 
 - Git commit is a branch-state mutation, so review should verify that the only

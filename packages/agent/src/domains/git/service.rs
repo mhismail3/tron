@@ -1,5 +1,6 @@
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::thread;
@@ -226,6 +227,9 @@ pub(super) fn repository_facts(
         ["symbolic-ref", "--quiet", "--short", "HEAD"],
     )?;
     let head_oid = git_optional_stdout(&worktree_root, ["rev-parse", "--verify", "HEAD"])?;
+    let head_tree_oid =
+        git_optional_stdout(&worktree_root, ["rev-parse", "--verify", "HEAD^{tree}"])?;
+    let index_tree_oid = staged_index_tree_oid(&worktree_root)?;
     let upstream = git_optional_stdout(
         &worktree_root,
         [
@@ -260,6 +264,8 @@ pub(super) fn repository_facts(
         detached_head: branch.is_none() && head_oid.is_some(),
         branch,
         head_oid,
+        head_tree_oid,
+        index_tree_oid,
         upstream,
         ahead,
         behind,
@@ -377,19 +383,261 @@ where
     })
 }
 
+pub(super) fn git_commit_output_bounded(
+    dir: &Path,
+    message: &str,
+    stdout_limit: usize,
+) -> Result<BoundedGitOutput, CapabilityError> {
+    let mut child = git_command_base(dir)
+        .arg("-c")
+        .arg("core.hooksPath=/dev/null")
+        .arg("-c")
+        .arg("commit.gpgSign=false")
+        .arg("-c")
+        .arg("gpg.program=false")
+        .arg("-c")
+        .arg("core.pager=cat")
+        .arg("-c")
+        .arg("credential.helper=")
+        .arg("commit")
+        .arg("--no-verify")
+        .arg("--no-gpg-sign")
+        .arg("--no-status")
+        .arg("-m")
+        .arg(message)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_EDITOR", ":")
+        .env("VISUAL", ":")
+        .env("EDITOR", ":")
+        .env("GIT_PAGER", "cat")
+        .env("PAGER", "cat")
+        .env("GIT_ASKPASS", "/bin/false")
+        .env("SSH_ASKPASS", "/bin/false")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| internal(format!("run git commit: {error}")))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| internal("capture git commit stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| internal("capture git commit stderr"))?;
+    let stdout_reader = thread::spawn(move || read_bounded(stdout, stdout_limit));
+    let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_GIT_STDERR_BYTES));
+    let status = child
+        .wait()
+        .map_err(|error| internal(format!("wait for git commit: {error}")))?;
+    let (stdout, stdout_truncated) = stdout_reader
+        .join()
+        .map_err(|_| internal("join git commit stdout reader"))?
+        .map_err(|error| internal(format!("read git commit stdout: {error}")))?;
+    let (stderr, _stderr_truncated) = stderr_reader
+        .join()
+        .map_err(|_| internal("join git commit stderr reader"))?
+        .map_err(|error| internal(format!("read git commit stderr: {error}")))?;
+    Ok(BoundedGitOutput {
+        status,
+        stdout,
+        stdout_truncated,
+        stderr,
+    })
+}
+
+fn staged_index_tree_oid(worktree_root: &Path) -> Result<Option<String>, CapabilityError> {
+    staged_index_tree_oid_with_limit(worktree_root, MAX_STATUS_BYTES)
+}
+
+fn staged_index_tree_oid_with_limit(
+    worktree_root: &Path,
+    stdout_limit: usize,
+) -> Result<Option<String>, CapabilityError> {
+    let output = git_output_bounded(worktree_root, ["ls-files", "-s", "-z"], stdout_limit)?;
+    if output.stdout_truncated {
+        return Err(invalid(
+            "git index tree calculation refused truncated index listing",
+        ));
+    }
+    let mut root = TreeNode::default();
+    for record in output.stdout.split(|byte| *byte == 0) {
+        if record.is_empty() {
+            continue;
+        }
+        let Some(tab_index) = record.iter().position(|byte| *byte == b'\t') else {
+            return Err(internal("parse git index entry"));
+        };
+        let metadata = String::from_utf8_lossy(&record[..tab_index]);
+        let mut parts = metadata.split_whitespace();
+        let mode = parts
+            .next()
+            .ok_or_else(|| internal("parse git index entry mode"))?
+            .as_bytes()
+            .to_vec();
+        let oid = parts
+            .next()
+            .ok_or_else(|| internal("parse git index entry oid"))?
+            .to_owned();
+        let stage = parts
+            .next()
+            .ok_or_else(|| internal("parse git index entry stage"))?;
+        if stage != "0" {
+            return Ok(None);
+        }
+        root.insert(&record[tab_index + 1..], mode, oid)?;
+    }
+    hash_tree_node(worktree_root, &root).map(Some)
+}
+
+fn hash_tree_node(worktree_root: &Path, node: &TreeNode) -> Result<String, CapabilityError> {
+    let mut content = Vec::new();
+    for (name, entry) in node.sorted_entries() {
+        match entry {
+            TreeEntry::Blob { mode, oid } => {
+                content.extend_from_slice(mode);
+                content.push(b' ');
+                content.extend_from_slice(name);
+                content.push(0);
+                content.extend_from_slice(
+                    &hex::decode(oid).map_err(|error| internal(format!("decode oid: {error}")))?,
+                );
+            }
+            TreeEntry::Tree(child) => {
+                let oid = hash_tree_node(worktree_root, child)?;
+                content.extend_from_slice(b"40000 ");
+                content.extend_from_slice(name);
+                content.push(0);
+                content.extend_from_slice(
+                    &hex::decode(oid).map_err(|error| internal(format!("decode oid: {error}")))?,
+                );
+            }
+        }
+    }
+    git_hash_tree_content(worktree_root, &content)
+}
+
+fn git_hash_tree_content(worktree_root: &Path, content: &[u8]) -> Result<String, CapabilityError> {
+    let mut child = git_command_base(worktree_root)
+        .arg("hash-object")
+        .arg("-t")
+        .arg("tree")
+        .arg("--stdin")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| internal(format!("run git hash-object: {error}")))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| internal("open git hash-object stdin"))?
+        .write_all(content)
+        .map_err(|error| internal(format!("write git hash-object stdin: {error}")))?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| internal(format!("wait for git hash-object: {error}")))?;
+    if output.status.success() {
+        return Ok(trim_stdout(&output.stdout));
+    }
+    Err(CapabilityError::Custom {
+        code: "GIT_COMMAND_FAILED".to_owned(),
+        message: truncate_chars(String::from_utf8_lossy(&output.stderr).trim(), 1_000),
+        details: None,
+    })
+}
+
+#[derive(Default)]
+struct TreeNode {
+    entries: BTreeMap<Vec<u8>, TreeEntry>,
+}
+
+impl TreeNode {
+    fn insert(&mut self, path: &[u8], mode: Vec<u8>, oid: String) -> Result<(), CapabilityError> {
+        let mut components = path.split(|byte| *byte == b'/').collect::<Vec<_>>();
+        if components.is_empty() || components[0].is_empty() {
+            return Err(internal("parse empty git index path"));
+        }
+        let name = components.remove(0);
+        if components.is_empty() {
+            self.entries
+                .insert(name.to_vec(), TreeEntry::Blob { mode, oid });
+            return Ok(());
+        }
+        let entry = self
+            .entries
+            .entry(name.to_vec())
+            .or_insert_with(|| TreeEntry::Tree(TreeNode::default()));
+        let TreeEntry::Tree(child) = entry else {
+            return Err(internal(
+                "git index contains file and directory path collision",
+            ));
+        };
+        child.insert(&components.join(&b'/'), mode, oid)
+    }
+
+    fn sorted_entries(&self) -> Vec<(&Vec<u8>, &TreeEntry)> {
+        let mut entries = self.entries.iter().collect::<Vec<_>>();
+        entries.sort_by(|(left_name, left_entry), (right_name, right_entry)| {
+            git_tree_name_cmp(
+                left_name,
+                matches!(left_entry, TreeEntry::Tree(_)),
+                right_name,
+                matches!(right_entry, TreeEntry::Tree(_)),
+            )
+        });
+        entries
+    }
+}
+
+enum TreeEntry {
+    Blob { mode: Vec<u8>, oid: String },
+    Tree(TreeNode),
+}
+
+fn git_tree_name_cmp(
+    left: &[u8],
+    left_tree: bool,
+    right: &[u8],
+    right_tree: bool,
+) -> std::cmp::Ordering {
+    let common = left.len().min(right.len());
+    match left[..common].cmp(&right[..common]) {
+        std::cmp::Ordering::Equal => {}
+        ordering => return ordering,
+    }
+    let left_char = if left.len() == common {
+        if left_tree { b'/' } else { 0 }
+    } else {
+        left[common]
+    };
+    let right_char = if right.len() == common {
+        if right_tree { b'/' } else { 0 }
+    } else {
+        right[common]
+    };
+    left_char.cmp(&right_char)
+}
+
 fn git_command<I, S>(dir: &Path, args: I) -> Result<std::process::Output, CapabilityError>
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    Command::new("git")
+    git_command_base(dir)
+        .args(args)
+        .output()
+        .map_err(|error| internal(format!("run git: {error}")))
+}
+
+fn git_command_base(dir: &Path) -> Command {
+    let mut command = Command::new("git");
+    command
         .arg("--no-optional-locks")
         .arg("-C")
         .arg(dir)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .output()
-        .map_err(|error| internal(format!("run git: {error}")))
+        .env("GIT_TERMINAL_PROMPT", "0");
+    command
 }
 
 fn git_command_bounded<I, S>(
@@ -401,12 +649,8 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut child = Command::new("git")
-        .arg("--no-optional-locks")
-        .arg("-C")
-        .arg(dir)
+    let mut child = git_command_base(dir)
         .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -449,12 +693,8 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut child = Command::new("git")
-        .arg("--no-optional-locks")
-        .arg("-C")
-        .arg(dir)
+    let mut child = git_command_base(dir)
         .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -712,6 +952,8 @@ pub(super) fn repository_value(target: &ResolvedTarget, repository: &RepositoryF
         "branch": repository.branch,
         "detachedHead": repository.detached_head,
         "headOid": repository.head_oid,
+        "headTreeOid": repository.head_tree_oid,
+        "indexTreeOid": repository.index_tree_oid,
         "upstream": repository.upstream,
         "hasUpstream": repository.upstream.is_some(),
         "ahead": repository.ahead,
@@ -757,6 +999,121 @@ fn parse_ahead_behind(raw: Option<&str>) -> (Option<u64>, Option<u64>) {
 
 fn trim_stdout(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).trim().to_owned()
+}
+
+#[cfg(test)]
+mod service_tests {
+    use std::fs;
+    use std::path::Path;
+    use std::process::Command;
+
+    use tempfile::tempdir;
+
+    use super::{staged_index_tree_oid, staged_index_tree_oid_with_limit};
+
+    #[test]
+    fn staged_index_tree_matches_git_write_tree_without_writing_loose_objects() {
+        let repo = tempdir().expect("repo");
+        init_repo(repo.path());
+        write_file(repo.path(), "src/lib.rs", "base\n");
+        write_file(repo.path(), "README.md", "base\n");
+        git(repo.path(), ["add", "."]);
+        git(repo.path(), ["commit", "-m", "base"]);
+
+        write_file(repo.path(), "src/lib.rs", "changed\n");
+        write_file(repo.path(), "src/nested/mod.rs", "nested\n");
+        git(repo.path(), ["add", "src/lib.rs", "src/nested/mod.rs"]);
+        let loose_before = loose_object_count(repo.path());
+        let actual = staged_index_tree_oid(repo.path())
+            .expect("staged tree")
+            .expect("tree oid");
+        let loose_after = loose_object_count(repo.path());
+        let expected = git_stdout(repo.path(), ["write-tree"]);
+
+        assert_eq!(actual, expected);
+        assert_eq!(
+            loose_after, loose_before,
+            "read-only staged index tree calculation must not write loose objects"
+        );
+    }
+
+    #[test]
+    fn staged_index_tree_refuses_truncated_index_listing() {
+        let repo = tempdir().expect("repo");
+        init_repo(repo.path());
+        write_file(repo.path(), "tracked.txt", "content\n");
+        git(repo.path(), ["add", "tracked.txt"]);
+
+        let error = staged_index_tree_oid_with_limit(repo.path(), 1)
+            .expect_err("truncated index listing should fail")
+            .to_string();
+        assert!(
+            error.contains("truncated index listing"),
+            "unexpected error: {error}"
+        );
+    }
+
+    fn init_repo(path: &Path) {
+        git(path, ["init", "-b", "main"]);
+        git(path, ["config", "user.name", "Tron Test"]);
+        git(path, ["config", "user.email", "tron-test@invalid.local"]);
+    }
+
+    fn write_file(root: &Path, relative: &str, content: &str) {
+        let path = root.join(relative);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("parent dir");
+        }
+        fs::write(path, content).expect("write file");
+    }
+
+    fn loose_object_count(repo: &Path) -> usize {
+        let objects = repo.join(".git/objects");
+        fs::read_dir(objects)
+            .expect("objects dir")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().len() == 2)
+            .map(|entry| {
+                fs::read_dir(entry.path())
+                    .expect("object shard")
+                    .filter_map(Result::ok)
+                    .count()
+            })
+            .sum()
+    }
+
+    fn git<const N: usize>(path: &Path, args: [&str; N]) {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn git_stdout<const N: usize>(path: &Path, args: [&str; N]) -> String {
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(path)
+            .args(args)
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .expect("run git");
+        assert!(
+            output.status.success(),
+            "git failed\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).trim().to_owned()
+    }
 }
 
 fn truncate_chars(value: &str, max: usize) -> String {

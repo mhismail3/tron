@@ -147,9 +147,9 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         `observe`, `state_get`, `state_set`, `state_list`, `filesystem_read`, \
         `filesystem_list`, `filesystem_find`, `filesystem_glob`, \
         `filesystem_search_text`, `filesystem_diff`, `filesystem_write`, `filesystem_edit`, \
-        `filesystem_apply_patch`, `git_status`, `git_diff`, `git_stage`, `git_unstage`, `process_run`, `job_start`, `job_status`, `job_list`, \
+        `filesystem_apply_patch`, `git_status`, `git_diff`, `git_stage`, `git_unstage`, `git_commit`, `process_run`, `job_start`, `job_status`, `job_list`, \
         `job_log`, `job_cancel`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
-        `catalog_search`, `catalog_inspect`, or `catalog_conformance`. \
+        `catalog_search`, `catalog_inspect`, `catalog_conformance`, `memory_status`, `memory_list`, or `memory_inspect`. \
         Do not send `target`, `contractId`, `functionId`, or `arguments`. \
         Catalog discovery operations inspect metadata/conformance only and never execute discovered \
         functions. Put operation fields at the top level of the execute payload. \
@@ -158,7 +158,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         operations for bounded read/list/find/glob/search/diff and preview-first write/edit/patch under \
         trusted roots, `git_status` and `git_diff` for read-only repository/worktree status and \
         bounded staged/unstaged diff evidence, `git_stage` and `git_unstage` for explicit relative-path Git index \
-        mutations that require `expectedHead`, `reason`, and a stable `idempotencyKey`, `process_run` for short bounded shell commands, job operations for durable \
+        mutations that require `expectedHead`, `reason`, and a stable `idempotencyKey`, `git_commit` for one already-staged index commit with `message`, `expectedHead`, `expectedIndexTree`, `reason`, and `idempotencyKey`, `process_run` for short bounded shell commands, job operations for durable \
         non-interactive command lifecycle/status/log/cancel, trace/log operations to inspect durable \
         execution records, `replay_manifest` to \
         export the current session's `tron.replay.v1` audit manifest, and catalog operations to inspect \
@@ -166,7 +166,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         Mutating filesystem package operations require a stable `idempotencyKey`; include `reason`, use \
         preview mode before commit when possible, and provide `expectedHash` when committing changes to \
         an existing file. `job_start` and `job_cancel` require a stable `idempotencyKey`; other mutating \
-        operations should include a short `reason`; repeated writes, Git index mutations, or commands should include a stable \
+        operations should include a short `reason`; repeated writes, Git index mutations, Git commits, or commands should include a stable \
         `idempotencyKey` when retry safety matters. Except for read-only `replay_manifest`, the engine records a trace \
         record for each execute operation with status, timing, provider/model context, authority metadata, \
         touched resources, hashes where available, errors, and implementation metadata.\n\
