@@ -77,7 +77,6 @@ struct SessionSidebar: View {
             ShellToolbarContent(title: "Tron", accent: .tronEmerald, actions: actions)
         }
     }
-
     @ViewBuilder
     private func sessionRow(_ session: CachedSession) -> some View {
         let isSelected = session.id == selectedSessionId

@@ -326,7 +326,7 @@ reconstructed through server APIs, not replayed from cursor storage.
 Session list projection keeps server titles and last-message previews together:
 dashboard rows prefer generated or explicit session titles, then the latest user
 prompt preview, then `New Session` for untitled new rows. `SessionSidebar`
-composes the dashboard surface and shell actions; `SessionDashboard.swift` owns
+composes the dashboard surface and shell actions; `SessionList.swift` owns
 workspace grouping, expansion state, row status mapping, interactive row
 liquid-glass containers, and header/row presentation metrics.
 `NewSessionFlow` owns the new-session sheet workflow and presents with medium
