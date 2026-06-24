@@ -32,14 +32,27 @@ final class ComposerMicRecorder {
 
     func startRecording(maxDuration: TimeInterval) async throws {
         guard !isRecording else { return }
-        guard await engine.requestPermission() else {
-            throw RecorderError.permissionDenied
-        }
+        try Task.checkCancellation()
+        let hasPermission = await engine.requestPermission()
+        try Task.checkCancellation()
+        guard hasPermission else { throw RecorderError.permissionDenied }
 
         MicAvailabilityMonitor.shared.isRecordingInProgress = true
         do {
             try await engine.start()
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            isRecording = false
+            engine.cancel()
+            MicAvailabilityMonitor.shared.isRecordingInProgress = false
+            throw CancellationError()
         } catch {
+            if Task.isCancelled {
+                isRecording = false
+                engine.cancel()
+                MicAvailabilityMonitor.shared.isRecordingInProgress = false
+                throw CancellationError()
+            }
             MicAvailabilityMonitor.shared.isRecordingInProgress = false
             throw RecorderError.startFailed(error.localizedDescription)
         }
@@ -53,6 +66,11 @@ final class ComposerMicRecorder {
                 let (url, success) = self.stopRecording()
                 self.onFinish?(url, success)
             }
+        }
+
+        if Task.isCancelled {
+            cancelRecording()
+            throw CancellationError()
         }
     }
 

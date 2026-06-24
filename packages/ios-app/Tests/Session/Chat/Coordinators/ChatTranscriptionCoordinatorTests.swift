@@ -94,6 +94,31 @@ final class ChatTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertEqual(context.transcribedMimeType, "audio/x-caf")
     }
 
+    func testCancelledRecordingStartupCleansUpAfterLateStartCompletion() async {
+        let coordinator = ChatTranscriptionCoordinator()
+        let context = MockTranscriptionContext()
+        let startSuspended = expectation(description: "recording startup suspended")
+        context.onStartRecordingSuspended = {
+            startSuspended.fulfill()
+        }
+
+        let task = Task { @MainActor in
+            await coordinator.toggleRecording(context: context)
+        }
+
+        await fulfillment(of: [startSuspended], timeout: 1.0)
+        task.cancel()
+        context.resumeStartRecording()
+        await task.value
+
+        XCTAssertEqual(context.startRecordingCallCount, 1)
+        XCTAssertEqual(context.cancelRecordingCallCount, 1)
+        XCTAssertFalse(context.isRecording)
+        XCTAssertFalse(context.isTranscribing)
+        XCTAssertEqual(context.inputText, "")
+        XCTAssertTrue(context.errors.isEmpty)
+    }
+
     func testToggleRecordingDoesNotStartWhileProcessing() async {
         let coordinator = ChatTranscriptionCoordinator()
         let context = MockTranscriptionContext()
@@ -182,12 +207,15 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
 
     var readinessCallCount = 0
     var startRecordingCallCount = 0
+    var cancelRecordingCallCount = 0
     var stopRecordingCallCount = 0
     var loadedURL: URL?
     var transcribedMimeType: String?
     var errors: [String] = []
     var shownErrors: [String] = []
+    var onStartRecordingSuspended: (() -> Void)?
     var onTranscriptionStarted: (() -> Void)?
+    private var startRecordingContinuation: CheckedContinuation<Void, Never>?
     private var transcribeContinuation: CheckedContinuation<String, Error>?
 
     func requireTranscriptionReady() async throws {
@@ -199,7 +227,19 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
 
     func startRecording() async throws {
         startRecordingCallCount += 1
+        if onStartRecordingSuspended != nil {
+            await withCheckedContinuation { continuation in
+                startRecordingContinuation = continuation
+                onStartRecordingSuspended?()
+            }
+        }
         isRecording = true
+    }
+
+    func cancelRecording() {
+        cancelRecordingCallCount += 1
+        isRecording = false
+        isTranscribing = false
     }
 
     @discardableResult
@@ -223,6 +263,11 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     func resumeTranscription() {
         transcribeContinuation?.resume(returning: nextTranscript)
         transcribeContinuation = nil
+    }
+
+    func resumeStartRecording() {
+        startRecordingContinuation?.resume()
+        startRecordingContinuation = nil
     }
 
     func loadAudioData(from url: URL) async throws -> Data {
