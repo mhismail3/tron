@@ -412,8 +412,8 @@ Current living entry points:
   constraints, first-audit target, accepted deferred scope, and current
   Phase 2 Slice 5A, accepted Slice 6A through Slice 6E source-control
   foundations, accepted Slice 7A goal/question foundation, and accepted Slice
-  8A web fetch/source provenance foundation, and the Slice 8B web source
-  citation/inspection implementation candidate.
+  8A web fetch/source provenance foundation, and the accepted Slice 8B web
+  source citation/inspection foundation.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -1025,9 +1025,9 @@ This foundation does not add an autonomous goal runner, planner, hidden prompt
 queue, scheduler/reminder, notification/APNs behavior, subagents, public
 `/engine` goal API expansion, settings fields, or native Work/question UI.
 The accepted Slice 8A foundation adds the `web` domain as a source provenance
-owner without adding direct public `web::*` catalog functions, and the Slice 8B
-implementation candidate adds read-only source list/inspect operations for
-citation assembly. Provider-visible access remains the single
+owner without adding direct public `web::*` catalog functions, and the accepted
+Slice 8B foundation adds read-only source list/inspect operations for citation
+assembly. Provider-visible access remains the single
 `capability::execute` primitive with operation values `web_fetch`,
 `web_source_list`, and `web_source_inspect`. Direct fetch requires a trusted
 agent/system runtime context, current session, idempotency key, allowed

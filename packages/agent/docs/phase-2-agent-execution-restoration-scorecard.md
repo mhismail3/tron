@@ -24,21 +24,22 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`origin/main@d2cb7cd32976f1de460defe5fc0cb094669b0140`
-(`docs: accept phase 2 slice 8a`). That line includes accepted Slice 6A
+`main@8033e22932f55388a94f9d18ce6b11a91f9f1545`
+(`feat: add web source citation inspection`) plus this Slice 8B closeout
+documentation commit. That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
 stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
 6D local branch-start evidence, accepted Slice 6E read-only branch inventory
-evidence, accepted Slice 7A goal/question lifecycle evidence, and accepted
-Slice 8A web fetch/source provenance evidence.
+evidence, accepted Slice 7A goal/question lifecycle evidence, accepted Slice 8A
+web fetch/source provenance evidence, and accepted Slice 8B web source
+citation/inspection evidence.
 
-Candidate note: Slice 8B implementation work starts from this accepted Slice 8A
-baseline and adds read-only `web_source_list` / `web_source_inspect`
-inspection operations for citation assembly. Until review and integration, 8B
-remains an implementation candidate, not an accepted baseline. Direct URL fetch
-provenance is accepted; later search providers, browser automation, crawling,
-robots policy, login/cookies/session reuse, native source UI, public `/engine`
-web APIs, and network-enabled jobs remain deferred.
+Closeout note: Slice 8B is accepted after independent review thread
+`019efb6e-dfc0-7b73-8bd6-d23f91e82248` returned `slice accepted` with no
+findings. Direct URL fetch provenance and read-only source inspection are
+accepted; later search providers, browser automation, crawling, robots policy,
+login/cookies/session reuse, native source UI, public `/engine` web APIs, and
+network-enabled jobs remain deferred.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -64,18 +65,18 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 8A: direct `web_fetch` source provenance with declared-network
   authority, bounded evidence, `web_source` resources, and no search/browser
   scope;
-- Slice 8B candidate: read-only current-session `web_source` list/inspect
+- Slice 8B: read-only current-session `web_source` list/inspect
   citation fields through `capability::execute`, with no new network breadth.
 
 Current next action:
-Review the Slice 8B implementation candidate for **Web Source Citation And
-Inspection Foundation**. Slice 8A is accepted as direct fetch source provenance
-only; Slice 8B should be accepted only after review confirms source
-list/inspect are read-only, bounded, current-session scoped, and authority
-checked. Search providers, browser automation, crawling, robots policy,
-login/cookies/session reuse, native source UI, public `/engine` web APIs,
-network-enabled jobs, autonomous goal execution, fetch/pull/push, PR handoff,
-production deployment behavior, and native SourceChanges UI remain deferred.
+Start discovery from fresh `origin/main` for the next **Slice 8: Web,
+Research, Browser, And Fetch** sub-slice unless the current canonical docs
+identify a narrower required follow-up. Slice 8A direct fetch source provenance
+and Slice 8B read-only source inspection are accepted; search providers,
+browser automation, crawling, robots policy, login/cookies/session reuse,
+native source UI, public `/engine` web APIs, network-enabled jobs, autonomous
+goal execution, fetch/pull/push, PR handoff, production deployment behavior,
+and native SourceChanges UI remain deferred.
 
 ## Scope
 
@@ -1727,6 +1728,53 @@ Accepted validation:
   deterministic regressions and inventory coverage.
 - Final independent re-review `019efb3c-e2b3-7950-b1f6-56cc884c509e`
   returned `slice accepted` with no findings.
+
+#### Slice 8B Accepted Implementation: Web Source Citation And Inspection Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8b-web-source-citation-inspection`.
+Baseline:
+`origin/main@d2cb7cd32976f1de460defe5fc0cb094669b0140`
+(`docs: accept phase 2 slice 8a`).
+Accepted commit:
+`8033e22932f55388a94f9d18ce6b11a91f9f1545`
+(`feat: add web source citation inspection`).
+
+Accepted scope:
+
+- Add execute-only `web_source_list` and `web_source_inspect` operation values
+  behind the single provider-visible `capability::execute` primitive.
+- Add `domains/web/source.rs` as the read-only source inspection owner for
+  bounded citation fields from durable `web_source` resource payloads.
+- Return requested URL, final URL, fetched time, status, content type,
+  captured SHA-256, captured/output byte counts, truncation/redaction metadata,
+  redacted snippets, trace refs, replay refs, and resource refs.
+- Require trusted current-session context plus `web.read` and `resource.read`
+  authority before returning source details.
+- Reject malformed ids, wrong resource kind/schema, missing current versions,
+  missing or stale requested versions, cross-session scope mismatches, and
+  missing read authority.
+- Keep read operations valid under `networkPolicy: none`; `web_fetch` remains
+  the only network operation and still requires declared network authority.
+
+Non-goals:
+
+- No search provider, browser automation, crawling, sitemap traversal, robots
+  policy engine, login/cookies/session reuse, credential handling,
+  shell/process network side channel, native iOS source UI, public `/engine`
+  expansion, or network-enabled `job_*` behavior.
+
+Accepted validation:
+
+- Implementation validation passed `cargo fmt`, `cargo check`, focused
+  `domains::web`, `domains::capability`, and OpenAI message-converter tests,
+  SACB/HRA/TMB/TPC/PCC/BPRC/IARM/DESI/public-protocol static guards,
+  `git diff --check`, `git ls-files -ci --exclude-standard`, and
+  `scripts/personal-info-guard.sh`.
+- Independent review thread `019efb6e-dfc0-7b73-8bd6-d23f91e82248` verified the
+  expected head, baseline ancestry, read authority, scope/version rejection,
+  no-network read behavior, provider operation exposure, static inventories,
+  and personal-info guard, then returned `slice accepted` with no findings.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

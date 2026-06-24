@@ -232,8 +232,8 @@ The accepted review/fix loop added explicit `capability::execute` scope,
 resource-kind, and selector checks for goal/question operations before handler
 execution.
 
-`P2AER-INV-012` is current baseline after accepted Slice 8A:
-Web Fetch And Source Provenance Foundation. Slice 8A adds
+`P2AER-INV-012` is current baseline after accepted Slice 8B:
+Web Source Citation And Inspection Foundation. Slice 8A adds
 `domains/web` as the package owner, one execute-only `web_fetch` operation,
 declared-network authority checks, bounded direct fetch, sanitized URL/final
 URL evidence, content-type handling, deterministic byte/output truncation
@@ -244,11 +244,11 @@ robots policy, login/cookies/session reuse, credential handling, public
 `/engine` web APIs, native iOS source UI, and network-enabled jobs remain
 deferred to later Slice 8 sub-slices.
 
-Slice 8B implementation candidate adds execute-only read operations
+Slice 8B adds execute-only read operations
 `web_source_list` and `web_source_inspect` under the same `domains/web`
 boundary. They require trusted current-session context plus `web.read` and
 `resource.read` authority, inspect only scoped `web_source` resources, reject
 malformed ids, wrong kinds, missing/stale versions, cross-session sources, and
 missing read authority, and return bounded citation-ready URL/status/content
 type/hash/truncation/redaction/snippet/trace/replay/resource refs without
-network I/O. This remains `pending_review` evidence until accepted on main.
+network I/O.

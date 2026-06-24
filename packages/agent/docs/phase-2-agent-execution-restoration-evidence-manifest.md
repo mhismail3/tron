@@ -1052,16 +1052,23 @@ traversal, robots policy, login/cookies/session reuse, credential reuse, shell
 or process network side channels, native iOS web/source UI, public `/engine`
 web APIs, and network-enabled jobs remain deferred to later slices.
 
-## Phase 2 Slice 8B Implementation Candidate: Web Source Citation And Inspection Foundation
+## Phase 2 Slice 8B Accepted Implementation: Web Source Citation And Inspection Foundation
 
 Implementation branch:
 `codex/phase-2-slice-8b-web-source-citation-inspection`.
 Baseline:
 `origin/main@d2cb7cd32976f1de460defe5fc0cb094669b0140`
 (`docs: accept phase 2 slice 8a`).
-Status: `pending_review`.
+Accepted commit:
+`8033e22932f55388a94f9d18ce6b11a91f9f1545`
+(`feat: add web source citation inspection`).
+Implementation thread:
+`019efb53-19a3-7c43-8afd-2cf6972055cd`.
+Independent review thread:
+`019efb6e-dfc0-7b73-8bd6-d23f91e82248`.
+Status: `accepted`.
 
-Candidate implementation evidence:
+Accepted implementation evidence:
 
 - Adds execute-only `web_source_list` and `web_source_inspect` operation values
   behind the single provider-visible `capability::execute` primitive.
@@ -1081,17 +1088,29 @@ Candidate implementation evidence:
   automation, crawling, robots policy, login/cookies/session reuse, native
   source UI, public `/engine` API, or network-enabled job behavior is added.
 
-Candidate validation to rerun before review:
+Review and validation:
 
+- Independent review thread `019efb6e-dfc0-7b73-8bd6-d23f91e82248` found no
+  blocking issues and returned `slice accepted`.
+- Review verified the expected head, baseline ancestry, read authority,
+  current-session scope, stale/missing version rejection, no-network read
+  behavior, provider operation exposure, static inventories, and
+  personal-info guard.
 - `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
-- `cargo check --manifest-path packages/agent/Cargo.toml`
+  passed.
+- `cargo check --manifest-path packages/agent/Cargo.toml` passed with
+  pre-existing dead-code warnings.
 - `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::web -- --nocapture`
+  passed.
 - `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`
-- OpenAI message converter focused tests
-- SACB/HRA/TMB/TPC/PCC/BPRC/IARM/DESI/public-protocol static guard bundle
-- `git diff --check`
-- `git ls-files -ci --exclude-standard`
-- `scripts/personal-info-guard.sh`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib engine::tests::authority -- --nocapture`
+  passed in review.
+- SACB/HRA/TMB/TPC/PCC/BPRC/IARM/DESI/public-protocol static guards passed.
+- `git diff --check`, `git ls-files -ci --exclude-standard`, and
+  `scripts/personal-info-guard.sh` passed.
 
 ## Phase 2 Slice 7A Accepted Implementation: Goal And Question Foundation
 
