@@ -518,7 +518,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-05",
         "worktree_git",
         "Slice 6: Git And Worktree Foundations",
-        "pending_review",
+        "current_baseline",
         &[
             "accepted Slice 6B adds index-only Git stage/unstage",
             "git_status",
@@ -526,14 +526,14 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "git_stage",
             "git_unstage",
             "git_commit",
-            "pending_review",
+            "accepted Slice 6C adds staged-index commit evidence",
         ],
         &[
             "Slice 6B adds explicit `git_stage`/`git_unstage` index mutation",
             "with `git::status`",
             "`git::diff` backend contracts",
             "`git_index_change` resource",
-            "Slice 6C Candidate Implementation",
+            "Slice 6C Accepted Implementation",
         ],
     );
     let phase_two_inventory_doc =
@@ -548,6 +548,12 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             && !phase_two_inventory_doc
                 .contains("pending independent acceptance and mainline integration"),
         "Slice 6B docs must not retain pre-acceptance candidate wording after integration"
+    );
+    assert!(
+        !phase_two_inventory_doc.contains("Slice 6C Git Commit Evidence Foundation candidate")
+            && !phase_two_inventory_doc
+                .contains("Mainline acceptance of `git_commit` remains pending review"),
+        "Slice 6C docs must not retain pre-acceptance candidate wording after integration"
     );
     let normalized_inventory_doc = phase_two_inventory_doc
         .split_whitespace()

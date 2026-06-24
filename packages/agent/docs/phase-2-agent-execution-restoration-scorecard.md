@@ -24,14 +24,15 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`origin/main@d70486e8a8dbac3723ae0efca3fef816af12a612`
-(`docs: record slice 6b acceptance`). That line includes accepted Slice 6A
+`main@6ec2e03baf03bf260e8e1d3522c93ef8bdeb563f`
+(`Fix git_commit HEAD drift guard`). That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
-stage/unstage, and mainline closeout documentation for both sub-slices.
+stage/unstage, accepted Slice 6C staged-index commit evidence, and mainline
+closeout documentation for Slice 6A and Slice 6B.
 
-Checkout note: this update started after `git fetch --prune origin` from a
-Codex discovery branch created at the same commit as `origin/main`. The
-retrospective tracker remains the source of truth for source-resolution state.
+Closeout note: this update fast-forwarded `main` from current `origin/main` to
+the accepted Slice 6C implementation stack, then records the independent review
+and fix-loop evidence here and in the retrospective tracker.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -45,19 +46,18 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 5A: durable jobs and process lifecycle foundation with accepted race
   hardening;
 - Slice 6A: read-only Git/worktree status and bounded diff evidence;
-- Slice 6B: index-only Git stage/unstage with resource and lifecycle evidence.
+- Slice 6B: index-only Git stage/unstage with resource and lifecycle evidence;
+- Slice 6C: guarded staged-index Git commit evidence with resource and
+  lifecycle evidence.
 
 Current next action:
-**Implement Phase 2 Slice 6C: Git Commit Evidence Foundation** from current
-`origin/main`. Slice 6C is the next narrow source-control sub-slice after
-accepted Slice 6B. It should create one commit from the already-staged index on
-the current named branch with resource-backed evidence, `git.lifecycle` stream
-evidence, expected HEAD, expected index-tree freshness, explicit reason,
-idempotency, and hook/editor/signing suppression. Branch creation/checkout/
-deletion, detached-HEAD commits, merge/rebase/reset, stash/clean,
-fetch/pull/push, PR handoff, conflict resolution workflows, worktree graph
-resources, public API expansion, production deployment behavior, and native
-SourceChanges UI remain deferred.
+Start discovery for the next Phase 2 Slice 6 source-control sub-slice from
+fresh `origin/main`. Slice 6C completed local staged-index commit creation;
+branch creation/checkout/deletion, detached-HEAD commits, merge/rebase/reset,
+stash/clean, fetch/pull/push, PR handoff, conflict resolution workflows,
+worktree graph resources, public API expansion, production deployment
+behavior, and native SourceChanges UI remain deferred until a discovery packet
+selects the next narrow source-control boundary.
 
 ## Scope
 
@@ -976,31 +976,35 @@ Explicit non-goals:
   for a later policy decision, though the resource/event evidence should be
   sufficient for future approval checks.
 
-#### Slice 6C Candidate Implementation Note
+#### Slice 6C Accepted Implementation Note
 
 Implementation branch `codex/phase-2-slice-6c-git-commit-evidence` starts from
-`origin/main@bc469ba3458ecce8301eb84abbd82070cfd0362a`. The candidate adds
-only `git_commit` through the existing `capability::execute` and `domains/git`
-boundaries, with staged-index tree freshness, resource/stream evidence, and
-hook/editor/pager/signing/prompt suppression. It remains pending independent
-review and is not yet recorded as an accepted mainline baseline.
+`origin/main@bc469ba3458ecce8301eb84abbd82070cfd0362a`. The accepted
+implementation adds only `git_commit` through the existing
+`capability::execute` and `domains/git` boundaries, with staged-index tree
+freshness, resource/stream evidence, hook/editor/pager/signing/prompt
+suppression, merge/sequencer rejection, guarded branch compare-and-swap, and
+symbolic HEAD lock/recheck protection. It is recorded as an accepted mainline
+baseline after the independent review/fix loop.
 
-Review focus and risks:
+Review outcome and residual risks:
 
-- Git commit is a branch-state mutation, so review should verify that the only
-  branch movement is the current named branch advancing from `expectedHead` to
-  the new commit.
-- Repository hooks are arbitrary code. The slice must prove hooks and other
-  interactive/signing paths cannot run under provider-triggered commits.
-- Resource creation happens after an external Git side effect unless the
-  implementation designs a stronger two-phase evidence path. Review should
-  inspect failure semantics carefully so successful commits remain discoverable
-  even if evidence writing fails.
-- Expected HEAD alone is insufficient. The expected index-tree guard is
-  critical and should be tested as a staged-content race.
-- Commit messages can contain sensitive user text. Evidence should store only
-  bounded message fields needed for audit and avoid logging full content
-  outside resource payloads.
+- First review thread `019ef9e2-1d45-7301-b20e-c7df03274a22` required fixes
+  for resolved merge-state rejection and stale mutation-boundary guarding.
+- Fix thread `019ef9e7-6156-7bf1-8082-945be924808a` produced
+  `f603ea566de9b021ec14cdc123f3cf71b43f1bad`, replacing porcelain commit with
+  commit-tree, commit object verification, and guarded branch ref update.
+- Re-review thread `019ef9f0-1a49-74c2-982d-b5bd08340256` required a fix for
+  symbolic HEAD branch drift between preflight and final ref update.
+- Fix thread `019ef9f4-ffa5-7221-b5ac-3af6489bb65c` produced
+  `6ec2e03baf03bf260e8e1d3522c93ef8bdeb563f`, adding HEAD lock/recheck
+  protection and deterministic synthetic-gitdir branch CAS handling.
+- Final review thread `019efa01-45ba-77b2-a2be-b8c0d2ac1d18` returned
+  `slice accepted` with no findings after source inspection and focused
+  validation.
+- Abrupt process termination can still leave a normal Git-style `HEAD.lock`
+  until cleanup, matching interrupted Git operation behavior; normal error
+  paths remove the lock.
 
 iOS validation: no native SourceChanges UI is part of Slice 6C. Run iOS tests
 only if generic runtime/resource rendering changes.
@@ -1023,7 +1027,7 @@ Validation commands:
 - `scripts/personal-info-guard.sh`;
 - `git diff --check`.
 
-iOS validation: no native SourceChanges UI is part of Slice 6B.
+iOS validation: no native SourceChanges UI is part of Slice 6C.
 
 Docs/static updates: README capabilities, Phase 2 scorecard/evidence/inventory,
 retrospective tracker, provider instruction tests, and static guard inventories.
@@ -1378,9 +1382,10 @@ Implementation slices add:
 ## Closure Verdict
 
 Phase 2 remains source-backed and proceeds one slice at a time. As of
-`origin/main@d70486e8a8dbac3723ae0efca3fef816af12a612`, Slices 1 through 4,
-Slice 5A, Slice 6A, and Slice 6B are represented on the consolidated mainline
-after independent acceptance. The next Phase 2 implementation action is
-Slice 6C: Git Commit Evidence Foundation, starting fresh from current
-`origin/main` and preserving the Slice 6C scope, freshness checks, hook
-suppression requirements, and non-goals above.
+`main@6ec2e03baf03bf260e8e1d3522c93ef8bdeb563f`, Slices 1 through 4,
+Slice 5A, Slice 6A, Slice 6B, and Slice 6C are represented on the consolidated
+mainline after independent acceptance. The next Phase 2 action is a discovery
+thread for the next narrow Slice 6 source-control boundary from fresh
+`origin/main`, preserving branch/worktree graph, merge/rebase/reset, remote,
+PR handoff, conflict workflow, production deploy, and native SourceChanges
+deferred scope until explicitly shaped.

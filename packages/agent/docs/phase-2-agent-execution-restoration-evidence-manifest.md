@@ -613,17 +613,17 @@ schema, lifecycle event shape, likely files, deterministic tests, docs/static
 updates, risks, and validation commands. This discovery section records no
 runtime behavior implementation.
 
-## Phase 2 Slice 6C Candidate Implementation: Git Commit Evidence Foundation
+## Phase 2 Slice 6C Accepted Implementation Evidence: Git Commit Evidence Foundation
 
 Implementation branch: `codex/phase-2-slice-6c-git-commit-evidence`.
 Baseline:
 `origin/main@bc469ba3458ecce8301eb84abbd82070cfd0362a`
 (`docs: shape slice 6c git commit handoff`).
 
-Candidate status: pending review, not yet accepted as the current mainline
-baseline.
+Accepted status: Slice 6C is accepted after independent review/fix loops and
+fast-forward integration into `main`.
 
-Candidate implementation evidence:
+Implementation evidence:
 
 - Adds provider-visible `git_commit` only through the existing
   `capability::execute` primitive and backend Git commit service; no direct
@@ -650,6 +650,38 @@ Candidate implementation evidence:
 - Keeps branch operations, merges/rebases/resets, remotes, PR handoff, conflict
   resolution workflows, worktree graph resources, public `/engine` DTO
   expansion, native SourceChanges UI, and production deploy behavior deferred.
+
+Independent review and fix-loop evidence:
+
+- Implementation thread `019ef9bc-d9d2-7f13-8966-7659f90e6d06` produced
+  `ce147b9ff9958c101fa7b9d40d26b0470eafbf60`.
+- Review thread `019ef9e2-1d45-7301-b20e-c7df03274a22` required fixes for
+  hidden merge-commit risk after resolved merge state and stale
+  mutation-boundary guarding.
+- Fix thread `019ef9e7-6156-7bf1-8082-945be924808a` produced
+  `f603ea566de9b021ec14cdc123f3cf71b43f1bad`, replacing porcelain commit with
+  commit-tree, single-parent/tree verification, and guarded branch ref update.
+- Re-review thread `019ef9f0-1a49-74c2-982d-b5bd08340256` required a symbolic
+  HEAD drift fix before final branch ref update.
+- Fix thread `019ef9f4-ffa5-7221-b5ac-3af6489bb65c` produced
+  `6ec2e03baf03bf260e8e1d3522c93ef8bdeb563f`, adding HEAD lock/recheck
+  protection and deterministic synthetic-gitdir branch CAS handling.
+- Final independent review thread `019efa01-45ba-77b2-a2be-b8c0d2ac1d18`
+  returned `slice accepted` with no findings. It verified the three-commit
+  stack over `origin/main`, execute-only `git_commit`, prior P1 fixes, and the
+  focused validation suite.
+
+Validation on final review and mainline closeout:
+
+- Final review passed `git diff --check origin/main...HEAD`,
+  `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`,
+  `scripts/personal-info-guard.sh`, `cargo check --manifest-path
+  packages/agent/Cargo.toml`, `cargo test --manifest-path
+  packages/agent/Cargo.toml git`, focused `domains::capability` and OpenAI
+  message-converter tests, and the requested BPRC, HRA, TMB, TPC, and DRC
+  invariant files.
+- Mainline closeout reruns the same focused validation from `main` before
+  pushing and records accepted commit ancestry in the orchestration summary.
 
 ## Validation Log
 

@@ -1769,6 +1769,7 @@ packages/agent/src/domains/jobs/tests.rs	retain	phase2 jobs	P2AER-S5A	Jobs focus
 packages/agent/src/domains/jobs/types.rs	retain	phase2 jobs	P2AER-S5A	Jobs record types retained for durable lifecycle, command, authority, limits, retention, terminal, and output schemas.
 packages/agent/src/engine/durability/resources/job_definitions.rs	retain	phase2 jobs	P2AER-S5A	Job process resource definitions retained for engine-owned job_process contract schemas.
 packages/agent/src/domains/git/contract.rs	retain	phase2 git	P2AER-S6B	Git contracts retained for status, diff, and index-only stage/unstage schemas.
+packages/agent/src/domains/git/commit.rs	retain	phase2 git	P2AER-S6C	Git commit service retained for staged-index commit evidence, guarded branch advancement, and git_commit resources.
 packages/agent/src/domains/git/handlers.rs	retain	phase2 git	P2AER-S6B	Git handlers retained for backend function dispatch under the git domain boundary.
 packages/agent/src/domains/git/mod.rs	retain	phase2 git	P2AER-S6B	Git module root retained for progressive disclosure and index-only mutation invariants.
 packages/agent/src/domains/git/mutation.rs	retain	phase2 git	P2AER-S6B	Git mutation service retained for explicit index-only stage/unstage with evidence resources and lifecycle streams.

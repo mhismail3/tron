@@ -411,8 +411,8 @@ Current living entry points:
   retrospective audit tracker for the ordered completed-slice queue, audit
   constraints, first-audit target, accepted deferred scope, and current
   Phase 2 Slice 5A, accepted Slice 6A read-only git/worktree baseline,
-  Slice 6B Git index mutation implementation evidence, and Slice 6C Git
-  commit candidate review status.
+  accepted Slice 6B Git index mutation foundation, and accepted Slice 6C Git
+  commit evidence foundation.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -930,7 +930,7 @@ Current primitive operations:
 | `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers. |
 | `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
-| `git_commit` | Candidate Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
+| `git_commit` | Accepted Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
@@ -988,19 +988,19 @@ not part of this foundation.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
-This branch carries the Slice 6C candidate `git_commit` execute operation with
-backend staged-index commit evidence pending review; commit is not registered as
-a direct `git::*` catalog function.
+Accepted Slice 6C adds the `git_commit` execute operation with backend
+staged-index commit evidence; commit is not registered as a direct `git::*`
+catalog function.
 Provider-visible access remains operation values behind the single
 `capability::execute` primitive: `git_status`, `git_diff`, `git_stage`,
-`git_unstage`, and candidate `git_commit`. The implementation resolves only
+`git_unstage`, and `git_commit`. The implementation resolves only
 relative paths under trusted working-directory metadata, rejects path traversal
 and worktree-root escapes, reports branch/detached HEAD/upstream/ahead-behind/
 dirty summaries, returns bounded status/diff evidence, exposes the staged index
 tree without writing repository tree objects, and requires idempotency key,
 human/action reason, and expected HEAD for mutation. Successful stage/unstage
 operations create `git_index_change` resources and publish `git.lifecycle`
-stream evidence. Candidate `git_commit` creates exactly one single-parent commit
+stream evidence. Accepted Slice 6C `git_commit` creates exactly one single-parent commit
 from the already-staged index on the current named branch after expected HEAD and
 expected index tree freshness checks, rejects detached/conflicted/empty-index
 and merge/sequencer states, rechecks the staged tree immediately before creating
