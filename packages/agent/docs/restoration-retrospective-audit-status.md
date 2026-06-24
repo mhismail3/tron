@@ -58,7 +58,7 @@ completed slice.
 | 5 | iOS Affordance Restoration Map | Phase 1 planning | Baseline `a0b80c7d2`; map commit `d1fd79878`; current branch head `7db72c1ee` also contains Phase 2 plan; retrospective fix branches `codex/iarm-audit-findings-fix`, `codex/iarm-reaudit-findings-fix`; fix commits `92b9357edaa3a64e7c2dfee3e41e95f391239637`, `c52205d3dc049c5fe8cc312588bec45c303cc90a` | `codex/ios-affordance-restoration-map-current` plus retrospective fix commits | `ios-affordance-restoration-map-scorecard.md`; `ios-affordance-restoration-map-evidence-manifest.md`; `ios-affordance-restoration-map-inventory.md`; `ios-affordance-restoration-map-inventory.tsv`; `ios_affordance_restoration_map_invariants.rs`; `ios-affordance-restoration-progress.md` | Accepted by second re-audit thread `019ef6c3-2174-7f31-8a9f-97fae37ae98e` after two focused fix commits; no blocking, important, or non-blocking findings remain. Historical map value and old-path coverage are preserved; IARM queue/handoff text is explicitly historical, Phase 2 live state points to approved Phase 2 artifacts and slice execution, physical-device evidence redacts the UUID, and stale-wording/UUID invariant coverage is normalized and bounded. | Mapping is not permission to restore legacy UI. Agent-execution-dependent surfaces remain Phase 2 or later; IARM planning evidence stays historical rather than live implementation state. | Closed. Continue with iOS Phase 1 Slice 1: Composer Attachment / Camera / Native Menu. |
 | 6 | iOS Phase 1 Slice 1: Composer Attachment / Camera / Native Menu | Phase 1 iOS affordance restoration | Baseline after IARM; commits `473cce8b3`, `62b577047`, `84451c969`, `019f3b9ce`, `279fafe4e`; final native-menu cleanup later `d69afc6a1`; retrospective fix commit `e73ae67d3ba1c88fc96018d95a7234928675b26f` | Progress ledger; `codex/ios-voice-dictation-affordance-current`; `codex/ios-prompt-input-snippet-affordance-current` for later label cleanup; retrospective fix branch `codex/iarm-retrospective-audit-closeout` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; iOS attachment/camera/source-guard tests | Accepted by re-audit thread `019ef6d7-cc14-7e10-9f18-0c55a4870a5c` after fix commit `e73ae67d3ba1c88fc96018d95a7234928675b26f`; no blocking, important, or non-blocking findings remain. Camera preview stops the live capture session immediately after successful capture enters preview, and the ledger/evidence truthfully covers camera sheet, pickers, native-menu cleanup, exact commits, coverage, and simulator/device boundaries. | Skills, prompt snippets, queue controls, plugin/catalog concepts, old non-functional menu actions, backend/agent coupling, fake server truth, generated management surfaces, and the old custom attachment sheet path remain absent. | Closed. Continue with iOS Phase 1 Slice 2: Composer Voice Transcription. |
 | 7 | iOS Phase 1 Slice 2: Composer Voice Transcription | Phase 1 iOS affordance restoration | Commits `c5f92eed3`, `ec3428283`, `abd396897`, `e095249be`; final branch head `4e66af302` includes accepted session-list/title work; retrospective fix commits `f2fb7c3303da51cb91893ff87b9d41af240702aa`, `9008894583d05fbc7848c290d2c0a75eea3e6109` | `codex/ios-voice-dictation-affordance-current` plus retrospective fix commits | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; transcription Rust/iOS tests; settings parity tests | Accepted by second re-audit thread `019ef6fa-166f-7a40-ba0d-118af72f7f94` after two focused fix commits; no blocking or important findings remain. Fixes cancel in-flight transcription/upload on chat exit, prevent late transcript/error mutation after cancellation, and make recording startup cancellation-aware across readiness, permission, recorder engine startup, post-start, and auto-stop registration boundaries. | Voice notes, persistent media storage, media client, APNs/background delivery, fake transcription, and agent-execution voice surfaces remain absent. Local-native boundaries, temp-file cleanup, recorder cancellation, and readiness/settings behavior are preserved. | Closed. Continue with Accepted Off-Plan: Session List Simplification and Native Title Generation. |
-| 8 | Accepted Off-Plan: Session List Simplification and Native Title Generation | Phase 1 accepted follow-up | Commits `0f58806c5`, `4e66af302` | `codex/ios-voice-dictation-affordance-current`; progress ledger | `ios-affordance-restoration-progress.md`; session-list/title-generation tests; README/iOS docs where touched | User-confirmed device result; Rust title-generation tests; focused iOS session-list presentation tests; server restart note recorded. | Work overview, import tree, source-control graph, workspace analytics, old title hooks/skills/rules/subagents, existing-session backfill, and title management UI remain absent. | Race checks, event reconstruction, title sanitization/bounds, shutdown registration, no old hook/subagent restoration, and session-list accessibility/density. |
+| 8 | Accepted Off-Plan: Session List Simplification and Native Title Generation | Phase 1 accepted follow-up | Commits `0f58806c5`, `4e66af302`; retrospective fix commits `634fb7469`, `72a5b9c7` | `codex/ios-voice-dictation-affordance-current`; progress ledger; retrospective fix branches `codex/session-title-cache-audit-fix`, `codex/session-title-sync-legacy-normalize` | `ios-affordance-restoration-progress.md`; session-list/title-generation tests; README/iOS docs where touched | Accepted by second re-audit thread `019ef717-d7f4-78e3-b2d5-6684e400b59f` after two focused fix commits; no findings remain. New/fork local caches no longer seed workspace basenames as row titles, legacy nil-title sync clears only exact workspace-basename titles, and rows/accessibility use `listTitle`. | Work overview, import tree, source-control graph, workspace analytics, old title hooks/skills/rules/subagents, existing-session backfill, and title management UI remain absent. Server/generated titles remain authoritative; legitimate non-workspace local titles are preserved. | Closed. Continue with iOS Phase 1 Slice 3: Recent Input History. |
 | 9 | iOS Phase 1 Slice 3: Recent Input History | Phase 1 iOS affordance restoration | Commits `16586ae07`, `3740b33a2`, `ad777a3dd`, `0655e7131`, `d69afc6a1`; progress reconciliation `48054db64` | `codex/ios-prompt-input-snippet-affordance-current` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; recent-input/input-history/attachment/source-guard tests | Focused iOS simulator tests, IARM invariant, XcodeGen, personal-info guard, whitespace, ignored-file, simulator install/launch, manual validation, and screenshot evidence recorded. | Snippets/templates, search/pagination/use counts, server prompt history, prompt-library APIs, generated prompt management, skills, queues, and routing remain absent. | Local UserDefaults retention/dedupe/clear, privacy, menu state gating, sheet ergonomics, and guards against old prompt-library surfaces. |
 | 10 | iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances | Phase 1 iOS affordance restoration | Commits `bb9057148`, `09d155bda`; reconciliation `f4cb11d68`; branch ref also has duplicate `87f53a0ca` | `codex/ios-chat-visual-cues-status-affordance-current`; progress ledger | `ios-affordance-restoration-progress.md`; chat visual/local notification/capability evidence/source-guard tests | Focused iOS simulator tests, render artifact tests, XcodeGen, reinstall/manual blank-content validation, personal-info guard, whitespace, ignored-file, and clean status recorded. | Fixed process/job/subagent/source-control/approval/memory/rules/hooks/skill/inbox panels, fake activity, notification expansion, and rich connection sheets remain deferred. | No fake chain-of-thought, local notification dedupe/lifecycle, capability evidence truthfulness, quiet empty/loading state, and source guards against old status panels. |
 | 11 | iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish | Phase 1 iOS affordance restoration | Commit `3680ea271` | `codex/ios-settings-onboarding-diagnostics-pairing-current` | `ios-affordance-restoration-progress.md`; settings/onboarding/provider/server/source-guard tests; iOS docs | Focused iOS simulator tests, Computer Use validation, screenshots, IARM invariant, personal-info guard, whitespace, ignored-file recorded. | Fixed product session lists, APNs/device broker, skills/rules/memory/worktree/process/job/goal/subagent/approval/web state, fake server-health facts, new server settings, DB tables, auth/provider behavior remain absent. | Settings parity, provider id truthfulness, pairing repair vs new origin, diagnostics copy, feedback path, and no invented server facts. |
@@ -472,10 +472,72 @@ Verification recorded by the accepted re-audit:
 - Focused `xcodebuild` test `TronMobileTests/SourceGuardTests` passed, 52
   Swift Testing tests.
 
+## Completed Audit: Accepted Off-Plan Session List Simplification and Native Title Generation
+
+Original audit thread: `019ef702-5bf2-7a82-ab5f-01720bc3283e`
+
+Original verdict: `changes required`
+
+First fix thread: `019ef707-a8de-78c1-8ca5-85799d6d196c`
+
+First fix commit: `634fb74696cfbd324cb96cf6509072cc6bd4f3b7`
+(`Fix local session title cache fallback`) on
+`codex/session-title-cache-audit-fix`
+
+First independent re-audit thread: `019ef70e-4538-7a40-98bd-86a1f52cbb73`
+
+First re-audit verdict: `changes required`, due to nil-title sync preserving
+pre-fix stale workspace-basename titles.
+
+Second fix thread: `019ef712-6975-7d60-a188-9119614fddb9`
+
+Second fix commit: `72a5b9c7c21a9ea053402b8feae6dde5d8f10913`
+(`Normalize legacy workspace titles during sync`) on
+`codex/session-title-sync-legacy-normalize`
+
+Second independent re-audit thread: `019ef717-d7f4-78e3-b2d5-6684e400b59f`
+
+Second re-audit verdict: `slice accepted`
+
+Status: accepted with no findings after the second fix.
+
+Accepted result:
+
+- New local session cache no longer promotes workspace basename into
+  `CachedSession.title`.
+- Fork/local cache no longer seeds workspace basename as title.
+- Sync merge clears only legacy cached titles that exactly equal existing or
+  server workspace basename when server title is nil or blank.
+- Server/generated titles remain authoritative, and legitimate non-workspace
+  local titles are preserved.
+- Cleared legacy titles fall back through `listTitle` to `lastUserPrompt` or
+  `New Session`.
+- Session rows and accessibility use `listTitle`; workspace names remain
+  grouping/header metadata.
+
+Accepted deferred scope:
+
+- Work overview, import tree, source-control graph, workspace analytics, old
+  title hooks/skills/rules/subagents, existing-session backfill, and title
+  management UI remain absent.
+- Future agent-execution behavior, fake backend truth, provider/public/auth/API
+  drift, broad refactors, and runtime documentation overclaims remain out of
+  scope for this accepted off-plan follow-up.
+
+Verification recorded by the accepted re-audit:
+
+- Focused `xcodebuild` for `TronMobileTests/CachedSessionTests`,
+  `TronMobileTests/SessionListPresentationTests`, and
+  `TronMobileTests/SourceGuardTests` passed, 18 selected XCTest tests plus 52
+  source guard tests.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- The review worktree was clean.
+
 ## Next Audit
 
-The next slice to audit is **Accepted Off-Plan: Session List Simplification and
-Native Title Generation**.
+The next slice to audit is **iOS Phase 1 Slice 3: Recent Input History**.
 
 ## Per-Slice Audit Start State
 
