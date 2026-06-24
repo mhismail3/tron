@@ -2,6 +2,7 @@
 
 pub(in crate::engine::tests) use super::fixtures::*;
 
+mod execute_goal_authorization;
 mod grant_derivation;
 mod helpers;
 mod invocation_authorization;

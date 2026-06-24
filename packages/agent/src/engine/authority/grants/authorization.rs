@@ -78,6 +78,14 @@ pub(super) fn authorize_with_grant(
             )));
         }
     }
+    for scope in authority_scopes_from_invocation(invocation) {
+        if !allows_item(&grant.allowed_authority_scopes, &scope) {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} does not allow required authority {scope}",
+                grant.grant_id
+            )));
+        }
+    }
     let resource_kinds = resource_kinds_from_invocation(invocation);
     for kind in &resource_kinds {
         if !allows_item(&grant.allowed_resource_kinds, kind) {
@@ -163,6 +171,23 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))
     .map(str::to_owned)
     .collect()
+}
+
+fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
+    if invocation.function_id.as_str() != "capability::execute" {
+        return Vec::new();
+    }
+    let mut scopes = Vec::new();
+    match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("goal_create" | "goal_cancel" | "question_create" | "question_answer") => {
+            push_unique(&mut scopes, "goals.write");
+        }
+        Some("goal_list" | "goal_inspect" | "question_list" | "question_inspect") => {
+            push_unique(&mut scopes, "goals.read");
+        }
+        _ => {}
+    }
+    scopes
 }
 
 fn resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String> {

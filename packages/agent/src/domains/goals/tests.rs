@@ -569,7 +569,7 @@ async fn derive_execute_grant(ctx: &ServerRuntimeContext, key: &str) -> Authorit
                 "subjectActorId": "agent:goals-session",
                 "allowedCapabilities": [EXECUTE_FUNCTION],
                 "allowedNamespaces": ["__no_namespace_authority__"],
-                "allowedAuthorityScopes": ["capability.execute", super::WRITE_SCOPE],
+                "allowedAuthorityScopes": ["capability.execute", "goals.read", super::WRITE_SCOPE],
                 "allowedResourceKinds": ["goal", super::USER_QUESTION_KIND, super::GOAL_ANSWER_KIND],
                 "resourceSelectors": ["*"],
                 "fileRoots": ["*"],
