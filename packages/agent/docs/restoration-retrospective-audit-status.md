@@ -57,7 +57,7 @@ completed slice.
 | 4 | iOS Self-Adapting Agent Cockpit Baseline | iOS baseline | Baseline `6aa395fdd`; final `a0b80c7d2`; retrospective fix branch `codex/slice-4-ios-cockpit-audit-fix`; fix commit `962164520b32bcc25ca24db41daf8bd27baad85f` | `codex/ios-agent-cockpit-baseline-current` plus retrospective fix commit | `ios-self-adapting-agent-cockpit-baseline-scorecard.md`; `ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.tsv`; `ios_self_adapting_agent_cockpit_baseline_invariants.rs` | Accepted by re-audit thread `019ef6a6-dc7b-7ff2-ae3f-ef9cc92148f7` after fix commit `962164520b32bcc25ca24db41daf8bd27baad85f`; no blocking, important, or non-blocking findings remain. Fixes preserve last good refresh facts while surfacing degraded refresh-failed status, and expose malformed live catalog decode diagnostics instead of silently dropping entries. | No fixed product panels, restored old agent-execution surfaces, passive chat runtime banner, provider-visible tool widening, public/settings/auth/DB/API expansion, or coupling to memory/filesystem/jobs internals. | Closed. Continue with iOS Affordance Restoration Map. |
 | 5 | iOS Affordance Restoration Map | Phase 1 planning | Baseline `a0b80c7d2`; map commit `d1fd79878`; current branch head `7db72c1ee` also contains Phase 2 plan; retrospective fix branches `codex/iarm-audit-findings-fix`, `codex/iarm-reaudit-findings-fix`; fix commits `92b9357edaa3a64e7c2dfee3e41e95f391239637`, `c52205d3dc049c5fe8cc312588bec45c303cc90a` | `codex/ios-affordance-restoration-map-current` plus retrospective fix commits | `ios-affordance-restoration-map-scorecard.md`; `ios-affordance-restoration-map-evidence-manifest.md`; `ios-affordance-restoration-map-inventory.md`; `ios-affordance-restoration-map-inventory.tsv`; `ios_affordance_restoration_map_invariants.rs`; `ios-affordance-restoration-progress.md` | Accepted by second re-audit thread `019ef6c3-2174-7f31-8a9f-97fae37ae98e` after two focused fix commits; no blocking, important, or non-blocking findings remain. Historical map value and old-path coverage are preserved; IARM queue/handoff text is explicitly historical, Phase 2 live state points to approved Phase 2 artifacts and slice execution, physical-device evidence redacts the UUID, and stale-wording/UUID invariant coverage is normalized and bounded. | Mapping is not permission to restore legacy UI. Agent-execution-dependent surfaces remain Phase 2 or later; IARM planning evidence stays historical rather than live implementation state. | Closed. Continue with iOS Phase 1 Slice 1: Composer Attachment / Camera / Native Menu. |
 | 6 | iOS Phase 1 Slice 1: Composer Attachment / Camera / Native Menu | Phase 1 iOS affordance restoration | Baseline after IARM; commits `473cce8b3`, `62b577047`, `84451c969`, `019f3b9ce`, `279fafe4e`; final native-menu cleanup later `d69afc6a1`; retrospective fix commit `e73ae67d3ba1c88fc96018d95a7234928675b26f` | Progress ledger; `codex/ios-voice-dictation-affordance-current`; `codex/ios-prompt-input-snippet-affordance-current` for later label cleanup; retrospective fix branch `codex/iarm-retrospective-audit-closeout` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; iOS attachment/camera/source-guard tests | Accepted by re-audit thread `019ef6d7-cc14-7e10-9f18-0c55a4870a5c` after fix commit `e73ae67d3ba1c88fc96018d95a7234928675b26f`; no blocking, important, or non-blocking findings remain. Camera preview stops the live capture session immediately after successful capture enters preview, and the ledger/evidence truthfully covers camera sheet, pickers, native-menu cleanup, exact commits, coverage, and simulator/device boundaries. | Skills, prompt snippets, queue controls, plugin/catalog concepts, old non-functional menu actions, backend/agent coupling, fake server truth, generated management surfaces, and the old custom attachment sheet path remain absent. | Closed. Continue with iOS Phase 1 Slice 2: Composer Voice Transcription. |
-| 7 | iOS Phase 1 Slice 2: Composer Voice Transcription | Phase 1 iOS affordance restoration | Commits `c5f92eed3`, `ec3428283`, `abd396897`, `e095249be`; final branch head `4e66af302` includes accepted session-list/title work | `codex/ios-voice-dictation-affordance-current` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; transcription Rust/iOS tests; settings parity tests | Rust/iOS focused tests, readiness gating, live authenticated `/engine` probe, personal-info guard, whitespace, ignored-file, and physical-device install/launch with user confirmation recorded. | Voice notes, persistent media storage, media client, APNs/background delivery, fake transcription, and agent-execution voice surfaces remain absent. | Opt-in setting parity, local readiness states, temp-file cleanup, old-server failure UX, lifecycle cancel on chat exit, and physical-device evidence boundary. |
+| 7 | iOS Phase 1 Slice 2: Composer Voice Transcription | Phase 1 iOS affordance restoration | Commits `c5f92eed3`, `ec3428283`, `abd396897`, `e095249be`; final branch head `4e66af302` includes accepted session-list/title work; retrospective fix commits `f2fb7c3303da51cb91893ff87b9d41af240702aa`, `9008894583d05fbc7848c290d2c0a75eea3e6109` | `codex/ios-voice-dictation-affordance-current` plus retrospective fix commits | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; transcription Rust/iOS tests; settings parity tests | Accepted by second re-audit thread `019ef6fa-166f-7a40-ba0d-118af72f7f94` after two focused fix commits; no blocking or important findings remain. Fixes cancel in-flight transcription/upload on chat exit, prevent late transcript/error mutation after cancellation, and make recording startup cancellation-aware across readiness, permission, recorder engine startup, post-start, and auto-stop registration boundaries. | Voice notes, persistent media storage, media client, APNs/background delivery, fake transcription, and agent-execution voice surfaces remain absent. Local-native boundaries, temp-file cleanup, recorder cancellation, and readiness/settings behavior are preserved. | Closed. Continue with Accepted Off-Plan: Session List Simplification and Native Title Generation. |
 | 8 | Accepted Off-Plan: Session List Simplification and Native Title Generation | Phase 1 accepted follow-up | Commits `0f58806c5`, `4e66af302` | `codex/ios-voice-dictation-affordance-current`; progress ledger | `ios-affordance-restoration-progress.md`; session-list/title-generation tests; README/iOS docs where touched | User-confirmed device result; Rust title-generation tests; focused iOS session-list presentation tests; server restart note recorded. | Work overview, import tree, source-control graph, workspace analytics, old title hooks/skills/rules/subagents, existing-session backfill, and title management UI remain absent. | Race checks, event reconstruction, title sanitization/bounds, shutdown registration, no old hook/subagent restoration, and session-list accessibility/density. |
 | 9 | iOS Phase 1 Slice 3: Recent Input History | Phase 1 iOS affordance restoration | Commits `16586ae07`, `3740b33a2`, `ad777a3dd`, `0655e7131`, `d69afc6a1`; progress reconciliation `48054db64` | `codex/ios-prompt-input-snippet-affordance-current` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; recent-input/input-history/attachment/source-guard tests | Focused iOS simulator tests, IARM invariant, XcodeGen, personal-info guard, whitespace, ignored-file, simulator install/launch, manual validation, and screenshot evidence recorded. | Snippets/templates, search/pagination/use counts, server prompt history, prompt-library APIs, generated prompt management, skills, queues, and routing remain absent. | Local UserDefaults retention/dedupe/clear, privacy, menu state gating, sheet ergonomics, and guards against old prompt-library surfaces. |
 | 10 | iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances | Phase 1 iOS affordance restoration | Commits `bb9057148`, `09d155bda`; reconciliation `f4cb11d68`; branch ref also has duplicate `87f53a0ca` | `codex/ios-chat-visual-cues-status-affordance-current`; progress ledger | `ios-affordance-restoration-progress.md`; chat visual/local notification/capability evidence/source-guard tests | Focused iOS simulator tests, render artifact tests, XcodeGen, reinstall/manual blank-content validation, personal-info guard, whitespace, ignored-file, and clean status recorded. | Fixed process/job/subagent/source-control/approval/memory/rules/hooks/skill/inbox panels, fake activity, notification expansion, and rich connection sheets remain deferred. | No fake chain-of-thought, local notification dedupe/lifecycle, capability evidence truthfulness, quiet empty/loading state, and source guards against old status panels. |
@@ -403,10 +403,79 @@ Verification recorded by the accepted re-audit:
   the generated project matched.
 - The re-audit worktree remained clean.
 
+## Completed Audit: iOS Phase 1 Slice 2 Composer Voice Transcription
+
+Original audit thread: `019ef6e0-1bd8-7fd3-ab94-9d627b526fab`
+
+Original verdict: `changes required`
+
+First fix thread: `019ef6e5-73f5-70b3-bc54-63c35f88a38e`
+
+First fix commit: `f2fb7c3303da51cb91893ff87b9d41af240702aa`
+(`Fix chat exit transcription cancellation`) on
+`codex/slice-7-transcription-cancel-fix`
+
+First independent re-audit thread: `019ef6ed-0ac7-76b3-b41e-1c22a5ef39cd`
+
+First re-audit verdict: `changes required`, due to the async microphone
+permission/startup cancellation race.
+
+Second fix thread: `019ef6f1-f80d-7aa1-a1ef-a2f89a173bc6`
+
+Second fix commit: `9008894583d05fbc7848c290d2c0a75eea3e6109`
+(`Fix composer transcription startup cancellation`) on
+`codex/slice-7-transcription-startup-cancel-fix`
+
+Second independent re-audit thread: `019ef6fa-166f-7a40-ba0d-118af72f7f94`
+
+Second re-audit verdict: `slice accepted`
+
+Status: accepted with no blocking or important findings after the second fix.
+
+Accepted result:
+
+- In-flight transcription/upload is a stored cancellable task, and chat exit
+  cancels it.
+- Late transcript completion cannot mutate draft/input or error state after
+  cancellation.
+- Recording startup is cancellation-aware across readiness, microphone
+  permission, recorder engine startup, post-start, and auto-stop registration
+  boundaries.
+- Cancellation wins over late non-cancellation readiness/startup errors after
+  chat exit.
+- Temp-file cleanup, recorder cancellation, readiness/settings behavior, and
+  local-native boundaries are preserved.
+- No fake transcription, persistent audio/media storage, APNs/background
+  delivery, provider/public/auth/API drift, agent-execution voice surface, dead
+  fallback, or speculative abstraction was introduced.
+
+Accepted deferred scope:
+
+- Voice notes, persistent audio/media storage, media client behavior,
+  APNs/background delivery, fake transcription, and agent-execution voice
+  surfaces remain absent.
+- Provider/public/auth/API changes, persistent audio uploads beyond the existing
+  local transcription boundary, dead fallbacks, and speculative abstractions
+  remain out of scope for this Phase 1 local-native slice.
+
+Verification recorded by the accepted re-audit:
+
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- `scripts/personal-info-guard.sh` passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed, 13 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml transcription --lib`
+  passed, 8 tests.
+- Focused `xcodebuild` test
+  `TronMobileTests/ChatTranscriptionCoordinatorTests` passed, 12 tests.
+- Focused `xcodebuild` test `TronMobileTests/SourceGuardTests` passed, 52
+  Swift Testing tests.
+
 ## Next Audit
 
-The next slice to audit is **iOS Phase 1 Slice 2: Composer Voice
-Transcription**.
+The next slice to audit is **Accepted Off-Plan: Session List Simplification and
+Native Title Generation**.
 
 ## Per-Slice Audit Start State
 
