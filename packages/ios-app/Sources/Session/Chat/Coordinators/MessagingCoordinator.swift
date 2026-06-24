@@ -2,6 +2,17 @@ import Foundation
 import PhotosUI
 import SwiftUI
 
+/// Protocol for chat contexts that can render temporary local timeline errors.
+@MainActor
+protocol LocalChatNotificationPresenting: AnyObject {
+    func appendLocalError(
+        dedupKey: String,
+        title: String,
+        message: String,
+        suggestion: String?
+    )
+}
+
 /// Protocol defining the context required by MessagingCoordinator.
 ///
 /// This protocol allows MessagingCoordinator to be tested independently from ChatViewModel
@@ -14,7 +25,7 @@ import SwiftUI
 /// - StreamingManaging: Streaming state management
 /// - SessionActivityUpdating: session activity summary updates
 @MainActor
-protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, SessionActivityUpdating {
+protocol MessagingContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, StreamingManaging, SessionActivityUpdating, LocalChatNotificationPresenting {
     /// The current input text
     var inputText: String { get set }
 
@@ -104,14 +115,7 @@ final class MessagingCoordinator {
         }
 
         context.logInfo("Sending message: \"\(text.prefix(100))...\" with \(context.attachments.count) attachments, reasoningLevel=\(reasoningLevel ?? "nil")")
-        context.clearLocalNotifications()
-        do {
-            try await context.ensureLiveEventSubscription()
-        } catch {
-            context.logError("Failed to subscribe to live session events: \(error.localizedDescription)")
-            context.showError("Could not start live session stream: \(error.localizedDescription)")
-            return
-        }
+        guard await preparePromptSend(context: context, lastUserPrompt: nil) else { return }
 
         // Reset browser dismissal for new prompt - browser can auto-open again
 
@@ -163,8 +167,64 @@ final class MessagingCoordinator {
             }
         } catch {
             context.logError("Failed to send prompt: \(error.localizedDescription)")
-            context.handleAgentError("Failed to send message: \(error.localizedDescription)")
+            context.appendLocalError(
+                dedupKey: "agent.prompt.send.failed",
+                title: "Could not send message",
+                message: error.localizedDescription,
+                suggestion: "Check the connection, then send the message again."
+            )
         }
+    }
+
+    /// Retry a prompt already present in history without consuming composer
+    /// state or appending a duplicate local user bubble.
+    func retryMessage(
+        prompt: String,
+        attachments: [FileAttachment]?,
+        context: MessagingContext
+    ) async {
+        context.logInfo("Retrying last turn (\"\(prompt.prefix(50))...\")")
+
+        guard await preparePromptSend(context: context, lastUserPrompt: prompt) else { return }
+
+        do {
+            try await context.sendPromptToServer(
+                text: prompt,
+                attachments: attachments,
+                reasoningLevel: nil,
+                idempotencyKey: .userAction("agent.prompt.retry")
+            )
+        } catch {
+            context.logError("Retry failed: \(error.localizedDescription)")
+            context.appendLocalError(
+                dedupKey: "turn.retry.failed",
+                title: "Could not retry",
+                message: error.localizedDescription,
+                suggestion: "Check the connection, then retry the turn again."
+            )
+        }
+    }
+
+    private func preparePromptSend(
+        context: MessagingContext,
+        lastUserPrompt: String?
+    ) async -> Bool {
+        context.clearLocalNotifications()
+        do {
+            try await context.ensureLiveEventSubscription()
+        } catch {
+            context.logError("Failed to subscribe to live session events: \(error.localizedDescription)")
+            context.showError("Could not start live session stream: \(error.localizedDescription)")
+            return false
+        }
+
+        context.isProcessing = true
+        context.setSessionProcessing(true)
+        if let lastUserPrompt {
+            context.updateSessionActivitySummary(lastUserPrompt: lastUserPrompt, lastAssistantResponse: nil)
+        }
+        context.resetStreamingManager()
+        return true
     }
 
     // MARK: - Abort Agent

@@ -10,7 +10,7 @@ import Foundation
 /// - SessionIdentifiable: Session ID access
 /// - ProcessingTrackable: Processing state and session list updates
 @MainActor
-protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrackable {
+protocol ConnectionContext: LoggingContext, SessionIdentifiable, ProcessingTrackable, LocalChatNotificationPresenting {
     /// Whether the view should dismiss (e.g., session not found)
     var shouldDismiss: Bool { get set }
 
@@ -127,6 +127,12 @@ final class ConnectionCoordinator {
             context.logInfo("[RECONSTRUCT] Complete: \(result.events.count) events, isRunning=\(result.isRunning), lastSeq=\(result.lastSequence), highWaterMark=\(context.sequenceHighWaterMark)")
         } catch {
             context.logWarning("[RECONSTRUCT] Failed: \(error.localizedDescription)")
+            context.appendLocalError(
+                dedupKey: "session.reconstruct.failed",
+                title: "Could not load chat",
+                message: "Session history could not be loaded: \(error.localizedDescription)",
+                suggestion: "Check the connection, then reopen this chat to retry loading history."
+            )
         }
 
         // Always reset reconstruction flag and drain buffered events
