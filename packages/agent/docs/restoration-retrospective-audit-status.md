@@ -59,7 +59,7 @@ completed slice.
 | 6 | iOS Phase 1 Slice 1: Composer Attachment / Camera / Native Menu | Phase 1 iOS affordance restoration | Baseline after IARM; commits `473cce8b3`, `62b577047`, `84451c969`, `019f3b9ce`, `279fafe4e`; final native-menu cleanup later `d69afc6a1`; retrospective fix commit `e73ae67d3ba1c88fc96018d95a7234928675b26f` | Progress ledger; `codex/ios-voice-dictation-affordance-current`; `codex/ios-prompt-input-snippet-affordance-current` for later label cleanup; retrospective fix branch `codex/iarm-retrospective-audit-closeout` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; iOS attachment/camera/source-guard tests | Accepted by re-audit thread `019ef6d7-cc14-7e10-9f18-0c55a4870a5c` after fix commit `e73ae67d3ba1c88fc96018d95a7234928675b26f`; no blocking, important, or non-blocking findings remain. Camera preview stops the live capture session immediately after successful capture enters preview, and the ledger/evidence truthfully covers camera sheet, pickers, native-menu cleanup, exact commits, coverage, and simulator/device boundaries. | Skills, prompt snippets, queue controls, plugin/catalog concepts, old non-functional menu actions, backend/agent coupling, fake server truth, generated management surfaces, and the old custom attachment sheet path remain absent. | Closed. Continue with iOS Phase 1 Slice 2: Composer Voice Transcription. |
 | 7 | iOS Phase 1 Slice 2: Composer Voice Transcription | Phase 1 iOS affordance restoration | Commits `c5f92eed3`, `ec3428283`, `abd396897`, `e095249be`; final branch head `4e66af302` includes accepted session-list/title work; retrospective fix commits `f2fb7c3303da51cb91893ff87b9d41af240702aa`, `9008894583d05fbc7848c290d2c0a75eea3e6109` | `codex/ios-voice-dictation-affordance-current` plus retrospective fix commits | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; transcription Rust/iOS tests; settings parity tests | Accepted by second re-audit thread `019ef6fa-166f-7a40-ba0d-118af72f7f94` after two focused fix commits; no blocking or important findings remain. Fixes cancel in-flight transcription/upload on chat exit, prevent late transcript/error mutation after cancellation, and make recording startup cancellation-aware across readiness, permission, recorder engine startup, post-start, and auto-stop registration boundaries. | Voice notes, persistent media storage, media client, APNs/background delivery, fake transcription, and agent-execution voice surfaces remain absent. Local-native boundaries, temp-file cleanup, recorder cancellation, and readiness/settings behavior are preserved. | Closed. Continue with Accepted Off-Plan: Session List Simplification and Native Title Generation. |
 | 8 | Accepted Off-Plan: Session List Simplification and Native Title Generation | Phase 1 accepted follow-up | Commits `0f58806c5`, `4e66af302`; retrospective fix commits `634fb7469`, `72a5b9c7` | `codex/ios-voice-dictation-affordance-current`; progress ledger; retrospective fix branches `codex/session-title-cache-audit-fix`, `codex/session-title-sync-legacy-normalize` | `ios-affordance-restoration-progress.md`; session-list/title-generation tests; README/iOS docs where touched | Accepted by second re-audit thread `019ef717-d7f4-78e3-b2d5-6684e400b59f` after two focused fix commits; no findings remain. New/fork local caches no longer seed workspace basenames as row titles, legacy nil-title sync clears only exact workspace-basename titles, and rows/accessibility use `listTitle`. | Work overview, import tree, source-control graph, workspace analytics, old title hooks/skills/rules/subagents, existing-session backfill, and title management UI remain absent. Server/generated titles remain authoritative; legitimate non-workspace local titles are preserved. | Closed. Continue with iOS Phase 1 Slice 3: Recent Input History. |
-| 9 | iOS Phase 1 Slice 3: Recent Input History | Phase 1 iOS affordance restoration | Commits `16586ae07`, `3740b33a2`, `ad777a3dd`, `0655e7131`, `d69afc6a1`; progress reconciliation `48054db64` | `codex/ios-prompt-input-snippet-affordance-current` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; recent-input/input-history/attachment/source-guard tests | Focused iOS simulator tests, IARM invariant, XcodeGen, personal-info guard, whitespace, ignored-file, simulator install/launch, manual validation, and screenshot evidence recorded. | Snippets/templates, search/pagination/use counts, server prompt history, prompt-library APIs, generated prompt management, skills, queues, and routing remain absent. | Local UserDefaults retention/dedupe/clear, privacy, menu state gating, sheet ergonomics, and guards against old prompt-library surfaces. |
+| 9 | iOS Phase 1 Slice 3: Recent Input History | Phase 1 iOS affordance restoration | Commits `16586ae07`, `3740b33a2`, `ad777a3dd`, `0655e7131`, `d69afc6a1`; progress reconciliation `48054db64`; retrospective fix commits `705253e16644b1b8f4c05f6a57533f320703df49`, `90784394899a88e9b7877c027905d6f6f0cd2d31` | `codex/ios-prompt-input-snippet-affordance-current` plus retrospective fix branches `codex/order-9-recent-input-history-fix`, `codex/order-9-recent-input-history-share-fix` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; recent-input/input-history/attachment/source-guard tests | Accepted by second re-audit thread `019ef733-d2a9-7961-8387-db21cb646ca9` after two focused fix commits; no findings remain. Recent input history persists only after successful `agent::prompt` server sends for normal composer and pending-share text paths; failure, empty text, and attachment-only paths do not persist attempted text. | Snippets/templates, search/pagination/use counts, server prompt history, prompt-library APIs, generated prompt management, skills, queues, routing, agent-execution behavior, fake backend truth, provider/public/auth/API drift, and broad refactors remain absent. | Closed. Continue with iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances. |
 | 10 | iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances | Phase 1 iOS affordance restoration | Commits `bb9057148`, `09d155bda`; reconciliation `f4cb11d68`; branch ref also has duplicate `87f53a0ca` | `codex/ios-chat-visual-cues-status-affordance-current`; progress ledger | `ios-affordance-restoration-progress.md`; chat visual/local notification/capability evidence/source-guard tests | Focused iOS simulator tests, render artifact tests, XcodeGen, reinstall/manual blank-content validation, personal-info guard, whitespace, ignored-file, and clean status recorded. | Fixed process/job/subagent/source-control/approval/memory/rules/hooks/skill/inbox panels, fake activity, notification expansion, and rich connection sheets remain deferred. | No fake chain-of-thought, local notification dedupe/lifecycle, capability evidence truthfulness, quiet empty/loading state, and source guards against old status panels. |
 | 11 | iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish | Phase 1 iOS affordance restoration | Commit `3680ea271` | `codex/ios-settings-onboarding-diagnostics-pairing-current` | `ios-affordance-restoration-progress.md`; settings/onboarding/provider/server/source-guard tests; iOS docs | Focused iOS simulator tests, Computer Use validation, screenshots, IARM invariant, personal-info guard, whitespace, ignored-file recorded. | Fixed product session lists, APNs/device broker, skills/rules/memory/worktree/process/job/goal/subagent/approval/web state, fake server-health facts, new server settings, DB tables, auth/provider behavior remain absent. | Settings parity, provider id truthfulness, pairing repair vs new origin, diagnostics copy, feedback path, and no invented server facts. |
 | 12 | Accepted Follow-Up: Cockpit Placement and Session-List Row Polish | Phase 1 accepted follow-up | Commits `becbc0e95`, `34c53dc93`, `22cb96e72`, `9d172aa27`, `0176379ba`; progress checkpoint `da53490c1` | `codex/ios-cockpit-placement-cleanup-current`; progress ledger | `ios-affordance-restoration-progress.md`; IOSAC/IARM invariants; session-list/cockpit/settings placement tests | Focused iOS tests, simulator/Computer Use evidence, IARM and IOSAC invariants, personal-info guard, whitespace, ignored-file recorded. | No notification inbox, APNs, device broker, worker launch flow, Phase 2 capability, or passive chat runtime banner. | Placement truthfulness, diagnostics-only cockpit access, native row interaction, no custom press feedback, and no passive idle signal in chat. |
@@ -535,9 +535,73 @@ Verification recorded by the accepted re-audit:
 - `git ls-files -ci --exclude-standard` passed with empty output.
 - The review worktree was clean.
 
+## Completed Audit: iOS Phase 1 Slice 3 Recent Input History
+
+Original audit thread: `019ef71e-b36d-70d3-a7c2-06d5a339e8d2`
+
+Original verdict: `changes required`, because recent inputs were retained before
+successful send.
+
+First fix thread: `019ef724-299f-7ec3-90c9-755b07b1280a`
+
+First fix commit: `705253e16644b1b8f4c05f6a57533f320703df49`
+(`Fix recent input history send boundary`) on
+`codex/order-9-recent-input-history-fix`
+
+First independent re-audit thread: `019ef72b-868e-7562-8066-6c3b6ddab0ae`
+
+First re-audit verdict: `changes required`, because pending-share text sends in
+`ChatView.swift` bypassed recent input persistence.
+
+Second fix thread: `019ef72f-9f4d-7a73-a26e-a7288e542542`
+
+Second fix commit: `90784394899a88e9b7877c027905d6f6f0cd2d31`
+(`Fix shared prompt recent input history`) on
+`codex/order-9-recent-input-history-share-fix`
+
+Second independent re-audit thread: `019ef733-d2a9-7961-8387-db21cb646ca9`
+
+Second re-audit verdict: `slice accepted`
+
+Status: accepted with no findings after the second fix.
+
+Accepted result:
+
+- Recent input history persists only after successful `agent::prompt` server
+  sends for normal composer and pending-share text paths.
+- Subscription failure, server-send failure, empty text, and attachment-only
+  sends do not persist attempted text.
+- Successful text sends persist trimmed text through local `InputHistoryStore`,
+  preserving UserDefaults ownership, dedupe/order, and the 100-entry cap.
+- Dead legacy `TextFieldWithHistory` was removed after source/test reference
+  search.
+- Source guards cover the normal composer path, pending-share path,
+  local-native scope, and no backend prompt-history routing.
+
+Accepted deferred scope:
+
+- Snippets/templates, search/pagination/use counts, server prompt history,
+  prompt-library APIs, generated prompt management, skills, queues, and routing
+  remain absent.
+- Agent-execution behavior, fake backend truth, provider/public/auth/API drift,
+  and broad refactors remain out of scope for this Phase 1 local-native slice.
+
+Verification recorded by the accepted re-audit:
+
+- Focused `xcodebuild` selected `TronMobileTests/MessagingCoordinatorTests`,
+  `TronMobileTests/InputHistoryStoreTests`,
+  `TronMobileTests/RecentInputHistoryTests`, and
+  `TronMobileTests/SourceGuardTests`; 56 XCTest cases plus 53 source-guard tests
+  passed.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- The review worktree had no edits or commits.
+
 ## Next Audit
 
-The next slice to audit is **iOS Phase 1 Slice 3: Recent Input History**.
+The next slice to audit is **iOS Phase 1 Slice 4: Chat Visual Cues / Status /
+Error Affordances**.
 
 ## Per-Slice Audit Start State
 
