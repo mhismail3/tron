@@ -53,6 +53,14 @@ pub const MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID: &str = "tron.resource.memory_migr
 pub const JOB_PROCESS_KIND: &str = "job_process";
 /// Built-in durable process job resource schema id.
 pub const JOB_PROCESS_SCHEMA_ID: &str = "tron.resource.job_process.v1";
+/// Built-in user question resource kind.
+pub const USER_QUESTION_KIND: &str = "user_question";
+/// Built-in user question resource schema id.
+pub const USER_QUESTION_SCHEMA_ID: &str = "tron.resource.user_question.v1";
+/// Built-in goal answer resource kind.
+pub const GOAL_ANSWER_KIND: &str = "goal_answer";
+/// Built-in goal answer resource schema id.
+pub const GOAL_ANSWER_SCHEMA_ID: &str = "tron.resource.goal_answer.v1";
 /// Built-in Git index mutation evidence resource kind.
 pub const GIT_INDEX_CHANGE_KIND: &str = "git_index_change";
 /// Built-in Git index mutation evidence resource schema id.

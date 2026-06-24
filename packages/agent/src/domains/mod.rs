@@ -3,8 +3,8 @@
 //! Each declared child module is part of the retained bare loop: startup and
 //! system metadata, provider/auth/settings setup, session/message/log truth,
 //! model providers, blobs, catalog-discovery evidence, approval/freshness
-//! evidence, memory contract custody, durable non-interactive jobs, read-only
-//! Git/worktree observation, and the single model-facing
+//! evidence, memory contract custody, durable non-interactive jobs, durable
+//! goal/question lifecycle records, read-only Git/worktree observation, and the single model-facing
 //! `capability::execute` primitive, plus the narrow iOS workspace-browser
 //! filesystem domain. Product/tool domains are otherwise intentionally not
 //! declared on this branch.
@@ -18,6 +18,7 @@
 //! | `catalog_discovery` | Native catalog search, inspect, and conformance evidence |
 //! | `memory` | Memory contract resources, prompt traces, and migration envelopes |
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
+//! | `goals` | Durable goal and user-question records plus answer provenance |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
 //! | `filesystem` | Human-facing workspace picker: home, directory list, folder creation |
@@ -60,8 +61,11 @@
 //! input; saved voice notes and media storage remain absent. The worker
 //! lifecycle domain is the post-baseline package/launch substrate for
 //! self-updating workers; it is not a restored product tool domain. The git
-//! domain is restored only for read-only status/diff evidence; source-control
-//! mutations remain absent. New domain behavior must add a contract, deps
+//! domain is restored only for accepted Slice 6 source-control evidence;
+//! unaccepted source-control mutations remain absent. The goals domain is a
+//! Slice 7A backend foundation only: it records goal/question state and queue
+//! evidence, but does not run planners, schedulers, subagents, notifications,
+//! or native Work/question UI. New domain behavior must add a contract, deps
 //! narrowing, handler binding, tests, and README/domain-doc updates together.
 //!
 //! ## Test Ownership
@@ -79,6 +83,7 @@ pub mod capability;
 pub mod catalog_discovery;
 pub mod filesystem;
 pub mod git;
+pub mod goals;
 pub mod jobs;
 pub mod logs;
 pub mod memory;

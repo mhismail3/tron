@@ -30,7 +30,7 @@ use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, approval, auth, blob, capability, catalog_discovery, filesystem, git, jobs, logs,
+    agent, approval, auth, blob, capability, catalog_discovery, filesystem, git, goals, jobs, logs,
     memory, message, model, session, settings, system, transcription, worker_lifecycle,
 };
 
@@ -63,6 +63,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         catalog_discovery::worker_module(&deps)?,
         approval::worker_module(&deps)?,
         memory::worker_module(&deps)?,
+        goals::worker_module(&deps)?,
         jobs::worker_module(&deps)?,
         git::worker_module(&deps)?,
         filesystem::worker_module(&deps)?,

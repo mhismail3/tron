@@ -16,6 +16,7 @@
 
 mod definitions;
 mod git_definitions;
+mod goal_definitions;
 mod job_definitions;
 mod memory_definitions;
 mod store;

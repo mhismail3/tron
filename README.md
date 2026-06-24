@@ -704,6 +704,14 @@ deny traversal and symlink escapes, bound read/search/diff output, omit binary
 content bodies, return provider-visible paths relative to the authorized root,
 and record mutating previews/commits as patch proposal and materialized-file
 resources.
+`domains/goals` owns the Slice 7A backend goal/question foundation: durable
+`goal`, `user_question`, and `goal_answer` records, scoped list/inspect/cancel/
+answer operations, queue receipt evidence, lifecycle stream events, trace refs,
+replay refs, idempotency, expected-version guarded answers, and bounded
+provider-visible summaries through `capability::execute`. It records work and
+blocking questions only; it does not run a planner, drain queue items, schedule
+background work, notify devices, expose a public `/engine` goal API, or add
+native Work/question UI.
 `domains/worker_lifecycle` owns local package proposals,
 `tron.worker_package.v1` manifest validation, install/enable/disable/launch/
 stop/retire functions, verified source-tree package digests, scoped token
@@ -939,6 +947,14 @@ Current primitive operations:
 | `job_list` | List durable `job_process` resources in the current session scope, optionally filtered by lifecycle state. |
 | `job_log` | Read bounded stdout/stderr previews and output-resource refs for one durable job. |
 | `job_cancel` | Request cancellation for a running durable job; runtime finalization records terminal cancellation with bounded output evidence after signalling the owned process group. |
+| `goal_create` | Create a durable scoped `goal` resource with objective, criteria, queue receipt, stream cursor, trace refs, replay refs, authority, and idempotency evidence. |
+| `goal_list` | List bounded goal summaries for the current session/workspace scope with deterministic truncation flags. |
+| `goal_inspect` | Inspect one scoped goal resource, including lifecycle state, refs, revisions, and bounded output metadata. |
+| `goal_cancel` | Cancel an open goal with reason and idempotency evidence; already-cancelled goals replay as terminal state and invalid transitions fail closed. |
+| `question_create` | Create a durable scoped `user_question` resource, optionally attached to an open goal, with expiry/options/free-form policy and lifecycle stream evidence. |
+| `question_list` | List bounded user-question summaries for the current scope, optionally filtered by goal, with truncation flags. |
+| `question_inspect` | Inspect one scoped `user_question` resource, including answer/expiry/version and bounded refs. |
+| `question_answer` | Record one expected-version guarded `goal_answer` resource with answer text, reason, actor provenance, idempotency, stream evidence, and replay refs. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -955,7 +971,7 @@ provider-visible execute surface; file access goes through the hardened
 `filesystem_*` operation package.
 
 The accepted startup-registration baseline keeps only loop infrastructure domains:
-`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
+`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `goals`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
 `worker_lifecycle`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
@@ -1569,7 +1585,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process` lifecycle records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process` lifecycle records, durable goal/question/answer records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

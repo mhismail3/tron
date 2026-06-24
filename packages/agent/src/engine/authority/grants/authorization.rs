@@ -138,6 +138,9 @@ fn allows_resource_id(grant: &EngineGrant, resource_id: &str) -> bool {
             &grant.resource_selectors,
             &format!("resource:{resource_id}"),
         )
+        || resource_id.split_once(':').is_some_and(|(kind, _)| {
+            allows_item(&grant.resource_selectors, &format!("kind:{kind}"))
+        })
 }
 
 fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {

@@ -1448,6 +1448,12 @@ Work dashboard is native or generated first.
 
 Exact next slice to implement: **Slice 7A: Goal And Question Foundation**.
 
+Implementation candidate: branch
+`codex/phase-2-slice-7a-goal-question-foundation-v3` starts from
+`origin/main@9950ea484299901e09af9077f33466021118ca33` and is pending review.
+Treat the candidate as evidence for Slice 7A only after independent review and
+integration accept it.
+
 Why this is the smallest safe Slice 7 cut: current main already has engine
 queues, streams, generic resources, approval/freshness evidence, memory trace
 refs, and replay rows. It does not have a package that owns durable user goals,

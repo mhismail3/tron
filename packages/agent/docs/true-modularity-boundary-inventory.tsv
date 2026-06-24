@@ -1105,3 +1105,12 @@ packages/agent/src/domains/git/mutation.rs	rust	implementation	agent:git	owner-p
 packages/agent/src/domains/git/service.rs	rust	implementation	agent:git	owner-private status, diff, path, and git command service; callers use registered functions
 packages/agent/src/domains/git/types.rs	rust	implementation	agent:git	owner-private request, result, and evidence helpers for status/index/commit/branch-start/branch-inventory; callers must use git contracts or facade
 packages/agent/src/engine/durability/resources/git_definitions.rs	rust	implementation	rust:engine	owner-private Git evidence resource definition module; callers use engine resource facade
+packages/agent/src/domains/capability/operations/goals.rs	rust	implementation	agent:capability	owner-private execute adapter; callers enter through capability::execute
+packages/agent/src/domains/goals/mod.rs	rust	facade	agent:goals	domain root owns registration and docs; implementation stays in owner modules
+packages/agent/src/domains/goals/contract.rs	rust	contract	agent:goals	may be shared across registration while preserving goals owner schemas
+packages/agent/src/domains/goals/handlers.rs	rust	implementation	agent:goals	owner-private handler bindings; external callers use registered functions
+packages/agent/src/domains/goals/service.rs	rust	implementation	agent:goals	owner-private resource-backed lifecycle service; callers enter through capability::execute or domain functions
+packages/agent/src/domains/goals/support.rs	rust	implementation	agent:goals	owner-private parsing, scope, queue, stream, and resource helpers
+packages/agent/src/domains/goals/tests.rs	rust	test-support	agent:goals	test-only helper; production code must not depend on it
+packages/agent/src/domains/goals/types.rs	rust	contract	agent:goals	may be shared across the owning boundary without concrete implementation imports
+packages/agent/src/engine/durability/resources/goal_definitions.rs	rust	implementation	rust:engine	owner-private goal/question resource definition module; callers use engine resource facade

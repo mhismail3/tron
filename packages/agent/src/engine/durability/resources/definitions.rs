@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::git_definitions::git_resource_type_definitions;
+use super::goal_definitions::goal_question_resource_type_definitions;
 use super::job_definitions::job_resource_type_definitions;
 use super::memory_definitions::memory_resource_type_definitions;
 use super::types::{
@@ -55,21 +56,30 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
             "tron.resource.goal.v1",
             json!({
                 "type": "object",
-                "required": ["intent"],
+                "required": ["schemaVersion", "state", "objective", "authority", "idempotency", "traceRefs", "replayRefs", "createdAt", "updatedAt", "revision"],
                 "additionalProperties": true,
                 "properties": {
-                    "intent": {"type": "string"},
+                    "schemaVersion": {"type": "string"},
+                    "state": {"type": "string", "enum": ["open", "cancelled", "archived"]},
+                    "objective": {"type": "string"},
                     "successCriteria": {"type": "array", "items": {"type": "string"}},
-                    "inputResources": {"type": "array", "items": {"type": "string"}},
-                    "expectedOutputKinds": {"type": "array", "items": {"type": "string"}},
                     "constraints": {"type": "object"},
-                    "riskBudget": {"type": "object"},
-                    "authorityPolicy": {"type": "object"},
-                    "retentionPolicy": {"type": "object"},
-                    "completionCondition": {"type": "string"}
+                    "queueRefs": {"type": "array"},
+                    "planRefs": {"type": "array"},
+                    "evidenceRefs": {"type": "array"},
+                    "questionRefs": {"type": "array"},
+                    "answerRefs": {"type": "array"},
+                    "cancellation": {"type": ["object", "null"]},
+                    "authority": {"type": "object"},
+                    "idempotency": {"type": "object"},
+                    "traceRefs": {"type": "array"},
+                    "replayRefs": {"type": "array"},
+                    "createdAt": {"type": "string"},
+                    "updatedAt": {"type": "string"},
+                    "revision": {"type": "integer"}
                 }
             }),
-            vec!["open", "in_progress", "completed", "failed", "archived"],
+            vec!["open", "cancelled", "archived"],
             vec![
                 "input",
                 "subgoal",
@@ -78,6 +88,8 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "candidate_output",
                 "promoted_output",
                 "decided_by",
+                "blocked_by",
+                "answered_by",
                 "supported_by",
                 "contradicted_by",
                 "supersedes",
@@ -681,6 +693,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
         ),
     ];
     definitions.extend(git_resource_type_definitions());
+    definitions.extend(goal_question_resource_type_definitions());
     definitions.extend(job_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
     definitions

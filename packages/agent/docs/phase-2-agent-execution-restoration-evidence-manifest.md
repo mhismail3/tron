@@ -979,6 +979,50 @@ Discovery validation:
 - `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
   passed with 14 tests.
 
+## Phase 2 Slice 7A Candidate: Goal And Question Foundation
+
+Implementation branch:
+`codex/phase-2-slice-7a-goal-question-foundation-v3`.
+Baseline:
+`origin/main@9950ea484299901e09af9077f33466021118ca33`
+(`docs: shape phase 2 slice 7a handoff`).
+
+Candidate status: pending review. This branch is implementation evidence only;
+it is not accepted until independent review and integration complete.
+
+Candidate scope:
+
+- Adds `packages/agent/src/domains/goals/` as the backend owner for durable
+  goal, user-question, and answer records behind the existing
+  `capability::execute` primitive.
+- Adds execute operations `goal_create`, `goal_list`, `goal_inspect`,
+  `goal_cancel`, `question_create`, `question_list`, `question_inspect`, and
+  `question_answer`.
+- Reuses the generic `goal` resource kind and the existing queue, resource,
+  stream, idempotency, trace, and replay substrates; adds only
+  `user_question` and `goal_answer` resource definitions.
+- Records bounded list/inspect output, explicit truncation flags, queue receipt
+  evidence, lifecycle stream cursors, authority/capability context, replay
+  refs, answer reasons, idempotency keys, and expected-version answer guards.
+- Keeps autonomous runners, planners, hidden prompt queues, schedulers,
+  notifications/APNs, subagents, native Work dashboards, native question
+  sheets, public `/engine` goal APIs, settings/profile fields, unrelated DB
+  tables, branch/source-control work, and production deploy behavior out of
+  scope.
+
+Candidate validation to rerun before acceptance:
+
+- Goal/question lifecycle tests through `capability::execute`, including
+  resource refs, queue receipt evidence, stream/replay refs, cancellation,
+  expiry, idempotent answer replay, stale-version rejection, malformed IDs,
+  missing context/reason, bounds, scope isolation, and list truncation.
+- Provider schema/instruction tests proving only Slice 7A operations are
+  exposed and deferred operations remain rejected.
+- Resource-definition tests covering `goal`, `user_question`, and
+  `goal_answer` schema/lifecycle contracts.
+- BPRC, DESI, CSD, IARM, HRA, TMB, TPC, SACB, formatting, check, diff, and
+  personal-info guards on the implementation branch.
+
 ## Validation Log
 
 | Command | Result | Evidence |
