@@ -919,6 +919,66 @@ Validation recorded before mainline closeout:
   true primitive cleanup, primitive code cleanup, SACB, and DESI invariant
   targets.
 
+## Phase 2 Slice 7A Discovery: Goal And Question Foundation
+
+Discovery branch: `codex/phase-2-slice-7a-discovery`.
+Baseline:
+`origin/main@db05cd467ff028530df043dc754dfd252c2211ac`
+(`docs: record slice 6e acceptance`).
+
+Discovery status: selected. Implementation may start from fresh `origin/main`;
+this discovery does not implement runtime behavior.
+
+Selected scope:
+
+- Add the first backend Slice 7 sub-slice as a domain/package-owned goal and
+  question foundation, not a broad autonomous planning/runtime slice.
+- Reuse existing engine queues, generic resources, streams, idempotency,
+  approvals, memory trace refs, and replay rows.
+- Restore durable goal lifecycle operations and durable user-question lifecycle
+  operations behind the existing `capability::execute` primitive.
+- Record bounded queue/resource/stream/replay evidence and answer provenance.
+- Keep native iOS Work dashboards and question sheets deferred until after the
+  backend contract exists.
+
+Discovery evidence:
+
+- Baseline was verified after `git fetch --prune`; the discovery worktree was
+  initially detached at `db05cd467ff028530df043dc754dfd252c2211ac`, and
+  `origin/main` resolved to the same commit.
+- Required canonical docs were read from accepted Slice 6E mainline: README
+  capability/source-control/resource sections, Phase 2 scorecard/evidence/
+  inventory artifacts, retrospective tracker, inventory TSV rows
+  `P2AER-INV-010` and `P2AER-INV-013`, and relevant `domains`, Git, jobs,
+  approval, queue, resource, registration, and capability docs/source.
+- Fresh discovery found no smaller required source-control follow-up after
+  Slice 6E. Current docs classify read-only status/diff, index stage/unstage,
+  staged-index commit, branch start, and branch inventory as current baseline,
+  while arbitrary checkout, branch deletion/rename, remotes, conflict
+  workflows, worktree graph resources, PR handoff, and native SourceChanges UI
+  remain explicit deferred policy work.
+- Current architecture has queue/resource/stream/replay substrate and an
+  existing generic `goal` resource kind, but no package-owned goal/question
+  lifecycle, user-question resource, answer provenance, or bounded
+  queue-to-goal handoff contract.
+- The scorecard now contains the full Slice 7A handoff packet: first-principles
+  UX review, architecture review, exact implementation scope, non-goals, likely
+  files, deterministic tests, docs/static updates, validation commands, risks,
+  and residual decisions.
+
+Discovery validation:
+
+- `git diff --check` and `git ls-files -ci --exclude-standard` passed.
+- `scripts/personal-info-guard.sh` passed with no personal-info leaks.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture`
+  passed with 9 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture`
+  passed with 8 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture`
+  passed with 12 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed with 14 tests.
+
 ## Validation Log
 
 | Command | Result | Evidence |

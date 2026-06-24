@@ -24,16 +24,18 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`main@719ebb5fc6d0db082a2577e44aa60982abbed253`
-(`docs: record slice 6d acceptance`). That line includes accepted Slice 6A
+`main@db05cd467ff028530df043dc754dfd252c2211ac`
+(`docs: record slice 6e acceptance`). That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
 stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
-6D local branch-start evidence, and mainline closeout documentation through
-Slice 6D.
+6D local branch-start evidence, accepted Slice 6E read-only branch inventory
+evidence, and mainline closeout documentation through Slice 6E.
 
 Closeout note: this update verified current `origin/main` after accepted Slice
-6D and records the next source-control discovery boundary here and in the
-companion artifacts.
+6E and records the next goal/question discovery boundary here and in the
+companion artifacts. No smaller source-control follow-up is required before the
+next Phase 2 slice: later Git branch checkout/delete/rename, remote, conflict,
+worktree graph, and native SourceChanges work remains intentionally deferred.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -56,12 +58,13 @@ Completed Phase 2 restoration slices at this baseline:
   `git_branch_inventory`, including bounded truncated metadata handling.
 
 Current next action:
-Start discovery from fresh `origin/main` for the next Phase 2 restoration
-slice. The current scorecard proceeds to Slice 7 goals/queues/questions unless
-the fresh discovery pass identifies a smaller required source-control follow-up.
-Branch deletion, rename, arbitrary checkout, detached-HEAD commits,
-merge/rebase/reset, stash/clean, fetch/pull/push, PR handoff, conflict
-resolution workflows, worktree graph resources, public API expansion,
+Start implementation from fresh `origin/main` for **Slice 7A: Goal And Question
+Foundation**. This is the smallest safe sub-slice of Slice 7: it restores
+durable goal/question objects and bounded queue/resource evidence without
+autonomous execution, full planning, a native Work dashboard, or fake local
+question sheets. Branch deletion, rename, arbitrary checkout, detached-HEAD
+commits, merge/rebase/reset, stash/clean, fetch/pull/push, PR handoff,
+conflict resolution workflows, worktree graph resources, public API expansion,
 production deployment behavior, and native SourceChanges UI remain deferred.
 
 ## Scope
@@ -1441,6 +1444,160 @@ queue/resource inventories.
 User decisions: default goal autonomy, when questions interrupt, and whether a
 Work dashboard is native or generated first.
 
+#### Selected Slice 7A Discovery Packet
+
+Exact next slice to implement: **Slice 7A: Goal And Question Foundation**.
+
+Why this is the smallest safe Slice 7 cut: current main already has engine
+queues, streams, generic resources, approval/freshness evidence, memory trace
+refs, and replay rows. It does not have a package that owns durable user goals,
+question prompts, answer provenance, or the relationship between goal state and
+queue evidence. Implementing those records first gives users and agents real
+inspectable work/question objects without restoring the old prompt queue,
+autonomous planner, inbox product, subagent orchestration, scheduler, or native
+iOS Work dashboard in one step.
+
+First-principles UX review:
+
+- Users should be able to ask "what work is pending?", "what question blocked
+  this goal?", and "what answer was used?" from server truth rather than from
+  chat transcript inference.
+- The first cut should be useful through `execute` and generic runtime/resource
+  rendering: create/list/inspect/cancel goals, create/list/inspect/answer
+  questions, and see bounded queue/resource refs.
+- Old `agent::run_goal`, prompt queues, work snapshots, ask-user pause planes,
+  and answer submission DTOs are evidence only. They do not authorize copying
+  old APIs or fixed iOS panels.
+
+Architecture review:
+
+- Core primitives: reuse existing engine queues, resources, streams,
+  idempotency ledger, approvals, memory trace refs, and replay. Do not add a
+  new public engine primitive unless implementation proves a generic substrate
+  gap shared by multiple packages.
+- Modular owner: add a `goal_question` or similarly named domain/package that
+  owns goal lifecycle, question lifecycle, answer idempotency, plan/evidence
+  refs, queue refs, stream payloads, and package docs/tests.
+- Resource shape: reuse the existing generic `goal` resource kind where it is
+  sufficient, then add only missing package-owned resource definitions such as
+  `user_question`, `goal_plan`, or `goal_answer` if the generic resource schema
+  cannot encode lifecycle, expiry, answer provenance, and replay refs safely.
+- Provider surface: expose only operation values behind
+  `capability::execute`, for example `goal_create`, `goal_list`,
+  `goal_inspect`, `goal_cancel`, `question_create`, `question_list`,
+  `question_inspect`, and `question_answer`. Direct `goal::*` catalog
+  functions may exist for backend/domain contracts, but model access remains
+  the single `execute` primitive.
+- Queue boundary: Slice 7A may enqueue or record queue refs only when the
+  queue item points at an explicitly scoped domain function with durable
+  receipt evidence. It must not start autonomous multi-turn execution,
+  scheduler-driven runs, subagents, or hidden prompt queues.
+- Authority boundary: mutating goal/question operations require explicit
+  idempotency and least-privilege grants. Answers must record actor, expected
+  question version, freshness/expiry outcome, trace refs, replay refs, and
+  whether the answer unblocks a goal; answer records do not mint authority.
+- Memory boundary: goal/question records may carry memory trace refs and
+  selected context refs, but Slice 7A must not add semantic retrieval,
+  automatic retention, procedural memory, or hidden prompt memory behavior.
+- iOS boundary: no native Work dashboard or question sheet in Slice 7A. iOS
+  remains generic runtime/resource rendering unless implementation touches
+  protocol DTOs for server-fact display, in which case focused decode and
+  projection tests are required.
+
+Exact implementation scope:
+
+- Add the backend domain contract, handler table, service, support/types, and
+  resource definitions needed for durable goal/question lifecycle.
+- Support create/list/inspect/cancel for goals with explicit objective,
+  status, owner/session/workspace scope, success criteria, constraints, queue
+  refs, plan/evidence refs, cancellation reason, trace refs, replay refs, and
+  revision.
+- Support create/list/inspect/answer for user questions with prompt text,
+  requester/goal refs, answer options or free-form allowance, expiry, pending/
+  answered/expired/cancelled state, expected-version idempotent answers,
+  answer actor/provenance, trace refs, replay refs, and lifecycle stream
+  evidence.
+- Add bounded model-visible `execute` operation results and schema/static guards
+  proving the provider-visible tool remains singular.
+- Add deterministic tests for resource schemas, lifecycle transitions,
+  idempotent replay, expected-version conflicts, expiry/fail-closed answer
+  handling, scope isolation, queue ref persistence, stream publication, replay
+  refs, and provider execute routing.
+
+Explicit non-goals:
+
+- no autonomous goal runner, planner, task decomposition engine, hidden prompt
+  queue, background scheduler, reminders, notifications, inbox delivery, APNs,
+  subagents, web research, Git behavior, filesystem behavior, semantic memory,
+  native iOS Work dashboard, native question sheet, new public `/engine` goal
+  APIs, settings/profile fields, database tables outside the resource/stream/
+  queue substrate, production deployment behavior, or copied historical DTOs.
+
+Likely files and boundaries:
+
+- `packages/agent/src/domains/goals/` or
+  `packages/agent/src/domains/goal_question/`
+- `packages/agent/src/domains/mod.rs`
+- `packages/agent/src/domains/registration/catalog.rs`
+- `packages/agent/src/domains/capability/contract.rs`
+- `packages/agent/src/domains/capability/operations/mod.rs`
+- `packages/agent/src/engine/durability/resources/definitions.rs`
+- optional focused split such as
+  `packages/agent/src/engine/durability/resources/goal_definitions.rs`
+- `packages/agent/tests/*_invariants.rs` inventories and static guards for
+  BPRC, HRA, TMB, TPC, PCC, SACB, CSD, DESI, and iOS affordance boundaries as
+  touched
+- `README.md`
+- `packages/agent/docs/phase-2-agent-execution-restoration-*`
+- `packages/ios-app/docs/architecture.md` only if Swift/iOS-facing protocol or
+  generic runtime display claims change
+
+Deterministic validation gates:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+- `cargo check --manifest-path packages/agent/Cargo.toml`
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::goals -- --nocapture`
+  or the exact chosen domain test filter
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+- `scripts/personal-info-guard.sh`
+- `git diff --check`
+- `git ls-files -ci --exclude-standard`
+- If Swift files change: `cd packages/ios-app && xcodegen generate`, plus
+  focused iOS DTO/view-model tests for the touched generic runtime path.
+
+Docs/static updates required:
+
+- README capability/domain/resource/event sections for the new execute
+  operations, domain registration, resource kinds, lifecycle stream, and
+  explicit iOS non-goal.
+- Domain `mod.rs` progressive docs for the new package and any touched resource
+  kernel split.
+- Phase 2 scorecard, evidence manifest, inventory narrative, and TSV row
+  `P2AER-INV-010`.
+- Static inventory rows and source guards for BPRC, HRA, TMB, TPC, PCC, SACB,
+  CSD, DESI, and IARM as required by the touched files.
+
+Residual risks and deferred work:
+
+- The generic built-in `goal` resource kind is broad and may need package-owned
+  lifecycle constraints to avoid schema drift or ambiguous ownership.
+- Queue-backed autonomous execution needs a later grant/runner design; Slice 7A
+  should preserve queue receipt evidence without running hidden work loops.
+- Question interruption policy, notification delivery, native iOS question UI,
+  and Work dashboard placement remain user decisions after the backend
+  contract exists.
+- Expiry and cancellation must be deterministic and testable without wall-clock
+  race assumptions; prefer injectable time seams in the domain service.
+
 ### Slice 8: Web, Research, Browser, And Fetch
 
 Objective: restore network research with provenance and explicit authority.
@@ -1754,10 +1911,12 @@ Implementation slices add:
 ## Closure Verdict
 
 Phase 2 remains source-backed and proceeds one slice at a time. As of
-`main@16025248d4b9f470786e61888d5f74b7fc9f3572`, Slices 1 through 4,
+`main@db05cd467ff028530df043dc754dfd252c2211ac`, Slices 1 through 4,
 Slice 5A, Slice 6A, Slice 6B, Slice 6C, Slice 6D, and Slice 6E are represented
 on the consolidated mainline after independent acceptance. Slice 6E restores
 read-only local Git branch inventory through `git_branch_inventory` and keeps
 arbitrary checkout, branch deletion/rename, merge/rebase/reset, remote
 push/PR handoff, conflict workflow, worktree graph, production deploy, and
-native SourceChanges deferred.
+native SourceChanges deferred. The next implementation slice is Slice 7A Goal
+And Question Foundation, limited to durable backend goal/question lifecycle
+contracts and bounded queue/resource evidence.
