@@ -54,7 +54,7 @@ completed slice.
 | 1 | Primitive Minimality Closure | Pre-restoration foundation | Baseline `7b03b51f`; final `1545da37d` | `codex/primitive-minimality-closure-current` | `primitive-minimality-closure-scorecard.md`; `primitive-minimality-closure-evidence-manifest.md`; `primitive-minimality-closure-inventory.md`; `primitive-minimality-closure-inventory.tsv`; `primitive_minimality_closure_invariants.rs` | Accepted by audit thread `019ef654-8726-7781-91bf-5bbb6f6321cd`; no blocking or important findings; score 100/100 and focused deletion/minimality tests remain accepted. | No successor features, provider-visible tool widening, settings/auth/DB/iOS DTO expansion, or deploy behavior. | Closed. Future cleanup: align the invariant endpoint constant with the documented slice boundary. |
 | 2 | Baseline Pre-Restoration Closure | Pre-restoration foundation | Baseline `1545da37d`; final `4cb2387f1` | `codex/baseline-pre-restoration-closure-current`; tag `pre-restoration-baseline-2026-06-14` | `baseline-pre-restoration-closure-scorecard.md`; `baseline-pre-restoration-closure-evidence-manifest.md`; `baseline-pre-restoration-closure-inventory.md`; `baseline-pre-restoration-closure-inventory.tsv`; `baseline_pre_restoration_closure_invariants.rs`; `README.md` | Accepted by re-audit thread `019ef668-26d1-7123-924c-e7077c2232d2` after fix commit `9329dd1f92440500afd861293a9d4b6e981930ef`; no blocking, important, or non-blocking findings remain; BPRC and DESI invariants passed. | Approved restored roots `catalog_discovery`, `approval`, `jobs`, memory, and filesystem remain mapped to canonical Phase 2/BPRC lineage; deferred roots remain forbidden. | Closed. Preserve tracker active status and continue with Self-Updating Worker Runtime Foundation. |
 | 3 | Self-Updating Worker Runtime Foundation | First post-BPRC restoration foundation | Baseline `4cb2387f1`; final `6aa395fdd`; retrospective fix branches `codex/slice-3-suwrf-audit-fixes`, `codex/slice-3-suwrf-audit-fixes-2`; fix commits `07c571b6b405a9cc97588fbb3adf113ea40578bf`, `f7ca654e4` | `codex/self-updating-worker-runtime-foundation-current` plus retrospective fix commits | `self-updating-worker-runtime-foundation-scorecard.md`; `self-updating-worker-runtime-foundation-evidence-manifest.md`; `self-updating-worker-runtime-foundation-inventory.md`; `self-updating-worker-runtime-foundation-inventory.tsv`; `self_updating_worker_runtime_foundation_invariants.rs` | Accepted by second re-audit thread `019ef68f-0293-75f3-b8dc-a8a30ba2b4d0` after two focused fix commits; no blocking or important findings remain. Fixes cover stop-to-enabled relaunch state, verified deterministic source-tree `packageDigest`, fail-closed unowned stops, fail-safe child drop, startup ownership-loss reconciliation, and fenced lifecycle requests that cannot launch while startup reconciliation is still scanning stale attempts. | No MCP, skills, memory, web/browser, scheduler, subagents, prompt library, program execution, fixed iOS product panels, provider-visible tool widening, or production deploy behavior. Crash-orphaned OS processes after ownership loss remain an accepted limitation; the system records unhealthy/lost-ownership evidence and relaunchable state. | Closed. Continue with iOS Self-Adapting Agent Cockpit Baseline. |
-| 4 | iOS Self-Adapting Agent Cockpit Baseline | iOS baseline | Baseline `6aa395fdd`; final `a0b80c7d2`; retrospective fix branch `codex/slice-4-ios-cockpit-audit-fix` | `codex/ios-agent-cockpit-baseline-current` plus retrospective fix branch | `ios-self-adapting-agent-cockpit-baseline-scorecard.md`; `ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.tsv`; `ios_self_adapting_agent_cockpit_baseline_invariants.rs` | Audit thread `019ef696-2f4d-7f91-8a9c-6403cdbeff3c` found changes required; fix branch covers refresh-failure truthfulness and malformed catalog decode degradation while preserving diagnostics-only placement. | No fixed product panels, restored old agent-execution surfaces, or passive chat runtime banner. | Ready for independent re-audit of stale status handling, partial decode truthfulness, and diagnostics-only placement. |
+| 4 | iOS Self-Adapting Agent Cockpit Baseline | iOS baseline | Baseline `6aa395fdd`; final `a0b80c7d2`; retrospective fix branch `codex/slice-4-ios-cockpit-audit-fix`; fix commit `962164520b32bcc25ca24db41daf8bd27baad85f` | `codex/ios-agent-cockpit-baseline-current` plus retrospective fix commit | `ios-self-adapting-agent-cockpit-baseline-scorecard.md`; `ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.tsv`; `ios_self_adapting_agent_cockpit_baseline_invariants.rs` | Accepted by re-audit thread `019ef6a6-dc7b-7ff2-ae3f-ef9cc92148f7` after fix commit `962164520b32bcc25ca24db41daf8bd27baad85f`; no blocking, important, or non-blocking findings remain. Fixes preserve last good refresh facts while surfacing degraded refresh-failed status, and expose malformed live catalog decode diagnostics instead of silently dropping entries. | No fixed product panels, restored old agent-execution surfaces, passive chat runtime banner, provider-visible tool widening, public/settings/auth/DB/API expansion, or coupling to memory/filesystem/jobs internals. | Closed. Continue with iOS Affordance Restoration Map. |
 | 5 | iOS Affordance Restoration Map | Phase 1 planning | Baseline `a0b80c7d2`; map commit `d1fd79878`; current branch head `7db72c1ee` also contains Phase 2 plan | `codex/ios-affordance-restoration-map-current` | `ios-affordance-restoration-map-scorecard.md`; `ios-affordance-restoration-map-evidence-manifest.md`; `ios-affordance-restoration-map-inventory.md`; `ios-affordance-restoration-map-inventory.tsv`; `ios_affordance_restoration_map_invariants.rs`; `ios-affordance-restoration-progress.md` | Score 100/100; old tree census of 848 deleted/renamed iOS paths; Phase 1 queue and Phase 2 deferral anchor; invariant coverage recorded. | Mapping is not permission to restore legacy UI. Agent-execution-dependent surfaces remain Phase 2 or later. | Coverage gaps in old-path classification, overbroad grouping, stale queue state after closeout, and false implication that mapped affordances are shipped. |
 | 6 | iOS Phase 1 Slice 1: Composer Attachment / Camera / Native Menu | Phase 1 iOS affordance restoration | Baseline after IARM; commits `473cce8b3`, `62b577047`, `84451c969`, `019f3b9ce`, `279fafe4e`; final native-menu cleanup later `d69afc6a1` | Progress ledger; `codex/ios-voice-dictation-affordance-current`; `codex/ios-prompt-input-snippet-affordance-current` for later label cleanup | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; iOS attachment/camera/source-guard tests | Ledger records functional local actions only: Take Photo, Select Photos, Attach Files; native SwiftUI menu; removed custom sheet path; focused iOS tests and source guards. | Skills, prompt snippets, queue controls, plugin/catalog concepts, and old non-functional menu actions remain absent. | Local-only ownership, file/photo privacy, menu sizing/accessibility, source guards against old popup/actions, and interaction with later recent-input menu action. |
 | 7 | iOS Phase 1 Slice 2: Composer Voice Transcription | Phase 1 iOS affordance restoration | Commits `c5f92eed3`, `ec3428283`, `abd396897`, `e095249be`; final branch head `4e66af302` includes accepted session-list/title work | `codex/ios-voice-dictation-affordance-current` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; transcription Rust/iOS tests; settings parity tests | Rust/iOS focused tests, readiness gating, live authenticated `/engine` probe, personal-info guard, whitespace, ignored-file, and physical-device install/launch with user confirmation recorded. | Voice notes, persistent media storage, media client, APNs/background delivery, fake transcription, and agent-execution voice surfaces remain absent. | Opt-in setting parity, local readiness states, temp-file cleanup, old-server failure UX, lifecycle cancel on chat exit, and physical-device evidence boundary. |
@@ -227,9 +227,62 @@ Verification recorded by the accepted re-audit:
 - `git diff --check` passed.
 - `git ls-files -ci --exclude-standard` passed with empty output.
 
+## Completed Audit: iOS Self-Adapting Agent Cockpit Baseline
+
+Original audit thread: `019ef696-2f4d-7f91-8a9c-6403cdbeff3c`
+
+Original verdict: `changes required`
+
+Fix thread: `019ef69b-5651-7d33-b551-1a3de6ec28ce`
+
+Fix commit: `962164520b32bcc25ca24db41daf8bd27baad85f`
+(`codex/slice-4-ios-cockpit-audit-fix`)
+
+Independent re-audit thread: `019ef6a6-dc7b-7ff2-ae3f-ef9cc92148f7`
+
+Re-audit verdict: `slice accepted`
+
+Status: accepted with no blocking, important, or non-blocking findings after the
+fix.
+
+Accepted result:
+
+- Refresh failures no longer fabricate a connected empty/Idle cockpit. The view
+  model preserves last good facts and projects explicit degraded refresh-failed
+  status.
+- Malformed live catalog entries are no longer silently dropped. Decode
+  diagnostics surface through projection/UI and issue counts, and lossy helper
+  APIs were removed.
+- The Runtime Cockpit boundary remains under Settings -> Servers -> Diagnostics
+  -> Runtime Cockpit.
+- No passive chat banner, fixed product panels, provider-visible tool widening,
+  public/settings/auth/DB/API expansion, or coupling to memory/filesystem/jobs
+  internals was introduced.
+
+Accepted deferred scope:
+
+- Fixed product panels, restored old agent-execution surfaces, passive chat
+  runtime banners, public cockpit/API expansion, settings/auth/database
+  expansion, and cross-domain coupling to memory/filesystem/jobs remain out of
+  scope for this slice.
+
+Verification recorded by the accepted re-audit:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants -- --nocapture`
+  passed, 11 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture`
+  passed, 9 tests.
+- `cd packages/ios-app && xcodegen generate` succeeded and the worktree stayed
+  clean.
+- Focused simulator tests for WorkerLifecycle DTO/client/state/view-model plus
+  SourceGuard tests passed, 74 tests.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- Final `git status --short` was clean.
+
 ## Next Audit
 
-The next slice to audit is **iOS Self-Adapting Agent Cockpit Baseline**.
+The next slice to audit is **iOS Affordance Restoration Map**.
 
 ## Per-Slice Audit Start State
 

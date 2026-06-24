@@ -12,6 +12,15 @@ const EVIDENCE_PATH: &str =
 const INVENTORY_PATH: &str = "packages/agent/docs/ios-affordance-restoration-map-inventory.md";
 const INVENTORY_TSV_PATH: &str = "packages/agent/docs/ios-affordance-restoration-map-inventory.tsv";
 const PROGRESS_PATH: &str = "packages/agent/docs/ios-affordance-restoration-progress.md";
+const README_PATH: &str = "README.md";
+const PHASE2_SCORECARD_PATH: &str =
+    "packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md";
+const PHASE2_EVIDENCE_PATH: &str =
+    "packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md";
+const PHASE2_INVENTORY_PATH: &str =
+    "packages/agent/docs/phase-2-agent-execution-restoration-inventory.md";
+const PHASE2_INVENTORY_TSV_PATH: &str =
+    "packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv";
 const TARGET_PATH: &str = "packages/agent/tests/ios_affordance_restoration_map_invariants.rs";
 const TARGET_NAME: &str = "ios_affordance_restoration_map_invariants";
 const OLD_REFERENCE: &str = "ad5e484722c6f7abbe764126409494026216ad92";
@@ -95,6 +104,41 @@ fn assert_contains_all(path: &str, required: &[&str]) {
             "{path} missing required text: {needle}"
         );
     }
+}
+
+fn normalize_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn assert_normalized_contains_all(path: &str, required: &[&str]) {
+    let content = normalize_whitespace(&read_repo_file(path));
+    for needle in required {
+        let normalized_needle = normalize_whitespace(needle);
+        assert!(
+            content.contains(&normalized_needle),
+            "{path} missing required normalized text: {needle}"
+        );
+    }
+}
+
+fn is_hex_byte(byte: u8) -> bool {
+    byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte) || (b'A'..=b'F').contains(&byte)
+}
+
+fn contains_uuid_like_identifier(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    if bytes.len() < 36 {
+        return false;
+    }
+    bytes.windows(36).any(|window| {
+        window.iter().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                *byte == b'-'
+            } else {
+                is_hex_byte(*byte)
+            }
+        })
+    })
 }
 
 fn assert_current_lineage_base() {
@@ -564,6 +608,116 @@ fn phase_two_anchor_covers_deferred_agent_execution_buckets() {
             "IARM inventory must link deferred bucket {bucket}"
         );
     }
+}
+
+#[test]
+fn original_queue_handoff_and_phase_two_anchor_are_historical_after_closeout() {
+    assert_normalized_contains_all(
+        EVIDENCE_PATH,
+        &[
+            "## Historical Handoff",
+            "This original map handoff is historical.",
+            "Phase 1 is now closed",
+            "`ios-affordance-restoration-progress.md`",
+            "`phase-2-agent-execution-restoration-*`",
+        ],
+    );
+    assert_normalized_contains_all(
+        INVENTORY_PATH,
+        &[
+            "exhaustive source-backed historical map",
+            "## Historical Phase 1 Review Queue",
+            "historical evidence",
+            "not as live scheduling state",
+            "Current restoration status is recorded in `ios-affordance-restoration-progress.md`",
+            "That plan now exists in",
+            PHASE2_SCORECARD_PATH.trim_start_matches("packages/agent/docs/"),
+            PHASE2_EVIDENCE_PATH.trim_start_matches("packages/agent/docs/"),
+            PHASE2_INVENTORY_PATH.trim_start_matches("packages/agent/docs/"),
+            PHASE2_INVENTORY_TSV_PATH.trim_start_matches("packages/agent/docs/"),
+            "It is not the live Phase 1 queue",
+        ],
+    );
+    assert_contains_all(
+        PROGRESS_PATH,
+        &[
+            "## Phase 1 Closeout",
+            "Phase 1 local-native/user-facing affordance restoration is closed",
+            "No remaining Phase 1 slice is queued.",
+        ],
+    );
+
+    let readme = normalize_whitespace(&read_repo_file("README.md"));
+    for required in [
+        "historical Phase 1",
+        "original Phase 2 agent-execution anchor",
+        "original Phase 1 review queue as historical planning evidence",
+        "tracks Phase 1 closeout",
+        PHASE2_SCORECARD_PATH,
+        PHASE2_EVIDENCE_PATH,
+        PHASE2_INVENTORY_PATH,
+        PHASE2_INVENTORY_TSV_PATH,
+    ] {
+        let normalized_required = normalize_whitespace(required);
+        assert!(
+            readme.contains(&normalized_required),
+            "README must describe IARM historical/live state: {required}"
+        );
+    }
+
+    for (path, forbidden) in [
+        (
+            EVIDENCE_PATH,
+            "The first recommended implementation slice after this map is",
+        ),
+        (INVENTORY_PATH, "## Phase 1 Review Queue"),
+        (
+            INVENTORY_PATH,
+            "A full Phase 2 agent-execution restoration plan is still required",
+        ),
+        (PROGRESS_PATH, "current Phase 1 queue"),
+        (README_PATH, "defines the Phase 1 review queue"),
+        (
+            README_PATH,
+            "preserves the requirement for a later full Phase 2 agent-execution restoration plan",
+        ),
+    ] {
+        let content = read_repo_file(path);
+        assert!(
+            !content.contains(forbidden),
+            "{path} contains stale live IARM planning wording: {forbidden}"
+        );
+    }
+}
+
+#[test]
+fn docs_do_not_store_physical_ios_device_uuid_like_identifiers() {
+    let docs = git_output(&["ls-files", "README.md", "packages/agent/docs"])
+        .lines()
+        .filter(|path| path.ends_with(".md"))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+
+    let mut offenders = Vec::new();
+    for path in docs {
+        let content = read_repo_file(&path);
+        for (line_index, line) in content.lines().enumerate() {
+            let lower = line.to_ascii_lowercase();
+            let mentions_physical_ios_device = lower.contains("physical device")
+                || lower.contains("physical-device")
+                || lower.contains("physical iphone")
+                || lower.contains("physical ipad");
+            if mentions_physical_ios_device && contains_uuid_like_identifier(line) {
+                offenders.push(format!("{}:{}: {}", path, line_index + 1, line));
+            }
+        }
+    }
+
+    assert!(
+        offenders.is_empty(),
+        "docs/evidence must use generic iOS device selectors and must not store physical device UUID-like identifiers:\n{}",
+        offenders.join("\n")
+    );
 }
 
 #[test]

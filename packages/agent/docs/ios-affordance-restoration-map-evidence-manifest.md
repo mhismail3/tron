@@ -45,13 +45,15 @@ Baseline: `a0b80c7d204cf9349a5f647ecbc58a8a37735e15`
 | `git diff --check` | passed | No whitespace errors. |
 | `git ls-files -ci --exclude-standard` | passed | No ignored tracked files reported. |
 
-## Handoff
+## Historical Handoff
 
-The first recommended implementation slice after this map is
-`phase1_slice_1`: chat composer affordance and menu sheet restoration. It
-should present the old input bar, attachment, skills, prompt, and queue concepts
-to the user as a first-principles review packet before any Swift changes are
-made.
+This original map handoff is historical. Its first implementation candidate was
+chat composer affordance and menu sheet restoration, with the old input bar,
+attachment, skills, prompt, and queue concepts presented as a first-principles
+review packet before Swift changes. Phase 1 is now closed; live restoration
+state is recorded in `ios-affordance-restoration-progress.md`, and the durable
+Phase 2 plan is recorded in the `phase-2-agent-execution-restoration-*`
+artifacts.
 
 ## Phase 1 Slice 2 Addendum: Composer Voice Transcription
 
@@ -109,4 +111,4 @@ Slice validation:
 | `scripts/personal-info-guard.sh` | passed | Full scan reported no personal-info leaks. |
 | `git diff --check` | passed | No whitespace errors. |
 | `git ls-files -ci --exclude-standard` | passed | No ignored tracked files reported. |
-| `env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta install` | passed | Built, installed, and launched `com.tron.mobile.beta` on physical device `42EC9FCD-DFE9-56DE-AFD4-526D25A9F3CF`; post-launch status later reported not running. |
+| `env TRON_IOS_DEVICE_NAME=iPhone scripts/tron-ios-beta install` | passed | Built, installed, and launched `com.tron.mobile.beta` using the generic `TRON_IOS_DEVICE_NAME=iPhone` selector; the physical-device identifier is intentionally not recorded. Post-launch status later reported not running. |

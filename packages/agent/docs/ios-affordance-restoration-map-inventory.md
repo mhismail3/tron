@@ -5,8 +5,8 @@ Status: `complete`
 Machine-readable inventory:
 [`ios-affordance-restoration-map-inventory.tsv`](ios-affordance-restoration-map-inventory.tsv)
 
-This inventory is the exhaustive source-backed map for the first iOS
-restoration phase. It compares the old modular capability iOS tree at
+This inventory is the exhaustive source-backed historical map for the original
+iOS restoration planning phase. It compares the old modular capability iOS tree at
 `ad5e484722c6f7abbe764126409494026216ad92` to the current IOSAC baseline and
 classifies every deleted or renamed old iOS path through grouped rows. The
 grouping is intentional: future restoration decisions happen by user-facing
@@ -56,7 +56,11 @@ Every future slice must answer these questions before implementation:
 4. What part is functional today, and what must stay absent until Phase 2?
 5. What old behavior is evidence only and must not be copied by default?
 
-## Phase 1 Review Queue
+## Historical Phase 1 Review Queue
+
+The queue below was the original Phase 1 planning order. It is retained as
+historical evidence, not as live scheduling state. Current restoration status is
+recorded in `ios-affordance-restoration-progress.md`.
 
 1. Chat composer affordance/menu sheet restoration.
 2. Dictation/audio capture and voice input affordance audit.
@@ -84,12 +88,16 @@ Each future slice must present this packet before implementation:
 
 ## Phase 2 Anchor
 
-A full Phase 2 agent-execution restoration plan is still required after the
-Phase 1 map and local-native slices. It must cover every deferred BPRC bucket:
-capability discovery, filesystem, jobs/processes, worker self-extension,
-subagents, goals/queues/questions, approvals, web, git/worktrees,
-skills/rules/hooks/memory, MCP, scheduling, program execution, database/events,
-settings, and dependency restoration.
+This original anchor required a full Phase 2 agent-execution restoration plan
+after the Phase 1 map and local-native slices. That plan now exists in
+`phase-2-agent-execution-restoration-scorecard.md`,
+`phase-2-agent-execution-restoration-evidence-manifest.md`,
+`phase-2-agent-execution-restoration-inventory.md`, and
+`phase-2-agent-execution-restoration-inventory.tsv`. The Phase 2 plan covers
+every deferred BPRC bucket: capability discovery, filesystem, jobs/processes,
+worker self-extension, subagents, goals/queues/questions, approvals, web,
+git/worktrees, skills/rules/hooks/memory, MCP, scheduling, program execution,
+database/events, settings, and dependency restoration.
 
 Phase 2 work must restore capability through worker-owned functions, triggers,
 resources, events, grants, conformance checks, and generated or justified native
@@ -102,7 +110,11 @@ agent-execution UI.
 
 ## Current Boundary
 
-This map does not restore any UI or backend behavior. It records what should be
-reviewed and in what order. Any future slice that changes Swift source must run
-the relevant iOS build/test/simulator checks and update the iOS architecture
-docs with actual restored behavior.
+This map does not restore any UI or backend behavior. It records the historical
+review taxonomy and original slice ordering. It is not the live Phase 1 queue:
+Phase 1 closeout and shipped/deferred behavior are recorded in
+`ios-affordance-restoration-progress.md`, while live Phase 2 planning is
+recorded in the `phase-2-agent-execution-restoration-*` artifacts. Any future
+slice that changes Swift source must run the relevant iOS
+build/test/simulator checks and update the iOS architecture docs with actual
+restored behavior.
