@@ -503,6 +503,50 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "`execution_output` artifact creation",
         ],
     );
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "git",
+        "P2AER-INV-013",
+        "BPRC-FEATURE-05",
+        "worktree_git",
+        "Slice 6: Git, Worktrees, And Source Control",
+        &[
+            "Slice 6A restores read-only Git status",
+            "git_status",
+            "git_diff",
+            "current_baseline",
+        ],
+        &[
+            "Added a narrow read-only `domains/git` package",
+            "with `git::status` and",
+            "`git::diff` backend contracts",
+        ],
+    );
+    let git_source = read_repo_file("packages/agent/src/domains/git/mod.rs")
+        + &read_repo_file("packages/agent/src/domains/git/contract.rs")
+        + &read_repo_file("packages/agent/src/domains/git/service.rs")
+        + &read_repo_file("packages/agent/src/domains/capability/operations/git.rs");
+    for forbidden in [
+        "git_stage",
+        "git_commit",
+        "git_merge",
+        "git_rebase",
+        "git_reset",
+        "git_push",
+        "git_checkout",
+        "git::stage",
+        "git::commit",
+        "git::merge",
+        "git::rebase",
+        "git::reset",
+        "git::push",
+        "git::checkout",
+    ] {
+        assert!(
+            !git_source.contains(forbidden),
+            "Slice 6A git foundation must stay read-only; found {forbidden}"
+        );
+    }
     for forbidden in [
         "autostart",
         "browser",
@@ -512,7 +556,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "device_broker",
         "display",
         "events",
-        "git",
         "import",
         "job",
         "mcp",

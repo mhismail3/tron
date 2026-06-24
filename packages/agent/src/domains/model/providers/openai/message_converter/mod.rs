@@ -147,7 +147,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         `observe`, `state_get`, `state_set`, `state_list`, `filesystem_read`, \
         `filesystem_list`, `filesystem_find`, `filesystem_glob`, \
         `filesystem_search_text`, `filesystem_diff`, `filesystem_write`, `filesystem_edit`, \
-        `filesystem_apply_patch`, `process_run`, `job_start`, `job_status`, `job_list`, \
+        `filesystem_apply_patch`, `git_status`, `git_diff`, `process_run`, `job_start`, `job_status`, `job_list`, \
         `job_log`, `job_cancel`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
         `catalog_search`, `catalog_inspect`, or `catalog_conformance`. \
         Do not send `target`, `contractId`, `functionId`, or `arguments`. \
@@ -156,7 +156,8 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         Use `observe` to record reasoning-relevant facts, state operations for agent-owned memory, \
         filesystem package \
         operations for bounded read/list/find/glob/search/diff and preview-first write/edit/patch under \
-        trusted roots, `process_run` for short bounded shell commands, job operations for durable \
+        trusted roots, `git_status` and `git_diff` for read-only repository/worktree status and \
+        bounded staged/unstaged diff evidence, `process_run` for short bounded shell commands, job operations for durable \
         non-interactive command lifecycle/status/log/cancel, trace/log operations to inspect durable \
         execution records, `replay_manifest` to \
         export the current session's `tron.replay.v1` audit manifest, and catalog operations to inspect \

@@ -406,6 +406,48 @@ Adversarial self-review:
   cancellation metadata, and attaches the existing output resource evidence
   before writing the terminal state.
 
+## Phase 2 Slice 6A: Read-only Git/Worktree Foundation
+
+Implementation branch: `codex/phase-2-slice-6a-readonly-git-worktree`.
+Baseline: `origin/main@470e73897b885264aec0a6c9692e54eb2a186ef1`.
+
+What changed:
+
+- Added a narrow read-only `domains/git` package with `git::status` and
+  `git::diff` backend contracts.
+- Exposed provider access only as `git_status` and `git_diff` operation values
+  behind the existing `capability::execute` primitive.
+- Reported trusted-path repository facts: worktree root, requested path,
+  branch or detached HEAD, HEAD OID, upstream, ahead/behind, dirty state,
+  staged/unstaged/untracked/conflicted summaries, and bounded status/diff
+  evidence.
+- Kept the implementation read-only: no staging, commits, merges, rebases,
+  resets, pushes, branch checkout/deletion, conflict resolution, worktree graph
+  resources, PR handoff, public API expansion, production deployment behavior,
+  or native iOS SourceChanges UI.
+
+Deterministic coverage:
+
+- Clean repo, dirty repo with staged/unstaged/untracked entries, nested repo
+  path scoping, detached HEAD, missing upstream, upstream ahead/behind,
+  non-repo path, trusted-root escape rejection, bounded/truncated status and
+  diff output, provider execute routing, and schema guards proving no mutating
+  git operation names are exposed.
+
+Validation on the implementation branch:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml git -- --nocapture`
+  passed; 13 filtered git/static tests passed, including 11 git-domain tests,
+  provider execute routing, and the read-only schema guard.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture`
+  passed; 8 BPRC tests passed after narrowing the retired-domain guard to
+  allow only the Slice 6A read-only git package.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  passed.
+- `cargo check --manifest-path packages/agent/Cargo.toml` passed.
+- `git diff --check` passed.
+- `scripts/personal-info-guard.sh` passed.
+
 ## Validation Log
 
 | Command | Result | Evidence |
