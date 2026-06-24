@@ -19,6 +19,8 @@ use crate::engine::{
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
 
+#[path = "web_extraction_tests.rs"]
+mod extraction_tests;
 #[path = "web_source_tests.rs"]
 mod source_tests;
 
@@ -168,6 +170,25 @@ async fn web_fetch_redacts_secret_text_and_replays_idempotently() {
     let preview = payload["textEvidence"]["preview"].as_str().unwrap();
     assert!(!preview.contains("abcdefghijk"));
     assert!(!preview.contains("letmein"));
+    let extraction_mode = payload["textEvidence"]["extractionMode"].clone();
+    let extracted_text_bytes = payload["textEvidence"]["extractedTextBytes"].clone();
+    assert_eq!(extraction_mode, json!("plain_text"));
+
+    let replayed = ctx
+        .engine_host
+        .inspect_resource(first_id)
+        .await
+        .expect("inspect replayed")
+        .expect("web source resource");
+    let replayed_payload = current_payload(&replayed);
+    assert_eq!(
+        replayed_payload["textEvidence"]["extractionMode"],
+        extraction_mode
+    );
+    assert_eq!(
+        replayed_payload["textEvidence"]["extractedTextBytes"],
+        extracted_text_bytes
+    );
 }
 
 #[tokio::test]

@@ -67,12 +67,16 @@ Completed Phase 2 restoration slices at this baseline:
   scope;
 - Slice 8B: read-only current-session `web_source` list/inspect
   citation fields through `capability::execute`, with no new network breadth.
+- Slice 8C: implementation candidate for deterministic HTML/XHTML readable-text
+  extraction under existing `web_fetch`/`web_source_*` operations, preserving
+  raw-byte source hashes and adding extraction metadata without search/browser
+  breadth.
 
 Current next action:
-Start discovery from fresh `origin/main` for the next **Slice 8: Web,
-Research, Browser, And Fetch** sub-slice unless the current canonical docs
-identify a narrower required follow-up. Slice 8A direct fetch source provenance
-and Slice 8B read-only source inspection are accepted; search providers,
+Review the Slice 8C implementation candidate from fresh `origin/main` for
+**Web HTML/Text Extraction And Citation Quality Foundation**. Slice 8A direct
+fetch source provenance and Slice 8B read-only source inspection are accepted;
+Slice 8C remains pending review on its implementation branch. Search providers,
 browser automation, crawling, robots policy, login/cookies/session reuse,
 native source UI, public `/engine` web APIs, network-enabled jobs, autonomous
 goal execution, fetch/pull/push, PR handoff, production deployment behavior,
@@ -1775,6 +1779,49 @@ Accepted validation:
   expected head, baseline ancestry, read authority, scope/version rejection,
   no-network read behavior, provider operation exposure, static inventories,
   and personal-info guard, then returned `slice accepted` with no findings.
+
+#### Slice 8C Implementation Candidate: Web HTML/Text Extraction And Citation Quality Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8c-web-html-text-extraction`.
+Baseline:
+`origin/main@5c99501b5e00305f3be95ae3fce4d2f855c6aed8`
+(`docs: accept phase 2 slice 8b`).
+
+Candidate scope:
+
+- Keep the provider-visible web operation set unchanged:
+  `web_fetch`, `web_source_list`, and `web_source_inspect`.
+- Add `domains/web/extract.rs` as the deterministic HTML/XHTML readable-text
+  extraction owner inside the existing web boundary.
+- For HTML-like content types, derive readable text and safe title metadata from
+  captured bytes before output bounding, redaction, and snippet generation.
+- Preserve captured raw response bytes, raw byte counts, and raw captured-byte
+  SHA-256 evidence as the durable source provenance hash.
+- Add backward-compatible `textEvidence` extraction metadata for mode,
+  extractor id/version, title, extracted text bytes, max output bytes, and
+  truncation flags.
+- Keep source list/inspect read-only, valid under `networkPolicy: none`, and
+  compatible with pre-Slice-8C `web_source` records that lack extraction
+  metadata.
+
+Candidate non-goals:
+
+- No `web_search`, search provider, browser automation/control, crawling,
+  sitemap traversal, robots policy engine, login/cookies/session reuse,
+  credential reuse, shell/process network side channel, network-enabled jobs,
+  public `/engine` web APIs, native iOS source UI, or specialized source
+  rendering.
+
+Candidate validation:
+
+- Focused web tests cover deterministic HTML extraction, script/style/noise
+  removal, redaction after extraction, plain text/JSON/XML/binary/malformed
+  HTML/oversized/non-UTF8 paths, idempotent replay stability, and old
+  Slice 8A/8B source inspection compatibility.
+- Capability/provider operation names remain unchanged; existing schema and
+  message-converter guards continue to reject non-goal web/browser/crawl/login
+  operation names.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

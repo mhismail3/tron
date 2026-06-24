@@ -955,7 +955,7 @@ Current primitive operations:
 | `question_list` | List scoped user questions with bounded summaries and explicit truncation metadata. |
 | `question_inspect` | Inspect one scoped user question with current resource/version refs, lifecycle state, and answer summary when present. |
 | `question_answer` | Record one idempotent `goal_answer` handoff for a pending question after expected-version and expiry checks, with required reason, authority/freshness evidence, stream refs, and no authority minting. |
-| `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, producing redacted `web_source` resource/cache evidence. |
+| `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, producing redacted `web_source` resource/cache evidence with readable HTML/XHTML text extraction when applicable. |
 | `web_source_list` | List current-session `web_source` records as bounded citation-ready summaries without network access. |
 | `web_source_inspect` | Inspect one current-session `web_source` resource/version as bounded citation-ready source metadata and redacted snippet evidence without network access. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
@@ -1040,16 +1040,20 @@ Fetches use `reqwest` with bounded timeout, redirects, captured response bytes,
 provider-visible text bytes, content-type handling, deterministic truncation
 metadata, captured-byte SHA-256 evidence, common secret redaction for previews
 and error details, sanitized source/final URLs, replay refs, and idempotent
-`web_source` resource/cache evidence on `web.lifecycle`. `web_source_list` and
+`web_source` resource/cache evidence on `web.lifecycle`. HTML/XHTML responses
+derive bounded readable text before redaction/snippet generation, removing
+script/style/noise blocks and recording extraction mode, extractor id/version,
+safe title, extracted text bytes, and truncation metadata while preserving the
+raw captured-byte SHA-256 as the durable source hash. `web_source_list` and
 `web_source_inspect` require trusted current-session context plus `web.read`
 and `resource.read` authority, inspect only scoped `web_source` resources, and
 return bounded requested/final URLs, fetched time, status, content type,
-captured SHA-256, byte/truncation/redaction metadata, trace/replay refs,
-resource refs, and redacted snippets; they perform no network I/O and remain
-valid under `networkPolicy: none`. Search providers, browser automation,
-crawling, sitemap traversal, robots policy, login/cookies, credential reuse,
-shell/process network side channels, native iOS web UI, and public `/engine`
-web API expansion remain deferred to later slices.
+captured SHA-256, byte/truncation/redaction/extraction metadata,
+trace/replay refs, resource refs, and redacted snippets; they perform no
+network I/O and remain valid under `networkPolicy: none`. Search providers,
+browser automation, crawling, sitemap traversal, robots policy, login/cookies,
+credential reuse, shell/process network side channels, native iOS web UI, and
+public `/engine` web API expansion remain deferred to later slices.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.

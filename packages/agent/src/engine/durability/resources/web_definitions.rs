@@ -43,7 +43,23 @@ pub(super) fn web_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "status": {"type": "integer"},
                 "contentType": {"type": ["string", "null"]},
                 "byteEvidence": {"type": "object"},
-                "textEvidence": {"type": "object"},
+                "textEvidence": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "preview": {"type": "string"},
+                        "textBytes": {"type": "integer"},
+                        "maxOutputBytes": {"type": "integer"},
+                        "outputTextTruncated": {"type": "boolean"},
+                        "binaryBodyOmitted": {"type": "boolean"},
+                        "extractionMode": {"type": "string"},
+                        "extractorId": {"type": "string"},
+                        "extractorVersion": {"type": "string"},
+                        "title": {"type": ["string", "null"]},
+                        "extractedTextBytes": {"type": "integer"},
+                        "extractedTextTruncated": {"type": "boolean"}
+                    }
+                },
                 "redaction": {"type": "object"},
                 "redirects": {"type": "object"},
                 "authority": {"type": "object"},

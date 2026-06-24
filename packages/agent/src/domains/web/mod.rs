@@ -1,12 +1,16 @@
 //! Web source provenance domain.
 //!
 //! Slice 8A restores only explicit direct URL fetch as source evidence. Slice
-//! 8B adds read-only source list/inspect operations for citation assembly. The
+//! 8B adds read-only source list/inspect operations for citation assembly. Slice
+//! 8C adds deterministic HTML/XHTML readable-text extraction for higher-quality
+//! citation snippets while preserving captured raw bytes as the durable source
+//! hash. The
 //! provider-visible surface remains the single `capability::execute` primitive
 //! with `web_fetch`, `web_source_list`, and `web_source_inspect` operation
 //! values; this package owns URL validation, network authority checks, bounded
-//! HTTP fetching, source/cache resource evidence, redaction metadata, replay
-//! refs, read-only citation summaries, and `web.lifecycle` events.
+//! HTTP fetching, source/cache resource evidence, readable-text extraction,
+//! redaction metadata, replay refs, read-only citation summaries, and
+//! `web.lifecycle` events.
 //! URL authority checks must cover initial URLs, every redirect target before
 //! it is followed, and DNS-resolved socket addresses before network I/O.
 //!
@@ -14,6 +18,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `extract` | Deterministic HTML/XHTML readable-text and title extraction |
 //! | `fetch` | Direct bounded URL fetch and source provenance resource writes |
 //! | `network_policy` | URL, redirect-target, and DNS-resolved address safety checks |
 //! | `source` | Read-only bounded citation summaries for stored web sources |
@@ -30,6 +35,7 @@
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
+mod extract;
 pub(crate) mod fetch;
 mod network_policy;
 pub(crate) mod source;

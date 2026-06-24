@@ -1182,6 +1182,38 @@ Implementation, review, and acceptance evidence:
   `git diff --check`; ignored-file audit; and
   `scripts/personal-info-guard.sh`.
 
+### Slice 8C Implementation Candidate Evidence: Web HTML/Text Extraction And Citation Quality Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8c-web-html-text-extraction`.
+Baseline:
+`origin/main@5c99501b5e00305f3be95ae3fce4d2f855c6aed8`
+(`docs: accept phase 2 slice 8b`).
+
+Candidate evidence:
+
+- Added `packages/agent/src/domains/web/extract.rs` as a dependency-free,
+  deterministic HTML/XHTML readable-text extraction module.
+- Integrated extraction in `web_fetch` before output bounding, redaction, and
+  snippet generation while preserving captured raw response bytes and raw
+  captured-byte SHA-256 as source provenance.
+- Added backward-compatible `textEvidence` metadata for extraction mode,
+  extractor id/version, safe title, extracted text bytes, and truncation flags.
+- Updated `web_source_list` and `web_source_inspect` to surface extraction
+  metadata when present and return `null` metadata for older Slice 8A/8B
+  records.
+- Kept provider-visible operation names unchanged and did not add search,
+  browser, crawl, login, native source UI, public `/engine` web APIs, or
+  network-enabled job behavior.
+
+Candidate validation evidence:
+
+- Focused web tests cover deterministic HTML fixture extraction, script/style
+  and navigation/noise removal, redaction after extraction, JSON/XML/plain text
+  preservation, binary omission, malformed HTML tolerance, oversized output
+  bounds, non-UTF8 lossy text behavior, idempotent cache replay stability, and
+  old `web_source` record inspection compatibility.
+
 ## Validation Log
 
 | Command | Result | Evidence |

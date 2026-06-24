@@ -145,6 +145,93 @@ async fn web_source_list_is_current_session_bounded_and_count_truncated() {
 }
 
 #[tokio::test]
+async fn web_source_inspect_handles_pre_extraction_web_source_records() {
+    let ctx = make_test_context();
+    let read = WebFixture::new(&ctx, "web-source-old-record", "none").await;
+    let resource = ctx
+        .engine_host
+        .create_resource(CreateResource {
+            resource_id: Some("web_source:old-record".to_owned()),
+            kind: WEB_SOURCE_KIND.to_owned(),
+            schema_id: Some(WEB_SOURCE_SCHEMA_ID.to_owned()),
+            scope: EngineResourceScope::Session(read.session_id.clone()),
+            owner_worker_id: WorkerId::new("web-test").expect("worker id"),
+            owner_actor_id: read.actor_id.clone(),
+            lifecycle: Some("fetched".to_owned()),
+            policy: json!({"test": "old web_source"}),
+            initial_payload: Some(json!({
+                "schemaVersion": crate::domains::web::WEB_SOURCE_SCHEMA_VERSION,
+                "operation": "web_fetch",
+                "state": "fetched",
+                "requestedUrl": "https://example.invalid/source",
+                "finalUrl": "https://example.invalid/source",
+                "fetchedAt": "2026-06-24T00:00:00Z",
+                "status": 200,
+                "contentType": "text/plain",
+                "byteEvidence": {
+                    "capturedBytes": 17,
+                    "maxResponseBytes": 262144,
+                    "responseBytesTruncated": false,
+                    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                    "hashScope": "captured_response_bytes"
+                },
+                "textEvidence": {
+                    "preview": "old record snippet",
+                    "textBytes": 18,
+                    "maxOutputBytes": 20000,
+                    "outputTextTruncated": false,
+                    "binaryBodyOmitted": false
+                },
+                "redaction": {
+                    "applied": false,
+                    "replacementCount": 0,
+                    "policy": "common_token_key_password_patterns"
+                },
+                "authority": {
+                    "actorId": read.actor_id.as_str(),
+                    "authorityGrantId": read.grant_id.as_str(),
+                    "networkPolicy": "declared",
+                    "authorityScopes": ["capability.execute", "web.write", "resource.write"],
+                    "noCredentialsCookiesBrowserOrShell": true
+                },
+                "traceRefs": [],
+                "replayRefs": [],
+                "cache": {
+                    "cacheKey": "web_source:old-record",
+                    "idempotencyScoped": true,
+                    "cacheHit": false
+                },
+                "idempotency": {
+                    "key": "old-record",
+                    "invocationId": "inv_old",
+                    "functionId": "capability::execute"
+                },
+                "revision": 1
+            })),
+            locations: Vec::new(),
+            trace_id: TraceId::generate(),
+            invocation_id: None,
+        })
+        .await
+        .expect("create old source");
+
+    let inspected = read
+        .invoke_ok(json!({
+            "operation": "web_source_inspect",
+            "webSourceResourceId": resource.resource_id,
+            "maxSnippetBytes": 8,
+            "idempotencyKey": "web-source-old-record-inspect"
+        }))
+        .await;
+    let source = &inspected["details"]["web"]["source"];
+    assert_eq!(source["textEvidence"]["snippet"], json!("old reco"));
+    assert_eq!(source["textEvidence"]["snippetTruncated"], json!(true));
+    assert_eq!(source["textEvidence"]["extractedTextBytes"], Value::Null);
+    assert_eq!(source["extraction"]["mode"], Value::Null);
+    assert_eq!(source["extraction"]["extractorId"], Value::Null);
+}
+
+#[tokio::test]
 async fn web_source_inspect_rejects_invalid_scope_kind_version_and_authority() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))

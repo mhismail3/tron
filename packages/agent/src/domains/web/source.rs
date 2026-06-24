@@ -230,9 +230,11 @@ fn source_summary(
         "fetchedAt": source.get("fetchedAt").cloned().unwrap_or(Value::Null),
         "status": source.get("status").cloned().unwrap_or(Value::Null),
         "contentType": source.get("contentType").cloned().unwrap_or(Value::Null),
+        "title": source.pointer("/textEvidence/title").cloned().unwrap_or(Value::Null),
         "capturedSha256": source.pointer("/byteEvidence/sha256").cloned().unwrap_or(Value::Null),
         "capturedBytes": source.pointer("/byteEvidence/capturedBytes").cloned().unwrap_or(Value::Null),
         "outputTextBytes": source.pointer("/textEvidence/textBytes").cloned().unwrap_or(Value::Null),
+        "extraction": extraction_metadata(source),
         "truncation": truncation_metadata(source, &snippet, max_preview_bytes),
         "redaction": source.get("redaction").cloned().unwrap_or(Value::Null),
         "snippet": snippet.text,
@@ -268,14 +270,28 @@ fn source_details(
             "storedTextBytes": source.pointer("/textEvidence/textBytes").cloned().unwrap_or(Value::Null),
             "storedMaxOutputBytes": source.pointer("/textEvidence/maxOutputBytes").cloned().unwrap_or(Value::Null),
             "storedOutputTextTruncated": source.pointer("/textEvidence/outputTextTruncated").cloned().unwrap_or(Value::Null),
+            "extractedTextBytes": source.pointer("/textEvidence/extractedTextBytes").cloned().unwrap_or(Value::Null),
+            "extractedTextTruncated": source.pointer("/textEvidence/extractedTextTruncated").cloned().unwrap_or(Value::Null),
             "binaryBodyOmitted": source.pointer("/textEvidence/binaryBodyOmitted").cloned().unwrap_or(Value::Null)
         },
+        "extraction": extraction_metadata(source),
         "redaction": source.get("redaction").cloned().unwrap_or(Value::Null),
         "redirects": source.get("redirects").cloned().unwrap_or(Value::Null),
         "traceRefs": source.get("traceRefs").cloned().unwrap_or_else(|| json!([])),
         "replayRefs": source.get("replayRefs").cloned().unwrap_or_else(|| json!([])),
         "resourceRefs": [resource_ref(resource, version, "source")],
         "cache": source.get("cache").cloned().unwrap_or(Value::Null)
+    })
+}
+
+fn extraction_metadata(source: &Value) -> Value {
+    json!({
+        "mode": source.pointer("/textEvidence/extractionMode").cloned().unwrap_or(Value::Null),
+        "extractorId": source.pointer("/textEvidence/extractorId").cloned().unwrap_or(Value::Null),
+        "extractorVersion": source.pointer("/textEvidence/extractorVersion").cloned().unwrap_or(Value::Null),
+        "title": source.pointer("/textEvidence/title").cloned().unwrap_or(Value::Null),
+        "extractedTextBytes": source.pointer("/textEvidence/extractedTextBytes").cloned().unwrap_or(Value::Null),
+        "extractedTextTruncated": source.pointer("/textEvidence/extractedTextTruncated").cloned().unwrap_or(Value::Null)
     })
 }
 

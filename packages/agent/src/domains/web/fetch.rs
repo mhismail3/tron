@@ -18,6 +18,7 @@ use crate::engine::{
 };
 use crate::shared::server::errors::CapabilityError;
 
+use super::extract::extract_response_text;
 use super::network_policy::{
     SafeDnsResolver, validate_final_url, validate_redirect_target, validate_url,
 };
@@ -86,17 +87,12 @@ pub(crate) async fn web_fetch_value(
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
         .map(ToOwned::to_owned);
-    let textual = is_textual_content_type(content_type.as_deref());
     let body = read_bounded_response(response, request.max_response_bytes).await?;
     let response_truncated = body.truncated;
     let captured_sha256 = sha256_hex(&body.bytes);
     let byte_count = body.bytes.len();
-    let raw_text = if textual {
-        String::from_utf8_lossy(&body.bytes).into_owned()
-    } else {
-        String::new()
-    };
-    let (bounded_text, output_truncated) = truncate_utf8(&raw_text, request.max_output_bytes);
+    let extracted = extract_response_text(content_type.as_deref(), &body.bytes);
+    let (bounded_text, output_truncated) = truncate_utf8(&extracted.text, request.max_output_bytes);
     let redacted = redact_text(&bounded_text);
     let source_resource_id = source_resource_id(invocation, &request);
     let record = json!({
@@ -120,7 +116,13 @@ pub(crate) async fn web_fetch_value(
             "textBytes": bounded_text.len(),
             "maxOutputBytes": request.max_output_bytes,
             "outputTextTruncated": output_truncated,
-            "binaryBodyOmitted": !textual
+            "binaryBodyOmitted": extracted.binary_body_omitted,
+            "extractionMode": extracted.mode,
+            "extractorId": extracted.extractor_id,
+            "extractorVersion": extracted.extractor_version,
+            "title": extracted.title,
+            "extractedTextBytes": extracted.extracted_text_bytes,
+            "extractedTextTruncated": output_truncated
         },
         "redaction": {
             "applied": redacted.count > 0,
@@ -266,18 +268,6 @@ async fn read_bounded_response(
         }
     }
     Ok(BoundedBody { bytes, truncated })
-}
-
-fn is_textual_content_type(content_type: Option<&str>) -> bool {
-    let Some(content_type) = content_type else {
-        return true;
-    };
-    let lower = content_type.to_ascii_lowercase();
-    lower.starts_with("text/")
-        || lower.contains("json")
-        || lower.contains("xml")
-        || lower.contains("javascript")
-        || lower.contains("x-www-form-urlencoded")
 }
 
 fn truncate_utf8(value: &str, max_bytes: usize) -> (String, bool) {
