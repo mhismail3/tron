@@ -282,6 +282,19 @@ struct TriggerTypeCatalogDefinitionDTO: Decodable, Equatable, Sendable, Identifi
     }
 }
 
+struct CatalogDefinitionDecodeIssue: Equatable, Sendable, Identifiable {
+    var category: String
+    var index: Int
+    var message: String
+
+    var id: String { "\(category):\(index)" }
+}
+
+struct CatalogDefinitionDecodeResult<Definition: Equatable & Sendable>: Equatable, Sendable {
+    var definitions: [Definition]
+    var issues: [CatalogDefinitionDecodeIssue]
+}
+
 // MARK: - Worker Lifecycle Action DTOs
 
 struct WorkerLifecycleManifestRequestDTO: Codable, Equatable, Sendable {
@@ -421,30 +434,48 @@ struct EngineResourceVersionDTO: Codable, Equatable, Sendable, Identifiable {
 // MARK: - Catalog Snapshot Decoding Helpers
 
 extension CatalogSnapshotDTO {
-    func workerDefinitions() -> [WorkerCatalogDefinitionDTO] {
-        decodeCatalogDefinitions(workers)
+    func workerDefinitionResult() -> CatalogDefinitionDecodeResult<WorkerCatalogDefinitionDTO> {
+        decodeCatalogDefinitions(workers, category: "workers")
     }
 
-    func functionDefinitions() -> [FunctionCatalogDefinitionDTO] {
-        decodeCatalogDefinitions(functions)
+    func functionDefinitionResult() -> CatalogDefinitionDecodeResult<FunctionCatalogDefinitionDTO> {
+        decodeCatalogDefinitions(functions, category: "functions")
     }
 
-    func triggerDefinitions() -> [TriggerCatalogDefinitionDTO] {
-        decodeCatalogDefinitions(triggers)
+    func triggerDefinitionResult() -> CatalogDefinitionDecodeResult<TriggerCatalogDefinitionDTO> {
+        decodeCatalogDefinitions(triggers, category: "triggers")
     }
 
-    func triggerTypeDefinitions() -> [TriggerTypeCatalogDefinitionDTO] {
-        decodeCatalogDefinitions(triggerTypes)
+    func triggerTypeDefinitionResult() -> CatalogDefinitionDecodeResult<TriggerTypeCatalogDefinitionDTO> {
+        decodeCatalogDefinitions(triggerTypes, category: "triggerTypes")
     }
 
-    private func decodeCatalogDefinitions<T: Decodable>(_ values: [AnyCodable]?) -> [T] {
-        guard let values else { return [] }
+    private func decodeCatalogDefinitions<T: Decodable & Equatable & Sendable>(
+        _ values: [AnyCodable]?,
+        category: String
+    ) -> CatalogDefinitionDecodeResult<T> {
+        guard let values else {
+            return CatalogDefinitionDecodeResult(definitions: [], issues: [])
+        }
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
-        return values.compactMap { value in
-            guard let data = try? encoder.encode(value) else { return nil }
-            return try? decoder.decode(T.self, from: data)
+        var definitions: [T] = []
+        var issues: [CatalogDefinitionDecodeIssue] = []
+        for (index, value) in values.enumerated() {
+            do {
+                let data = try encoder.encode(value)
+                definitions.append(try decoder.decode(T.self, from: data))
+            } catch {
+                issues.append(
+                    CatalogDefinitionDecodeIssue(
+                        category: category,
+                        index: index,
+                        message: error.localizedDescription
+                    )
+                )
+            }
         }
+        return CatalogDefinitionDecodeResult(definitions: definitions, issues: issues)
     }
 }
 

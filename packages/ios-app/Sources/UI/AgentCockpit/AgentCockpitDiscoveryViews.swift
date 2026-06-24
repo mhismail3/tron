@@ -50,7 +50,7 @@ struct DiscoverySummaryCard: View {
         switch overview.title {
         case "Verified":
             return .tronSuccess
-        case "Schema Gaps", "Attention", "Report Failed":
+        case "Catalog Degraded", "Schema Gaps", "Attention", "Report Failed":
             return .tronWarning
         default:
             return .tronInfo

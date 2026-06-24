@@ -16,8 +16,11 @@ a diagnostics surface opened from Servers -> Diagnostics -> Runtime Cockpit. It
 surfaces live worker lifecycle catalog entries, capability discovery families,
 schema/health gaps, durable `catalog_discovery_report` history,
 package/resource status, confirmation-backed lifecycle actions, activity, and
-active `ui_surface` resources without adding fixed product panels. The app does
-not own
+active `ui_surface` resources without adding fixed product panels. Cockpit
+refresh failures render as degraded while preserving the last good server facts,
+and malformed catalog entries surface catalog decode degradation instead of
+being silently omitted from counts or verified/no-catalog summaries. The app
+does not own
 repository-specific panels, media workflow surfaces, saved voice notes,
 assistant-management panels, extension-source surfaces, memory-retain, or rules.
 
@@ -121,6 +124,11 @@ Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> Chat
 Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
 Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
+
+`AgentCockpitProjection` is also the boundary that turns partial or failed
+reads into truthful diagnostics: catalog decode degradation becomes a degraded
+summary, and view-model refresh failures keep the previous overview visible
+with an explicit failed-refresh status.
 
 `WorkspaceSelector` is a narrow server-backed workspace browser, not the old
 general filesystem tool surface. Its hierarchy is navigation-first: configured

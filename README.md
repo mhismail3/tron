@@ -1569,8 +1569,11 @@ packages/ios-app/Sources/
   redacted memory resource status through generic resource facts,
   confirmation-backed lifecycle actions, activity, and active `ui_surface`
   resources through generic engine data using the standard liquid-glass sheet
-  chrome and shared segmented tab control. The primary chat shell does not mount
-  a passive worker-runtime banner.
+  chrome and shared segmented tab control. Refresh failures render as a degraded
+  cockpit status while preserving the last good server facts, and malformed
+  catalog entries surface catalog decode degradation instead of disappearing
+  from projected counts. The primary chat shell does not mount a passive
+  worker-runtime banner.
 - **Dependency injection**: All services via SwiftUI `@Environment(\.dependencies)`; SwiftUI/session layers consume repository protocols and view models, while concrete engine clients are wired in `Support/Composition`.
 - **Generic runtime rendering**: server/agent-authored runtime data renders through `GeneratedRuntimeSurfaceView`; iOS does not map fixed feature names into custom sheets.
 - **Onboarding sheet**: `TronMobileApp.readyContent()` always mounts `ContentView`; first-run setup, Settings-launched server pairing, and pairing URLs all present the same large-detent `OnboardingFlowView` through the central onboarding presenter. Settings can reopen the flow at the Connect page for another server or token refresh, with a dismiss button, and posts that launch only after the Settings sheet has dismissed so SwiftUI presents a single modal at a time. New-server onboarding requires a scanned/pasted/manual token and a bare DNS, IPv4, or unbracketed IPv6 host before Connect is enabled; full URLs, paths, query strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are rejected before any probe. An already paired server row can reuse that server's Keychain token unless the user edits its host or port. Successful repair of an existing server closes after the probe/settings refresh when the host and port still match; new or edited server origins continue into setup. Setup pages require a pairing probe plus engine invocations for `settings::get` and setup hydration.

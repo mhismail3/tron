@@ -41,6 +41,48 @@ struct AgentCockpitViewModelTests {
         #expect(viewModel.lastError == nil)
     }
 
+    @Test("Refresh failure preserves last overview and reports degraded status")
+    func refreshFailurePreservesLastOverviewAndReportsDegradedStatus() async {
+        let repository = MockWorkerLifecycleRepository()
+        repository.catalog = CatalogWatchSnapshotDTO(
+            changes: [],
+            snapshot: CatalogSnapshotDTO(
+                functions: [
+                    AnyCodable([
+                        "id": "local.echo::reply",
+                        "owner_worker": "local.echo",
+                        "request_schema": ["type": "object"],
+                        "response_schema": ["type": "object"]
+                    ])
+                ],
+                workers: [
+                    AnyCodable([
+                        "id": "local.echo",
+                        "kind": "External",
+                        "lifecycle": "Ready"
+                    ])
+                ],
+                triggers: [],
+                triggerTypes: []
+            ),
+            currentRevision: 7,
+            nextRevision: 8,
+            hasMore: false
+        )
+        let viewModel = AgentCockpitViewModel()
+        await viewModel.refresh(repository: repository, connectionState: .connected)
+
+        repository.listErrorsByKind[.package] = MockWorkerLifecycleError.failure("package resource refresh failed")
+        await viewModel.refresh(repository: repository, connectionState: .connected)
+
+        #expect(viewModel.overview.status.kind == .degraded)
+        #expect(viewModel.overview.status.title == "Refresh Failed")
+        #expect(viewModel.overview.status.title != "Idle")
+        #expect(viewModel.overview.currentRevision == 7)
+        #expect(viewModel.overview.workers.first?.id == "local.echo")
+        #expect(viewModel.lastError == "package resource refresh failed")
+    }
+
     @Test("Verify catalog discovery creates conformance report and refreshes")
     func verifyCatalogDiscoveryCreatesReportAndRefreshes() async {
         let repository = MockWorkerLifecycleRepository()
@@ -234,6 +276,7 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
         hasMore: false
     )
     var resourcesByKind: [WorkerLifecycleResourceKind: [EngineResourceDTO]] = [:]
+    var listErrorsByKind: [WorkerLifecycleResourceKind: Error] = [:]
     var inspections: [String: ResourceInspectResultDTO] = [:]
 
     var overviewCallCount = 0
@@ -257,6 +300,9 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
         limit: UInt64
     ) async throws -> ResourceListResultDTO {
         listedKinds.append(kind)
+        if let error = listErrorsByKind[kind] {
+            throw error
+        }
         return ResourceListResultDTO(resources: resourcesByKind[kind] ?? [])
     }
 
@@ -357,5 +403,16 @@ private final class MockWorkerLifecycleRepository: WorkerLifecycleRepository {
         idempotencyKey: EngineIdempotencyKey
     ) async throws -> WorkerLifecycleResultDTO {
         WorkerLifecycleResultDTO(status: "retired")
+    }
+}
+
+private enum MockWorkerLifecycleError: LocalizedError {
+    case failure(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .failure(message):
+            return message
+        }
     }
 }

@@ -18,10 +18,14 @@ implementation.
 
 - IOSAC-1: `WorkerLifecycleClient` calls only existing engine functions:
   `catalog::watch_snapshot`, `resource::list`, `resource::inspect`, and
-  `worker_lifecycle::*` lifecycle mutations.
+  `worker_lifecycle::*` lifecycle mutations. Catalog definition conversion
+  records decode degradation diagnostics instead of silently dropping malformed
+  worker/function/trigger entries.
 - IOSAC-2: `AgentCockpitProjection` derives status, rows, package actions,
   activity, and confirmations from `CatalogWatchSnapshotDTO` and
-  `EngineResourceDTO`/`EngineResourceInspectionDTO` values.
+  `EngineResourceDTO`/`EngineResourceInspectionDTO` values. Partial catalog
+  decode results and refresh failure states project as degraded diagnostics
+  rather than healthy idle/no-catalog truth.
 - IOSAC-3: destructive and state-changing lifecycle actions require an
   `AgentCockpitConfirmation`; disabled actions are ignored; successful
   mutations refresh from server state.
@@ -34,7 +38,8 @@ implementation.
 - IOSAC-6: `TronColors` now defines neutral glass backgrounds and emerald primary
   accent tokens; `TronColorsTests` lock the light/dark values.
 - IOSAC-7: focused Swift tests cover DTO decoding, RPC function IDs and
-  payloads, projection state, dynamic surface inspection/decoding, generated UI
+  payloads, projection state, malformed catalog decode degradation, refresh
+  failure truthfulness, dynamic surface inspection/decoding, generated UI
   renderer invariants, and theme tokens.
 - IOSAC-8: `ios_self_adapting_agent_cockpit_baseline_invariants` is wired into
   local `scripts/tron ci test` and GitHub static gates.
@@ -81,6 +86,12 @@ implementation.
   used simulator-native screenshot capture, full Swift tests, WebSocket/server
   probes, and source/static invariants. Native CGEvent tap attempts were also
   ignored by macOS, so no validation-only app hook was added.
+- Retrospective audit thread `019ef696-2f4d-7f91-8a9c-6403cdbeff3c` found that
+  refresh failures rendered as connected `Idle` and that malformed live catalog
+  entries were dropped by lossy DTO conversion. Fix: refresh failures now
+  preserve the last good overview with an explicit degraded status, catalog
+  conversion reports decode degradation, projection/discovery summaries surface
+  that degradation, and focused Swift/static tests cover both regressions.
 
 ## Command Evidence
 

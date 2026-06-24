@@ -87,6 +87,52 @@ struct AgentCockpitStateTests {
         #expect(overview.discovery.families.first?.missingSchemaCount == 1)
     }
 
+    @Test("Projection reports malformed catalog entries as degraded")
+    func projectionReportsMalformedCatalogEntriesAsDegraded() {
+        let snapshot = CatalogWatchSnapshotDTO(
+            changes: [],
+            snapshot: CatalogSnapshotDTO(
+                functions: [
+                    AnyCodable([
+                        "id": "local.echo::reply",
+                        "owner_worker": "local.echo",
+                        "request_schema": ["type": "object"],
+                        "response_schema": ["type": "object"]
+                    ]),
+                    AnyCodable([
+                        "owner_worker": "local.echo",
+                        "request_schema": ["type": "object"]
+                    ])
+                ],
+                workers: [],
+                triggers: [],
+                triggerTypes: []
+            ),
+            currentRevision: 2,
+            nextRevision: 3,
+            hasMore: false
+        )
+
+        let overview = AgentCockpitProjection.project(
+            snapshot: snapshot,
+            resources: [],
+            discoveryReports: [
+                sampleResource(
+                    id: "catalog_discovery_report:2:invocation-2",
+                    kind: .catalogDiscoveryReport,
+                    lifecycle: "passed"
+                )
+            ],
+            connectionState: .connected
+        )
+
+        #expect(overview.status.kind == .degraded)
+        #expect(overview.status.title == "Catalog Degraded")
+        #expect(overview.discovery.title == "Catalog Degraded")
+        #expect(overview.discovery.catalogDecodeIssueCount == 1)
+        #expect(overview.discovery.reports.first?.lifecycle == "passed")
+    }
+
     @Test("Projection reports offline without calling lifecycle data")
     func projectionReportsOffline() {
         let overview = AgentCockpitOverview.empty(connectionState: .disconnected)

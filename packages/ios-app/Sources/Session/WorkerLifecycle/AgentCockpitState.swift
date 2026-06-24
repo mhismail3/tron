@@ -125,6 +125,7 @@ struct AgentCockpitOverview: Equatable, Sendable {
     var functions: [AgentCockpitFunctionRow]
     var triggers: [AgentCockpitTriggerRow]
     var triggerTypes: [TriggerTypeCatalogDefinitionDTO]
+    var catalogDecodeIssues: [CatalogDefinitionDecodeIssue]
     var packages: [AgentCockpitPackageRow]
     var runtimeSurfaces: [AgentCockpitRuntimeSurface]
     var discovery: AgentCockpitDiscoveryOverview
@@ -138,12 +139,14 @@ struct AgentCockpitOverview: Equatable, Sendable {
                 connectionState: connectionState,
                 workers: [],
                 functions: [],
-                packages: []
+                packages: [],
+                catalogDecodeIssues: []
             ),
             workers: [],
             functions: [],
             triggers: [],
             triggerTypes: [],
+            catalogDecodeIssues: [],
             packages: [],
             runtimeSurfaces: [],
             discovery: .empty,
@@ -163,13 +166,25 @@ enum AgentCockpitProjection {
         connectionState: ConnectionState
     ) -> AgentCockpitOverview {
         let snapshotBody = snapshot.snapshot
-        let functions = (snapshotBody?.functionDefinitions() ?? []).map(functionRow)
+        let functionResult = snapshotBody?.functionDefinitionResult()
+            ?? CatalogDefinitionDecodeResult<FunctionCatalogDefinitionDTO>(definitions: [], issues: [])
+        let triggerResult = snapshotBody?.triggerDefinitionResult()
+            ?? CatalogDefinitionDecodeResult<TriggerCatalogDefinitionDTO>(definitions: [], issues: [])
+        let triggerTypeResult = snapshotBody?.triggerTypeDefinitionResult()
+            ?? CatalogDefinitionDecodeResult<TriggerTypeCatalogDefinitionDTO>(definitions: [], issues: [])
+        let workerResult = snapshotBody?.workerDefinitionResult()
+            ?? CatalogDefinitionDecodeResult<WorkerCatalogDefinitionDTO>(definitions: [], issues: [])
+        let catalogDecodeIssues = workerResult.issues
+            + functionResult.issues
+            + triggerResult.issues
+            + triggerTypeResult.issues
+        let functions = functionResult.definitions.map(functionRow)
             .sorted { $0.id < $1.id }
-        let triggers = (snapshotBody?.triggerDefinitions() ?? []).map(triggerRow)
+        let triggers = triggerResult.definitions.map(triggerRow)
             .sorted { $0.id < $1.id }
-        let triggerTypes = (snapshotBody?.triggerTypeDefinitions() ?? [])
+        let triggerTypes = triggerTypeResult.definitions
             .sorted { $0.id < $1.id }
-        let workers = (snapshotBody?.workerDefinitions() ?? []).map { worker in
+        let workers = workerResult.definitions.map { worker in
             workerRow(worker, functions: functions, triggers: triggers)
         }
         .sorted { $0.id < $1.id }
@@ -186,6 +201,7 @@ enum AgentCockpitProjection {
             functions: functions,
             triggers: triggers,
             triggerTypes: triggerTypes,
+            catalogDecodeIssues: catalogDecodeIssues,
             reports: discoveryReports
         )
         return AgentCockpitOverview(
@@ -193,12 +209,14 @@ enum AgentCockpitProjection {
                 connectionState: connectionState,
                 workers: workers,
                 functions: functions,
-                packages: packages
+                packages: packages,
+                catalogDecodeIssues: catalogDecodeIssues
             ),
             workers: workers,
             functions: functions,
             triggers: triggers,
             triggerTypes: triggerTypes,
+            catalogDecodeIssues: catalogDecodeIssues,
             packages: packages,
             runtimeSurfaces: runtimeSurfaces.sorted { $0.surface.title < $1.surface.title },
             discovery: discovery,
@@ -208,11 +226,30 @@ enum AgentCockpitProjection {
         )
     }
 
+    static func refreshFailedOverview(
+        previous: AgentCockpitOverview,
+        connectionState: ConnectionState,
+        message: String
+    ) -> AgentCockpitOverview {
+        guard connectionState.isConnected else {
+            return .empty(connectionState: connectionState)
+        }
+        var overview = previous
+        overview.status = AgentCockpitStatusSummary(
+            kind: .degraded,
+            title: "Refresh Failed",
+            detail: message.nilIfEmpty ?? "Latest cockpit refresh failed",
+            systemImage: "exclamationmark.triangle"
+        )
+        return overview
+    }
+
     static func status(
         connectionState: ConnectionState,
         workers: [AgentCockpitWorkerRow],
         functions: [AgentCockpitFunctionRow],
-        packages: [AgentCockpitPackageRow]
+        packages: [AgentCockpitPackageRow],
+        catalogDecodeIssues: [CatalogDefinitionDecodeIssue]
     ) -> AgentCockpitStatusSummary {
         if !connectionState.isConnected {
             switch connectionState {
@@ -249,6 +286,14 @@ enum AgentCockpitProjection {
             }
         }
 
+        if !catalogDecodeIssues.isEmpty {
+            return .init(
+                kind: .degraded,
+                title: "Catalog Degraded",
+                detail: catalogDecodeIssueDetail(catalogDecodeIssues.count),
+                systemImage: "exclamationmark.triangle"
+            )
+        }
         if packages.contains(where: { $0.kind == .proposal && normalized($0.lifecycle) == "proposed" }) {
             return .init(
                 kind: .awaitingApproval,
@@ -520,5 +565,10 @@ enum AgentCockpitProjection {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
             .replacingOccurrences(of: "_", with: "")
             .lowercased()
+    }
+
+    static func catalogDecodeIssueDetail(_ count: Int) -> String {
+        let noun = count == 1 ? "entry" : "entries"
+        return "\(count) catalog \(noun) could not be decoded"
     }
 }
