@@ -68,7 +68,7 @@ completed slice.
 | 12 | Accepted Follow-Up: Cockpit Placement and Session-List Row Polish | Phase 1 accepted follow-up | Commits `becbc0e95`, `34c53dc93`, `22cb96e72`, `9d172aa27`, `0176379ba`; progress checkpoint `da53490c1`; retrospective fix commit `2b546ee9316ae758193b96b594a2002733e2afc9` | `codex/ios-cockpit-placement-cleanup-current`; progress ledger; retrospective fix branch `codex/order-12-cockpit-placement-repair-cta-fix` | `ios-affordance-restoration-progress.md`; IOSAC/IARM invariants; session-list/cockpit/settings placement tests; README/onboarding docs; settings source guards | Accepted by re-audit thread `019ef78e-d30c-7f82-96ab-206c34af2276` after fix commit `2b546ee9316ae758193b96b594a2002733e2afc9`; no findings remain. Active-server repair uses truthful re-pair wording, true new-server flow still uses `prefill: nil`, docs match behavior, and Order 12 cockpit/dashboard/session-row behavior remains intact. | No backend facts, server settings, provider/auth APIs, fake backend truth, diagnostics execution changes, worker lifecycle changes, future agent-execution surfaces, notification inbox, APNs, device broker, Phase 2 capability, or passive chat runtime banner. | Closed. Continue with iOS Phase 1 Slice 6: Notification / Inbox Concept Review. |
 | 13 | iOS Phase 1 Slice 6: Notification / Inbox Concept Review | Phase 1 iOS defer decision | Commit `ace41ac98`; closeout `fda2eaf6d`; retrospective fix commit `0ff5d2b28de52dda2beb64245c1d6524ed835969` | `codex/ios-notification-inbox-concept-review-current`; progress ledger plus retrospective fix branch `codex/order-13-notification-inbox-concept-fix` | `ios-affordance-restoration-progress.md`; `ios_affordance_restoration_map_invariants.rs`; BPRC/IARM docs; iOS architecture doc | Accepted by re-audit thread `019ef7a8-1ac7-76d1-9024-4127a0cfdf71` after fix commit `0ff5d2b28de52dda2beb64245c1d6524ed835969`; no findings remain. Slice 6 is recorded as a defer/concept decision, not a runtime notification UI implementation; current line/tracker docs no longer claim it is next or pending implementation. | APNs, background push, device broker, notification resources, durable inbox storage, read state, app badge semantics, delivery chips, tool-family notifications, and agent-execution inbox remain Phase 2/later. | Closed. Continue with Accepted Follow-Up: Server-Backed Workspace Browser. |
 | 14 | Accepted Follow-Up: Server-Backed Workspace Browser | Phase 1 accepted follow-up / Phase 2 precursor | Commits `70780b798`, `f34ac1bdd`, `c818cc296`, `ceb6aab35`, `7a9de156b`, `8054ed17e`, `74a5564d3`, `38a88ede9`; reconciliation `980867c35` | `codex/ios-affordance-restoration-map-current`; progress ledger | `ios-affordance-restoration-progress.md`; filesystem workspace-browser docs/tests; IARM/BPRC invariants | Accepted by audit thread `019ef7ae-6dd0-77f2-851b-78934da65718`; no blocking or important findings. Server-backed workspace browser is accepted as a workspace selector precursor only; authenticated engine clients keep first-party filesystem-browser access by design, without adding model-facing filesystem tools. | Native file/patch review UI, import, worktree, git, broad file-management/product panels, fake analytics, source-control surfaces, and Phase 2 model-facing filesystem tools remain absent. | Closed. Follow-up: align symlinked-directory advertisement/navigation behavior; tighten workspace path abbreviation to the server-returned home path. Continue with Phase 2 Agent Execution Restoration Plan. |
-| 15 | Phase 2 Agent Execution Restoration Plan | Phase 2 planning | Planning baseline `980867c35`; final `7db72c1ee` | Historical branch evidence at `codex/ios-affordance-restoration-map-current@7db72c1ee`; the files are not present on this tracker branch. | Historical branch-only files: `phase-2-agent-execution-restoration-scorecard.md`; `phase-2-agent-execution-restoration-evidence-manifest.md`; `phase-2-agent-execution-restoration-inventory.md`; `phase-2-agent-execution-restoration-inventory.tsv`; DESI/IARM/BPRC/SSARR/OPSAA invariants on that source branch. | Historical plan evidence reports score 100/100, all 24 BPRC buckets mapped, ordered roadmap, memory architecture, validation protocol, and handoff packet. Current-line acceptance still requires a final consolidation branch/audit that ports or supersedes branch-scoped artifacts before claiming one integrated accepted state. | Planning does not implement runtime behavior. Future slices still need user decisions and per-slice validation. | Roadmap completeness, stale closure text, inventory row status drift, deferral preservation, handoff constraints, and whether branch-scoped artifacts have been consolidated before integrated acceptance. |
+| 15 | Phase 2 Agent Execution Restoration Plan | Phase 2 planning | Planning baseline `980867c35`; final `7db72c1ee`; retrospective fix commit `737411eefa30aa5a9b7ebd040583e62c995ba48f` | Historical branch evidence at `codex/ios-affordance-restoration-map-current@7db72c1ee`; the files are not present on this tracker branch. | Historical branch-only files: `phase-2-agent-execution-restoration-scorecard.md`; `phase-2-agent-execution-restoration-evidence-manifest.md`; `phase-2-agent-execution-restoration-inventory.md`; `phase-2-agent-execution-restoration-inventory.tsv`; DESI/IARM/BPRC/SSARR/OPSAA invariants on that source branch. | Accepted by re-audit thread `019ef7c2-a23a-7cf3-80c9-21695a1f84f1` after focused fix commit `737411eefa30aa5a9b7ebd040583e62c995ba48f`; no findings remain. Historical plan evidence reports score 100/100, all 24 BPRC buckets mapped, ordered roadmap, memory architecture, validation protocol, and handoff packet. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | Planning does not implement runtime behavior. Future slices still need user decisions and per-slice validation. | Closed. Continue with Phase 2 Slice 1: Catalog Discovery Evidence. |
 | 16 | Phase 2 Slice 1: Catalog Discovery Evidence | Phase 2 agent-execution restoration | Baseline `7db72c1ee`; commits `a9c3d3507`, `ca471fcde`, `680d9429f`; final `f95d3b02e` | `codex/phase-2-catalog-discovery-evidence-current` | Phase 2 scorecard/evidence/inventory; catalog discovery domain docs/tests; Runtime Cockpit tests; SACB/HRA/PCC/TPC/TMB/IARM/IOSAC/IOSTC/CSD invariants | Catalog search/inspect/conformance through `execute`; resource-backed reports; Runtime Cockpit Discovery; protected omission; many Rust/iOS/static validations recorded. | No target routing, intent execution, public `/engine` expansion, generated `ui_surface` publication, fixed legacy panels, schema repair, or old module copies. | Protected visibility, no target invocation, idempotency/lease/compensation, provider-visible singularity, cockpit DTO truthfulness, and log redaction hardening. |
 | 17 | Phase 2 Slice 2: Approval Safety / Freshness + Schema Hardening | Phase 2 agent-execution restoration | Baseline `f95d3b02e`; final pre-hardening `5ea963008`; hardening final `301f61bc3` | `codex/phase-2-approval-safety-freshness-current`; `codex/phase-2-approval-schema-hardening-current` | Phase 2 scorecard/evidence/inventory; approval domain docs/tests; SACB/TMB/HRA/TPC/PCC/DRC/CSD/DESI invariants | Durable approval request/decision resources, lifecycle stream, idempotent decision recording, fail-closed checks, replay explanations, schema alignment guard, full Rust CI recorded. | Native iOS approval UI, risk taxonomy, default expiry policy, interruption behavior, per-package risky-action triggers, and unrelated capability behavior remain deferred. | Approval-is-not-authority boundary, stale version/idempotency, expiry/freshness determinism, schema/output drift, and denial behavior. |
 | 18 | Phase 2 Slice 3: Memory Foundation + Scope Hardening | Phase 2 agent-execution restoration | Baseline `301f61bc3`; commits `29024b677`, `20dde9894`, `4c35b2119` | `codex/phase-2-memory-foundation-current` | Phase 2 scorecard/evidence/inventory; memory domain docs/tests; SACB/HRA/TMB/TPC/PCC/DRC/SSARR/CSD/BPRC/IARM/OPSAA/SUWRF/DESI invariants | Memory policy/status, resource definitions, redacted records, prompt traces, migration envelopes, scope hardening, no hidden body-context inclusion, full Rust CI and guards recorded. | Semantic/vector retrieval, embeddings, ranking, summarization, episodic retrieval, procedural rules/hooks/skills, automatic retention, native iOS memory UI, and unrelated features remain deferred. | Privacy and bodyRef custody, scope isolation, prompt trace freshness, policy inheritance, migration redaction, hidden memory leakage, and guard narrowing. |
@@ -909,15 +909,63 @@ Validation recorded by the accepted audit:
 - `git ls-files -ci --exclude-standard` passed with empty output.
 - The audit worktree remained clean.
 
+## Completed Audit: Phase 2 Agent Execution Restoration Plan
+
+Original audit thread: `019ef7b9-106d-70b3-b50b-984ba4718287`
+
+Focused fix thread: `019ef7be-7e0d-70d0-9e03-4727e8a87557`
+
+Independent re-audit thread: `019ef7c2-a23a-7cf3-80c9-21695a1f84f1`
+
+Original audit verdict: `changes required`
+
+Re-audit verdict: `slice accepted`
+
+Status: accepted with no findings after the focused tracker/docs fix.
+
+Accepted fix:
+
+- Fix commit:
+  `737411eefa30aa5a9b7ebd040583e62c995ba48f`
+- The fix clarified that Phase 2 Agent Execution Restoration Plan artifacts are
+  historical branch-only evidence at
+  `codex/ios-affordance-restoration-map-current@7db72c1ee`, not files present
+  on this tracker branch.
+- The fix preserved the consolidation requirement: before any all-slices
+  integrated acceptance claim, a final consolidation branch and explicit
+  consolidation audit must verify branch-scoped artifacts have either been
+  ported into that branch or truthfully superseded by current-line records.
+
+Accepted result:
+
+- Phase 2 Agent Execution Restoration Plan is accepted as a planning slice.
+- The accepted historical evidence reports score 100/100, all 24 BPRC buckets
+  mapped, an ordered roadmap, memory architecture, validation protocol, and
+  handoff packet.
+- Acceptance does not claim runtime/product implementation and does not claim
+  the historical branch-only plan files exist on this tracker branch.
+
+Accepted deferred scope:
+
+- Planning does not implement runtime behavior.
+- Future slices still need user decisions and per-slice validation.
+- Integrated all-slices acceptance remains blocked until the final
+  consolidation branch/audit requirement is completed.
+
+Validation recorded by the accepted re-audit:
+
+- The independent re-audit returned `verdict: slice accepted`.
+- The independent re-audit reported no findings.
+
 ## Next Audit
 
-The next action is audit of **Order 15: Phase 2 Agent Execution Restoration
-Plan**.
+The next action is audit of **Order 16: Phase 2 Slice 1: Catalog Discovery
+Evidence**.
 
-The tracker queue is not ambiguous: Order 14 is now closed, and Order 15 is the
-next open row. It starts from planning baseline `980867c35` and final
-`7db72c1ee`, with historical branch evidence at
-`codex/ios-affordance-restoration-map-current@7db72c1ee`.
+The tracker queue is not ambiguous: Order 15 is now closed, and Order 16 is the
+next open row. It starts from baseline `7db72c1ee`, includes commits
+`a9c3d3507`, `ca471fcde`, and `680d9429f`, and has final commit `f95d3b02e`.
+Its source of truth is `codex/phase-2-catalog-discovery-evidence-current`.
 
 Before any all-slices integrated acceptance claim, create a final consolidation
 branch and run an explicit consolidation audit that verifies accepted
