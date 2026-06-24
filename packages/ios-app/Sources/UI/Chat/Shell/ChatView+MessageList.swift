@@ -27,14 +27,16 @@ extension ChatView {
                     ),
                     actions: InputBarActions(
                         onSend: { [viewModel, inputHistory, scrollCoordinator] in
-                            inputHistory.addToHistory(viewModel.inputText)
                             scrollCoordinator.userSentMessage()
                             UIApplication.shared.sendAction(
                                 #selector(UIResponder.resignFirstResponder),
                                 to: nil, from: nil, for: nil
                             )
                             viewModel.sendMessage(
-                                reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil
+                                reasoningLevel: currentModelInfo?.supportsReasoning == true ? viewModel.inputBarState.reasoningLevel : nil,
+                                onPromptSent: { sentText in
+                                    inputHistory.addToHistory(sentText)
+                                }
                             )
                         },
                         onAbort: viewModel.abortAgent,

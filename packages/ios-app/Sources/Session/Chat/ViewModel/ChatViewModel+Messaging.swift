@@ -63,11 +63,12 @@ extension ChatViewModel: MessagingContext {
 extension ChatViewModel {
 
     /// Send a message to the agent.
-    func sendMessage(reasoningLevel: String? = nil) {
+    func sendMessage(reasoningLevel: String? = nil, onPromptSent: ((String) -> Void)? = nil) {
         Task {
             await messagingCoordinator.sendMessage(
                 reasoningLevel: reasoningLevel,
-                context: self
+                context: self,
+                onPromptSent: onPromptSent
             )
         }
     }
