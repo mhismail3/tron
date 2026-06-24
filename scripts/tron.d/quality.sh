@@ -59,7 +59,7 @@ run_tests() {
     )
 
     if (cd "$RUST_WORKSPACE" \
-        && cargo test --workspace --lib --bins -- --quiet 2>&1 \
+        && cargo test --workspace --lib --bins -- --quiet --test-threads=1 2>&1 \
         && run_named_test_targets "${closeout_test_targets[@]}"); then
         print_success "Tests passed"
         return 0
