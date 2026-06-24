@@ -235,6 +235,91 @@ async fn stale_running_job_is_reconciled_after_restart_before_status_list_and_cl
 }
 
 #[tokio::test]
+async fn stale_running_reconciliation_scans_past_newer_non_reconcilable_rows() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-stale-hidden").await;
+    let stale_status_id = "job_process:jobs-stale-hidden-status";
+    let stale_log_id = "job_process:jobs-stale-hidden-log";
+    let stale_time = Utc::now() - ChronoDuration::minutes(5);
+    create_running_job_resource_at(&ctx, &fixture, stale_status_id, stale_time).await;
+    create_running_job_resource_at(&ctx, &fixture, stale_log_id, stale_time).await;
+
+    let future_time = Utc::now() + ChronoDuration::minutes(5);
+    for index in 0..501 {
+        create_running_job_resource_at(
+            &ctx,
+            &fixture,
+            &format!("job_process:jobs-stale-hidden-future-{index}"),
+            future_time + ChronoDuration::seconds(index),
+        )
+        .await;
+    }
+
+    let status = fixture
+        .invoke_ok(json!({
+            "operation": "job_status",
+            "jobResourceId": stale_status_id
+        }))
+        .await;
+    let status_job = &jobs_details(&status)["job"];
+    assert_eq!(status_job["state"], json!("failed"));
+    assert!(
+        status_job["terminal"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("ownership unknown after jobs domain restart")
+    );
+
+    let log = fixture
+        .invoke_ok(json!({
+            "operation": "job_log",
+            "jobResourceId": stale_log_id
+        }))
+        .await;
+    assert_eq!(jobs_details(&log)["status"], json!("failed"));
+    let log_version_id = jobs_details(&log)["jobVersionId"].clone();
+
+    let future = ctx
+        .engine_host
+        .inspect_resource("job_process:jobs-stale-hidden-future-500")
+        .await
+        .expect("inspect future")
+        .expect("future running resource");
+    let (_, future_record) = super::support::job_record(&future).expect("future job record");
+    assert_eq!(future.resource.lifecycle, "running");
+    assert_eq!(future_record.state.as_str(), "running");
+
+    for (stale_id, version_id) in [
+        (stale_status_id, status_job["jobVersionId"].clone()),
+        (stale_log_id, log_version_id),
+    ] {
+        let inspection = ctx
+            .engine_host
+            .inspect_resource(stale_id)
+            .await
+            .expect("inspect stale")
+            .expect("stale resource");
+        assert_eq!(inspection.resource.lifecycle, "failed");
+        let (_, record) = super::support::job_record(&inspection).expect("stale job record");
+        assert!(
+            record
+                .terminal
+                .as_ref()
+                .and_then(|terminal| terminal.error.as_deref())
+                .is_some_and(|error| error.contains("ownership unknown after jobs domain restart"))
+        );
+        assert!(
+            inspection
+                .events
+                .iter()
+                .any(|event| event.payload["versionId"] == version_id),
+            "missing reconcile event for {stale_id}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn job_start_completes_and_records_bounded_output() {
     let ctx = make_test_context();
     let root = tempdir().expect("root");
@@ -785,7 +870,21 @@ async fn create_stale_running_job_resource(
     fixture: &ExecuteFixture<'_>,
     job_resource_id: &str,
 ) {
-    let stale_time = Utc::now() - ChronoDuration::minutes(5);
+    create_running_job_resource_at(
+        ctx,
+        fixture,
+        job_resource_id,
+        Utc::now() - ChronoDuration::minutes(5),
+    )
+    .await;
+}
+
+async fn create_running_job_resource_at(
+    ctx: &ServerRuntimeContext,
+    fixture: &ExecuteFixture<'_>,
+    job_resource_id: &str,
+    started_at: chrono::DateTime<Utc>,
+) {
     let record = super::types::JobProcessRecord {
         schema_version: super::types::JOB_SCHEMA_VERSION.to_owned(),
         state: super::types::JobState::Running,
@@ -813,8 +912,8 @@ async fn create_stale_running_job_resource(
             "mode": "explicit",
             "cleanupAfterSeconds": Value::Null
         }),
-        created_at: stale_time,
-        started_at: stale_time,
+        created_at: started_at,
+        started_at,
         completed_at: None,
         cancellation: super::types::JobCancellationRecord {
             requested: false,

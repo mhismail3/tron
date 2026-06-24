@@ -452,6 +452,16 @@ impl ResourceStoreBackend {
             Self::Sqlite(store) => store.list(filter),
         }
     }
+
+    pub(in crate::engine) fn list_internal_scan(
+        &self,
+        filter: ListResources,
+    ) -> Result<Vec<EngineResource>> {
+        match self {
+            Self::InMemory(store) => store.list_internal_scan(filter),
+            Self::Sqlite(store) => store.list_internal_scan(filter),
+        }
+    }
 }
 
 /// Engine primitive store bundle.

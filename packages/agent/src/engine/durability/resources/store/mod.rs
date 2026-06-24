@@ -397,6 +397,52 @@ impl SqliteEngineResourceStore {
         Ok(resources)
     }
 
+    /// List resources for crate-internal maintenance scans without the public
+    /// response cap. Callers must keep their own mutation scope narrow.
+    pub(in crate::engine) fn list_internal_scan(
+        &self,
+        filter: ListResources,
+    ) -> Result<Vec<EngineResource>> {
+        validate_list_filter(&filter)?;
+        let mut resources = Vec::new();
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT resource_id, kind, schema_id, scope_kind, scope_value, owner_worker_id,
+                        owner_actor_id, lifecycle, policy_json, current_version_id, trace_id,
+                        created_by_invocation_id, created_at, updated_at
+                 FROM engine_resources
+                 ORDER BY updated_at DESC",
+            )
+            .map_err(|err| sqlite_err("resource.list_internal_scan.prepare", err.to_string()))?;
+        let rows = stmt
+            .query_map([], row_to_resource)
+            .map_err(|err| sqlite_err("resource.list_internal_scan.query", err.to_string()))?;
+        for row in rows {
+            let resource =
+                row.map_err(|err| sqlite_err("resource.list_internal_scan.row", err.to_string()))?;
+            if filter
+                .kind
+                .as_ref()
+                .is_none_or(|kind| &resource.kind == kind)
+                && filter
+                    .scope
+                    .as_ref()
+                    .is_none_or(|scope| &resource.scope == scope)
+                && filter
+                    .lifecycle
+                    .as_ref()
+                    .is_none_or(|lifecycle| &resource.lifecycle == lifecycle)
+            {
+                resources.push(resource);
+                if resources.len() >= filter.limit {
+                    break;
+                }
+            }
+        }
+        Ok(resources)
+    }
+
     fn append_version_inner(
         &mut self,
         resource_id: &str,

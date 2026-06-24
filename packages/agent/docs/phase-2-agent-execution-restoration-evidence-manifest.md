@@ -317,6 +317,12 @@ Scope shipped:
   cancellation-request update lands between finalization's resource read and
   terminal update; the retry reuses the created output resource/link and
   preserves cancellation metadata.
+- Re-audit follow-up for Order 20/Slice 5A fixes stale pre-startup `running`
+  job reconciliation when more than 500 newer non-reconcilable rows occupy the
+  public newest-first page. Startup/list/cleanup reconciliation now uses an
+  internal scoped scan, and targeted status/log/cancel paths reconcile the
+  addressed scoped resource before returning it while preserving live
+  runtime-owned and post-startup rows.
 - Deliberately deferred PTY/interactive terminals, interpreters/runtime
   packages, git/worktree/source-control behavior, web/network behavior,
   subagents, scheduling, native iOS process panels, notifications, and
@@ -329,7 +335,7 @@ Focused validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo test --manifest-path packages/agent/Cargo.toml domains::jobs -- --nocapture` | exit 0 | 12 jobs-domain tests passed, covering schema alignment, start/status/list/log/cancel behavior, restart reconciliation for stale running resources, terminal idempotency, bounded output, timeout terminal output, inherited-pipe background child cleanup, process-exit/cancel race, forced cancel-request/finalization version conflict retry, shutdown cancellation, output/resource evidence, cleanup archiving, and fail-closed network policy. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::jobs -- --nocapture` | exit 0 | 13 jobs-domain tests passed, covering schema alignment, start/status/list/log/cancel behavior, restart reconciliation for stale running resources including the >500 newer non-reconcilable row scan regression, terminal idempotency, bounded output, timeout terminal output, inherited-pipe background child cleanup, process-exit/cancel race, forced cancel-request/finalization version conflict retry, shutdown cancellation, output/resource evidence, cleanup archiving, and fail-closed network policy. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability-domain tests passed with job execute operations registered. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture` | exit 0 | 26 provider prompt/converter tests passed after documenting the job operation names and provider-visible execute boundary. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after classifying jobs files including `race_tests.rs`, operations, working-directory requirements, network-policy denial, and mutating idempotency requirements. |
@@ -351,6 +357,10 @@ Focused validation:
 
 No Swift or Xcode project files changed, so XcodeGen and iOS simulator tests
 were not run for Slice 5A.
+
+Order 20/Slice 5A re-audit evidence on follow-up branches remains
+branch-scoped until the final all-slices consolidation and audit explicitly
+rolls it into the canonical Phase 2 checkpoint.
 
 Adversarial self-review:
 

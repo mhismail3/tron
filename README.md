@@ -959,7 +959,11 @@ The `jobs` domain owns durable non-interactive process lifecycle records:
 `jobs::cleanup` create/update scoped `job_process` resources, bounded
 `execution_output` resources, `jobs.lifecycle` stream rows, trace/replay refs,
 process-group timeout/cancellation cleanup, terminal-state idempotency,
-shutdown cancellation, and retention cleanup.
+shutdown cancellation, and retention cleanup. Startup and lifecycle
+read/cleanup reconciliation scans scoped running jobs internally so older
+pre-startup stale records cannot be hidden behind a public list page of live or
+post-startup rows; targeted status/log/cancel also rechecks the addressed
+resource after scope validation without mutating unrelated scopes.
 Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, git, web/network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
