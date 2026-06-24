@@ -861,18 +861,30 @@ Discovery evidence:
   deterministic tests, docs/static updates, validation commands, and residual
   decisions.
 
-## Phase 2 Slice 6E Implementation Candidate: Git Branch Inventory Foundation
+## Phase 2 Slice 6E Accepted Implementation: Git Branch Inventory Foundation
 
-Candidate branch: `codex/phase-2-slice-6e-branch-inventory-v2`.
+Implementation branch: `codex/phase-2-slice-6e-branch-inventory-v2`.
 Implementation baseline:
 `origin/main@2241def83033d3bb49836b0d6b1ecf3c36fc8c39`
 (`docs: shape slice 6e branch inventory handoff`).
 
-Implementation status: candidate pending independent review, fix loop if
-needed, mainline integration, push, and ancestry proof. This section is not an
-acceptance claim.
+Accepted commits:
 
-Candidate evidence:
+- `7f72e9407bf1dfc39b9a41dd091fc7fd7565d432` (`feat: add git branch inventory foundation`);
+- `16025248d4b9f470786e61888d5f74b7fc9f3572` (`Fix truncated branch metadata inventory evidence`).
+
+Review/fix evidence:
+
+- Initial independent review thread `019efa73-0911-7bc2-a10c-37be6ab374d9`
+  returned `changes required` for oversized branch metadata that could truncate
+  before all NUL-delimited fields and fail the whole inventory operation.
+- Focused fix thread `019efa76-51cd-7902-8fca-aed5bb3487f9` committed
+  `16025248d4b9f470786e61888d5f74b7fc9f3572`, preserving bounded row evidence
+  with metadata truncation flags and adding an oversized-author regression.
+- Final independent re-review thread `019efa7c-7bb9-7803-bf80-224f8b799c1b`
+  returned `slice accepted` with no findings.
+
+Accepted evidence:
 
 - Adds read-only `git_branch_inventory` behind the existing
   `capability::execute` primitive; no direct `git::branch_inventory` catalog
@@ -881,21 +893,31 @@ Candidate evidence:
   trusted-root repository validation shared with prior Git slices.
 - Returns current branch or detached `HEAD` evidence, sorted local branch
   rows, local branch refs/names/OIDs, optional local upstream/ahead-behind
-  counts, bounded last-commit subject/time/author metadata, and explicit
-  `maxBranches`/`maxBranchBytes` truncation metadata.
+  counts, bounded last-commit subject/time/author metadata, oversized metadata
+  rows as truncated evidence, and explicit `maxBranches`/`maxBranchBytes`
+  truncation metadata.
 - Rejects non-repo paths, traversal, missing trusted working-directory
   metadata, and nested-repo misuse.
 - Keeps later mutation scope deferred: checkout/switch, branch deletion/rename,
   upstream setup, merge/rebase/reset/revert/cherry-pick, stash/clean,
   fetch/pull/push, PR handoff, worktree graph resources, public `/engine`
-  DTOs, native SourceChanges UI, and production deployment behavior.
+  DTOs, native SourceChanges UI, durable branch-inventory resources, and
+  production deployment behavior.
 
-Candidate validation recorded before review:
+Validation recorded before mainline closeout:
 
 - `cargo test --manifest-path packages/agent/Cargo.toml git_branch_inventory -- --nocapture`
-  passed with six focused tests covering sorted/current branch evidence,
+  passed with seven focused tests covering sorted/current branch evidence,
   detached `HEAD`, upstream/no-upstream, count/byte truncation, unusual branch
-  names, path/repo rejection, and provider execute boundary.
+  names, oversized metadata truncation, path/repo rejection, and provider
+  execute boundary.
+- `cargo check --manifest-path packages/agent/Cargo.toml` passed with existing
+  dead-code warnings.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`,
+  `git diff --check`, and `scripts/personal-info-guard.sh` passed.
+- Independent re-review also passed the baseline closure, HRA, true modularity,
+  true primitive cleanup, primitive code cleanup, SACB, and DESI invariant
+  targets.
 
 ## Validation Log
 

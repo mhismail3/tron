@@ -529,7 +529,8 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "git_branch_start",
             "accepted Slice 6C adds staged-index commit evidence",
             "accepted Slice 6D adds",
-            "Slice 6E implementation candidate adds read-only local branch inventory evidence",
+            "accepted Slice 6E adds read-only local branch inventory evidence",
+            "branch inventory sorting/bounds/upstream/oversized-metadata evidence",
         ],
         &[
             "Slice 6B adds explicit `git_stage`/`git_unstage` index mutation",
@@ -539,7 +540,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "Slice 6C Accepted Implementation",
             "Slice 6D Accepted Implementation",
             "Phase 2 Slice 6E Discovery: Git Branch Inventory Foundation",
-            "Phase 2 Slice 6E Implementation Candidate",
+            "Phase 2 Slice 6E Accepted Implementation",
         ],
     );
     let phase_two_inventory_doc =
@@ -571,19 +572,28 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             && !phase_two_inventory_doc.contains("P2AER-INV-013 remains `pending_review`"),
         "Slice 6D docs must not retain pre-acceptance candidate wording after integration"
     );
+    let normalized_phase_two_inventory_doc = phase_two_inventory_doc
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
-        phase_two_inventory_doc.contains("Slice 6E now has an implementation")
-            && phase_two_inventory_doc.contains("candidate for read-only local branch inventory")
+        normalized_phase_two_inventory_doc
+            .contains("Accepted Slice 6E adds read-only local branch inventory")
+            && normalized_phase_two_inventory_doc.contains(
+                "bounded last-commit metadata with oversized metadata rows retained as truncated evidence"
+            )
             && phase_two_inventory_doc.contains("`git_branch_inventory`"),
-        "Slice 6E docs must identify the read-only branch inventory candidate boundary"
+        "Slice 6E docs must record accepted read-only branch inventory boundary"
     );
     let phase_two_inventory_tsv =
         read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv");
     assert!(
-        phase_two_inventory_tsv.contains(
-            "Slice 6E implementation candidate adds read-only local branch inventory evidence"
-        ) && phase_two_inventory_tsv.contains("\tSlice 6E\t"),
-        "Slice 6E candidate must update the machine-readable P2AER inventory row"
+        phase_two_inventory_tsv
+            .contains("accepted Slice 6E adds read-only local branch inventory evidence")
+            && phase_two_inventory_tsv
+                .contains("branch inventory sorting/bounds/upstream/oversized-metadata evidence")
+            && phase_two_inventory_tsv.contains("\tSlice 6E\t"),
+        "Slice 6E acceptance must update the machine-readable P2AER inventory row"
     );
     let phase_two_evidence_doc = read_repo_file(
         "packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md",
@@ -591,31 +601,31 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
     assert!(
         phase_two_evidence_doc
             .contains("Phase 2 Slice 6E Discovery: Git Branch Inventory Foundation")
-            && phase_two_evidence_doc.contains("Phase 2 Slice 6E Implementation Candidate")
-            && phase_two_evidence_doc.contains("candidate pending independent review"),
-        "Slice 6E evidence must record discovery and pending-review candidate status"
+            && phase_two_evidence_doc.contains("Phase 2 Slice 6E Accepted Implementation")
+            && phase_two_evidence_doc.contains("Final independent re-review thread")
+            && phase_two_evidence_doc.contains("returned `slice accepted` with no findings"),
+        "Slice 6E evidence must record accepted implementation status"
     );
     let phase_two_scorecard =
         read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md");
     assert!(
         phase_two_scorecard.contains("Selected Slice 6E Discovery Packet")
-            && phase_two_scorecard.contains("Slice 6E Implementation Candidate")
-            && phase_two_scorecard.contains("Review the Slice 6E implementation candidate"),
-        "Slice 6E scorecard must carry the handoff packet and implementation candidate status"
+            && phase_two_scorecard.contains("Accepted Slice 6E Implementation")
+            && phase_two_scorecard.contains("Final independent re-review thread")
+            && phase_two_scorecard.contains("returned `slice accepted` with no findings"),
+        "Slice 6E scorecard must carry the handoff packet and accepted implementation status"
     );
     let retrospective_tracker =
         read_repo_file("packages/agent/docs/restoration-retrospective-audit-status.md");
     assert!(
         retrospective_tracker.contains("Phase 2 Slice 6D: Git Branch Start Foundation")
             && retrospective_tracker.contains("Phase 2 Slice 6E: Git Branch Inventory Foundation")
-            && retrospective_tracker.contains("Pending independent review"),
-        "retrospective tracker must include accepted Slice 6D and pending Slice 6E candidate"
+            && retrospective_tracker
+                .contains("final accepting review `019efa7c-7bb9-7803-bf80-224f8b799c1b`")
+            && retrospective_tracker.contains("Closed. Continue with fresh discovery"),
+        "retrospective tracker must include accepted Slice 6D and closed Slice 6E"
     );
-    let normalized_inventory_doc = phase_two_inventory_doc
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
-    for sentence in normalized_inventory_doc.split(". ") {
+    for sentence in normalized_phase_two_inventory_doc.split(". ") {
         let lower_sentence = sentence.to_ascii_lowercase();
         if !lower_sentence.contains("slice 6b") {
             continue;

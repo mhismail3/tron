@@ -207,12 +207,12 @@ resource-backed evidence, lifecycle stream evidence, expected HEAD freshness,
 expected index-tree freshness for commit, idempotency, branch-name validation,
 and static guards proving no arbitrary checkout, branch delete/rename,
 merge/rebase/reset, push/PR, worktree graph, conflict resolution workflow, or
-native SourceChanges surface was added. Slice 6E now has an implementation
-candidate for read-only local branch inventory through the existing
-`capability::execute` and `domains/git` boundary: `git_branch_inventory`
-enumerates sorted local `refs/heads/*`, reports current or detached HEAD
-evidence, includes branch OIDs, optional local upstream/ahead-behind evidence,
-and bounded last-commit metadata, and records branch count/byte truncation
-without adding a durable resource kind. Branch deletion/rename, arbitrary
+native SourceChanges surface was added. Accepted Slice 6E adds read-only local
+branch inventory through the existing `capability::execute` and `domains/git`
+boundary: `git_branch_inventory` enumerates sorted local `refs/heads/*`,
+reports current or detached HEAD evidence, includes branch OIDs, optional local
+upstream/ahead-behind evidence, bounded last-commit metadata with oversized
+metadata rows retained as truncated evidence, and branch count/byte truncation
+metadata without adding a durable resource kind. Branch deletion/rename, arbitrary
 checkout, remote push/PR, merge/rebase/reset, conflict workflows, worktree graph
 resources, and native SourceChanges remain deferred.

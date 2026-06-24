@@ -51,18 +51,18 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 6C: guarded staged-index Git commit evidence with resource and
   lifecycle evidence;
 - Slice 6D: local branch-start with guarded symbolic `HEAD` movement, resource
-  evidence, lifecycle evidence, and no checkout.
-- Slice 6E candidate: read-only local branch inventory evidence through
-  `git_branch_inventory`, pending independent review and mainline acceptance.
+  evidence, lifecycle evidence, and no checkout;
+- Slice 6E: read-only local branch inventory evidence through
+  `git_branch_inventory`, including bounded truncated metadata handling.
 
 Current next action:
-Review the Slice 6E implementation candidate from fresh `origin/main`: a
-read-only Git branch inventory foundation through the existing
-`capability::execute` and `domains/git` boundary. Branch deletion, rename,
-arbitrary checkout, detached-HEAD commits, merge/rebase/reset, stash/clean,
-fetch/pull/push, PR handoff, conflict resolution workflows, worktree graph
-resources, public API expansion, production deployment behavior, and native
-SourceChanges UI remain deferred.
+Start discovery from fresh `origin/main` for the next Phase 2 restoration
+slice. The current scorecard proceeds to Slice 7 goals/queues/questions unless
+the fresh discovery pass identifies a smaller required source-control follow-up.
+Branch deletion, rename, arbitrary checkout, detached-HEAD commits,
+merge/rebase/reset, stash/clean, fetch/pull/push, PR handoff, conflict
+resolution workflows, worktree graph resources, public API expansion,
+production deployment behavior, and native SourceChanges UI remain deferred.
 
 ## Scope
 
@@ -1353,14 +1353,28 @@ Residual user decisions after Slice 6E: push/PR approval, arbitrary checkout
 policy, branch deletion/rename policy, default branch naming/cleanup policy,
 native source-control UI scope, and conflict-resolution delegation.
 
-#### Slice 6E Implementation Candidate
+#### Accepted Slice 6E Implementation
 
-Candidate branch: `codex/phase-2-slice-6e-branch-inventory-v2`.
+Implementation branch: `codex/phase-2-slice-6e-branch-inventory-v2`.
 Implementation baseline:
 `origin/main@2241def83033d3bb49836b0d6b1ecf3c36fc8c39`
 (`docs: shape slice 6e branch inventory handoff`).
+Accepted commits:
 
-Candidate scope:
+- `7f72e9407bf1dfc39b9a41dd091fc7fd7565d432` (`feat: add git branch inventory foundation`);
+- `16025248d4b9f470786e61888d5f74b7fc9f3572` (`Fix truncated branch metadata inventory evidence`).
+
+Review/fix loop:
+
+- Initial independent review thread `019efa73-0911-7bc2-a10c-37be6ab374d9`
+  returned `changes required` for an oversized metadata truncation path that
+  could fail the whole inventory operation.
+- Focused fix thread `019efa76-51cd-7902-8fca-aed5bb3487f9` added bounded
+  partial-row handling, README/module docs, and an oversized-author regression.
+- Final independent re-review thread `019efa7c-7bb9-7803-bf80-224f8b799c1b`
+  returned `slice accepted` with no findings.
+
+Accepted scope:
 
 - Adds execute-only `git_branch_inventory`; no direct `git::branch_inventory`
   catalog contract and no durable resource kind.
@@ -1371,18 +1385,27 @@ Candidate scope:
   helpers and rejects traversal, non-repo paths, and nested-repo misuse.
 - Enumerates sorted local `refs/heads/*`, reports current branch or detached
   `HEAD`, branch ref/name/OID rows, optional local upstream/ahead-behind
-  evidence, bounded last-commit subject/time/author metadata, and explicit
-  branch count/byte truncation metadata.
+  evidence, bounded last-commit subject/time/author metadata, oversized
+  metadata rows as truncated evidence, and explicit branch count/byte
+  truncation metadata.
 - Uses local non-paged Git commands only; it does not fetch, pull, push, switch,
   create, delete, rename, merge, rebase, reset, stash, clean, create worktrees,
   mutate the index, or edit worktree files.
 
-Candidate validation performed before independent review:
+Implementation and review validation:
 
 - `cargo test --manifest-path packages/agent/Cargo.toml git_branch_inventory -- --nocapture`
-  passed, including deterministic order/current marker, detached `HEAD`,
-  upstream/no-upstream, count/byte bounds, unusual branch name serialization,
+  passed with seven focused tests after the fix, including deterministic
+  order/current marker, detached `HEAD`, upstream/no-upstream, count/byte
+  bounds, unusual branch name serialization, oversized metadata truncation,
   bad path/repo rejection, and execute-boundary coverage.
+- `cargo check --manifest-path packages/agent/Cargo.toml`, `cargo fmt
+  --manifest-path packages/agent/Cargo.toml --all -- --check`, `git diff
+  --check`, and `scripts/personal-info-guard.sh` passed on the implementation
+  branch and in independent review.
+- The final review also ran the baseline closure, HRA, true modularity, true
+  primitive cleanup, primitive code cleanup, security authority/capability
+  boundary, and documentation/evidence scorecard invariant targets.
 
 ### Slice 7: Goals, Queues, Questions, And Planning
 
@@ -1731,12 +1754,10 @@ Implementation slices add:
 ## Closure Verdict
 
 Phase 2 remains source-backed and proceeds one slice at a time. As of
-`main@2241def83033d3bb49836b0d6b1ecf3c36fc8c39`, Slices 1 through 4,
-Slice 5A, Slice 6A, Slice 6B, Slice 6C, and Slice 6D are represented on the
-consolidated mainline after independent acceptance, and Slice 6E discovery is
-recorded on main. The current candidate branch implements Slice 6E read-only
-Git branch inventory and still requires independent review, any fix loop,
-mainline integration, push, and ancestor proof before acceptance. Arbitrary
-checkout, branch deletion/rename, merge/rebase/reset, remote push/PR handoff,
-conflict workflow, worktree graph, production deploy, and native SourceChanges
-remain deferred.
+`main@16025248d4b9f470786e61888d5f74b7fc9f3572`, Slices 1 through 4,
+Slice 5A, Slice 6A, Slice 6B, Slice 6C, Slice 6D, and Slice 6E are represented
+on the consolidated mainline after independent acceptance. Slice 6E restores
+read-only local Git branch inventory through `git_branch_inventory` and keeps
+arbitrary checkout, branch deletion/rename, merge/rebase/reset, remote
+push/PR handoff, conflict workflow, worktree graph, production deploy, and
+native SourceChanges deferred.
