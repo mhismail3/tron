@@ -518,20 +518,22 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-05",
         "worktree_git",
         "Slice 6: Git And Worktree Foundations",
-        "current_baseline",
+        "pending_review",
         &[
             "accepted Slice 6B adds index-only Git stage/unstage",
             "git_status",
             "git_diff",
             "git_stage",
             "git_unstage",
-            "current_baseline",
+            "git_commit",
+            "pending_review",
         ],
         &[
             "Slice 6B adds explicit `git_stage`/`git_unstage` index mutation",
             "with `git::status`",
             "`git::diff` backend contracts",
             "`git_index_change` resource",
+            "Slice 6C Candidate Implementation",
         ],
     );
     let phase_two_inventory_doc =
@@ -571,11 +573,11 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
     }
     let git_source = read_repo_file("packages/agent/src/domains/git/mod.rs")
         + &read_repo_file("packages/agent/src/domains/git/contract.rs")
+        + &read_repo_file("packages/agent/src/domains/git/commit.rs")
         + &read_repo_file("packages/agent/src/domains/git/mutation.rs")
         + &read_repo_file("packages/agent/src/domains/git/service.rs")
         + &read_repo_file("packages/agent/src/domains/capability/operations/git.rs");
     for forbidden in [
-        "git_commit",
         "git_merge",
         "git_rebase",
         "git_reset",
@@ -586,7 +588,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "git_pull",
         "git_fetch",
         "git_clean",
-        "git::commit",
         "git::merge",
         "git::rebase",
         "git::reset",
@@ -600,7 +601,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
     ] {
         assert!(
             !git_source.contains(forbidden),
-            "Slice 6B git foundation must stay index-only; found {forbidden}"
+            "Slice 6C git foundation must stay staged-index commit only; found {forbidden}"
         );
     }
     for forbidden in [

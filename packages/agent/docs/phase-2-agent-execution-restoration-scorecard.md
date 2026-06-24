@@ -873,10 +873,10 @@ Core versus modular split:
   grants, idempotency ledger, resource kernel, stream substrate, trace/replay
   refs, and bounded Git command helpers. Add only generic resource definition
   constants/schema wiring needed for a new `git_commit` evidence resource.
-- Modular package: keep behavior in `domains/git`. Add a backend
-  `git::commit` contract and provider-visible `git_commit` operation value
-  through `capability::execute`; do not add a second model-facing tool or
-  public `/engine` API.
+- Modular package: keep behavior in `domains/git`. Add backend commit service
+  code and provider-visible `git_commit` operation value through
+  `capability::execute`; do not add a direct `git::commit` catalog function,
+  second model-facing tool, or public `/engine` API.
 - Mutation boundary: `git_commit` may create exactly one commit from the
   already-staged index and advance the current named branch from
   `expectedHead` to the new commit. It must not auto-stage files, edit
@@ -974,6 +974,15 @@ Explicit non-goals:
 - no hidden approval policy changes. Package-wide risky-action approvals wait
   for a later policy decision, though the resource/event evidence should be
   sufficient for future approval checks.
+
+#### Slice 6C Candidate Implementation Note
+
+Implementation branch `codex/phase-2-slice-6c-git-commit-evidence` starts from
+`origin/main@bc469ba3458ecce8301eb84abbd82070cfd0362a`. The candidate adds
+only `git_commit` through the existing `capability::execute` and `domains/git`
+boundaries, with staged-index tree freshness, resource/stream evidence, and
+hook/editor/pager/signing/prompt suppression. It remains pending independent
+review and is not yet recorded as an accepted mainline baseline.
 
 Review focus and risks:
 

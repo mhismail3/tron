@@ -410,8 +410,9 @@ Current living entry points:
 - `packages/agent/docs/restoration-retrospective-audit-status.md`: active
   retrospective audit tracker for the ordered completed-slice queue, audit
   constraints, first-audit target, accepted deferred scope, and current
-  Phase 2 Slice 5A, accepted Slice 6A read-only git/worktree baseline, and
-  Slice 6B Git index mutation implementation evidence.
+  Phase 2 Slice 5A, accepted Slice 6A read-only git/worktree baseline,
+  Slice 6B Git index mutation implementation evidence, and Slice 6C Git
+  commit candidate review status.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -929,6 +930,7 @@ Current primitive operations:
 | `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers. |
 | `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
+| `git_commit` | Candidate Slice 6C operation that creates one commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
@@ -986,17 +988,26 @@ not part of this foundation.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
+This branch carries the Slice 6C candidate `git_commit` execute operation with
+backend staged-index commit evidence pending review; commit is not registered as
+a direct `git::*` catalog function.
 Provider-visible access remains operation values behind the single
-`capability::execute` primitive: `git_status`, `git_diff`, `git_stage`, and
-`git_unstage`. The implementation resolves only relative paths under trusted
-working-directory metadata, rejects path traversal and worktree-root escapes,
-reports branch/detached HEAD/upstream/ahead-behind/dirty summaries, returns
-bounded status/diff evidence, and requires idempotency key, human/action
-reason, and expected HEAD for index mutation. Successful stage/unstage
+`capability::execute` primitive: `git_status`, `git_diff`, `git_stage`,
+`git_unstage`, and candidate `git_commit`. The implementation resolves only
+relative paths under trusted working-directory metadata, rejects path traversal
+and worktree-root escapes, reports branch/detached HEAD/upstream/ahead-behind/
+dirty summaries, returns bounded status/diff evidence, exposes the staged index
+tree without writing repository tree objects, and requires idempotency key,
+human/action reason, and expected HEAD for mutation. Successful stage/unstage
 operations create `git_index_change` resources and publish `git.lifecycle`
-stream evidence. Commits, merges, rebases, resets, pushes, branch
-checkout/deletion, conflict resolution workflows, PR handoff, worktree graph
-resources, and native iOS SourceChanges UI remain deferred.
+stream evidence. Candidate `git_commit` creates exactly one commit from the
+already-staged index on the current named branch after expected HEAD and
+expected index tree freshness checks, rejects detached/conflicted/empty-index
+states, suppresses hooks/editors/pagers/signing/credential prompts, creates a
+`git_commit` resource, and publishes `git.commit_created` lifecycle evidence.
+Merges, rebases, resets, pushes, branch checkout/deletion, conflict resolution
+workflows, PR handoff, worktree graph resources, and native iOS SourceChanges
+UI remain deferred.
 Policy lookup is `session -> workspace -> system`, and prompt-trace audit
 idempotency is keyed by trace so memory status can change across turns.
 Direct record-id inspect/edit/tombstone operations reject cross-scope resources.

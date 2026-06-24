@@ -1096,6 +1096,7 @@ packages/agent/src/domains/jobs/types.rs	rust	contract	agent:jobs	may be shared 
 packages/agent/src/engine/durability/resources/job_definitions.rs	rust	implementation	rust:engine	owner-private resource definition module; callers use engine resource facade
 packages/agent/src/domains/capability/operations/git.rs	rust	implementation	agent:capability	owner-private execute adapter; callers enter through capability::execute
 packages/agent/src/domains/git/mod.rs	rust	facade	agent:git	domain root owns registration and docs; implementation stays in owner modules
+packages/agent/src/domains/git/commit.rs	rust	implementation	agent:git	owner-private staged-index commit and evidence; callers enter through capability::execute
 packages/agent/src/domains/git/contract.rs	rust	contract	agent:git	may be shared across registration while preserving git owner schemas
 packages/agent/src/domains/git/handlers.rs	rust	implementation	agent:git	owner-private handler bindings; external callers use registered functions
 packages/agent/src/domains/git/mutation.rs	rust	implementation	agent:git	owner-private index-only mutation and evidence; callers use registered functions

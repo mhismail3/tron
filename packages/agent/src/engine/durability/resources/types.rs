@@ -57,6 +57,10 @@ pub const JOB_PROCESS_SCHEMA_ID: &str = "tron.resource.job_process.v1";
 pub const GIT_INDEX_CHANGE_KIND: &str = "git_index_change";
 /// Built-in Git index mutation evidence resource schema id.
 pub const GIT_INDEX_CHANGE_SCHEMA_ID: &str = "tron.resource.git_index_change.v1";
+/// Built-in Git commit evidence resource kind.
+pub const GIT_COMMIT_KIND: &str = "git_commit";
+/// Built-in Git commit evidence resource schema id.
+pub const GIT_COMMIT_SCHEMA_ID: &str = "tron.resource.git_commit.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

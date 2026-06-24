@@ -46,6 +46,19 @@ pub(super) async fn git_unstage(
     git_result("git_unstage", result)
 }
 
+pub(super) async fn git_commit(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let result = crate::domains::git::commit::commit_value(
+        &deps.engine_host,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    git_result("git_commit", result)
+}
+
 fn git_result(
     operation: &'static str,
     result: serde_json::Value,

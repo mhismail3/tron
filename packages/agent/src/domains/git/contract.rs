@@ -33,6 +33,7 @@ pub(crate) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         write_contract(
             STAGE_FUNCTION,
             "Stage one explicit relative path into the Git index after expected-HEAD and conflict checks.",
+            GIT_INDEX_CHANGE_KIND,
         )
         .request_schema(index_mutation_schema())
         .response_schema(json_schema())
@@ -40,6 +41,7 @@ pub(crate) fn capabilities() -> crate::engine::Result<Vec<CapabilitySpec>> {
         write_contract(
             UNSTAGE_FUNCTION,
             "Unstage one explicit relative path from the Git index after expected-HEAD and conflict checks.",
+            GIT_INDEX_CHANGE_KIND,
         )
         .request_schema(index_mutation_schema())
         .response_schema(json_schema())
@@ -61,7 +63,11 @@ fn read_contract(function_id: &'static str, description: &'static str) -> Capabi
     .presentation_hints(json!({"systemImage": "branch"}))
 }
 
-fn write_contract(function_id: &'static str, description: &'static str) -> CapabilityContract {
+fn write_contract(
+    function_id: &'static str,
+    description: &'static str,
+    resource_kind: &'static str,
+) -> CapabilityContract {
     CapabilityContract::new(
         function_id,
         WORKER,
@@ -70,7 +76,7 @@ fn write_contract(function_id: &'static str, description: &'static str) -> Capab
         Some(WRITE_SCOPE),
     )
     .description(description)
-    .tags(vec!["git", "index", "source-control", "resource"])
+    .tags(vec!["git", "source-control", "resource"])
     .domain_module("git")
     .idempotency(IdempotencyContract::caller_session_engine_ledger())
     .idempotency_mode(TransportIdempotencyMode::ExplicitRequired)
@@ -81,11 +87,9 @@ fn write_contract(function_id: &'static str, description: &'static str) -> Capab
     ))
     .compensation(CompensationContract::new(
         CompensationKind::ManualOnly,
-        "git index mutations return bounded before/after evidence and can be manually reversed with the opposite index operation before commit",
+        "git write operations return bounded before/after evidence; index changes can be manually reversed before commit and committed history requires later manual source-control recovery",
     ))
-    .output_contract(DurableOutputContract::resource_backed([
-        GIT_INDEX_CHANGE_KIND,
-    ]))
+    .output_contract(DurableOutputContract::resource_backed([resource_kind]))
     .stream_topics(vec![GIT_LIFECYCLE_TOPIC])
     .presentation_hints(json!({"systemImage": "plusminus"}))
 }

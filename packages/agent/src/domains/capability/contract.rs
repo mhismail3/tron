@@ -2,7 +2,8 @@
 //!
 //! This worker is the model-facing harness collapse point: providers see one
 //! `execute` primitive that can observe, touch agent-owned state, use hardened
-//! filesystem package operations, inspect and stage Git index changes, run
+//! filesystem package operations, inspect Git state, stage Git index changes,
+//! commit already-staged Git changes under freshness guards, run
 //! bounded local commands, and manage durable non-interactive jobs.
 
 use serde_json::{Map, Value, json};
@@ -47,7 +48,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "name": "execute",
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
-                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff evidence, stage or unstage explicit Git index paths with expected HEAD checks, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, inspect agent trace/log records, and inspect catalog discovery evidence. ",
+                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, inspect agent trace/log records, and inspect catalog discovery evidence. ",
                     "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
@@ -68,7 +69,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "operation".to_owned(),
         json!({
             "type": "string",
-            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_stage, git_unstage, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_stage, git_unstage, git_commit, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
         }),
     );
     insert_string(&mut properties, "input", "Text to record for observe.");
@@ -111,7 +112,17 @@ fn execute_model_request_schema() -> serde_json::Value {
     insert_string(
         &mut properties,
         "expectedHead",
-        "Expected Git HEAD OID before git_stage or git_unstage.",
+        "Expected Git HEAD OID before git_stage, git_unstage, or git_commit.",
+    );
+    insert_string(
+        &mut properties,
+        "expectedIndexTree",
+        "Expected staged Git index tree OID before git_commit.",
+    );
+    insert_string(
+        &mut properties,
+        "message",
+        "Bounded commit message for git_commit.",
     );
     properties.insert(
         "commit".to_owned(),

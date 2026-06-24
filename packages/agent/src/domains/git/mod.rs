@@ -1,33 +1,37 @@
 //! Git and worktree domain.
 //!
 //! This Phase 2 package restores source-control observation plus the narrow
-//! Slice 6B Git index mutation foundation. It detects the repository
+//! Slice 6C Git staged-index commit foundation. It detects the repository
 //! containing a trusted runtime path, reports branch/upstream/dirty facts,
-//! returns bounded status/diff evidence, and stages/unstages explicit relative
-//! paths through the existing `capability::execute` primitive.
+//! returns bounded status/diff evidence, stages/unstages explicit relative
+//! paths, and creates one commit from the already-staged index through the
+//! existing `capability::execute` primitive.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
-//! | `contract` | Read and index-only write `git::*` function contracts and schemas |
+//! | `commit` | Staged-index commit implementation and evidence |
+//! | `contract` | Read and index-mutation `git::*` function contracts and schemas |
 //! | `handlers` | Operation-key binding table |
 //! | `mutation` | Index-only stage/unstage implementation and evidence |
 //! | `service` | Trusted path resolution, Git command execution, and truncation |
 //! | `types` | Small request/result helper types |
 //!
-//! # INVARIANT: git mutation is index-only
+//! # INVARIANT: Git mutation is staged-state only
 //!
-//! This domain must not commit, merge, rebase, reset, push, delete branches,
-//! resolve conflicts, or mutate repository files. Stage/unstage operations only
-//! mutate the Git index after validating trusted working-directory metadata,
-//! explicit relative paths, expected HEAD freshness, path existence, and
-//! path-scoped conflict state. Conflict preflight reads unmerged index entries
-//! directly; caller-controlled status/diff byte limits affect evidence only,
-//! never mutation eligibility.
+//! This domain must not merge, rebase, reset, push, delete branches, resolve
+//! conflicts, or mutate repository files. Stage/unstage operations only mutate
+//! the Git index after validating trusted working-directory metadata, explicit
+//! relative paths, expected HEAD freshness, path existence, and path-scoped
+//! conflict state. Commit operations create exactly one commit from the
+//! already-staged index on the current named branch after expected HEAD and
+//! expected index-tree checks. Caller-controlled status/diff byte limits affect
+//! evidence only, never mutation eligibility.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
+pub(crate) mod commit;
 pub(crate) mod contract;
 mod handlers;
 pub(crate) mod mutation;

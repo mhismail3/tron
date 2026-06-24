@@ -613,6 +613,43 @@ schema, lifecycle event shape, likely files, deterministic tests, docs/static
 updates, risks, and validation commands. This discovery section records no
 runtime behavior implementation.
 
+## Phase 2 Slice 6C Candidate Implementation: Git Commit Evidence Foundation
+
+Implementation branch: `codex/phase-2-slice-6c-git-commit-evidence`.
+Baseline:
+`origin/main@bc469ba3458ecce8301eb84abbd82070cfd0362a`
+(`docs: shape slice 6c git commit handoff`).
+
+Candidate status: pending review, not yet accepted as the current mainline
+baseline.
+
+Candidate implementation evidence:
+
+- Adds provider-visible `git_commit` only through the existing
+  `capability::execute` primitive and backend Git commit service; no direct
+  `git::commit` catalog function is registered.
+- Creates exactly one commit from the already-staged index on the current named
+  branch after `expectedHead`, `expectedIndexTree`, `reason`, bounded
+  `message`, and idempotency checks.
+- Exposes staged index tree evidence through repository facts without using
+  `git write-tree`; the tree hash is derived from `git ls-files -s -z` and
+  `git hash-object -t tree --stdin` without `-w`, and fails closed if the
+  index listing is truncated.
+- Rejects stale head, stale index tree, empty staged index, detached HEAD,
+  conflicted/unmerged index entries, non-repo and nested-repo misuse, path
+  escapes, missing trusted working-directory metadata, empty message, and empty
+  reason before committing.
+- Suppresses hooks, editors, pagers, GPG signing, terminal prompts, askpass,
+  and credential helpers with explicit command environment/config controls.
+- Records `git_commit` resources (`tron.resource.git_commit.v1`) with commit
+  oid, parent oid, actual tree, branch, expected head/index tree, authority,
+  reason, bounded message metadata, before/after bounded evidence, trace/replay
+  refs, idempotency, revision, and timestamp; publishes `git.commit_created`
+  lifecycle events with resource refs.
+- Keeps branch operations, merges/rebases/resets, remotes, PR handoff, conflict
+  resolution workflows, worktree graph resources, public `/engine` DTO
+  expansion, native SourceChanges UI, and production deploy behavior deferred.
+
 ## Validation Log
 
 | Command | Result | Evidence |

@@ -18,7 +18,8 @@ use crate::shared::server::test_support::make_test_context;
 use super::service::{diff_value, status_value};
 use crate::domains::capability::contract;
 use crate::engine::{
-    GIT_INDEX_CHANGE_KIND, GIT_INDEX_CHANGE_SCHEMA_ID, builtin_resource_type_definitions,
+    GIT_COMMIT_KIND, GIT_COMMIT_SCHEMA_ID, GIT_INDEX_CHANGE_KIND, GIT_INDEX_CHANGE_SCHEMA_ID,
+    builtin_resource_type_definitions,
 };
 
 #[tokio::test]
@@ -34,6 +35,8 @@ async fn status_reports_clean_repo() {
     assert_eq!(value["repository"]["branch"], "main");
     assert_eq!(value["repository"]["detachedHead"], false);
     assert!(value["repository"]["headOid"].as_str().unwrap().len() >= 40);
+    assert!(value["repository"]["headTreeOid"].as_str().unwrap().len() >= 40);
+    assert!(value["repository"]["indexTreeOid"].as_str().unwrap().len() >= 40);
     assert_eq!(value["repository"]["hasUpstream"], false);
     assert!(value["repository"]["upstream"].is_null());
 }
@@ -296,8 +299,9 @@ fn model_schema_exposes_index_only_git_operations() {
     assert!(schema_text.contains("git_diff"));
     assert!(schema_text.contains("git_stage"));
     assert!(schema_text.contains("git_unstage"));
+    assert!(schema_text.contains("git_commit"));
+    assert!(schema_text.contains("expectedIndexTree"));
     for forbidden in [
-        "git_commit",
         "git_merge",
         "git_rebase",
         "git_reset",
@@ -309,6 +313,29 @@ fn model_schema_exposes_index_only_git_operations() {
             "mutating git operation leaked into execute schema: {forbidden}"
         );
     }
+}
+
+#[test]
+fn git_commit_is_execute_only_not_direct_git_domain_contract() {
+    let direct_ids = super::contract::capabilities()
+        .expect("git capabilities")
+        .into_iter()
+        .map(|spec| spec.function_id)
+        .map(|function_id| function_id.into_inner())
+        .collect::<Vec<_>>();
+
+    assert!(direct_ids.contains(&"git::status".to_owned()));
+    assert!(direct_ids.contains(&"git::diff".to_owned()));
+    assert!(direct_ids.contains(&"git::stage".to_owned()));
+    assert!(direct_ids.contains(&"git::unstage".to_owned()));
+    assert!(
+        !direct_ids.contains(&"git::commit".to_owned()),
+        "Slice 6C git_commit must be exposed only through capability::execute"
+    );
+
+    let execute_metadata = contract::model_metadata(contract::EXECUTE_FUNCTION_ID);
+    let execute_schema = execute_metadata["capabilitySchema"]["parameters"].to_string();
+    assert!(execute_schema.contains("git_commit"));
 }
 
 #[test]
@@ -326,6 +353,46 @@ fn git_index_change_resource_definition_is_registered() {
     assert_eq!(
         definition.schema["properties"]["operation"]["enum"],
         json!(["stage", "unstage"])
+    );
+    assert_eq!(
+        definition.required_capabilities["write"],
+        json!(["git.write", "resource.write"])
+    );
+}
+
+#[test]
+fn git_commit_resource_definition_is_registered() {
+    let definitions = builtin_resource_type_definitions();
+    let definition = definitions
+        .iter()
+        .find(|definition| definition.kind == GIT_COMMIT_KIND)
+        .expect("git commit resource type");
+    assert_eq!(definition.schema_id, GIT_COMMIT_SCHEMA_ID);
+    assert_eq!(
+        definition.lifecycle_states,
+        vec!["committed".to_owned(), "archived".to_owned()]
+    );
+    assert_eq!(
+        definition.schema["properties"]["operation"]["enum"],
+        json!(["commit"])
+    );
+    assert!(
+        definition.schema["required"]
+            .to_string()
+            .contains("commitOid")
+    );
+    assert!(
+        definition.schema["required"]
+            .to_string()
+            .contains("expectedIndexTree")
+    );
+    assert_eq!(
+        definition.allowed_link_relations,
+        vec![
+            "evidence_for".to_owned(),
+            "derived_from".to_owned(),
+            "supersedes".to_owned()
+        ]
     );
     assert_eq!(
         definition.required_capabilities["write"],
@@ -415,6 +482,165 @@ async fn execute_git_stage_and_unstage_mutate_only_index_with_resource_and_strea
         ""
     );
     assert!(git_stdout(repo.path(), ["diff", "--", "tracked.txt"]).contains("after"));
+}
+
+#[tokio::test]
+async fn execute_git_commit_creates_one_commit_with_resource_and_stream() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let parent = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    write_file(repo.path(), "tracked.txt", "staged\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    write_file(repo.path(), "tracked.txt", "unstaged\n");
+    write_file(repo.path(), "untracked.txt", "untracked\n");
+    let expected_tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .expect("index tree")
+        .to_owned();
+    let before_cursor = ctx
+        .engine_host
+        .latest_stream_cursor(super::GIT_LIFECYCLE_TOPIC)
+        .await
+        .expect("latest cursor");
+
+    let committed = execute_git_ok(
+        &ctx,
+        repo.path(),
+        "git-commit-success",
+        json!({
+            "operation": "git_commit",
+            "message": "slice 6c test commit",
+            "expectedHead": parent,
+            "expectedIndexTree": expected_tree,
+            "reason": "test commit",
+            "maxDiffBytes": 16,
+            "idempotencyKey": "git-commit-success"
+        }),
+    )
+    .await;
+
+    assert_eq!(committed["details"]["primitiveOperation"], "git_commit");
+    assert_eq!(committed["details"]["git"]["status"], "committed");
+    let commit_oid = committed["details"]["git"]["commitOid"]
+        .as_str()
+        .expect("commit oid");
+    assert_eq!(git_stdout(repo.path(), ["rev-parse", "HEAD"]), commit_oid);
+    assert_eq!(
+        git_stdout(repo.path(), ["rev-parse", "HEAD^"]),
+        committed["details"]["git"]["parentOid"]
+    );
+    assert_eq!(
+        committed["details"]["git"]["actualTree"],
+        committed["details"]["git"]["expectedIndexTree"]
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["show", "HEAD:tracked.txt"]),
+        "staged"
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "unstaged\n"
+    );
+    assert!(repo.path().join("untracked.txt").exists());
+    assert!(git_stdout(repo.path(), ["status", "--porcelain=v1"]).contains("M tracked.txt"));
+    assert!(git_stdout(repo.path(), ["status", "--porcelain=v1"]).contains("?? untracked.txt"));
+    assert_eq!(
+        committed["details"]["git"]["evidence"]["beforeTruncated"],
+        true
+    );
+    assert_eq!(
+        committed["details"]["git"]["evidence"]["afterTruncated"],
+        true
+    );
+    assert_eq!(
+        committed["details"]["git"]["evidence"]["hookPolicy"],
+        "core.hooksPath=/dev/null"
+    );
+    assert_eq!(
+        committed["details"]["git"]["evidence"]["terminalPromptPolicy"],
+        "disabled"
+    );
+
+    let resource_id = committed["details"]["git"]["gitCommitResourceId"]
+        .as_str()
+        .expect("resource id");
+    let inspection = ctx
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .expect("inspect resource")
+        .expect("git commit resource");
+    assert_eq!(inspection.resource.kind, "git_commit");
+    assert_eq!(inspection.resource.lifecycle, "committed");
+    assert_eq!(inspection.versions[0].payload["commitOid"], commit_oid);
+    assert_eq!(inspection.versions[0].payload["parentOid"], parent);
+    assert_eq!(inspection.versions[0].payload["actualTree"], expected_tree);
+    assert_eq!(
+        inspection.versions[0].payload["message"]["subjectPreview"],
+        "slice 6c test commit"
+    );
+    let after_cursor = StreamCursor(
+        committed["details"]["git"]["streamCursor"]
+            .as_u64()
+            .expect("stream cursor"),
+    );
+    assert!(after_cursor > before_cursor);
+    assert_git_commit_lifecycle_event(&ctx, before_cursor, resource_id, commit_oid).await;
+}
+
+#[tokio::test]
+async fn execute_git_commit_replays_with_same_idempotency_key() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let parent = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    write_file(repo.path(), "tracked.txt", "after\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    let expected_tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let payload = json!({
+        "operation": "git_commit",
+        "message": "idempotent commit",
+        "expectedHead": parent,
+        "expectedIndexTree": expected_tree,
+        "reason": "test replay",
+        "idempotencyKey": "git-commit-replay"
+    });
+    let first = execute_git_ok(&ctx, repo.path(), "git-commit-replay", payload.clone()).await;
+    let first_commit = first["details"]["git"]["commitOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let first_resource = first["details"]["git"]["gitCommitResourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let first_cursor = first["details"]["git"]["streamCursor"].as_u64().unwrap();
+
+    let second = execute_git_ok(&ctx, repo.path(), "git-commit-replay", payload).await;
+    assert_eq!(second["details"]["git"]["commitOid"], json!(first_commit));
+    assert_eq!(
+        second["details"]["git"]["gitCommitResourceId"],
+        json!(first_resource)
+    );
+    assert_eq!(
+        second["details"]["git"]["streamCursor"],
+        json!(first_cursor)
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["rev-list", "--count", "HEAD"]),
+        "2"
+    );
 }
 
 #[tokio::test]
@@ -763,6 +989,360 @@ async fn execute_git_stage_rejects_conflicted_pathspecs() {
     );
 }
 
+#[tokio::test]
+async fn execute_git_commit_rejects_stale_head_and_stale_index_tree_before_commit() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let parent = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    let parent_count = git_stdout(repo.path(), ["rev-list", "--count", "HEAD"]);
+    write_file(repo.path(), "tracked.txt", "after\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    let expected_tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let stale_head = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-commit-stale-head",
+        json!({
+            "operation": "git_commit",
+            "message": "stale head",
+            "expectedHead": "0000000000000000000000000000000000000000",
+            "expectedIndexTree": expected_tree,
+            "reason": "test stale head",
+            "idempotencyKey": "git-commit-stale-head"
+        }),
+    )
+    .await;
+    assert!(stale_head.contains("expectedHead mismatch"));
+
+    let stale_tree = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-commit-stale-tree",
+        json!({
+            "operation": "git_commit",
+            "message": "stale tree",
+            "expectedHead": parent,
+            "expectedIndexTree": "0000000000000000000000000000000000000000",
+            "reason": "test stale tree",
+            "idempotencyKey": "git-commit-stale-tree"
+        }),
+    )
+    .await;
+    assert!(stale_tree.contains("expectedIndexTree mismatch"));
+    assert_eq!(
+        git_stdout(repo.path(), ["rev-list", "--count", "HEAD"]),
+        parent_count
+    );
+}
+
+#[tokio::test]
+async fn execute_git_commit_rejects_empty_index_detached_head_and_conflicts() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    let clean_tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let empty = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-commit-empty-index",
+        json!({
+            "operation": "git_commit",
+            "message": "empty",
+            "expectedHead": head,
+            "expectedIndexTree": clean_tree,
+            "reason": "test empty",
+            "idempotencyKey": "git-commit-empty-index"
+        }),
+    )
+    .await;
+    assert!(empty.contains("non-empty staged changes"));
+
+    git(repo.path(), ["checkout", "--detach", "HEAD"]);
+    write_file(repo.path(), "tracked.txt", "detached\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    let detached_tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let detached = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-commit-detached",
+        json!({
+            "operation": "git_commit",
+            "message": "detached",
+            "expectedHead": git_stdout(repo.path(), ["rev-parse", "HEAD"]),
+            "expectedIndexTree": detached_tree,
+            "reason": "test detached",
+            "idempotencyKey": "git-commit-detached"
+        }),
+    )
+    .await;
+    assert!(detached.contains("named branch") || detached.contains("detached HEAD"));
+
+    let conflicted = tempdir().expect("conflicted repo");
+    init_repo(conflicted.path());
+    write_file(conflicted.path(), "tracked.txt", "base\n");
+    git(conflicted.path(), ["add", "tracked.txt"]);
+    commit(conflicted.path(), "base");
+    git(conflicted.path(), ["checkout", "-b", "feature"]);
+    write_file(conflicted.path(), "tracked.txt", "feature\n");
+    git(conflicted.path(), ["add", "tracked.txt"]);
+    commit(conflicted.path(), "feature");
+    git(conflicted.path(), ["checkout", "main"]);
+    write_file(conflicted.path(), "tracked.txt", "main\n");
+    git(conflicted.path(), ["add", "tracked.txt"]);
+    commit(conflicted.path(), "main");
+    let merge = git_failure(conflicted.path(), ["merge", "feature"]);
+    assert!(merge.contains("CONFLICT") || merge.contains("conflict"));
+    let conflict_error = execute_git_error(
+        &ctx,
+        conflicted.path(),
+        "git-commit-conflict",
+        json!({
+            "operation": "git_commit",
+            "message": "conflict",
+            "expectedHead": git_stdout(conflicted.path(), ["rev-parse", "HEAD"]),
+            "expectedIndexTree": "0000000000000000000000000000000000000000",
+            "reason": "test conflict",
+            "idempotencyKey": "git-commit-conflict"
+        }),
+    )
+    .await;
+    assert!(conflict_error.contains("conflicted") || conflict_error.contains("unmerged"));
+}
+
+#[tokio::test]
+async fn execute_git_commit_rejects_bad_context_path_message_and_reason() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    write_file(repo.path(), "tracked.txt", "after\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    let tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let no_metadata = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("capability::execute").unwrap(),
+            json!({
+                "operation": "git_commit",
+                "message": "missing metadata",
+                "expectedHead": head,
+                "expectedIndexTree": tree,
+                "reason": "test",
+                "idempotencyKey": "git-commit-missing-metadata"
+            }),
+            execute_context_without_working_directory(
+                &ctx,
+                repo.path(),
+                "git-commit-missing-metadata",
+            )
+            .await,
+        ))
+        .await
+        .error
+        .expect("missing metadata should fail")
+        .to_string();
+    assert!(no_metadata.contains("trusted working directory metadata"));
+
+    for (key, payload, needle) in [
+        (
+            "git-commit-absolute",
+            json!({
+                "operation": "git_commit",
+                "path": repo.path().display().to_string(),
+                "message": "absolute",
+                "expectedHead": head,
+                "expectedIndexTree": tree,
+                "reason": "test absolute",
+                "idempotencyKey": "git-commit-absolute"
+            }),
+            "relative",
+        ),
+        (
+            "git-commit-traversal",
+            json!({
+                "operation": "git_commit",
+                "path": "../escape",
+                "message": "traversal",
+                "expectedHead": head,
+                "expectedIndexTree": tree,
+                "reason": "test traversal",
+                "idempotencyKey": "git-commit-traversal"
+            }),
+            "escape",
+        ),
+        (
+            "git-commit-empty-message",
+            json!({
+                "operation": "git_commit",
+                "message": "",
+                "expectedHead": head,
+                "expectedIndexTree": tree,
+                "reason": "test empty message",
+                "idempotencyKey": "git-commit-empty-message"
+            }),
+            "message must not be empty",
+        ),
+        (
+            "git-commit-empty-reason",
+            json!({
+                "operation": "git_commit",
+                "message": "empty reason",
+                "expectedHead": head,
+                "expectedIndexTree": tree,
+                "reason": "",
+                "idempotencyKey": "git-commit-empty-reason"
+            }),
+            "reason must not be empty",
+        ),
+    ] {
+        let error = execute_git_error(&ctx, repo.path(), key, payload).await;
+        assert!(
+            error.contains(needle),
+            "expected {needle:?} in error {error:?}"
+        );
+    }
+
+    let non_repo = tempdir().expect("non repo");
+    write_file(non_repo.path(), "tracked.txt", "content\n");
+    let non_repo_error = execute_git_error(
+        &ctx,
+        non_repo.path(),
+        "git-commit-non-repo",
+        json!({
+            "operation": "git_commit",
+            "message": "non repo",
+            "expectedHead": head,
+            "expectedIndexTree": tree,
+            "reason": "test non repo",
+            "idempotencyKey": "git-commit-non-repo"
+        }),
+    )
+    .await;
+    assert!(non_repo_error.contains("not inside a Git worktree"));
+
+    let outer = tempdir().expect("outer repo");
+    init_repo(outer.path());
+    write_file(outer.path(), "outer.txt", "outer\n");
+    git(outer.path(), ["add", "outer.txt"]);
+    commit(outer.path(), "outer");
+    let nested = outer.path().join("nested");
+    fs::create_dir(&nested).expect("nested");
+    init_repo(&nested);
+    write_file(&nested, "inner.txt", "inner\n");
+    git(&nested, ["add", "inner.txt"]);
+    commit(&nested, "inner");
+    let nested_error = execute_git_error(
+        &ctx,
+        outer.path(),
+        "git-commit-nested",
+        json!({
+            "operation": "git_commit",
+            "path": "nested",
+            "message": "nested",
+            "expectedHead": git_stdout(outer.path(), ["rev-parse", "HEAD"]),
+            "expectedIndexTree": git_stdout(outer.path(), ["rev-parse", "HEAD^{tree}"]),
+            "reason": "test nested",
+            "idempotencyKey": "git-commit-nested"
+        }),
+    )
+    .await;
+    assert!(nested_error.contains("trusted working-directory repository"));
+}
+
+#[tokio::test]
+async fn execute_git_commit_suppresses_hooks_editors_signing_and_prompts() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let hook_sentinel = repo.path().join("hook-ran");
+    let hooks = repo.path().join(".git/hooks");
+    fs::write(
+        hooks.join("pre-commit"),
+        format!("#!/bin/sh\ntouch {}\nexit 1\n", shell_quote(&hook_sentinel)),
+    )
+    .expect("write hook");
+    let mut permissions = fs::metadata(hooks.join("pre-commit"))
+        .expect("hook metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(hooks.join("pre-commit"), permissions).expect("hook permissions");
+    git(repo.path(), ["config", "commit.gpgSign", "true"]);
+    git(repo.path(), ["config", "gpg.program", "/bin/false"]);
+    git(repo.path(), ["config", "core.pager", "/bin/false"]);
+    git(repo.path(), ["config", "credential.helper", "!/bin/false"]);
+
+    let parent = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    write_file(repo.path(), "tracked.txt", "after\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    let expected_tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let committed = execute_git_ok(
+        &ctx,
+        repo.path(),
+        "git-commit-suppression",
+        json!({
+            "operation": "git_commit",
+            "message": "suppression",
+            "expectedHead": parent,
+            "expectedIndexTree": expected_tree,
+            "reason": "test suppression",
+            "idempotencyKey": "git-commit-suppression"
+        }),
+    )
+    .await;
+    assert!(!hook_sentinel.exists(), "commit hook must not run");
+    assert_eq!(
+        committed["details"]["git"]["evidence"]["editorPolicy"],
+        "disabled"
+    );
+    assert_eq!(
+        committed["details"]["git"]["evidence"]["pagerPolicy"],
+        "disabled"
+    );
+    assert_eq!(
+        committed["details"]["git"]["evidence"]["gpgSigningPolicy"],
+        "disabled"
+    );
+    assert_eq!(
+        committed["details"]["git"]["evidence"]["credentialPromptPolicy"],
+        "disabled"
+    );
+    assert_eq!(
+        committed["details"]["git"]["evidence"]["terminalPromptPolicy"],
+        "disabled"
+    );
+}
+
 async fn status(root: &Path, payload: Value) -> Value {
     status_value(&invocation(root, "git-status"), &payload)
         .await
@@ -876,6 +1456,48 @@ async fn assert_git_lifecycle_event(
     );
 }
 
+async fn assert_git_commit_lifecycle_event(
+    ctx: &ServerRuntimeContext,
+    before_cursor: StreamCursor,
+    resource_id: &str,
+    commit_oid: &str,
+) {
+    ctx.engine_host
+        .subscribe_stream(
+            "git-commit-test".to_owned(),
+            super::GIT_LIFECYCLE_TOPIC.to_owned(),
+            before_cursor,
+            crate::engine::VisibilityScope::Session,
+            Some("git-commit-success-session".to_owned()),
+            Some("git-commit-success-workspace".to_owned()),
+        )
+        .await
+        .expect("subscribe");
+    let page = ctx
+        .engine_host
+        .poll_stream(
+            "git-commit-test",
+            Some(before_cursor),
+            10,
+            &StreamActorScope::scoped(
+                Some("git-commit-success-session".to_owned()),
+                Some("git-commit-success-workspace".to_owned()),
+            ),
+        )
+        .await
+        .expect("poll");
+    assert!(
+        page.events.iter().any(|event| {
+            event.topic == super::GIT_LIFECYCLE_TOPIC
+                && event.payload["type"] == json!("git.commit_created")
+                && event.payload["gitCommitResourceId"] == json!(resource_id)
+                && event.payload["commitOid"] == json!(commit_oid)
+        }),
+        "missing git commit lifecycle event in {:?}",
+        page.events
+    );
+}
+
 async fn execute_context(ctx: &ServerRuntimeContext, root: &Path, key: &str) -> CausalContext {
     let trace_id = TraceId::new(key).unwrap();
     let session_id = format!("{key}-session");
@@ -904,6 +1526,28 @@ async fn execute_context_with_idempotency(
 ) -> CausalContext {
     execute_context(ctx, root, key)
         .await
+        .with_idempotency_key(key.to_owned())
+}
+
+async fn execute_context_without_working_directory(
+    ctx: &ServerRuntimeContext,
+    root: &Path,
+    key: &str,
+) -> CausalContext {
+    let trace_id = TraceId::new(key).unwrap();
+    let session_id = format!("{key}-session");
+    let workspace_id = format!("{key}-workspace");
+    let actor_id = ActorId::new(format!("agent:{session_id}")).unwrap();
+    let grant_id = derive_execute_grant(ctx, &actor_id, trace_id.clone(), &session_id, root).await;
+    CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
+        .with_scope("capability.execute")
+        .with_session_id(session_id)
+        .with_workspace_id(workspace_id)
+        .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_INVOCATION_ID, key)
+        .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
+        .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
+        .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, format!("run-{key}"))
+        .with_runtime_metadata(RUNTIME_METADATA_TURN, "1")
         .with_idempotency_key(key.to_owned())
 }
 
