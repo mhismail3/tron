@@ -24,8 +24,14 @@
 //! domain owns process-job semantics over those primitives. `process_run`
 //! remains the short synchronous primitive; durable jobs are a separate
 //! resource-backed lifecycle and must keep network policy fail-closed.
+//! On domain startup and before lifecycle reads/cleanup, persisted `running`
+//! job resources from before the current service instance are reconciled:
+//! owned jobs continue under their runtime handle, while non-owned stale jobs
+//! are marked with inspectable unknown/failure terminal evidence.
 
 use std::sync::{Arc, LazyLock};
+
+use chrono::Utc;
 
 use crate::app::lifecycle::shutdown::{ShutdownCoordinator, ShutdownPhase};
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
@@ -59,11 +65,15 @@ pub(crate) struct Deps {
     pub(crate) engine_host: crate::engine::EngineHostHandle,
     pub(crate) shutdown_coordinator: Option<Arc<ShutdownCoordinator>>,
     pub(crate) runtime: runtime::JobRuntime,
+    pub(crate) reconcile: service::ReconcileContext,
 }
 
 impl Deps {
     pub(crate) fn from_engine(deps: &DomainRegistrationContext) -> Self {
         let runtime = JOB_RUNTIME.clone();
+        let reconcile = service::ReconcileContext {
+            startup_cutoff: Utc::now(),
+        };
         if let Some(shutdown) = &deps.shutdown_coordinator {
             let runtime_for_shutdown = runtime.clone();
             shutdown.register_phase_callback(ShutdownPhase::Capabilities, "jobs", move || {
@@ -73,10 +83,42 @@ impl Deps {
                 }
             });
         }
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let engine_host = deps.engine_host.clone();
+            let runtime_for_reconcile = runtime.clone();
+            let reconcile_for_startup = reconcile.clone();
+            handle.spawn(async move {
+                match service::reconcile_stale_running_jobs(
+                    &engine_host,
+                    runtime_for_reconcile,
+                    reconcile_for_startup,
+                    None,
+                )
+                .await
+                {
+                    Ok(count) if count > 0 => {
+                        tracing::warn!(
+                            component = "jobs",
+                            reconciled_count = count,
+                            "reconciled stale running job resources at jobs domain startup"
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        tracing::warn!(
+                            component = "jobs",
+                            error = %error,
+                            "failed to reconcile stale running job resources at jobs domain startup"
+                        );
+                    }
+                }
+            });
+        }
         Self {
             engine_host: deps.engine_host.clone(),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
             runtime,
+            reconcile,
         }
     }
 }

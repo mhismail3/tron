@@ -181,6 +181,10 @@ impl JobRuntime {
         );
     }
 
+    pub(crate) async fn owns_job(&self, job_resource_id: &str) -> bool {
+        self.running.lock().await.contains_key(job_resource_id)
+    }
+
     async fn run_process_to_terminal(
         &self,
         request: SpawnProcessRequest,

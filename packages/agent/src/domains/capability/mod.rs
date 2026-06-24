@@ -44,6 +44,7 @@ pub(crate) use operations::execute_value;
 
 use std::sync::Arc;
 
+use crate::domains::jobs;
 use crate::domains::registration::catalog::{CapabilitySpec, function_definition_for_capability};
 use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
@@ -51,6 +52,7 @@ use crate::domains::registration::worker::{
 use crate::domains::session::event_store::EventStore;
 use crate::engine::{EngineError, InProcessFunctionHandler, Invocation};
 use crate::shared::server::error_mapping::capability_error_to_engine;
+use chrono::Utc;
 use serde_json::Value;
 
 #[derive(Clone)]
@@ -59,6 +61,7 @@ pub(crate) struct Deps {
     pub(crate) event_store: Arc<EventStore>,
     pub(crate) shutdown_coordinator:
         Option<Arc<crate::app::lifecycle::shutdown::ShutdownCoordinator>>,
+    pub(crate) jobs_reconcile: jobs::service::ReconcileContext,
 }
 
 impl Deps {
@@ -67,6 +70,9 @@ impl Deps {
             engine_host: deps.engine_host.clone(),
             event_store: Arc::clone(&deps.event_store),
             shutdown_coordinator: deps.shutdown_coordinator.clone(),
+            jobs_reconcile: jobs::service::ReconcileContext {
+                startup_cutoff: Utc::now(),
+            },
         }
     }
 }
