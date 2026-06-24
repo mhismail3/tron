@@ -2,8 +2,8 @@ use chrono::Utc;
 use serde_json::{Value, json};
 
 use crate::engine::{
-    CreateResource, EngineHostHandle, EngineResourceInspection, ListResources, UpdateResource,
-    WorkerId,
+    AcquireResourceLease, CreateResource, EngineHostHandle, EngineResourceInspection,
+    ListResources, UpdateResource, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -17,6 +17,8 @@ use super::types::{
 use super::{
     GOAL_ANSWER_KIND, GOAL_ANSWER_SCHEMA_ID, USER_QUESTION_KIND, USER_QUESTION_SCHEMA_ID, WORKER,
 };
+
+const QUESTION_ANSWER_LEASE_TTL_MS: i64 = 60_000;
 
 pub(crate) async fn create_goal_value(
     engine_host: &EngineHostHandle,
@@ -347,8 +349,56 @@ pub(crate) async fn answer_question_value(
     invocation: &crate::engine::Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    let mut inspection = require_question(engine_host, invocation, payload).await?;
+    let inspection = require_question(engine_host, invocation, payload).await?;
     let expected = required_string(payload, "expectedQuestionVersionId")?;
+    let (current_version_id, _) = question_record(&inspection)?;
+    if current_version_id != expected {
+        return Err(invalid_params(format!(
+            "question revision conflict: expected {expected}, actual {current_version_id}"
+        )));
+    }
+
+    let lease = engine_host
+        .acquire_resource_lease(AcquireResourceLease {
+            resource_kind: USER_QUESTION_KIND.to_owned(),
+            resource_id: inspection.resource.resource_id.clone(),
+            holder_invocation_id: invocation.id.clone(),
+            function_id: invocation.function_id.clone(),
+            actor_id: invocation.causal_context.actor_id.clone(),
+            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
+            idempotency_key: invocation.causal_context.idempotency_key.clone(),
+            ttl_ms: QUESTION_ANSWER_LEASE_TTL_MS,
+        })
+        .await
+        .map_err(engine_error)?;
+
+    let result = answer_question_with_lease(engine_host, invocation, payload, expected).await;
+    match (
+        result,
+        engine_host.release_resource_lease(&lease.lease_id).await,
+    ) {
+        (Ok(value), Ok(_)) => Ok(value),
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(_), Err(error)) => Err(engine_error(error)),
+        (Err(error), Err(release_error)) => {
+            tracing::warn!(
+                ?release_error,
+                "question answer resource lease release failed after answer path failed"
+            );
+            Err(error)
+        }
+    }
+}
+
+async fn answer_question_with_lease(
+    engine_host: &EngineHostHandle,
+    invocation: &crate::engine::Invocation,
+    payload: &Value,
+    expected: String,
+) -> Result<Value, CapabilityError> {
+    let mut inspection = require_question(engine_host, invocation, payload).await?;
     let (current_version_id, mut record) = question_record(&inspection)?;
     if current_version_id != expected {
         return Err(invalid_params(format!(

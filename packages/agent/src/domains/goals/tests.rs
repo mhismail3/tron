@@ -2,8 +2,9 @@ use chrono::{Duration, SecondsFormat, Utc};
 use serde_json::json;
 
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineResourceVersioningMode, FunctionId,
-    Invocation, ListResources, RegisterResourceType, TraceId, WorkerId,
+    AcquireResourceLease, ActorId, ActorKind, AuthorityGrantId, CausalContext,
+    EngineResourceVersioningMode, FunctionId, Invocation, ListResources, RegisterResourceType,
+    TraceId, WorkerId,
 };
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
@@ -251,6 +252,94 @@ async fn execute_question_answer_replays_same_idempotency_key_without_double_ans
 }
 
 #[tokio::test]
+async fn active_question_answer_lease_blocks_before_answer_resource_creation() {
+    let ctx = test_context().await;
+    let question_invocation = invocation(
+        "answer-lease-question",
+        QUESTION_CREATE_FUNCTION,
+        Some("answer-lease-question"),
+    );
+    let question = super::service::create_question_value(
+        &ctx.engine_host,
+        &question_invocation,
+        &json!({"prompt": "Which serialized answer should be recorded?"}),
+    )
+    .await
+    .expect("create question");
+    let question_id = question["questionResourceId"].as_str().unwrap();
+    let question_version = question["questionVersionId"].as_str().unwrap();
+    let blocking_invocation = invocation(
+        "answer-lease-blocker",
+        QUESTION_ANSWER_FUNCTION,
+        Some("answer-lease-blocker"),
+    );
+    let lease = ctx
+        .engine_host
+        .acquire_resource_lease(AcquireResourceLease {
+            resource_kind: super::USER_QUESTION_KIND.to_owned(),
+            resource_id: question_id.to_owned(),
+            holder_invocation_id: blocking_invocation.id.clone(),
+            function_id: blocking_invocation.function_id.clone(),
+            actor_id: blocking_invocation.causal_context.actor_id.clone(),
+            authority_grant_id: blocking_invocation
+                .causal_context
+                .authority_grant_id
+                .clone(),
+            trace_id: blocking_invocation.causal_context.trace_id.clone(),
+            parent_invocation_id: blocking_invocation
+                .causal_context
+                .parent_invocation_id
+                .clone(),
+            idempotency_key: blocking_invocation.causal_context.idempotency_key.clone(),
+            ttl_ms: 60_000,
+        })
+        .await
+        .expect("acquire blocking lease");
+
+    let blocked = super::service::answer_question_value(
+        &ctx.engine_host,
+        &invocation(
+            "answer-lease-blocked",
+            QUESTION_ANSWER_FUNCTION,
+            Some("answer-lease-blocked"),
+        ),
+        &json!({
+            "questionResourceId": question_id,
+            "expectedQuestionVersionId": question_version,
+            "answerText": "This attempt must be blocked by the lease.",
+            "reason": "The question is already being answered."
+        }),
+    )
+    .await
+    .expect_err("active question lease should block answer");
+    assert!(blocked.to_string().contains("resource lease conflict"));
+    assert_eq!(answer_resource_count(&ctx).await, 0);
+
+    ctx.engine_host
+        .release_resource_lease(&lease.lease_id)
+        .await
+        .expect("release blocking lease");
+    let answered = super::service::answer_question_value(
+        &ctx.engine_host,
+        &invocation(
+            "answer-lease-success",
+            QUESTION_ANSWER_FUNCTION,
+            Some("answer-lease-success"),
+        ),
+        &json!({
+            "questionResourceId": question_id,
+            "expectedQuestionVersionId": question_version,
+            "answerText": "Record one serialized answer.",
+            "reason": "The blocking lease has been released."
+        }),
+    )
+    .await
+    .expect("answer after release");
+    assert_eq!(answered["status"], "answered");
+    assert_eq!(answer_resource_count(&ctx).await, 1);
+}
+
+#[tokio::test]
 async fn bounded_question_list_reports_truncation() {
     let ctx = test_context().await;
     for index in 0..3 {
@@ -409,6 +498,19 @@ async fn register_goal_question_types(ctx: &ServerRuntimeContext) {
             .await
             .expect("register test resource type");
     }
+}
+
+async fn answer_resource_count(ctx: &ServerRuntimeContext) -> usize {
+    ctx.engine_host
+        .list_resources(ListResources {
+            kind: Some(super::GOAL_ANSWER_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 10,
+        })
+        .await
+        .expect("list answers")
+        .len()
 }
 
 fn test_type(kind: &str, schema_id: &str, lifecycle_states: &[&str]) -> RegisterResourceType {
