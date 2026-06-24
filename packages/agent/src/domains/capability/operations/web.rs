@@ -13,6 +13,8 @@ pub(super) async fn web_fetch(
 ) -> Result<CapabilityResult, CapabilityError> {
     let web_deps = crate::domains::web::Deps {
         engine_host: deps.engine_host.clone(),
+        #[cfg(test)]
+        dns_overrides: None,
     };
     let value =
         crate::domains::web::fetch::web_fetch_value(&web_deps, invocation, &invocation.payload)

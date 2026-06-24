@@ -971,9 +971,11 @@ provider-visible execute surface; file access goes through the hardened
 `filesystem_*` operation package.
 
 The accepted startup-registration baseline keeps only loop infrastructure domains:
-`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `web`, `filesystem`, `blob`, `message`,
+`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
-`worker_lifecycle`, and model-provider modules. The
+`worker_lifecycle`, and model-provider modules. On this candidate branch only,
+the pending Slice 8A `web` domain is registered for review; it is not part of
+the accepted/current baseline until mainline acceptance. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
 limited to `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/

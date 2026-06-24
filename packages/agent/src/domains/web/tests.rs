@@ -1,5 +1,11 @@
+use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use std::time::Duration;
+
 use serde_json::{Value, json};
 use tempfile::tempdir;
+use tokio::net::TcpListener;
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -203,6 +209,124 @@ async fn web_fetch_records_redirect_final_url_evidence() {
 }
 
 #[tokio::test]
+async fn web_fetch_rejects_redirect_to_forbidden_target_before_requesting_it() {
+    let redirect_server = MockServer::start().await;
+    let forbidden_server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/redirect"))
+        .respond_with(
+            ResponseTemplate::new(302)
+                .insert_header("Location", format!("{}/forbidden", forbidden_server.uri())),
+        )
+        .mount(&redirect_server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/forbidden"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("must not fetch"))
+        .mount(&forbidden_server)
+        .await;
+
+    let ctx = make_test_context();
+    let fixture = WebFixture::new(&ctx, "web-fetch-redirect-forbidden", "declared").await;
+    let error = fixture
+        .invoke_error(json!({
+            "operation": "web_fetch",
+            "url": format!("{}/redirect", redirect_server.uri()),
+            "maxRedirects": 2,
+            "idempotencyKey": "web-fetch-redirect-forbidden"
+        }))
+        .await;
+    assert!(
+        error.contains("redirect policy rejected"),
+        "forbidden redirect target should be rejected by policy, got: {error}"
+    );
+    let forbidden_requests = forbidden_server
+        .received_requests()
+        .await
+        .expect("request recording");
+    assert_eq!(
+        forbidden_requests.len(),
+        0,
+        "redirect target must be rejected before network I/O"
+    );
+}
+
+#[tokio::test]
+async fn web_fetch_rejects_canonical_localhost_alias_before_network_io() {
+    let (port, accepts) = loopback_accept_probe().await;
+    let ctx = make_test_context();
+    let fixture = WebFixture::new(&ctx, "web-fetch-localhost-dot", "declared").await;
+    let error = fixture
+        .invoke_error(json!({
+            "operation": "web_fetch",
+            "url": format!("https://localhost.:{port}/forbidden"),
+            "idempotencyKey": "web-fetch-localhost-dot"
+        }))
+        .await;
+    assert!(
+        error.contains("localhost"),
+        "canonical localhost alias should be rejected, got: {error}"
+    );
+    assert_eq!(
+        accepts.await.expect("accept probe"),
+        0,
+        "canonical localhost alias must fail before opening a socket"
+    );
+}
+
+#[tokio::test]
+async fn web_fetch_rejects_hostname_resolving_to_internal_ip_before_network_io() {
+    let (port, accepts) = loopback_accept_probe().await;
+    let ctx = make_test_context();
+    let fixture = WebFixture::new(&ctx, "web-fetch-rebinding", "declared").await;
+    let mut overrides = HashMap::new();
+    overrides.insert(
+        "rebind.test".to_owned(),
+        vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)],
+    );
+
+    let error = fixture
+        .invoke_direct_error_with_dns_overrides(
+            json!({
+                "operation": "web_fetch",
+                "url": format!("https://rebind.test:{port}/forbidden"),
+                "idempotencyKey": "web-fetch-rebinding-loopback"
+            }),
+            overrides,
+        )
+        .await;
+    assert!(
+        error.contains("connection failed"),
+        "DNS rebinding target should fail closed through resolver, got: {error}"
+    );
+    assert_eq!(
+        accepts.await.expect("accept probe"),
+        0,
+        "unsafe DNS result must be rejected before TCP connect"
+    );
+
+    let mut private_overrides = HashMap::new();
+    private_overrides.insert(
+        "private.test".to_owned(),
+        vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 10)), 0)],
+    );
+    let private_error = fixture
+        .invoke_direct_error_with_dns_overrides(
+            json!({
+                "operation": "web_fetch",
+                "url": "https://private.test/forbidden",
+                "idempotencyKey": "web-fetch-rebinding-private"
+            }),
+            private_overrides,
+        )
+        .await;
+    assert!(
+        private_error.contains("connection failed"),
+        "private DNS result should fail closed through resolver, got: {private_error}"
+    );
+}
+
+#[tokio::test]
 async fn web_fetch_rejects_unsupported_or_unsafe_urls() {
     let ctx = make_test_context();
     let fixture = WebFixture::new(&ctx, "web-fetch-url-validation", "declared").await;
@@ -212,6 +336,8 @@ async fn web_fetch_rejects_unsupported_or_unsafe_urls() {
         ("http://example.com/insecure", "http only for test loopback"),
         ("https://10.0.0.1/private", "local/internal IP"),
         ("https://localhost/private", "localhost"),
+        ("https://localhost./private", "localhost"),
+        ("http://localhost/test", "http only for test loopback IP"),
         ("not a url", "malformed url"),
     ] {
         let error = fixture
@@ -309,6 +435,31 @@ impl<'a> WebFixture<'a> {
         result.error.expect("execute should fail").to_string()
     }
 
+    async fn invoke_direct_error_with_dns_overrides(
+        &self,
+        payload: Value,
+        dns_overrides: HashMap<String, Vec<SocketAddr>>,
+    ) -> String {
+        let idempotency_key = payload
+            .get("idempotencyKey")
+            .and_then(Value::as_str)
+            .unwrap_or("web-fixture-context-key")
+            .to_owned();
+        let deps = super::Deps {
+            engine_host: self.ctx.engine_host.clone(),
+            dns_overrides: Some(Arc::new(dns_overrides)),
+        };
+        let invocation = Invocation::new_sync(
+            FunctionId::new("capability::execute").expect("function id"),
+            payload.clone(),
+            self.context(&idempotency_key),
+        );
+        super::fetch::web_fetch_value(&deps, &invocation, &payload)
+            .await
+            .expect_err("web_fetch should fail")
+            .to_string()
+    }
+
     fn context(&self, idempotency_key: &str) -> CausalContext {
         CausalContext::new(
             self.actor_id.clone(),
@@ -394,4 +545,18 @@ fn current_payload(inspection: &crate::engine::EngineResourceInspection) -> Valu
         .expect("current payload")
         .payload
         .clone()
+}
+
+async fn loopback_accept_probe() -> (u16, tokio::task::JoinHandle<usize>) {
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind loopback probe");
+    let port = listener.local_addr().expect("probe addr").port();
+    let handle = tokio::spawn(async move {
+        match tokio::time::timeout(Duration::from_millis(200), listener.accept()).await {
+            Ok(Ok((_stream, _addr))) => 1,
+            _ => 0,
+        }
+    });
+    (port, handle)
 }

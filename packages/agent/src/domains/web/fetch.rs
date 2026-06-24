@@ -1,6 +1,5 @@
 //! Direct web fetch implementation for source provenance evidence.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -11,7 +10,7 @@ use regex::Regex;
 use reqwest::redirect::{Attempt, Policy};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use url::{Host, Url};
+use url::Url;
 
 use crate::engine::{
     CreateResource, EngineResource, EngineResourceScope, Invocation, PublishStreamEvent,
@@ -19,6 +18,9 @@ use crate::engine::{
 };
 use crate::shared::server::errors::CapabilityError;
 
+use super::network_policy::{
+    SafeDnsResolver, validate_final_url, validate_redirect_target, validate_url,
+};
 use super::{Deps, WEB_LIFECYCLE_TOPIC, WEB_SOURCE_SCHEMA_VERSION, WORKER, WRITE_SCOPE};
 
 const MAX_URL_BYTES: usize = 2_048;
@@ -53,10 +55,13 @@ pub(crate) async fn web_fetch_value(
             redirect_count_for_policy.store(next_count, Ordering::SeqCst);
             if attempt.previous().len() >= redirect_limit {
                 attempt.stop()
+            } else if validate_redirect_target(attempt.url(), attempt.previous()).is_err() {
+                attempt.error("web_fetch redirect target rejected by URL policy")
             } else {
                 attempt.follow()
             }
         }))
+        .dns_resolver(Arc::new(SafeDnsResolver::from_deps(deps)))
         .timeout(Duration::from_millis(request.timeout_ms))
         .user_agent("tron-web-fetch/0.1 source-provenance")
         .no_proxy()
@@ -214,104 +219,6 @@ impl FetchRequest {
                 .unwrap_or_else(|| "<context>".to_owned()),
         })
     }
-}
-
-struct ValidatedUrl {
-    url: Url,
-}
-
-fn validate_url(value: &str) -> Result<ValidatedUrl, CapabilityError> {
-    let url = Url::parse(value).map_err(|error| invalid(format!("malformed url: {error}")))?;
-    if !url.username().is_empty() || url.password().is_some() {
-        return Err(invalid("web_fetch rejects credentials in URLs"));
-    }
-    if url.fragment().is_some() {
-        return Err(invalid("web_fetch rejects URL fragments"));
-    }
-    match url.scheme() {
-        "https" => validate_host(&url)?,
-        "http" => validate_http_loopback(&url)?,
-        other => {
-            return Err(invalid(format!(
-                "unsupported URL scheme {other}; web_fetch supports https and test loopback http only"
-            )));
-        }
-    }
-    Ok(ValidatedUrl { url })
-}
-
-fn validate_final_url(url: &Url) -> Result<(), CapabilityError> {
-    match url.scheme() {
-        "https" => validate_host(url),
-        "http" => validate_http_loopback(url),
-        other => Err(invalid(format!(
-            "redirected to unsupported URL scheme {other}"
-        ))),
-    }
-}
-
-fn validate_host(url: &Url) -> Result<(), CapabilityError> {
-    let Some(host) = url.host() else {
-        return Err(invalid("web_fetch requires a URL host"));
-    };
-    match host {
-        Host::Domain(domain) => {
-            let lower = domain.to_ascii_lowercase();
-            if lower == "localhost" {
-                return Err(invalid(
-                    "web_fetch rejects localhost except test loopback http",
-                ));
-            }
-            if lower.ends_with(".local") || lower.ends_with(".internal") {
-                return Err(invalid("web_fetch rejects local/internal host names"));
-            }
-        }
-        Host::Ipv4(addr) => validate_ip(IpAddr::V4(addr))?,
-        Host::Ipv6(addr) => validate_ip(IpAddr::V6(addr))?,
-    }
-    Ok(())
-}
-
-fn validate_http_loopback(url: &Url) -> Result<(), CapabilityError> {
-    let Some(host) = url.host() else {
-        return Err(invalid("web_fetch requires a URL host"));
-    };
-    match host {
-        Host::Domain(domain) if domain.eq_ignore_ascii_case("localhost") => Ok(()),
-        Host::Ipv4(addr) if addr.is_loopback() => Ok(()),
-        Host::Ipv6(addr) if addr.is_loopback() => Ok(()),
-        _ => Err(invalid(
-            "web_fetch supports http only for test loopback targets",
-        )),
-    }
-}
-
-fn validate_ip(ip: IpAddr) -> Result<(), CapabilityError> {
-    let unsafe_ip = match ip {
-        IpAddr::V4(addr) => is_unsafe_ipv4(addr),
-        IpAddr::V6(addr) => is_unsafe_ipv6(addr),
-    };
-    if unsafe_ip {
-        return Err(invalid("web_fetch rejects local/internal IP targets"));
-    }
-    Ok(())
-}
-
-fn is_unsafe_ipv4(addr: Ipv4Addr) -> bool {
-    addr.is_private()
-        || addr.is_loopback()
-        || addr.is_link_local()
-        || addr.is_unspecified()
-        || addr.is_broadcast()
-        || addr.is_multicast()
-}
-
-fn is_unsafe_ipv6(addr: Ipv6Addr) -> bool {
-    addr.is_loopback()
-        || addr.is_unspecified()
-        || addr.is_multicast()
-        || addr.is_unique_local()
-        || addr.is_unicast_link_local()
 }
 
 async fn inspect_fetch_grant(

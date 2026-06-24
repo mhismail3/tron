@@ -5,12 +5,15 @@
 //! with the `web_fetch` operation value; this package owns URL validation,
 //! network authority checks, bounded HTTP fetching, source/cache resource
 //! evidence, redaction metadata, replay refs, and `web.lifecycle` events.
+//! URL authority checks must cover initial URLs, every redirect target before
+//! it is followed, and DNS-resolved socket addresses before network I/O.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
 //! | `fetch` | Direct bounded URL fetch and source provenance resource writes |
+//! | `network_policy` | URL, redirect-target, and DNS-resolved address safety checks |
 //!
 //! # INVARIANT: web fetch is explicit and provenance-backed
 //!
@@ -23,6 +26,7 @@
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
 pub(crate) mod fetch;
+mod network_policy;
 
 pub(crate) const WORKER: &str = "web";
 pub(crate) const WEB_LIFECYCLE_TOPIC: &str = "web.lifecycle";
@@ -33,6 +37,9 @@ pub(crate) const WEB_SOURCE_SCHEMA_VERSION: &str = "tron.web_source.v1";
 #[derive(Clone)]
 pub(crate) struct Deps {
     pub(crate) engine_host: crate::engine::EngineHostHandle,
+    #[cfg(test)]
+    pub(crate) dns_overrides:
+        Option<std::sync::Arc<std::collections::HashMap<String, Vec<std::net::SocketAddr>>>>,
 }
 
 pub(crate) fn worker_module(
