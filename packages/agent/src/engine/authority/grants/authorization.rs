@@ -78,15 +78,16 @@ pub(super) fn authorize_with_grant(
             )));
         }
     }
-    if let Some(kind) = resource_kind_from_invocation(invocation)
-        && !allows_item(&grant.allowed_resource_kinds, &kind)
-    {
-        return Err(EngineError::PolicyViolation(format!(
-            "authority grant {} does not allow resource kind {kind}",
-            grant.grant_id
-        )));
+    let resource_kinds = resource_kinds_from_invocation(invocation);
+    for kind in &resource_kinds {
+        if !allows_item(&grant.allowed_resource_kinds, kind) {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} does not allow resource kind {kind}",
+                grant.grant_id
+            )));
+        }
     }
-    ensure_resource_selectors(grant, invocation)?;
+    ensure_resource_selectors(grant, invocation, &resource_kinds)?;
     ensure_file_roots(grant, invocation)?;
     Ok(())
 }
@@ -108,11 +109,16 @@ fn ensure_budget_available(grant: &EngineGrant) -> Result<()> {
     Ok(())
 }
 
-fn ensure_resource_selectors(grant: &EngineGrant, invocation: &Invocation) -> Result<()> {
+fn ensure_resource_selectors(
+    grant: &EngineGrant,
+    invocation: &Invocation,
+    resource_kinds: &[String],
+) -> Result<()> {
     if allows_item(&grant.resource_selectors, "*") {
         return Ok(());
     }
-    for resource_id in resource_ids_from_invocation(invocation) {
+    let resource_ids = resource_ids_from_invocation(invocation);
+    for resource_id in &resource_ids {
         if !allows_resource_id(grant, &resource_id) {
             return Err(EngineError::PolicyViolation(format!(
                 "authority grant {} does not allow resource {resource_id}",
@@ -120,14 +126,18 @@ fn ensure_resource_selectors(grant: &EngineGrant, invocation: &Invocation) -> Re
             )));
         }
     }
-    if resource_ids_from_invocation(invocation).is_empty()
-        && let Some(kind) = resource_kind_from_invocation(invocation)
-        && !allows_item(&grant.resource_selectors, &format!("kind:{kind}"))
-    {
-        return Err(EngineError::PolicyViolation(format!(
-            "authority grant {} does not allow new resource kind {kind}",
-            grant.grant_id
-        )));
+    let selector_kinds = if resource_ids.is_empty() {
+        resource_kinds.to_vec()
+    } else {
+        created_resource_kinds_from_invocation(invocation)
+    };
+    for kind in selector_kinds {
+        if !allows_item(&grant.resource_selectors, &format!("kind:{kind}")) {
+            return Err(EngineError::PolicyViolation(format!(
+                "authority grant {} does not allow new resource kind {kind}",
+                grant.grant_id
+            )));
+        }
     }
     Ok(())
 }
@@ -155,17 +165,62 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
     .collect()
 }
 
-fn resource_kind_from_invocation(invocation: &Invocation) -> Option<String> {
+fn resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String> {
+    let mut kinds = Vec::new();
     match invocation.function_id.as_str() {
+        "capability::execute" => {
+            for kind in capability_execute_resource_kinds(invocation) {
+                push_unique(&mut kinds, kind);
+            }
+        }
         "resource::create" | "artifact::create" | "goal::create" | "claim::attach"
-        | "evidence::attach" | "decision::create" => invocation
-            .payload
-            .get("kind")
-            .and_then(Value::as_str)
-            .map(str::to_owned)
-            .or_else(|| wrapper_resource_kind(invocation.function_id.as_str()).map(str::to_owned)),
-        _ => wrapper_resource_kind(invocation.function_id.as_str()).map(str::to_owned),
+        | "evidence::attach" | "decision::create" => {
+            if let Some(kind) = invocation
+                .payload
+                .get("kind")
+                .and_then(Value::as_str)
+                .or_else(|| wrapper_resource_kind(invocation.function_id.as_str()))
+            {
+                push_unique(&mut kinds, kind);
+            }
+        }
+        _ => {
+            if let Some(kind) = wrapper_resource_kind(invocation.function_id.as_str()) {
+                push_unique(&mut kinds, kind);
+            }
+        }
     }
+    kinds
+}
+
+fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static str> {
+    match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("goal_create" | "goal_list" | "goal_inspect" | "goal_cancel") => vec!["goal"],
+        Some("question_create") => {
+            if invocation.payload.get("goalResourceId").is_some() {
+                vec!["goal", "user_question"]
+            } else {
+                vec!["user_question"]
+            }
+        }
+        Some("question_list" | "question_inspect") => vec!["user_question"],
+        Some("question_answer") => vec!["user_question", "goal_answer"],
+        _ => Vec::new(),
+    }
+}
+
+fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String> {
+    if invocation.function_id.as_str() != "capability::execute" {
+        return Vec::new();
+    }
+    let mut kinds = Vec::new();
+    match invocation.payload.get("operation").and_then(Value::as_str) {
+        Some("goal_create") => push_unique(&mut kinds, "goal"),
+        Some("question_create") => push_unique(&mut kinds, "user_question"),
+        Some("question_answer") => push_unique(&mut kinds, "goal_answer"),
+        _ => {}
+    }
+    kinds
 }
 
 fn ensure_file_roots(grant: &EngineGrant, invocation: &Invocation) -> Result<()> {
@@ -267,6 +322,12 @@ fn wrapper_resource_kind(function_id: &str) -> Option<&'static str> {
         id if id.starts_with("ui::") => Some("ui_surface"),
         id if id.starts_with("jobs::") => Some("job_process"),
         _ => None,
+    }
+}
+
+fn push_unique(kinds: &mut Vec<String>, kind: &str) {
+    if !kinds.iter().any(|existing| existing == kind) {
+        kinds.push(kind.to_owned());
     }
 }
 

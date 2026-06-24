@@ -18,6 +18,9 @@
 //! containment for file roots. Raw string-prefix checks are not authority.
 //! INVARIANT: when `remainingInvocations` is present, invocation execution
 //! consumes one durable grant budget unit before the handler runs.
+//! INVARIANT: model-facing `capability::execute` inner operations are mapped
+//! back to their durable resource kinds before grant checks run, so the single
+//! provider primitive does not bypass package resource-kind or selector policy.
 
 use std::collections::BTreeMap;
 use std::path::Path;
