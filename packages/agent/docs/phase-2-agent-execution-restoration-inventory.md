@@ -231,3 +231,15 @@ sheets, public `/engine` goal APIs, and copied historical DTOs remain deferred.
 The accepted review/fix loop added explicit `capability::execute` scope,
 resource-kind, and selector checks for goal/question operations before handler
 execution.
+
+`P2AER-INV-012` has a Slice 8A implementation candidate, not an accepted
+baseline: Web Fetch And Source Provenance Foundation. The candidate adds
+`domains/web` as the package owner, one execute-only `web_fetch` operation,
+declared-network authority checks, bounded direct fetch, sanitized URL/final
+URL evidence, content-type handling, deterministic byte/output truncation
+metadata, captured-byte SHA-256 evidence, common secret redaction, trace refs,
+replay refs, idempotent `web_source` resource/cache evidence, and
+`web.lifecycle` stream evidence. Search providers, browser automation, crawling,
+robots policy, login/cookies/session reuse, credential handling, public
+`/engine` web APIs, native iOS source UI, and network-enabled jobs remain
+deferred pending review and mainline integration.

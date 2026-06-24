@@ -979,6 +979,44 @@ Discovery validation:
 - `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
   passed with 14 tests.
 
+## Phase 2 Slice 8A Implementation Candidate: Web Fetch And Source Provenance Foundation
+
+Implementation branch: `codex/phase-2-slice-8a-web-fetch-source-provenance`.
+Baseline:
+`origin/main@49a47cc1902a958eb775bcb5a3a28913d0d3aefb`
+(`docs: accept phase 2 slice 7a`).
+
+Candidate implementation evidence:
+
+- Added the `web` domain owner for direct fetch source provenance without
+  adding public `web::*` catalog functions.
+- Added one provider-visible operation value behind `capability::execute`:
+  `web_fetch`.
+- Added the `web_source` resource definition for source/cache evidence:
+  requested URL, final URL, fetched-at timestamp, status, content type,
+  captured-byte count, SHA-256 hash, truncation metadata, redaction metadata,
+  authority refs, trace refs, replay refs, and idempotency/cache refs.
+- Runtime grant derivation keeps `networkPolicy: none` for existing execute
+  operations and derives `networkPolicy: declared` only for `web_fetch`, with
+  `web_source` as the additional resource kind.
+- Fetch validation rejects unsupported schemes, credentials, fragments,
+  malformed or overlong URLs, and unsafe local/internal targets except
+  deterministic HTTP loopback test targets.
+- Fetch execution uses structured URL parsing and `reqwest`, not shell/process
+  network paths, browser sessions, cookies, credentials, or provider search
+  APIs.
+
+Candidate validation run so far:
+
+| Command | Result | Notes |
+|---------|--------|-------|
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Compile check passed with pre-existing dead-code warnings. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::web -- --nocapture` | exit 0 | 5 focused web-domain tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability schema tests passed. |
+
+Candidate status: pending independent review and mainline integration. Do not
+treat Slice 8A as accepted/current baseline until the review process closes.
+
 ## Phase 2 Slice 7A Accepted Implementation: Goal And Question Foundation
 
 Implementation branch: `codex/phase-2-slice-7a-goal-question-foundation-v2`.

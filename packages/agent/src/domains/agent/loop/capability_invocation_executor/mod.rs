@@ -463,6 +463,7 @@ async fn execute_capability_primitive_via_engine(
         model_primitive_name,
         turn,
         run_id,
+        &effective_args,
     )
     .await
     {

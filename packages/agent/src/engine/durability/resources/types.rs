@@ -73,6 +73,10 @@ pub const GIT_COMMIT_SCHEMA_ID: &str = "tron.resource.git_commit.v1";
 pub const GIT_BRANCH_START_KIND: &str = "git_branch_start";
 /// Built-in Git branch-start evidence resource schema id.
 pub const GIT_BRANCH_START_SCHEMA_ID: &str = "tron.resource.git_branch_start.v1";
+/// Built-in web source/fetch provenance resource kind.
+pub const WEB_SOURCE_KIND: &str = "web_source";
+/// Built-in web source/fetch provenance resource schema id.
+pub const WEB_SOURCE_SCHEMA_ID: &str = "tron.resource.web_source.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

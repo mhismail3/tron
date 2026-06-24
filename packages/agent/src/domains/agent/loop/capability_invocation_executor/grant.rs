@@ -24,7 +24,12 @@ pub(super) async fn derive_capability_runtime_grant(
     model_primitive_name: &str,
     turn: i64,
     run_id: Option<&str>,
+    effective_args: &Value,
 ) -> Result<AuthorityGrantId, FailureEnvelope> {
+    let operation = effective_args
+        .get("operation")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
     let mut allowed_capabilities = vec![
         target_function_id.as_str().to_owned(),
         "state::get".to_owned(),
@@ -35,8 +40,24 @@ pub(super) async fn derive_capability_runtime_grant(
     allowed_capabilities.dedup();
     let mut allowed_authority_scopes = target_authority_scopes.to_vec();
     allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
+    if operation == "web_fetch" {
+        allowed_authority_scopes.extend(["web.read".to_owned(), "web.write".to_owned()]);
+    }
     allowed_authority_scopes.sort();
     allowed_authority_scopes.dedup();
+    let network_policy = if operation == "web_fetch" {
+        "declared"
+    } else {
+        "none"
+    };
+    let mut allowed_resource_kinds = vec!["agent_state".to_owned()];
+    if operation == "web_fetch" {
+        allowed_resource_kinds.push("web_source".to_owned());
+    }
+    let resource_selectors = allowed_resource_kinds
+        .iter()
+        .map(|kind| format!("kind:{kind}"))
+        .collect::<Vec<_>>();
     let idempotency_material = json!({
         "version": 1,
         "sessionId": session_id,
@@ -47,6 +68,7 @@ pub(super) async fn derive_capability_runtime_grant(
         "targetAuthorityScopes": target_authority_scopes,
         "providerInvocationId": invocation_id,
         "modelPrimitiveName": model_primitive_name,
+        "operation": operation,
         "turn": turn,
         "runId": run_id
     });
@@ -74,10 +96,10 @@ pub(super) async fn derive_capability_runtime_grant(
         "allowedCapabilities": allowed_capabilities,
         "allowedNamespaces": ["__no_namespace_authority__"],
         "allowedAuthorityScopes": allowed_authority_scopes,
-        "allowedResourceKinds": ["agent_state"],
-        "resourceSelectors": ["kind:agent_state"],
+        "allowedResourceKinds": allowed_resource_kinds,
+        "resourceSelectors": resource_selectors,
         "fileRoots": [working_directory],
-        "networkPolicy": "none",
+        "networkPolicy": network_policy,
         "maxRisk": "medium",
         "budget": {
             "remainingInvocations": 2,
@@ -91,9 +113,11 @@ pub(super) async fn derive_capability_runtime_grant(
             "targetFunctionId": target_function_id.as_str(),
             "providerInvocationId": invocation_id,
             "modelPrimitiveName": model_primitive_name,
+            "operation": operation,
             "turn": turn,
             "runId": run_id,
-            "workingDirectory": working_directory
+            "workingDirectory": working_directory,
+            "networkPolicy": network_policy
         }
     });
     let result = engine_host

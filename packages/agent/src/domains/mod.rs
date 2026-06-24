@@ -4,9 +4,9 @@
 //! system metadata, provider/auth/settings setup, session/message/log truth,
 //! model providers, blobs, catalog-discovery evidence, approval/freshness
 //! evidence, memory contract custody, durable non-interactive jobs, read-only
-//! Git/worktree observation, goal/question lifecycle records, and the single model-facing
-//! `capability::execute` primitive, plus the narrow iOS workspace-browser
-//! filesystem domain. Product/tool domains are otherwise intentionally not
+//! Git/worktree observation, goal/question lifecycle records, direct web source
+//! fetch provenance, and the single model-facing `capability::execute`
+//! primitive, plus the narrow iOS workspace-browser filesystem domain. Product/tool domains are otherwise intentionally not
 //! declared on this branch.
 //!
 //! ## Submodules
@@ -20,6 +20,7 @@
 //! | `jobs` | Durable non-interactive local process jobs and lifecycle resources |
 //! | `git` | Read-only repository/worktree status and bounded diff evidence |
 //! | `goals` | Goal and user-question lifecycle records |
+//! | `web` | Direct web fetch source provenance resources |
 //! | `registration` | Startup registration plus shared domain contract/binding helpers |
 //! | `filesystem` | Human-facing workspace picker: home, directory list, folder creation |
 //! | domain modules | Retained loop infrastructure for agent, auth, blob, logs, message, model, session, settings, system, transcription, and worker lifecycle |
@@ -92,4 +93,5 @@ pub mod session;
 pub mod settings;
 pub mod system;
 pub mod transcription;
+pub mod web;
 pub mod worker_lifecycle;

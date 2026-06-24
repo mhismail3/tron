@@ -24,6 +24,7 @@ mod types;
 mod ui_surface;
 mod validation;
 mod versions;
+mod web_definitions;
 
 pub use definitions::builtin_resource_type_definitions;
 pub use store::{InMemoryEngineResourceStore, SqliteEngineResourceStore};

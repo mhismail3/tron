@@ -1661,6 +1661,53 @@ dependency inventory.
 User decisions: allowed search/fetch providers, default network mode,
 retention, and browser automation scope.
 
+#### Slice 8A Implementation Candidate: Web Fetch And Source Provenance Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8a-web-fetch-source-provenance`.
+Baseline:
+`origin/main@49a47cc1902a958eb775bcb5a3a28913d0d3aefb`
+(`docs: accept phase 2 slice 7a`).
+
+Candidate scope:
+
+- Add `domains/web` as the package owner for direct URL fetch source
+  provenance, without adding public `web::*` catalog functions.
+- Expose exactly one new provider-visible operation value behind
+  `capability::execute`: `web_fetch`.
+- Require trusted agent/system runtime context, current session, idempotency,
+  `web_source` resource authority, and `networkPolicy: declared` before any
+  network I/O. `networkPolicy: none` remains the default for all other execute
+  operations and fails closed for `web_fetch`.
+- Create idempotent `web_source` resource/cache evidence with URL/final URL,
+  fetched-at time, status, content type, byte/hash evidence, redaction and
+  truncation metadata, trace refs, replay refs, authority refs, and
+  `web.lifecycle` stream evidence.
+- Bound URL length, redirect count, response bytes, output text bytes, timeout,
+  content-type handling, and error details.
+- Reject unsupported schemes, credentials in URLs, URL fragments, malformed or
+  overlong URLs, and unsafe local/internal targets except deterministic HTTP
+  loopback test targets.
+
+Non-goals:
+
+- No search provider, browser automation, crawling, sitemap traversal, robots
+  policy engine, login/cookies/session reuse, credential handling, shell/process
+  network side channel, native iOS web UI, public `/engine` expansion, or
+  network-enabled `job_*` behavior.
+
+Candidate validation:
+
+- Focused web-domain tests cover declared-network authority denial, successful
+  deterministic loopback fetch, URL validation, redirects/final URL evidence,
+  byte/output truncation, content-type handling, redaction, hash/source
+  evidence, and idempotent replay without duplicate durable evidence.
+- Capability schema tests cover `web_fetch` exposure and reject non-goal names
+  such as `web_search`, `browser_open`, `browser_click`, `web_crawl`,
+  `web_login`, and network-enabled `job_*` variants.
+- Review and mainline acceptance remain pending; this section must not be
+  treated as current baseline until accepted by the review/integration process.
+
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 
 Objective: let Tron install and run external capability packages safely.

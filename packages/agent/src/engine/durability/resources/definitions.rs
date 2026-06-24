@@ -14,6 +14,7 @@ use super::types::{
     UI_SURFACE_KIND, UI_SURFACE_SCHEMA_ID,
 };
 use super::ui_surface::ui_surface_schema;
+use super::web_definitions::web_resource_type_definitions;
 use crate::engine::kernel::ids::WorkerId;
 
 /// Built-in resource kinds for the collapsed modular substrate.
@@ -650,6 +651,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
     definitions.extend(goal_question_resource_type_definitions());
     definitions.extend(job_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
+    definitions.extend(web_resource_type_definitions());
     definitions
 }
 

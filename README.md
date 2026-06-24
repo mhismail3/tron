@@ -954,6 +954,7 @@ Current primitive operations:
 | `question_list` | List scoped user questions with bounded summaries and explicit truncation metadata. |
 | `question_inspect` | Inspect one scoped user question with current resource/version refs, lifecycle state, and answer summary when present. |
 | `question_answer` | Record one idempotent `goal_answer` handoff for a pending question after expected-version and expiry checks, with required reason, authority/freshness evidence, stream refs, and no authority minting. |
+| `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, producing redacted `web_source` resource/cache evidence. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -970,7 +971,7 @@ provider-visible execute surface; file access goes through the hardened
 `filesystem_*` operation package.
 
 The accepted startup-registration baseline keeps only loop infrastructure domains:
-`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
+`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `web`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
 `worker_lifecycle`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
@@ -999,7 +1000,7 @@ pre-startup stale records cannot be hidden behind a public list page of live or
 post-startup rows; targeted status/log/cancel also rechecks the addressed
 resource after scope validation without mutating unrelated scopes.
 Provider-visible access remains the single `execute` tool through `job_*`
-operation values; PTY sessions, interpreters, web/network behavior,
+operation values; PTY sessions, interpreters, job-owned network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
 not part of this foundation.
 The accepted Slice 7A `goals` domain owns durable backend records only.
@@ -1020,6 +1021,25 @@ empty, oversized, missing-reason, or untrusted-context calls fail closed.
 This foundation does not add an autonomous goal runner, planner, hidden prompt
 queue, scheduler/reminder, notification/APNs behavior, subagents, public
 `/engine` goal API expansion, settings fields, or native Work/question UI.
+The Slice 8A implementation candidate adds the `web` domain as a source
+provenance owner without adding direct public `web::*` catalog functions.
+Provider-visible access remains the single `capability::execute` primitive with
+one new operation value: `web_fetch`. Direct fetch requires a trusted
+agent/system runtime context, current session, idempotency key, allowed
+`web_source` resource authority, and a derived grant with
+`networkPolicy: declared`; grants with `networkPolicy: none` fail before any
+HTTP client is built. The operation accepts one explicit URL, rejects
+credentials, fragments, malformed or overlong URLs, unsupported schemes, and
+unsafe local/internal targets except deterministic HTTP loopback test targets.
+Fetches use `reqwest` with bounded timeout, redirects, captured response bytes,
+provider-visible text bytes, content-type handling, deterministic truncation
+metadata, captured-byte SHA-256 evidence, common secret redaction for previews
+and error details, sanitized source/final URLs, replay refs, and idempotent
+`web_source` resource/cache evidence on `web.lifecycle`. Search providers,
+browser automation, crawling, sitemap traversal, robots policy, login/cookies,
+credential reuse, shell/process network side channels, native iOS web UI, and
+public `/engine` web API expansion remain deferred pending review and mainline
+integration.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
@@ -1079,7 +1099,7 @@ recording, treats recording startup as cancellation-aware, cancels capture and
 in-flight transcription when leaving chat, the server reports explicit
 disabled/loading/ready/failed model state, and no media or voice notes are
 stored. Product/tool domains such as
-`process`, `program`, `web`, `worktree`, `browser`, `display`, `plan`,
+`process`, `program`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, `notifications`, `voice_notes`, and media/import surfaces are
 not registered by default on this branch.
@@ -1606,7 +1626,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, and `goal_answer` lifecycle records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, `goal_answer`, and `web_source` source-provenance records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

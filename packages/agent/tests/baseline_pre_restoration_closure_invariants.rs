@@ -679,6 +679,26 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "Slice 6D git foundation must stay within branch-start and existing status/diff/index/commit boundaries; found {forbidden}"
         );
     }
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "web",
+        "P2AER-INV-012",
+        "BPRC-FEATURE-04",
+        "web_browser",
+        "Slice 8: Web, Research, Browser, And Fetch",
+        "implementation_candidate",
+        &[
+            "Slice 8A implementation candidate",
+            "web_fetch",
+            "web_source",
+            "domains/web",
+        ],
+        &[
+            "Phase 2 Slice 8A Implementation Candidate",
+            "`web_fetch`",
+            "`web_source`",
+        ],
+    );
     for forbidden in [
         "autostart",
         "browser",
@@ -706,7 +726,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "subagents",
         "tree",
         "voice_notes",
-        "web",
         "worktree",
     ] {
         assert!(
