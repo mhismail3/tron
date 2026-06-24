@@ -10,13 +10,17 @@ use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineResourceScope, FunctionId,
-    Invocation, ListResources, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, EngineResourceScope,
+    FunctionId, Invocation, ListResources, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
     RUNTIME_METADATA_PROVIDER_INVOCATION_ID, RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_TURN,
-    RUNTIME_METADATA_WORKING_DIRECTORY, TraceId, WEB_SOURCE_KIND, WEB_SOURCE_SCHEMA_ID,
+    RUNTIME_METADATA_WORKING_DIRECTORY, TraceId, UpdateResource, WEB_SOURCE_KIND,
+    WEB_SOURCE_SCHEMA_ID, WorkerId,
 };
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
+
+#[path = "web_source_tests.rs"]
+mod source_tests;
 
 #[tokio::test]
 async fn web_fetch_requires_declared_network_policy_before_network_io() {
@@ -436,6 +440,31 @@ struct WebFixture<'a> {
 
 impl<'a> WebFixture<'a> {
     async fn new(ctx: &'a ServerRuntimeContext, session_id: &str, network_policy: &str) -> Self {
+        Self::new_with_authority(
+            ctx,
+            session_id,
+            network_policy,
+            &[
+                "capability.execute",
+                "web.read",
+                "web.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &["agent_state", "web_source"],
+            &["kind:agent_state", "kind:web_source"],
+        )
+        .await
+    }
+
+    async fn new_with_authority(
+        ctx: &'a ServerRuntimeContext,
+        session_id: &str,
+        network_policy: &str,
+        allowed_authority_scopes: &[&str],
+        allowed_resource_kinds: &[&str],
+        resource_selectors: &[&str],
+    ) -> Self {
         let root = tempdir().expect("root");
         let workspace_id = format!("{session_id}-workspace");
         let actor_id = ActorId::new(format!("agent:{session_id}")).expect("actor id");
@@ -446,6 +475,9 @@ impl<'a> WebFixture<'a> {
             &workspace_id,
             root.path().to_str().unwrap(),
             network_policy,
+            allowed_authority_scopes,
+            allowed_resource_kinds,
+            resource_selectors,
         )
         .await;
         Self {
@@ -532,6 +564,8 @@ impl<'a> WebFixture<'a> {
         .with_scope("capability.execute")
         .with_scope("web.read")
         .with_scope("web.write")
+        .with_scope("resource.read")
+        .with_scope("resource.write")
         .with_session_id(self.session_id.clone())
         .with_workspace_id(self.workspace_id.clone())
         .with_idempotency_key(idempotency_key.to_owned())
@@ -553,6 +587,9 @@ async fn derive_execute_grant(
     workspace_id: &str,
     root: &str,
     network_policy: &str,
+    allowed_authority_scopes: &[&str],
+    allowed_resource_kinds: &[&str],
+    resource_selectors: &[&str],
 ) -> AuthorityGrantId {
     let grant = ctx
         .engine_host
@@ -563,9 +600,9 @@ async fn derive_execute_grant(
                 "subjectActorId": actor_id.as_str(),
                 "allowedCapabilities": ["capability::execute"],
                 "allowedNamespaces": ["__no_namespace_authority__"],
-                "allowedAuthorityScopes": ["capability.execute", "web.read", "web.write"],
-                "allowedResourceKinds": ["agent_state", "web_source"],
-                "resourceSelectors": ["kind:agent_state", "kind:web_source"],
+                "allowedAuthorityScopes": allowed_authority_scopes,
+                "allowedResourceKinds": allowed_resource_kinds,
+                "resourceSelectors": resource_selectors,
                 "fileRoots": [root],
                 "networkPolicy": network_policy,
                 "maxRisk": "medium",
@@ -582,7 +619,12 @@ async fn derive_execute_grant(
             .with_scope("grant.write")
             .with_session_id(session_id.to_owned())
             .with_workspace_id(workspace_id.to_owned())
-            .with_idempotency_key(format!("derive-{session_id}-{network_policy}")),
+            .with_idempotency_key(format!(
+                "derive-{session_id}-{network_policy}-{}-{}-{}",
+                allowed_authority_scopes.join("."),
+                allowed_resource_kinds.join("."),
+                resource_selectors.join(".")
+            )),
         ))
         .await;
     assert_eq!(grant.error, None, "derive grant failed: {:?}", grant.error);

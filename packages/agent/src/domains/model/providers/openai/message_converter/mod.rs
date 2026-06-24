@@ -149,7 +149,8 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         `filesystem_search_text`, `filesystem_diff`, `filesystem_write`, `filesystem_edit`, \
         `filesystem_apply_patch`, `git_status`, `git_diff`, `git_branch_inventory`, `git_stage`, `git_unstage`, `git_commit`, `git_branch_start`, `process_run`, `job_start`, `job_status`, `job_list`, \
         `job_log`, `job_cancel`, `goal_create`, `goal_list`, `goal_inspect`, `goal_cancel`, \
-        `question_create`, `question_list`, `question_inspect`, `question_answer`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
+        `question_create`, `question_list`, `question_inspect`, `question_answer`, \
+        `web_fetch`, `web_source_list`, `web_source_inspect`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
         `catalog_search`, `catalog_inspect`, `catalog_conformance`, `memory_status`, `memory_list`, or `memory_inspect`. \
         Do not send `target`, `contractId`, `functionId`, or `arguments`. \
         Catalog discovery operations inspect metadata/conformance only and never execute discovered \
@@ -160,7 +161,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         trusted roots, `git_status`, `git_diff`, and `git_branch_inventory` for read-only repository/worktree status, \
         bounded staged/unstaged diff evidence, and bounded local branch inventory, `git_stage` and `git_unstage` for explicit relative-path Git index \
         mutations that require `expectedHead`, `reason`, and a stable `idempotencyKey`, `git_commit` for one already-staged index commit with `message`, `expectedHead`, `expectedIndexTree`, `reason`, and `idempotencyKey`, `git_branch_start` for one new local branch at `expectedHead` with `branchName`, `reason`, and `idempotencyKey` without checkout/file updates, `process_run` for short bounded shell commands, job operations for durable \
-        non-interactive command lifecycle/status/log/cancel, goal/question operations for durable lifecycle records and expected-version answer handoff, trace/log operations to inspect durable \
+        non-interactive command lifecycle/status/log/cancel, goal/question operations for durable lifecycle records and expected-version answer handoff, `web_fetch` for one explicit URL with declared network authority and durable `web_source` evidence, `web_source_list`/`web_source_inspect` for read-only bounded citation fields from current-session `web_source` resources without network access, trace/log operations to inspect durable \
         execution records, `replay_manifest` to \
         export the current session's `tron.replay.v1` audit manifest, and catalog operations to inspect \
         available workers/functions/schemas/conformance evidence through the same execute primitive. \

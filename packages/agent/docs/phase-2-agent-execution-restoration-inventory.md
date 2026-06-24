@@ -243,3 +243,12 @@ replay refs, idempotent `web_source` resource/cache evidence, and
 robots policy, login/cookies/session reuse, credential handling, public
 `/engine` web APIs, native iOS source UI, and network-enabled jobs remain
 deferred to later Slice 8 sub-slices.
+
+Slice 8B implementation candidate adds execute-only read operations
+`web_source_list` and `web_source_inspect` under the same `domains/web`
+boundary. They require trusted current-session context plus `web.read` and
+`resource.read` authority, inspect only scoped `web_source` resources, reject
+malformed ids, wrong kinds, missing/stale versions, cross-session sources, and
+missing read authority, and return bounded citation-ready URL/status/content
+type/hash/truncation/redaction/snippet/trace/replay/resource refs without
+network I/O. This remains `pending_review` evidence until accepted on main.

@@ -185,6 +185,14 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         Some("goal_list" | "goal_inspect" | "question_list" | "question_inspect") => {
             push_unique(&mut scopes, "goals.read");
         }
+        Some("web_fetch") => {
+            push_unique(&mut scopes, "resource.write");
+            push_unique(&mut scopes, "web.write");
+        }
+        Some("web_source_list" | "web_source_inspect") => {
+            push_unique(&mut scopes, "resource.read");
+            push_unique(&mut scopes, "web.read");
+        }
         _ => {}
     }
     scopes
@@ -230,7 +238,7 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         }
         Some("question_list" | "question_inspect") => vec!["user_question"],
         Some("question_answer") => vec!["user_question", "goal_answer"],
-        Some("web_fetch") => vec!["web_source"],
+        Some("web_fetch" | "web_source_list" | "web_source_inspect") => vec!["web_source"],
         _ => Vec::new(),
     }
 }

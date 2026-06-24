@@ -1052,6 +1052,47 @@ traversal, robots policy, login/cookies/session reuse, credential reuse, shell
 or process network side channels, native iOS web/source UI, public `/engine`
 web APIs, and network-enabled jobs remain deferred to later slices.
 
+## Phase 2 Slice 8B Implementation Candidate: Web Source Citation And Inspection Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8b-web-source-citation-inspection`.
+Baseline:
+`origin/main@d2cb7cd32976f1de460defe5fc0cb094669b0140`
+(`docs: accept phase 2 slice 8a`).
+Status: `pending_review`.
+
+Candidate implementation evidence:
+
+- Adds execute-only `web_source_list` and `web_source_inspect` operation values
+  behind the single provider-visible `capability::execute` primitive.
+- Adds `domains/web/source.rs` as the read-only source inspection owner. The
+  module returns bounded citation-ready fields from durable `web_source`
+  resource payloads: requested/final URLs, fetched time, status, content type,
+  captured SHA-256, captured/output byte counts, truncation/redaction metadata,
+  redacted snippets, trace refs, replay refs, and resource refs.
+- Requires trusted current-session execute context plus `web.read` and
+  `resource.read` authority before returning source details. Grant derivation
+  and central grant authorization now include web-source read operations and
+  keep read operations at `networkPolicy: none`.
+- Rejects malformed ids, wrong resource kind/schema, missing current versions,
+  missing or stale requested versions, cross-session scope mismatches, and
+  missing read authority.
+- Keeps `web_fetch` as the only network operation; no search provider, browser
+  automation, crawling, robots policy, login/cookies/session reuse, native
+  source UI, public `/engine` API, or network-enabled job behavior is added.
+
+Candidate validation to rerun before review:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+- `cargo check --manifest-path packages/agent/Cargo.toml`
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::web -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`
+- OpenAI message converter focused tests
+- SACB/HRA/TMB/TPC/PCC/BPRC/IARM/DESI/public-protocol static guard bundle
+- `git diff --check`
+- `git ls-files -ci --exclude-standard`
+- `scripts/personal-info-guard.sh`
+
 ## Phase 2 Slice 7A Accepted Implementation: Goal And Question Foundation
 
 Implementation branch: `codex/phase-2-slice-7a-goal-question-foundation-v2`.

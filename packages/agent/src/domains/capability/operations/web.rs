@@ -33,3 +33,59 @@ pub(super) async fn web_fetch(
         }),
     ))
 }
+
+pub(super) async fn web_source_list(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let web_deps = crate::domains::web::Deps {
+        engine_host: deps.engine_host.clone(),
+        #[cfg(test)]
+        dns_overrides: None,
+    };
+    let value = crate::domains::web::source::web_source_list_value(
+        &web_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    let count = value["sources"].as_array().map_or(0, Vec::len);
+    Ok(ok_result(
+        format!("Listed {count} web source(s)"),
+        json!({
+            "primitiveOperation": "web_source_list",
+            "status": "ok",
+            "web": value
+        }),
+    ))
+}
+
+pub(super) async fn web_source_inspect(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let web_deps = crate::domains::web::Deps {
+        engine_host: deps.engine_host.clone(),
+        #[cfg(test)]
+        dns_overrides: None,
+    };
+    let value = crate::domains::web::source::web_source_inspect_value(
+        &web_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(ok_result(
+        format!(
+            "Inspected source {}",
+            value["source"]["resourceRefs"][0]["resourceId"]
+                .as_str()
+                .unwrap_or("web_source")
+        ),
+        json!({
+            "primitiveOperation": "web_source_inspect",
+            "status": "ok",
+            "web": value
+        }),
+    ))
+}

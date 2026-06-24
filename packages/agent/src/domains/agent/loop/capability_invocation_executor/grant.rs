@@ -41,7 +41,9 @@ pub(super) async fn derive_capability_runtime_grant(
     let mut allowed_authority_scopes = target_authority_scopes.to_vec();
     allowed_authority_scopes.extend(["state.read".to_owned(), "state.write".to_owned()]);
     if operation == "web_fetch" {
-        allowed_authority_scopes.extend(["web.read".to_owned(), "web.write".to_owned()]);
+        allowed_authority_scopes.extend(["resource.write".to_owned(), "web.write".to_owned()]);
+    } else if matches!(operation, "web_source_list" | "web_source_inspect") {
+        allowed_authority_scopes.extend(["resource.read".to_owned(), "web.read".to_owned()]);
     }
     allowed_authority_scopes.sort();
     allowed_authority_scopes.dedup();
@@ -51,7 +53,10 @@ pub(super) async fn derive_capability_runtime_grant(
         "none"
     };
     let mut allowed_resource_kinds = vec!["agent_state".to_owned()];
-    if operation == "web_fetch" {
+    if matches!(
+        operation,
+        "web_fetch" | "web_source_list" | "web_source_inspect"
+    ) {
         allowed_resource_kinds.push("web_source".to_owned());
     }
     let resource_selectors = allowed_resource_kinds

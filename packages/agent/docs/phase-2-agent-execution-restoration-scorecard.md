@@ -24,20 +24,21 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`main@77f0620545b4d277c0288cc9503e2d90cdf7e0b8`
-(`fix: close web fetch ipv6 policy gaps`) plus the Slice 8A closeout
-documentation commit. That line includes accepted Slice 6A
+`origin/main@d2cb7cd32976f1de460defe5fc0cb094669b0140`
+(`docs: accept phase 2 slice 8a`). That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
 stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
 6D local branch-start evidence, accepted Slice 6E read-only branch inventory
 evidence, accepted Slice 7A goal/question lifecycle evidence, and accepted
 Slice 8A web fetch/source provenance evidence.
 
-Closeout note: this update verified current `origin/main` after accepted Slice
-8A and records the next Slice 8 discovery boundary here and in the companion
-artifacts. Direct URL fetch provenance is accepted; later search providers,
-browser automation, crawling, robots policy, login/cookies/session reuse, native
-source UI, public `/engine` web APIs, and network-enabled jobs remain deferred.
+Candidate note: Slice 8B implementation work starts from this accepted Slice 8A
+baseline and adds read-only `web_source_list` / `web_source_inspect`
+inspection operations for citation assembly. Until review and integration, 8B
+remains an implementation candidate, not an accepted baseline. Direct URL fetch
+provenance is accepted; later search providers, browser automation, crawling,
+robots policy, login/cookies/session reuse, native source UI, public `/engine`
+web APIs, and network-enabled jobs remain deferred.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -62,17 +63,19 @@ Completed Phase 2 restoration slices at this baseline:
   and explicit execute authority/resource checks without autonomous execution;
 - Slice 8A: direct `web_fetch` source provenance with declared-network
   authority, bounded evidence, `web_source` resources, and no search/browser
-  scope.
+  scope;
+- Slice 8B candidate: read-only current-session `web_source` list/inspect
+  citation fields through `capability::execute`, with no new network breadth.
 
 Current next action:
-Start discovery from fresh `origin/main` for the next **Slice 8: Web,
-Research, Browser, And Fetch** sub-slice unless the current canonical docs
-identify a narrower required follow-up. Slice 8A is accepted as direct fetch
-source provenance only; search providers, browser automation, crawling, robots
-policy, login/cookies/session reuse, native source UI, public `/engine` web
-APIs, network-enabled jobs, autonomous goal execution, fetch/pull/push, PR
-handoff, production deployment behavior, and native SourceChanges UI remain
-deferred.
+Review the Slice 8B implementation candidate for **Web Source Citation And
+Inspection Foundation**. Slice 8A is accepted as direct fetch source provenance
+only; Slice 8B should be accepted only after review confirms source
+list/inspect are read-only, bounded, current-session scoped, and authority
+checked. Search providers, browser automation, crawling, robots policy,
+login/cookies/session reuse, native source UI, public `/engine` web APIs,
+network-enabled jobs, autonomous goal execution, fetch/pull/push, PR handoff,
+production deployment behavior, and native SourceChanges UI remain deferred.
 
 ## Scope
 

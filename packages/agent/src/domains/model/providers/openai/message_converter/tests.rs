@@ -477,8 +477,26 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(!result.contains("file_read"));
     assert!(!result.contains("file_write"));
     assert!(result.contains("process_run"));
+    assert!(result.contains("web_fetch"));
+    assert!(result.contains("web_source_list"));
+    assert!(result.contains("web_source_inspect"));
     assert!(result.contains("trace_list"));
     assert!(result.contains("replay_manifest"));
+    for non_goal in [
+        "web_search",
+        "browser_open",
+        "browser_click",
+        "web_crawl",
+        "web_login",
+        "job_fetch",
+        "job_http",
+        "job_network",
+    ] {
+        assert!(
+            !result.contains(non_goal),
+            "non-goal operation {non_goal} must not be provider-visible"
+        );
+    }
     assert!(result.contains("Do not send `target`"));
     assert!(result.contains("Put operation fields at the top level"));
     assert!(result.contains("Except for read-only `replay_manifest`"));
@@ -494,6 +512,9 @@ fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
     assert!(result.contains("catalog_search"));
     assert!(result.contains("catalog_inspect"));
     assert!(result.contains("catalog_conformance"));
+    assert!(result.contains("web_fetch"));
+    assert!(result.contains("web_source_list"));
+    assert!(result.contains("web_source_inspect"));
     assert!(result.contains("Do not send `target`, `contractId`, `functionId`, or `arguments`"));
     assert!(result.contains("Catalog discovery operations inspect metadata/conformance only"));
     assert!(result.contains("Put operation fields at the top level"));
