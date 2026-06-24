@@ -209,4 +209,7 @@ and static guards proving no arbitrary checkout, branch delete/rename,
 merge/rebase/reset, push/PR, worktree graph, conflict resolution workflow, or
 native SourceChanges surface was added. Branch deletion/rename, arbitrary
 checkout, remote push/PR, merge/rebase/reset, conflict workflows, worktree graph
-resources, and native SourceChanges remain deferred.
+resources, and native SourceChanges remain deferred. The selected next
+source-control slice is Slice 6E: read-only local branch inventory through the
+existing `capability::execute` and `domains/git` boundary, with bounded branch
+evidence and no branch mutation.

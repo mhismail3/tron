@@ -816,6 +816,51 @@ Validation on final review and mainline closeout:
   packages/agent/Cargo.toml --all -- --check`, `git diff --check`, and
   `scripts/personal-info-guard.sh`.
 
+## Phase 2 Slice 6E Discovery: Git Branch Inventory Foundation
+
+Discovery branch: `codex/phase-2-slice-6e-discovery`.
+Baseline:
+`origin/main@719ebb5fc6d0db082a2577e44aa60982abbed253`
+(`docs: record slice 6d acceptance`).
+
+Discovery status: selected. Implementation may start from fresh `origin/main`;
+this discovery does not implement runtime behavior.
+
+Selected scope:
+
+- Add only a read-only branch inventory source-control operation through the
+  existing `capability::execute` primitive and `domains/git` package boundary.
+- Report bounded local branch evidence for the trusted repository root:
+  current branch or detached state, local branch names/refs, oids, upstream
+  names when present, ahead/behind when available without network, and bounded
+  last-commit metadata.
+- Do not create, switch, delete, rename, reset, merge, rebase, revert,
+  cherry-pick, stash, clean, fetch, pull, push, set upstreams, create PRs,
+  create worktrees, mutate the index, edit worktree files, add public `/engine`
+  DTOs, add native SourceChanges UI, or run production deployment behavior.
+- No durable resource kind is required unless implementation discovers a real
+  replay-custody need beyond normal invocation/result trace evidence.
+
+Discovery evidence:
+
+- Baseline was verified after `git fetch --prune`; local `HEAD` and
+  `origin/main` both resolved to
+  `719ebb5fc6d0db082a2577e44aa60982abbed253`.
+- Required canonical docs were read from accepted Slice 6D mainline: README
+  capability/source-control sections, Phase 2 scorecard/evidence/inventory
+  artifacts, retrospective tracker, inventory TSV row `P2AER-INV-013`, and
+  `packages/agent/src/domains/git/mod.rs`.
+- Existing `domains/git` architecture shows read-only status/diff plus narrow
+  stage, commit, and branch-start mutation boundaries. Since canonical docs
+  still defer arbitrary checkout, branch delete/rename, remotes, conflict
+  workflows, worktree graph resources, and native SourceChanges, branch
+  inventory is the next safe source-control slice before any broader branch
+  mutation.
+- The scorecard now contains the full Slice 6E handoff packet: objective, user
+  value, modular boundary, request/output shape, likely files, non-goals,
+  deterministic tests, docs/static updates, validation commands, and residual
+  decisions.
+
 ## Validation Log
 
 | Command | Result | Evidence |

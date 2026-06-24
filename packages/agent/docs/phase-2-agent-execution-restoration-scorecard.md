@@ -24,15 +24,16 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`main@6ec2e03baf03bf260e8e1d3522c93ef8bdeb563f`
-(`Fix git_commit HEAD drift guard`). That line includes accepted Slice 6A
+`main@719ebb5fc6d0db082a2577e44aa60982abbed253`
+(`docs: record slice 6d acceptance`). That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
-stage/unstage, accepted Slice 6C staged-index commit evidence, and mainline
-closeout documentation for Slice 6A and Slice 6B.
+stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
+6D local branch-start evidence, and mainline closeout documentation through
+Slice 6D.
 
-Closeout note: this update fast-forwarded `main` from current `origin/main` to
-the accepted Slice 6C implementation stack, then records the independent review
-and fix-loop evidence here and in the retrospective tracker.
+Closeout note: this update verified current `origin/main` after accepted Slice
+6D and records the next source-control discovery boundary here and in the
+companion artifacts.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -53,13 +54,12 @@ Completed Phase 2 restoration slices at this baseline:
   evidence, lifecycle evidence, and no checkout.
 
 Current next action:
-Start fresh discovery from current `origin/main` for the next source-control
-slice after accepted Slice 6D. Branch deletion, rename, arbitrary checkout,
-detached-HEAD commits, merge/rebase/reset, stash/clean, fetch/pull/push, PR
-handoff, conflict resolution workflows, worktree graph resources, public API
-expansion, production deployment behavior, and native SourceChanges UI remain
-deferred unless the discovery packet explicitly justifies one narrow next
-boundary.
+Implement Slice 6E from fresh `origin/main`: a read-only Git branch inventory
+foundation through the existing `capability::execute` and `domains/git`
+boundary. Branch deletion, rename, arbitrary checkout, detached-HEAD commits,
+merge/rebase/reset, stash/clean, fetch/pull/push, PR handoff, conflict
+resolution workflows, worktree graph resources, public API expansion,
+production deployment behavior, and native SourceChanges UI remain deferred.
 
 ## Scope
 
@@ -1223,6 +1223,133 @@ Review outcome and residual risks:
   until cleanup, matching interrupted Git operation behavior; normal error
   paths remove the lock or use all-or-nothing branch-ref rollback.
 
+#### Selected Slice 6E Discovery Packet
+
+Exact next slice to implement: **Slice 6E: Git Branch Inventory Foundation**.
+
+Why this slice is next: accepted Slice 6D can create and enter a new local
+branch without checkout, but the agent still lacks bounded evidence for the
+local branch set before any later branch mutation, push/PR handoff, cleanup,
+or checkout decision. The current canonical plan still defers arbitrary
+checkout, branch deletion/rename, remotes, worktree graph resources, conflict
+workflows, and native SourceChanges UI. A read-only branch inventory is the
+narrowest useful source-control boundary because it supplies decision evidence
+without taking on those deferred mutation policies.
+
+User-facing objective: let the agent inspect local branch state for the trusted
+repository root, including the current branch, local branch names/refs, head
+oids, upstream names when present, ahead/behind counts when cheaply available,
+last-commit summary metadata, and bounded evidence. This helps users and later
+slices decide what branch exists, where work lives, and whether a future branch
+switch/delete/push/PR operation is even meaningful.
+
+Scope and boundaries:
+
+- True primitive: none beyond the existing `capability::execute`, Git domain,
+  trusted working-directory metadata, bounded evidence, and resource/event
+  substrate already used by Slices 6A-6D.
+- Modular package: keep behavior in `domains/git`. Add a provider-visible
+  `git_branch_list` or `git_branch_inventory` operation value through
+  `capability::execute`; add a backend read contract only if it fits the
+  existing `git::status`/`git::diff` catalog pattern.
+- Read-only boundary: this slice must not create, delete, rename, switch, reset,
+  merge, rebase, revert, cherry-pick, stash, clean, fetch, pull, push, set
+  upstreams, create worktrees, resolve conflicts, mutate the index, or edit
+  worktree files.
+- Evidence boundary: output must be bounded and deterministic enough for tests;
+  caller-controlled byte/count limits affect returned evidence only, never
+  whether repository state is read.
+- Authority boundary: only trusted working-directory repository metadata is
+  accepted. No arbitrary filesystem scan, remote network access, public
+  `/engine` DTO expansion, hidden approval policy, or iOS native SourceChanges
+  surface is included.
+
+Request/output shape:
+
+- Request fields should include `operation`, optional trusted-root `path`, and
+  optional evidence bounds such as `maxBranches` and `maxBranchBytes`.
+- Response should include `schemaVersion`, `status`, `operation`,
+  `repository`, `currentBranch` or detached-HEAD evidence, `branches`, and
+  `evidence`/truncation metadata.
+- Each branch row should include local branch name, full ref, oid, current
+  marker, optional upstream, optional ahead/behind, and bounded last-commit
+  subject/time/author metadata if already available without invoking editors,
+  hooks, pagers, credentials, or network.
+- No durable resource kind is required unless the implementation needs replay
+  custody beyond the normal invocation/result trace; branch inventory is a
+  read-only observation, not a source-control effect.
+
+Likely files/areas:
+
+- `packages/agent/src/domains/git/service.rs`;
+- `packages/agent/src/domains/git/contract.rs`;
+- `packages/agent/src/domains/git/handlers.rs`;
+- `packages/agent/src/domains/capability/operations/git.rs`;
+- provider operation/schema instruction tests;
+- `packages/agent/src/domains/git/mod.rs` docs;
+- README capability and Git/source-control sections plus this scorecard,
+  evidence manifest, inventory, and TSV.
+
+Deterministic tests:
+
+- clean repository with several local branches returns sorted or otherwise
+  documented deterministic branch rows and marks the current branch;
+- detached HEAD reports detached evidence without pretending a branch is
+  current;
+- upstream/ahead-behind evidence is reported for a local fixture with a local
+  remote ref and omitted or marked unavailable when no upstream exists;
+- bounded branch count/byte limits truncate safely with explicit metadata;
+- non-repo, nested-repo misuse, missing trusted metadata, and path traversal
+  reject consistently with existing Git read operations;
+- branch names with unusual but valid ref characters are escaped/serialized
+  safely;
+- static/provider guards expose only the branch inventory operation while still
+  rejecting `git_checkout`, `git_branch_delete`, `git_branch_rename`,
+  `git_merge`, `git_rebase`, `git_reset`, `git_push`, `git_pull`,
+  `git_fetch`, `git_stash`, `git_clean`, `git_revert`, and `git_cherry_pick`;
+- no resource schema is added unless the implementation deliberately adds a
+  resource-backed observation record.
+
+Non-goals:
+
+- no branch creation beyond accepted `git_branch_start`;
+- no arbitrary checkout or switching to an existing branch;
+- no branch deletion, rename, upstream setup, default branch policy, or cleanup
+  automation;
+- no merge, rebase, reset, revert, cherry-pick, stash, clean, fetch, pull,
+  push, remote configuration, PR handoff, or conflict workflow;
+- no worktree graph resources, repository import/tree/history UI, native iOS
+  SourceChanges UI, public `/engine` expansion, or production deployment
+  behavior.
+
+Docs/static updates:
+
+- README capability table and Git/source-control paragraph if a new operation
+  is exposed;
+- `domains/git/mod.rs` progressive disclosure docs;
+- Phase 2 scorecard/evidence/inventory/TSV;
+- provider static guards and BPRC/HRA/TMB/TPC/PCC inventory guards only if the
+  implementation changes their covered path sets.
+
+Validation commands:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`;
+- `cargo check --manifest-path packages/agent/Cargo.toml`;
+- `cargo test --manifest-path packages/agent/Cargo.toml git_branch -- --nocapture`
+  or the narrowest branch-inventory test filter added by the implementation;
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`;
+- touched static/inventory invariant tests, especially BPRC, HRA, TMB, TPC,
+  PCC, DRC, DESI, and SACB when their inputs change;
+- `git diff --check`;
+- `scripts/personal-info-guard.sh`.
+
+iOS validation: no native SourceChanges UI is part of Slice 6E. Run iOS tests
+only if generic runtime/resource rendering changes.
+
+Residual user decisions after Slice 6E: push/PR approval, arbitrary checkout
+policy, branch deletion/rename policy, default branch naming/cleanup policy,
+native source-control UI scope, and conflict-resolution delegation.
+
 ### Slice 7: Goals, Queues, Questions, And Planning
 
 Objective: restore durable autonomous work objects and user-question flows.
@@ -1570,10 +1697,10 @@ Implementation slices add:
 ## Closure Verdict
 
 Phase 2 remains source-backed and proceeds one slice at a time. As of
-`main@6ec2e03baf03bf260e8e1d3522c93ef8bdeb563f`, Slices 1 through 4,
-Slice 5A, Slice 6A, Slice 6B, and Slice 6C are represented on the consolidated
-mainline after independent acceptance. The next Phase 2 action is a discovery
-thread for the next narrow Slice 6 source-control boundary from fresh
-`origin/main`, preserving branch/worktree graph, merge/rebase/reset, remote,
-PR handoff, conflict workflow, production deploy, and native SourceChanges
-deferred scope until explicitly shaped.
+`main@719ebb5fc6d0db082a2577e44aa60982abbed253`, Slices 1 through 4,
+Slice 5A, Slice 6A, Slice 6B, Slice 6C, and Slice 6D are represented on the
+consolidated mainline after independent acceptance. The next Phase 2 action is
+Slice 6E, a read-only Git branch inventory foundation from fresh
+`origin/main`, preserving arbitrary checkout, branch deletion/rename,
+merge/rebase/reset, remote push/PR handoff, conflict workflow, worktree graph,
+production deploy, and native SourceChanges deferred scope.
