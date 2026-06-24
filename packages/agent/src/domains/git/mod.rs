@@ -1,16 +1,18 @@
 //! Git and worktree domain.
 //!
 //! This Phase 2 package restores source-control observation plus the narrow
-//! Slice 6C Git staged-index commit foundation. It detects the repository
+//! Slice 6C Git staged-index commit and Slice 6D branch-start foundations. It detects the repository
 //! containing a trusted runtime path, reports branch/upstream/dirty facts,
 //! returns bounded status/diff evidence, stages/unstages explicit relative
-//! paths, and creates one guarded single-parent commit from the already-staged
-//! index through the existing `capability::execute` primitive.
+//! paths, creates one guarded single-parent commit from the already-staged
+//! index, and creates one local branch at the expected `HEAD` before moving the
+//! symbolic `HEAD` through the existing `capability::execute` primitive.
 //!
 //! ## Submodules
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `branch_start` | Local branch creation plus symbolic `HEAD` movement |
 //! | `commit` | Staged-index commit implementation and evidence |
 //! | `contract` | Read and index-mutation `git::*` function contracts and schemas |
 //! | `handlers` | Operation-key binding table |
@@ -20,19 +22,23 @@
 //!
 //! # INVARIANT: Git mutation is staged-state only
 //!
-//! This domain must not merge, rebase, reset, push, delete branches, resolve
-//! conflicts, or mutate repository files. Stage/unstage operations only mutate
+//! This domain must not merge, rebase, reset, push, delete/rename/reset branches,
+//! resolve conflicts, or mutate repository files. Stage/unstage operations only mutate
 //! the Git index after validating trusted working-directory metadata, explicit
 //! relative paths, expected HEAD freshness, path existence, and path-scoped
 //! conflict state. Commit operations create exactly one commit from the
 //! already-staged index on the current named branch by rechecking expected HEAD
 //! and expected index-tree, writing the commit object with exactly that
 //! parent/tree, and advancing the branch ref with guarded `update-ref` while
-//! the worktree's symbolic `HEAD` is locked and reverified. Caller-controlled
+//! the worktree's symbolic `HEAD` is locked and reverified. Branch-start
+//! operations create exactly one missing local branch at the current expected
+//! `HEAD` and move symbolic `HEAD` to that new branch without checkout, hooks,
+//! remotes, index mutation, or worktree file updates. Caller-controlled
 //! status/diff byte limits affect evidence only, never mutation eligibility.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
+pub(crate) mod branch_start;
 pub(crate) mod commit;
 pub(crate) mod contract;
 mod handlers;

@@ -706,7 +706,7 @@ Selected scope:
   deployment behavior is in scope.
 - Require branch-name validation, expected head, reason, idempotency, trusted
   working-directory repository checks, conflict/sequencer rejection, bounded
-  before/after evidence, `git_branch_change` resource evidence, and
+  before/after evidence, `git_branch_start` resource evidence, and
   `git.lifecycle` stream evidence.
 
 Discovery evidence:
@@ -726,6 +726,48 @@ Discovery evidence:
   user value, modular boundary, request/resource/event shape, likely files,
   non-goals, safety risks, deterministic tests, docs/static updates, validation
   commands, and residual decisions.
+
+## Phase 2 Slice 6D Implementation Candidate: Git Branch Start Foundation
+
+Implementation branch: `codex/phase-2-slice-6d-branch-start`.
+Baseline:
+`origin/main@4d7221bf436acce3406d50ab0b1f2a06415616be`
+(`docs: shape slice 6d branch start handoff`).
+
+Implementation status: candidate ready for independent review, not recorded as
+mainline acceptance by this artifact.
+
+Implemented scope:
+
+- Added provider-visible `git_branch_start` as an operation value behind the
+  existing single `capability::execute` primitive.
+- Kept backend behavior in `domains/git` with a new `branch_start` module.
+- Creates exactly one new local branch ref at `expectedHead` and moves symbolic
+  `HEAD` to it through Git ref primitives without invoking checkout.
+- Requires `branchName`, `expectedHead`, non-empty `reason`, explicit payload
+  `idempotencyKey`, trusted working-directory metadata, current named branch
+  provenance, and clean conflict/sequencer state.
+- Rejects stale heads, existing branch names, unsafe/ref-injection/reserved
+  branch names, detached HEAD, non-repo and nested-repo misuse, missing
+  metadata, empty reason, and missing idempotency.
+- Records `git_branch_start` resource evidence and `git.branch_started`
+  lifecycle stream evidence with trace/replay/idempotency/authority refs.
+- Preserves staged, unstaged, and untracked worktree state; tests compare
+  before/after status, staged names, unstaged names, index tree, branch refs,
+  and file content.
+- Provider schema and instruction tests expose only the new
+  `git_branch_start` source-control operation while continuing to reject
+  checkout, branch delete/rename/move, merge/rebase/reset, push/pull/fetch,
+  remote, stash, clean, cherry-pick, and revert names.
+
+Implementation evidence:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml git` passed on the
+  implementation branch with 43 git-filtered tests, including branch-start
+  success, replay, stale/existing/invalid branch rejection, detached/conflict/
+  sequencer rejection, missing metadata/idempotency/reason rejection, nested
+  repo rejection, checkout-hook suppression, resource-definition coverage, and
+  provider/static schema guards.
 
 ## Validation Log
 

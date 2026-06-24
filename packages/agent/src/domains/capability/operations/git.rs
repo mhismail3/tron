@@ -59,6 +59,19 @@ pub(super) async fn git_commit(
     git_result("git_commit", result)
 }
 
+pub(super) async fn git_branch_start(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let result = crate::domains::git::branch_start::branch_start_value(
+        &deps.engine_host,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    git_result("git_branch_start", result)
+}
+
 fn git_result(
     operation: &'static str,
     result: serde_json::Value,

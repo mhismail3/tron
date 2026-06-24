@@ -931,6 +931,7 @@ Current primitive operations:
 | `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_commit` | Accepted Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
+| `git_branch_start` | Slice 6D operation that creates one new local branch at `expectedHead`, moves symbolic `HEAD` to it without checkout, preserves index/worktree content, and records branch-start resource and stream evidence. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
@@ -990,10 +991,12 @@ domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
 Accepted Slice 6C adds the `git_commit` execute operation with backend
 staged-index commit evidence; commit is not registered as a direct `git::*`
-catalog function.
+catalog function. Slice 6D adds the local-only `git_branch_start` execute
+operation for creating one new local branch at the current expected `HEAD` and
+moving symbolic `HEAD` to it without checkout or file updates.
 Provider-visible access remains operation values behind the single
 `capability::execute` primitive: `git_status`, `git_diff`, `git_stage`,
-`git_unstage`, and `git_commit`. The implementation resolves only
+`git_unstage`, `git_commit`, and `git_branch_start`. The implementation resolves only
 relative paths under trusted working-directory metadata, rejects path traversal
 and worktree-root escapes, reports branch/detached HEAD/upstream/ahead-behind/
 dirty summaries, returns bounded status/diff evidence, exposes the staged index
@@ -1008,8 +1011,17 @@ the commit object, then advances the branch with a guarded `update-ref` compare
 against the expected HEAD while symbolic `HEAD` is locked and reverified. The
 `commit-tree` path does not invoke hooks or an editor and suppresses
 pager/signing/credential prompts, creates a `git_commit` resource, and publishes
-`git.commit_created` lifecycle evidence.
-Merges, rebases, resets, pushes, branch checkout/deletion, conflict resolution
+`git.commit_created` lifecycle evidence. Slice 6D `git_branch_start` requires a
+safe new branch name, non-conflicted and sequencer-clean repository state,
+trusted working-directory metadata, expected `HEAD`, reason, and explicit
+idempotency. It creates a `git_branch_start` resource, publishes
+`git.branch_started` lifecycle evidence, rejects detached HEAD, existing or
+unsafe branch names, stale `expectedHead`, missing idempotency, nested/non-repo
+misuse, and merge/rebase/cherry-pick/sequencer states, and proves checkout,
+hooks, remotes, merge/rebase/reset, index mutation, and worktree file updates
+are not invoked.
+Merges, rebases, resets, pushes, arbitrary branch checkout, branch
+deletion/rename, conflict resolution
 workflows, PR handoff, worktree graph resources, and native iOS SourceChanges
 UI remain deferred.
 Policy lookup is `session -> workspace -> system`, and prompt-trace audit

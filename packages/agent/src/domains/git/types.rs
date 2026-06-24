@@ -7,6 +7,7 @@ use serde_json::Value;
 pub(super) const SCHEMA_VERSION: &str = "tron.git_readonly.v1";
 pub(super) const INDEX_CHANGE_SCHEMA_VERSION: &str = "tron.git_index_change.v1";
 pub(super) const COMMIT_SCHEMA_VERSION: &str = "tron.git_commit.v1";
+pub(super) const BRANCH_START_SCHEMA_VERSION: &str = "tron.git_branch_start.v1";
 pub(super) const DEFAULT_STATUS_BYTES: usize = 64 * 1024;
 pub(super) const MAX_STATUS_BYTES: usize = 200 * 1024;
 pub(super) const DEFAULT_DIFF_BYTES: usize = 64 * 1024;
@@ -71,6 +72,29 @@ pub(super) struct GitCommitRecord {
     pub(super) actual_tree: String,
     pub(super) commit_oid: String,
     pub(super) message: Value,
+    pub(super) reason: String,
+    pub(super) authority: Value,
+    pub(super) before: Value,
+    pub(super) after: Value,
+    pub(super) evidence: Value,
+    pub(super) trace_refs: Vec<Value>,
+    pub(super) replay_refs: Vec<Value>,
+    pub(super) idempotency: Value,
+    pub(super) revision: u64,
+    pub(super) created_at: DateTime<Utc>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(super) struct GitBranchStartRecord {
+    pub(super) schema_version: String,
+    pub(super) operation: String,
+    pub(super) state: String,
+    pub(super) repository: Value,
+    pub(super) branch_name: String,
+    pub(super) previous_branch: String,
+    pub(super) expected_head: String,
+    pub(super) head_oid: String,
     pub(super) reason: String,
     pub(super) authority: Value,
     pub(super) before: Value,

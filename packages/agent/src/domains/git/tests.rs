@@ -18,8 +18,8 @@ use crate::shared::server::test_support::make_test_context;
 use super::service::{diff_value, status_value};
 use crate::domains::capability::contract;
 use crate::engine::{
-    GIT_COMMIT_KIND, GIT_COMMIT_SCHEMA_ID, GIT_INDEX_CHANGE_KIND, GIT_INDEX_CHANGE_SCHEMA_ID,
-    builtin_resource_type_definitions,
+    GIT_BRANCH_START_KIND, GIT_BRANCH_START_SCHEMA_ID, GIT_COMMIT_KIND, GIT_COMMIT_SCHEMA_ID,
+    GIT_INDEX_CHANGE_KIND, GIT_INDEX_CHANGE_SCHEMA_ID, builtin_resource_type_definitions,
 };
 
 #[tokio::test]
@@ -300,13 +300,25 @@ fn model_schema_exposes_index_only_git_operations() {
     assert!(schema_text.contains("git_stage"));
     assert!(schema_text.contains("git_unstage"));
     assert!(schema_text.contains("git_commit"));
+    assert!(schema_text.contains("git_branch_start"));
     assert!(schema_text.contains("expectedIndexTree"));
+    assert!(schema_text.contains("branchName"));
     for forbidden in [
-        "git_merge",
-        "git_rebase",
-        "git_reset",
-        "git_push",
+        "git_branch_delete",
+        "git_branch_move",
+        "git_branch_rename",
+        "git_cherry_pick",
         "git_checkout",
+        "git_clean",
+        "git_fetch",
+        "git_merge",
+        "git_pull",
+        "git_push",
+        "git_rebase",
+        "git_remote",
+        "git_reset",
+        "git_revert",
+        "git_stash",
     ] {
         assert!(
             !schema_text.contains(forbidden),
@@ -332,10 +344,15 @@ fn git_commit_is_execute_only_not_direct_git_domain_contract() {
         !direct_ids.contains(&"git::commit".to_owned()),
         "Slice 6C git_commit must be exposed only through capability::execute"
     );
+    assert!(
+        !direct_ids.contains(&"git::branch_start".to_owned()),
+        "Slice 6D git_branch_start must be exposed only through capability::execute"
+    );
 
     let execute_metadata = contract::model_metadata(contract::EXECUTE_FUNCTION_ID);
     let execute_schema = execute_metadata["capabilitySchema"]["parameters"].to_string();
     assert!(execute_schema.contains("git_commit"));
+    assert!(execute_schema.contains("git_branch_start"));
 }
 
 #[test]
@@ -385,6 +402,41 @@ fn git_commit_resource_definition_is_registered() {
         definition.schema["required"]
             .to_string()
             .contains("expectedIndexTree")
+    );
+    assert_eq!(
+        definition.allowed_link_relations,
+        vec![
+            "evidence_for".to_owned(),
+            "derived_from".to_owned(),
+            "supersedes".to_owned()
+        ]
+    );
+    assert_eq!(
+        definition.required_capabilities["write"],
+        json!(["git.write", "resource.write"])
+    );
+}
+
+#[test]
+fn git_branch_start_resource_definition_is_registered() {
+    let definitions = builtin_resource_type_definitions();
+    let definition = definitions
+        .iter()
+        .find(|definition| definition.kind == GIT_BRANCH_START_KIND)
+        .expect("git branch start resource type");
+    assert_eq!(definition.schema_id, GIT_BRANCH_START_SCHEMA_ID);
+    assert_eq!(
+        definition.lifecycle_states,
+        vec!["started".to_owned(), "archived".to_owned()]
+    );
+    assert_eq!(
+        definition.schema["properties"]["operation"]["enum"],
+        json!(["branch_start"])
+    );
+    assert!(
+        definition.schema["required"]
+            .to_string()
+            .contains("branchName")
     );
     assert_eq!(
         definition.allowed_link_relations,
@@ -647,6 +699,216 @@ async fn execute_git_commit_replays_with_same_idempotency_key() {
 }
 
 #[tokio::test]
+async fn execute_git_branch_start_creates_branch_moves_head_and_preserves_dirty_state() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    let main_ref_before = git_stdout(repo.path(), ["rev-parse", "refs/heads/main"]);
+    let clean_index_tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    write_file(repo.path(), "tracked.txt", "unstaged\n");
+    write_file(repo.path(), "staged.txt", "staged\n");
+    git(repo.path(), ["add", "staged.txt"]);
+    write_file(repo.path(), "untracked.txt", "untracked\n");
+    let dirty_index_tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_ne!(dirty_index_tree, clean_index_tree);
+    let status_before = git_stdout(repo.path(), ["status", "--porcelain=v1"]);
+    let staged_before = git_stdout(repo.path(), ["diff", "--cached", "--name-only"]);
+    let unstaged_before = git_stdout(repo.path(), ["diff", "--name-only"]);
+    let before_cursor = ctx
+        .engine_host
+        .latest_stream_cursor(super::GIT_LIFECYCLE_TOPIC)
+        .await
+        .expect("latest cursor");
+
+    let started = execute_git_ok(
+        &ctx,
+        repo.path(),
+        "git-branch-start-success",
+        json!({
+            "operation": "git_branch_start",
+            "branchName": "feature/slice-6d",
+            "expectedHead": head,
+            "reason": "test branch start",
+            "maxDiffBytes": 16,
+            "idempotencyKey": "git-branch-start-success"
+        }),
+    )
+    .await;
+
+    assert_eq!(started["details"]["primitiveOperation"], "git_branch_start");
+    assert_eq!(started["details"]["git"]["status"], "started");
+    assert_eq!(started["details"]["git"]["branchName"], "feature/slice-6d");
+    assert_eq!(started["details"]["git"]["previousBranch"], "main");
+    assert_eq!(started["details"]["git"]["headOid"], head);
+    assert_eq!(
+        git_stdout(repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+        "feature/slice-6d"
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["rev-parse", "refs/heads/feature/slice-6d"]),
+        head
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["rev-parse", "refs/heads/main"]),
+        main_ref_before
+    );
+    assert_eq!(
+        status(repo.path(), json!({})).await["repository"]["indexTreeOid"],
+        json!(dirty_index_tree)
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["status", "--porcelain=v1"]),
+        status_before
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["diff", "--cached", "--name-only"]),
+        staged_before
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["diff", "--name-only"]),
+        unstaged_before
+    );
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "unstaged\n"
+    );
+    assert!(repo.path().join("untracked.txt").exists());
+    assert_eq!(
+        started["details"]["git"]["evidence"]["checkoutPolicy"],
+        "not invoked"
+    );
+    assert_eq!(
+        started["details"]["git"]["evidence"]["hookPolicy"],
+        "not invoked"
+    );
+    assert_eq!(
+        started["details"]["git"]["evidence"]["indexPolicy"],
+        "preserved"
+    );
+    assert_eq!(
+        started["details"]["git"]["evidence"]["worktreePolicy"],
+        "preserved"
+    );
+    assert_eq!(
+        started["details"]["git"]["evidence"]["remotePolicy"],
+        "not invoked"
+    );
+    assert_eq!(
+        started["details"]["git"]["evidence"]["mergeRebaseResetPolicy"],
+        "not invoked"
+    );
+
+    let resource_id = started["details"]["git"]["gitBranchStartResourceId"]
+        .as_str()
+        .expect("resource id");
+    let inspection = ctx
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .expect("inspect resource")
+        .expect("git branch start resource");
+    assert_eq!(inspection.resource.kind, "git_branch_start");
+    assert_eq!(inspection.resource.lifecycle, "started");
+    assert_eq!(inspection.versions[0].payload["operation"], "branch_start");
+    assert_eq!(
+        inspection.versions[0].payload["branchName"],
+        "feature/slice-6d"
+    );
+    assert_eq!(inspection.versions[0].payload["previousBranch"], "main");
+    assert_eq!(inspection.versions[0].payload["headOid"], head);
+    assert_eq!(
+        inspection.versions[0].payload["reason"],
+        "test branch start"
+    );
+    let after_cursor = StreamCursor(
+        started["details"]["git"]["streamCursor"]
+            .as_u64()
+            .expect("stream cursor"),
+    );
+    assert!(after_cursor > before_cursor);
+    assert_git_branch_start_lifecycle_event(
+        &ctx,
+        before_cursor,
+        resource_id,
+        "feature/slice-6d",
+        &head,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn execute_git_branch_start_replays_with_same_idempotency_key() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+
+    let payload = json!({
+        "operation": "git_branch_start",
+        "branchName": "feature/replay",
+        "expectedHead": head,
+        "reason": "test replay",
+        "idempotencyKey": "git-branch-start-replay"
+    });
+    let first = execute_git_ok(
+        &ctx,
+        repo.path(),
+        "git-branch-start-replay",
+        payload.clone(),
+    )
+    .await;
+    let first_resource = first["details"]["git"]["gitBranchStartResourceId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let first_cursor = first["details"]["git"]["streamCursor"].as_u64().unwrap();
+
+    let second = execute_git_ok(&ctx, repo.path(), "git-branch-start-replay", payload).await;
+    assert_eq!(
+        second["details"]["git"]["gitBranchStartResourceId"],
+        json!(first_resource)
+    );
+    assert_eq!(
+        second["details"]["git"]["streamCursor"],
+        json!(first_cursor)
+    );
+    assert_eq!(
+        git_stdout(
+            repo.path(),
+            [
+                "for-each-ref",
+                "--format=%(refname)",
+                "refs/heads/feature/replay"
+            ]
+        ),
+        "refs/heads/feature/replay"
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+        "feature/replay"
+    );
+    let latest_cursor = ctx
+        .engine_host
+        .latest_stream_cursor(super::GIT_LIFECYCLE_TOPIC)
+        .await
+        .expect("latest cursor");
+    assert_eq!(latest_cursor, StreamCursor(first_cursor));
+}
+
+#[tokio::test]
 async fn execute_git_stage_replays_with_same_idempotency_key() {
     let ctx = make_test_context();
     let repo = tempdir().expect("repo");
@@ -686,6 +948,362 @@ async fn execute_git_stage_replays_with_same_idempotency_key() {
         .await
         .expect("latest cursor");
     assert_eq!(latest_cursor, StreamCursor(first_cursor));
+}
+
+#[tokio::test]
+async fn execute_git_branch_start_rejects_stale_head_existing_and_invalid_branch_names() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+
+    let stale = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-branch-start-stale-head",
+        json!({
+            "operation": "git_branch_start",
+            "branchName": "feature/stale",
+            "expectedHead": "0000000000000000000000000000000000000000",
+            "reason": "test stale",
+            "idempotencyKey": "git-branch-start-stale-head"
+        }),
+    )
+    .await;
+    assert!(stale.contains("expectedHead mismatch"));
+
+    let existing = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-branch-start-existing",
+        json!({
+            "operation": "git_branch_start",
+            "branchName": "main",
+            "expectedHead": head,
+            "reason": "test existing",
+            "idempotencyKey": "git-branch-start-existing"
+        }),
+    )
+    .await;
+    assert!(existing.contains("existing branch"));
+
+    for (suffix, branch_name, needle) in [
+        ("empty", "", "branchName must not be empty"),
+        ("traversal", "../feature", "safe local branch name"),
+        ("refs", "refs/heads/escape", "safe local branch name"),
+        ("lock", "feature/name.lock", "invalid path component"),
+        ("reserved", "HEAD", "reserved Git ref name"),
+        ("injection", "feature@{1}", "safe local branch name"),
+        ("control", "feature\nname", "safe local branch name"),
+        ("dash", "-feature", "safe local branch name"),
+    ] {
+        let key = format!("git-branch-start-invalid-{suffix}");
+        let error = execute_git_error(
+            &ctx,
+            repo.path(),
+            &key,
+            json!({
+                "operation": "git_branch_start",
+                "branchName": branch_name,
+                "expectedHead": git_stdout(repo.path(), ["rev-parse", "HEAD"]),
+                "reason": "test invalid branch name",
+                "idempotencyKey": key
+            }),
+        )
+        .await;
+        assert!(
+            error.contains(needle),
+            "expected {needle:?} in branchName error {error:?}"
+        );
+    }
+    assert_eq!(
+        git_stdout(repo.path(), ["symbolic-ref", "--short", "HEAD"]),
+        "main"
+    );
+}
+
+#[tokio::test]
+async fn execute_git_branch_start_rejects_detached_conflicts_and_in_progress_states() {
+    let ctx = make_test_context();
+    let detached = tempdir().expect("detached repo");
+    init_repo(detached.path());
+    write_file(detached.path(), "tracked.txt", "base\n");
+    git(detached.path(), ["add", "tracked.txt"]);
+    commit(detached.path(), "base");
+    git(detached.path(), ["checkout", "--detach", "HEAD"]);
+    let detached_error = execute_git_error(
+        &ctx,
+        detached.path(),
+        "git-branch-start-detached",
+        json!({
+            "operation": "git_branch_start",
+            "branchName": "feature/detached",
+            "expectedHead": git_stdout(detached.path(), ["rev-parse", "HEAD"]),
+            "reason": "test detached",
+            "idempotencyKey": "git-branch-start-detached"
+        }),
+    )
+    .await;
+    assert!(detached_error.contains("named branch") || detached_error.contains("detached HEAD"));
+
+    let conflicted = tempdir().expect("conflicted repo");
+    init_repo(conflicted.path());
+    write_file(conflicted.path(), "tracked.txt", "base\n");
+    git(conflicted.path(), ["add", "tracked.txt"]);
+    commit(conflicted.path(), "base");
+    git(conflicted.path(), ["checkout", "-b", "feature"]);
+    write_file(conflicted.path(), "tracked.txt", "feature\n");
+    git(conflicted.path(), ["add", "tracked.txt"]);
+    commit(conflicted.path(), "feature");
+    git(conflicted.path(), ["checkout", "main"]);
+    write_file(conflicted.path(), "tracked.txt", "main\n");
+    git(conflicted.path(), ["add", "tracked.txt"]);
+    commit(conflicted.path(), "main");
+    let merge = git_failure(conflicted.path(), ["merge", "feature"]);
+    assert!(merge.contains("CONFLICT") || merge.contains("conflict"));
+    let conflict_error = execute_git_error(
+        &ctx,
+        conflicted.path(),
+        "git-branch-start-conflict",
+        json!({
+            "operation": "git_branch_start",
+            "branchName": "feature/conflict",
+            "expectedHead": git_stdout(conflicted.path(), ["rev-parse", "HEAD"]),
+            "reason": "test conflict",
+            "idempotencyKey": "git-branch-start-conflict"
+        }),
+    )
+    .await;
+    assert!(
+        conflict_error.contains("conflicted")
+            || conflict_error.contains("unmerged")
+            || conflict_error.contains("in-progress merge state")
+    );
+
+    let resolved_merge = tempdir().expect("resolved merge repo");
+    init_repo(resolved_merge.path());
+    write_file(resolved_merge.path(), "tracked.txt", "base\n");
+    git(resolved_merge.path(), ["add", "tracked.txt"]);
+    commit(resolved_merge.path(), "base");
+    git(resolved_merge.path(), ["checkout", "-b", "feature"]);
+    write_file(resolved_merge.path(), "tracked.txt", "feature\n");
+    git(resolved_merge.path(), ["add", "tracked.txt"]);
+    commit(resolved_merge.path(), "feature");
+    git(resolved_merge.path(), ["checkout", "main"]);
+    write_file(resolved_merge.path(), "tracked.txt", "main\n");
+    git(resolved_merge.path(), ["add", "tracked.txt"]);
+    commit(resolved_merge.path(), "main");
+    let merge = git_failure(resolved_merge.path(), ["merge", "feature"]);
+    assert!(merge.contains("CONFLICT") || merge.contains("conflict"));
+    write_file(resolved_merge.path(), "tracked.txt", "resolved\n");
+    git(resolved_merge.path(), ["add", "tracked.txt"]);
+    assert_eq!(
+        git_stdout(
+            resolved_merge.path(),
+            ["ls-files", "-u", "--", "tracked.txt"]
+        ),
+        ""
+    );
+    let resolved_error = execute_git_error(
+        &ctx,
+        resolved_merge.path(),
+        "git-branch-start-resolved-merge",
+        json!({
+            "operation": "git_branch_start",
+            "branchName": "feature/resolved",
+            "expectedHead": git_stdout(resolved_merge.path(), ["rev-parse", "HEAD"]),
+            "reason": "test resolved merge",
+            "idempotencyKey": "git-branch-start-resolved-merge"
+        }),
+    )
+    .await;
+    assert!(resolved_error.contains("in-progress merge state"));
+}
+
+#[tokio::test]
+async fn execute_git_branch_start_rejects_bad_context_and_missing_required_fields() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+
+    let no_metadata = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("capability::execute").unwrap(),
+            json!({
+                "operation": "git_branch_start",
+                "branchName": "feature/missing-metadata",
+                "expectedHead": head,
+                "reason": "test missing metadata",
+                "idempotencyKey": "git-branch-start-missing-metadata"
+            }),
+            execute_context_without_working_directory(
+                &ctx,
+                repo.path(),
+                "git-branch-start-missing-metadata",
+            )
+            .await,
+        ))
+        .await
+        .error
+        .expect("missing metadata should fail")
+        .to_string();
+    assert!(no_metadata.contains("trusted working directory metadata"));
+
+    for (key, payload, needle) in [
+        (
+            "git-branch-start-empty-reason",
+            json!({
+                "operation": "git_branch_start",
+                "branchName": "feature/empty-reason",
+                "expectedHead": head,
+                "reason": "",
+                "idempotencyKey": "git-branch-start-empty-reason"
+            }),
+            "reason must not be empty",
+        ),
+        (
+            "git-branch-start-missing-payload-idempotency",
+            json!({
+                "operation": "git_branch_start",
+                "branchName": "feature/missing-idempotency",
+                "expectedHead": head,
+                "reason": "test missing idempotency payload"
+            }),
+            "missing idempotencyKey",
+        ),
+        (
+            "git-branch-start-absolute",
+            json!({
+                "operation": "git_branch_start",
+                "path": repo.path().display().to_string(),
+                "branchName": "feature/absolute",
+                "expectedHead": head,
+                "reason": "test absolute",
+                "idempotencyKey": "git-branch-start-absolute"
+            }),
+            "relative",
+        ),
+        (
+            "git-branch-start-traversal",
+            json!({
+                "operation": "git_branch_start",
+                "path": "../escape",
+                "branchName": "feature/traversal",
+                "expectedHead": head,
+                "reason": "test traversal",
+                "idempotencyKey": "git-branch-start-traversal"
+            }),
+            "escape",
+        ),
+    ] {
+        let error = execute_git_error(&ctx, repo.path(), key, payload).await;
+        assert!(
+            error.contains(needle),
+            "expected {needle:?} in error {error:?}"
+        );
+    }
+
+    let non_repo = tempdir().expect("non repo");
+    write_file(non_repo.path(), "tracked.txt", "content\n");
+    let non_repo_error = execute_git_error(
+        &ctx,
+        non_repo.path(),
+        "git-branch-start-non-repo",
+        json!({
+            "operation": "git_branch_start",
+            "branchName": "feature/non-repo",
+            "expectedHead": head,
+            "reason": "test non repo",
+            "idempotencyKey": "git-branch-start-non-repo"
+        }),
+    )
+    .await;
+    assert!(non_repo_error.contains("not inside a Git worktree"));
+
+    let outer = tempdir().expect("outer repo");
+    init_repo(outer.path());
+    write_file(outer.path(), "outer.txt", "outer\n");
+    git(outer.path(), ["add", "outer.txt"]);
+    commit(outer.path(), "outer");
+    let nested = outer.path().join("nested");
+    fs::create_dir(&nested).expect("nested");
+    init_repo(&nested);
+    write_file(&nested, "inner.txt", "inner\n");
+    git(&nested, ["add", "inner.txt"]);
+    commit(&nested, "inner");
+    let nested_error = execute_git_error(
+        &ctx,
+        outer.path(),
+        "git-branch-start-nested",
+        json!({
+            "operation": "git_branch_start",
+            "path": "nested",
+            "branchName": "feature/nested",
+            "expectedHead": git_stdout(outer.path(), ["rev-parse", "HEAD"]),
+            "reason": "test nested",
+            "idempotencyKey": "git-branch-start-nested"
+        }),
+    )
+    .await;
+    assert!(nested_error.contains("trusted working-directory repository"));
+}
+
+#[tokio::test]
+async fn execute_git_branch_start_does_not_invoke_checkout_hooks_or_remote_operations() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let hook_sentinel = repo.path().join("checkout-hook-ran");
+    let hooks = repo.path().join(".git/hooks");
+    fs::write(
+        hooks.join("post-checkout"),
+        format!("#!/bin/sh\ntouch {}\nexit 1\n", shell_quote(&hook_sentinel)),
+    )
+    .expect("write hook");
+    let mut permissions = fs::metadata(hooks.join("post-checkout"))
+        .expect("hook metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(hooks.join("post-checkout"), permissions).expect("hook permissions");
+    git(repo.path(), ["config", "alias.checkout", "!/bin/false"]);
+    git(repo.path(), ["config", "alias.switch", "!/bin/false"]);
+    git(repo.path(), ["config", "alias.fetch", "!/bin/false"]);
+    git(repo.path(), ["config", "alias.push", "!/bin/false"]);
+
+    let started = execute_git_ok(
+        &ctx,
+        repo.path(),
+        "git-branch-start-no-checkout",
+        json!({
+            "operation": "git_branch_start",
+            "branchName": "feature/no-checkout",
+            "expectedHead": git_stdout(repo.path(), ["rev-parse", "HEAD"]),
+            "reason": "test no checkout hooks",
+            "idempotencyKey": "git-branch-start-no-checkout"
+        }),
+    )
+    .await;
+
+    assert!(!hook_sentinel.exists(), "checkout hook must not run");
+    assert_eq!(
+        started["details"]["git"]["evidence"]["checkoutPolicy"],
+        "not invoked"
+    );
+    assert_eq!(
+        started["details"]["git"]["evidence"]["remotePolicy"],
+        "not invoked"
+    );
 }
 
 #[tokio::test]
@@ -1623,6 +2241,50 @@ async fn assert_git_commit_lifecycle_event(
     );
 }
 
+async fn assert_git_branch_start_lifecycle_event(
+    ctx: &ServerRuntimeContext,
+    before_cursor: StreamCursor,
+    resource_id: &str,
+    branch_name: &str,
+    head_oid: &str,
+) {
+    ctx.engine_host
+        .subscribe_stream(
+            "git-branch-start-test".to_owned(),
+            super::GIT_LIFECYCLE_TOPIC.to_owned(),
+            before_cursor,
+            crate::engine::VisibilityScope::Session,
+            Some("git-branch-start-success-session".to_owned()),
+            Some("git-branch-start-success-workspace".to_owned()),
+        )
+        .await
+        .expect("subscribe");
+    let page = ctx
+        .engine_host
+        .poll_stream(
+            "git-branch-start-test",
+            Some(before_cursor),
+            10,
+            &StreamActorScope::scoped(
+                Some("git-branch-start-success-session".to_owned()),
+                Some("git-branch-start-success-workspace".to_owned()),
+            ),
+        )
+        .await
+        .expect("poll");
+    assert!(
+        page.events.iter().any(|event| {
+            event.topic == super::GIT_LIFECYCLE_TOPIC
+                && event.payload["type"] == json!("git.branch_started")
+                && event.payload["gitBranchStartResourceId"] == json!(resource_id)
+                && event.payload["branchName"] == json!(branch_name)
+                && event.payload["headOid"] == json!(head_oid)
+        }),
+        "missing git branch start lifecycle event in {:?}",
+        page.events
+    );
+}
+
 async fn execute_context(ctx: &ServerRuntimeContext, root: &Path, key: &str) -> CausalContext {
     let trace_id = TraceId::new(key).unwrap();
     let session_id = format!("{key}-session");
@@ -1693,8 +2355,8 @@ async fn derive_execute_grant(
                 "allowedCapabilities": ["capability::execute"],
                 "allowedNamespaces": ["__no_namespace_authority__"],
                 "allowedAuthorityScopes": ["capability.execute"],
-                "allowedResourceKinds": ["agent_state", "git_index_change"],
-                "resourceSelectors": ["kind:agent_state", "kind:git_index_change"],
+                "allowedResourceKinds": ["agent_state", "git_index_change", "git_commit", "git_branch_start"],
+                "resourceSelectors": ["kind:agent_state", "kind:git_index_change", "kind:git_commit", "kind:git_branch_start"],
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": "none",
                 "maxRisk": "medium",

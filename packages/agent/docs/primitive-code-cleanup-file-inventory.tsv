@@ -1768,13 +1768,14 @@ packages/agent/src/domains/jobs/support.rs	retain	phase2 jobs	P2AER-S5A	Jobs sup
 packages/agent/src/domains/jobs/tests.rs	retain	phase2 jobs	P2AER-S5A	Jobs focused tests retained for lifecycle, idempotency, cancellation, cleanup, bounded output, and policy denial.
 packages/agent/src/domains/jobs/types.rs	retain	phase2 jobs	P2AER-S5A	Jobs record types retained for durable lifecycle, command, authority, limits, retention, terminal, and output schemas.
 packages/agent/src/engine/durability/resources/job_definitions.rs	retain	phase2 jobs	P2AER-S5A	Job process resource definitions retained for engine-owned job_process contract schemas.
+packages/agent/src/domains/git/branch_start.rs	retain	phase2 git	P2AER-S6D	Git branch-start service retained for local branch creation, symbolic HEAD movement, index/worktree preservation, and git_branch_start resources.
 packages/agent/src/domains/git/contract.rs	retain	phase2 git	P2AER-S6B	Git contracts retained for status, diff, and index-only stage/unstage schemas.
 packages/agent/src/domains/git/commit.rs	retain	phase2 git	P2AER-S6C	Git commit service retained for staged-index commit evidence, guarded branch advancement, and git_commit resources.
 packages/agent/src/domains/git/handlers.rs	retain	phase2 git	P2AER-S6B	Git handlers retained for backend function dispatch under the git domain boundary.
 packages/agent/src/domains/git/mod.rs	retain	phase2 git	P2AER-S6B	Git module root retained for progressive disclosure and index-only mutation invariants.
 packages/agent/src/domains/git/mutation.rs	retain	phase2 git	P2AER-S6B	Git mutation service retained for explicit index-only stage/unstage with evidence resources and lifecycle streams.
 packages/agent/src/domains/git/service.rs	retain	phase2 git	P2AER-S6B	Git read/evidence service retained for trusted repo detection, status, diff, and bounded output helpers.
-packages/agent/src/domains/git/tests.rs	retain	phase2 git	P2AER-S6B	Git tests retained for read-only status/diff preservation plus index mutation rejection, resource, stream, and idempotency coverage.
-packages/agent/src/domains/git/types.rs	retain	phase2 git	P2AER-S6B	Git types retained for repository facts and git_index_change resource payloads.
-packages/agent/src/domains/capability/operations/git.rs	retain	phase2 git	P2AER-S6B	Capability execute Git adapter retained for provider-facing git_status, git_diff, git_stage, and git_unstage operation values.
-packages/agent/src/engine/durability/resources/git_definitions.rs	retain	phase2 git	P2AER-S6B	Git index change resource definitions retained for engine-owned evidence schema registration.
+packages/agent/src/domains/git/tests.rs	retain	phase2 git	P2AER-S6D	Git tests retained for read-only status/diff, index mutation, commit, branch-start rejection, resource, stream, and idempotency coverage.
+packages/agent/src/domains/git/types.rs	retain	phase2 git	P2AER-S6D	Git types retained for repository facts and git_index_change, git_commit, and git_branch_start resource payloads.
+packages/agent/src/domains/capability/operations/git.rs	retain	phase2 git	P2AER-S6D	Capability execute Git adapter retained for provider-facing git_status, git_diff, git_stage, git_unstage, git_commit, and git_branch_start operation values.
+packages/agent/src/engine/durability/resources/git_definitions.rs	retain	phase2 git	P2AER-S6D	Git index change, commit, and branch-start resource definitions retained for engine-owned evidence schema registration.

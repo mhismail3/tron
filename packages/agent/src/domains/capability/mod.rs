@@ -8,6 +8,9 @@
 //! trace record. Catalog-discovery operations are inspect-only additions to the
 //! same primitive: search/inspect read current metadata, while conformance
 //! writes only durable catalog-discovery report evidence.
+//! Git branch-start is intentionally a git-domain operation under this
+//! primitive: it creates one local branch and moves symbolic `HEAD`, but it does
+//! not expose arbitrary checkout or branch-management targets.
 //! Memory audit operations are also inspect-only additions: they expose
 //! resource-backed memory status/list/inspect facts without retaining or
 //! injecting private memory body content.

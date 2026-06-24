@@ -75,9 +75,14 @@ the already-staged index on the current named branch, guarded by expected HEAD,
 expected index tree, idempotency, reason, resource evidence, lifecycle events,
 and hook/editor/signing suppression. Mainline acceptance followed independent
 review and two focused guard fixes.
-Worktree graph resources, branch operations, merges/rebases/resets,
-stash/clean, fetch/pull/push, PR handoff, conflict resolution workflows, and
-native SourceChanges remain deferred.
+Slice 6D now has an implementation candidate for local branch start: a
+provider-visible `git_branch_start` operation through `capability::execute`
+that creates one new local branch at `expectedHead`, moves symbolic `HEAD`
+without checkout, preserves index/worktree content, and records
+`git_branch_start` resource plus `git.branch_started` lifecycle evidence.
+Worktree graph resources, arbitrary checkout, branch deletion/rename,
+merges/rebases/resets, stash/clean, fetch/pull/push, PR handoff, conflict
+resolution workflows, and native SourceChanges remain deferred.
 
 It also maps every BPRC backlog row:
 
@@ -193,14 +198,13 @@ job dispatch also remains deferred pending an explicit queued-grant design.
 
 `P2AER-INV-013` is current baseline for Slice 6A read-only Git status/diff
 evidence, accepted Slice 6B index-only stage/unstage, and accepted Slice 6C
-staged-index commit evidence. The mutating boundary is intentionally
-narrow: explicit paths for index mutation, resource-backed evidence, lifecycle
-stream evidence, expected HEAD freshness, expected index-tree freshness for
-commit, idempotency, and static guards proving no branch, merge/rebase/reset,
-push/PR, worktree graph, conflict resolution workflow, or native SourceChanges
-surface was added. The selected next discovery packet is Slice 6D Git Branch
-Start Foundation: a local-only `git_branch_start` operation that creates a new
-task branch at the current expected HEAD and moves symbolic `HEAD` to it while
-preserving index/worktree content. Branch deletion/rename, arbitrary checkout,
-remote push/PR, merge/rebase/reset, conflict workflows, worktree graph
+staged-index commit evidence. Slice 6D has an implementation candidate for
+local `git_branch_start` branch creation and symbolic-HEAD movement. The
+mutating boundary is intentionally narrow: explicit paths for index mutation,
+resource-backed evidence, lifecycle stream evidence, expected HEAD freshness,
+expected index-tree freshness for commit, idempotency, branch-name validation,
+and static guards proving no arbitrary checkout, branch delete/rename,
+merge/rebase/reset, push/PR, worktree graph, conflict resolution workflow, or
+native SourceChanges surface was added. Branch deletion/rename, arbitrary
+checkout, remote push/PR, merge/rebase/reset, conflict workflows, worktree graph
 resources, and native SourceChanges remain deferred.

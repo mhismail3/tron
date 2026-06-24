@@ -386,6 +386,18 @@ where
     })
 }
 
+pub(super) fn git_output_status_bounded<I, S>(
+    dir: &Path,
+    args: I,
+    stdout_limit: usize,
+) -> Result<BoundedGitOutput, CapabilityError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    git_command_bounded(dir, args, stdout_limit)
+}
+
 pub(super) fn git_symbolic_head_ref(
     worktree_root: &Path,
 ) -> Result<Option<String>, CapabilityError> {

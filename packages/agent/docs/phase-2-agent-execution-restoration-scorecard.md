@@ -51,21 +51,21 @@ Completed Phase 2 restoration slices at this baseline:
   lifecycle evidence.
 
 Current next action:
-Implement **Slice 6D: Git Branch Start Foundation** from fresh `origin/main`.
-Slice 6D is selected as a local branch create-and-switch boundary after
-accepted Slice 6C completed staged-index commit creation. Branch deletion,
-rename, arbitrary checkout, detached-HEAD commits, merge/rebase/reset,
-stash/clean, fetch/pull/push, PR handoff, conflict resolution workflows,
-worktree graph resources, public API expansion, production deployment
-behavior, and native SourceChanges UI remain deferred.
+Independently review the **Slice 6D: Git Branch Start Foundation**
+implementation candidate from fresh `origin/main`. Slice 6D is the local branch
+create-and-switch boundary after accepted Slice 6C completed staged-index
+commit creation. Branch deletion, rename, arbitrary checkout, detached-HEAD
+commits, merge/rebase/reset, stash/clean, fetch/pull/push, PR handoff,
+conflict resolution workflows, worktree graph resources, public API expansion,
+production deployment behavior, and native SourceChanges UI remain deferred.
 
 ## Scope
 
-This is a planning and handoff artifact only. Phase 2 execution behavior is
-not implemented here. It does not restore
-agent-execution features, add provider-visible tools, add public `/engine`
-methods, add database migrations, add iOS product panels, add worker packages,
-or reintroduce repo-managed first-party skills.
+This is a planning, handoff, and implementation-evidence artifact. It records
+candidate branch work without making pre-acceptance claims. It does not by
+itself restore agent-execution features, add public `/engine` methods, add
+database migrations, add iOS product panels, add worker packages, or
+reintroduce repo-managed first-party skills.
 
 The plan converts Phase 1 deferrals and the BPRC restoration backlog into an
 ordered Phase 2 roadmap. Future implementation threads must treat old modular
@@ -1059,7 +1059,7 @@ Core versus modular split:
 - Core/harness: reuse the existing `capability::execute` primitive, authority
   grants, idempotency ledger, resource kernel, stream substrate, trace/replay
   refs, and bounded Git command helpers. Add only generic resource definition
-  constants/schema wiring needed for a `git_branch_change` evidence resource.
+  constants/schema wiring needed for a `git_branch_start` evidence resource.
 - Modular package: keep behavior in `domains/git`. Add backend branch-start
   service code plus a provider-visible `git_branch_start` operation value
   through `capability::execute`; do not add a second model-facing tool, public
@@ -1076,10 +1076,9 @@ Core versus modular split:
   created at the current `expectedHead`; conflicted/unmerged index state and
   in-progress merge/rebase/cherry-pick/sequencer state must reject.
 - Branch-name boundary: validate the caller-supplied branch name as a local
-  branch ref, require an allowed task-branch shape such as `codex/<slug>` unless
-  the implementation packet explicitly documents a narrower accepted pattern,
-  reject existing local branches, and reject branch names that resolve outside
-  `refs/heads/` or imply remote/upstream configuration.
+  branch ref, reject traversal/ref-injection/reserved names and existing local
+  branches, and reject branch names that resolve outside `refs/heads/` or imply
+  remote/upstream configuration.
 - Hook/network boundary: branch start must be non-interactive, must not run
   checkout hooks, editors, pagers, credential prompts, GPG helpers, or network
   commands, and must not modify production deployment state.
@@ -1089,7 +1088,6 @@ Required request shape:
 - `operation: "git_branch_start"`;
 - `branchName`;
 - `expectedHead`;
-- optional `expectedCurrentBranch` for named-branch freshness;
 - non-empty `reason`;
 - explicit caller idempotency key through the existing provider boundary;
 - optional bounded evidence controls such as `maxStatusBytes` and
@@ -1097,27 +1095,24 @@ Required request shape:
 
 Required resource/event shape:
 
-- Add a `git_branch_change` resource kind with schema id
-  `tron.resource.git_branch_change.v1`.
+- Add a `git_branch_start` resource kind with schema id
+  `tron.resource.git_branch_start.v1`.
 - Resource payload should include schema version, operation
-  `branch_start`, state, repository facts, previous branch or detached-HEAD
-  marker, previous head, new branch name, branch ref, expected head, actual
-  head, reason, authority, before/after bounded status/diff evidence,
+  `branch_start`, state, repository facts, previous branch, new branch name,
+  expected head, actual head, reason, authority, before/after bounded
+  status/diff evidence,
   trace refs, replay refs, idempotency, revision, and created timestamp.
-- Resource lifecycle states should start with `committed` and `archived`.
+- Resource lifecycle states should start with `started` and `archived`.
 - Publish a `git.lifecycle` event such as `git.branch_started` pointing to the
   resource and carrying branch name, branch ref, previous branch/head,
   expected head, reason, authority grant id, and actor id.
-- Compensation should be best-effort before success: if branch ref creation
-  succeeds but the symbolic-HEAD switch fails before a committed result, delete
-  only the just-created branch when it still points at `expectedHead`. After a
-  committed result, compensation is manual-only; branch deletion/rename is a
-  future source-control slice.
+- Compensation after a successful branch start is manual-only; branch
+  deletion/rename remains a future source-control slice.
 
 Likely implementation files/domains to inspect or touch:
 
 - `packages/agent/src/domains/git/{mod.rs,contract.rs,handlers.rs,service.rs,types.rs,tests.rs}`;
-- likely new `packages/agent/src/domains/git/branch.rs` plus small shared
+- new `packages/agent/src/domains/git/branch_start.rs` plus small shared
   helpers if the existing commit HEAD-lock/ref-update code should be reused;
 - `packages/agent/src/domains/capability/operations/{git.rs,mod.rs}`;
 - `packages/agent/src/domains/capability/contract.rs`;
@@ -1137,12 +1132,11 @@ Deterministic tests required:
   and remains visible in before/after status evidence;
 - idempotency replay with the same caller key returns the original branch
   resource/cursor and does not create or switch another branch;
-- stale `expectedHead` and mismatched `expectedCurrentBranch` reject before
-  creating a branch;
-- existing branch name, invalid branch name, remote-like branch name,
-  non-`codex/` branch name if that policy is selected, unborn HEAD, non-repo,
-  nested-repo misuse, absolute path/traversal/root escape, and missing trusted
-  working-directory metadata reject;
+- stale `expectedHead` rejects before creating a branch;
+- existing branch name, invalid branch name, remote-like/ref-injection branch
+  name, detached HEAD, non-repo, nested-repo misuse, absolute path/traversal/
+  root escape, missing idempotency, and missing trusted working-directory
+  metadata reject;
 - conflicted/unmerged index and in-progress merge/rebase/cherry-pick/sequencer
   state reject;
 - checkout hooks, editors, pagers, credential prompts, GPG helpers, and network
@@ -1152,7 +1146,7 @@ Deterministic tests required:
   continuing to reject `git_checkout`, `git_branch_delete`,
   `git_branch_rename`, `git_merge`, `git_rebase`, `git_reset`, `git_push`,
   and other later source-control operation names;
-- resource-definition tests cover `git_branch_change` schema required fields,
+- resource-definition tests cover `git_branch_start` schema required fields,
   lifecycle states, link relations, and required capabilities.
 
 Explicit non-goals:

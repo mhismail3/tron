@@ -452,10 +452,14 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("git_stage"));
     assert!(result.contains("git_unstage"));
     assert!(result.contains("git_commit"));
+    assert!(result.contains("git_branch_start"));
     assert!(result.contains("expectedHead"));
     assert!(result.contains("expectedIndexTree"));
+    assert!(result.contains("branchName"));
     assert!(!result.contains("git_push"));
     assert!(!result.contains("git_reset"));
+    assert!(!result.contains("git_checkout"));
+    assert!(!result.contains("git_branch_delete"));
     assert!(!result.contains("file_read"));
     assert!(!result.contains("file_write"));
     assert!(result.contains("process_run"));

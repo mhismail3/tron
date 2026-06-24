@@ -61,6 +61,10 @@ pub const GIT_INDEX_CHANGE_SCHEMA_ID: &str = "tron.resource.git_index_change.v1"
 pub const GIT_COMMIT_KIND: &str = "git_commit";
 /// Built-in Git commit evidence resource schema id.
 pub const GIT_COMMIT_SCHEMA_ID: &str = "tron.resource.git_commit.v1";
+/// Built-in Git branch-start evidence resource kind.
+pub const GIT_BRANCH_START_KIND: &str = "git_branch_start";
+/// Built-in Git branch-start evidence resource schema id.
+pub const GIT_BRANCH_START_SCHEMA_ID: &str = "tron.resource.git_branch_start.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -526,7 +526,9 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "git_stage",
             "git_unstage",
             "git_commit",
+            "git_branch_start",
             "accepted Slice 6C adds staged-index commit evidence",
+            "Slice 6D",
         ],
         &[
             "Slice 6B adds explicit `git_stage`/`git_unstage` index mutation",
@@ -534,6 +536,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "`git::diff` backend contracts",
             "`git_index_change` resource",
             "Slice 6C Accepted Implementation",
+            "Slice 6D",
         ],
     );
     let phase_two_inventory_doc =
@@ -578,6 +581,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         }
     }
     let git_source = read_repo_file("packages/agent/src/domains/git/mod.rs")
+        + &read_repo_file("packages/agent/src/domains/git/branch_start.rs")
         + &read_repo_file("packages/agent/src/domains/git/contract.rs")
         + &read_repo_file("packages/agent/src/domains/git/commit.rs")
         + &read_repo_file("packages/agent/src/domains/git/mutation.rs")
@@ -589,7 +593,9 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "git_reset",
         "git_push",
         "git_checkout",
-        "git_branch",
+        "git_branch_delete",
+        "git_branch_rename",
+        "git_branch_move",
         "git_stash",
         "git_pull",
         "git_fetch",
@@ -599,7 +605,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "git::reset",
         "git::push",
         "git::checkout",
-        "git::branch",
         "git::stash",
         "git::pull",
         "git::fetch",
@@ -607,7 +612,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
     ] {
         assert!(
             !git_source.contains(forbidden),
-            "Slice 6C git foundation must stay staged-index commit only; found {forbidden}"
+            "Slice 6D git foundation must stay within branch-start and existing status/diff/index/commit boundaries; found {forbidden}"
         );
     }
     for forbidden in [
