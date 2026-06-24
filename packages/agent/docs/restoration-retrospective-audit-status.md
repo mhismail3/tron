@@ -63,7 +63,7 @@ completed slice.
 | 10 | iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances | Phase 1 iOS affordance restoration | Commits `bb9057148`, `09d155bda`; reconciliation `f4cb11d68`; branch ref also has duplicate `87f53a0ca`; retrospective fix branches `codex/order-10-ios-chat-affordance-audit-fixes`, `codex/order-10-ios-chat-affordance-preaccept-cleanup`; fix commits `ea2e01ec7e33a69136915b3c1a04c009b1dccfdc`, `a3d6ddcb0b088165af25cd798cddef65667dc74e` | `codex/ios-chat-visual-cues-status-affordance-current`; progress ledger plus retrospective fix commits | `ios-affordance-restoration-progress.md`; chat visual/local notification/capability evidence/source-guard tests | Accepted by second re-audit thread `019ef765-b32b-7431-bc6a-c1f7402ea901` after two focused fix commits; no findings remain. Pre-accept normal send and retry failures now surface as deduped local notifications after clearing composer/session processing, retry shares normal setup/reset behavior, and reconstruction failures render visible local load errors while successful empty/loading states stay quiet. | Fixed process/job/subagent/source-control/approval/memory/rules/hooks/skill/inbox panels, fake activity, notification expansion, rich connection sheets, fake backend truth, provider/public/auth/settings/API drift, and agent-execution restoration remain deferred. | Closed. Continue with iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish. |
 | 11 | iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish | Phase 1 iOS affordance restoration | Commit `3680ea271`; retrospective fix commit `49b76afa3805eeed7b4f5847779cfb2eb69a8edf` | `codex/ios-settings-onboarding-diagnostics-pairing-current`; retrospective fix branch `codex/order-11-ios-settings-onboarding-polish-fix` | `ios-affordance-restoration-progress.md`; settings/onboarding/provider/server/source-guard tests; iOS docs | Accepted by re-audit thread `019ef77a-bce7-7d23-815f-2a06a719b79c` after fix commit `49b76afa3805eeed7b4f5847779cfb2eb69a8edf`; no findings remain. Active-server repair uses truthful re-pair wording, the real new-server path still uses `prefill: nil`, source guards pin label-to-prefill intent, and docs match the corrected behavior. | Fixed product session lists, APNs/device broker, skills/rules/memory/worktree/process/job/goal/subagent/approval/web state, fake server-health facts, new server settings, DB tables, auth/provider behavior, backend facts, diagnostics execution changes, and future agent-execution surfaces remain absent. | Closed. Continue with Accepted Follow-Up: Cockpit Placement and Session-List Row Polish. |
 | 12 | Accepted Follow-Up: Cockpit Placement and Session-List Row Polish | Phase 1 accepted follow-up | Commits `becbc0e95`, `34c53dc93`, `22cb96e72`, `9d172aa27`, `0176379ba`; progress checkpoint `da53490c1`; retrospective fix commit `2b546ee9316ae758193b96b594a2002733e2afc9` | `codex/ios-cockpit-placement-cleanup-current`; progress ledger; retrospective fix branch `codex/order-12-cockpit-placement-repair-cta-fix` | `ios-affordance-restoration-progress.md`; IOSAC/IARM invariants; session-list/cockpit/settings placement tests; README/onboarding docs; settings source guards | Accepted by re-audit thread `019ef78e-d30c-7f82-96ab-206c34af2276` after fix commit `2b546ee9316ae758193b96b594a2002733e2afc9`; no findings remain. Active-server repair uses truthful re-pair wording, true new-server flow still uses `prefill: nil`, docs match behavior, and Order 12 cockpit/dashboard/session-row behavior remains intact. | No backend facts, server settings, provider/auth APIs, fake backend truth, diagnostics execution changes, worker lifecycle changes, future agent-execution surfaces, notification inbox, APNs, device broker, Phase 2 capability, or passive chat runtime banner. | Closed. Continue with iOS Phase 1 Slice 6: Notification / Inbox Concept Review. |
-| 13 | iOS Phase 1 Slice 6: Notification / Inbox Concept Review | Phase 1 iOS defer decision | Commit `ace41ac98`; closeout `fda2eaf6d`; retrospective fix pending re-audit on `codex/order-13-notification-inbox-concept-fix` | `codex/ios-notification-inbox-concept-review-current`; progress ledger plus current retrospective fix branch | `ios-affordance-restoration-progress.md`; `ios_affordance_restoration_map_invariants.rs`; BPRC/IARM docs; iOS architecture doc | Changes required by audit thread `019ef798-f06a-7951-961f-590915eccb60`; focused fix reconciles the current progress ledger with the Slice 6 defer decision and adds a bounded Rust IARM source/defer guard. Pending independent re-audit; not yet accepted on the tracker line. | APNs, background push, device broker, notification resources, read state, app badge semantics, delivery chips, and tool-family notifications remain Phase 2/later. | Re-audit should verify tracker/current-line agreement, source-backed defer docs/invariants, runtime notification/inbox absence, preserved Order 12 closeout notes, and no broad unrelated SourceGuard budget refactor. |
+| 13 | iOS Phase 1 Slice 6: Notification / Inbox Concept Review | Phase 1 iOS defer decision | Commit `ace41ac98`; closeout `fda2eaf6d`; retrospective fix commit `0ff5d2b28de52dda2beb64245c1d6524ed835969` | `codex/ios-notification-inbox-concept-review-current`; progress ledger plus retrospective fix branch `codex/order-13-notification-inbox-concept-fix` | `ios-affordance-restoration-progress.md`; `ios_affordance_restoration_map_invariants.rs`; BPRC/IARM docs; iOS architecture doc | Accepted by re-audit thread `019ef7a8-1ac7-76d1-9024-4127a0cfdf71` after fix commit `0ff5d2b28de52dda2beb64245c1d6524ed835969`; no findings remain. Slice 6 is recorded as a defer/concept decision, not a runtime notification UI implementation; current line/tracker docs no longer claim it is next or pending implementation. | APNs, background push, device broker, notification resources, durable inbox storage, read state, app badge semantics, delivery chips, tool-family notifications, and agent-execution inbox remain Phase 2/later. | Closed. Continue with Accepted Follow-Up: Server-Backed Workspace Browser. |
 | 14 | Accepted Follow-Up: Server-Backed Workspace Browser | Phase 1 accepted follow-up / Phase 2 precursor | Commits `70780b798`, `f34ac1bdd`, `c818cc296`, `ceb6aab35`, `7a9de156b`, `8054ed17e`, `74a5564d3`, `38a88ede9`; reconciliation `980867c35` | `codex/ios-affordance-restoration-map-current`; progress ledger | `ios-affordance-restoration-progress.md`; filesystem workspace-browser docs/tests; IARM/BPRC invariants | Progress ledger records server-backed home/list/create-dir selector, compact UI follow-ups, and expected focused validation. | Native file/patch review UI, import, worktree, git, broad file-management/product panels, fake analytics, source-control surfaces remain absent. | Filesystem boundary separation from Phase 2 agent tools, server-fact rendering, path/root handling, hidden-folder behavior, create-dir authority, and selector reuse. |
 | 15 | Phase 2 Agent Execution Restoration Plan | Phase 2 planning | Planning baseline `980867c35`; final `7db72c1ee` | `codex/ios-affordance-restoration-map-current` | `phase-2-agent-execution-restoration-scorecard.md`; `phase-2-agent-execution-restoration-evidence-manifest.md`; `phase-2-agent-execution-restoration-inventory.md`; `phase-2-agent-execution-restoration-inventory.tsv`; DESI/IARM/BPRC/SSARR/OPSAA invariants | Score 100/100; all 24 BPRC buckets mapped; ordered roadmap; memory architecture; validation protocol; handoff packet recorded. | Planning does not implement runtime behavior. Future slices still need user decisions and per-slice validation. | Roadmap completeness, stale closure text, inventory row status drift, deferral preservation, and handoff constraints. |
 | 16 | Phase 2 Slice 1: Catalog Discovery Evidence | Phase 2 agent-execution restoration | Baseline `7db72c1ee`; commits `a9c3d3507`, `ca471fcde`, `680d9429f`; final `f95d3b02e` | `codex/phase-2-catalog-discovery-evidence-current` | Phase 2 scorecard/evidence/inventory; catalog discovery domain docs/tests; Runtime Cockpit tests; SACB/HRA/PCC/TPC/TMB/IARM/IOSAC/IOSTC/CSD invariants | Catalog search/inspect/conformance through `execute`; resource-backed reports; Runtime Cockpit Discovery; protected omission; many Rust/iOS/static validations recorded. | No target routing, intent execution, public `/engine` expansion, generated `ui_surface` publication, fixed legacy panels, schema repair, or old module copies. | Protected visibility, no target invocation, idempotency/lease/compensation, provider-visible singularity, cockpit DTO truthfulness, and log redaction hardening. |
@@ -780,12 +780,73 @@ Verification recorded by the accepted re-audit:
 - Targeted README/auth lifecycle invariant
   `sol_settings_auth_secrets_lifecycle_is_source_backed` passed.
 
+## Completed Audit: iOS Phase 1 Slice 6 Notification / Inbox Concept Review
+
+Original audit thread: `019ef798-f06a-7951-961f-590915eccb60`
+
+Original verdict: `changes required`, because the current audit line/tracker
+claimed the defer decision was complete while the current line lacked the
+recorded Slice 6 defer/progress/invariant guard content.
+
+Fix thread: `019ef7a1-4c08-7542-832b-98c86ba79d43`
+
+Fix commit: `0ff5d2b28de52dda2beb64245c1d6524ed835969`
+(`Fix notification inbox defer audit drift`) on
+`codex/order-13-notification-inbox-concept-fix`
+
+Independent re-audit thread: `019ef7a8-1ac7-76d1-9024-4127a0cfdf71`
+
+Re-audit verdict: `slice accepted`
+
+Status: accepted with no findings after the fix.
+
+Accepted result:
+
+- Notification / Inbox Concept Review is recorded as a defer/concept decision,
+  not a runtime notification UI implementation.
+- The current line no longer says Slice 6 is still next or pending as a future
+  implementation slice.
+- Rust IARM guards prove defer documentation and absence of old APNs,
+  device-token, `NotificationClient`, `NotificationStore`, and inbox runtime
+  planes.
+- README and iOS architecture docs match the defer decision and do not overclaim
+  APNs, push, badge/read semantics, durable inbox storage, notification
+  resources, background delivery, or agent-execution inbox.
+- Existing local chat error notification pills remain accepted Slice 4 behavior,
+  not a restored inbox/APNs plane.
+
+Accepted deferred scope:
+
+- No runtime notification UI/code, backend facts, server settings,
+  provider/auth APIs, fake backend truth, diagnostics execution changes, or
+  future agent-execution surfaces were added.
+- APNs, background push, device broker, notification resources, durable inbox
+  storage, read state, app badge semantics, delivery chips, tool-family
+  notifications, and agent-execution inbox remain deferred.
+- Unrelated broad Swift SourceGuard budget drift remains outside this slice and
+  was not papered over.
+
+Validation recorded by the accepted re-audit:
+
+- `git show --stat --oneline 0ff5d2b28de52dda2beb64245c1d6524ed835969`
+  reported a docs/test-only fix with 5 files changed.
+- Targeted diff review found no Swift/runtime source changes.
+- Source scan found forbidden APNs, device-token, `NotificationClient`, and
+  `NotificationStore` tokens only in absence guards; notification-named runtime
+  files remain local chat error notification files.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed, 8 tests; existing Rust warning backlog observed.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- The review worktree remained clean.
+
 ## Next Audit
 
-The next action is independent re-audit of **Order 13: iOS Phase 1 Slice 6:
-Notification / Inbox Concept Review** after the focused tracker/progress/IARM
-guard reconciliation on
-`codex/order-13-notification-inbox-concept-fix`.
+The next action is audit of **Order 14: Accepted Follow-Up: Server-Backed
+Workspace Browser**.
 
 ## Per-Slice Audit Start State
 
