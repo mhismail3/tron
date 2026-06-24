@@ -71,7 +71,7 @@ completed slice.
 | 15 | Phase 2 Agent Execution Restoration Plan | Phase 2 planning | Planning baseline `980867c35`; final `7db72c1ee`; retrospective fix commit `737411eefa30aa5a9b7ebd040583e62c995ba48f` | Historical branch evidence at `codex/ios-affordance-restoration-map-current@7db72c1ee`; the files are not present on this tracker branch. | Historical branch-only files: `phase-2-agent-execution-restoration-scorecard.md`; `phase-2-agent-execution-restoration-evidence-manifest.md`; `phase-2-agent-execution-restoration-inventory.md`; `phase-2-agent-execution-restoration-inventory.tsv`; DESI/IARM/BPRC/SSARR/OPSAA invariants on that source branch. | Accepted by re-audit thread `019ef7c2-a23a-7cf3-80c9-21695a1f84f1` after focused fix commit `737411eefa30aa5a9b7ebd040583e62c995ba48f`; no findings remain. Historical plan evidence reports score 100/100, all 24 BPRC buckets mapped, ordered roadmap, memory architecture, validation protocol, and handoff packet. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | Planning does not implement runtime behavior. Future slices still need user decisions and per-slice validation. | Closed. Continue with Phase 2 Slice 1: Catalog Discovery Evidence. |
 | 16 | Phase 2 Slice 1: Catalog Discovery Evidence | Phase 2 agent-execution restoration | Baseline `7db72c1ee`; commits `a9c3d3507`, `ca471fcde`, `680d9429f`; final `f95d3b02e`; retrospective fix commit `e9fb48c3b9469d4b8122ab76c299eba3832df8c0` | Historical branch evidence at `codex/phase-2-catalog-discovery-evidence-current@f95d3b02e`; the canonical artifacts and implementation files are not present on this tracker branch. | Historical branch-only files: `phase-2-agent-execution-restoration-scorecard.md`; `phase-2-agent-execution-restoration-evidence-manifest.md`; `phase-2-agent-execution-restoration-inventory.md`; `phase-2-agent-execution-restoration-inventory.tsv`; `packages/agent/src/domains/catalog_discovery/`; Runtime Cockpit Discovery tests; SACB/HRA/PCC/TPC/TMB/IARM/IOSAC/IOSTC/CSD invariants on that source branch. | Accepted by re-audit thread `019ef7ce-cb06-7242-9361-06e28bf01aa9` after focused tracker/docs fix commit `e9fb48c3b9469d4b8122ab76c299eba3832df8c0`; no findings remain. Historical branch-scoped evidence records catalog search/inspect/conformance through `execute`, resource-backed reports, Runtime Cockpit Discovery, protected omission, and Rust/iOS/static validations. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | No target routing, intent execution, public `/engine` expansion, generated `ui_surface` publication, fixed legacy panels, schema repair, or old module copies. | Closed. Continue with Phase 2 Slice 2: Approval Safety / Freshness + Schema Hardening. |
 | 17 | Phase 2 Slice 2: Approval Safety / Freshness + Schema Hardening | Phase 2 agent-execution restoration | Baseline `f95d3b02e`; final pre-hardening `5ea963008`; hardening final `301f61bc3` | Historical branch evidence at `codex/phase-2-approval-safety-freshness-current` and `codex/phase-2-approval-schema-hardening-current@301f61bc3`; the canonical artifacts and implementation files are not present on this tracker branch. | Historical branch-only files: Phase 2 scorecard/evidence/inventory; `packages/agent/src/domains/approval/`; approval domain docs/tests; SACB/TMB/HRA/TPC/PCC/DRC/CSD/DESI invariants on the source branches. | Accepted by audit thread `019ef7d6-60f7-79f0-a39f-2ab59fb44ae6`; no findings remain. Historical branch-scoped evidence records durable approval request/decision resources, lifecycle stream, idempotent decision replay through engine idempotency, stale version conflict, deterministic `check_approval_at`, fail-closed denial/expiry/pending/missing/malformed/stale/scope mismatch, schema alignment guard, replay/evidence explanations, approval-is-not-authority metadata, and full Rust CI. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | Native iOS approval UI, risk taxonomy, default expiry policy, interruption behavior, per-package risky-action triggers, and unrelated capability behavior remain deferred. | Closed. Continue with Phase 2 Slice 3: Memory Foundation + Scope Hardening. |
-| 18 | Phase 2 Slice 3: Memory Foundation + Scope Hardening | Phase 2 agent-execution restoration | Baseline `301f61bc3`; commits `29024b677`, `20dde9894`, `4c35b2119` | `codex/phase-2-memory-foundation-current` | Phase 2 scorecard/evidence/inventory; memory domain docs/tests; SACB/HRA/TMB/TPC/PCC/DRC/SSARR/CSD/BPRC/IARM/OPSAA/SUWRF/DESI invariants | Memory policy/status, resource definitions, redacted records, prompt traces, migration envelopes, scope hardening, no hidden body-context inclusion, full Rust CI and guards recorded. | Semantic/vector retrieval, embeddings, ranking, summarization, episodic retrieval, procedural rules/hooks/skills, automatic retention, native iOS memory UI, and unrelated features remain deferred. | Privacy and bodyRef custody, scope isolation, prompt trace freshness, policy inheritance, migration redaction, hidden memory leakage, and guard narrowing. |
+| 18 | Phase 2 Slice 3: Memory Foundation + Scope Hardening | Phase 2 agent-execution restoration | Baseline `301f61bc3`; original commits `29024b677`, `20dde9894`, `4c35b2119`; accepted fix commit `be1300934fb36ec9bac650eedfee933c9daf0d9d` | Historical branch evidence at `codex/phase-2-memory-foundation-current@4c35b2119` plus accepted fix ref `codex/order-18-memory-bodyref-recursive-validation@be1300934fb36ec9bac650eedfee933c9daf0d9d`; the canonical artifacts, memory implementation, and fix files are not present on this tracker branch. | Historical branch-only files: Phase 2 scorecard/evidence/inventory; memory domain docs/tests; SACB/HRA/TMB/TPC/PCC/DRC/SSARR/CSD/BPRC/IARM/OPSAA/SUWRF/DESI invariants on the source/fix branches. | Accepted by independent re-audit thread `019ef7ee-0b9b-7213-a51c-d66a89e8b483` after focused fix commit `be1300934fb36ec9bac650eedfee933c9daf0d9d`; no findings remain. Historical branch-scoped evidence records memory policy/status, resource definitions, redacted records, prompt traces, migration envelopes, scope hardening, no hidden body-context inclusion, recursive `bodyRef` inline-body rejection, full Rust CI, and guards. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | Semantic/vector retrieval, embeddings, ranking, summarization, episodic retrieval, procedural rules/hooks/skills, automatic retention, native iOS memory UI, and unrelated features remain deferred. | Closed. Continue with Phase 2 Slice 4: Filesystem Agent Tools + Truncated Snapshot Hardening. |
 | 19 | Phase 2 Slice 4: Filesystem Agent Tools + Truncated Snapshot Hardening | Phase 2 agent-execution restoration | Baseline `4c35b2119`; commits `27e5847c9`, `2650dd0b9` | `codex/phase-2-filesystem-agent-tools-current` | Phase 2 scorecard/evidence/inventory; filesystem domain docs/tests; SACB/TMB/HRA/TPC/PCC/BPRC/IARM/DESI/OPSAA invariants; provider message converter tests | Bounded read/list/find/glob/search/diff/write/edit/apply-patch through `execute`; path authority; symlink/traversal denial; patch/materialized resources; truncated snapshot refusal; personal-info guard recorded. | Jobs, git, web, subagents, memory/vector/procedural/scheduling, native file/patch UI, public DTO expansion, DB/settings/auth/provider changes, and production deploy remain deferred. | Path canonicalization, symlink escapes, bounded output, binary omission, exact edit/hash guards, preview/commit idempotency, rollback evidence, and provider prompt guardrails. |
 | 20 | Phase 2 Slice 5A: Durable Jobs and Process Lifecycle + Race Hardening | Phase 2 agent-execution restoration | Baseline `1d35ac848` on `2650dd0b9`; commits `404290d06`, `4fb134c64`, `0d76be40d`; final `0d76be40d` | `codex/phase-2-jobs-process-lifecycle-current` | Phase 2 scorecard/evidence/inventory; jobs domain docs/tests; SACB/TMB/CSD/HRA/PCC/TPC/BPRC/IARM/OPSAA/PRG/DRC/DESI invariants | Durable `jobs` domain, `job_process` resources, bounded `execution_output`, lifecycle streams, start/status/list/log/cancel `execute` ops, process-group cleanup, cancellation/finalization race fixes, full Rust CI recorded. | PTY/interactive terminals, interpreter runtimes, git/source control, web/network research, subagents, scheduling, notifications, native iOS process panels, and queue-backed internal dispatch remain deferred. | Process-group cleanup, network denial fail-closed, output-drain bounds, terminal idempotency, cancel/completion races, stale-version retry, cleanup archiving, and no hidden queue grant. |
 
@@ -1079,20 +1079,86 @@ Validation recorded by the accepted audit:
   `301f61bc3` worktree.
 - The original audit checkout remained clean and detached at `fce107fa`.
 
+## Completed Audit: Phase 2 Slice 3: Memory Foundation + Scope Hardening
+
+Original audit thread: `019ef7e2-1558-7b70-9281-ebe61e56eedb`
+
+Original audit verdict: `changes required`, because shallow `bodyRef`
+validation only rejected top-level inline body keys and allowed nested inline
+body content to be persisted despite privacy/bodyRef custody claims.
+
+Focused fix thread: `019ef7e7-3d95-7fe1-b29c-1aa69b5ea359`
+
+Focused fix commit:
+`be1300934fb36ec9bac650eedfee933c9daf0d9d` (`Reject nested inline memory
+body refs`) on `codex/order-18-memory-bodyref-recursive-validation`
+
+Independent re-audit thread: `019ef7ee-0b9b-7213-a51c-d66a89e8b483`
+
+Re-audit verdict: `slice accepted`
+
+Status: accepted with no findings after the focused fix.
+
+Accepted result:
+
+- Phase 2 Slice 3 Memory Foundation + Scope Hardening is accepted as
+  branch-scoped historical evidence.
+- Historical range: baseline `301f61bc3`, original implementation commits
+  `29024b677`, `20dde9894`, and `4c35b2119` at
+  `codex/phase-2-memory-foundation-current@4c35b2119`, plus accepted fix commit
+  `be1300934fb36ec9bac650eedfee933c9daf0d9d` at
+  `codex/order-18-memory-bodyref-recursive-validation@be1300934fb36ec9bac650eedfee933c9daf0d9d`.
+- The accepted historical evidence covers memory policy/status, resource
+  definitions, redacted records, prompt traces, migration envelopes, scope
+  hardening, no hidden body-context inclusion, and branch-scoped full Rust
+  CI/guards.
+- The accepted fix recursively rejects inline body-like keys (`content`, `text`,
+  `body`, `raw`) anywhere inside `bodyRef` objects/arrays before retain, edit,
+  or import persistence.
+- Regression coverage includes nested retain and migration import cases. The
+  edit path is accepted because it shares the same validator before update
+  persistence.
+- Acceptance does not claim the canonical Phase 2 Slice 3 artifacts, memory
+  implementation files, or focused fix files are present on this tracker branch.
+- The original audit also noted that Order 18 source-branch history is not an
+  ancestor of tracker `HEAD`; this remains branch-scoped historical evidence
+  until the final consolidation branch/audit ports or truthfully supersedes it.
+
+Accepted deferred scope:
+
+- Semantic/vector retrieval, embeddings, ranking, summarization, episodic
+  retrieval, procedural rules/hooks/skills, automatic retention, native iOS
+  memory UI, and unrelated features remain deferred.
+- Integrated all-slices acceptance remains blocked until the final
+  consolidation branch/audit requirement is completed.
+
+Validation recorded by the accepted re-audit:
+
+- `git show --stat --oneline be1300934fb36ec9bac650eedfee933c9daf0d9d`
+  reported 4 files changed, with 128 insertions and 8 deletions.
+- `cargo test -p tron memory::tests` passed, 13 tests.
+- `cargo test -p tron nested_inline_body_refs_are_rejected_on_retain` passed.
+- `cargo test -p tron migration_import_rejects_nested_inline_body_ref_content`
+  passed.
+- `cargo fmt --all -- --check` passed.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check 4c35b211...be130093` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- The re-audit worktree was clean.
+
 ## Next Audit
 
-The next action is audit of **Order 18: Phase 2 Slice 3: Memory Foundation +
-Scope Hardening**.
+The next action is audit of **Order 19: Phase 2 Slice 4: Filesystem Agent Tools +
+Truncated Snapshot Hardening**.
 
-The tracker queue is not ambiguous: Order 17 is now closed, and Order 18 is the
+The tracker queue is not ambiguous: Order 18 is now closed, and Order 19 is the
 next open row:
 
-> `| 18 | Phase 2 Slice 3: Memory Foundation + Scope Hardening | Phase 2 agent-execution restoration | Baseline 301f61bc3; commits 29024b677, 20dde9894, 4c35b2119 | codex/phase-2-memory-foundation-current | ... |`
+> `| 19 | Phase 2 Slice 4: Filesystem Agent Tools + Truncated Snapshot Hardening | Phase 2 agent-execution restoration | Baseline 4c35b2119; commits 27e5847c9, 2650dd0b9 | codex/phase-2-filesystem-agent-tools-current | ... |`
 
-Order 18 starts from baseline `301f61bc3`, includes commits `29024b677`,
-`20dde9894`, and `4c35b2119`, and uses
-`codex/phase-2-memory-foundation-current` as the source-of-truth ref. The
-recommended next orchestration target is Order 18.
+Order 19 starts from baseline `4c35b2119`, includes commits `27e5847c9` and
+`2650dd0b9`, and uses `codex/phase-2-filesystem-agent-tools-current` as the
+source-of-truth ref. The recommended next orchestration target is Order 19.
 
 Before any all-slices integrated acceptance claim, create a final consolidation
 branch and run an explicit consolidation audit that verifies accepted
