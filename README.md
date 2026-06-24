@@ -1103,9 +1103,10 @@ enable it, launch it with an allowlisted environment and scoped
 `worker_package`, `worker_package_installation`, `worker_launch_attempt`, and
 `worker_package_conformance_report` resources on `worker.lifecycle`. Stop
 returns package/installation state to `enabled` for immediate relaunch, while
-startup reconciliation marks durable running launch attempts `unhealthy` if
-process ownership was lost. A failed launch, conformance mismatch, digest
-mismatch, or unowned stop is recorded or rejected fail-closed. The
+startup reconciliation runs before lifecycle requests and marks durable running
+launch attempts `unhealthy` if process ownership was lost. A failed launch,
+conformance mismatch, digest mismatch, or unowned stop is recorded or rejected
+fail-closed. The
 provider-visible model tool remains `execute`; package lifecycle operations are
 engine capabilities invoked through the authenticated `/engine` protocol by
 trusted host surfaces.

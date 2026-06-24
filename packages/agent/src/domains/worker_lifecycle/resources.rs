@@ -12,6 +12,12 @@ use super::params::{PackageRef, package_ref_from_payload};
 use super::{Deps, manifest::validate_manifest_full};
 use super::{WORKER, WORKER_LIFECYCLE_TOPIC};
 
+#[cfg(test)]
+#[async_trait::async_trait]
+pub(super) trait StartupReconciliationHook: Send + Sync {
+    async fn before_lifecycle_list(&self, lifecycle: &str);
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct ResourceWrite {
     pub(super) resource_id: String,
@@ -257,6 +263,10 @@ pub(super) async fn reconcile_owned_launch_attempts_on_startup(
 ) -> Result<usize, CapabilityError> {
     let mut reconciled = 0;
     for lifecycle in ["launching", "running"] {
+        #[cfg(test)]
+        if let Some(hook) = &deps.startup_reconciliation_hook {
+            hook.before_lifecycle_list(lifecycle).await;
+        }
         let resources = deps
             .engine_host
             .list_resources(ListResources {

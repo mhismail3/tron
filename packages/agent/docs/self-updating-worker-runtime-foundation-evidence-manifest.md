@@ -33,8 +33,8 @@ are retained here because they shaped the final implementation.
 - SUWRF-7: failed launch or failed conformance updates
   launch/package/installation state to `failed`; verified stop returns
   package/installation state to `enabled`; unowned stop fails without writing
-  clean stopped evidence; startup reconciliation downgrades stale durable
-  running attempts to `unhealthy`.
+  clean stopped evidence; lifecycle requests wait for startup reconciliation,
+  which downgrades stale durable running attempts to `unhealthy`.
 - SUWRF-8: no Swift DTO or native product-panel expansion was needed; generic
   resource and stream visibility is the iOS parity surface for this slice.
 - SUWRF-9: `self_updating_worker_runtime_foundation_invariants` is the static
@@ -83,6 +83,12 @@ are retained here because they shaped the final implementation.
   stop fails when ownership is missing, child drop is fail-safe, and startup
   reconciliation marks durable running attempts `unhealthy` while returning the
   package/installation to relaunchable `enabled`.
+- Retrospective re-audit found startup reconciliation could still race a new
+  lifecycle launch request because it ran asynchronously outside request
+  ordering. Fix: lifecycle functions now wait on the shared startup
+  reconciliation cell before handling requests, and focused regression coverage
+  pauses reconciliation at the old race window to prove current-process launches
+  cannot be downgraded by stale startup ownership-loss reconciliation.
 
 ## Command Evidence
 
