@@ -61,7 +61,7 @@ completed slice.
 | 8 | Accepted Off-Plan: Session List Simplification and Native Title Generation | Phase 1 accepted follow-up | Commits `0f58806c5`, `4e66af302`; retrospective fix commits `634fb7469`, `72a5b9c7` | `codex/ios-voice-dictation-affordance-current`; progress ledger; retrospective fix branches `codex/session-title-cache-audit-fix`, `codex/session-title-sync-legacy-normalize` | `ios-affordance-restoration-progress.md`; session-list/title-generation tests; README/iOS docs where touched | Accepted by second re-audit thread `019ef717-d7f4-78e3-b2d5-6684e400b59f` after two focused fix commits; no findings remain. New/fork local caches no longer seed workspace basenames as row titles, legacy nil-title sync clears only exact workspace-basename titles, and rows/accessibility use `listTitle`. | Work overview, import tree, source-control graph, workspace analytics, old title hooks/skills/rules/subagents, existing-session backfill, and title management UI remain absent. Server/generated titles remain authoritative; legitimate non-workspace local titles are preserved. | Closed. Continue with iOS Phase 1 Slice 3: Recent Input History. |
 | 9 | iOS Phase 1 Slice 3: Recent Input History | Phase 1 iOS affordance restoration | Commits `16586ae07`, `3740b33a2`, `ad777a3dd`, `0655e7131`, `d69afc6a1`; progress reconciliation `48054db64`; retrospective fix commits `705253e16644b1b8f4c05f6a57533f320703df49`, `90784394899a88e9b7877c027905d6f6f0cd2d31` | `codex/ios-prompt-input-snippet-affordance-current` plus retrospective fix branches `codex/order-9-recent-input-history-fix`, `codex/order-9-recent-input-history-share-fix` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; recent-input/input-history/attachment/source-guard tests | Accepted by second re-audit thread `019ef733-d2a9-7961-8387-db21cb646ca9` after two focused fix commits; no findings remain. Recent input history persists only after successful `agent::prompt` server sends for normal composer and pending-share text paths; failure, empty text, and attachment-only paths do not persist attempted text. | Snippets/templates, search/pagination/use counts, server prompt history, prompt-library APIs, generated prompt management, skills, queues, routing, agent-execution behavior, fake backend truth, provider/public/auth/API drift, and broad refactors remain absent. | Closed. Continue with iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances. |
 | 10 | iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances | Phase 1 iOS affordance restoration | Commits `bb9057148`, `09d155bda`; reconciliation `f4cb11d68`; branch ref also has duplicate `87f53a0ca`; retrospective fix branches `codex/order-10-ios-chat-affordance-audit-fixes`, `codex/order-10-ios-chat-affordance-preaccept-cleanup`; fix commits `ea2e01ec7e33a69136915b3c1a04c009b1dccfdc`, `a3d6ddcb0b088165af25cd798cddef65667dc74e` | `codex/ios-chat-visual-cues-status-affordance-current`; progress ledger plus retrospective fix commits | `ios-affordance-restoration-progress.md`; chat visual/local notification/capability evidence/source-guard tests | Accepted by second re-audit thread `019ef765-b32b-7431-bc6a-c1f7402ea901` after two focused fix commits; no findings remain. Pre-accept normal send and retry failures now surface as deduped local notifications after clearing composer/session processing, retry shares normal setup/reset behavior, and reconstruction failures render visible local load errors while successful empty/loading states stay quiet. | Fixed process/job/subagent/source-control/approval/memory/rules/hooks/skill/inbox panels, fake activity, notification expansion, rich connection sheets, fake backend truth, provider/public/auth/settings/API drift, and agent-execution restoration remain deferred. | Closed. Continue with iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish. |
-| 11 | iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish | Phase 1 iOS affordance restoration | Commit `3680ea271` | `codex/ios-settings-onboarding-diagnostics-pairing-current` | `ios-affordance-restoration-progress.md`; settings/onboarding/provider/server/source-guard tests; iOS docs | Focused iOS simulator tests, Computer Use validation, screenshots, IARM invariant, personal-info guard, whitespace, ignored-file recorded. | Fixed product session lists, APNs/device broker, skills/rules/memory/worktree/process/job/goal/subagent/approval/web state, fake server-health facts, new server settings, DB tables, auth/provider behavior remain absent. | Settings parity, provider id truthfulness, pairing repair vs new origin, diagnostics copy, feedback path, and no invented server facts. |
+| 11 | iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish | Phase 1 iOS affordance restoration | Commit `3680ea271`; retrospective fix commit `49b76afa3805eeed7b4f5847779cfb2eb69a8edf` | `codex/ios-settings-onboarding-diagnostics-pairing-current`; retrospective fix branch `codex/order-11-ios-settings-onboarding-polish-fix` | `ios-affordance-restoration-progress.md`; settings/onboarding/provider/server/source-guard tests; iOS docs | Accepted by re-audit thread `019ef77a-bce7-7d23-815f-2a06a719b79c` after fix commit `49b76afa3805eeed7b4f5847779cfb2eb69a8edf`; no findings remain. Active-server repair uses truthful re-pair wording, the real new-server path still uses `prefill: nil`, source guards pin label-to-prefill intent, and docs match the corrected behavior. | Fixed product session lists, APNs/device broker, skills/rules/memory/worktree/process/job/goal/subagent/approval/web state, fake server-health facts, new server settings, DB tables, auth/provider behavior, backend facts, diagnostics execution changes, and future agent-execution surfaces remain absent. | Closed. Continue with Accepted Follow-Up: Cockpit Placement and Session-List Row Polish. |
 | 12 | Accepted Follow-Up: Cockpit Placement and Session-List Row Polish | Phase 1 accepted follow-up | Commits `becbc0e95`, `34c53dc93`, `22cb96e72`, `9d172aa27`, `0176379ba`; progress checkpoint `da53490c1` | `codex/ios-cockpit-placement-cleanup-current`; progress ledger | `ios-affordance-restoration-progress.md`; IOSAC/IARM invariants; session-list/cockpit/settings placement tests | Focused iOS tests, simulator/Computer Use evidence, IARM and IOSAC invariants, personal-info guard, whitespace, ignored-file recorded. | No notification inbox, APNs, device broker, worker launch flow, Phase 2 capability, or passive chat runtime banner. | Placement truthfulness, diagnostics-only cockpit access, native row interaction, no custom press feedback, and no passive idle signal in chat. |
 | 13 | iOS Phase 1 Slice 6: Notification / Inbox Concept Review | Phase 1 iOS defer decision | Commit `ace41ac98`; closeout `fda2eaf6d` | `codex/ios-notification-inbox-concept-review-current`; progress ledger | `ios-affordance-restoration-progress.md`; `ios_affordance_restoration_map_invariants.rs`; BPRC/IARM docs | Defer decision; no Swift/UI changes; IARM invariant with defer guard, cargo fmt check, personal-info guard, whitespace, ignored-file recorded. | APNs, background push, device broker, notification resources, read state, app badge semantics, delivery chips, and tool-family notifications remain Phase 2/later. | Whether current source truly lacks fake notification owners; defer guard coverage; database/resource absence evidence; no local-only inbox implying backend truth. |
 | 14 | Accepted Follow-Up: Server-Backed Workspace Browser | Phase 1 accepted follow-up / Phase 2 precursor | Commits `70780b798`, `f34ac1bdd`, `c818cc296`, `ceb6aab35`, `7a9de156b`, `8054ed17e`, `74a5564d3`, `38a88ede9`; reconciliation `980867c35` | `codex/ios-affordance-restoration-map-current`; progress ledger | `ios-affordance-restoration-progress.md`; filesystem workspace-browser docs/tests; IARM/BPRC invariants | Progress ledger records server-backed home/list/create-dir selector, compact UI follow-ups, and expected focused validation. | Native file/patch review UI, import, worktree, git, broad file-management/product panels, fake analytics, source-control surfaces remain absent. | Filesystem boundary separation from Phase 2 agent tools, server-fact rendering, path/root handling, hidden-folder behavior, create-dir authority, and selector reuse. |
@@ -670,10 +670,64 @@ Verification recorded by the accepted re-audit:
 - `git ls-files -ci --exclude-standard` passed with empty output.
 - The re-audit worktree was clean.
 
+## Completed Audit: iOS Phase 1 Slice 5 Settings / Onboarding / Diagnostics / Pairing Polish
+
+Original audit thread: `019ef76e-e810-7640-a15b-475470e49ff2`
+
+Original verdict: `changes required`, because the disconnected Settings card
+labeled an active-server-prefilled repair flow as "Connect to a new server."
+
+Fix thread: `019ef775-3214-7ff2-b864-082a73df35b7`
+
+Fix commit: `49b76afa3805eeed7b4f5847779cfb2eb69a8edf`
+(`Fix settings re-pair CTA semantics`) on
+`codex/order-11-ios-settings-onboarding-polish-fix`
+
+Independent re-audit thread: `019ef77a-bce7-7d23-815f-2a06a719b79c`
+
+Re-audit verdict: `slice accepted`
+
+Status: accepted with no findings after the fix.
+
+Accepted result:
+
+- The disconnected Settings card no longer labels an active-server-prefilled
+  onboarding launch as "Connect to a new server."
+- The active-server-prefilled repair path uses truthful re-pair wording and
+  preserves intended same-server repair/token-reuse semantics.
+- The real "Connect to a new server" path still launches onboarding with
+  `prefill: nil`.
+- Source guards pin the label-to-prefill intent.
+- README and onboarding docs match the corrected behavior.
+
+Accepted deferred scope:
+
+- Backend facts, server settings, provider/auth APIs, fake backend truth,
+  diagnostics execution changes, and future agent-execution surfaces remain out
+  of scope for this Phase 1 settings/onboarding polish slice.
+- Fixed product session lists, APNs/device broker,
+  skills/rules/memory/worktree/process/job/goal/subagent/approval/web state,
+  new server settings, DB tables, and auth/provider behavior remain absent.
+
+Verification recorded by the accepted re-audit:
+
+- `git show --stat --oneline 49b76afa3` reported 5 intended files changed.
+- `git diff 78f44fe..49b76afa -- packages/ios-app README.md packages/agent/docs`
+  was reviewed.
+- Focused `xcodebuild` for `ServerSettingsPageTests` passed, 21 Swift Testing
+  tests.
+- Focused `xcodebuild` for `OnboardingFlowLayoutTests` with isolated
+  DerivedData passed, 2 tests. An initial parallel attempt hit an Xcode database
+  lock, then passed serially.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- `git status --short` was clean.
+
 ## Next Audit
 
-The next action is first independent audit of **Order 11: iOS Phase 1 Slice 5:
-Settings / Onboarding / Diagnostics / Pairing Polish**.
+The next action is first independent audit of **Order 12: Accepted Follow-Up:
+Cockpit Placement and Session-List Row Polish**.
 
 ## Per-Slice Audit Start State
 
