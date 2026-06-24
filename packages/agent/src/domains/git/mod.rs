@@ -1,13 +1,14 @@
 //! Git and worktree domain.
 //!
 //! This Phase 2 package restores source-control observation plus the narrow
-//! Slice 6C Git staged-index commit and Slice 6D branch-start foundations. It detects the repository
-//! containing a trusted runtime path, reports branch/upstream/dirty facts,
-//! returns bounded status/diff evidence, stages/unstages explicit relative
-//! paths, creates one guarded single-parent commit from the already-staged
-//! index, and creates one local branch at the expected `HEAD` before moving the
-//! symbolic `HEAD` through a guarded ref/OID check in the existing
-//! `capability::execute` primitive.
+//! Slice 6C Git staged-index commit, Slice 6D branch-start, and Slice 6E branch
+//! inventory foundations. It detects the repository containing a trusted runtime
+//! path, reports branch/upstream/dirty facts, returns bounded status/diff/local
+//! branch inventory evidence, stages/unstages explicit relative paths, creates
+//! one guarded single-parent commit from the already-staged index, and creates
+//! one local branch at the expected `HEAD` before moving the symbolic `HEAD`
+//! through a guarded ref/OID check in the existing `capability::execute`
+//! primitive.
 //!
 //! ## Submodules
 //!
@@ -18,7 +19,7 @@
 //! | `contract` | Read and index-mutation `git::*` function contracts and schemas |
 //! | `handlers` | Operation-key binding table |
 //! | `mutation` | Index-only stage/unstage implementation and evidence |
-//! | `service` | Trusted path resolution, Git command execution, and truncation |
+//! | `service` | Trusted path resolution, Git command execution, branch inventory, and truncation |
 //! | `types` | Small request/result helper types |
 //!
 //! # INVARIANT: Git mutation is staged-state only
@@ -37,8 +38,11 @@
 //! old symbolic ref and OID while `HEAD` is locked. They do this without
 //! checkout, hooks, remotes, index mutation, or worktree file updates; if
 //! symbolic `HEAD` movement fails, the just-created ref is removed only when it
-//! still points at the expected OID. Caller-controlled status/diff byte limits
-//! affect evidence only, never mutation eligibility.
+//! still points at the expected OID. Branch inventory is read-only and lists
+//! local `refs/heads` in deterministic refname order with explicit count/byte
+//! truncation metadata; it does not fetch, set upstreams, switch branches, or
+//! create durable resources. Caller-controlled status/diff/branch inventory
+//! limits affect evidence only, never mutation eligibility.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

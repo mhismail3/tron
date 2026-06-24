@@ -12,6 +12,11 @@ pub(super) const DEFAULT_STATUS_BYTES: usize = 64 * 1024;
 pub(super) const MAX_STATUS_BYTES: usize = 200 * 1024;
 pub(super) const DEFAULT_DIFF_BYTES: usize = 64 * 1024;
 pub(super) const MAX_DIFF_BYTES: usize = 128 * 1024;
+pub(super) const DEFAULT_BRANCHES: usize = 100;
+pub(super) const MAX_BRANCHES: usize = 500;
+pub(super) const DEFAULT_BRANCH_BYTES: usize = 64 * 1024;
+pub(super) const MAX_BRANCH_BYTES: usize = 200 * 1024;
+pub(super) const MAX_BRANCH_METADATA_CHARS: usize = 512;
 pub(super) const MAX_COMMIT_MESSAGE_BYTES: usize = 8 * 1024;
 
 #[derive(Clone)]

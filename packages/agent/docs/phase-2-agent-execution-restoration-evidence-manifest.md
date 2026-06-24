@@ -861,6 +861,41 @@ Discovery evidence:
   deterministic tests, docs/static updates, validation commands, and residual
   decisions.
 
+## Phase 2 Slice 6E Implementation Candidate: Git Branch Inventory Foundation
+
+Implementation branch: `codex/phase-2-slice-6e-branch-inventory`.
+Baseline:
+`origin/main@2241def83033d3bb49836b0d6b1ecf3c36fc8c39`
+(`docs: shape slice 6e branch inventory handoff`).
+
+Candidate scope:
+
+- Added provider-visible `git_branch_inventory` behind the existing
+  `capability::execute` primitive and kept backend behavior in `domains/git`.
+- Kept the operation execute-only: no direct `git::branch_inventory` catalog
+  contract and no new resource kind or lifecycle event.
+- Reports deterministic, bounded local branch evidence for the trusted
+  repository root: current branch or detached state, local branch names/refs,
+  OIDs, current marker, upstream names when present, ahead/behind counts from
+  existing local refs, and bounded last-commit subject/time/author metadata.
+- Uses explicit `maxBranches` and `maxBranchBytes` bounds with returned
+  branch count, retained bytes, truncation flags, and local-ref-only/no-network
+  evidence metadata.
+- Preserves Slice 6E non-goals: no checkout/switch, branch deletion/rename,
+  upstream setup, merge/rebase/reset/revert/cherry-pick, stash/clean,
+  fetch/pull/push, PR handoff, worktree graph resources, public `/engine`
+  expansion, native SourceChanges UI, or production deploy behavior.
+
+Candidate test coverage:
+
+- Deterministic branch inventory tests cover clean repositories with multiple
+  branches, current markers, detached HEAD, upstream ahead/behind from local
+  remote refs, no-upstream rows, count and byte truncation, unusual valid branch
+  names, non-repo/path traversal/nested-repo rejection, and execute routing.
+- Provider/static guards expose `git_branch_inventory`, add branch inventory
+  bounds fields, keep `git_commit`/`git_branch_start` execute-only precedent,
+  and continue excluding non-goal Git operation names.
+
 ## Validation Log
 
 | Command | Result | Evidence |

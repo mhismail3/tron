@@ -82,6 +82,12 @@ without checkout after a locked old-ref/OID guard, preserves index/worktree
 content, and records `git_branch_start` resource plus `git.branch_started`
 lifecycle evidence. Mainline acceptance followed independent review and two
 focused guard fixes.
+Slice 6E now has an implementation candidate for execute-only
+`git_branch_inventory`: a read-only local branch inventory operation through
+`domains/git` that returns deterministic local `refs/heads` rows, current or
+detached-HEAD evidence, OIDs, upstream names when present, local ahead/behind
+counts, bounded last-commit metadata, and explicit count/byte truncation
+metadata without branch mutation or a new resource kind.
 Worktree graph resources, arbitrary checkout, branch deletion/rename,
 merges/rebases/resets, stash/clean, fetch/pull/push, PR handoff, conflict
 resolution workflows, and native SourceChanges remain deferred.
@@ -200,8 +206,10 @@ job dispatch also remains deferred pending an explicit queued-grant design.
 
 `P2AER-INV-013` is current baseline for Slice 6A read-only Git status/diff
 evidence, accepted Slice 6B index-only stage/unstage, accepted Slice 6C
-staged-index commit evidence, and accepted Slice 6D local `git_branch_start`
-branch creation with locked symbolic-HEAD movement. The
+staged-index commit evidence, accepted Slice 6D local `git_branch_start`
+branch creation with locked symbolic-HEAD movement. Slice 6E now has an
+implementation candidate for read-only `git_branch_inventory` local branch
+inventory. The
 mutating boundary is intentionally narrow: explicit paths for index mutation,
 resource-backed evidence, lifecycle stream evidence, expected HEAD freshness,
 expected index-tree freshness for commit, idempotency, branch-name validation,
@@ -209,7 +217,6 @@ and static guards proving no arbitrary checkout, branch delete/rename,
 merge/rebase/reset, push/PR, worktree graph, conflict resolution workflow, or
 native SourceChanges surface was added. Branch deletion/rename, arbitrary
 checkout, remote push/PR, merge/rebase/reset, conflict workflows, worktree graph
-resources, and native SourceChanges remain deferred. The selected next
-source-control slice is Slice 6E: read-only local branch inventory through the
-existing `capability::execute` and `domains/git` boundary, with bounded branch
-evidence and no branch mutation.
+resources, and native SourceChanges remain deferred. Slice 6E does not add a
+direct `git::*` backend contract, resource kind, checkout/switch behavior,
+upstream setup, or remote network operation.

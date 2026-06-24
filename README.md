@@ -928,6 +928,7 @@ Current primitive operations:
 | `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
 | `git_status` | Inspect trusted-root repository state: branch or detached HEAD, upstream/ahead-behind, dirty summaries, and bounded porcelain evidence. |
 | `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers. |
+| `git_branch_inventory` | Slice 6E read-only operation that lists bounded local branch evidence for the trusted-root repository: current marker, refs, OIDs, upstream names, local ahead/behind counts, and bounded last-commit metadata. |
 | `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_commit` | Accepted Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
@@ -994,15 +995,24 @@ staged-index commit evidence; commit is not registered as a direct `git::*`
 catalog function. Accepted Slice 6D adds the local-only
 `git_branch_start` execute operation for creating one new local branch at the
 current expected `HEAD` and moving symbolic `HEAD` to it after rechecking the
-old symbolic ref and OID without checkout or file updates.
+old symbolic ref and OID without checkout or file updates. Slice 6E adds the
+execute-only `git_branch_inventory` read operation for deterministic bounded
+local branch inventory evidence without adding a resource kind or direct
+`git::*` catalog contract.
 Provider-visible access remains operation values behind the single
 `capability::execute` primitive: `git_status`, `git_diff`, `git_stage`,
-`git_unstage`, `git_commit`, and `git_branch_start`. The implementation resolves only
+`git_branch_inventory`, `git_unstage`, `git_commit`, and
+`git_branch_start`. The implementation resolves only
 relative paths under trusted working-directory metadata, rejects path traversal
 and worktree-root escapes, reports branch/detached HEAD/upstream/ahead-behind/
-dirty summaries, returns bounded status/diff evidence, exposes the staged index
-tree without writing repository tree objects, and requires idempotency key,
-human/action reason, and expected HEAD for mutation. Successful stage/unstage
+dirty summaries, returns bounded status/diff/branch inventory evidence, exposes
+the staged index tree without writing repository tree objects, and requires
+idempotency key, human/action reason, and expected HEAD for mutation. Branch
+inventory lists only local `refs/heads` in deterministic refname order with
+explicit count/byte truncation metadata, optional upstream names and local
+ahead/behind counts when upstream refs are present, and last-commit
+subject/time/author metadata without hooks, editors, pagers, credentials, or
+network access. Successful stage/unstage
 operations create `git_index_change` resources and publish `git.lifecycle`
 stream evidence. Accepted Slice 6C `git_commit` creates exactly one single-parent commit
 from the already-staged index on the current named branch after expected HEAD and

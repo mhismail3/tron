@@ -21,7 +21,7 @@ use super::branch_start::{
     BRANCH_START_OUTPUT_BYTES, BranchStartGitRunner, BranchStartGitStatus,
     create_branch_and_move_head_with_runner,
 };
-use super::service::{self, diff_value, status_value};
+use super::service::{self, branch_inventory_value, diff_value, status_value};
 use crate::domains::capability::contract;
 use crate::engine::{
     GIT_BRANCH_START_KIND, GIT_BRANCH_START_SCHEMA_ID, GIT_COMMIT_KIND, GIT_COMMIT_SCHEMA_ID,
@@ -298,18 +298,255 @@ async fn execute_git_status_uses_single_provider_tool_boundary() {
     assert_eq!(value["details"]["git"]["dirty"], false);
 }
 
+#[tokio::test]
+async fn branch_inventory_reports_sorted_local_branches_current_marker_and_last_commit() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base subject");
+    let main_oid = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    git(repo.path(), ["branch", "feature/zeta"]);
+    git(repo.path(), ["branch", "bugfix.alpha"]);
+
+    let value = branch_inventory(repo.path(), json!({})).await;
+    assert_eq!(value["operation"], "branch_inventory");
+    assert_eq!(value["currentBranch"], "main");
+    assert_eq!(value["detachedHead"], false);
+    let branches = value["branches"].as_array().expect("branches");
+    let names = branches
+        .iter()
+        .map(|branch| branch["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec!["bugfix.alpha", "feature/zeta", "main"]);
+    assert!(
+        branches
+            .iter()
+            .all(|branch| branch["oid"] == json!(main_oid))
+    );
+    assert_eq!(branches[0]["current"], false);
+    assert_eq!(branches[1]["current"], false);
+    assert_eq!(branches[2]["current"], true);
+    assert_eq!(branches[2]["ref"], "refs/heads/main");
+    assert_eq!(branches[2]["hasUpstream"], false);
+    assert!(branches[2]["upstream"].is_null());
+    assert_eq!(branches[2]["lastCommit"]["subject"], "base subject");
+    assert_eq!(branches[2]["lastCommit"]["authorName"], "Tron Test");
+    assert_eq!(value["evidence"]["sort"], "refname");
+    assert_eq!(value["evidence"]["bounded"], true);
+    assert_eq!(value["evidence"]["branchesTruncated"], false);
+    assert_eq!(value["evidence"]["branchCount"], 3);
+    assert_eq!(value["evidence"]["returnedBranchCount"], 3);
+    assert_eq!(value["evidence"]["networkPolicy"], "none");
+}
+
+#[tokio::test]
+async fn branch_inventory_reports_detached_head_without_current_branch_marker() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    git(repo.path(), ["checkout", "--detach", head.as_str()]);
+
+    let value = branch_inventory(repo.path(), json!({})).await;
+    assert!(value["currentBranch"].is_null());
+    assert_eq!(value["detachedHead"], true);
+    assert_eq!(value["headOid"], head);
+    assert!(
+        value["branches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|branch| branch["current"] == json!(false))
+    );
+}
+
+#[tokio::test]
+async fn branch_inventory_reports_upstream_ahead_behind_from_local_refs() {
+    let remote = tempdir().expect("remote");
+    git(remote.path(), ["init", "--bare"]);
+    let repo = tempdir().expect("repo");
+    git(repo.path(), ["clone", remote.path().to_str().unwrap(), "."]);
+    configure_repo(repo.path());
+    git(repo.path(), ["checkout", "-B", "main"]);
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base");
+    git(repo.path(), ["push", "-u", "origin", "main"]);
+
+    write_file(repo.path(), "tracked.txt", "local ahead\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "local ahead");
+
+    let peer = tempdir().expect("peer");
+    git(peer.path(), ["clone", remote.path().to_str().unwrap(), "."]);
+    configure_repo(peer.path());
+    write_file(peer.path(), "remote.txt", "remote behind\n");
+    git(peer.path(), ["add", "remote.txt"]);
+    commit(peer.path(), "remote behind");
+    git(peer.path(), ["push", "origin", "main"]);
+    git(repo.path(), ["fetch", "origin", "main"]);
+
+    let value = branch_inventory(repo.path(), json!({})).await;
+    let main = value["branches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|branch| branch["name"] == json!("main"))
+        .expect("main branch");
+    assert_eq!(main["upstream"], "origin/main");
+    assert_eq!(main["hasUpstream"], true);
+    assert_eq!(main["ahead"], 1);
+    assert_eq!(main["behind"], 1);
+}
+
+#[tokio::test]
+async fn branch_inventory_bounds_branch_count_and_ref_bytes() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base");
+    for index in 0..8 {
+        git(repo.path(), ["branch", &format!("topic/{index:02}")]);
+    }
+
+    let count_limited = branch_inventory(repo.path(), json!({"maxBranches": 3})).await;
+    assert_eq!(count_limited["branches"].as_array().unwrap().len(), 3);
+    assert_eq!(count_limited["evidence"]["branchCount"], 9);
+    assert_eq!(count_limited["evidence"]["returnedBranchCount"], 3);
+    assert_eq!(count_limited["evidence"]["branchesTruncated"], true);
+    assert_eq!(count_limited["evidence"]["branchBytesTruncated"], false);
+
+    let byte_limited = branch_inventory(repo.path(), json!({"maxBranchBytes": 10})).await;
+    assert_eq!(byte_limited["evidence"]["branchesTruncated"], true);
+    assert_eq!(byte_limited["evidence"]["branchBytesTruncated"], true);
+    assert!(
+        byte_limited["evidence"]["branchBytesRetained"]
+            .as_u64()
+            .unwrap()
+            <= 10
+    );
+}
+
+#[tokio::test]
+async fn branch_inventory_serializes_unusual_valid_branch_names() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base");
+    for branch in [
+        "feature/dot.name",
+        "feature/plus+name",
+        "feature/equal=name",
+        "feature/comma,name",
+    ] {
+        git(repo.path(), ["branch", branch]);
+    }
+
+    let value = branch_inventory(repo.path(), json!({})).await;
+    let names = value["branches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|branch| branch["name"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    for expected in [
+        "feature/comma,name",
+        "feature/dot.name",
+        "feature/equal=name",
+        "feature/plus+name",
+    ] {
+        assert!(
+            names.contains(&expected),
+            "missing unusual branch name {expected} in {names:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn execute_git_branch_inventory_uses_single_provider_tool_boundary() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "clean\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    git(repo.path(), ["branch", "feature/provider"]);
+
+    let value = execute_git_ok(
+        &ctx,
+        repo.path(),
+        "git-branch-inventory-execute",
+        json!({
+            "operation": "git_branch_inventory",
+            "path": ".",
+            "maxBranches": 10
+        }),
+    )
+    .await;
+    assert_eq!(
+        value["details"]["primitiveOperation"],
+        "git_branch_inventory"
+    );
+    assert_eq!(value["details"]["git"]["operation"], "branch_inventory");
+    assert_eq!(
+        value["details"]["git"]["evidence"]["resourceRefs"],
+        json!([])
+    );
+    assert_eq!(
+        value["details"]["git"]["evidence"]["mutationBoundary"],
+        "read-only"
+    );
+}
+
+#[tokio::test]
+async fn branch_inventory_rejects_non_repo_out_of_root_and_nested_repo_misuse() {
+    let non_repo = tempdir().expect("non repo");
+    let non_repo_error = branch_inventory_error(non_repo.path(), json!({})).await;
+    assert!(non_repo_error.contains("not inside a Git worktree"));
+
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base");
+    let traversal = branch_inventory_error(repo.path(), json!({"path": "../escape"})).await;
+    assert!(traversal.contains("must not escape the root"));
+
+    let outer = tempdir().expect("outer repo");
+    init_repo(outer.path());
+    write_file(outer.path(), "outer.txt", "outer\n");
+    git(outer.path(), ["add", "outer.txt"]);
+    commit(outer.path(), "outer");
+    let nested = outer.path().join("nested");
+    fs::create_dir(&nested).expect("nested");
+    init_repo(&nested);
+    write_file(&nested, "inner.txt", "inner\n");
+    git(&nested, ["add", "inner.txt"]);
+    commit(&nested, "inner");
+    let nested_error = branch_inventory_error(outer.path(), json!({"path": "nested"})).await;
+    assert!(nested_error.contains("trusted working-directory repository"));
+}
+
 #[test]
 fn model_schema_exposes_index_only_git_operations() {
     let metadata = contract::model_metadata(contract::EXECUTE_FUNCTION_ID);
     let schema_text = metadata["capabilitySchema"]["parameters"].to_string();
     assert!(schema_text.contains("git_status"));
     assert!(schema_text.contains("git_diff"));
+    assert!(schema_text.contains("git_branch_inventory"));
     assert!(schema_text.contains("git_stage"));
     assert!(schema_text.contains("git_unstage"));
     assert!(schema_text.contains("git_commit"));
     assert!(schema_text.contains("git_branch_start"));
     assert!(schema_text.contains("expectedIndexTree"));
     assert!(schema_text.contains("branchName"));
+    assert!(schema_text.contains("maxBranches"));
+    assert!(schema_text.contains("maxBranchBytes"));
     for forbidden in [
         "git_branch_delete",
         "git_branch_move",
@@ -355,11 +592,16 @@ fn git_commit_is_execute_only_not_direct_git_domain_contract() {
         !direct_ids.contains(&"git::branch_start".to_owned()),
         "Slice 6D git_branch_start must be exposed only through capability::execute"
     );
+    assert!(
+        !direct_ids.contains(&"git::branch_inventory".to_owned()),
+        "Slice 6E git_branch_inventory must be exposed only through capability::execute"
+    );
 
     let execute_metadata = contract::model_metadata(contract::EXECUTE_FUNCTION_ID);
     let execute_schema = execute_metadata["capabilitySchema"]["parameters"].to_string();
     assert!(execute_schema.contains("git_commit"));
     assert!(execute_schema.contains("git_branch_start"));
+    assert!(execute_schema.contains("git_branch_inventory"));
 }
 
 #[test]
@@ -2237,6 +2479,19 @@ async fn diff(root: &Path, payload: Value) -> Value {
     diff_value(&invocation(root, "git-diff"), &payload)
         .await
         .expect("diff")
+}
+
+async fn branch_inventory(root: &Path, payload: Value) -> Value {
+    branch_inventory_value(&invocation(root, "git-branch-inventory"), &payload)
+        .await
+        .expect("branch inventory")
+}
+
+async fn branch_inventory_error(root: &Path, payload: Value) -> String {
+    branch_inventory_value(&invocation(root, "git-branch-inventory-error"), &payload)
+        .await
+        .expect_err("branch inventory should fail")
+        .to_string()
 }
 
 fn invocation(root: &Path, trace: &str) -> Invocation {

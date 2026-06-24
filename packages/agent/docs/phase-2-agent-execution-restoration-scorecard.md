@@ -1350,6 +1350,27 @@ Residual user decisions after Slice 6E: push/PR approval, arbitrary checkout
 policy, branch deletion/rename policy, default branch naming/cleanup policy,
 native source-control UI scope, and conflict-resolution delegation.
 
+#### Slice 6E Implementation Candidate Note
+
+Implementation branch `codex/phase-2-slice-6e-branch-inventory` adds the
+execute-only `git_branch_inventory` operation through the existing
+`capability::execute` and `domains/git` boundary. The operation is read-only:
+it resolves the trusted working-directory repository, rejects nested repository
+misuse, lists only local `refs/heads` in deterministic `refname` order, marks
+the current branch or detached HEAD state, reports branch refs/OIDs, upstream
+names when configured, local ahead/behind counts from existing refs, bounded
+last-commit subject/time/author metadata, and explicit count/byte truncation
+metadata. It does not add a direct `git::branch_inventory` backend catalog
+contract, durable resource kind, lifecycle event, checkout/switch behavior,
+branch deletion/rename, upstream setup, remote network operation, or native
+SourceChanges surface.
+
+Candidate validation focuses on branch inventory behavior and provider/static
+guards: clean multi-branch ordering/current marker, detached HEAD, local
+upstream ahead/behind, no-upstream rows, branch count/byte truncation, unusual
+valid branch names, non-repo/out-of-root/nested-repo rejection, execute routing,
+provider schema exposure, and continued rejection of non-goal Git operations.
+
 ### Slice 7: Goals, Queues, Questions, And Planning
 
 Objective: restore durable autonomous work objects and user-question flows.

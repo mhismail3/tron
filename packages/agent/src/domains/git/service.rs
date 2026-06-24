@@ -14,8 +14,9 @@ use crate::shared::server::context::run_blocking_task;
 use crate::shared::server::errors::CapabilityError;
 
 use super::types::{
-    DEFAULT_DIFF_BYTES, DEFAULT_STATUS_BYTES, MAX_DIFF_BYTES, MAX_STATUS_BYTES, RepositoryFacts,
-    ResolvedTarget, SCHEMA_VERSION,
+    DEFAULT_BRANCH_BYTES, DEFAULT_BRANCHES, DEFAULT_DIFF_BYTES, DEFAULT_STATUS_BYTES,
+    MAX_BRANCH_BYTES, MAX_BRANCH_METADATA_CHARS, MAX_BRANCHES, MAX_DIFF_BYTES, MAX_STATUS_BYTES,
+    RepositoryFacts, ResolvedTarget, SCHEMA_VERSION,
 };
 
 const MAX_GIT_STDERR_BYTES: usize = 4 * 1024;
@@ -40,6 +41,18 @@ pub(crate) async fn diff_value(
     let invocation = invocation.clone();
     let request = payload.clone();
     run_blocking_task("git::diff", move || diff_value_sync(&invocation, &request)).await
+}
+
+pub(crate) async fn branch_inventory_value(
+    invocation: &Invocation,
+    payload: &Value,
+) -> Result<Value, CapabilityError> {
+    let invocation = invocation.clone();
+    let request = payload.clone();
+    run_blocking_task("git_branch_inventory", move || {
+        branch_inventory_value_sync(&invocation, &request)
+    })
+    .await
 }
 
 fn status_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, CapabilityError> {
@@ -83,6 +96,87 @@ fn status_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, 
             "statusTruncated": status_output.stdout_truncated,
             "statusLimitBytes": max_status_bytes,
             "resourceRefs": []
+        }
+    }))
+}
+
+fn branch_inventory_value_sync(
+    invocation: &Invocation,
+    payload: &Value,
+) -> Result<Value, CapabilityError> {
+    let target = resolve_target(invocation, payload)?;
+    let repository = repository_facts(&target)?;
+    let trusted_root = resolve_target(invocation, &json!({"path": "."}))?;
+    let trusted_repository = repository_facts(&trusted_root)?;
+    if repository.worktree_root != trusted_repository.worktree_root {
+        return Err(invalid(
+            "git_branch_inventory path must belong to the trusted working-directory repository",
+        ));
+    }
+
+    let max_branches = optional_usize(payload, "maxBranches")?
+        .unwrap_or(DEFAULT_BRANCHES)
+        .min(MAX_BRANCHES);
+    let max_branch_bytes = optional_usize(payload, "maxBranchBytes")?
+        .unwrap_or(DEFAULT_BRANCH_BYTES)
+        .min(MAX_BRANCH_BYTES);
+    let ref_output = git_output_bounded(
+        &repository.worktree_root,
+        [
+            "for-each-ref",
+            "--sort=refname",
+            "--format=%(refname)\t%(refname:short)\t%(objectname)\t%(upstream:short)",
+            "refs/heads",
+        ],
+        max_branch_bytes,
+    )?;
+    let parsed_rows = parse_branch_ref_rows(&ref_output.stdout, ref_output.stdout_truncated)?;
+    let branch_count = parsed_rows.len();
+    let branches_truncated = ref_output.stdout_truncated || branch_count > max_branches;
+    let mut branches = Vec::new();
+    for row in parsed_rows.into_iter().take(max_branches) {
+        let has_upstream = row.upstream.is_some();
+        let (ahead, behind) =
+            branch_ahead_behind(&repository.worktree_root, &row.oid, row.upstream.as_deref())?;
+        let last_commit = last_commit_metadata(&repository.worktree_root, &row.oid)?;
+        branches.push(json!({
+            "name": row.name,
+            "ref": row.ref_name,
+            "oid": row.oid,
+            "current": repository.branch.as_deref() == Some(row.name.as_str()),
+            "upstream": row.upstream,
+            "hasUpstream": has_upstream,
+            "ahead": ahead,
+            "behind": behind,
+            "lastCommit": last_commit
+        }));
+    }
+
+    Ok(json!({
+        "schemaVersion": SCHEMA_VERSION,
+        "status": "ok",
+        "operation": "branch_inventory",
+        "path": path_value(&target),
+        "repository": repository_value(&target, &repository),
+        "currentBranch": repository.branch,
+        "detachedHead": repository.detached_head,
+        "headOid": repository.head_oid,
+        "branches": branches,
+        "evidence": {
+            "bounded": true,
+            "sort": "refname",
+            "branchLimit": max_branches,
+            "branchCount": branch_count,
+            "returnedBranchCount": branches.len(),
+            "branchesTruncated": branches_truncated,
+            "branchBytesLimit": max_branch_bytes,
+            "branchBytesRetained": ref_output.stdout.len(),
+            "branchBytesTruncated": ref_output.stdout_truncated,
+            "metadataCharLimit": MAX_BRANCH_METADATA_CHARS,
+            "resourceRefs": [],
+            "networkPolicy": "none",
+            "remotePolicy": "local refs only",
+            "mutationBoundary": "read-only"
         }
     }))
 }
@@ -765,6 +859,114 @@ fn staged_index_tree_oid_with_limit(
         root.insert(&record[tab_index + 1..], mode, oid)?;
     }
     hash_tree_node(worktree_root, &root).map(Some)
+}
+
+fn parse_branch_ref_rows(
+    bytes: &[u8],
+    truncated: bool,
+) -> Result<Vec<BranchRefRow>, CapabilityError> {
+    let complete = complete_branch_ref_lines(bytes, truncated);
+    let mut rows = Vec::new();
+    for line in complete.split(|byte| *byte == b'\n') {
+        if line.is_empty() {
+            continue;
+        }
+        let text = String::from_utf8_lossy(line);
+        let fields = text.split('\t').collect::<Vec<_>>();
+        if fields.len() != 4 {
+            return Err(internal("parse git branch ref inventory row"));
+        }
+        let ref_name = fields[0].to_owned();
+        let name = fields[1].to_owned();
+        let oid = fields[2].to_owned();
+        let upstream = if fields[3].is_empty() {
+            None
+        } else {
+            Some(fields[3].to_owned())
+        };
+        if !ref_name.starts_with("refs/heads/") || name.is_empty() || oid.is_empty() {
+            return Err(internal("parse git branch ref inventory fields"));
+        }
+        rows.push(BranchRefRow {
+            ref_name,
+            name,
+            oid,
+            upstream,
+        });
+    }
+    Ok(rows)
+}
+
+fn complete_branch_ref_lines(bytes: &[u8], truncated: bool) -> &[u8] {
+    if !truncated || bytes.last() == Some(&b'\n') {
+        return bytes;
+    }
+    bytes
+        .iter()
+        .rposition(|byte| *byte == b'\n')
+        .map(|index| &bytes[..=index])
+        .unwrap_or(&[])
+}
+
+fn branch_ahead_behind(
+    worktree_root: &Path,
+    oid: &str,
+    upstream: Option<&str>,
+) -> Result<(Option<u64>, Option<u64>), CapabilityError> {
+    let Some(upstream) = upstream else {
+        return Ok((None, None));
+    };
+    let revision_range = format!("{oid}...{upstream}");
+    let counts = git_optional_stdout(
+        worktree_root,
+        [
+            "rev-list",
+            "--left-right",
+            "--count",
+            revision_range.as_str(),
+        ],
+    )?;
+    Ok(parse_ahead_behind(counts.as_deref()))
+}
+
+fn last_commit_metadata(worktree_root: &Path, oid: &str) -> Result<Value, CapabilityError> {
+    let output = git_output_bounded(
+        worktree_root,
+        [
+            "-c",
+            "core.pager=cat",
+            "show",
+            "--quiet",
+            "--no-show-signature",
+            "--format=%cI%x00%an%x00%s",
+            oid,
+        ],
+        MAX_BRANCH_METADATA_CHARS * 4,
+    )?;
+    if !output.status.success() {
+        return Ok(Value::Null);
+    }
+    let fields = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .map(|field| String::from_utf8_lossy(field).trim().to_owned())
+        .collect::<Vec<_>>();
+    let committed_at = fields.first().cloned().filter(|value| !value.is_empty());
+    let author = fields.get(1).cloned().filter(|value| !value.is_empty());
+    let subject = fields.get(2).cloned().filter(|value| !value.is_empty());
+    Ok(json!({
+        "committedAt": committed_at,
+        "authorName": author.map(|value| truncate_chars(&value, MAX_BRANCH_METADATA_CHARS)),
+        "subject": subject.map(|value| truncate_chars(&value, MAX_BRANCH_METADATA_CHARS)),
+        "truncated": output.stdout_truncated
+    }))
+}
+
+struct BranchRefRow {
+    ref_name: String,
+    name: String,
+    oid: String,
+    upstream: Option<String>,
 }
 
 fn hash_tree_node(worktree_root: &Path, node: &TreeNode) -> Result<String, CapabilityError> {
