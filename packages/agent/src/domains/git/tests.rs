@@ -165,6 +165,36 @@ async fn diff_reports_staged_unstaged_and_truncation() {
 }
 
 #[tokio::test]
+async fn diff_status_preflight_is_bounded_independently_of_diff_text() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base");
+    write_file(repo.path(), "tracked.txt", "changed\n");
+    for index in 0..7_000 {
+        write_file(
+            repo.path(),
+            &format!("untracked-status-preflight-{index:05}.txt"),
+            "x\n",
+        );
+    }
+
+    let value = diff(repo.path(), json!({"maxDiffBytes": 64})).await;
+    assert_eq!(value["evidence"]["statusPreflightLimitBytes"], 200 * 1024);
+    assert_eq!(value["evidence"]["statusPreflightTruncated"], true);
+    assert!(
+        value["evidence"]["statusPreflightRetainedBytes"]
+            .as_u64()
+            .unwrap()
+            <= 200 * 1024
+    );
+    assert_eq!(value["diffs"]["unstaged"]["limitBytes"], 64);
+    assert_eq!(value["summary"]["unstagedCount"], 1);
+    assert_eq!(value["summary"]["untrackedCount"], 7_000);
+}
+
+#[tokio::test]
 async fn diff_does_not_invoke_configured_textconv_driver() {
     let repo = tempdir().expect("repo");
     init_repo(repo.path());

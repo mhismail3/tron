@@ -89,7 +89,7 @@ fn diff_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, Ca
     let max_diff_bytes = optional_usize(payload, "maxDiffBytes")?
         .unwrap_or(DEFAULT_DIFF_BYTES)
         .min(MAX_DIFF_BYTES);
-    let status_output = git_output(
+    let status_output = git_status_counts_bounded(
         &repository.worktree_root,
         [
             "status",
@@ -99,8 +99,8 @@ fn diff_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, Ca
             "--",
             repository.pathspec.as_str(),
         ],
+        MAX_STATUS_BYTES,
     )?;
-    let summary = parse_status(&status_output.stdout);
     let staged = git_diff_text(
         &repository.worktree_root,
         true,
@@ -121,8 +121,8 @@ fn diff_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, Ca
         "operation": "diff",
         "path": path_value(&target),
         "repository": repository_value(&target, &repository),
-        "dirty": summary.dirty(),
-        "summary": summary.summary_value(),
+        "dirty": status_output.counts.dirty(),
+        "summary": status_output.counts.summary_value(),
         "diffs": {
             "staged": {
                 "text": staged.0,
@@ -137,6 +137,9 @@ fn diff_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, Ca
         },
         "truncated": truncated,
         "evidence": {
+            "statusPreflightTruncated": status_output.stdout_truncated,
+            "statusPreflightLimitBytes": MAX_STATUS_BYTES,
+            "statusPreflightRetainedBytes": status_output.stdout.len(),
             "resourceRefs": []
         }
     }))
@@ -173,6 +176,27 @@ fn git_diff_text(
         String::from_utf8_lossy(&output.stdout).into_owned(),
         output.stdout_truncated,
     ))
+}
+
+fn git_status_counts_bounded<I, S>(
+    dir: &Path,
+    args: I,
+    stdout_limit: usize,
+) -> Result<BoundedGitStatusCounts, CapabilityError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = git_status_command_bounded(dir, args, stdout_limit)?;
+    if output.status.success() {
+        return Ok(output);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(CapabilityError::Custom {
+        code: "GIT_COMMAND_FAILED".to_owned(),
+        message: truncate_chars(stderr.trim(), 1_000),
+        details: None,
+    })
 }
 
 fn repository_facts(target: &ResolvedTarget) -> Result<RepositoryFacts, CapabilityError> {
@@ -323,23 +347,6 @@ where
     })
 }
 
-fn git_output<I, S>(dir: &Path, args: I) -> Result<std::process::Output, CapabilityError>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    let output = git_command(dir, args)?;
-    if output.status.success() {
-        return Ok(output);
-    }
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(CapabilityError::Custom {
-        code: "GIT_COMMAND_FAILED".to_owned(),
-        message: truncate_chars(stderr.trim(), 1_000),
-        details: None,
-    })
-}
-
 fn git_output_bounded<I, S>(
     dir: &Path,
     args: I,
@@ -424,6 +431,55 @@ where
     })
 }
 
+fn git_status_command_bounded<I, S>(
+    dir: &Path,
+    args: I,
+    stdout_limit: usize,
+) -> Result<BoundedGitStatusCounts, CapabilityError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut child = Command::new("git")
+        .arg("--no-optional-locks")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| internal(format!("run git: {error}")))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| internal("capture git stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| internal("capture git stderr"))?;
+    let stdout_reader = thread::spawn(move || read_status_counts_bounded(stdout, stdout_limit));
+    let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_GIT_STDERR_BYTES));
+    let status = child
+        .wait()
+        .map_err(|error| internal(format!("wait for git: {error}")))?;
+    let (stdout, stdout_truncated, counts) = stdout_reader
+        .join()
+        .map_err(|_| internal("join git stdout reader"))?
+        .map_err(|error| internal(format!("read git stdout: {error}")))?;
+    let (stderr, _stderr_truncated) = stderr_reader
+        .join()
+        .map_err(|_| internal("join git stderr reader"))?
+        .map_err(|error| internal(format!("read git stderr: {error}")))?;
+    Ok(BoundedGitStatusCounts {
+        status,
+        stdout,
+        stdout_truncated,
+        stderr,
+        counts,
+    })
+}
+
 fn read_bounded<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<(Vec<u8>, bool)> {
     let mut stored = Vec::with_capacity(max_bytes.min(8 * 1024));
     let mut truncated = false;
@@ -447,11 +503,56 @@ fn read_bounded<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<(Ve
     Ok((stored, truncated))
 }
 
+fn read_status_counts_bounded<R: Read>(
+    mut reader: R,
+    max_bytes: usize,
+) -> std::io::Result<(Vec<u8>, bool, GitStatusCounts)> {
+    let mut stored = Vec::with_capacity(max_bytes.min(8 * 1024));
+    let mut truncated = false;
+    let mut counts = GitStatusCounts::default();
+    let mut record = Vec::new();
+    let mut skip_next_path = false;
+    let mut buffer = [0u8; 8 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = max_bytes.saturating_sub(stored.len());
+        if remaining == 0 {
+            truncated = true;
+        } else {
+            let take = read.min(remaining);
+            stored.extend_from_slice(&buffer[..take]);
+            if take < read {
+                truncated = true;
+            }
+        }
+        for byte in &buffer[..read] {
+            if *byte == 0 {
+                counts.push_record(&record, &mut skip_next_path);
+                record.clear();
+            } else {
+                record.push(*byte);
+            }
+        }
+    }
+    Ok((stored, truncated, counts))
+}
+
 struct BoundedGitOutput {
     status: ExitStatus,
     stdout: Vec<u8>,
     stdout_truncated: bool,
     stderr: Vec<u8>,
+}
+
+struct BoundedGitStatusCounts {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stdout_truncated: bool,
+    stderr: Vec<u8>,
+    counts: GitStatusCounts,
 }
 
 fn parse_status(bytes: &[u8]) -> GitStatusSummary {
@@ -508,6 +609,57 @@ fn complete_status_records(bytes: &[u8], truncated: bool) -> &[u8] {
         .rposition(|byte| *byte == 0)
         .map(|index| &bytes[..=index])
         .unwrap_or(&[])
+}
+
+#[derive(Default)]
+struct GitStatusCounts {
+    staged: usize,
+    unstaged: usize,
+    untracked: usize,
+    conflicted: usize,
+}
+
+impl GitStatusCounts {
+    fn push_record(&mut self, record: &[u8], skip_next_path: &mut bool) {
+        if *skip_next_path {
+            *skip_next_path = false;
+            return;
+        }
+        if record.len() < 3 {
+            return;
+        }
+        let x = record[0] as char;
+        let y = record[1] as char;
+        if x == '?' && y == '?' {
+            self.untracked += 1;
+            return;
+        }
+        if is_conflicted(x, y) {
+            self.conflicted += 1;
+        }
+        if x != ' ' && x != '?' {
+            self.staged += 1;
+        }
+        if y != ' ' && y != '?' {
+            self.unstaged += 1;
+        }
+        if matches!(x, 'R' | 'C') {
+            *skip_next_path = true;
+        }
+    }
+
+    fn dirty(&self) -> bool {
+        self.staged > 0 || self.unstaged > 0 || self.untracked > 0 || self.conflicted > 0
+    }
+
+    fn summary_value(&self) -> Value {
+        json!({
+            "stagedCount": self.staged,
+            "unstagedCount": self.unstaged,
+            "untrackedCount": self.untracked,
+            "conflictedCount": self.conflicted
+        })
+    }
 }
 
 #[derive(Default)]
