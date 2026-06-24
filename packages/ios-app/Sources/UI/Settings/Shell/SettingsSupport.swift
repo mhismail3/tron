@@ -8,6 +8,7 @@ import SwiftUI
 enum SettingsLabels {
     static let providers = "Providers"
     static let connectToNewServer = "Connect to a new server"
+    static let repairActiveServerPairing = "Re-pair this server"
     static let connectedServerUnavailableDescription = ConnectionStatusCopy.connectedServerUnavailableDescription
     static let loadingServerSettingsDescription = "Loading server settings from the active server."
 }

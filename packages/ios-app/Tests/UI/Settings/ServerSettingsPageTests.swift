@@ -9,8 +9,46 @@ struct ServerSettingsPageTests {
     @Test("server settings copy matches current labels")
     func serverSettingsCopyMatchesCurrentLabels() {
         #expect(SettingsLabels.connectToNewServer == "Connect to a new server")
+        #expect(SettingsLabels.repairActiveServerPairing == "Re-pair this server")
         #expect(SettingsLabels.connectedServerUnavailableDescription == "The connected server can't be reached.")
         #expect(SettingsLabels.loadingServerSettingsDescription == "Loading server settings from the active server.")
+    }
+
+    @Test("server onboarding CTAs keep label and prefill semantics aligned")
+    func serverOnboardingCTAsKeepLabelAndPrefillSemanticsAligned() throws {
+        let mainSection = try source(pathComponents: [
+            "Sources",
+            "UI",
+            "Settings",
+            "Shell",
+            "SettingsView+MainSection.swift",
+        ])
+        let serverUnavailableCard = try section(
+            in: mainSection,
+            from: "var serverUnavailableCard: some View {",
+            to: "func mainSettingsDestinationTileContent("
+        )
+
+        #expect(serverUnavailableCard.contains("Button(SettingsLabels.repairActiveServerPairing)"))
+        #expect(serverUnavailableCard.contains("startOnboarding(prefill: dependencies.pairedServerStore.activeServer)"))
+        #expect(!serverUnavailableCard.contains("Button(SettingsLabels.connectToNewServer)"))
+
+        let connectionPage = try source(pathComponents: [
+            "Sources",
+            "UI",
+            "Settings",
+            "Pages",
+            "ConnectionSettingsPage.swift",
+        ])
+        let onboardRow = try section(
+            in: connectionPage,
+            from: "private var onboardRow: some View {",
+            to: "private func manageServerMenu("
+        )
+
+        #expect(onboardRow.contains("startOnboarding(prefill: nil)"))
+        #expect(onboardRow.contains("Text(SettingsLabels.connectToNewServer)"))
+        #expect(!onboardRow.contains("dependencies.pairedServerStore.activeServer"))
     }
 
     @Test("server page diagnostics copy stays local and minimal")
@@ -72,6 +110,31 @@ struct ServerSettingsPageTests {
         #expect(posted == [
             ServerOnboardingLauncher.serverIdUserInfoKey: "studio",
         ])
+    }
+
+    private func source(pathComponents: [String]) throws -> String {
+        var url = try projectRoot()
+        for component in pathComponents {
+            url.appendPathComponent(component)
+        }
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    private func projectRoot() throws -> URL {
+        let fileURL = URL(fileURLWithPath: #filePath)
+        return fileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func section(in source: String, from start: String, to end: String) throws -> String {
+        guard let startRange = source.range(of: start),
+              let endRange = source[startRange.upperBound...].range(of: end) else {
+            throw NSError(domain: "ServerSettingsPageTests", code: 1)
+        }
+        return String(source[startRange.lowerBound..<endRange.lowerBound])
     }
 
     @Test("deferred onboarding launch preserves nil prefill until settings dismiss")

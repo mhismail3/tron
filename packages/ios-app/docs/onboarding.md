@@ -217,7 +217,9 @@ labels and top-right icons. When the paired server is unavailable or
 server-backed settings have not loaded, the launcher collapses to a two-column
 App and Server row, hides Providers, Agent, and Context, and shows the
 server-unavailable card immediately below that row before the destructive
-actions.
+actions. That card labels its active-server-prefilled pairing action as
+`Re-pair this server`; `Connect to a new server` remains reserved for launches
+that do not prefill a paired server.
 Device-only preferences such as onboarding completion,
 paired servers, active server id, appearance, shell presentation, and bearer
 tokens live in iOS `UserDefaults`/Keychain. When the user switches Macs, the app

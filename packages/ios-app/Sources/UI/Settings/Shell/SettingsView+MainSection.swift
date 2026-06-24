@@ -147,7 +147,7 @@ extension SettingsView {
                     .buttonStyle(.borderedProminent)
                     .tint(.tronEmerald)
 
-                    Button(SettingsLabels.connectToNewServer) {
+                    Button(SettingsLabels.repairActiveServerPairing) {
                         startOnboarding(prefill: dependencies.pairedServerStore.activeServer)
                     }
                     .buttonStyle(.bordered)
