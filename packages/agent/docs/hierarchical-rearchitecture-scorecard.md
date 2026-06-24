@@ -92,6 +92,7 @@ hard limit.
 | `packages/agent/src/domains/jobs/tests.rs` | jobs test owner | Rust hard limit 900 LOC | 986 LOC | Split lifecycle, output, timeout, and reconciliation regression tests into focused modules before adding more jobs coverage. | accepted_budget |
 | `packages/agent/src/domains/git/tests.rs` | git test owner | Rust hard limit 900 LOC | 932 LOC | Split read-only Git status/diff tests from index-mutation/resource/replay tests before adding more source-control coverage. | accepted_budget |
 | `packages/agent/src/domains/worker_lifecycle/tests.rs` | worker lifecycle test owner | Rust hard limit 900 LOC | 967 LOC | Split manifest/package tests from lifecycle launch/reconciliation tests before adding more worker runtime coverage. | accepted_budget |
+| `packages/agent/tests/baseline_pre_restoration_closure_invariants.rs` | BPRC invariant owner | Rust hard limit 900 LOC | 906 LOC | Split scorecard/inventory parsing helpers and Phase 2 lineage assertions into folder-backed modules before extending BPRC closure guards. | accepted_budget |
 | `packages/agent/tests/ios_affordance_restoration_map_invariants.rs` | IARM invariant owner | Rust hard limit 900 LOC | 1106 LOC | Split helper parsing, physical-device guards, queue/phase anchors, and APNs defer tests into submodules before extending IARM guards. | accepted_budget |
 
 ## Static Gates
