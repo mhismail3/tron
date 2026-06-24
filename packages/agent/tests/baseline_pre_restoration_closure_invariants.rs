@@ -147,12 +147,13 @@ fn assert_phase_two_restored_domain_lineage(
     bprc_feature_id: &str,
     bprc_surface_kind: &str,
     phase_two_slice_label: &str,
+    expected_status: &str,
     required_inventory_text: &[&str],
     required_evidence_text: &[&str],
 ) {
     assert!(
         domain_root.join(domain).exists(),
-        "approved Phase 2 domain root missing: {domain}"
+        "Phase 2 domain root missing: {domain}"
     );
 
     assert_bprc_feature_backlog_lineage(bprc_feature_id, bprc_surface_kind);
@@ -163,10 +164,10 @@ fn assert_phase_two_restored_domain_lineage(
         .find(|line| line.starts_with(&format!("{phase_two_row_id}\t")))
         .unwrap_or_else(|| panic!("missing Phase 2 inventory row {phase_two_row_id}"));
     assert!(
-        inventory_row.contains("current_baseline")
+        inventory_row.contains(expected_status)
             && inventory_row.contains(bprc_feature_id)
             && inventory_row.contains(domain),
-        "{domain} must have explicit current-baseline Phase 2 inventory lineage to {bprc_feature_id}: {inventory_row}"
+        "{domain} must have explicit {expected_status} Phase 2 inventory lineage to {bprc_feature_id}: {inventory_row}"
     );
     for required in required_inventory_text {
         assert!(
@@ -455,6 +456,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-01",
         "capability_discovery",
         "Slice 1: Catalog, Discovery, And Capability Evidence",
+        "current_baseline",
         &[
             "Slice 1 implemented native `catalog_discovery::{search,inspect,conformance_report}`",
             "catalog_discovery package",
@@ -474,6 +476,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-09",
         "approval",
         "Slice 2: Authority, Approval, Safety, And Freshness",
+        "current_baseline",
         &[
             "Slice 2 implements durable `approval_request` and `approval_decision` resources",
             "approval package",
@@ -492,6 +495,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-03",
         "process_jobs",
         "Slice 5A: Durable Jobs And Process Lifecycle",
+        "current_baseline",
         &[
             "Slice 5A implements durable non-interactive jobs",
             "jobs package",
@@ -510,15 +514,16 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-05",
         "worktree_git",
         "Slice 6: Git, Worktrees, And Source Control",
+        "pending_review",
         &[
-            "Slice 6A restores read-only Git status",
+            "Slice 6A implementation candidate restores read-only Git status",
             "git_status",
             "git_diff",
-            "current_baseline",
+            "pending_review",
         ],
         &[
-            "Added a narrow read-only `domains/git` package",
-            "with `git::status` and",
+            "Candidate adds a narrow read-only `domains/git` package",
+            "with `git::status`",
             "`git::diff` backend contracts",
         ],
     );
@@ -591,6 +596,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "BPRC-FEATURE-10",
             "context_rules_memory",
             "Slice 3: Memory Foundation And Engine Contract",
+            "current_baseline",
             &[
                 "Slice 3 implements the memory domain",
                 "memory contract",

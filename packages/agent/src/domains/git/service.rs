@@ -1,6 +1,8 @@
 use std::ffi::OsStr;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, ExitStatus, Stdio};
+use std::thread;
 
 use serde_json::{Value, json};
 
@@ -12,6 +14,8 @@ use super::types::{
     DEFAULT_DIFF_BYTES, DEFAULT_STATUS_BYTES, MAX_DIFF_BYTES, MAX_STATUS_BYTES, RepositoryFacts,
     ResolvedTarget, SCHEMA_VERSION,
 };
+
+const MAX_GIT_STDERR_BYTES: usize = 4 * 1024;
 
 pub(crate) async fn status_value(
     invocation: &Invocation,
@@ -40,7 +44,7 @@ fn status_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, 
     let max_status_bytes = optional_usize(payload, "maxStatusBytes")?
         .unwrap_or(DEFAULT_STATUS_BYTES)
         .min(MAX_STATUS_BYTES);
-    let status_output = git_output(
+    let status_output = git_output_bounded(
         &repository.worktree_root,
         [
             "status",
@@ -50,10 +54,13 @@ fn status_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, 
             "--",
             repository.pathspec.as_str(),
         ],
+        max_status_bytes,
     )?;
-    let summary = parse_status(&status_output.stdout);
-    let (status_porcelain, status_truncated) =
-        truncate_utf8(&status_output.stdout, max_status_bytes);
+    let summary = parse_status(complete_status_records(
+        &status_output.stdout,
+        status_output.stdout_truncated,
+    ));
+    let status_porcelain = String::from_utf8_lossy(&status_output.stdout).into_owned();
 
     Ok(json!({
         "schemaVersion": SCHEMA_VERSION,
@@ -69,7 +76,7 @@ fn status_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, 
         "conflicted": summary.conflicted,
         "evidence": {
             "statusPorcelainV1Z": status_porcelain,
-            "statusTruncated": status_truncated,
+            "statusTruncated": status_output.stdout_truncated,
             "statusLimitBytes": max_status_bytes,
             "resourceRefs": []
         }
@@ -147,14 +154,25 @@ fn git_diff_text(
             "--cached",
             "--no-ext-diff",
             "--no-color",
+            "--no-textconv",
             "--",
             pathspec,
         ]
     } else {
-        vec!["diff", "--no-ext-diff", "--no-color", "--", pathspec]
+        vec![
+            "diff",
+            "--no-ext-diff",
+            "--no-color",
+            "--no-textconv",
+            "--",
+            pathspec,
+        ]
     };
-    let output = git_output(worktree_root, args)?;
-    Ok(truncate_utf8(&output.stdout, max_bytes))
+    let output = git_output_bounded(worktree_root, args, max_bytes)?;
+    Ok((
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        output.stdout_truncated,
+    ))
 }
 
 fn repository_facts(target: &ResolvedTarget) -> Result<RepositoryFacts, CapabilityError> {
@@ -322,6 +340,27 @@ where
     })
 }
 
+fn git_output_bounded<I, S>(
+    dir: &Path,
+    args: I,
+    stdout_limit: usize,
+) -> Result<BoundedGitOutput, CapabilityError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let output = git_command_bounded(dir, args, stdout_limit)?;
+    if output.status.success() {
+        return Ok(output);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Err(CapabilityError::Custom {
+        code: "GIT_COMMAND_FAILED".to_owned(),
+        message: truncate_chars(stderr.trim(), 1_000),
+        details: None,
+    })
+}
+
 fn git_command<I, S>(dir: &Path, args: I) -> Result<std::process::Output, CapabilityError>
 where
     I: IntoIterator<Item = S>,
@@ -335,6 +374,84 @@ where
         .env("GIT_TERMINAL_PROMPT", "0")
         .output()
         .map_err(|error| internal(format!("run git: {error}")))
+}
+
+fn git_command_bounded<I, S>(
+    dir: &Path,
+    args: I,
+    stdout_limit: usize,
+) -> Result<BoundedGitOutput, CapabilityError>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut child = Command::new("git")
+        .arg("--no-optional-locks")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| internal(format!("run git: {error}")))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| internal("capture git stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| internal("capture git stderr"))?;
+    let stdout_reader = thread::spawn(move || read_bounded(stdout, stdout_limit));
+    let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_GIT_STDERR_BYTES));
+    let status = child
+        .wait()
+        .map_err(|error| internal(format!("wait for git: {error}")))?;
+    let (stdout, stdout_truncated) = stdout_reader
+        .join()
+        .map_err(|_| internal("join git stdout reader"))?
+        .map_err(|error| internal(format!("read git stdout: {error}")))?;
+    let (stderr, _stderr_truncated) = stderr_reader
+        .join()
+        .map_err(|_| internal("join git stderr reader"))?
+        .map_err(|error| internal(format!("read git stderr: {error}")))?;
+    Ok(BoundedGitOutput {
+        status,
+        stdout,
+        stdout_truncated,
+        stderr,
+    })
+}
+
+fn read_bounded<R: Read>(mut reader: R, max_bytes: usize) -> std::io::Result<(Vec<u8>, bool)> {
+    let mut stored = Vec::with_capacity(max_bytes.min(8 * 1024));
+    let mut truncated = false;
+    let mut buffer = [0u8; 8 * 1024];
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        let remaining = max_bytes.saturating_sub(stored.len());
+        if remaining == 0 {
+            truncated = true;
+            continue;
+        }
+        let take = read.min(remaining);
+        stored.extend_from_slice(&buffer[..take]);
+        if take < read {
+            truncated = true;
+        }
+    }
+    Ok((stored, truncated))
+}
+
+struct BoundedGitOutput {
+    status: ExitStatus,
+    stdout: Vec<u8>,
+    stdout_truncated: bool,
+    stderr: Vec<u8>,
 }
 
 fn parse_status(bytes: &[u8]) -> GitStatusSummary {
@@ -380,6 +497,17 @@ fn parse_status(bytes: &[u8]) -> GitStatusSummary {
         };
     }
     summary
+}
+
+fn complete_status_records(bytes: &[u8], truncated: bool) -> &[u8] {
+    if !truncated || bytes.last() == Some(&0) {
+        return bytes;
+    }
+    bytes
+        .iter()
+        .rposition(|byte| *byte == 0)
+        .map(|index| &bytes[..=index])
+        .unwrap_or(&[])
 }
 
 #[derive(Default)]
@@ -468,15 +596,6 @@ fn parse_ahead_behind(raw: Option<&str>) -> (Option<u64>, Option<u64>) {
 
 fn trim_stdout(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).trim().to_owned()
-}
-
-fn truncate_utf8(bytes: &[u8], max: usize) -> (String, bool) {
-    let truncated = bytes.len() > max;
-    let end = bytes.len().min(max);
-    (
-        String::from_utf8_lossy(&bytes[..end]).into_owned(),
-        truncated,
-    )
 }
 
 fn truncate_chars(value: &str, max: usize) -> String {
