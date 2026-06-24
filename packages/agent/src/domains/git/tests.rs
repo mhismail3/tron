@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::Command;
 
@@ -156,7 +157,54 @@ async fn diff_reports_staged_unstaged_and_truncation() {
     assert_eq!(value["summary"]["unstagedCount"], 1);
     assert_eq!(value["diffs"]["staged"]["truncated"], true);
     assert_eq!(value["diffs"]["unstaged"]["truncated"], true);
+    assert_eq!(value["diffs"]["staged"]["limitBytes"], 20);
+    assert_eq!(value["diffs"]["unstaged"]["limitBytes"], 20);
+    assert!(value["diffs"]["staged"]["text"].as_str().unwrap().len() <= 20);
+    assert!(value["diffs"]["unstaged"]["text"].as_str().unwrap().len() <= 20);
     assert_eq!(value["truncated"], true);
+}
+
+#[tokio::test]
+async fn diff_does_not_invoke_configured_textconv_driver() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    let sentinel = repo.path().join("textconv-ran");
+    let script = repo.path().join("textconv-spy.sh");
+    fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\ntouch {}\nprintf 'textconv output\\n'\n",
+            shell_quote(&sentinel)
+        ),
+    )
+    .expect("write textconv script");
+    let mut permissions = fs::metadata(&script)
+        .expect("script metadata")
+        .permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&script, permissions).expect("script permissions");
+    write_file(repo.path(), ".gitattributes", "tracked.txt diff=spy\n");
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(
+        repo.path(),
+        ["config", "diff.spy.textconv", script.to_str().unwrap()],
+    );
+    git(repo.path(), ["add", ".gitattributes", "tracked.txt"]);
+    commit(repo.path(), "base");
+    write_file(repo.path(), "tracked.txt", "changed\n");
+
+    let value = diff(repo.path(), json!({"maxDiffBytes": 1024})).await;
+    assert_eq!(value["diffs"]["unstaged"]["truncated"], false);
+    assert!(
+        value["diffs"]["unstaged"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("changed")
+    );
+    assert!(
+        !sentinel.exists(),
+        "git diff invoked configured textconv despite --no-textconv"
+    );
 }
 
 #[tokio::test]
@@ -393,4 +441,8 @@ fn git_stdout<const N: usize>(path: &Path, args: [&str; N]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn shell_quote(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
 }

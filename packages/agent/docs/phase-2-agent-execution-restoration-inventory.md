@@ -31,6 +31,8 @@ Statuses:
 - `planned`: accepted in this Phase 2 roadmap, no feature implementation.
 - `current_baseline`: already present as primitive substrate or Phase 1 local
   affordance.
+- `pending_review`: implementation candidate exists on a branch but is not yet
+  independently accepted or integrated into the current mainline baseline.
 - `rejected_for_phase2_shape`: old shape rejected, future concept may return
   through another row.
 
@@ -61,11 +63,12 @@ skills/rules/hooks, memory, MCP, scheduling, program execution,
 database/events/settings, dependency restoration, and APNs/device notification
 capability.
 
-Slice 6A changes only the git/worktree row: read-only repository status and
-bounded staged/unstaged diff evidence are now current baseline behavior through
-`domains/git` and `capability::execute` operation values. Worktree graph
-resources, staging, commits, merges, rebases, pushes, PR handoff, conflict
-resolution, and native iOS SourceChanges remain planned future sub-slices.
+Slice 6A changes only the git/worktree row as a pending-review implementation
+candidate: read-only repository status and bounded staged/unstaged diff
+evidence are branch-scoped candidate behavior through `domains/git` and
+`capability::execute` operation values. Worktree graph resources, staging,
+commits, merges, rebases, pushes, PR handoff, conflict resolution, and native
+iOS SourceChanges remain planned future sub-slices.
 
 It also maps every BPRC backlog row:
 
