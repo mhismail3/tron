@@ -24,11 +24,10 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`origin/main@743b783976b0515372e5525c0c1671f5dbec37bd`
-(`docs: shape slice 6b git index handoff`). That line includes the accepted
-Slice 6A read-only Git/worktree foundation, its acceptance documentation after
-the restoration consolidation checkpoint `455e0c8a5` and tracker update
-`705199d37`, and the Slice 6B discovery/handoff packet.
+`origin/main@d70486e8a8dbac3723ae0efca3fef816af12a612`
+(`docs: record slice 6b acceptance`). That line includes accepted Slice 6A
+read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
+stage/unstage, and mainline closeout documentation for both sub-slices.
 
 Checkout note: this update started after `git fetch --prune origin` from a
 Codex discovery branch created at the same commit as `origin/main`. The
@@ -45,15 +44,20 @@ Completed Phase 2 restoration slices at this baseline:
   commits, patch evidence, and truncated-snapshot hardening;
 - Slice 5A: durable jobs and process lifecycle foundation with accepted race
   hardening;
-- Slice 6A: read-only Git/worktree status and bounded diff evidence.
+- Slice 6A: read-only Git/worktree status and bounded diff evidence;
+- Slice 6B: index-only Git stage/unstage with resource and lifecycle evidence.
 
 Current next action:
-**Review Phase 2 Slice 6B: Git Index Mutation Foundation** on
-`codex/phase-2-slice-6b-git-index-mutation`. Slice 6B is the first mutating
-source-control sub-slice and remains limited to explicit Git index
-stage/unstage operations with resource-backed evidence; commits, branch
-changes, merge/rebase/reset, push/PR, worktree graph resources, conflict
-resolution workflows, and native SourceChanges UI remain deferred.
+**Implement Phase 2 Slice 6C: Git Commit Evidence Foundation** from current
+`origin/main`. Slice 6C is the next narrow source-control sub-slice after
+accepted Slice 6B. It should create one commit from the already-staged index on
+the current named branch with resource-backed evidence, `git.lifecycle` stream
+evidence, expected HEAD, expected index-tree freshness, explicit reason,
+idempotency, and hook/editor/signing suppression. Branch creation/checkout/
+deletion, detached-HEAD commits, merge/rebase/reset, stash/clean,
+fetch/pull/push, PR handoff, conflict resolution workflows, worktree graph
+resources, public API expansion, production deployment behavior, and native
+SourceChanges UI remain deferred.
 
 ## Scope
 
@@ -852,6 +856,163 @@ resource refs and `git.lifecycle` stream evidence, verify bounded before/after
 evidence, and update static guards so only `git_stage` and `git_unstage` are
 newly admitted mutating Git operations.
 
+#### Selected Slice 6C Discovery Packet
+
+Exact next slice to implement: **Slice 6C: Git Commit Evidence Foundation**.
+
+Why this slice is next: accepted Slice 6B can prepare the Git index but still
+cannot turn reviewed staged changes into durable repository history. A staged
+index commit is the smallest coherent follow-up because it completes the local
+source-control loop without introducing branch management, conflict
+resolution, remote network behavior, PR handoff, worktree graph resources, or
+native iOS UI.
+
+Core versus modular split:
+
+- Core/harness: reuse the existing `capability::execute` primitive, authority
+  grants, idempotency ledger, resource kernel, stream substrate, trace/replay
+  refs, and bounded Git command helpers. Add only generic resource definition
+  constants/schema wiring needed for a new `git_commit` evidence resource.
+- Modular package: keep behavior in `domains/git`. Add a backend
+  `git::commit` contract and provider-visible `git_commit` operation value
+  through `capability::execute`; do not add a second model-facing tool or
+  public `/engine` API.
+- Mutation boundary: `git_commit` may create exactly one commit from the
+  already-staged index and advance the current named branch from
+  `expectedHead` to the new commit. It must not auto-stage files, edit
+  worktree content, checkout/create/delete branches, merge, rebase, reset,
+  stash, clean, fetch, pull, push, or create PRs.
+- Freshness boundary: `git_commit` must require both `expectedHead` and an
+  expected staged index tree value. The slice should expose the staged index
+  tree in existing read evidence, such as `git_status` or `git_diff`, before
+  requiring it for commits. This prevents committing a staged set that changed
+  after review even when HEAD is unchanged.
+- Branch boundary: require a named branch and reject detached HEAD in Slice 6C.
+  Detached commit support waits for an explicit worktree/branch policy slice.
+- Hook/network boundary: commit execution must be non-interactive and must not
+  run repository hooks, editors, pagers, credential prompts, GPG signing, or
+  network-dependent helpers. The operation should use command/env/config
+  controls that make those exclusions deterministic and covered by tests where
+  practical.
+
+Required request shape:
+
+- `operation: "git_commit"`;
+- non-empty bounded `message`;
+- `expectedHead`;
+- `expectedIndexTree`;
+- non-empty `reason`;
+- explicit caller idempotency key through the existing provider boundary;
+- optional bounded evidence controls such as `maxStatusBytes` and
+  `maxDiffBytes`.
+
+Required resource/event shape:
+
+- Add a `git_commit` resource kind with schema id
+  `tron.resource.git_commit.v1`.
+- Resource payload should include schema version, state, repository facts,
+  branch, parent head, expected head, expected index tree, actual tree, commit
+  oid, bounded commit message metadata, reason, authority, before/after
+  status/diff evidence, trace refs, replay refs, idempotency, revision, and
+  created timestamp.
+- Resource lifecycle states should start with `committed` and `archived`.
+- Publish a `git.lifecycle` event such as `git.commit_created` pointing to the
+  `git_commit` resource and carrying commit oid, parent head, branch, reason,
+  authority grant id, and actor id.
+- Compensation is manual-only: reset/revert/cherry-pick workflows remain
+  future source-control slices.
+
+Likely implementation files/domains to inspect or touch:
+
+- `packages/agent/src/domains/git/{mod.rs,contract.rs,handlers.rs,service.rs,types.rs,tests.rs}`;
+- likely new `packages/agent/src/domains/git/commit.rs` or a carefully split
+  mutation module if line budgets require it;
+- `packages/agent/src/domains/capability/operations/{git.rs,mod.rs}`;
+- `packages/agent/src/domains/capability/contract.rs`;
+- `packages/agent/src/engine/durability/resources/{types.rs,git_definitions.rs}`;
+- `packages/agent/src/domains/model/providers/openai/message_converter/{mod.rs,tests.rs}`;
+- static guard inventories and tests under `packages/agent/tests/`, especially
+  BPRC, DESI, HRA, PCC, TPC, TMB, SACB, DRC, and IARM as touched;
+- README capability and Git/source-control sections plus this scorecard,
+  inventory, evidence manifest, and retrospective tracker closeout records.
+
+Deterministic tests required:
+
+- successful commit from staged changes advances the current branch from
+  `expectedHead` and records the new commit oid, parent oid, tree oid,
+  resource ref, and stream cursor;
+- unstaged and untracked worktree changes remain uncommitted and unchanged;
+- idempotency replay with the same caller key returns the original commit
+  resource/cursor and does not create a second commit;
+- stale `expectedHead` rejects before commit;
+- stale `expectedIndexTree` rejects before commit;
+- empty staged index rejects before commit;
+- detached HEAD rejects before commit;
+- conflicted/unmerged index rejects before commit;
+- non-repo, nested-repo misuse, absolute path/traversal/root escape, missing
+  trusted working-directory metadata, empty message, and empty reason reject;
+- commit hooks/editor/signing/pager/credential prompts are suppressed or
+  fail-closed without running user-controlled hook behavior;
+- bounded before/after status and diff evidence reports truncation flags;
+- provider schema and instruction tests expose `git_commit` while continuing
+  to reject `git_merge`, `git_rebase`, `git_reset`, `git_push`,
+  `git_checkout`, and other later source-control operation names;
+- resource-definition tests cover `git_commit` schema required fields,
+  lifecycle states, link relations, and required capabilities.
+
+Explicit non-goals:
+
+- no auto-staging, unstaging, file edits, conflict resolution, or index repair;
+- no branch creation, checkout, deletion, rename, or detached-HEAD commit
+  support;
+- no merge, rebase, reset, revert, cherry-pick, stash, clean, fetch, pull,
+  push, remote configuration, or PR handoff;
+- no worktree graph resource acquisition/release or repo import/tree
+  visualization;
+- no native iOS SourceChanges UI or public `/engine` DTO expansion;
+- no production deployment behavior and no `tron deploy`;
+- no hidden approval policy changes. Package-wide risky-action approvals wait
+  for a later policy decision, though the resource/event evidence should be
+  sufficient for future approval checks.
+
+Review focus and risks:
+
+- Git commit is a branch-state mutation, so review should verify that the only
+  branch movement is the current named branch advancing from `expectedHead` to
+  the new commit.
+- Repository hooks are arbitrary code. The slice must prove hooks and other
+  interactive/signing paths cannot run under provider-triggered commits.
+- Resource creation happens after an external Git side effect unless the
+  implementation designs a stronger two-phase evidence path. Review should
+  inspect failure semantics carefully so successful commits remain discoverable
+  even if evidence writing fails.
+- Expected HEAD alone is insufficient. The expected index-tree guard is
+  critical and should be tested as a staged-content race.
+- Commit messages can contain sensitive user text. Evidence should store only
+  bounded message fields needed for audit and avoid logging full content
+  outside resource payloads.
+
+iOS validation: no native SourceChanges UI is part of Slice 6C. Run iOS tests
+only if generic runtime/resource rendering changes.
+
+Docs/static updates for implementation: README current operations and
+Git/source-control paragraph, Phase 2 scorecard/evidence/inventory, resource
+definition docs/tests, provider instruction tests, BPRC current-baseline
+wording, retrospective tracker, and any static inventory rows for touched
+source files.
+
+Validation commands:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`;
+- `cargo check --manifest-path packages/agent/Cargo.toml`;
+- `cargo test --manifest-path packages/agent/Cargo.toml git -- --nocapture`;
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`;
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture`;
+- targeted static gates for touched inventories: BPRC, DESI, HRA, PCC, TPC,
+  TMB, SACB, DRC, and IARM as applicable;
+- `scripts/personal-info-guard.sh`;
+- `git diff --check`.
+
 iOS validation: no native SourceChanges UI is part of Slice 6B.
 
 Docs/static updates: README capabilities, Phase 2 scorecard/evidence/inventory,
@@ -1206,13 +1367,10 @@ Implementation slices add:
 
 ## Closure Verdict
 
-Phase 2 remains source-backed and proceeds one slice at a time. At the
-2026-06-24 Slice 6A acceptance update, the implementation starts from
-`origin/main@470e73897b885264aec0a6c9692e54eb2a186ef1` and is integrated into
-`main` after independent review thread `019ef942-3a15-74c0-8230-7065c4e0000d`
-accepted it. Slices 1 through 4, Slice 5A, and Slice 6A are represented on the
-consolidated mainline, and the explicit fresh-implementation order authorizes
-Slice 6A despite the missing historical source. The next Phase 2 action is
-fresh discovery for the next Slice 6 sub-slice, likely mutating Git/worktree
-operations, while preserving the Slice 5A and 6A constraints and non-goals
-above.
+Phase 2 remains source-backed and proceeds one slice at a time. As of
+`origin/main@d70486e8a8dbac3723ae0efca3fef816af12a612`, Slices 1 through 4,
+Slice 5A, Slice 6A, and Slice 6B are represented on the consolidated mainline
+after independent acceptance. The next Phase 2 implementation action is
+Slice 6C: Git Commit Evidence Foundation, starting fresh from current
+`origin/main` and preserving the Slice 6C scope, freshness checks, hook
+suppression requirements, and non-goals above.

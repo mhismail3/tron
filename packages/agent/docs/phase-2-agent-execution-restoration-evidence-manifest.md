@@ -579,6 +579,40 @@ Mainline closeout validation before push:
 - `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture`
   passed.
 
+## Phase 2 Slice 6C Discovery: Git Commit Evidence Foundation
+
+Discovery branch: `codex/phase-2-slice-6c-discovery`.
+Baseline:
+`origin/main@d70486e8a8dbac3723ae0efca3fef816af12a612`
+(`docs: record slice 6b acceptance`).
+
+Selected next implementation slice:
+**Phase 2 Slice 6C: Git Commit Evidence Foundation**.
+
+Discovery outcome:
+
+- Current `main` and canonical Phase 2 docs are sufficient to define a fresh
+  implementation slice after accepted Slice 6B.
+- The next safe source-control step is `git_commit`: create one commit from the
+  already-staged index on the current named branch, with expected HEAD,
+  expected index-tree freshness, explicit reason, caller idempotency,
+  resource-backed `git_commit` evidence, and `git.lifecycle` stream evidence.
+- The slice must expose/read the staged index tree before commit so a caller can
+  bind commit execution to the exact reviewed staged content, not merely to the
+  current HEAD.
+- The slice must suppress or fail closed around repository hooks, editors,
+  pagers, credential prompts, GPG signing, and network-dependent helper paths.
+- Detached HEAD commits, branch create/checkout/delete, merge/rebase/reset,
+  revert/cherry-pick, stash/clean, fetch/pull/push, PR handoff, conflict
+  resolution workflows, worktree graph resources, public API expansion,
+  production deploy behavior, and native iOS SourceChanges remain deferred.
+
+Required implementation evidence is specified in the scorecard's
+`Selected Slice 6C Discovery Packet`: request fields, `git_commit` resource
+schema, lifecycle event shape, likely files, deterministic tests, docs/static
+updates, risks, and validation commands. This discovery section records no
+runtime behavior implementation.
+
 ## Validation Log
 
 | Command | Result | Evidence |

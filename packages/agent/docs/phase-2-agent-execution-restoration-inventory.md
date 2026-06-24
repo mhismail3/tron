@@ -70,9 +70,13 @@ stage/unstage through explicit `git_stage`/`git_unstage` operations over
 trusted-root relative paths, with idempotency, mutation reason, expected HEAD
 preconditions, bounded before/after evidence, `git_index_change` resources, and
 `git.lifecycle` stream events.
-Worktree graph resources, commits, branch operations, merges/rebases/resets,
-pushes/PRs, conflict resolution workflows, and native SourceChanges remain
-deferred.
+The next selected source-control sub-slice is Slice 6C Git Commit Evidence
+Foundation: one commit from the already-staged index on the current named
+branch, guarded by expected HEAD, expected index tree, idempotency, reason,
+resource evidence, lifecycle events, and hook/editor/signing suppression.
+Worktree graph resources, branch operations, merges/rebases/resets,
+stash/clean, fetch/pull/push, PR handoff, conflict resolution workflows, and
+native SourceChanges remain deferred.
 
 It also maps every BPRC backlog row:
 
@@ -192,3 +196,6 @@ is intentionally narrow: explicit paths, resource-backed
 evidence, lifecycle stream evidence, expected HEAD freshness, idempotency, and
 static guards proving no commit, branch, merge/rebase/reset, push/PR, worktree
 graph, conflict resolution workflow, or native SourceChanges surface was added.
+The next implementation handoff is Slice 6C: add `git_commit` as staged-index
+commit creation evidence only, with detached HEAD, branch management, remotes,
+conflicts, and native UI still out of scope.
