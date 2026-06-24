@@ -1,44 +1,43 @@
 # Onboarding (iOS sheet)
 
-> Reference companion to `.claude/rules/onboarding.md` (load-on-demand
-> rule consumed by Claude). This file is the human-readable narrative;
-> when in doubt, the rule is normative.
+> Last verified: 2026-06-18 (IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IOSTC-3 pairing/auth custody and connection robustness; PCC-6 iOS source consolidation).
 
-The iOS app always opens to the normal dashboard after initialization.
-Fresh installs present a medium-detent onboarding sheet above the
-dashboard when `@AppStorage("onboardingComplete")` is false. The sheet
-is swipeable: welcome, install Tailscale on iPhone, install Tron Server
-on Mac, connect, then a short settings setup flow for workspace,
-credentials, services, and default model. Setup pages are locked until
-the Mac connection succeeds. The sheet follows the app's
-standard Liquid Glass chrome: hidden drag handle, principal toolbar
-title, and a compact floating progress-dot indicator that sits low at the
-bottom of the sheet.
+The iOS app always opens to the normal session shell after initialization.
+`TronMobileApp` presents one large-detent onboarding sheet for first-run setup,
+Server-page pairing, and pairing URLs. The sheet is a paged flow: welcome,
+install Tailscale on iPhone, install Tron Server on Mac, connect, then a short
+settings setup flow for workspace, credentials, services, and default model.
+Setup pages are locked until the Mac connection succeeds. The sheet follows the
+app's standard Liquid Glass chrome: hidden drag handle, principal toolbar title,
+Back/Next controls in the top sheet toolbar for paged navigation, and a compact
+floating progress-dot indicator that sits low at the bottom of the sheet.
 
-The three preparation pages set expectations before pairing. Welcome
-introduces Tron as a local, private AI agent controlled from iPhone, then
-shows rows for installing the Mac server, connecting privately with
-Tailscale, and pairing with the Mac installation QR code. The Tailscale page
-explains that the iPhone must have Tailscale VPN set up on the user's private
-tailnet, then points the user to download Tailscale, sign into the same
-account used on the Mac, and return once connected. The Mac installer page
-explains that Tron runs in the background on the user's Mac, then shows
-full-width actions with `Copy Link` above `Open Releases page`.
+The three preparation pages stay terse and action-oriented. Welcome frames the
+task as pairing this iPhone with the Mac running Tron, then shows rows for
+running the local Mac server, using the private Tailscale network, and scanning
+or pasting the pairing code. The Tailscale page asks for the same Tailscale
+account on iPhone and Mac, then points the user to install, sign in, and return
+connected. The Mac installer page tells the user to install Tron on the Mac and
+use the pairing screen shown by the Mac app, then shows full-width actions with
+`Copy Link` above `Open Releases page`.
 
-When Settings launches onboarding for a new server, the same sheet opens
+When Settings launches onboarding for a new server, the same large sheet opens
 directly on the connect step with a top-left dismiss button and still requires
 a QR scan, pasted pairing link, or manual token before Connect is enabled. When
 Settings launches onboarding from an already paired server row, the connect page
 is prefilled from the local paired-server record and may use that server's
-Keychain token for the probe. Editing the prefilled host or port turns it back
-into a fresh pairing attempt, so the user must provide a new token. First-run
-onboarding remains non-dismissable until the user completes setup or explicitly
-leaves from a Settings-launched sheet. Settings hosts dismiss their active
-settings sheet before posting the onboarding launch, so nested settings pages do
-not unwind one at a time before the connect sheet appears. The unauthorized
-connection-status repair action uses the same app-level onboarding launch
-notification and targets the active paired server directly instead of depending
-on a nested Settings page listener.
+Keychain token for the probe. If a QR scan or manual token refresh still targets
+the same host and port, successful pairing closes the Settings-launched sheet
+after settings hydration instead of replaying workspace/provider/model setup.
+Editing the prefilled host or port turns it back into a fresh pairing attempt,
+so the user must provide a new token and setup remains available afterward.
+First-run onboarding remains non-dismissable until setup completes; Settings
+and already-complete pairing URL launches are dismissible. Settings hosts
+dismiss their active settings sheet before posting the onboarding launch, so
+nested settings pages do not unwind one at a time before the connect sheet
+appears. The unauthorized connection-status repair action uses the same
+app-level onboarding launch notification and targets the active paired server
+directly instead of depending on a nested Settings page listener.
 The setup pages are not rendered until a fresh pairing attempt succeeds, so
 opening onboarding from Settings cannot reveal stale settings from the currently
 active server.
@@ -57,7 +56,7 @@ WindowGroup.task
 
 readyContent()
   ├─ always mounts ContentView
-  └─ sheet(isPresented: !onboardingComplete)
+  └─ presentOnboarding(first-run / Server settings / pairing URL)
        └─ OnboardingFlowView
             ├─ WelcomeOnboardingPage
             ├─ InstallTailscaleOnboardingPage
@@ -65,13 +64,13 @@ readyContent()
             └─ PairingStep
                  ├─ scan QR / optionally reveal manual entry
                  ├─ validate host / port / token / server name
-                 ├─ probe ws://host:port/ws with Authorization: Bearer token
-                 ├─ send system.ping
+                 ├─ probe ws://host:port/engine with Authorization: Bearer token
+                 ├─ send system::ping
                  ├─ persist Keychain bearer + local paired-server store
-                 ├─ rebuild RPC client for the paired server
+                 ├─ rebuild engine client for the paired server
                  ├─ load settings.get from the paired server
                  ├─ best-effort load auth.get for masked credential status
-                 └─ advance to setup pages
+                 └─ advance to setup pages, or close after existing-server repair
             ├─ WorkspaceSetupOnboardingPage
             ├─ ProviderSetupOnboardingPage(Anthropic)
             ├─ ProviderSetupOnboardingPage(OpenAI)
@@ -85,8 +84,8 @@ Pairing URLs (`tron://pair?host=…&port=…&token=…[&label=…]`) are
 handled in three places:
 
 - `TronMobileApp.onOpenURL` accepts QR/deep-link launches, fills the
-  pairing form, jumps to the connect page, and presents the sheet at the
-  large detent.
+  pairing form, jumps to the connect page, and presents through the same
+  large-detent onboarding presenter without mutating first-run completion state.
 - `QRCodeScannerSheet` scans the Mac QR code, parses the same URL shape,
   fills the connect page, and starts the same Connect validation after
   the camera sheet dismisses.
@@ -122,10 +121,11 @@ PairingPersistor.plan(payload, existing)
 side effects:
   1. pairedServerTokenStore.setToken(...)
   2. PairedServerStore.replace(..., activeId:)
-  3. rebuild RPC client for the active paired server
+  3. rebuild engine client for the active paired server
   4. connect and load settings.get from the paired server
   5. best-effort load auth.get for masked credential status
-  6. advance to the workspace/settings setup pages
+  6. advance to the workspace/settings setup pages, or close after
+     same-server Settings repair
 ```
 
 If step 4 fails, onboarding rolls back the local paired-server store and
@@ -136,12 +136,18 @@ server only owns server runtime settings and secrets.
 
 ## Settings Setup Pages
 
-After pairing succeeds, onboarding continues with optional setup pages:
+After first-run or new-server pairing succeeds, onboarding continues with
+optional setup pages. Settings repair of an already paired server skips these
+pages only when the successful pairing payload still matches that server's
+host and port.
 
 - **Default workspace** reuses `WorkspaceSelector` from the new-session
-  flow and writes `server.defaultWorkspace`. The selected path also
-  updates the local quick-chat workspace so long-press plus uses it
-  immediately.
+  flow and writes `server.defaultWorkspace`. The selector offers the
+  current default workspace, recent session workspaces when supplied by
+  the caller, server-returned home suggestions, paired-Mac directory browsing,
+  a hidden-folder toggle, and inline folder creation through the narrow
+  `filesystem` workspace-browser domain. The selected path also updates the
+  local quick-chat workspace so long-press plus uses it immediately.
 - **Anthropic** and **OpenAI** reuse `OAuthLoginSheet` for OAuth and
   expose a named API-key field for users who prefer keys. Saved OAuth
   credentials render as one compact status row: status icon, account label,
@@ -154,13 +160,15 @@ After pairing succeeds, onboarding continues with optional setup pages:
 - **Search services** exposes API-key rows for Brave Search and Exa.
   Saved service keys use the same right-aligned masked preview layout as
   optional model providers.
-- **Default model** reuses `ModelPickerSheet`, then writes both
-  `server.defaultModel` and `memory.retainModel`.
+- **Default model** reuses `ModelPickerSheet`, then writes
+  `server.defaultModel`. The separate `server.defaultProvider` control lives in
+  Agent settings because it is a retained server setting, not a credential.
 
 Pairing hydrates an in-memory `OnboardingSetupSnapshot` from the newly active
 server before the setup pages unlock. Existing server preferences from
 `settings.get` prefill workspace and model choices, so pairing a forgotten but
-still-running Mac can be completed by reviewing each page and swiping forward.
+still-running Mac can be completed by reviewing each page and using Next or the
+page gesture to advance.
 Existing provider and service credentials from `auth.get` are shown
 only as server-returned labels and masked hints; secrets are never copied into
 iOS storage. If `auth.get` fails after `settings.get` succeeds, onboarding
@@ -174,7 +182,7 @@ the current page swaps from empty entry state to a saved credential card with
 the masked label/hint before the user moves forward. The OAuth sheet also
 reports its returned `AuthState` to callers; Settings uses the same callback so
 the model providers page refreshes even if the server event arrives later.
-Settings provider forms keep their local input until the auth RPC returns an
+Settings provider forms keep their local input until the auth engine protocol returns an
 updated `AuthState`; failed saves leave labels, API keys, and Google Cloud
 fields visible for correction or retry.
 The Providers settings sheet starts with a dynamic summary card computed from
@@ -193,7 +201,7 @@ small red X icon button. The Services group uses a stronger spaced header than
 individual provider rows so the sheet reads as two clear sections: model
 providers first, then search services.
 
-Provider credentials are written through `auth.*` RPCs, so secrets land in
+Provider credentials are written through `auth.*` engine invocations, so secrets land in
 `auth.json`, not profile settings.
 
 Server settings and app settings are intentionally separate. Server-backed
@@ -201,29 +209,28 @@ settings live as sparse `[settings]` overrides in
 `~/.tron/profiles/user/profile.toml`; they remain behind the server-backed
 settings grid tiles and are enabled only after the active server connects and
 `settings.get` returns real values. The main Settings sheet starts at the medium detent and
-uses a 3x3 launcher grid: App, Server, and Providers for settings surfaces;
-Agent, Context, and MCP for agent behavior; then Clear Prompt History, Archive
-All Sessions, and Reset All Settings as the red destructive row with no separate
-Danger Zone header. All nine tiles share the same compact icon size; the green
+uses a compact launcher grid: App, Server, and Providers for settings surfaces;
+Agent and Context for primitive agent behavior; then Clear Prompt History,
+Archive All Sessions, and Reset All Settings as the red destructive row with no
+separate Danger Zone header. All tiles share the same compact icon size; the green
 surface and behavior tiles are slightly taller with left-aligned emerald titles,
 top-right icons, and short softer descriptive copy. A thin muted divider separates
 those destination rows from the destructive row, which sizes to its two-line red
 labels and top-right icons. When the paired server is unavailable or
 server-backed settings have not loaded, the launcher collapses to a two-column
-App and Server row, hides Providers, Agent, Context, and MCP, and shows the
+App and Server row, hides Providers, Agent, and Context, and shows the
 server-unavailable card immediately below that row before the destructive
 actions.
 Device-only preferences such as onboarding completion,
-paired servers, active server id, appearance, dashboard presentation, and bearer
+paired servers, active server id, appearance, shell presentation, and bearer
 tokens live in iOS `UserDefaults`/Keychain. When the user switches Macs, the app
 clears server-backed controls immediately and reloads them from the newly active
 Mac.
 The Servers sheet starts with a dynamic summary card, then groups settings as:
 header, one or more glass containers with control titles, and optional
-description text below each container. Transcription, paired-device token
-enforcement, and update checks all live in this sheet because they are active
-Mac server settings; update controls sit at the bottom after security under one
-Updates header.
+description text below each container. Its minimal Diagnostics section opens
+the local Logs sheet; feedback remains the persistent Settings footer action.
+Product update checks are not part of the primitive iOS shell.
 When the active paired server is unreachable, the Servers sheet keeps paired
 server rows visible for local switching and removal, turns the summary card
 warning-yellow with `<server name> not available`, and hides server-backed
@@ -231,10 +238,9 @@ controls including the `Server Controls` header until the Mac reconnects and
 `settings.get` succeeds. The selected unreachable row overrides stale
 `Connected` metadata with `Unavailable`; its ellipsis menu is reduced to Retry
 and Forget. The main Settings sheet also disables destructive server-coupled
-actions while in this unavailable state: Clear Prompt History and Archive All
-Sessions are unavailable, while Reset All Settings remains available for local
-app preferences.
-The dashboard also surfaces a deduplicated banner for the active paired server
+actions while in this unavailable state: Archive All Sessions is unavailable,
+while Reset All Settings remains available for local app preferences.
+The shell also surfaces a deduplicated banner for the active paired server
 when connection state moves to disconnected, reconnecting, failed, or
 unauthorized. Disconnected and reconnecting banners are warning-yellow,
 failed banners are error-red, and all retryable connection banners auto-dismiss
@@ -244,35 +250,29 @@ sticky because the stored credential must be repaired. The banner appears as a
 compact centered pill near the top safe area, sizes to its content up to a
 fixed maximum width, and clears automatically on reconnect. Settings keeps its
 own persistent warning cards so users still see the unavailable state even after
-dismissing the banner. Normal reconnect does one short two-second automatic
-probe before settling into the not-connected/Retry state; only deploy-aware
-server restart handling keeps trying because the server has announced it is
-coming back.
+dismissing the banner. Normal reconnect keeps issuing short foreground probes
+at a bounded cadence until the server returns, the app backgrounds, or
+authentication fails, so shell and chat controls recover after a dev-server
+rebuild without requiring every screen to own retry logic.
 The Agent and Context settings sheets follow the same top summary-card pattern
-and divide server settings by ownership. Agent owns execution and lifecycle
-behavior: quick-session defaults, hook model/error/context budgets,
-built-in/user hooks, prompt-history capture/retention controls, queued-message
-delivery, and protected branches. Hooks and Prompt Library each use one grouped
-header, but each setting keeps its own glass container and description unless
-the controls are intentionally coupled. The user hook directory card keeps the
-folder label and `~/.tron/hooks/` value in one status row, then shows a small
-empty-state placeholder until a hook-listing API exists. Context owns
-context-management behavior: individual compaction controls, memory
-auto-retain, retain model, and standalone rule discovery. Hooks and Prompt
-Library no longer appear as separate Settings destinations; their
-non-destructive controls live inside Agent. Clearing prompt history is a
-destructive server action and therefore lives in the main Settings destructive
-grid row before Archive All Sessions and Reset All Settings.
+and divide server settings by ownership. Agent owns the retained quick-session
+defaults that still exist in the current settings schema: provider, model, and
+workspace. Each setting keeps its own glass container and description unless
+controls are intentionally coupled.
+Context owns retained context-management behavior: compaction only. Deleted
+plugin-source, hook, rules, memory-retain, prompt-history, and prompt-library
+controls must not reappear as separate Settings destinations or destructive
+actions.
 
 `URLSessionPairingProbe` opens a one-shot WebSocket upgrade with the
-pairing bearer token and sends `system.ping`. The server emits a
+pairing bearer token and sends `system::ping`. The server emits a
 `connection.established` event immediately after upgrade, so the probe
-matches the `system.ping` response by request id and ignores unrelated
+matches the `system::ping` response by request id and ignores unrelated
 event frames before classifying:
 
 - `.ok` when the server replies successfully.
 - `.unauthorized` when the WebSocket upgrade gets HTTP 401.
-- `.incompatible` when `system.ping` returns
+- `.incompatible` when `system::ping` returns
   `CLIENT_VERSION_UNSUPPORTED`.
 - `.unreachable` for DNS, timeout, refused connection, and malformed
   responses.
@@ -363,7 +363,7 @@ pairing an iPad must not silently mark an iPhone as paired.
 
 Every `PairedServer.id` has a Keychain slot at
 `com.tron.mobile.bearer.<serverId>`. The onboarding sheet writes or refreshes
-the token; `WebSocketService` reads it when building the
+the token; `EngineConnection` reads it when building the
 `Authorization: Bearer …` upgrade header.
 
 Keychain accessibility is `accessibleAfterFirstUnlock` so background
@@ -375,39 +375,42 @@ unlocked at least once.
 ## File Map
 
 ```
-Sources/App/TronMobileApp.swift
-  └── owns the dashboard + onboarding sheet presentation
+Sources/App/Lifecycle/TronMobileApp.swift
+  └── owns the shell + onboarding sheet presentation
 
-Sources/Views/Onboarding/
+Sources/UI/Onboarding/
   ├── OnboardingFlowView.swift
   ├── OnboardingShell.swift
   ├── QRCodeScannerSheet.swift
   └── Steps/
+      ├── SetupStepComponents.swift
       ├── SetupSteps.swift
       └── PairingStep.swift
 
-Sources/Services/Onboarding/
+Sources/Support/Pairing/Onboarding/
   ├── PairingStepValidator.swift
   ├── PairingProbe.swift
   └── PairingPersistor.swift
 
-Sources/Services/PairingURLParser.swift
-Sources/Services/Settings/PairedServerStore.swift
-Sources/Services/Storage/PairedServerTokenStore.swift
-Sources/Services/Storage/KeychainItem.swift
-Sources/Extensions/Binding+PasteAware.swift
-Sources/ViewModels/State/OnboardingSetupSnapshot.swift
-Sources/ViewModels/State/OnboardingState.swift
+Sources/Support/Pairing/PairingURLParser.swift
+Sources/Support/Pairing/PairedServerStore.swift
+Sources/Support/Storage/PairedServerTokenStore.swift
+Sources/Support/Storage/KeychainItem.swift
+Sources/Support/Foundation/SwiftUI/Binding+PasteAware.swift
+Sources/Session/Chat/State/OnboardingSetupSnapshot.swift
+Sources/Session/Chat/State/OnboardingState.swift
 
-Tests/Onboarding/
+Tests/UI/Onboarding/
   ├── OnboardingStateTests.swift
+  └── BindingPasteAwareTests.swift
+
+Tests/Support/Pairing/
   ├── PairingPersistorTests.swift
   ├── PairingProbeTests.swift
   ├── PairingValidationTests.swift
-  ├── PairingURLParserTests.swift
-  └── BindingPasteAwareTests.swift
+  └── PairingURLParserTests.swift
 
-Tests/Services/
+Tests/Support/Storage/
   ├── PairedServerStoreTests.swift
   └── PairedServerTokenStoreTests.swift
 ```

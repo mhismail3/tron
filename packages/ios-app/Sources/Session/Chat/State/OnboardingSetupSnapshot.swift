@@ -1,0 +1,200 @@
+import Foundation
+
+/// Server-derived setup values shown after pairing during iOS onboarding.
+///
+/// The snapshot is intentionally memory-only. Pairing state remains iOS-local,
+/// while server settings/auth remain authoritative on the Mac. If a user forgot
+/// a server locally and later pairs it again, this snapshot lets the remaining
+/// onboarding pages reflect the server's existing profile-backed settings and
+/// masked `auth.json` state without copying those files into iOS storage.
+struct OnboardingSetupSnapshot {
+    static let defaultApiKeyLabel = "Default"
+
+    private(set) var serverId: String?
+    private(set) var settings: ServerSettingsSnapshot?
+    private(set) var authState: AuthSnapshot?
+    private(set) var authLoadError: String?
+
+    var defaultWorkspace: String {
+        settings?.defaultWorkspace ?? AppConstants.defaultWorkspace
+    }
+
+    var defaultModel: String {
+        settings?.defaultModel ?? ""
+    }
+
+    mutating func hydrate(
+        serverId: String,
+        settings: ServerSettingsSnapshot,
+        authState: AuthSnapshot?,
+        authLoadError: String? = nil
+    ) {
+        self.serverId = serverId
+        self.settings = settings
+        self.authState = authState
+        self.authLoadError = authLoadError
+    }
+
+    mutating func reset() {
+        serverId = nil
+        settings = nil
+        authState = nil
+        authLoadError = nil
+    }
+
+    mutating func refreshAuth(_ authState: AuthSnapshot) {
+        self.authState = authState
+        authLoadError = nil
+    }
+
+    func providerSummary(for providerId: String) -> OnboardingCredentialSummary? {
+        guard let info = authState?.providers[providerId] else { return nil }
+
+        if let active = info.activeCredential {
+            if active.isOAuth {
+                let account = info.accounts.first { $0.label == active.label }
+                return OnboardingCredentialSummary(
+                    title: oauthTitle(for: providerId, isExpired: account?.isExpired == true),
+                    detail: active.label,
+                    isExpired: account?.isExpired == true,
+                    kind: .oauth,
+                    credentialLabel: active.label
+                )
+            }
+
+            if active.isApiKey {
+                let key = info.apiKeys.first { $0.label == active.label }
+                let keyHint = key?.keyHint ?? info.apiKeyHint
+                return OnboardingCredentialSummary(
+                    title: "API key saved",
+                    detail: joinedDetail(active.label, keyHint),
+                    isExpired: false,
+                    kind: .apiKey,
+                    credentialLabel: active.label,
+                    keyPreview: keyHint
+                )
+            }
+        }
+
+        if let account = info.accounts.first {
+            return OnboardingCredentialSummary(
+                title: oauthTitle(for: providerId, isExpired: account.isExpired),
+                detail: account.label,
+                isExpired: account.isExpired,
+                kind: .oauth,
+                credentialLabel: account.label
+            )
+        }
+
+        if let key = info.apiKeys.first {
+            return OnboardingCredentialSummary(
+                title: "API key saved",
+                detail: joinedDetail(key.label, key.keyHint),
+                isExpired: false,
+                kind: .apiKey,
+                credentialLabel: key.label,
+                keyPreview: key.keyHint
+            )
+        }
+
+        if info.hasApiKey {
+            return OnboardingCredentialSummary(
+                title: "API key saved",
+                detail: info.apiKeyHint ?? "Saved on this server",
+                isExpired: false,
+                kind: .apiKey,
+                keyPreview: info.apiKeyHint
+            )
+        }
+
+        if providerId == "google" {
+            let hasGoogleConfig = info.hasClientId || info.hasClientSecret || info.projectId != nil
+            if hasGoogleConfig {
+                return OnboardingCredentialSummary(
+                    title: "Google Cloud configured",
+                    detail: info.projectId ?? "OAuth client saved on this server",
+                    isExpired: false,
+                    kind: .configuration
+                )
+            }
+        }
+
+        return nil
+    }
+
+    func serviceSummary(for serviceId: String) -> OnboardingCredentialSummary? {
+        guard let info = authState?.services[serviceId], info.hasApiKey else { return nil }
+        return OnboardingCredentialSummary(
+            title: "API key saved",
+            detail: info.apiKeyHint ?? "Saved on this server",
+            isExpired: false,
+            kind: .apiKey,
+            keyPreview: info.apiKeyHint
+        )
+    }
+
+    func preferredApiKeyLabel(for providerId: String) -> String {
+        guard let info = authState?.providers[providerId] else { return Self.defaultApiKeyLabel }
+        if let active = info.activeCredential, active.isApiKey {
+            return active.label
+        }
+        if let key = info.apiKeys.first {
+            return key.label
+        }
+        return Self.defaultApiKeyLabel
+    }
+
+    private func joinedDetail(_ label: String, _ hint: String?) -> String {
+        guard let hint, !hint.isEmpty else { return label }
+        return "\(label) - \(hint)"
+    }
+
+    private func oauthTitle(for providerId: String, isExpired: Bool) -> String {
+        let providerName = providerDisplayName(for: providerId)
+        return isExpired ? "\(providerName) needs reconnect" : "\(providerName) signed in"
+    }
+
+    private func providerDisplayName(for providerId: String) -> String {
+        switch providerId {
+        case "anthropic":
+            return "Anthropic"
+        case "openai-codex":
+            return "OpenAI"
+        case "google":
+            return "Google"
+        default:
+            return "Provider"
+        }
+    }
+}
+
+struct OnboardingCredentialSummary: Equatable {
+    let title: String
+    let detail: String
+    let isExpired: Bool
+    let kind: OnboardingCredentialKind
+    let credentialLabel: String?
+    let keyPreview: String?
+
+    init(
+        title: String,
+        detail: String,
+        isExpired: Bool,
+        kind: OnboardingCredentialKind,
+        credentialLabel: String? = nil,
+        keyPreview: String? = nil
+    ) {
+        self.title = title
+        self.detail = detail
+        self.isExpired = isExpired
+        self.kind = kind
+        self.credentialLabel = credentialLabel
+        self.keyPreview = keyPreview
+    }
+}
+
+enum OnboardingCredentialKind: Equatable {
+    case oauth
+    case apiKey
+    case configuration
+}

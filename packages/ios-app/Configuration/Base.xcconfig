@@ -3,7 +3,10 @@
 // Deployment
 IPHONEOS_DEPLOYMENT_TARGET = 26.0
 SWIFT_VERSION = 6.0
-TRON_FEEDBACK_EMAIL = tron@mhismail.com
+TRON_FEEDBACK_EMAIL =
+TRON_MAC_DOWNLOAD_URL = https:/$()/github.com/tron-owner/tron/releases
 
 // App info lives in project.yml and is generated from VERSION.env.
+// Local.xcconfig may override feedback and release URLs without committing
+// maintainer-specific identities.
 #include? "Local.xcconfig"

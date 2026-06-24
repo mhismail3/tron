@@ -3,9 +3,9 @@
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use tron::settings::db_path_policy::{
-    PRODUCTION_DB_FILENAME, production_db_dir_from_home, resolve_production_db_path_for_home,
-    validate_production_db_path_for_home,
+use tron::domains::settings::db_path_policy::{
+    PRODUCTION_DB_FILENAME, production_db_dir_from_tron_home,
+    resolve_production_db_path_for_tron_home, validate_production_db_path_for_tron_home,
 };
 
 fn repo_relative(path: &Path) -> String {
@@ -23,11 +23,11 @@ fn repo_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn setup_home() -> (tempfile::TempDir, PathBuf) {
+fn setup_tron_home() -> (tempfile::TempDir, PathBuf) {
     let dir = tempfile::tempdir().unwrap();
-    let home = dir.path().join("home");
-    std::fs::create_dir_all(&home).unwrap();
-    (dir, home)
+    let tron_home = dir.path().join(".tron-dev");
+    std::fs::create_dir_all(&tron_home).unwrap();
+    (dir, tron_home)
 }
 
 fn file_signature(path: &Path) -> (u64, SystemTime) {
@@ -62,12 +62,12 @@ fn collect_text_files(path: &Path, files: &mut Vec<PathBuf>) {
 }
 
 #[test]
-fn accepts_default_log_db() {
-    let (_tmp, home) = setup_home();
-    let expected_dir = production_db_dir_from_home(&home);
+fn accepts_default_tron_sqlite() {
+    let (_tmp, tron_home) = setup_tron_home();
+    let expected_dir = production_db_dir_from_tron_home(&tron_home);
     std::fs::create_dir_all(&expected_dir).unwrap();
 
-    let resolved = resolve_production_db_path_for_home(None, &home).unwrap();
+    let resolved = resolve_production_db_path_for_tron_home(None, &tron_home).unwrap();
     assert_eq!(
         resolved.file_name().and_then(std::ffi::OsStr::to_str),
         Some(PRODUCTION_DB_FILENAME)
@@ -79,13 +79,35 @@ fn accepts_default_log_db() {
 }
 
 #[test]
+fn resolved_tron_home_is_not_nested_under_dot_tron_again() {
+    let (_tmp, tron_home) = setup_tron_home();
+    let expected = tron_home
+        .join("internal")
+        .join("database")
+        .join(PRODUCTION_DB_FILENAME);
+
+    let resolved = resolve_production_db_path_for_tron_home(None, &tron_home).unwrap();
+
+    assert_eq!(resolved.file_name(), expected.file_name());
+    assert_eq!(
+        resolved.parent().unwrap(),
+        expected.parent().unwrap().canonicalize().unwrap()
+    );
+    assert!(
+        !resolved.to_string_lossy().contains(".tron-dev/.tron/"),
+        "isolated homes must not be forced back under production .tron: {}",
+        resolved.display()
+    );
+}
+
+#[test]
 fn rejects_alternate_filename() {
-    let (_tmp, home) = setup_home();
-    let expected_dir = production_db_dir_from_home(&home);
+    let (_tmp, tron_home) = setup_tron_home();
+    let expected_dir = production_db_dir_from_tron_home(&tron_home);
     std::fs::create_dir_all(&expected_dir).unwrap();
 
     let bad = expected_dir.join("wrong.db");
-    let err = validate_production_db_path_for_home(&bad, &home).unwrap_err();
+    let err = validate_production_db_path_for_tron_home(&bad, &tron_home).unwrap_err();
     assert!(err.to_string().contains(PRODUCTION_DB_FILENAME));
     assert!(!bad.exists());
 }
@@ -95,60 +117,61 @@ fn rejects_alternate_filename() {
 fn rejects_symlink_escape_path() {
     use std::os::unix::fs::symlink;
 
-    let (_tmp, home) = setup_home();
-    let expected_dir = production_db_dir_from_home(&home);
+    let (_tmp, tron_home) = setup_tron_home();
+    let expected_dir = production_db_dir_from_tron_home(&tron_home);
     std::fs::create_dir_all(&expected_dir).unwrap();
 
-    let outside = home.join("outside.db");
+    let outside = tron_home.join("outside.db");
     std::fs::write(&outside, "do-not-touch").unwrap();
     let outside_before = file_signature(&outside);
 
     let symlink_path = expected_dir.join(PRODUCTION_DB_FILENAME);
     symlink(&outside, &symlink_path).unwrap();
 
-    let err = validate_production_db_path_for_home(&symlink_path, &home).unwrap_err();
+    let err = validate_production_db_path_for_tron_home(&symlink_path, &tron_home).unwrap_err();
     assert!(err.to_string().contains("symlink"));
     assert_eq!(outside_before, file_signature(&outside));
 }
 
 #[test]
 fn rejected_path_does_not_create_or_modify_db_files() {
-    let (_tmp, home) = setup_home();
-    let expected_dir = production_db_dir_from_home(&home);
+    let (_tmp, tron_home) = setup_tron_home();
+    let expected_dir = production_db_dir_from_tron_home(&tron_home);
     std::fs::create_dir_all(&expected_dir).unwrap();
 
     let sentinel = expected_dir.join(PRODUCTION_DB_FILENAME);
     std::fs::write(&sentinel, "sentinel").unwrap();
     let sentinel_before = file_signature(&sentinel);
 
-    let bad_parent = home.join("other-dir");
+    let bad_parent = tron_home.join("other-dir");
     std::fs::create_dir_all(&bad_parent).unwrap();
     let rejected_path = bad_parent.join(PRODUCTION_DB_FILENAME);
-    let err = resolve_production_db_path_for_home(Some(rejected_path.clone()), &home).unwrap_err();
+    let err = resolve_production_db_path_for_tron_home(Some(rejected_path.clone()), &tron_home)
+        .unwrap_err();
     assert!(err.to_string().contains("only allows DBs under"));
     assert!(!rejected_path.exists());
     assert_eq!(sentinel_before, file_signature(&sentinel));
 }
 
 #[test]
-fn startup_migrations_only_touch_log_db() {
-    let (_tmp, home) = setup_home();
-    let expected_dir = production_db_dir_from_home(&home);
+fn startup_migrations_only_touch_tron_sqlite() {
+    let (_tmp, tron_home) = setup_tron_home();
+    let expected_dir = production_db_dir_from_tron_home(&tron_home);
     std::fs::create_dir_all(&expected_dir).unwrap();
 
     let untouched = expected_dir.join("other.db");
     std::fs::write(&untouched, "keep").unwrap();
     let untouched_before = file_signature(&untouched);
 
-    let db_path = resolve_production_db_path_for_home(None, &home).unwrap();
+    let db_path = resolve_production_db_path_for_tron_home(None, &tron_home).unwrap();
     let conn = rusqlite::Connection::open(&db_path).unwrap();
-    tron::events::run_migrations(&conn).unwrap();
+    tron::domains::session::event_store::run_migrations(&conn).unwrap();
     drop(conn);
 
     let db_meta = std::fs::metadata(&db_path).unwrap();
     assert!(
         db_meta.len() > 0,
-        "log.db should contain schema after migration"
+        "tron.sqlite should contain schema after migration"
     );
     assert_eq!(untouched_before, file_signature(&untouched));
 }
@@ -160,7 +183,6 @@ fn contributor_scripts_keep_runtime_artifacts_under_internal_run() {
         root.join("scripts/tron-lib.sh"),
         root.join("scripts/tron"),
         root.join("scripts/tron-cli"),
-        root.join("scripts/auto-deploy"),
     ];
 
     for script in scripts {
@@ -180,7 +202,7 @@ fn contributor_scripts_keep_runtime_artifacts_under_internal_run() {
 }
 
 #[test]
-fn legacy_tron_home_paths_are_absent() {
+fn retired_tron_home_paths_are_absent() {
     let root = repo_root();
     let scan_roots = [
         root.join("AGENTS.md"),
@@ -189,35 +211,36 @@ fn legacy_tron_home_paths_are_absent() {
         root.join("CONTRIBUTING.md"),
         root.join("packages/agent/defaults"),
         root.join("packages/agent/docs"),
-        root.join("packages/agent/skills"),
         root.join("packages/agent/src"),
         root.join("packages/ios-app/Sources"),
         root.join("packages/mac-app/Sources"),
         root.join("packages/mac-app/docs"),
         root.join("scripts"),
     ];
-    let old_patterns = [
-        "~/.tron/system/",
-        ".tron/system/",
-        "system/database",
-        "system/settings.json",
-        "system/auth.json",
-        "system/run",
-        "system/transcription",
-        "workspace/memory",
-        "workspace/renders",
-        "workspace/screenshots",
-        "~/.tron/settings",
-        "~/.tron/knowledge/",
-        "~/.tron/vault/",
-        "~/.tron/instructions",
-        "~/.tron/user",
-        "master-default",
-        "~/.tron/auto-update.pause",
-        "~/.tron/auto-deploy.pause",
-        "~/.tron/deploy.lock",
-        "~/.tron/auto-deploy.lock",
-        "~/.tron/tools/json-render",
+    let old_patterns = vec![
+        "~/.tron/system/".to_owned(),
+        ".tron/system/".to_owned(),
+        "system/database".to_owned(),
+        "system/settings.json".to_owned(),
+        "system/auth.json".to_owned(),
+        "system/run".to_owned(),
+        ["system/", "trans", "cription"].concat(),
+        "workspace/memory".to_owned(),
+        "workspace/artifacts".to_owned(),
+        "artifacts/renders".to_owned(),
+        "artifacts/screenshots".to_owned(),
+        "artifacts/exports".to_owned(),
+        "exports_dir".to_owned(),
+        "dirs::ARTIFACTS".to_owned(),
+        "dirs::EXPORTS".to_owned(),
+        "~/.tron/settings".to_owned(),
+        "~/.tron/knowledge/".to_owned(),
+        "~/.tron/vault/".to_owned(),
+        "~/.tron/instructions".to_owned(),
+        "~/.tron/user".to_owned(),
+        "master-default".to_owned(),
+        "~/.tron/deploy.lock".to_owned(),
+        concat!("~/.tron/", "to", "ols", "/json-render").to_owned(),
     ];
     let mut files = Vec::new();
     for scan_root in scan_roots {
@@ -232,7 +255,7 @@ fn legacy_tron_home_paths_are_absent() {
         let Ok(body) = std::fs::read_to_string(&file) else {
             continue;
         };
-        for pattern in old_patterns {
+        for pattern in &old_patterns {
             if body.contains(pattern) {
                 violations.push(format!("{relative}: contains {pattern}"));
             }
@@ -241,7 +264,7 @@ fn legacy_tron_home_paths_are_absent() {
 
     assert!(
         violations.is_empty(),
-        "old Tron Home paths must not appear in runtime, defaults, docs, skills, or scripts:\n{}",
+        "old Tron Home paths must not appear in runtime, defaults, docs, or scripts:\n{}",
         violations.join("\n")
     );
 }
@@ -250,11 +273,10 @@ fn legacy_tron_home_paths_are_absent() {
 fn runtime_does_not_use_global_active_profile_helpers() {
     let root = repo_root();
     let scan_roots = [
-        root.join("packages/agent/src/cron"),
-        root.join("packages/agent/src/llm"),
-        root.join("packages/agent/src/runtime"),
-        root.join("packages/agent/src/server"),
-        root.join("packages/agent/src/tools"),
+        root.join("packages/agent/src/domains/model/providers"),
+        root.join("packages/agent/src/domains/agent/loop"),
+        root.join("packages/agent/src/domains/agent/context"),
+        root.join("packages/agent/src/app"),
     ];
     let forbidden = [
         "active_execution_spec(",
@@ -269,7 +291,9 @@ fn runtime_does_not_use_global_active_profile_helpers() {
 
     let mut files = Vec::new();
     for scan_root in scan_roots {
-        collect_text_files(&scan_root, &mut files);
+        if scan_root.exists() {
+            collect_text_files(&scan_root, &mut files);
+        }
     }
 
     let mut violations = Vec::new();
@@ -293,26 +317,31 @@ fn runtime_does_not_use_global_active_profile_helpers() {
 }
 
 #[test]
-fn mac_bundle_script_loads_gitignored_local_relay_env() {
+fn mac_bundle_script_has_no_push_relay_build_plane() {
     let root = repo_root();
     let script_path = root.join("packages/mac-app/scripts/bundle-agent.sh");
     let script = std::fs::read_to_string(&script_path).unwrap();
 
-    assert!(
-        script.contains("LOCAL_ENV_FILE=\"$SCRIPT_DIR/../.env.local\""),
-        "{} should use the mac app's ignored local env file",
-        script_path.display()
-    );
-    assert!(script.contains("load_local_relay_env"));
-    assert!(script.contains("TRON_RELAY_URL"));
-    assert!(script.contains("TRON_RELAY_SECRET"));
-    assert!(script.contains("TRON_RELAY_ENVIRONMENT"));
+    assert!(!script.contains("TRON_RELAY"));
+    assert!(!script.contains("relay"));
+    assert!(!script.contains(".env.local"));
+}
 
-    let gitignore = std::fs::read_to_string(root.join(".gitignore")).unwrap();
-    assert!(
-        gitignore.lines().any(|line| line.trim() == ".env.local"),
-        "packages/mac-app/.env.local must stay gitignored because it can contain relay secrets"
-    );
+#[test]
+fn tron_dev_has_no_push_relay_build_plane() {
+    let root = repo_root();
+    let script_path = root.join("scripts/tron");
+    let workspace_script_path = root.join("scripts/tron.d/workspace.sh");
+    let dev_script_path = root.join("scripts/tron.d/dev.sh");
+    let script = std::fs::read_to_string(&script_path).unwrap();
+    let workspace_script = std::fs::read_to_string(&workspace_script_path).unwrap();
+    let dev_script = std::fs::read_to_string(&dev_script_path).unwrap();
+
+    assert!(!script.contains("MAC_APP_LOCAL_ENV_FILE"));
+    assert!(!workspace_script.contains("TRON_RELAY"));
+    assert!(!workspace_script.contains("relay"));
+    assert!(!dev_script.contains("TRON_RELAY"));
+    assert!(!dev_script.contains("relay"));
 }
 
 #[test]
@@ -375,7 +404,7 @@ fn ios_release_workflow_does_not_block_on_internal_testflight_group() {
 
     assert!(
         body.contains("attempting public-link auto-discovery"),
-        "stale public TestFlight group config should fall back to ASC public-link discovery"
+        "stale public TestFlight group config should use ASC public-link discovery"
     );
     assert!(
         body.contains("no public TestFlight group id resolved; skipping API group assignment"),

@@ -1,454 +1,113 @@
-//! End-to-end integration tests using a real WebSocket client.
+//! Primitive end-to-end tests using a real `/engine` WebSocket client.
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::Duration;
+use std::sync::atomic::AtomicU16;
+use std::time::{Duration, Instant};
 
-use async_trait::async_trait;
-use futures::{SinkExt, StreamExt, stream};
-use parking_lot::RwLock;
+use futures::{SinkExt, StreamExt};
 use serde_json::{Value, json};
-use tokio::task::JoinHandle;
+use tempfile::TempDir;
+use tokio::sync::Mutex;
 use tokio::time::timeout;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
-use tron::core::content::AssistantContent;
-use tron::core::events::{AssistantMessage, BaseEvent, StreamEvent, TronEvent};
-use tron::core::messages::TokenUsage;
-use tron::events::{ConnectionConfig, EventStore};
-use tron::llm::models::types::Provider as ProviderKind;
-use tron::llm::provider::{
-    Provider, ProviderError, ProviderFactory, ProviderStreamOptions, StreamEventStream,
-};
-use tron::runtime::orchestrator::orchestrator::Orchestrator;
-use tron::runtime::orchestrator::session_manager::SessionManager;
-use tron::server::config::ServerConfig;
-use tron::server::rpc::context::{AgentDeps, RpcContext};
-use tron::server::rpc::registry::MethodRegistry;
-use tron::server::server::TronServer;
-use tron::server::websocket::event_bridge::EventBridge;
-use tron::skills::registry::SkillRegistry;
-use tron::tools::registry::ToolRegistry;
+use tron::app::bootstrap::config::ServerConfig;
+use tron::app::bootstrap::server::TronServer;
+use tron::domains::agent::{Orchestrator, ProfileRuntime, SessionManager};
+use tron::domains::session::event_store::{ConnectionConfig, EventStore, new_file, run_migrations};
+use tron::shared::server::context::ServerRuntimeContext;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
-static TEST_PATH_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 type WsStream =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
-fn unique_test_path(name: &str, extension: &str) -> PathBuf {
-    let id = TEST_PATH_COUNTER.fetch_add(1, Ordering::Relaxed);
-    std::env::temp_dir().join(format!(
-        "tron-integration-{name}-{}-{id}.{extension}",
-        std::process::id()
-    ))
+struct TestServer {
+    _temp: TempDir,
+    url: String,
+    auth_path: PathBuf,
+    server: Arc<TronServer>,
 }
 
-fn unique_settings_path() -> PathBuf {
-    let dir = unique_test_path("tron-home", "dir");
-    let home = dir.join(".tron");
-    tron::core::constitution::ensure_tron_home_at(&home).unwrap();
-    home.join(tron::core::paths::dirs::PROFILES)
-        .join(tron::core::profile::USER_PROFILE)
-        .join(tron::core::paths::files::PROFILE_TOML)
+fn unique_home(root: &Path) -> PathBuf {
+    let home = root.join(".tron");
+    tron::shared::foundation::constitution::ensure_tron_home_at(&home).unwrap();
+    home
 }
 
-fn profile_runtime_for_settings_path(path: &std::path::Path) -> Arc<tron::runtime::ProfileRuntime> {
-    let home = path
-        .ancestors()
-        .nth(3)
-        .expect("settings path must be profiles/user/profile.toml");
-    Arc::new(tron::runtime::ProfileRuntime::load(home).unwrap())
-}
-
-/// Boot a test server and return the WS URL + shutdown handle.
-async fn boot_server_without_deps() -> (String, Arc<TronServer>) {
-    let pool = tron::events::new_in_memory(&ConnectionConfig::default()).unwrap();
+async fn boot_server() -> TestServer {
+    let temp = tempfile::tempdir().unwrap();
+    let home = unique_home(temp.path());
+    let db_path = temp.path().join("tron.sqlite");
+    let pool = new_file(db_path.to_str().unwrap(), &ConnectionConfig::default()).unwrap();
     {
         let conn = pool.get().unwrap();
-        let _ = tron::events::run_migrations(&conn).unwrap();
+        run_migrations(&conn).unwrap();
     }
+
     let event_store = Arc::new(EventStore::new(pool));
+    let session_manager = Arc::new(SessionManager::new(Arc::clone(&event_store)));
+    let orchestrator = Arc::new(Orchestrator::new(Arc::clone(&session_manager)));
+    let settings_path = home
+        .join(tron::shared::foundation::paths::dirs::PROFILES)
+        .join(tron::shared::foundation::profile::USER_PROFILE)
+        .join(tron::shared::foundation::paths::files::PROFILE_TOML);
+    let auth_path = home
+        .join(tron::shared::foundation::paths::dirs::PROFILES)
+        .join(tron::shared::foundation::paths::files::AUTH_JSON);
+    let settings =
+        tron::domains::settings::profile::storage::loader::load_settings_from_path(&settings_path)
+            .expect("settings load");
+    tron::domains::settings::init_settings(settings);
 
-    let session_manager = Arc::new(SessionManager::new(event_store.clone()));
-    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
-    let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
-    let settings_path = unique_settings_path();
-    tron::settings::reload_settings_from_path(&settings_path).unwrap();
-
-    let rpc_context = RpcContext {
-        orchestrator: orchestrator.clone(),
+    let runtime_context = ServerRuntimeContext {
+        orchestrator: Arc::clone(&orchestrator),
         session_manager,
         event_store,
-        skill_registry,
-        memory_registry: Arc::new(parking_lot::Mutex::new(
-            tron::runtime::memory::MemoryRegistry::new(),
-        )),
-        profile_runtime: profile_runtime_for_settings_path(&settings_path),
+        engine_host: tron::engine::EngineHostHandle::new_in_memory().unwrap(),
+        transcription_runtime: tron::domains::transcription::SharedTranscriptionEngine::new(),
         settings_path,
+        profile_runtime: Arc::new(ProfileRuntime::load(&home).unwrap()),
         agent_deps: None,
-        server_start_time: std::time::Instant::now(),
-        transcription_engine: Arc::new(std::sync::OnceLock::new()),
-        subagent_manager: None,
-        health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
+        server_start_time: Instant::now(),
         shutdown_coordinator: None,
-        origin: "localhost:9847".to_string(),
-        cron_scheduler: None,
-        codex_app_server: None,
-        worktree_coordinator: None,
-        device_request_broker: None,
-        context_artifacts: Arc::new(
-            tron::server::rpc::session_context::ContextArtifactsService::new(),
-        ),
-        auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
-        broadcast_manager: None,
-        oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        mcp_router: None,
-        display_stream_registry: None,
-        process_manager: None,
-        job_manager: None,
-        output_buffer_registry: None,
-        hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
-        onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
-        release_fetcher: None,
-        updater_state_path: std::path::PathBuf::from("/tmp/tron-test-updater-state.json"),
+        origin: "127.0.0.1:0".to_owned(),
+        auth_path: auth_path.clone(),
+        oauth_flows: Arc::new(Mutex::new(HashMap::new())),
+        ws_port: Arc::new(AtomicU16::new(0)),
+        onboarded_marker_path: temp.path().join(".onboarded"),
     };
+    tron::transport::runtime::setup::register_server_domains_for_context(&runtime_context)
+        .expect("primitive domains register");
 
-    let mut registry = MethodRegistry::new();
-    tron::server::rpc::handlers::register_all(&mut registry);
-
-    let config = ServerConfig::default(); // port 0 = auto-assign
     let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
         .build_recorder()
         .handle();
     let server = Arc::new(TronServer::new(
-        config,
-        registry,
-        rpc_context,
+        ServerConfig {
+            host: "127.0.0.1".to_owned(),
+            ..ServerConfig::default()
+        },
+        runtime_context,
         metrics_handle,
     ));
-
-    let bridge = EventBridge::new(
-        orchestrator.subscribe(),
-        server.broadcast().clone(),
-        server.shutdown().token(),
-        orchestrator.turn_accumulators().clone(),
-    );
-    let _bridge_handle = tokio::spawn(bridge.run());
-
+    tron::transport::runtime::EngineRuntimeServices::start(&server);
     let (addr, _handle) = server.listen().await.unwrap();
-    let ws_url = format!("ws://{addr}/ws");
 
-    (ws_url, server)
-}
-
-/// Boot the default test server with a provider that stays active briefly so
-/// busy-session behavior is observable in integration tests.
-async fn boot_server() -> (String, Arc<TronServer>) {
-    boot_server_with_provider(Arc::new(LaggyTextProvider::new("ok"))).await
-}
-
-// ── Mock Providers ──
-
-struct TextOnlyProvider {
-    text: String,
-}
-impl TextOnlyProvider {
-    fn new(text: &str) -> Self {
-        Self {
-            text: text.to_owned(),
-        }
-    }
-}
-#[async_trait]
-impl Provider for TextOnlyProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
-    }
-    fn model(&self) -> &'static str {
-        "mock"
-    }
-    async fn stream(
-        &self,
-        _c: &tron::core::messages::Context,
-        _o: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
-        let text = self.text.clone();
-        let events = vec![
-            Ok(StreamEvent::Start),
-            Ok(StreamEvent::TextDelta {
-                delta: text.clone(),
-            }),
-            Ok(StreamEvent::Done {
-                message: AssistantMessage {
-                    content: vec![AssistantContent::text(&text)],
-                    token_usage: Some(TokenUsage {
-                        input_tokens: 10,
-                        output_tokens: 5,
-                        ..Default::default()
-                    }),
-                },
-                stop_reason: "end_turn".into(),
-            }),
-        ];
-        Ok(Box::pin(stream::iter(events)))
+    TestServer {
+        _temp: temp,
+        url: format!("ws://{addr}/engine"),
+        auth_path,
+        server,
     }
 }
 
-struct LaggyTextProvider {
-    text: String,
-}
-impl LaggyTextProvider {
-    fn new(text: &str) -> Self {
-        Self {
-            text: text.to_owned(),
-        }
-    }
-}
-#[async_trait]
-impl Provider for LaggyTextProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
-    }
-    fn model(&self) -> &'static str {
-        "mock"
-    }
-    async fn stream(
-        &self,
-        _c: &tron::core::messages::Context,
-        _o: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
-        let text = self.text.clone();
-        let s = async_stream::stream! {
-            yield Ok(StreamEvent::Start);
-            yield Ok(StreamEvent::TextDelta { delta: text.clone() });
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            yield Ok(StreamEvent::Done {
-                message: AssistantMessage {
-                    content: vec![AssistantContent::text(&text)],
-                    token_usage: Some(TokenUsage::default()),
-                },
-                stop_reason: "end_turn".into(),
-            });
-        };
-        Ok(Box::pin(s))
-    }
-}
-
-struct ErrorProvider;
-#[async_trait]
-impl Provider for ErrorProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
-    }
-    fn model(&self) -> &'static str {
-        "mock"
-    }
-    async fn stream(
-        &self,
-        _c: &tron::core::messages::Context,
-        _o: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
-        Err(ProviderError::Auth {
-            message: "token expired".into(),
-        })
-    }
-}
-
-struct SlowProvider;
-#[async_trait]
-impl Provider for SlowProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
-    }
-    fn model(&self) -> &'static str {
-        "mock"
-    }
-    async fn stream(
-        &self,
-        _c: &tron::core::messages::Context,
-        _o: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
-        let s = async_stream::stream! {
-            yield Ok(StreamEvent::Start);
-            yield Ok(StreamEvent::TextDelta { delta: "partial...".into() });
-            tokio::time::sleep(Duration::from_secs(30)).await;
-            yield Ok(StreamEvent::Done {
-                message: AssistantMessage {
-                    content: vec![AssistantContent::text("partial...")],
-                    token_usage: Some(TokenUsage::default()),
-                },
-                stop_reason: "end_turn".into(),
-            });
-        };
-        Ok(Box::pin(s))
-    }
-}
-
-struct PanicThenTextProvider {
-    has_panicked: AtomicBool,
-    text: String,
-}
-
-impl PanicThenTextProvider {
-    fn new(text: &str) -> Self {
-        Self {
-            has_panicked: AtomicBool::new(false),
-            text: text.to_owned(),
-        }
-    }
-}
-
-#[async_trait]
-impl Provider for PanicThenTextProvider {
-    fn provider_type(&self) -> ProviderKind {
-        ProviderKind::Anthropic
-    }
-
-    fn model(&self) -> &'static str {
-        "mock"
-    }
-
-    async fn stream(
-        &self,
-        _c: &tron::core::messages::Context,
-        _o: &ProviderStreamOptions,
-    ) -> Result<StreamEventStream, ProviderError> {
-        assert!(
-            self.has_panicked.swap(true, Ordering::SeqCst),
-            "provider panicked"
-        );
-
-        let text = self.text.clone();
-        let events = vec![
-            Ok(StreamEvent::Start),
-            Ok(StreamEvent::TextDelta {
-                delta: text.clone(),
-            }),
-            Ok(StreamEvent::Done {
-                message: AssistantMessage {
-                    content: vec![AssistantContent::text(&text)],
-                    token_usage: Some(TokenUsage::default()),
-                },
-                stop_reason: "end_turn".into(),
-            }),
-        ];
-        Ok(Box::pin(stream::iter(events)))
-    }
-}
-
-/// Factory that always returns the same provider instance.
-struct FixedProviderFactory(Arc<dyn Provider>);
-#[async_trait]
-impl ProviderFactory for FixedProviderFactory {
-    async fn create_for_model(&self, _model: &str) -> Result<Arc<dyn Provider>, ProviderError> {
-        Ok(self.0.clone())
-    }
-}
-
-/// Boot a test server with an injected LLM provider.
-async fn boot_server_with_provider(provider: Arc<dyn Provider>) -> (String, Arc<TronServer>) {
-    let (ws_url, server, _handles) = boot_server_with_provider_and_handles(provider).await;
-    (ws_url, server)
-}
-
-async fn boot_server_with_provider_and_handles(
-    provider: Arc<dyn Provider>,
-) -> (String, Arc<TronServer>, Vec<JoinHandle<()>>) {
-    let pool = tron::events::new_in_memory(&ConnectionConfig::default()).unwrap();
-    {
-        let conn = pool.get().unwrap();
-        let _ = tron::events::run_migrations(&conn).unwrap();
-    }
-    let event_store = Arc::new(EventStore::new(pool));
-
-    let session_manager = Arc::new(SessionManager::new(event_store.clone()));
-    let orchestrator = Arc::new(Orchestrator::new(session_manager.clone()));
-    let skill_registry = Arc::new(RwLock::new(SkillRegistry::new()));
-    let settings_path = unique_settings_path();
-    tron::settings::reload_settings_from_path(&settings_path).unwrap();
-
-    let rpc_context = RpcContext {
-        orchestrator: orchestrator.clone(),
-        session_manager,
-        event_store,
-        skill_registry,
-        memory_registry: Arc::new(parking_lot::Mutex::new(
-            tron::runtime::memory::MemoryRegistry::new(),
-        )),
-        profile_runtime: profile_runtime_for_settings_path(&settings_path),
-        settings_path,
-        agent_deps: Some(AgentDeps {
-            provider_factory: Arc::new(FixedProviderFactory(provider)),
-            tool_factory: Arc::new(ToolRegistry::new),
-            guardrails: None,
-        }),
-        server_start_time: std::time::Instant::now(),
-        transcription_engine: Arc::new(std::sync::OnceLock::new()),
-        subagent_manager: None,
-        health_tracker: Arc::new(tron::llm::ProviderHealthTracker::new()),
-        shutdown_coordinator: None,
-        origin: "localhost:9847".to_string(),
-        cron_scheduler: None,
-        codex_app_server: None,
-        worktree_coordinator: None,
-        device_request_broker: None,
-        context_artifacts: Arc::new(
-            tron::server::rpc::session_context::ContextArtifactsService::new(),
-        ),
-        auth_path: PathBuf::from("/tmp/tron-test-auth.json"),
-        broadcast_manager: None,
-        oauth_flows: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
-        mcp_router: None,
-        display_stream_registry: None,
-        process_manager: None,
-        job_manager: None,
-        output_buffer_registry: None,
-        hook_abort_tracker: Arc::new(tron::runtime::hooks::abort_tracker::HookAbortTracker::new()),
-        ws_port: Arc::new(std::sync::atomic::AtomicU16::new(0)),
-        onboarded_marker_path: std::path::PathBuf::from("/tmp/tron-test-onboarded.marker"),
-        release_fetcher: None,
-        updater_state_path: std::path::PathBuf::from("/tmp/tron-test-updater-state.json"),
-    };
-
-    let mut registry = MethodRegistry::new();
-    tron::server::rpc::handlers::register_all(&mut registry);
-
-    let config = ServerConfig::default();
-    let metrics_handle = metrics_exporter_prometheus::PrometheusBuilder::new()
-        .build_recorder()
-        .handle();
-    let server = Arc::new(TronServer::new(
-        config,
-        registry,
-        rpc_context,
-        metrics_handle,
-    ));
-
-    let bridge = EventBridge::new(
-        orchestrator.subscribe(),
-        server.broadcast().clone(),
-        server.shutdown().token(),
-        orchestrator.turn_accumulators().clone(),
-    );
-    let bridge_handle = tokio::spawn(bridge.run());
-
-    let (addr, server_handle) = server.listen().await.unwrap();
-    let ws_url = format!("ws://{addr}/ws");
-
-    (ws_url, server, vec![bridge_handle, server_handle])
-}
-
-/// Connect and skip the initial system.connected message.
-async fn connect(url: &str) -> WsStream {
-    let token = tron::server::onboarding::load_or_create_bearer_token(std::path::Path::new(
-        "/tmp/tron-test-auth.json",
-    ))
-    .unwrap();
+async fn connect(url: &str, auth_path: &Path) -> WsStream {
+    let token = tron::app::lifecycle::onboarding::load_or_create_bearer_token(auth_path).unwrap();
     let mut request = url.into_client_request().unwrap();
     request
         .headers_mut()
@@ -457,7 +116,6 @@ async fn connect(url: &str) -> WsStream {
     ws
 }
 
-/// Read the next text message as JSON.
 async fn read_json(ws: &mut WsStream) -> Value {
     loop {
         let msg = timeout(TIMEOUT, ws.next())
@@ -471,48 +129,135 @@ async fn read_json(ws: &mut WsStream) -> Value {
     }
 }
 
-/// Send a JSON-RPC request and read the response.
-async fn rpc_call(ws: &mut WsStream, id: u64, method: &str, params: Option<Value>) -> Value {
-    let (response, _) = rpc_call_with_interleaved_events(ws, id, method, params).await;
-    response
+async fn invoke(ws: &mut WsStream, id: &str, function_id: &str, payload: Value) -> Value {
+    invoke_with_context(ws, id, function_id, payload, None).await
 }
 
-async fn rpc_call_with_interleaved_events(
+async fn invoke_with_context(
     ws: &mut WsStream,
-    id: u64,
-    method: &str,
-    params: Option<Value>,
-) -> (Value, Vec<Value>) {
-    let id_str = format!("r{id}");
-    let mut req = json!({"id": id_str, "method": method});
-    if method == "system.ping" {
-        req["params"] = params.unwrap_or_else(ping_params);
-    } else if let Some(p) = params {
-        req["params"] = p;
-    }
-    ws.send(Message::text(req.to_string())).await.unwrap();
-
-    // Read until we get a response with matching id
-    let mut interleaved = Vec::new();
+    id: &str,
+    function_id: &str,
+    payload: Value,
+    context: Option<Value>,
+) -> Value {
+    let request = json!({
+        "type": "invoke",
+        "id": id,
+        "functionId": function_id,
+        "payload": payload,
+        "idempotencyKey": format!("{id}-{function_id}", function_id = function_id.replace("::", "-")),
+        "context": context,
+    });
+    ws.send(Message::text(request.to_string())).await.unwrap();
     loop {
-        let parsed = read_json(ws).await;
-        if parsed.get("id").and_then(|v| v.as_str()) == Some(&id_str) {
-            return (parsed, interleaved);
+        let response = read_json(ws).await;
+        if response.get("id").and_then(Value::as_str) == Some(id) {
+            return response;
         }
-        interleaved.push(parsed);
     }
 }
 
-fn ping_params() -> Value {
-    json!({
-        "protocolVersion": 1,
-        "clientVersion": "integration-test",
-    })
+fn unwrap_invoke_value(response: Value) -> Value {
+    assert_eq!(response["ok"], true, "invoke failed: {response}");
+    if let Some(child) = response.pointer("/result/child") {
+        assert!(
+            child.get("error").is_none_or(Value::is_null),
+            "child invocation failed: {child}"
+        );
+        child.get("value").cloned().unwrap_or(Value::Null)
+    } else {
+        response.get("result").cloned().unwrap_or(Value::Null)
+    }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Tests
-// ─────────────────────────────────────────────────────────────────────────────
+#[tokio::test]
+async fn engine_hello_and_ping_use_current_minimal_transport() {
+    let runtime = boot_server().await;
+    let mut ws = connect(&runtime.url, &runtime.auth_path).await;
 
-#[path = "integration/tests.rs"]
-mod tests;
+    ws.send(Message::text(
+        json!({"type": "hello", "id": "hello", "protocolVersion": 1}).to_string(),
+    ))
+    .await
+    .unwrap();
+    let hello = read_json(&mut ws).await;
+    assert_eq!(hello["type"], "hello.ok");
+    assert_eq!(hello["serverId"], "tron-engine");
+
+    let ping = unwrap_invoke_value(
+        invoke(
+            &mut ws,
+            "ping",
+            "system::ping",
+            json!({"protocolVersion": 1, "clientVersion": "primitive-test"}),
+        )
+        .await,
+    );
+    assert_eq!(ping["pong"], true);
+    assert_eq!(ping["serverProtocolVersion"], 1);
+
+    runtime.server.shutdown().shutdown();
+}
+
+#[tokio::test]
+async fn session_create_reconstruct_and_public_execute_fails_closed() {
+    let runtime = boot_server().await;
+    let mut ws = connect(&runtime.url, &runtime.auth_path).await;
+    let working_directory = runtime._temp.path().join("workspace");
+    std::fs::create_dir_all(&working_directory).unwrap();
+
+    let created = unwrap_invoke_value(
+        invoke(
+            &mut ws,
+            "session-create",
+            "session::create",
+            json!({
+                "workingDirectory": working_directory.to_string_lossy(),
+                "model": "openai/gpt-4o",
+                "title": "primitive integration"
+            }),
+        )
+        .await,
+    );
+    let session_id = created["sessionId"].as_str().unwrap().to_owned();
+
+    let reconstructed = unwrap_invoke_value(
+        invoke(
+            &mut ws,
+            "session-reconstruct",
+            "session::reconstruct",
+            json!({"sessionId": session_id, "limit": 10}),
+        )
+        .await,
+    );
+    let events = reconstructed["events"].as_array().unwrap();
+    assert!(events.iter().any(|event| event["type"] == "session.start"));
+
+    let rejected = invoke_with_context(
+        &mut ws,
+        "execute-observe",
+        "capability::execute",
+        json!({
+            "operation": "observe",
+            "input": "primitive integration observation"
+        }),
+        Some(json!({
+            "sessionId": session_id,
+        })),
+    )
+    .await;
+    assert_eq!(
+        rejected["ok"], true,
+        "engine invoke wrapper failed: {rejected}"
+    );
+    let child_error = rejected
+        .pointer("/result/child/error/details/message")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    assert!(
+        child_error.contains("trusted agent or system runtime context"),
+        "public capability::execute must fail closed, got: {rejected}"
+    );
+
+    runtime.server.shutdown().shutdown();
+}

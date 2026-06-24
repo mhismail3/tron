@@ -4,18 +4,15 @@
 # Scans the source tree for high-impact patterns that would break or embarrass
 # when shipped to a different user:
 #
-#   /Users/moose           — raw filesystem path that won't exist for other users
-#   -Users-moose-          — Claude-Code-encoded form of the same path
-#   github.com/moose       — URL to a non-existent GitHub repo
-#   e.g. moose@            — placeholder / example text leaking the username
+#   /Users/<developer>     — raw filesystem path that won't exist for other users
+#   -Users-<developer>-    — Claude-Code-encoded form of the same path
+#   github.com/<developer> — personal GitHub handle
+#   mhismail3              — personal GitHub handle, including split-string forms
+#   mhismail.com           — personal feedback domain
+#   bare developer username in product source, docs, or examples
 #
-# These differ from intentional uses of "moose":
-#   - paths.rs constructs needles from string parts as part of the regression
-#     guard (`format!("/Users/{}", "moose")`) — that's the test, not a leak.
-#   - auth_tests.rs uses literals like "moose@macbook" as test fixtures.
-#   - ContentView.swift comments mention "Circuit moose logo" (internal name).
-#
-# Allowlist below covers those intentional cases. Everything else is a fail.
+# The guard constructs the developer-username needle from fragments so the guard
+# itself does not normalize the source-identity string it bans.
 #
 # Exit codes: 0 = clean, 1 = offenders found, 2 = setup error.
 #
@@ -28,22 +25,27 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+DEV_USER='m''oose'
+DEV_USER_ENCODED='-Users-'"$DEV_USER"'-'
+
 # Patterns to ban. Each line: <regex>|<short description>
 PATTERNS=(
-    '/Users/moose|raw home path; should be /Users/<USER> or use paths.rs helpers'
-    '\-Users\-moose\-|Claude-Code encoded developer path'
-    'github\.com/moose|wrong GitHub handle (real repo is mhismail3/tron)'
-    'e\.g\. moose@|placeholder text leaking developer username'
-    '"moose@iphone"|hardcoded example matching developer device'
+    "/Users/${DEV_USER}|raw home path; should be /Users/<USER> or use paths.rs helpers"
+    "${DEV_USER_ENCODED}|Claude-Code encoded developer path"
+    "github\\.com/${DEV_USER}|personal GitHub handle"
+    "\\b${DEV_USER}\\b|plain developer username; use generic product/source wording"
+    'mhismail3|personal GitHub handle; use a generic placeholder or configured repository URL'
+    'mhismail\.com|personal domain; use configured feedback recipient'
+    '"mh"[[:space:]]*\+[[:space:]]*"is"[[:space:]]*\+[[:space:]]*"mail"|split personal handle construction'
+    '"mh"[[:space:]]*,[[:space:]]*"is"[[:space:]]*,[[:space:]]*"mail"|split personal handle regression needle outside allowlisted tests'
+    '"tron@"[[:space:]]*\+[[:space:]]*"mh"|split personal feedback email construction'
 )
 
-# Files / directories that may legitimately contain "moose" (test fixtures,
-# regression-guard needle construction, internal nicknames). Each entry is
-# matched as a glob against the file path relative to repo root.
+# Regression-guard files construct personal-info needles from fragments. Each
+# entry is matched as a glob against the file path relative to repo root.
 ALLOWLIST_PATHS=(
-    'packages/agent/src/core/foundation/paths.rs'
-    'packages/agent/src/server/rpc/handlers/auth_tests.rs'
-    'packages/ios-app/Sources/Views/Chat/ContentView.swift'
+    'packages/agent/src/shared/foundation/paths/mod.rs'
+    'packages/agent/src/shared/foundation/paths/tests.rs'
     'scripts/personal-info-guard.sh'
     '.git/*'
     'target/*'
@@ -51,6 +53,22 @@ ALLOWLIST_PATHS=(
     'packages/ios-app/.build/*'
     'packages/ios-app/TronMobile.xcodeproj/*'
     '.tron/*'
+)
+
+# Full scans intentionally name every tracked source/documentation root so a
+# root can be added or removed only with a conscious scan-scope edit.
+SCAN_PATHS=(
+    '.codex'
+    '.github'
+    '.gitignore'
+    'AGENTS.md'
+    'CONTRIBUTING.md'
+    'README.md'
+    'VERSION.env'
+    'packages/agent'
+    'packages/ios-app'
+    'packages/mac-app'
+    'scripts'
 )
 
 # Build a single grep-include filter that excludes the allowlist.
@@ -89,8 +107,8 @@ scan_pattern() {
             | xargs -0r git grep --cached -nE "$pattern" -- "${EXCLUDE_ARGS[@]}" 2>/dev/null \
             || true)
     else
-        # Full repo scan via git grep (respects .gitignore)
-        hits=$(git grep -nE "$pattern" -- . "${EXCLUDE_ARGS[@]}" 2>/dev/null || true)
+        # Full repo scan via git grep (respects .gitignore).
+        hits=$(git grep -nE "$pattern" -- "${SCAN_PATHS[@]}" "${EXCLUDE_ARGS[@]}" 2>/dev/null || true)
     fi
 
     if [ -n "$hits" ]; then
@@ -116,7 +134,7 @@ if [ "$offenders_total" -gt 0 ]; then
     echo "❌ FAIL — $offenders_total personal-info offender(s) found."
     echo ""
     echo "User-specific values belong in MEMORY.md or ~/.tron/ runtime files,"
-    echo "not the source tree. See packages/agent/src/core/foundation/paths.rs"
+    echo "not the source tree. See packages/agent/src/shared/foundation/paths.rs"
     echo "for the regression-guard pattern that catches Rust offenders at test time."
     exit 1
 fi

@@ -1,405 +1,436 @@
 # iOS App Architecture
 
-> Last verified: 2026-05-04 (Codex App Server dashboard/detail flow, new-session mode chooser, local diagnostics, MetricKit retention, feedback bundle, settings grid revamp, local paired servers, unreachable server settings, server-owned settings, provider status cards, Agent Control sheet entrance animation, onboarding handoff, and foreground connection recovery)
+> Last verified: 2026-06-19 (Phase 2 Slice 1 Runtime Cockpit catalog discovery added; Phase 2 Agent Execution Restoration planning scorecard added; IARM Phase 1 Slice 6 notification/inbox concept deferred to APNs/server capability restoration; IARM Phase 1 dashboard/cockpit closeout; IARM Phase 1 Slice 5 settings/onboarding/diagnostics/pairing polish; IARM Phase 1 Slice 4 chat visual cues/status affordance restoration; IARM-9 iOS Affordance Restoration Map; IOSAC-10 self-adapting Agent cockpit baseline; IOSTC-10 thin-client generic runtime shell; SACB-9 pairing lifecycle; SACB-8 secret custody/redaction; CSD-10 concurrency scheduling discipline; DRC-9 replay manifest/event parity retained).
 
 ## Overview
 
-The iOS app is a SwiftUI client that connects to the Tron agent server via WebSocket. It provides:
-- Real-time chat interface with streaming responses
-- Session management (create, fork, resume)
-- Event-sourced state reconstruction
-- Push notifications for background alerts
-- Voice transcription input
-- A staged input composer where pending skills and attachments share one wrapping chip row before send
-- A mode-driven New Session sheet for quick Chat, Project workspace sessions, GitHub clone, and Claude Code import
-- A separate Codex mode that connects directly to a Tron-managed `codex app-server` on the active paired machine without using Tron agent sessions
+**Minimum iOS**: 26.0
+
+The iOS app is a SwiftUI `/engine` client. In the current primitive baseline it
+is intentionally a shell: it pairs with a local Tron server, sends prompts,
+keeps a clearable local recent-input history for composer reuse, records
+composer mic input for opt-in local transcription, renders session
+messages, persists a local event cache for reconstruction, and renders generic
+runtime surfaces emitted by the engine. The current user-facing Agent cockpit is
+a diagnostics surface opened from Servers -> Diagnostics -> Runtime Cockpit. It
+surfaces live worker lifecycle catalog entries, capability discovery families,
+schema/health gaps, durable `catalog_discovery_report` history,
+package/resource status, confirmation-backed lifecycle actions, activity, and
+active `ui_surface` resources without adding fixed product panels. The app does
+not own
+repository-specific panels, media workflow surfaces, saved voice notes,
+assistant-management panels, extension-source surfaces, memory-retain, or rules.
+
+The Rust server remains authoritative for provider communication, session/event
+truth, model routing, execution, state, logs, and generated runtime data. iOS
+may cache and render server facts, but it must not invent capability policy,
+source-control state, worker state, or product panels locally.
+
+Notification and inbox affordances remain deferred in the current Phase 1
+shell. Local chat error pills, app-global connection toasts, timeline system
+events, Logs, Server Diagnostics, and feedback are the current attention
+surfaces. A notification bell, unread inbox, APNs registration, push delivery,
+device broker behavior, notification read state, and notification delivery
+chips return only with a future server-owned APNs/device/capability resource
+mechanism; iOS must not create a local substitute that implies hidden backend
+truth.
+
+The iOS Affordance Restoration Map is the active planning artifact for
+functional-only Phase 1 iOS UX restoration. It classifies every deleted or
+renamed old iOS path before implementation, starts with local-native and
+current server-fact affordances, and does not restore deleted product panels.
+The full Phase 2 agent-execution restoration plan now lives in
+`packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md` and
+covers capability discovery, filesystem, jobs, workers, subagents, approvals,
+web, git/worktrees, skills/rules/memory, MCP, scheduling, program execution,
+and matching database/event/settings/dependency work.
+
+## Retained Surface
+
+- Connection, strict pairing host validation, onboarding, and local paired-server
+  selection.
+- Settings needed to reach the server, configure providers, choose models, and
+  inspect local diagnostics.
+- Grouped session dashboard with collapsible workspace headers and compact
+  inset liquid-glass one-line session rows, session creation/fork/resume,
+  a new-session workspace selector over the configured default workspace,
+  recent session workspaces, and manual Mac paths, prompt composer with a
+  local recent-input picker, a functional-only native attachment menu that
+  preserves composer keyboard focus while layering native camera/photo/file
+  pickers above it, unified attachments for images/documents, a right-side mic
+  affordance for local composer transcription when enabled, and message
+  rendering with quiet blank empty/loading chat content, streamed thinking content, and
+  local in-chat error notifications.
+- Live event plugins plus stored-event reconstruction into `ChatMessage`.
+- Servers diagnostics Runtime Cockpit row and sheet for catalog discovery,
+  worker lifecycle catalog/resource state, package actions, activity, and
+  dynamic runtime surfaces. The primary chat shell does not mount passive
+  worker-runtime diagnostics.
+- Generic capability invocation chips and generic generated runtime surfaces.
+- Local logs, feedback bundles, MetricKit payload retention, hashed
+  server-log correlation IDs, and bounded local event cache integrity.
+
+## Deleted Fixed Product Modes
+
+The primary source tree must not contain fixed product roots, repository
+workflow panels, assistant-management panels, extension-source panels, or their
+matching state/client objects. Static source guards and the cleanup invariant
+test are the regression gates for this boundary; product names live only in
+scorecards, evidence manifests, inventory docs, and static absence tests.
 
 ## Directory Structure
 
 ```
 Sources/
-├── App/                    # App entry point, delegates, configuration
-├── Core/                   # Business logic extracted from other modules
-│   ├── Concurrency/        # Async primitives (AsyncSemaphore)
-│   ├── DI/                 # Dependency injection container
-│   └── Events/             # Event handling infrastructure
-│       ├── Plugins/        # Live event parsing (WebSocket -> UI)
-│       ├── Transformer/    # History reconstruction
-│       └── Payloads/       # Shared Decodable structs
-├── Database/               # SQLite event database, queries
-├── Models/                 # Data models, event transformers
-│   ├── CodexApp/           # Direct Codex App Server protocol models
-│   ├── Events/             # Event types and registry
-│   ├── Features/           # Feature-specific models
-│   ├── Messages/           # Message models
-│   └── RPC/                # RPC types and codables
-├── Services/               # Network, state management
-│   ├── CodexApp/           # Codex endpoint store, token store, JSON-RPC transport/client
-│   ├── Network/            # RPC, WebSocket (with Bearer auth), deep links
-│   ├── Events/             # Event store, sync
-│   ├── Audio/              # Recording, transcription
-│   ├── Diagnostics/        # Local MetricKit store + redacted feedback bundle builder
-│   ├── Feedback/           # Native Mail envelope for explicit diagnostics bundles
-│   ├── Notifications/      # Push notifications
-│   ├── Observability/      # DiagnosticsRedactor shared with Mac
-│   ├── Onboarding/         # Pairing validator/probe/persistor
-│   ├── PairingURLParser.swift  # tron://pair?host&port&token&label parser + builder
-│   ├── Parsing/            # Tool result parsers (delegated by ToolResultParser)
-│   ├── Settings/           # PairedServerStore (local server list + active id)
-│   └── Storage/            # KeychainItem + PairedServerTokenStore
-├── ViewModels/             # View state management
-│   ├── CodexApp/           # Codex mode state reducer and view model
-│   ├── Chat/               # ChatViewModel and extensions
-│   ├── Handlers/           # Event handling coordinators
-│   ├── Managers/           # Specialized state managers
-│   └── State/              # @Observable state objects
-└── Views/                  # SwiftUI views
-    ├── CodexApp/           # Codex dashboard, full-screen thread detail, setup/status, approvals
-    ├── Chat/               # Core chat interface
-    ├── Tools/              # Tool chips + detail sheets
-    ├── Components/         # Reusable UI components
-    └── ...                 # Feature-specific views
++-- App/                  Lifecycle entry point, app delegate, scene phases
++-- Engine/               Engine transport, protocol DTOs, live/stored
+|                         events, persistence, repositories
++-- Session/              Chat workflow, attachments, parsing, timeline
+|                         messages, worker lifecycle cockpit state,
+|                         reconstruction, activity, and tokens
++-- Support/              Composition, diagnostics, feedback, foundation,
+|                         pairing, share, storage
++-- UI/                   Theme, chat, settings, onboarding, runtime
+|                         surfaces, Agent cockpit, capabilities, components,
+|                         system sheets
++-- Assets.xcassets/      App icons and image assets
++-- Resources/            Fonts and generated app-icon source layers
 ```
 
-## Key Architectural Patterns
+The retained `UI/Capabilities` components render capability lifecycle
+data as generic chat evidence. They are not a capability catalog, admin
+console, or operator policy surface. Capability identity is limited to the
+model-visible primitive name, optional operation name, trace/root invocation
+ids, theme color, and runtime-supplied presentation hints.
 
-### MVVM with Extensions
-
-Large view models split across extension files:
-
-```
-ViewModels/Chat/
-├── ChatViewModel.swift              # Core state (~300 LOC)
-├── ChatViewModel+Connection.swift   # WebSocket management
-├── ChatViewModel+Events.swift       # Event subscription
-├── ChatViewModel+Messaging.swift    # Message sending
-├── ChatViewModel+Pagination.swift   # History loading
-├── ChatViewModel+Reconstruction.swift # Session reconstruction + pagination
-└── ChatViewModel+EventDispatchContext.swift  # Event handlers
-```
-
-### Coordinator Pattern
-
-Coordinators contain stateless logic. Context protocols define the interface:
-
-```swift
-// Protocol (what coordinator needs)
-@MainActor
-protocol ToolEventContext: AnyObject {
-    var activeTools: [String: ToolState] { get set }
-    func updateToolState(_ id: String, state: ToolState)
-}
-
-// Coordinator (stateless logic)
-@MainActor
-final class ToolEventCoordinator {
-    func handleToolStart(context: ToolEventContext, event: ToolStartEvent) {
-        context.activeTools[event.toolId] = .running
-    }
-}
-
-// ViewModel extension (provides context)
-extension ChatViewModel: ToolEventContext { ... }
-```
-
-### Event Plugin System
-
-Two systems handle events:
-
-1. **Plugins** - Parse live WebSocket events → UI-ready Result
-2. **Transformer** - Reconstruct history from stored events → ChatMessage
-
-```
-Live:   WebSocket → EventRegistry → Plugin → EventDispatchCoordinator → ChatViewModel
-Stored: EventDatabase → Transformer → ChatMessage array
-```
-
-### @Observable State Objects
-
-Complex state extracted into dedicated objects:
-
-```swift
-@Observable
-final class SubagentState {
-    var activeSubagents: [String: SubagentInfo] = [:]
-    var events: [String: [SubagentEvent]] = [:]  // Capped at 100 per subagent
-}
-```
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `Core/DI/DependencyContainer.swift` | Service initialization and injection |
-| `Core/Events/EventRegistry.swift` | Plugin registration |
-| `Core/Events/EventDispatchCoordinator.swift` | Routes events to handlers |
-| `Models/UnifiedEventTransformer.swift` | History reconstruction |
-| `ViewModels/Chat/ChatViewModel.swift` | Main chat state |
-| `Services/Network/RPCClient.swift` | WebSocket RPC |
-| `Services/Events/EventStoreManager.swift` | Local event persistence |
-| `Services/CodexApp/CodexJSONRPCTransport.swift` | Direct Codex App Server JSON-RPC transport |
-| `ViewModels/CodexApp/CodexAppViewModel.swift` | Codex mode setup, connection, thread, turn, and approval state |
+The deleted parallel session-tree projection is not a shell primitive. Fork
+lineage remains in session metadata and stored events; iOS reconstructs history
+through generic session/event repositories without a tree-only DTO, builder,
+icon catalog, or fork-row state model.
 
 ## Data Flow
 
-### Codex App Server Mode
-
 ```
-Codex mode UI
-    ↓
-CodexAppViewModel + CodexAppReducer
-    ↓
-CodexAppClient
-    ↓
-CodexJSONRPCTransport
-    ↓
-Tron-managed codex app-server on the active paired machine
+Prompt:  InputBar -> ChatViewModel -> AgentRepository -> agent::prompt
+Recent:  InputBar -> native attachment menu -> InputHistoryStore -> RecentInputHistorySheet -> InputBar
+Attach:  InputBar -> native attachment menu -> nested platform picker -> Attachment -> agent::prompt
+Voice:   InputBar -> ChatTranscriptionCoordinator -> transcription::list_models readiness state -> ComposerMicRecorder -> transcription::audio -> InputBar
+New:     NewSessionFlow -> WorkspaceSelectionOptionBuilder -> WorkspaceSelector -> WorkspaceBrowserRepository -> filesystem::{get_home,list_dir,create_dir} -> SessionRepository -> session::create
+Live:    Engine transport -> SessionEventRepository -> EventRegistry -> Plugin -> ChatViewModel
+Stored:  EventDatabase -> Session/Timeline/Reconstruction -> ChatMessage -> ChatView
+Surface: Generated UI ref/data -> GeneratedRuntimeSurfaceView
+Cockpit: Settings Diagnostics -> WorkerLifecycleRepository -> AgentCockpitProjection -> AgentCockpitSheet
 ```
 
-Codex mode does not use Tron sessions, the Tron agent turn pipeline, or
-`EventRegistry`/`EventStoreManager`. It does use authenticated Tron RPC for
-discovery: `CodexAppModeView` asks `RPCClient.codexAppServer.status()` for the
-server-owned endpoint, bearer token, lifecycle state, and thread defaults. The
-iOS view model keeps that data in memory only; Codex endpoint configuration and
-the WebSocket bearer token are owned by Tron Server.
+`WorkspaceSelector` is a narrow server-backed workspace browser, not the old
+general filesystem tool surface. Its hierarchy is navigation-first: configured
+quick/default and recent workspace shortcuts are compact horizontal chips,
+navigation actions are separate compact intrinsic-width single-line capsule
+controls, the current folder is listed as a plain left-aligned path, and
+existing server directories own the main list. It browses
+the paired Mac through `WorkspaceBrowserRepository` over
+`filesystem::get_home`, `filesystem::list_dir`, and
+`filesystem::create_dir`. Hidden folders are toggled from the compact action
+row, and inline folder creation selects the created folder. The selector must
+not restore old read/write/edit/search/diff/apply-patch/import or
+agent-execution filesystem behavior without a Phase 2 module contract.
 
-The UI mirrors the core session flow: a dashboard lists Codex threads, `+` opens
-a draft full-screen thread view, tapping an existing thread routes to a full
-detail view on iPhone, and iPad uses the same dashboard/detail split. The
-dashboard auto-connects, auto-loads `thread/list`, and keeps polling managed
-server status while disconnected so a restarted Codex child recovers without
-manual refresh. Foreground transitions in Codex mode also recover the dedicated
-Codex WebSocket: the view model disconnects the stale direct socket, refreshes
-managed status through Tron RPC, reconnects, reloads `thread/list`, and resumes
-the selected thread without replaying any turn. Detail views render text
-messages and Codex tool items as one chronological transcript, show the newest
-resumed history window first, keep older decoded entries outside the SwiftUI
-list until Load Earlier Entries is tapped, and re-anchor after prepending older
-batches. Failed/disabled server lifecycle states stay inside the dashboard as
-retryable connection states; manual server configuration lives in the main
-Settings sheet instead of an in-dashboard settings subpage.
+`CameraCaptureSheet` keeps the tap-to-sheet path light and immersive: the
+camera viewport is the sheet surface, controls layer at the bottom of that
+surface, and the live/captured camera image is installed as the modal
+presentation background. The foreground layer is controls-only; it does not add
+a bottom fade or other material over the live viewport, and it expands through
+a geometry root so bottom alignment is based on the sheet height instead of the
+controls' intrinsic height. The controls still add the runtime bottom safe-area
+inset back into their padding so the row stays low without clipping into the
+rounded sheet edge. iOS 26 partial-height sheets reserve and render Liquid Glass
+material at the safe-area edge, so the camera cannot rely on regular foreground
+content to paint the whole rounded container.
+`immersiveCameraSheetPresentation` keeps the iPad compact-form height fixed,
+clears the iPad material backing, and provides the custom presentation
+background that fills the entire modal. The sheet edge stays flat and does not
+add foreground glass, refraction, or decorative border layers over the live
+camera feed. `AVCaptureSession`/`AVCapturePhotoOutput` are created and
+configured on the dedicated session queue after presentation begins. Camera
+warm-up can still take time, but it must not block the initial child-sheet
+presentation. The flashlight, shutter, and switch controls share native
+interactive circular Liquid Glass surfaces with larger hit targets than their
+visual glass buttons; the shutter stays a minimal white-tinted frosted glass
+circle without a separate ring. After capture, the same center control animates
+into a green-tinted use-photo check button, the switch-camera control animates
+into the go-back-to-capture control, and the flashlight control fades out while
+the row geometry stays stable. Torch toggles and camera switching run through
+the session queue, update UI state on failure, turn off active torch before
+input replacement, discover front/back camera variants through `AVCaptureDevice`
+discovery, and remove the old video input before validating and attaching the
+replacement input so the old input does not make `canAddInput` fail.
 
-### Live Events
-
-```
-WebSocket message
-    ↓
-RPCClient.eventPublisherV2
-    ↓
-EventRegistry.parse() → EventPlugin → EventResult
-    ↓
-EventDispatchCoordinator.dispatch()
-    ↓
-ChatViewModel handler method
-    ↓
-UI updates via @Observable
-```
-
-### History Loading (Session Reconstruction)
-
-```
-SessionClient.reconstruct(sessionId, limit, beforeSequence)
-    ↓  (calls session.reconstruct RPC)
-SessionReconstructResult (events, isRunning, hasMoreEvents, oldestSequence)
-    ↓
-UnifiedEventTransformer.reconstructSessionState(from: events)
-    ↓
-ReconstructedState (messages, activeTools, pendingQuestion, ...)
-    ↓
-ChatViewModel.messages (batched for pagination)
-    ↓
-ChatView renders
-```
-
-Pagination: older history is loaded on demand via `beforeSequence`, passing the
-`oldestSequence` from the previous page. `hasMoreEvents` controls whether the
-"load more" UI is shown.
-
-### Session Creation
-
-The New Session sheet keeps shortcut paths separate from the standard workspace
-setup. Quick Chat and Claude Code import sit in a compact shortcut row at the
-top. Quick Chat applies a sheet preset instead of immediately creating a
-session: it resolves the quick-session workspace, selects the chat profile mode,
-and restores the default cloud model.
-The main setup section is separated by a thin divider and contains recent
-workspace pills, a profile-mode card (`Normal`, `Quick Chat`, `Local`), the
-workspace picker, model picker, git worktree isolation for repo-backed default
-sessions, and optional GitHub cloning. Selecting a local provider model forces
-Local mode, and selecting Normal or Quick Chat from Local restores the default
-cloud model. The toolbar Create button starts the currently configured profile
-mode; Clone GitHub clones into the selected workspace and starts in the cloned
-repository when not in Quick Chat mode. Imports preserve
-the imported model and do not force the sheet's selected model. While switching
-workspaces, the worktree card keeps its previous visibility until the new
-git-repo probe resolves, then animates any actual appear/disappear change.
-
-### Agent Control Sheet
-
-The chat input-bar pill opens `AgentControlView`, a medium/large detent sheet
-that summarizes context, model, source control, analytics, and history. Its card
-containers use the shared `CardEntranceModifier` from `Views/Components/` for a
-short opacity/vertical-offset reveal. The modifier owns that entrance animation
-directly and clears inherited sheet transactions before applying it, so iOS 26
-Liquid Glass container bounds do not inherit presentation springs or stretch
-during the sheet's own open animation.
-
-## Dependency Injection
-
-All services injected via SwiftUI environment:
-
-```swift
-// App startup
-@State private var container = DependencyContainer()
-
-// In views
-@Environment(\.dependencies) var dependencies
-dependencies.rpcClient
-dependencies.eventStoreManager
-```
-
-### Service Lifecycle
-
-| Type | Recreated On |
-|------|--------------|
-| Persistent | Never (eventDatabase, pushNotificationService) |
-| Connection-based | Server change (rpcClient, skillStore) |
-| Codex mode | Active paired server change; foreground recovery resets the direct Codex WebSocket only |
-
-Foreground/background handling for the primary Tron RPC socket is owned by
-`TronMobileApp` and the network services rather than by session views. SwiftUI
-`scenePhase` changes call `DependencyContainer.setBackgroundState(_:)`, which
-pauses WebSocket heartbeats while inactive and resets paused reconnect attempts
-to `.disconnected` so the next foreground transition can kick a fresh retry. On
-foreground return, the app verifies any apparently connected socket with a
-bounded URLSession WebSocket ping before issuing notification or session-list RPC
-refreshes, and manually retries through the same path as the status pill when
-the connection state machine says retrying is appropriate. Codex mode owns a
-small mode-scoped foreground hook because its Codex WebSocket bypasses
-`WebSocketService`; that hook refreshes only the direct Codex transport and does
-not mutate Tron session state. Normal automatic recovery uses one short
-two-second WebSocket-open probe; if that probe cannot connect, the transport
-parks in the user-retryable failed/not-connected state instead of cycling
-through repeated reconnect windows. Deploy-aware reconnect remains more patient
-because `server.restarting` is an explicit signal that the Mac is expected to
-come back. New WebSocket tasks also stay in
-`.connecting` until URLSession reports that the WebSocket upgrade opened, so a
-sleeping Mac cannot be reported as connected just because a task was resumed.
-Foreground ping failures and ping timeouts transition the stale socket out of
-`.connected` so the status pill and settings sheets immediately render the
-reconnecting or unavailable state instead of waiting on server-backed RPC
-timeouts. While foregrounded, the WebSocket heartbeat pings every five seconds
-with the same bounded verification timeout, and URLSession's WebSocket close
-delegate feeds remote closes into the reconnect state machine. Failed WebSocket
-upgrade completions also resume the open wait immediately, leaving the 10-second
-open timeout as a fallback instead of the primary failure signal. If a failed
-open leaves an `RPCClient` wrapper with a disconnected transport, the next
-`connect()` discards that stale transport instead of treating it as an active
-connection.
-`ConnectionToastPolicy` bridges app-level connection state into the global
-toast banner stack: when an active paired server becomes disconnected,
-reconnecting, failed, or unauthorized, a deduplicated compact pill appears near
-the top safe area with the appropriate repair affordance and hugs its content
-up to a fixed maximum width. Disconnected/failed banners say `Not Connected`;
-reconnecting banners say `Reconnecting`. Disconnected and reconnecting banners
-are warning-yellow, failed banners are error-red, and all retryable connection
-banners auto-dismiss after four seconds. Unauthorized re-pair banners remain
-sticky because the stored credential must be repaired.
-All connection banners clear as soon as the active server reconnects or no
-active server remains, and reconnecting countdown ticks keep the same semantic
-banner so they do not reset the auto-dismiss timer.
-
-`SessionRefreshService` is the gatekeeper for `session.list` refreshes. It
-debounces foreground refreshes, re-checks connectivity after the debounce, and
-registers a single reconnect hook through `ConnectionManager` when refresh work
-finds the socket offline or reconnecting. Native URLSession/POSIX transport
-errors such as `NSURLErrorNetworkConnectionLost` or `ECONNABORTED` are
-classified by `ConnectionErrorClassifier` and deferred to the reconnect flow
-instead of being shown as session-refresh error banners. Non-transport
-application errors still flow through `ErrorHandler` so real failures remain
+The shell mounts `ContentView` even before onboarding is complete.
+`TronMobileApp` owns one onboarding presenter for first-run setup, Server-page
+pairing, and pairing URLs. `OnboardingSheetPresentation` keeps that flow on the
+large detent so the connect form, QR-first pairing card, and setup pages share
+one geometry instead of splitting into separate medium/full variants. When
+`onboardingComplete` is true but no active paired server exists, the shell stays
 visible.
 
-## File Placement Guidelines
+Pairing accepts only bare DNS names, IPv4 addresses, or unbracketed IPv6
+addresses from QR/deep-link paste and manual entry. Full URLs, paths, query
+strings, userinfo, bracketed hosts, malformed IPs, and malformed DNS labels are
+rejected before a WebSocket probe or `PairedServerStore` write. The pairing
+commit path stores bearer tokens only in `PairedServerTokenStore`, rolls back
+failed setup hydration by restoring the previous token or removing the
+candidate token, and forgetting a server deletes the Keychain token before
+removing metadata. Settings-launched repair for an existing paired server uses
+the same large onboarding sheet, stays on the connect step, and closes after a
+successful token refresh when the host and port still match that local server;
+edited host/port values are treated as a new pairing and continue into setup.
 
-| Type | Location |
-|------|----------|
-| Event plugin | `Core/Events/Plugins/<Category>/` |
-| RPC client | `Services/Network/` |
-| State object | `ViewModels/State/` |
-| Coordinator | `ViewModels/Handlers/` |
-| Tool chip+sheet | `Views/Tools/<ToolName>/` |
-| Reusable component | `Views/Components/` |
+`ChatViewModel.swift` keeps the mounted session state and orchestration
+boundary. Runtime callback installation for streaming text, UI update queue
+drain, capability completion ordering, and live event processing lives in
+`ChatViewModel+RuntimeCallbacks.swift` so new callback behavior does not grow
+the root state object. Chat-scoped error routing lives in
+`ChatViewModel+Errors.swift`: local failures append ephemeral
+`LocalChatNotification` timeline items with deduped replacement and are cleared
+when a new prompt starts or the chat view disappears. `ChatView.swift` keeps
+shell composition; message-list scrolling, pagination, composer, and sheet
+rendering live in `ChatView+MessageList.swift` and the existing toolbar/helper
+extensions.
 
-Settings pages live under `Views/Settings/Pages/` and are launched from the
-main `SettingsView` grid. The root sheet supports medium and large detents and
-starts at medium on iPhone. Its first grid row launches the surface-oriented
-settings: App, Server, and Providers. Its second row launches agent-behavior
-settings: Agent, Context, and MCP. The third row holds the destructive actions
-without a separate Danger Zone header, while keeping those tiles error-red. All
-main-grid icons use the shared settings tile size. A thin muted divider separates
-the green destination rows from the destructive actions. The surface and behavior
-tiles use taller containers with left-aligned emerald titles, top-right icons,
-and smaller softer descriptive copy below, while the destructive row sizes to its
-two-line red labels and top-right icons. When paired server settings are not
-available, the main grid hides the server-backed destination tiles, stretches App
-and Server across a two-column row, and places the persistent unavailable card
-where the second green row normally sits.
-Server-backed settings are grouped by behavior owner: Servers covers
-pairing/security/transcription/updates, Providers covers auth credentials, Agent
-covers execution lifecycle including hooks, prompt-history capture/retention,
-queued-message delivery, and protected branches, Context covers
-compaction/memory/skills/rules, and MCP covers external tools. Low-level hook
-`add_context` budgeting stays an internal server fuse, not an end-user Agent
-setting. Source-control action sheets expose merge, push, branch, and upstream
-choices at the moment of action rather than through a separate source-control
-settings destination. The main settings sheet keeps its container, sheet
-presenters, lifecycle hooks, and alert presenters in separate computed view
-sections so SwiftUI's type checker remains stable under Xcode 26 while the UI
-stays declarative. Sheets that summarize server-backed behavior start with
-`SettingsInfoCard` and derive the mostly-static title plus dynamic description
-through small helpers in `SettingsSupport.swift` so copy and grouping rules are
-covered by focused tests. Main-sheet icon strings live in the same support file,
-and server-backed destination summary cards reuse their `ServerSettingsCategory`
-icons so the launcher tile and destination stay visually aligned. The main
-settings feedback footer is pinned with a bottom safe-area inset rather than
-placed inside the scroll content, so app/version copy and the diagnostics action
-remain reachable while the cards scroll independently. The feedback button lets
-native interactive glass own the pressed border, matching chips and avoiding a
-nested manual stroke. Send Feedback is mail-only: it builds the redacted
-diagnostics JSON, opens the native Mail composer with the tracked support
-recipient and attachment, and shows an alert when Mail is unavailable because
-iOS does not reliably attach files through a default-mail-app handoff.
-When the active paired server cannot be reached, Settings keeps local paired
-server management visible but hides server-backed controls until the connection
-returns and settings reload. The main sheet keeps App and Server visible,
-removes Providers, Agent, Context, and MCP from the launcher grid, moves the
-warning card above the destructive row, and disables destructive server-coupled
-actions such as clearing prompt history and archiving all sessions. The Servers
-sheet turns its top summary card
-warning-yellow, reports `<server name> not available`, overrides stale row
-metadata with an `Unavailable` status for the selected server, and limits that
-row's menu to Retry and Forget. Settings verifies the live socket before loading
-server-backed controls, so a half-open connection is demoted before the sheet can
-get stuck on loading copy. The main dashboard owns the global unreachable-server
-banner; Settings owns the persistent in-sheet warning surfaces.
-Static status rows such as the user hook directory keep their path/value in the
-trailing position and show a small empty-state placeholder when the server has
-no listable detail to return.
+## Chat Visual Affordances
 
-## Build Configuration
+The chat timeline owns only truthful local/session presentation state:
 
-Uses XcodeGen with `project.yml`:
+- Empty/loading chat content stays blank. Session loading does not render a
+  spinner or explanatory timeline row.
+- Connection status is app-global. Reconnecting, disconnected, and retry
+  signals route through `ToastCenter`/connection retry policy, not through
+  separate in-chat connection pills.
+- Local chat errors are temporary `LocalChatNotification` timeline messages.
+  Tapping opens `LocalErrorDetailSheet` only when structured details exist;
+  there is no tap-to-dismiss, explicit dismiss button, timer-only dismissal, or
+  persisted event claim.
+- Thinking fallback is a single app-owned `NeuralSparkIndicator`.
+  Configurable thinking styles were removed; streamed thinking text still
+  renders inline above the response when the current stream provides it.
+- Capability evidence uses `CapabilityEvidencePresentation` as the pure mapper
+  for one-line chat chips and sectioned detail sheets. Chips stay compact; the
+  detail sheet shows summary, target/input/result/error, and technical
+  provenance only when current invocation data supplies it.
+- Passive worker-runtime diagnostics stay out of the chat shell. A chat-level
+  agent signal can return only for attention-worthy states such as approval
+  required, degraded runtime, an active session-relevant worker, or a generated
+  surface requiring user action.
 
-- **Configs**: Beta (debug), Prod (release)
-- **Minimum iOS**: 26.0
-- **Swift**: 6.0
-- **Versioning**: `VERSION.env` is the only hand-edited release identity file.
-  `scripts/tron version sync` mirrors `TRON_VERSION` into the app and share
-  extension as `TRON_CANONICAL_VERSION`, while Apple receives numeric
-  `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` values. UI surfaces format
-  canonical versions through `VersionDisplay`, so `0.1.0-beta.1` renders as
-  `v0.1 (Beta 1)` without leaking Apple/Cargo constraints into user copy.
+Deferred or rejected surfaces remain absent: process/job/subagent/source-control
+work dashboards, approvals, memory/rules/hooks status, skill activation,
+prompt-suggestion/inbox surfaces, fixed product panels, fake activity, and
+backend status that is not sourced from current local state or current server
+facts.
 
-```bash
-xcodegen generate
-```
+## Engine Client Boundary
+
+`Engine/Transport/WebSocket` owns the WebSocket request/response transport.
+`EngineConnection` is split by transport concern: the root connection state,
+request tracking, receive/heartbeat loop, reconnect coordination, protocol
+frames, and transport types live in separate focused files. Typed domain client
+files live under `Engine/Transport/Clients` as thin method wrappers over
+`/engine` frames; system, message, and log operations use concrete
+`SystemClient`, `MessageClient`, and `LogsClient` domains rather than a
+miscellaneous facade. They must not encode product policy. Any fixed
+workflow-specific client removed in PET-8 must stay removed unless a later
+scorecard row proves it is boot infrastructure.
+
+Engine child errors are normalized at the transport boundary. Canonical
+`details.failure` payloads stay authoritative; older or setup-time child errors
+that only carry `kind`, `message`, and `details` are preserved as
+`EngineProtocolError` values so UI surfaces show the real server failure instead
+of a generic invalid-response fallback.
+
+SwiftUI and `Session/` code do not depend on concrete `EngineClient`,
+`EngineConnection`, WebSocket transport types, or settings/auth wire DTOs.
+They consume protocol-typed repositories and view models: `ChatSessionServices`
+for mounted chat sessions, `AppConnectionRepository` for connection state,
+`SessionEventRepository` for live events, `SettingsRepository` for settings
+snapshots/mutations, `AuthRepository` for credential snapshots/mutations, and
+the existing model/session/agent/message repositories for chat workflows.
+`WorkerLifecycleRepository` is the cockpit-facing boundary for catalog,
+resource, catalog-discovery report, and worker lifecycle calls.
+`AgentCockpitProjection` remains a pure mapper from server-owned facts to UI
+rows; it does not own worker truth.
+`Support/Composition` is the production composition root allowed to wire those
+protocols to engine-owned clients.
+
+Transport tests mirror the production owners: retry policy tests live under
+`Tests/Engine/Transport/Retry`, and WebSocket/request-response tests live under
+`Tests/Engine/Transport/WebSocket`.
+
+DRC-9 replay manifest/event parity remains a server/iOS boundary rule. Replay
+exports remain server-owned capability results, not live or persisted iOS
+events. iOS decodes the metadata-only `model.provider_request` audit event for
+stored-event parity, but replay manifests stay outside the iOS event plugin and
+database event-case surface.
+
+Transport and UI scheduling follows the CSD inventory in
+`packages/agent/docs/concurrency-scheduling-discipline-inventory.tsv`.
+Long-lived `Task` handles are stored and cancelled by their owner, SwiftUI
+`.task` work is view-scoped, stream ACKs coalesce to the latest cursor, and
+callback bridges use bounded stream buffering or owner queues. Production code
+must not use `Task.detached`, `DispatchQueue.global`, or
+`DispatchQueue.main.asyncAfter`; capture sessions use owner serial queues and
+UI delays use cancellation-aware Swift concurrency tasks.
+
+`Engine/Protocol` groups DTOs by server domain instead of one broad DTO bucket.
+`Engine/Persistence` owns the local SQLite cache, repositories, and sync cursor
+coordination. `Engine/Events` owns live event dispatch, payload decoding,
+plugin registration, and stored-event reconstruction helpers.
+
+Engine invocation context carries session/workspace ids and trace metadata when
+needed. The server owns validation, routing, execution, idempotency, and event
+publication. iOS records delivered stream cursors for acknowledgement and
+diagnostics only; it does not use them as an alternate truth store.
+Replay exports remain server-owned: `session::replay_manifest` and the
+`execute` `replay_manifest` operation return canonical JSON capability results,
+not live or persisted iOS events. The only replay-specific persisted event iOS
+decodes is the metadata-only `model.provider_request` audit event.
+
+## State Ownership
+
+The iOS app owns no canonical server truth. `EventDatabase` is a Documents-backed SQLite projection cache
+for session lists, delivered events, sync state, and draft metadata. The
+production composition root does not switch to a temporary event database when
+Documents is unavailable; startup fails at the composition boundary instead of silently changing the projection substrate.
+Tests and diagnostics harnesses may create explicit isolated database paths, but
+those paths are not production recovery modes.
+
+`EventStoreManager` and `SessionSynchronizer` rebuild local session/event
+projections from server session lists and event-sync APIs. Server-missing
+sessions are removed from the local cache, full session sync clears and
+refetches event rows, and fork ancestor rows remain source-session history
+rather than copied client truth. Engine stream cursors are stored per server
+origin/topic/filter for ACK coalescing and diagnostics only; session history is
+reconstructed through server APIs, not replayed from cursor storage.
+Session list projection keeps server titles and last-message previews together:
+dashboard rows prefer generated or explicit session titles, then the latest user
+prompt preview, then `New Session` for untitled new rows. `SessionSidebar`
+composes the dashboard surface and shell actions; `SessionDashboard.swift` owns
+workspace grouping, expansion state, row status mapping, interactive row
+liquid-glass containers, and header/row presentation metrics.
+`NewSessionFlow` owns the new-session sheet workflow and presents with medium
+and large detents so the sheet starts compactly while still allowing expansion
+for workspace and model selection.
+
+Server settings shown in the iOS settings UI are snapshots from
+`settings::get`/`settings::reset`; local state exists only to render the active
+server and roll back a failed in-flight edit to the last loaded snapshot.
+Pairing is device-local `UserDefaults` state, bearer tokens are per-server
+Keychain secrets, drafts and input history are local workflow state, pending
+share content is App Group handoff state cleared after consumption, and
+MetricKit payloads are bounded Application Support diagnostics buffers.
+Recent input history is stored only on the device through
+`InputHistoryStore`, capped at 100 sent text prompts, exposed from the
+composer attachment menu only while local history exists and the session is
+idle/editable, and clearable from the Recent Inputs sheet with an icon-only
+destructive toolbar action. It is not a server prompt-library
+resource, snippet catalog, routing plane, or generated management surface.
+
+## Event Handling
+
+Live events use self-dispatching plugins registered in
+`Engine/Events/Plugins/EventRegistry.swift`. Stored events use
+`Engine/Events/Reconstruction` for stored-event helper types,
+`Engine/Events/Reconstruction/ChatMessageProjection` for event-to-chat
+projection helpers, and
+`Session/Timeline/Reconstruction/UnifiedEventTransformer.swift` for the
+session-owned projection into `ChatMessage` timeline state. Unsupported or
+malformed events are diagnostics; they are not normalized through retired
+product names.
+
+See `events.md` for the current plugin categories and reconstruction boundary.
+
+## Dynamic Runtime Surfaces
+
+`UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift` is the retained
+generic renderer for server/agent-authored runtime data. It uses native SwiftUI
+layout primitives and submits only generic action coordinates or encoded action
+payloads supplied by the runtime surface. Pure icon, formatting, array, and row
+preview helpers live in `GeneratedRuntimeSurfaceView+RenderingHelpers.swift`.
+It must not map fixed feature names into custom sheets.
+
+The Agent cockpit opens from Servers -> Diagnostics -> Runtime Cockpit. Its
+Discovery tab groups visible functions by namespace, summarizes schema and
+health gaps, lists recent `catalog_discovery_report` resources, and can request
+a new `catalog_discovery::conformance_report`. That action writes durable
+report/stream evidence only; it does not execute discovered functions. Its
+Surfaces tab lists active `ui_surface` resources through the same generic
+`resource::list`/`resource::inspect` substrate, decodes current `UiSurfaceDTO`
+payloads, and passes resource/version refs into `GeneratedRuntimeSurfaceView`.
+The sheet uses the standard liquid-glass sheet toolbar, title, dismiss control,
+and shared `TronSegmentedControl` tabs rather than a native segmented picker.
+Empty state is allowed when no runtime surface is published; a hardcoded sample
+surface is not.
+
+## Settings And Theme Boundaries
+
+`SettingsView.swift` owns settings-shell state, navigation, toolbar actions,
+and sheet presentation. The main settings grid and destructive action section
+live in `SettingsView+MainSection.swift`; footer-specific helpers remain in
+`SettingsView+FooterSupport.swift`; paired-server row/menu helpers live in
+`SettingsServerSupport.swift`; and shared row/card primitives stay in
+`SettingsSupport.swift`.
+
+Server identity, reachability, diagnostics, and pairing controls stay inside
+the Servers page or the disconnected warning card; Settings main does not grow
+a server-health dashboard. Servers diagnostics owns the compact Logs and
+Runtime Cockpit entries. Agent settings owns server-backed quick-session
+defaults, including `server.defaultProvider`, `server.defaultModel`, and
+`server.defaultWorkspace`. Provider credential state remains in Providers.
+
+`ModelPickerSheet.swift` owns the model-picker sheet frame and loading/error
+state. Provider, family, model-card, reasoning-visibility, and reasoning
+popover rendering live in `ModelPickerSheet+Sections.swift`. `TronColors.swift`
+owns the base palette; semantic derived tokens and shape-style conveniences
+live in `TronThemeTokens.swift`. The current visual baseline is neutral glass:
+light backgrounds resolve to cool neutrals, dark surfaces resolve to deep
+neutral glass, primary controls use the `tronEmerald` token as the emerald
+primary accent, and success/warning/error remain separate semantic colors.
+
+## Diagnostics And Build Identity
+
+The settings toolbar and the Servers page Diagnostics section expose Logs in
+every build configuration. The Logs sheet shows redacted local iOS log entries;
+the client log ingestion service mirrors bounded client logs into the server
+`logs` table while connected. iOS redacts before buffering and again at the
+send boundary, and the server redacts bearer/API/OAuth fields again before
+durable `logs` storage, so diagnostics do not rely on one client-only scrubber.
+Successful ingest transport chatter is filtered to prevent a self-feeding
+diagnostics loop.
+`DiagnosticsBundleBuilder.swift` owns bundle assembly; DTOs, event sanitization,
+hashing, and host classification live in `DiagnosticsBundleTypes.swift`.
+Diagnostics support consumes `DiagnosticsEngineEndpoint` and
+`ClientLogIngestionEndpoint`; `Support/Composition` is the only support-layer
+owner that adapts those endpoints to concrete `EngineClient` instances.
+`DependencyProviding` intentionally does not expose the concrete engine client.
+
+`ProdDebug` backs the `Tron Fast` scheme: it keeps production bundle identity
+and entitlements while using debug build settings for fast local iteration.
+
+## Testing And Evidence
+
+For shell-affecting changes:
+
+- Regenerate the project with `xcodegen generate` when files are added,
+  deleted, or renamed.
+- Run `SourceGuardTests`, which compiles the full app/test target and enforces
+  deleted product roots.
+- Keep chat tests under the same owner names as production chat code:
+  `Coordinators`, `Messaging`, `Navigation`, `State`, and `ViewModel`.
+- Capture iPhone and iPad simulator screenshots when UI behavior changes.
+- Include simulator name, UDID, bundle id, launch/openurl return codes, and
+  screenshot paths in the relevant scorecard evidence.
+
+The current iOS thin-client closeout proof is recorded in
+`packages/agent/docs/ios-thin-client-generic-runtime-shell-scorecard.md`,
+`packages/agent/docs/ios-thin-client-generic-runtime-shell-evidence-manifest.md`,
+`packages/agent/docs/ios-thin-client-generic-runtime-shell-inventory.md`, and
+`packages/agent/tests/ios_thin_client_generic_runtime_shell_invariants.rs`.

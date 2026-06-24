@@ -1,0 +1,248 @@
+import XCTest
+@testable import TronMobile
+
+/// Tests for DependencyContainer
+/// Uses shared container where possible to avoid expensive per-test initialization.
+@MainActor
+final class DependencyContainerTests: XCTestCase {
+
+    // Shared container for read-only tests (avoids creating 25 containers)
+    private static var sharedContainer: DependencyContainer!
+
+    override class func setUp() {
+        super.setUp()
+        clearPairings()
+        // Create ONE container for all read-only tests
+        sharedContainer = DependencyContainer()
+    }
+
+    override class func tearDown() {
+        sharedContainer = nil
+        super.tearDown()
+    }
+
+    override func tearDown() {
+        Self.clearPairings()
+        super.tearDown()
+    }
+
+    private static func clearPairings() {
+        UserDefaults.standard.removeObject(forKey: PairedServerStore.serversKey)
+        UserDefaults.standard.removeObject(forKey: PairedServerStore.activeIdKey)
+    }
+
+    private func pairedContainer(
+        id: String = "server",
+        host: String = "localhost",
+        port: Int = 8082
+    ) -> (DependencyContainer, PairedServer) {
+        Self.clearPairings()
+        let server = PairedServer(id: id, label: "Test Server", host: host, port: port)
+        let data = try! JSONEncoder().encode([server])
+        UserDefaults.standard.set(data, forKey: PairedServerStore.serversKey)
+        UserDefaults.standard.set(server.id, forKey: PairedServerStore.activeIdKey)
+        return (DependencyContainer(), server)
+    }
+
+    // MARK: - Container Lifecycle Tests (use shared container)
+
+    func test_container_providesEngineClient() async throws {
+        XCTAssertNotNil(Self.sharedContainer.engineClient)
+        XCTAssert(Self.sharedContainer.engineClient is EngineClient)
+    }
+
+    func test_container_providesEventDatabase() async throws {
+        XCTAssertNotNil(Self.sharedContainer.eventDatabase)
+        XCTAssert(Self.sharedContainer.eventDatabase is EventDatabase)
+    }
+
+    func test_container_providesEventStoreManager() async throws {
+        XCTAssertNotNil(Self.sharedContainer.eventStoreManager)
+        XCTAssert(Self.sharedContainer.eventStoreManager is EventStoreManager)
+    }
+
+    func test_container_providesDraftStore() async throws {
+        XCTAssertNotNil(Self.sharedContainer.draftStore)
+        XCTAssert(Self.sharedContainer.draftStore is DraftStore)
+    }
+
+    func test_container_providesDeepLinkRouter() async throws {
+        XCTAssertNotNil(Self.sharedContainer.deepLinkRouter)
+        XCTAssert(Self.sharedContainer.deepLinkRouter is DeepLinkRouter)
+    }
+
+    // MARK: - Singleton Behavior Tests (use shared container)
+
+    func test_engineClient_returnsSameInstance() async throws {
+        let client1 = Self.sharedContainer.engineClient
+        let client2 = Self.sharedContainer.engineClient
+
+        XCTAssert(client1 === client2, "EngineClient should return same instance")
+    }
+
+    func test_eventDatabase_returnsSameInstance() async throws {
+        let db1 = Self.sharedContainer.eventDatabase
+        let db2 = Self.sharedContainer.eventDatabase
+
+        XCTAssert(db1 === db2, "EventDatabase should return same instance")
+    }
+
+    func test_eventStoreManager_returnsSameInstance() async throws {
+        let manager1 = Self.sharedContainer.eventStoreManager
+        let manager2 = Self.sharedContainer.eventStoreManager
+
+        XCTAssert(manager1 === manager2, "EventStoreManager should return same instance")
+    }
+
+    // MARK: - Server Settings Tests
+    // Note: These tests verify URL construction logic, not default values
+    // (UserDefaults may have values from previous test runs)
+
+    func test_serverURL_constructsCorrectlyWithoutTLS() async throws {
+        let (container, _) = pairedContainer(host: "localhost", port: 8082)
+        let url = container.serverURL
+
+        XCTAssertEqual(url.scheme, "ws")
+        XCTAssertEqual(url.host, "localhost")
+        XCTAssertEqual(url.port, 8082)
+    }
+
+    func test_currentServerOrigin_formatsCorrectly() async throws {
+        let (container, _) = pairedContainer(host: "testhost", port: 9999)
+        let origin = container.currentServerOrigin
+
+        XCTAssertEqual(origin, "testhost:9999")
+    }
+
+    func test_noPairedServerDoesNotUseLocalhostFallback() async throws {
+        Self.clearPairings()
+        let container = DependencyContainer()
+
+        XCTAssertEqual(container.currentServerOrigin, "")
+        XCTAssertEqual(container.serverURL.host, "paired-server-required.invalid")
+    }
+
+    // MARK: - Active Server Update Tests
+
+    func test_selectPairedServer_recreatesEngineClient() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19000)
+        let originalClient = container.engineClient
+        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19001)
+        container.replacePairedServers([first, second], activeServer: first)
+
+        container.selectPairedServer(second, connectAfterSwitch: false)
+
+        XCTAssert(originalClient !== container.engineClient, "engine client should be recreated after settings change")
+    }
+
+    func test_selectPairedServer_preservesEventDatabase() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19002)
+        let originalDB = container.eventDatabase
+        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19003)
+        container.replacePairedServers([first, second], activeServer: first)
+
+        container.selectPairedServer(second, connectAfterSwitch: false)
+
+        XCTAssert(originalDB === container.eventDatabase, "EventDatabase should NOT be recreated after settings change")
+    }
+
+    func test_selectPairedServer_preservesDeepLinkRouter() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19006)
+        let originalRouter = container.deepLinkRouter
+        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19007)
+        container.replacePairedServers([first, second], activeServer: first)
+
+        container.selectPairedServer(second, connectAfterSwitch: false)
+
+        XCTAssert(originalRouter === container.deepLinkRouter, "DeepLinkRouter should NOT be recreated")
+    }
+
+    func test_selectPairedServer_incrementsVersion() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19008)
+        let originalVersion = container.activeServerSelectionVersion
+        let second = PairedServer(id: "second", label: "Second", host: "second.example.com", port: 19009)
+        container.replacePairedServers([first, second], activeServer: first)
+
+        container.selectPairedServer(second, connectAfterSwitch: false)
+
+        XCTAssertEqual(container.activeServerSelectionVersion, originalVersion + 2, "activeServerSelectionVersion should increment for replace and select")
+    }
+
+    func test_selectPairedServer_noChangeDoesNotIncrementVersion() async throws {
+        let (container, server) = pairedContainer(host: "same.example.com", port: 19010)
+        let originalVersion = container.activeServerSelectionVersion
+
+        container.selectPairedServer(server)
+
+        XCTAssertEqual(container.activeServerSelectionVersion, originalVersion, "Version should NOT increment when unchanged")
+    }
+
+    func test_selectPairedServer_updatesServerURL() async throws {
+        let (container, first) = pairedContainer(host: "first.example.com", port: 19011)
+        let second = PairedServer(id: "second", label: "Second", host: "newhost.example.com", port: 19012)
+        container.replacePairedServers([first, second], activeServer: first)
+
+        container.selectPairedServer(second, connectAfterSwitch: false)
+
+        let url = container.serverURL
+        XCTAssertEqual(url.scheme, "ws")
+        XCTAssertTrue(url.host?.contains("newhost") ?? false)
+    }
+
+    func test_forgetPairedServer_removesTokenBeforeMetadataCompletes() async throws {
+        let id = "forget-\(UUID().uuidString)"
+        let (container, server) = pairedContainer(id: id, host: "forget.example.com", port: 19013)
+        try container.pairedServerTokenStore.setToken("tok-forget", forServerId: server.id)
+        defer { try? container.pairedServerTokenStore.remove(serverId: server.id) }
+
+        let plan = try container.forgetPairedServer(server)
+
+        XCTAssertTrue(plan.removedWasActive)
+        XCTAssertTrue(plan.shouldReturnToOnboarding)
+        XCTAssertNil(container.pairedServerTokenStore.token(forServerId: server.id))
+        XCTAssertFalse(container.pairedServerStore.servers.contains(where: { $0.id == server.id }))
+        XCTAssertNil(container.pairedServerStore.activeServerId)
+    }
+
+    // MARK: - App Settings Tests (use shared container for read, fresh for write)
+
+    func test_effectiveWorkingDirectory_fallsBackToDocuments() async throws {
+        // Read-only test on shared container's default behavior
+        let effective = Self.sharedContainer.effectiveWorkingDirectory
+        XCTAssertFalse(effective.isEmpty)
+    }
+
+    func test_effectiveWorkingDirectory_usesWorkingDirectoryWhenSet() async throws {
+        let container = DependencyContainer()
+        let original = container.workingDirectory
+        container.workingDirectory = "/custom/path"
+        defer { container.workingDirectory = original }
+        XCTAssertEqual(container.effectiveWorkingDirectory, "/custom/path")
+    }
+
+    // MARK: - Protocol Conformance Tests (use shared container - compile-time checks)
+
+    func test_container_conformsToDependencyProviding() async throws {
+        let _: any DependencyProviding = Self.sharedContainer
+        XCTAssertTrue(true)
+    }
+
+    func test_container_conformsToServerSettingsProvider() async throws {
+        let _: any ServerSettingsProvider = Self.sharedContainer
+        XCTAssertTrue(true)
+    }
+
+    func test_container_conformsToAppSettingsProvider() async throws {
+        let _: any AppSettingsProvider = Self.sharedContainer
+        XCTAssertTrue(true)
+    }
+
+    // MARK: - Initialization Tests
+
+    func test_container_startsNotInitialized() async throws {
+        // Fresh container needed to test initial state
+        let container = DependencyContainer()
+        XCTAssertFalse(container.isInitialized)
+    }
+
+}

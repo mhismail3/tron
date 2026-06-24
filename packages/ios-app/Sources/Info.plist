@@ -26,12 +26,16 @@
 	<string>$(TRON_CANONICAL_VERSION)</string>
 	<key>TRONFeedbackEmail</key>
 	<string>$(TRON_FEEDBACK_EMAIL)</string>
+	<key>TRONMacDownloadURL</key>
+	<string>$(TRON_MAC_DOWNLOAD_URL)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Tron uses the microphone to record voice for transcription.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Tron uses the camera to scan Mac pairing QR codes and capture photos for messages.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Tron uses the microphone to record composer voice input for local transcription on your paired Mac.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Tron connects to your Mac over your trusted local or Tailscale network for engine pairing and live sessions.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsArbitraryLoads</key>

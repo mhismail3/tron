@@ -1,17 +1,12 @@
 # Quick Chat Tron profile.
 #
 # Chat sessions are conversational and not project scoped by default. The
-# profile inherits every policy from "default", then remaps the main entrypoint
-# to the chat prompt and context policy so the rest of the runtime can treat it
-# as a normal session with a different execution spec.
+# profile inherits the managed boot settings and only names the chat class; the
+# primitive prompt loop does not use profile-specific entrypoints.
 
-version = "2"
+version = "3"
 name = "chat"
 managed = true
 profileClass = "chat"
 inherits = ["default"]
 authProfile = "default"
-
-[entrypoints.main]
-prompt = "prompts/chat.md"
-contextPolicy = "cloudDefault"

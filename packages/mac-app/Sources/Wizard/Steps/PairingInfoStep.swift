@@ -121,7 +121,7 @@ struct PairingInfoStep: View {
                     pairingRow(field: .tailscaleIP, label: "Tailscale IP", value: payload.host)
                     pairingRow(field: .port, label: "Port", value: String(payload.port))
                     pairingRow(field: .pairingToken, label: "Pairing token", value: payload.token, masked: true)
-                    pairingRow(field: .serverName, label: "Server name", value: payload.label ?? LocalComputerName.fallback)
+                    pairingRow(field: .serverName, label: "Server name", value: payload.label ?? LocalComputerName.defaultName)
                 }
                 .transition(PairingInfoStepLayout.revealTransition)
             } else if let failureReason {

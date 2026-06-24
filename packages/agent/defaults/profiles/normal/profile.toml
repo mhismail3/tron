@@ -1,15 +1,11 @@
 # Normal Tron profile.
 #
-# This is the standard project/workspace session profile. It intentionally
-# inherits the complete managed default AgentExecutionSpec and only names the
-# user-facing mode. Customize this profile directly only if you want to change
-# the normal baseline for all ordinary sessions; otherwise create your own
-# child profile that inherits from "normal".
+# This is the standard project/workspace profile. It inherits the managed
+# default boot settings and only names the user-facing profile class.
 
-version = "2"
+version = "3"
 name = "normal"
 managed = true
 profileClass = "normal"
 inherits = ["default"]
 authProfile = "default"
-

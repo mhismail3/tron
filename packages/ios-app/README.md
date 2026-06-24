@@ -45,31 +45,19 @@ open TronMobile.xcodeproj
 
 ## Connecting to Your Tron Server
 
-### Same Network (Easiest)
+The app connects to the Tron engine over the `/engine` WebSocket endpoint. The
+Mac wrapper pairing QR carries the server address, port, bearer token, and
+label. Physical-device testing can use a local network address or Tailscale.
 
-1. Find your Mac's local IP:
-   ```bash
-   ipconfig getifaddr en0
-   ```
+For local development from this checkout:
 
-2. Start Tron server on Mac:
-   ```bash
-   pnpm tron --server --host 0.0.0.0 --ws-port 8080
-   ```
+```bash
+scripts/tron dev -bdt
+```
 
-3. In the iOS app Settings, enter:
-   - Host: Your Mac's IP (e.g., `192.168.1.100`)
-   - Port: `8080`
-   - TLS: Off
-
-### Via Tailscale (Recommended for Remote)
-
-1. Install Tailscale on both Mac and iPhone
-2. Get your Mac's Tailscale IP:
-   ```bash
-   tailscale ip -4
-   ```
-3. Use the Tailscale IP in the app settings
+The default paired server port is `9847`. If pairing times out, verify
+`http://<mac-or-tailscale-ip>:9847/health` from the network you expect the
+device to use, and accept the iOS local-network permission prompt if it appears.
 
 ## Sideloading to Device
 
@@ -104,30 +92,23 @@ packages/ios-app/
 ├── project.yml              # XcodeGen project definition
 ├── Sources/
 │   ├── App/
-│   │   └── TronMobileApp.swift     # App entry point
-│   ├── Models/
-│   │   ├── AnyCodable.swift        # Dynamic JSON handling
-│   │   ├── Events.swift            # Server event types
-│   │   ├── Message.swift           # Chat message models
-│   │   └── RPCTypes.swift          # JSON-RPC types
-│   ├── Services/
-│   │   ├── RPCClient.swift         # High-level RPC client
-│   │   └── WebSocketService.swift  # WebSocket connection
-│   ├── ViewModels/
-│   │   └── ChatViewModel.swift     # Chat state management
-│   ├── Views/
-│   │   ├── ChatView.swift          # Main chat interface
-│   │   ├── InputBar.swift          # Message input
-│   │   ├── MessageBubble.swift     # Message rendering
-│   │   ├── SessionListView.swift   # Session browser
-│   │   └── SettingsView.swift      # App settings
-│   ├── Theme/
-│   │   ├── TronColors.swift        # Forest green palette
-│   │   └── TronIcons.swift         # SF Symbols mapping
-│   └── Extensions/
-│       ├── Date+Extensions.swift
-│       ├── String+Extensions.swift
-│       └── View+Extensions.swift
+│   │   └── Lifecycle/              # App entry point and scene coordination
+│   ├── Engine/
+│   │   ├── Transport/              # /engine WebSocket, clients, retry, deep links
+│   │   ├── Protocol/               # Engine protocol frames and domain payloads
+│   │   ├── Events/                 # Live events, plugins, payloads, reconstruction
+│   │   └── Persistence/            # Local SQLite cache, repositories, sync cursor
+│   ├── Session/                    # Chat workflow, timeline, parsing, attachments
+│   ├── UI/                         # Chat, settings, onboarding, runtime surfaces
+│   ├── Support/                    # Composition, diagnostics, pairing, storage
+│   ├── Assets.xcassets/            # App icons and image assets
+│   └── Resources/                  # Fonts and generated app-icon source layers
+├── Tests/
+│   ├── Engine/
+│   ├── Session/
+│   ├── UI/
+│   ├── Support/
+│   └── Infrastructure/
 └── TronMobile.xcodeproj     # Generated Xcode project
 ```
 
@@ -166,7 +147,7 @@ xcodegen generate
 ## Features
 
 - Real-time streaming responses
-- Tool use visualization
+- Capability invocation visualization
 - Session management
 - Image attachments
 - Thinking indicator

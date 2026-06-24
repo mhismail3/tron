@@ -1,20 +1,12 @@
 # Local-provider Tron profile.
 #
-# Local sessions optimize for smaller local model context windows while still
-# preserving enough orientation to be useful. The profile inherits the complete
-# default spec, then maps the main entrypoint to the local prompt, local context
-# policy, and local tool policy. Future local variants should inherit from this
-# profile rather than from "default" directly.
+# Local-provider sessions inherit the managed boot settings and name the local
+# class. Provider/context adaptation now belongs to the primitive model loop and
+# provider clients, not profile entrypoint policy.
 
-version = "2"
+version = "3"
 name = "local"
 managed = true
 profileClass = "local"
 inherits = ["default"]
 authProfile = "default"
-
-[entrypoints.main]
-prompt = "prompts/local.md"
-contextPolicy = "localDefault"
-localContextPolicy = "localDefault"
-toolPolicy = "localModel"

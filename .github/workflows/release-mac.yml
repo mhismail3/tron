@@ -10,8 +10,8 @@
 #
 #   1. Resolve the target version from VERSION.env and verify any tag
 #      matches the centralized release tag.
-#   2. Build the Rust agent binary in release mode (cached).
-#   3. Stage the agent into the embedded `Tron Server.app` Login Item via
+#   2. Build the Rust agent helper in release mode (cached).
+#   3. Stage both helpers into the embedded `Tron Server.app` Login Item via
 #      `packages/mac-app/scripts/bundle-agent.sh`.
 #   4. Generate the Xcode project with XcodeGen and archive the
 #      `TronMac` scheme with automatic signing.
@@ -33,9 +33,7 @@
 #   NOTARIZE_APPLE_ID       Apple ID email for notarytool
 #   NOTARIZE_TEAM_ID        Apple Developer team ID
 #   NOTARIZE_APP_PASSWORD   app-specific password for the Apple ID
-#   TRON_RELAY_URL          Cloudflare Worker URL for iOS push delivery
-#   TRON_RELAY_SECRET       HMAC secret shared with the Worker
-# All required signing, notarization, and relay secrets must be present for notarization to run. In
+# All required signing and notarization secrets must be present for notarization to run. In
 # dry-run mode (workflow_dispatch with `dry_run=true`) missing secrets
 # are tolerated and the job short-circuits before the notarization step.
 #
@@ -159,11 +157,9 @@ jobs:
           if [[ -z "${{ secrets.MACOS_CERT_P12_BASE64 }}" \
              || -z "${{ secrets.NOTARIZE_APPLE_ID }}" \
              || -z "${{ secrets.NOTARIZE_TEAM_ID }}" \
-             || -z "${{ secrets.NOTARIZE_APP_PASSWORD }}" \
-             || -z "${{ secrets.TRON_RELAY_URL }}" \
-             || -z "${{ secrets.TRON_RELAY_SECRET }}" ]]; then
+             || -z "${{ secrets.NOTARIZE_APP_PASSWORD }}" ]]; then
             flag="true"
-            echo "::notice::Release signing or relay secrets missing → forcing dry-run"
+            echo "::notice::Release signing/notarization secrets missing → forcing dry-run"
           fi
           echo "dry_run=$flag" >> "$GITHUB_OUTPUT"
           echo "Dry-run=$flag"
@@ -174,12 +170,8 @@ jobs:
         with:
           cache-workspaces: packages/agent
 
-      - name: Build agent (release)
+      - name: Build agent helper (release)
         working-directory: packages/agent
-        env:
-          TRON_RELAY_URL: ${{ secrets.TRON_RELAY_URL }}
-          TRON_RELAY_SECRET: ${{ secrets.TRON_RELAY_SECRET }}
-          TRON_RELAY_ENVIRONMENT: production
         run: cargo build --release --bin tron --locked
 
       # ── Xcode toolchain ────────────────────────────────────────────
@@ -192,16 +184,26 @@ jobs:
         run: |
           brew install xcodegen create-dmg
 
-      - name: Stage agent binary into embedded Login Item
+      - name: Stage agent helper binary into embedded Login Item
         working-directory: packages/mac-app
         run: |
-          # --skip-build because we already built the release binary above;
+          # --skip-build because we already built the release binaries above;
           # the script just copies + chmod + stages atomically.
           ./scripts/bundle-agent.sh --skip-build
+
+      - name: Validate staged helper binary
+        working-directory: packages/mac-app
+        run: |
+          test -x "Sources/Resources/Library/LoginItems/Tron Server.app/Contents/MacOS/tron"
 
       - name: Generate Xcode project
         working-directory: packages/mac-app
         run: xcodegen generate
+
+      - name: Verify generated Xcode project stays ignored
+        run: |
+          test -d packages/mac-app/TronMac.xcodeproj
+          git check-ignore -q packages/mac-app/TronMac.xcodeproj
 
       # ── Code signing setup ─────────────────────────────────────────
       #
@@ -346,14 +348,6 @@ jobs:
             || { echo "::error::Tron Server.app helper missing"; exit 1; }
           test -f "$APP_PATH/Contents/Library/LaunchAgents/com.tron.server.plist" \
             || { echo "::error::bundled LaunchAgent plist missing"; exit 1; }
-          test -f "$APP_PATH/Contents/Resources/Transcription/worker.py" \
-            || { echo "::error::bundled transcription worker missing"; exit 1; }
-          test -f "$APP_PATH/Contents/Resources/Transcription/requirements.txt" \
-            || { echo "::error::bundled transcription requirements missing"; exit 1; }
-          test -f "$APP_PATH/Contents/Resources/Skills/self-inspect/.managed" \
-            || { echo "::error::bundled managed skills missing"; exit 1; }
-          test -f "$APP_PATH/Contents/Resources/Skills/self-inspect/SKILL.md" \
-            || { echo "::error::bundled managed skill content missing"; exit 1; }
 
       # Inside-out signing — required for hardened runtime + notarization.
       #
@@ -361,8 +355,8 @@ jobs:
       # WITHOUT `--deep` so the helper's signature is preserved. The
       # earlier `--deep` flag was a footgun: it recursively re-signs every
       # already-signed binary, blowing away the hardened-runtime + entitlements
-      # we just applied to `Tron Server.app`. Apple has deprecated `--deep` for
-      # exactly this reason (`man codesign`, "DEEP DEPRECATION").
+      # we just applied to `Tron Server.app`. Apple now warns against `--deep`
+      # for exactly this reason (`man codesign`, "DEEP DEPRECATION").
       #
       # Verification uses `--deep` because it's a read-only walk and we
       # want to confirm the entire bundle tree validates.

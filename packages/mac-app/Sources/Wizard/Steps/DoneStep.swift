@@ -23,7 +23,7 @@ struct DoneStep: View {
         .onAppear {
             // Touch the sentinel atomically so the next launch lands
             // in menu-bar mode. Routes through `setup` so tests can
-            // substitute a no-op without touching disk.
+            // substitute an inert write without touching disk.
             //
             // Failure is rare (disk full, perms tampered) but real —
             // if we silently swallow it the user clicks "Open menu

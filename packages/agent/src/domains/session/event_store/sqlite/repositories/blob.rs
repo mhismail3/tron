@@ -1,0 +1,418 @@
+//! Blob repository — content-addressable storage with SHA-256 dedup.
+//!
+//! Blobs store large content (capability outputs, file contents) separately from events.
+//! Content is hashed with SHA-256 for deduplication — storing the same content twice
+//! increments the reference count instead of creating a duplicate row.
+
+use rusqlite::{Connection, OptionalExtension, params};
+
+use crate::domains::session::event_store::errors::{EventStoreError, Result};
+use crate::domains::session::event_store::sqlite::row_types::BlobRow;
+
+/// Blob repository — stateless, every method takes `&Connection`.
+pub struct BlobRepo;
+
+/// Storage size summary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobSizeInfo {
+    /// Total original (uncompressed) bytes.
+    pub original: i64,
+    /// Total compressed bytes.
+    pub compressed: i64,
+}
+
+impl BlobRepo {
+    /// Store content, deduplicating by SHA-256 hash.
+    ///
+    /// If identical content already exists, increments the reference count
+    /// and returns the existing blob ID. Otherwise creates a new blob.
+    pub fn store(conn: &Connection, content: &[u8], mime_type: &str) -> Result<String> {
+        let blob_id = crate::shared::storage::store_content_blob(conn, content, mime_type)
+            .map_err(|error| {
+                if is_write_contention(&error) {
+                    return EventStoreError::Busy {
+                        operation: "blob storage",
+                        attempts: 1,
+                    };
+                }
+                EventStoreError::Internal(format!("failed to store blob: {error:#}"))
+            })?;
+        crate::shared::storage::register_existing_blob_owner(
+            conn,
+            &blob_id,
+            "domain_blob",
+            "content",
+            "audit",
+        )
+        .map_err(|error| {
+            if is_write_contention(&error) {
+                return EventStoreError::Busy {
+                    operation: "blob owner registration",
+                    attempts: 1,
+                };
+            }
+            EventStoreError::Internal(format!("failed to record blob owner: {error:#}"))
+        })?;
+        Ok(blob_id)
+    }
+
+    /// Get blob content by ID.
+    pub fn get_content(conn: &Connection, blob_id: &str) -> Result<Option<Vec<u8>>> {
+        let content: Option<(Vec<u8>, String, i64)> = conn
+            .query_row(
+                "SELECT content, compression, uncompressed_size FROM blobs WHERE id = ?1",
+                params![blob_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        content.map_or(Ok(None), |(content, compression, original_size)| {
+            decode_content(&content, &compression, original_size).map(Some)
+        })
+    }
+
+    /// Get full blob record by ID.
+    pub fn get_by_id(conn: &Connection, blob_id: &str) -> Result<Option<BlobRow>> {
+        let row = conn
+            .query_row(
+                "SELECT id, hash, content, mime_type, uncompressed_size, size_compressed, compression, created_at, ref_count
+                 FROM blobs WHERE id = ?1",
+                params![blob_id],
+                Self::map_row,
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Get blob by SHA-256 hash.
+    pub fn get_by_hash(conn: &Connection, hash: &str) -> Result<Option<BlobRow>> {
+        let row = conn
+            .query_row(
+                "SELECT id, hash, content, mime_type, uncompressed_size, size_compressed, compression, created_at, ref_count
+                 FROM blobs WHERE hash = ?1",
+                params![hash],
+                Self::map_row,
+            )
+            .optional()?;
+        Ok(row)
+    }
+
+    /// Get reference count for a blob.
+    pub fn get_ref_count(conn: &Connection, blob_id: &str) -> Result<Option<i64>> {
+        let count: Option<i64> = conn
+            .query_row(
+                "SELECT ref_count FROM blobs WHERE id = ?1",
+                params![blob_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(count)
+    }
+
+    /// Increment reference count.
+    pub fn increment_ref_count(conn: &Connection, blob_id: &str) -> Result<bool> {
+        let changed = conn.execute(
+            "UPDATE blobs SET ref_count = ref_count + 1 WHERE id = ?1",
+            params![blob_id],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Decrement reference count (floor at 0). Returns new count if blob exists.
+    pub fn decrement_ref_count(conn: &Connection, blob_id: &str) -> Result<Option<i64>> {
+        let _ = conn.execute(
+            "UPDATE blobs SET ref_count = ref_count - 1 WHERE id = ?1 AND ref_count > 0",
+            params![blob_id],
+        )?;
+        let count = Self::get_ref_count(conn, blob_id)?;
+        if count == Some(0) {
+            let _ = conn.execute(
+                "DELETE FROM storage_payload_refs
+                 WHERE owner_kind = 'domain_blob'
+                   AND owner_id = ?1
+                   AND field_name = 'content'",
+                params![blob_id],
+            )?;
+        }
+        Ok(count)
+    }
+
+    /// Delete all blobs with zero references. Returns count deleted.
+    pub fn delete_unreferenced(conn: &Connection) -> Result<usize> {
+        let changed = conn.execute(
+            "DELETE FROM blobs
+             WHERE ref_count <= 0
+               AND NOT EXISTS (
+                 SELECT 1 FROM storage_payload_refs refs
+                 WHERE refs.payload_blob_id = blobs.id
+               )",
+            [],
+        )?;
+        Ok(changed)
+    }
+
+    /// Count total blobs.
+    pub fn count(conn: &Connection) -> Result<i64> {
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))?;
+        Ok(count)
+    }
+
+    /// Get total storage usage.
+    pub fn get_total_size(conn: &Connection) -> Result<BlobSizeInfo> {
+        let (original, compressed) = conn.query_row(
+            "SELECT COALESCE(SUM(uncompressed_size), 0), COALESCE(SUM(size_compressed), 0) FROM blobs",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok(BlobSizeInfo {
+            original,
+            compressed,
+        })
+    }
+
+    fn map_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<BlobRow> {
+        Ok(BlobRow {
+            id: row.get(0)?,
+            hash: row.get(1)?,
+            content: decode_content_for_row(row.get(2)?, &row.get::<_, String>(6)?, row.get(4)?)?,
+            mime_type: row.get(3)?,
+            uncompressed_size: row.get(4)?,
+            size_compressed: row.get(5)?,
+            compression: row.get(6)?,
+            created_at: row.get(7)?,
+            ref_count: row.get(8)?,
+        })
+    }
+}
+
+fn is_write_contention(error: &anyhow::Error) -> bool {
+    for cause in error.chain() {
+        if let Some(rusqlite::Error::SqliteFailure(code, _)) =
+            cause.downcast_ref::<rusqlite::Error>()
+            && matches!(
+                code.code,
+                rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+            )
+        {
+            return true;
+        }
+        let message = cause.to_string();
+        if message.contains("database is locked")
+            || message.contains("Cannot promote read transaction")
+        {
+            return true;
+        }
+    }
+    false
+}
+
+fn decode_content(content: &[u8], compression: &str, original_size: i64) -> Result<Vec<u8>> {
+    crate::shared::storage::decode_blob_content(content, compression, original_size)
+        .map_err(|error| EventStoreError::Internal(format!("failed to decode blob: {error:#}")))
+}
+
+fn decode_content_for_row(
+    content: Vec<u8>,
+    compression: &str,
+    original_size: i64,
+) -> rusqlite::Result<Vec<u8>> {
+    decode_content(&content, compression, original_size).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Blob, Box::new(error))
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tests
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+#[allow(unused_results)]
+mod tests {
+    use super::*;
+    use crate::domains::session::event_store::sqlite::migrations::run_migrations;
+    use sha2::{Digest, Sha256};
+
+    fn setup() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")
+            .unwrap();
+        run_migrations(&conn).unwrap();
+        conn
+    }
+
+    fn hex_sha256(data: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        format!("{:x}", hasher.finalize())
+    }
+
+    #[test]
+    fn store_and_retrieve() {
+        let conn = setup();
+        let id = BlobRepo::store(&conn, b"hello world", "text/plain").unwrap();
+        assert!(id.starts_with("blob_"));
+
+        let content = BlobRepo::get_content(&conn, &id).unwrap().unwrap();
+        assert_eq!(content, b"hello world");
+    }
+
+    #[test]
+    fn store_deduplicates() {
+        let conn = setup();
+        let id1 = BlobRepo::store(&conn, b"same content", "text/plain").unwrap();
+        let id2 = BlobRepo::store(&conn, b"same content", "text/plain").unwrap();
+        assert_eq!(id1, id2);
+
+        // Ref count should be 2
+        let count = BlobRepo::get_ref_count(&conn, &id1).unwrap().unwrap();
+        assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn large_blob_compresses_but_reads_original_content() {
+        let conn = setup();
+        let content = "engine payload ".repeat(2048).into_bytes();
+        let id = BlobRepo::store(&conn, &content, "application/json").unwrap();
+
+        let blob = BlobRepo::get_by_id(&conn, &id).unwrap().unwrap();
+        assert_eq!(blob.content, content);
+        assert_eq!(blob.compression, "zstd");
+        assert!(blob.size_compressed < blob.uncompressed_size);
+    }
+
+    #[test]
+    fn store_different_content_creates_new() {
+        let conn = setup();
+        let id1 = BlobRepo::store(&conn, b"content a", "text/plain").unwrap();
+        let id2 = BlobRepo::store(&conn, b"content b", "text/plain").unwrap();
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn get_by_id_full_record() {
+        let conn = setup();
+        let id = BlobRepo::store(&conn, b"test data", "text/plain").unwrap();
+
+        let blob = BlobRepo::get_by_id(&conn, &id).unwrap().unwrap();
+        assert_eq!(blob.id, id);
+        assert_eq!(blob.content, b"test data");
+        assert_eq!(blob.mime_type, "text/plain");
+        assert_eq!(blob.uncompressed_size, 9);
+        assert_eq!(blob.compression, "none");
+        assert_eq!(blob.ref_count, 1);
+    }
+
+    #[test]
+    fn get_by_hash() {
+        let conn = setup();
+        let id = BlobRepo::store(&conn, b"find by hash", "text/plain").unwrap();
+        let hash = hex_sha256(b"find by hash");
+
+        let blob = BlobRepo::get_by_hash(&conn, &hash).unwrap().unwrap();
+        assert_eq!(blob.id, id);
+    }
+
+    #[test]
+    fn get_content_not_found() {
+        let conn = setup();
+        let content = BlobRepo::get_content(&conn, "blob_nonexistent").unwrap();
+        assert!(content.is_none());
+    }
+
+    #[test]
+    fn increment_ref_count() {
+        let conn = setup();
+        let id = BlobRepo::store(&conn, b"data", "text/plain").unwrap();
+        assert_eq!(BlobRepo::get_ref_count(&conn, &id).unwrap().unwrap(), 1);
+
+        BlobRepo::increment_ref_count(&conn, &id).unwrap();
+        assert_eq!(BlobRepo::get_ref_count(&conn, &id).unwrap().unwrap(), 2);
+    }
+
+    #[test]
+    fn decrement_ref_count() {
+        let conn = setup();
+        let id = BlobRepo::store(&conn, b"data", "text/plain").unwrap();
+
+        let new_count = BlobRepo::decrement_ref_count(&conn, &id).unwrap().unwrap();
+        assert_eq!(new_count, 0);
+    }
+
+    #[test]
+    fn decrement_ref_count_floors_at_zero() {
+        let conn = setup();
+        let id = BlobRepo::store(&conn, b"data", "text/plain").unwrap();
+
+        BlobRepo::decrement_ref_count(&conn, &id).unwrap(); // 1 -> 0
+        BlobRepo::decrement_ref_count(&conn, &id).unwrap(); // stays 0
+        assert_eq!(BlobRepo::get_ref_count(&conn, &id).unwrap().unwrap(), 0);
+    }
+
+    #[test]
+    fn delete_unreferenced() {
+        let conn = setup();
+        let id1 = BlobRepo::store(&conn, b"keep me", "text/plain").unwrap();
+        let id2 = BlobRepo::store(&conn, b"delete me", "text/plain").unwrap();
+
+        BlobRepo::decrement_ref_count(&conn, &id2).unwrap(); // ref_count = 0
+
+        let deleted = BlobRepo::delete_unreferenced(&conn).unwrap();
+        assert_eq!(deleted, 1);
+
+        assert!(BlobRepo::get_by_id(&conn, &id1).unwrap().is_some());
+        assert!(BlobRepo::get_by_id(&conn, &id2).unwrap().is_none());
+    }
+
+    #[test]
+    fn count_blobs() {
+        let conn = setup();
+        assert_eq!(BlobRepo::count(&conn).unwrap(), 0);
+
+        BlobRepo::store(&conn, b"a", "text/plain").unwrap();
+        BlobRepo::store(&conn, b"b", "text/plain").unwrap();
+        assert_eq!(BlobRepo::count(&conn).unwrap(), 2);
+
+        // Duplicate doesn't increase count
+        BlobRepo::store(&conn, b"a", "text/plain").unwrap();
+        assert_eq!(BlobRepo::count(&conn).unwrap(), 2);
+    }
+
+    #[test]
+    fn get_total_size_empty() {
+        let conn = setup();
+        let size = BlobRepo::get_total_size(&conn).unwrap();
+        assert_eq!(
+            size,
+            BlobSizeInfo {
+                original: 0,
+                compressed: 0
+            }
+        );
+    }
+
+    #[test]
+    fn get_total_size() {
+        let conn = setup();
+        BlobRepo::store(&conn, b"12345", "text/plain").unwrap(); // 5 bytes
+        BlobRepo::store(&conn, b"1234567890", "text/plain").unwrap(); // 10 bytes
+
+        let size = BlobRepo::get_total_size(&conn).unwrap();
+        assert_eq!(size.original, 15);
+        assert_eq!(size.compressed, 15); // no compression
+    }
+
+    #[test]
+    fn binary_content() {
+        let conn = setup();
+        let binary = vec![0u8, 1, 2, 255, 254, 253];
+        let id = BlobRepo::store(&conn, &binary, "application/octet-stream").unwrap();
+
+        let content = BlobRepo::get_content(&conn, &id).unwrap().unwrap();
+        assert_eq!(content, binary);
+    }
+
+    #[test]
+    fn sha256_deterministic() {
+        assert_eq!(hex_sha256(b"hello"), hex_sha256(b"hello"));
+        assert_ne!(hex_sha256(b"hello"), hex_sha256(b"world"));
+    }
+}

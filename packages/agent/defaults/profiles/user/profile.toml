@@ -5,7 +5,7 @@
 # the active profile's managed settings. User-created execution profiles should
 # be separate siblings under `profiles/`, not edits to this overlay.
 
-version = "2"
+version = "3"
 name = "user"
 managed = false
 profileClass = "custom"

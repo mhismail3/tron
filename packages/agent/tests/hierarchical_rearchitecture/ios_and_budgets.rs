@@ -1,0 +1,581 @@
+use super::support::*;
+
+#[test]
+fn ios_sources_do_not_use_broad_views_network_database_buckets() {
+    let banned = [
+        "packages/ios-app/Sources/UI/Views",
+        "packages/ios-app/Sources/Engine/Network",
+        "packages/ios-app/Sources/Engine/Database",
+        "packages/ios-app/Sources/Engine/EventStore",
+        "packages/ios-app/Sources/Session/ViewModels/Managers",
+        "packages/ios-app/Sources/Session/ViewModels/Utilities",
+        "packages/ios-app/Sources/Support/Concurrency",
+        "packages/ios-app/Sources/Support/DependencyInjection",
+        "packages/ios-app/Sources/Support/Diagnostics/Services",
+        "packages/ios-app/Sources/Support/Utilities",
+        "packages/ios-app/Sources/Support/Extensions",
+        "packages/ios-app/Sources/Support/Infrastructure",
+        "packages/ios-app/Sources/Support/Observability",
+        "packages/ios-app/Sources/Support/Settings",
+        "packages/ios-app/Sources/Support/Storage/Services",
+    ];
+
+    let present: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        present.is_empty(),
+        "iOS sources must not retain broad technical buckets after HRA closeout: {present:#?}"
+    );
+}
+
+#[test]
+fn ios_tests_mirror_source_boundaries() {
+    let required_roots = [
+        "packages/ios-app/Tests/Infrastructure",
+        "packages/ios-app/Tests/Engine",
+        "packages/ios-app/Tests/Session",
+        "packages/ios-app/Tests/UI",
+        "packages/ios-app/Tests/Support",
+    ];
+    let banned_roots = [
+        "packages/ios-app/Tests/Core",
+        "packages/ios-app/Tests/Extensions",
+        "packages/ios-app/Tests/Models",
+        "packages/ios-app/Tests/Navigation",
+        "packages/ios-app/Tests/Observability",
+        "packages/ios-app/Tests/Onboarding",
+        "packages/ios-app/Tests/Repositories",
+        "packages/ios-app/Tests/Services",
+        "packages/ios-app/Tests/Theme",
+        "packages/ios-app/Tests/Utilities",
+        "packages/ios-app/Tests/ViewModels",
+        "packages/ios-app/Tests/Views",
+    ];
+
+    let missing: Vec<_> = required_roots
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned_roots
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "iOS tests must mirror production feature boundaries; missing roots: {missing:#?}; old buckets still present: {present_banned:#?}"
+    );
+}
+
+#[test]
+fn ios_hra8_ownership_map_covers_every_source_and_test_swift_file() {
+    let map = read_repo_file(IOS_OWNERSHIP_MAP_PATH);
+    let mut lines = map.lines();
+    assert_eq!(
+        lines.next(),
+        Some("current_path\ttarget_path\towner\tphase\tclassification\tstatus\treason"),
+        "{IOS_OWNERSHIP_MAP_PATH} must keep the HRA-8 iOS ownership-map header"
+    );
+
+    let allowed_phases = HashSet::from(["HRA-9", "HRA-10", "HRA-11", "HRA-12", "HRA-13", "HRA-16"]);
+    let allowed_classifications = HashSet::from(["move", "retain_in_place", "split"]);
+    let banned_target_prefixes = [
+        "packages/ios-app/Sources/UI/Views",
+        "packages/ios-app/Sources/Engine/Network",
+        "packages/ios-app/Sources/Engine/Database",
+        "packages/ios-app/Sources/Engine/EventStore",
+        "packages/ios-app/Sources/Session/ViewModels/Managers",
+        "packages/ios-app/Sources/Session/ViewModels/Utilities",
+        "packages/ios-app/Sources/Support/Concurrency",
+        "packages/ios-app/Sources/Support/DependencyInjection",
+        "packages/ios-app/Sources/Support/Diagnostics/Services",
+        "packages/ios-app/Sources/Support/Utilities",
+        "packages/ios-app/Sources/Support/Extensions",
+        "packages/ios-app/Sources/Support/Infrastructure",
+        "packages/ios-app/Sources/Support/Observability",
+        "packages/ios-app/Sources/Support/Settings",
+        "packages/ios-app/Sources/Support/Storage/Services",
+        "packages/ios-app/Tests/Core",
+        "packages/ios-app/Tests/Extensions",
+        "packages/ios-app/Tests/Models",
+        "packages/ios-app/Tests/Navigation",
+        "packages/ios-app/Tests/Observability",
+        "packages/ios-app/Tests/Onboarding",
+        "packages/ios-app/Tests/Repositories",
+        "packages/ios-app/Tests/Services",
+        "packages/ios-app/Tests/Theme",
+        "packages/ios-app/Tests/Utilities",
+        "packages/ios-app/Tests/ViewModels",
+        "packages/ios-app/Tests/Views",
+    ];
+
+    let mut rows = HashMap::new();
+    for line in lines {
+        let columns: Vec<_> = line.split('\t').collect();
+        assert_eq!(
+            columns.len(),
+            7,
+            "{IOS_OWNERSHIP_MAP_PATH} row must have seven TSV columns: {line}"
+        );
+        let [
+            current,
+            target,
+            owner,
+            phase,
+            classification,
+            status,
+            reason,
+        ] = columns.as_slice()
+        else {
+            unreachable!("column length asserted above")
+        };
+        assert!(
+            current.ends_with(".swift")
+                && (current.starts_with("packages/ios-app/Sources/")
+                    || current.starts_with("packages/ios-app/Tests/")),
+            "{IOS_OWNERSHIP_MAP_PATH} row must cover only iOS source/test Swift files: {line}"
+        );
+        assert!(
+            target.ends_with(".swift")
+                && (target.starts_with("packages/ios-app/Sources/")
+                    || target.starts_with("packages/ios-app/Tests/")),
+            "{IOS_OWNERSHIP_MAP_PATH} row must map to an iOS source/test Swift target: {line}"
+        );
+        assert!(
+            !owner.is_empty(),
+            "{IOS_OWNERSHIP_MAP_PATH} row must name an owner: {line}"
+        );
+        assert!(
+            allowed_phases.contains(*phase),
+            "{IOS_OWNERSHIP_MAP_PATH} row has invalid target phase `{phase}`: {line}"
+        );
+        assert!(
+            allowed_classifications.contains(*classification),
+            "{IOS_OWNERSHIP_MAP_PATH} row has invalid classification `{classification}`: {line}"
+        );
+        assert_eq!(
+            *status, "passed_after_fix",
+            "{IOS_OWNERSHIP_MAP_PATH} HRA-9/HRA-10/HRA-11/HRA-12/HRA-13/HRA-16 rows must all be complete in the closed HRA map: {line}"
+        );
+        assert!(
+            !reason.is_empty(),
+            "{IOS_OWNERSHIP_MAP_PATH} row must explain the target owner: {line}"
+        );
+        assert!(
+            banned_target_prefixes
+                .iter()
+                .all(|prefix| !target.starts_with(prefix)),
+            "{IOS_OWNERSHIP_MAP_PATH} target still points at an old technical bucket: {line}"
+        );
+        assert!(
+            rows.insert((*current).to_owned(), (*target).to_owned())
+                .is_none(),
+            "{IOS_OWNERSHIP_MAP_PATH} has duplicate current path row: {current}"
+        );
+    }
+
+    let mut swift_files = Vec::new();
+    list_source_files(
+        &repo_path("packages/ios-app/Sources"),
+        &["swift"],
+        &mut swift_files,
+    );
+    list_source_files(
+        &repo_path("packages/ios-app/Tests"),
+        &["swift"],
+        &mut swift_files,
+    );
+    let expected: HashSet<_> = swift_files
+        .into_iter()
+        .map(|path| {
+            path.strip_prefix(repo_root())
+                .expect("iOS Swift file should live under repo root")
+                .display()
+                .to_string()
+        })
+        .collect();
+    let actual: HashSet<_> = rows.keys().cloned().collect();
+    let missing: Vec<_> = expected.difference(&actual).cloned().collect();
+    let extra: Vec<_> = actual.difference(&expected).cloned().collect();
+
+    assert!(
+        missing.is_empty() && extra.is_empty(),
+        "{IOS_OWNERSHIP_MAP_PATH} must cover every live iOS source/test Swift file exactly once; missing: {missing:#?}; extra: {extra:#?}"
+    );
+}
+
+#[test]
+fn ios_engine_hra9_sources_use_target_boundaries() {
+    let required_roots = [
+        "packages/ios-app/Sources/Engine/Transport/WebSocket",
+        "packages/ios-app/Sources/Engine/Transport/Clients",
+        "packages/ios-app/Sources/Engine/Transport/Retry",
+        "packages/ios-app/Sources/Engine/Transport/DeepLinks",
+        "packages/ios-app/Sources/Engine/Protocol/Core",
+        "packages/ios-app/Sources/Engine/Protocol/Agent",
+        "packages/ios-app/Sources/Engine/Protocol/Session",
+        "packages/ios-app/Sources/Engine/Events/Live",
+        "packages/ios-app/Sources/Engine/Events/Payloads",
+        "packages/ios-app/Sources/Engine/Events/Plugins",
+        "packages/ios-app/Sources/Engine/Events/Reconstruction",
+        "packages/ios-app/Sources/Engine/Events/Reconstruction/ChatMessageProjection",
+        "packages/ios-app/Sources/Engine/Persistence/SQLite",
+        "packages/ios-app/Sources/Engine/Persistence/Repositories",
+        "packages/ios-app/Sources/Engine/Persistence/Sync",
+    ];
+    let banned_roots = [
+        "packages/ios-app/Sources/Engine/Network",
+        "packages/ios-app/Sources/Engine/Database",
+        "packages/ios-app/Sources/Engine/EventStore",
+        "packages/ios-app/Sources/Engine/Protocol/DTOs",
+        "packages/ios-app/Sources/Engine/Protocols",
+        "packages/ios-app/Sources/Engine/Repositories",
+        "packages/ios-app/Sources/Engine/Events/Core",
+        "packages/ios-app/Sources/Engine/Events/Types",
+        "packages/ios-app/Sources/Engine/Events/Reconstruction/Handlers",
+    ];
+    let split_connection_files = [
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Requests.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Receiving.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnection+Reconnect.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionProtocolFrames.swift",
+        "packages/ios-app/Sources/Engine/Transport/WebSocket/EngineConnectionTypes.swift",
+    ];
+
+    let missing_required: Vec<_> = required_roots
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_dir())
+        .collect();
+    let present_banned: Vec<_> = banned_roots
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+    let missing_connection_files: Vec<_> = split_connection_files
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_file())
+        .collect();
+    let oversized_connection_files: Vec<_> = split_connection_files
+        .iter()
+        .copied()
+        .filter_map(|path| {
+            let lines = source_line_count(&repo_path(path));
+            (lines > 700).then(|| format!("{path} has {lines} LOC"))
+        })
+        .collect();
+
+    assert!(
+        missing_required.is_empty()
+            && present_banned.is_empty()
+            && missing_connection_files.is_empty()
+            && oversized_connection_files.is_empty(),
+        "HRA-9 Engine hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_connection_files:#?}; oversized split files: {oversized_connection_files:#?}"
+    );
+}
+
+#[test]
+fn ios_engine_transport_tests_mirror_websocket_owner() {
+    let required = [
+        "packages/ios-app/Tests/Engine/Transport/WebSocket",
+        "packages/ios-app/Tests/Engine/Transport/WebSocket/EngineConnectionReconnectTests.swift",
+    ];
+    let banned =
+        ["packages/ios-app/Tests/Engine/Transport/Clients/EngineConnectionReconnectTests.swift"];
+
+    let missing: Vec<_> = required
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).exists())
+        .collect();
+    let present_banned: Vec<_> = banned
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing.is_empty() && present_banned.is_empty(),
+        "iOS Engine WebSocket tests must mirror the source owner; missing: {missing:#?}; stale client-path tests: {present_banned:#?}"
+    );
+}
+
+#[test]
+fn ios_session_hra10_sources_use_target_boundaries() {
+    let required_roots = [
+        "packages/ios-app/Sources/Session/Attachments",
+        "packages/ios-app/Sources/Session/Chat/ViewModel",
+        "packages/ios-app/Sources/Session/Chat/Coordinators",
+        "packages/ios-app/Sources/Session/Chat/Messaging",
+        "packages/ios-app/Sources/Session/Chat/Navigation",
+        "packages/ios-app/Sources/Session/Chat/State",
+        "packages/ios-app/Sources/Session/Parsing",
+        "packages/ios-app/Sources/Session/Timeline/Activity",
+        "packages/ios-app/Sources/Session/Timeline/Messages",
+        "packages/ios-app/Sources/Session/Timeline/Reconstruction",
+        "packages/ios-app/Sources/Session/Timeline/Tokens",
+    ];
+    let banned_roots = [
+        "packages/ios-app/Sources/Session/Activity",
+        "packages/ios-app/Sources/Session/Features",
+        "packages/ios-app/Sources/Session/Messages",
+        "packages/ios-app/Sources/Session/Reconstruction",
+        "packages/ios-app/Sources/Session/Tokens",
+        "packages/ios-app/Sources/Session/ViewModels",
+    ];
+    let split_display_model_files = [
+        "packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel.swift",
+        "packages/ios-app/Sources/Session/Timeline/Messages/CapabilityInvocationDisplayModel+PresentationHelpers.swift",
+    ];
+
+    let missing_required: Vec<_> = required_roots
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_dir())
+        .collect();
+    let present_banned: Vec<_> = banned_roots
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+    let missing_split_files: Vec<_> = split_display_model_files
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_file())
+        .collect();
+    let oversized_split_files: Vec<_> = split_display_model_files
+        .iter()
+        .copied()
+        .filter_map(|path| {
+            let lines = source_line_count(&repo_path(path));
+            (lines > 700).then(|| format!("{path} has {lines} LOC"))
+        })
+        .collect();
+
+    assert!(
+        missing_required.is_empty()
+            && present_banned.is_empty()
+            && missing_split_files.is_empty()
+            && oversized_split_files.is_empty(),
+        "HRA-10 Session hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_split_files:#?}; oversized split files: {oversized_split_files:#?}"
+    );
+}
+
+#[test]
+fn ios_ui_hra11_sources_use_target_boundaries() {
+    let required_roots = [
+        "packages/ios-app/Sources/UI/Capabilities",
+        "packages/ios-app/Sources/UI/Capabilities/Shared",
+        "packages/ios-app/Sources/UI/Capabilities/Thinking",
+        "packages/ios-app/Sources/UI/Chat/Composer",
+        "packages/ios-app/Sources/UI/Chat/Messages",
+        "packages/ios-app/Sources/UI/Chat/Messages/Indicators",
+        "packages/ios-app/Sources/UI/Chat/Sheets",
+        "packages/ios-app/Sources/UI/Chat/Shell",
+        "packages/ios-app/Sources/UI/Components",
+        "packages/ios-app/Sources/UI/Onboarding/Flow",
+        "packages/ios-app/Sources/UI/Onboarding/Pairing",
+        "packages/ios-app/Sources/UI/Onboarding/Steps",
+        "packages/ios-app/Sources/UI/RuntimeSurfaces",
+        "packages/ios-app/Sources/UI/RuntimeSurfaces/Display",
+        "packages/ios-app/Sources/UI/Settings/ModelPicker",
+        "packages/ios-app/Sources/UI/Settings/Pages",
+        "packages/ios-app/Sources/UI/Settings/Pages/ModelProviders",
+        "packages/ios-app/Sources/UI/Settings/Providers/OAuth",
+        "packages/ios-app/Sources/UI/Settings/Shell",
+        "packages/ios-app/Sources/UI/System",
+        "packages/ios-app/Sources/UI/Theme",
+    ];
+    let banned_roots = ["packages/ios-app/Sources/UI/Views"];
+    let split_ui_files = [
+        "packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift",
+        "packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView+Support.swift",
+        "packages/ios-app/Sources/UI/Settings/Shell/SettingsView.swift",
+        "packages/ios-app/Sources/UI/Settings/Shell/SettingsView+FooterSupport.swift",
+    ];
+
+    let missing_required: Vec<_> = required_roots
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_dir())
+        .collect();
+    let present_banned: Vec<_> = banned_roots
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+    let missing_split_files: Vec<_> = split_ui_files
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_file())
+        .collect();
+    let oversized_split_files: Vec<_> = split_ui_files
+        .iter()
+        .copied()
+        .filter_map(|path| {
+            let lines = source_line_count(&repo_path(path));
+            (lines > 700).then(|| format!("{path} has {lines} LOC"))
+        })
+        .collect();
+
+    assert!(
+        missing_required.is_empty()
+            && present_banned.is_empty()
+            && missing_split_files.is_empty()
+            && oversized_split_files.is_empty(),
+        "HRA-11 UI hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing split files: {missing_split_files:#?}; oversized split files: {oversized_split_files:#?}"
+    );
+}
+
+#[test]
+fn ios_support_hra12_sources_use_target_boundaries() {
+    let required_roots = [
+        "packages/ios-app/Sources/App/Lifecycle",
+        "packages/ios-app/Sources/Support/Composition",
+        "packages/ios-app/Sources/Support/Diagnostics",
+        "packages/ios-app/Sources/Support/Feedback",
+        "packages/ios-app/Sources/Support/Foundation",
+        "packages/ios-app/Sources/Support/Foundation/Concurrency",
+        "packages/ios-app/Sources/Support/Foundation/Formatting",
+        "packages/ios-app/Sources/Support/Foundation/Media",
+        "packages/ios-app/Sources/Support/Foundation/Parsing",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI",
+        "packages/ios-app/Sources/Support/Foundation/Validation",
+        "packages/ios-app/Sources/Support/Pairing",
+        "packages/ios-app/Sources/Support/Pairing/Onboarding",
+        "packages/ios-app/Sources/Support/Share",
+        "packages/ios-app/Sources/Support/Storage",
+    ];
+    let banned_roots = [
+        "packages/ios-app/Sources/Support/Concurrency",
+        "packages/ios-app/Sources/Support/DependencyInjection",
+        "packages/ios-app/Sources/Support/Diagnostics/Services",
+        "packages/ios-app/Sources/Support/Extensions",
+        "packages/ios-app/Sources/Support/Infrastructure",
+        "packages/ios-app/Sources/Support/Observability",
+        "packages/ios-app/Sources/Support/Settings",
+        "packages/ios-app/Sources/Support/Storage/Services",
+        "packages/ios-app/Sources/Support/Utilities",
+    ];
+    let required_files = [
+        "packages/ios-app/Sources/App/Lifecycle/AppDelegate.swift",
+        "packages/ios-app/Sources/App/Lifecycle/TronMobileApp.swift",
+        "packages/ios-app/Sources/Support/Composition/AppInitializer.swift",
+        "packages/ios-app/Sources/Support/Composition/DependencyContainer.swift",
+        "packages/ios-app/Sources/Support/Composition/DependencyEnvironment.swift",
+        "packages/ios-app/Sources/Support/Composition/DependencyProviding.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/ClientLogIngestionService.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/DiagnosticsBundleBuilder.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/DiagnosticsRedactor.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/ErrorHandler.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/MetricKitDiagnosticsStore.swift",
+        "packages/ios-app/Sources/Support/Diagnostics/TronLogger.swift",
+        "packages/ios-app/Sources/Support/Foundation/AppConstants.swift",
+        "packages/ios-app/Sources/Support/Foundation/Concurrency/AsyncSemaphore.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/Date+Extensions.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/DurationFormatter.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/ModelNameFormatter.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/String+Extensions.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/TaskFormatting.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/TokenFormatter.swift",
+        "packages/ios-app/Sources/Support/Foundation/Formatting/VersionDisplay.swift",
+        "packages/ios-app/Sources/Support/Foundation/Media/ImageProcessor.swift",
+        "packages/ios-app/Sources/Support/Foundation/Parsing/ContentLineParser.swift",
+        "packages/ios-app/Sources/Support/Foundation/Parsing/DateParser.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/Binding+PasteAware.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/KeyboardObserver.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/ToastCenter.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/View+Accessibility.swift",
+        "packages/ios-app/Sources/Support/Foundation/SwiftUI/View+Extensions.swift",
+        "packages/ios-app/Sources/Support/Foundation/Validation/FolderNameValidator.swift",
+        "packages/ios-app/Sources/Support/Pairing/PairedServerStore.swift",
+        "packages/ios-app/Sources/Support/Share/SharedContent.swift",
+        "packages/ios-app/Sources/Support/Storage/DraftStore.swift",
+        "packages/ios-app/Sources/Support/Storage/InputHistoryStore.swift",
+        "packages/ios-app/Sources/Support/Storage/KeychainItem.swift",
+        "packages/ios-app/Sources/Support/Storage/PairedServerTokenStore.swift",
+    ];
+    let banned_files = [
+        "packages/ios-app/Sources/App/AppDelegate.swift",
+        "packages/ios-app/Sources/App/TronMobileApp.swift",
+        "packages/ios-app/Sources/Support/AppConstants.swift",
+    ];
+
+    let missing_required: Vec<_> = required_roots
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_dir())
+        .collect();
+    let present_banned: Vec<_> = banned_roots
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+    let missing_files: Vec<_> = required_files
+        .iter()
+        .copied()
+        .filter(|path| !repo_path(path).is_file())
+        .collect();
+    let present_banned_files: Vec<_> = banned_files
+        .iter()
+        .copied()
+        .filter(|path| repo_path(path).exists())
+        .collect();
+
+    assert!(
+        missing_required.is_empty()
+            && present_banned.is_empty()
+            && missing_files.is_empty()
+            && present_banned_files.is_empty(),
+        "HRA-12 Support hierarchy drift; missing roots: {missing_required:#?}; old roots present: {present_banned:#?}; missing files: {missing_files:#?}; old files present: {present_banned_files:#?}"
+    );
+}
+
+#[test]
+fn large_files_have_decomposition_budget_rows() {
+    let scorecard = read_repo_file(SCORECARD_PATH);
+    let mut source_files = Vec::new();
+    for (path, extensions) in [
+        ("packages/agent/src", &["rs"][..]),
+        ("packages/agent/tests", &["rs"][..]),
+        ("packages/ios-app/Sources", &["swift"][..]),
+        ("packages/ios-app/Tests", &["swift"][..]),
+        ("packages/mac-app/Sources", &["swift"][..]),
+        ("packages/mac-app/Tests", &["swift"][..]),
+    ] {
+        list_source_files(&repo_path(path), extensions, &mut source_files);
+    }
+
+    let mut missing_budget_rows = Vec::new();
+    for path in source_files {
+        let relative = path
+            .strip_prefix(repo_root())
+            .expect("source file should live under repo root")
+            .display()
+            .to_string();
+        let extension = path.extension().and_then(|extension| extension.to_str());
+        let limit = if extension == Some("rs") { 900 } else { 700 };
+        let lines = source_line_count(&path);
+        if lines > limit {
+            let budgeted = scorecard.lines().any(|line| {
+                line.contains(&format!("| `{relative}` |")) && !line.contains("| pending |")
+            });
+            if !budgeted {
+                missing_budget_rows.push(format!("{relative} has {lines} LOC over limit {limit}"));
+            }
+        }
+    }
+
+    assert!(
+        missing_budget_rows.is_empty(),
+        "over-budget files need explicit owner, reason, and decomposition rows: {missing_budget_rows:#?}"
+    );
+}

@@ -12,11 +12,15 @@
 # Xcode
 *.xcuserstate
 project.xcworkspace/
+!packages/ios-app/TronMobile.xcodeproj/project.xcworkspace/
+!packages/ios-app/TronMobile.xcodeproj/project.xcworkspace/contents.xcworkspacedata
 xcuserdata/
+DerivedData/
 packages/ios-app/.build/
 packages/ios-app/build/
 packages/ios-app/Configuration/Local.xcconfig
 *.xcresult
+*.dSYM/
 
 # App Store Connect CLI local auth/config
 .asc/
@@ -39,6 +43,8 @@ package-lock.json
 
 # Python (utility scripts)
 __pycache__/
+*.pyc
+.pytest_cache/
 .venv/
 
 # Script artifacts (benchmarks, etc.)

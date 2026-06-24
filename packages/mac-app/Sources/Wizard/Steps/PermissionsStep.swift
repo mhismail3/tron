@@ -1,12 +1,11 @@
 import SwiftUI
 import AppKit
-import Darwin
 
 /// Permissions step. The shell owns the icon, title, progress pill,
 /// and the bottom action bar (Back / Continue, with Continue gated by
-/// all three grants in `WizardShell.permissionsCanContinue`). This
-/// view contributes the description, the three permission cards each
-/// with their own "Open Settings" deep-link and an inline Re-check link.
+/// the Full Disk Access grant in `WizardView.permissionsCanContinue`).
+/// This view contributes the description, the permission card, the
+/// Settings deep-link, and an inline Re-check link.
 ///
 /// This step runs AFTER Install (see `WizardStep.allCases` ordering
 /// test) on purpose. macOS ties sandbox/TCC extensions to the process
@@ -15,7 +14,7 @@ import Darwin
 /// can't satisfy. By the time the wizard gets here the agent bundle
 /// is already embedded at `Tron.app/Contents/Library/LoginItems/Tron Server.app`
 /// and the LaunchAgent is running. The LaunchAgent associates the helper
-/// with the wrapper bundle IDs, so macOS surfaces all three privacy rows
+/// with the wrapper bundle IDs, so macOS surfaces the privacy row
 /// under the responsible wrapper app (`Tron.app` in Release,
 /// `TronMac.app` in Debug). Returning from Settings, pressing Re-check,
 /// and the background watcher are all fast native wrapper probes. Hidden
@@ -39,17 +38,9 @@ struct PermissionsStep: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            VStack(spacing: 10) {
-                permissionRow(.fullDiskAccess,
-                              title: "Full Disk Access",
-                              detail: "Lets Tron Server read and edit files.")
-                permissionRow(.screenRecording,
-                              title: "Screen Recording",
-                              detail: "Lets Tron Server see your screen.")
-                permissionRow(.accessibility,
-                              title: "Accessibility",
-                              detail: "Lets Tron Server click and type for you.")
-            }
+            permissionRow(.fullDiskAccess,
+                          title: "Full Disk Access",
+                          detail: "Lets Tron Server read and edit files.")
             .padding(.vertical, 1)
 
             Button {
@@ -105,27 +96,14 @@ struct PermissionsStep: View {
                 }
                 .layoutPriority(1)
             } trailing: {
-                HStack(spacing: PermissionsStepLayout.trailingControlSpacing) {
-                    if permission == .screenRecording {
-                        ScreenRecordingAppShortcut(
-                            appURL: setup.applicationBundle,
-                            displayName: appName
-                        )
-                        .frame(
-                            width: PermissionsStepLayout.appShortcutHitSize,
-                            height: PermissionsStepLayout.appShortcutHitSize
-                        )
-                    }
-
-                    Button {
-                        openPermissionSettings(permission)
-                    } label: {
-                        Image(systemName: "gearshape.fill")
-                    }
-                    .buttonStyle(.wizardTertiary)
-                    .help("Open Settings and enable \(appName)")
-                    .accessibilityLabel("Open Settings for \(title) and enable \(appName)")
+                Button {
+                    openPermissionSettings(permission)
+                } label: {
+                    Image(systemName: "gearshape.fill")
                 }
+                .buttonStyle(.wizardTertiary)
+                .help("Open Settings and enable \(appName)")
+                .accessibilityLabel("Open Settings for \(title) and enable \(appName)")
             }
         }
     }
@@ -160,10 +138,6 @@ struct PermissionsStep: View {
         switch permission {
         case .fullDiskAccess:
             return "Enable \"\(appName)\" in Full Disk Access."
-        case .screenRecording:
-            return "Drag the icon into the list if \"\(appName)\" is missing."
-        case .accessibility:
-            return "Enable \"\(appName)\" in Accessibility."
         }
     }
 
@@ -180,8 +154,8 @@ struct PermissionsStep: View {
     // MARK: - Polling lifecycle
 
     /// Starts the 2 s agent-probe poll loop. Runs until the view
-    /// disappears or all three grants are observed, whichever comes
-    /// first. The loop is re-entrant — calling this twice is a no-op
+    /// disappears or Full Disk Access is observed, whichever comes
+    /// first. The loop is re-entrant, so calling this twice is idempotent
     /// thanks to the `pollTask` guard.
     @MainActor
     private func startPolling() async {
@@ -211,9 +185,9 @@ struct PermissionsStep: View {
                     guard let state else { return }
                     Self.applyPermissionSnapshot(snapshot, to: state)
                 }
-                // Stop polling once everything is granted — no point
-                // hammering the RPC when the user is still on this
-                // step admiring their green badges.
+                // Stop polling once the grant is observed — no point
+                // hammering the engine protocol when the user is still on this
+                // step admiring the green badge.
                 let allGranted = await MainActor.run { [weak state] in
                     Permission.allCases.allSatisfy { p in
                         (state?.permissionStatuses[p]) == .granted
@@ -301,8 +275,8 @@ struct PermissionsStep: View {
     }
 
     /// Applies a probe snapshot while preserving the last concrete
-    /// answer across transient RPC failures. If launchd is briefly
-    /// cycling for some unrelated reason, an all-unknown fallback should
+    /// answer across transient engine protocol failures. If launchd is briefly
+    /// cycling for some unrelated reason, an all-unknown probe snapshot should
     /// not wipe green/red badges into confusing gray icons.
     @MainActor
     private static func applyPermissionSnapshot(
@@ -332,178 +306,6 @@ struct PermissionsStep: View {
     }
 }
 
-private struct ScreenRecordingAppShortcut: NSViewRepresentable {
-    let appURL: URL
-    let displayName: String
-
-    func makeNSView(context: Context) -> ScreenRecordingAppShortcutView {
-        let view = ScreenRecordingAppShortcutView()
-        view.configure(appURL: appURL, displayName: displayName)
-        return view
-    }
-
-    func updateNSView(_ nsView: ScreenRecordingAppShortcutView, context: Context) {
-        nsView.configure(appURL: appURL, displayName: displayName)
-    }
-}
-
-private final class ScreenRecordingAppShortcutView: NSView, NSDraggingSource {
-    private var appURL: URL?
-    private var appIcon = NSImage.tronShortcutFallbackAppIcon
-    private var mouseDownPoint: NSPoint?
-    private var didStartDrag = false
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override var intrinsicContentSize: NSSize {
-        NSSize(
-            width: PermissionsStepLayout.appShortcutHitSize,
-            height: PermissionsStepLayout.appShortcutHitSize
-        )
-    }
-
-    override var mouseDownCanMoveWindow: Bool {
-        false
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        bounds.contains(point) ? self : nil
-    }
-
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
-        true
-    }
-
-    override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool {
-        true
-    }
-
-    func configure(appURL: URL, displayName: String) {
-        self.appURL = appURL
-        toolTip = "Drag \(displayName) into the Screen Recording list if it is missing."
-        setAccessibilityRole(.button)
-        setAccessibilityLabel("\(displayName) Screen Recording shortcut")
-        appIcon = Self.icon(for: appURL)
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-
-        NSGraphicsContext.saveGraphicsState()
-        NSShadow.screenRecordingShortcutShadow.set()
-        appIcon.draw(in: iconDrawingRect)
-        NSGraphicsContext.restoreGraphicsState()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        mouseDownPoint = convert(event.locationInWindow, from: nil)
-        didStartDrag = false
-    }
-
-    override func mouseDragged(with event: NSEvent) {
-        guard !didStartDrag,
-              let appURL,
-              FileManager.default.fileExists(atPath: appURL.path) else {
-            return
-        }
-
-        let point = convert(event.locationInWindow, from: nil)
-        if let start = mouseDownPoint, hypot(point.x - start.x, point.y - start.y) < 3 {
-            return
-        }
-
-        didStartDrag = true
-        let item = NSDraggingItem(pasteboardWriter: Self.dragPasteboardItem(for: appURL))
-        item.setDraggingFrame(iconDrawingRect, contents: appIcon)
-
-        let session = beginDraggingSession(with: [item], event: event, source: self)
-        session.animatesToStartingPositionsOnCancelOrFail = true
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        mouseDownPoint = nil
-        didStartDrag = false
-    }
-
-    func draggingSession(
-        _ session: NSDraggingSession,
-        sourceOperationMaskFor context: NSDraggingContext
-    ) -> NSDragOperation {
-        .copy
-    }
-
-    func draggingSession(
-        _ session: NSDraggingSession,
-        endedAt screenPoint: NSPoint,
-        operation: NSDragOperation
-    ) {
-        mouseDownPoint = nil
-        didStartDrag = false
-    }
-
-    private static func dragPasteboardItem(for appURL: URL) -> NSPasteboardItem {
-        let item = NSPasteboardItem()
-        item.setString(appURL.absoluteString, forType: .fileURL)
-        item.setString(appURL.path, forType: .string)
-        item.setPropertyList(
-            [appURL.path],
-            forType: NSPasteboard.PasteboardType("NSFilenamesPboardType")
-        )
-        return item
-    }
-
-    private static func icon(for appURL: URL) -> NSImage {
-        if FileManager.default.fileExists(atPath: appURL.path) {
-            let image = NSWorkspace.shared.icon(forFile: appURL.path)
-            image.size = NSSize(
-                width: PermissionsStepLayout.appShortcutIconSize,
-                height: PermissionsStepLayout.appShortcutIconSize
-            )
-            return image
-        }
-        return .tronShortcutFallbackAppIcon
-    }
-
-    private var iconDrawingRect: NSRect {
-        let iconSize = PermissionsStepLayout.appShortcutIconSize
-        return NSRect(
-            x: bounds.midX - iconSize / 2,
-            y: bounds.midY - iconSize / 2,
-            width: iconSize,
-            height: iconSize
-        )
-    }
-}
-
-private extension NSImage {
-    static var tronShortcutFallbackAppIcon: NSImage {
-        NSImage(named: "AppIcon")
-            ?? NSImage(size: NSSize(
-                width: PermissionsStepLayout.appShortcutIconSize,
-                height: PermissionsStepLayout.appShortcutIconSize
-            ))
-    }
-}
-
-private extension NSShadow {
-    static var screenRecordingShortcutShadow: NSShadow {
-        let shadow = NSShadow()
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.24)
-        shadow.shadowOffset = NSSize(width: 0, height: -4)
-        shadow.shadowBlurRadius = 8
-        return shadow
-    }
-}
-
 enum PermissionsStepContent {
     static let intro = "Enable the Tron app named on each row in System Settings."
     static let initialProbeDelayNanoseconds: UInt64 = 520_000_000
@@ -525,7 +327,4 @@ enum PermissionsStepLayout {
     static let textLineSpacing: CGFloat = 2
     static let recheckLeadingPadding: CGFloat = cardHorizontalPadding
         + ((statusIconColumnWidth - 16) / 2)
-    static let trailingControlSpacing: CGFloat = 5
-    static let appShortcutIconSize: CGFloat = 27
-    static let appShortcutHitSize: CGFloat = 40
 }

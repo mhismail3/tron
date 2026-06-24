@@ -1,0 +1,236 @@
+use super::*;
+
+#[test]
+fn tron_event_all_event_types() {
+    // Verify every variant has a distinct event_type
+    let base = BaseEvent::now("s1");
+    let events: Vec<TronEvent> = vec![
+        TronEvent::AgentStart { base: base.clone() },
+        TronEvent::AgentEnd {
+            base: base.clone(),
+            error: None,
+        },
+        TronEvent::AgentReady { base: base.clone() },
+        TronEvent::SessionProcessingChanged {
+            base: base.clone(),
+            is_processing: true,
+        },
+        TronEvent::AgentInterrupted {
+            base: base.clone(),
+            turn: 1,
+            partial_content: None,
+            active_capability: None,
+        },
+        TronEvent::TurnStart {
+            base: base.clone(),
+            turn: 1,
+        },
+        TronEvent::TurnEnd {
+            base: base.clone(),
+            turn: 1,
+            duration: 0,
+            token_usage: None,
+            token_record: None,
+            cost: None,
+            stop_reason: None,
+            context_limit: None,
+            model: None,
+        },
+        TronEvent::TurnFailed {
+            base: base.clone(),
+            turn: 1,
+            error: "e".into(),
+            code: None,
+            category: None,
+            retryable: None,
+            recoverable: false,
+            origin: None,
+            details: None,
+            partial_content: None,
+        },
+        TronEvent::ResponseComplete {
+            base: base.clone(),
+            turn: 1,
+            stop_reason: "end_turn".into(),
+            token_usage: None,
+            has_capability_invocations: false,
+            capability_invocation_count: 0,
+            token_record: None,
+            model: None,
+        },
+        TronEvent::MessageUpdate {
+            base: base.clone(),
+            content: "c".into(),
+        },
+        TronEvent::CapabilityInvocationBatch {
+            base: base.clone(),
+            capability_invocations: vec![],
+        },
+        TronEvent::CapabilityInvocationStarted {
+            base: base.clone(),
+            invocation_id: "id".into(),
+            model_primitive_name: "n".into(),
+            arguments: None,
+            capability_identity: CapabilityEventIdentity::default(),
+        },
+        TronEvent::CapabilityInvocationOutput {
+            base: base.clone(),
+            invocation_id: "id".into(),
+            update: "u".into(),
+        },
+        TronEvent::CapabilityInvocationProgress {
+            base: base.clone(),
+            invocation_id: "id".into(),
+            message: Some("msg".into()),
+            percent: Some(0.5),
+            capability_identity: CapabilityEventIdentity::default(),
+        },
+        TronEvent::CapabilityRunStatus {
+            base: base.clone(),
+            run_id: "run-1".into(),
+            invocation_id: "id".into(),
+            status: "running".into(),
+            stream_topic: Some("capability.run.run-1".into()),
+            child_invocations: vec![],
+            details: None,
+            capability_identity: CapabilityEventIdentity::default(),
+        },
+        TronEvent::CapabilityInvocationCompleted {
+            base: base.clone(),
+            invocation_id: "id".into(),
+            model_primitive_name: "n".into(),
+            duration: 0,
+            is_error: None,
+            result: None,
+            capability_identity: CapabilityEventIdentity::default(),
+        },
+        TronEvent::CapabilityInvocationArgumentDelta {
+            base: base.clone(),
+            invocation_id: "id".into(),
+            model_primitive_name: None,
+            arguments_delta: "d".into(),
+        },
+        TronEvent::CapabilityInvocationGenerating {
+            base: base.clone(),
+            invocation_id: "id".into(),
+            model_primitive_name: "n".into(),
+            capability_identity: CapabilityEventIdentity::default(),
+        },
+        TronEvent::SessionSaved {
+            base: base.clone(),
+            file_path: "p".into(),
+        },
+        TronEvent::SessionLoaded {
+            base: base.clone(),
+            file_path: "p".into(),
+            message_count: 0,
+        },
+        TronEvent::ContextWarning {
+            base: base.clone(),
+            usage_percent: 80.0,
+            message: "m".into(),
+        },
+        TronEvent::CompactionStart {
+            base: base.clone(),
+            reason: CompactionReason::Manual,
+            tokens_before: 0,
+        },
+        TronEvent::CompactionComplete {
+            base: base.clone(),
+            success: true,
+            tokens_before: 100,
+            tokens_after: 50,
+            compression_ratio: 0.5,
+            reason: None,
+            summary: None,
+            estimated_context_tokens: None,
+            preserved_turns: None,
+            summarized_turns: None,
+        },
+        TronEvent::Error {
+            base: base.clone(),
+            error: "e".into(),
+            context: None,
+            code: None,
+            provider: None,
+            category: None,
+            suggestion: None,
+            retryable: None,
+            recoverable: None,
+            origin: None,
+            details: None,
+            status_code: None,
+            error_type: None,
+            model: None,
+        },
+        TronEvent::ApiRetry {
+            base: base.clone(),
+            attempt: 1,
+            max_retries: 3,
+            delay_ms: 1000,
+            error_category: "c".into(),
+            error_message: "m".into(),
+        },
+        TronEvent::ThinkingStart { base: base.clone() },
+        TronEvent::ThinkingDelta {
+            base: base.clone(),
+            delta: "d".into(),
+        },
+        TronEvent::ThinkingEnd {
+            base: base.clone(),
+            thinking: "t".into(),
+        },
+        TronEvent::SessionCreated {
+            base: base.clone(),
+            model: "m".into(),
+            working_directory: "/tmp".into(),
+            title: None,
+        },
+        TronEvent::SessionArchived { base: base.clone() },
+        TronEvent::SessionUnarchived { base: base.clone() },
+        TronEvent::SessionForked {
+            base: base.clone(),
+            new_session_id: "new-s1".into(),
+        },
+        TronEvent::SessionDeleted { base: base.clone() },
+        TronEvent::SessionUpdated {
+            base: base.clone(),
+            title: None,
+            model: Some("m".into()),
+            event_count: Some(0),
+            turn_count: Some(0),
+            message_count: Some(0),
+            input_tokens: Some(0),
+            output_tokens: Some(0),
+            last_turn_input_tokens: Some(0),
+            cache_read_tokens: Some(0),
+            cache_creation_tokens: Some(0),
+            cost: Some(0.0),
+            last_activity: "t".into(),
+            is_active: true,
+            last_user_prompt: None,
+            last_assistant_response: None,
+            parent_session_id: None,
+            activity_lines: None,
+        },
+        TronEvent::ContextCleared {
+            base: base.clone(),
+            tokens_before: 0,
+            tokens_after: 0,
+        },
+        TronEvent::MessageDeleted {
+            base: base.clone(),
+            target_event_id: "id".into(),
+            target_type: "t".into(),
+            target_turn: None,
+            reason: None,
+        },
+    ];
+
+    assert_eq!(events.len(), VARIANT_COUNT);
+
+    let mut types: Vec<&str> = events.iter().map(TronEvent::event_type).collect();
+    types.sort_unstable();
+    types.dedup();
+    assert_eq!(types.len(), VARIANT_COUNT);
+}

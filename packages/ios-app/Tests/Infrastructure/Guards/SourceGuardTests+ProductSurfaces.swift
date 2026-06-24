@@ -1,0 +1,128 @@
+import Testing
+import Foundation
+
+extension SourceGuardTests {
+
+    @Test("Prompt transport has one attachment plane")
+    func testPromptTransportHasOneAttachmentPlane() throws {
+        let iosRoot = iosAppRoot()
+        let checkedFiles = [
+            "Sources/Engine/Protocol/Agent/EngineProtocolTypes+Agent.swift",
+            "Sources/Engine/Transport/Clients/AgentClient.swift",
+            "Sources/Engine/Transport/Clients/AgentClientProtocol.swift",
+            "Sources/Engine/Transport/Clients/Repositories/Defaults/Protocols/AgentRepository.swift",
+            "Sources/Engine/Transport/Clients/Repositories/Defaults/DefaultAgentRepository.swift",
+            "Sources/Session/Chat/ViewModel/ChatViewModel+Messaging.swift",
+            "Tests/Engine/Transport/Clients/AgentClientTests.swift",
+            "Tests/Engine/Transport/Clients/Repositories/DefaultAgentRepositoryTests.swift",
+            "Tests/Engine/Protocol/EngineProtocolTypesTests.swift",
+        ]
+        let forbiddenNeedles: [(String, String)] = [
+            ("Image" + "Attachment", "legacy image-only prompt DTO"),
+            ("last" + "Images", "legacy image-only mock state"),
+            ("last" + "Send" + "Prompt" + "Images", "legacy image-only repository mock state"),
+            ("images:", "legacy image-only prompt argument"),
+            (#""images""#, "legacy image-only encoded prompt field"),
+        ]
+
+        for relativePath in checkedFiles {
+            let url = iosRoot.appendingPathComponent(relativePath)
+            let content = try String(contentsOf: url, encoding: .utf8)
+            #expect(
+                content.contains("attachments") || content.contains("FileAttachment"),
+                "\(relativePath) should route prompt media through unified attachments"
+            )
+            for (needle, reason) in forbiddenNeedles {
+                #expect(
+                    !content.contains(needle),
+                    "\(relativePath) contains \(reason): `\(needle)`"
+                )
+            }
+        }
+    }
+
+
+    @Test("Primitive shell has no fixed tree projection")
+    func testPrimitiveShellHasNoFixedTreeProjection() throws {
+        let iosRoot = iosAppRoot()
+        let deletedPaths = [
+            "Sources/UI/" + "Session" + "Tree",
+            "Sources/Engine/Database/Repositories/TreeRepository.swift",
+            "Sources/Engine/EventStore/EventTreeBuilder.swift",
+            "Tests/Infrastructure/TreeRepositoryTests.swift",
+            "Tests/Views/ForkButtonTests.swift",
+            "Tests/Views/EventIconProviderTests.swift",
+        ]
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+        let forbiddenNeedles: [(String, String)] = [
+            ("Event" + "Tree" + "Node", "fixed event-tree projection DTO"),
+            ("Event" + "Tree" + "Builder", "fixed event-tree projection builder"),
+            ("Tree" + "Repository", "fixed event-tree repository"),
+            ("Fork" + "Point" + "Indicator", "fixed fork visualization"),
+            ("Fork" + "Button" + "State", "fixed fork-row state"),
+            ("Event" + "Icon" + "Provider", "fixed session-tree icon catalog"),
+            ("get" + "Tree" + "Visualization", "fixed tree query entry point"),
+            ("database" + "." + "tree", "fixed tree repository access"),
+            ("eventDB" + "." + "tree", "fixed tree repository access"),
+            ("is" + "Branch" + "Point", "fixed branch projection field"),
+        ]
+
+        for relativePath in deletedPaths {
+            #expect(
+                !FileManager.default.fileExists(atPath: iosRoot.appendingPathComponent(relativePath).path),
+                "\(relativePath) is a deleted fixed session-tree projection"
+            )
+        }
+
+        for root in sourceRoots {
+            for url in try swiftFiles(in: root) {
+                if isSourceGuardFile(url) { continue }
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for (needle, reason) in forbiddenNeedles {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.path) contains \(reason): `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
+
+
+    @Test("Primitive shell has no fixed product update surface")
+    func testPrimitiveShellHasNoFixedProductUpdateSurface() throws {
+        let iosRoot = iosAppRoot()
+        let sourceRoots = [
+            iosRoot.appendingPathComponent("Sources"),
+            iosRoot.appendingPathComponent("Tests"),
+        ]
+        let forbiddenNeedles: [(String, String)] = [
+            ("System" + "Check" + "For" + "Updates" + "Result", "fixed update-check response DTO"),
+            ("System" + "Update" + "Status" + "Result", "fixed update-status response DTO"),
+            ("check" + "For" + "Updates", "fixed update-check client call"),
+            ("get" + "Update" + "Status", "fixed update-status client call"),
+            ("Update" + "Channel", "fixed update channel setting enum"),
+            ("Update" + "Frequency", "fixed update frequency setting enum"),
+            ("Update" + "Action", "fixed update action setting enum"),
+            ("Server" + "Update" + "Settings" + "Item", "fixed update settings UI section"),
+            ("updates" + "Section", "fixed update settings section"),
+            ("Check" + " for " + "updates", "fixed user-facing update command"),
+        ]
+
+        for root in sourceRoots {
+            for url in try swiftFiles(in: root) {
+                if isSourceGuardFile(url) { continue }
+                let content = try String(contentsOf: url, encoding: .utf8)
+                for (needle, reason) in forbiddenNeedles {
+                    #expect(
+                        !content.contains(needle),
+                        "\(url.path) contains \(reason): `\(needle)`"
+                    )
+                }
+            }
+        }
+    }
+}

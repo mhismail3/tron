@@ -1,0 +1,105 @@
+import Foundation
+@testable import TronMobile
+
+/// Mock EngineTransport for testing domain clients' guard clauses and error paths.
+/// EngineConnection is a concrete class (not protocol-based), so we test:
+/// - Transport nil handling (weak reference deallocation)
+/// - Connection requirement checks (engineConnection nil)
+/// - Session requirement checks (sessionId nil)
+/// - Client-specific logic (caching, parameter construction)
+@MainActor
+final class MockEngineTransport: EngineTransport {
+    var engineConnection: EngineConnection?
+    var connectionState: ConnectionState = .connected
+    var currentSessionId: String?
+    var currentModel: String = "claude-opus-4-20250514"
+    var serverOrigin: String = "localhost:3456"
+
+    var setSessionIdCallCount = 0
+    var lastSetSessionId: String?
+    var ensureSessionEventSubscriptionCallCount = 0
+    var ensuredSessionEventSubscriptions: [(sessionId: String, workspaceId: String?)] = []
+    var ensureSessionEventSubscriptionShouldThrow = false
+    var operationOrder: [String] = []
+
+    var setModelCallCount = 0
+    var lastSetModel: String?
+    var lastReadFunctionId: EngineFunctionId?
+    var lastReadOptions: EngineInvocationOptions?
+    var lastReadPayload: Any?
+    var readHandler: ((EngineFunctionId, Any, EngineInvocationOptions) throws -> Any)?
+    var lastWriteFunctionId: EngineFunctionId?
+    var lastWriteIdempotencyKey: EngineIdempotencyKey?
+    var lastWriteOptions: EngineInvocationOptions?
+    var lastWritePayload: Any?
+    var writeHandler: ((EngineFunctionId, Any, EngineIdempotencyKey, EngineInvocationOptions) throws -> Any)?
+
+    func setCurrentSessionId(_ id: String?) {
+        setSessionIdCallCount += 1
+        lastSetSessionId = id
+        currentSessionId = id
+    }
+
+    func ensureSessionEventSubscription(sessionId: String, workspaceId: String?) async throws -> EngineSubscription {
+        _ = try requireConnection()
+        if ensureSessionEventSubscriptionShouldThrow {
+            throw EngineConnectionError.notConnected
+        }
+        operationOrder.append("subscribe:\(sessionId)")
+        ensureSessionEventSubscriptionCallCount += 1
+        ensuredSessionEventSubscriptions.append((sessionId: sessionId, workspaceId: workspaceId))
+        currentSessionId = sessionId
+        return EngineSubscription(
+            subscriptionId: "test-subscription-\(ensureSessionEventSubscriptionCallCount)",
+            topic: "events.session",
+            cursor: 100,
+            limit: 100
+        )
+    }
+
+    func setCurrentModel(_ model: String) {
+        setModelCallCount += 1
+        lastSetModel = model
+        currentModel = model
+    }
+
+    func invokeRead<P: Encodable, R: Decodable>(
+        functionId: EngineFunctionId,
+        payload: P,
+        options: EngineInvocationOptions
+    ) async throws -> R {
+        _ = try requireConnection()
+        lastReadFunctionId = functionId
+        lastReadOptions = options
+        lastReadPayload = payload
+        operationOrder.append("read:\(functionId.rawValue)")
+        if let readHandler {
+            guard let response = try readHandler(functionId, payload, options) as? R else {
+                throw EngineConnectionError.invalidResponse
+            }
+            return response
+        }
+        throw EngineConnectionError.invalidResponse
+    }
+
+    func invokeWrite<P: Encodable, R: Decodable>(
+        functionId: EngineFunctionId,
+        payload: P,
+        idempotencyKey: EngineIdempotencyKey,
+        options: EngineInvocationOptions
+    ) async throws -> R {
+        _ = try requireConnection()
+        lastWriteFunctionId = functionId
+        lastWriteIdempotencyKey = idempotencyKey
+        lastWriteOptions = options
+        lastWritePayload = payload
+        operationOrder.append("write:\(functionId.rawValue)")
+        if let writeHandler {
+            guard let response = try writeHandler(functionId, payload, idempotencyKey, options) as? R else {
+                throw EngineConnectionError.invalidResponse
+            }
+            return response
+        }
+        throw EngineConnectionError.invalidResponse
+    }
+}

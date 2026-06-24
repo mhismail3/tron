@@ -1,0 +1,406 @@
+# Phase 2 Agent Execution Restoration Evidence Manifest
+
+Status: **complete**
+Current score: **100/100**
+
+Scorecard:
+[`phase-2-agent-execution-restoration-scorecard.md`](phase-2-agent-execution-restoration-scorecard.md)
+
+Inventory:
+[`phase-2-agent-execution-restoration-inventory.md`](phase-2-agent-execution-restoration-inventory.md)
+and
+[`phase-2-agent-execution-restoration-inventory.tsv`](phase-2-agent-execution-restoration-inventory.tsv)
+
+## Source Audit
+
+Planning branch:
+`codex/ios-affordance-restoration-map-current`
+
+Planning baseline HEAD:
+`980867c3534612cd8d30867473a5b3eb36ad1f03`
+
+The plan was derived from repository artifacts instead of chat history. The
+audit covered:
+
+- Phase 1 iOS affordance map, inventory, TSV, evidence, and progress ledger;
+- BPRC restoration backlog and primitive feature index;
+- current README architecture, capabilities, event, settings, database, iOS,
+  testing, and invariant sections;
+- current Rust crate and domain `mod.rs` docs for the retained primitive
+  baseline, workspace browser, transcription, and worker lifecycle boundaries;
+- iOS architecture docs for Phase 1 closeout and Phase 2 deferral language;
+- SACB authority, public context, grant, secret, pairing, and worker-boundary
+  scorecard/evidence;
+- CSD task, queue, stream, timer, cancellation, and owner evidence;
+- TPC primitive-minimality and file-budget scorecard/evidence;
+- HRA ownership and progressive-disclosure scorecard/evidence;
+- SSARR readiness and SUWRF worker lifecycle inventories.
+
+## Row Evidence
+
+| Row | Status | Evidence | Validation anchor |
+| --- | --- | --- | --- |
+| P2AER-0 | passed | The scorecard records current branch, baseline HEAD, inspected artifacts, planning-only scope, and no feature implementation. | Scorecard Source Baseline and Scope sections. |
+| P2AER-1 | passed | The roadmap carries forward Phase 1 Slice 6 notification/APNs deferral, server-backed workspace-browser limitations, passive cockpit placement deferral, and the Phase 2 reminder categories from the progress ledger. | Scorecard Exhaustive Feature Coverage and Slice 13. |
+| P2AER-2 | passed | The TSV contains rows for all 24 BPRC feature buckets and the scorecard roadmap maps those buckets to implementation slices. | TSV `bprc_refs` column and inventory summary. |
+| P2AER-3 | passed | Each row in the TSV uses the controlled classification set for primitive, modular package, iOS-only, server-fact rendering, deferred, or reject candidate surfaces. | Inventory Controlled Vocabulary. |
+| P2AER-4 | passed | The memory section defines engine-owned memory primitives, replaceable memory engines, memory store families, privacy, provenance, confidence, expiry, edit/delete/export/migration, evals, engine comparison, iOS audit, and hidden-memory static gates. | Scorecard Deep Memory Architecture. |
+| P2AER-5 | passed | Fourteen implementation slices plus Slice 0 planning closeout include objective, user outcome, primitives, modular boundaries, likely files, old evidence paths, acceptance criteria, focused tests, iOS validation, docs/static updates, and user decisions. | Scorecard Ordered Slice Roadmap. |
+| P2AER-6 | passed | SACB authority, CSD scheduling, TPC minimality, HRA ownership, and DESI evidence rules are encoded as roadmap and validation constraints. | Scorecard Invariants and Validation Protocol. |
+| P2AER-7 | passed | iOS parity defaults to generic runtime rendering and permits native surfaces only after stable server contracts and validation. | Scorecard Primitive And Capability Architecture and each slice's iOS validation notes. |
+| P2AER-8 | passed | Companion narrative inventory and TSV exist with stable columns for old evidence, current replacement/gap, classification, owners, iOS surface, memory involvement, backend dependency, slice, user decision, validation, and status. | Inventory artifacts. |
+| P2AER-9 | passed | The handoff packet requires first-principles UX review, architecture review, source evidence, user questions, and validation plan before coding. | Scorecard Handoff Packet section. |
+
+## Slice 1 Implementation Evidence
+
+Branch: `codex/phase-2-catalog-discovery-evidence-current`
+
+Baseline HEAD: `7db72c1ee46ff4c974ad408f36e9c169da34dfd1`
+
+Scope implemented:
+
+- Added the `catalog_discovery` domain worker with
+  `catalog_discovery::search`, `catalog_discovery::inspect`, and
+  `catalog_discovery::conformance_report`.
+- Added `catalog_search`, `catalog_inspect`, and `catalog_conformance` as
+  inspect/evidence-only `capability::execute` operations while keeping the
+  provider-visible tool list singular.
+- Added resource-backed `catalog_discovery_report` evidence with explicit
+  idempotency, a report lease, event-sourced compensation metadata, an output
+  contract, and `catalog.discovery` stream publication.
+- Kept protected/internal/admin functions protected: search reports omission
+  counts by visibility and report checks aggregate protected failure counts
+  without storing hidden ids.
+- Added Runtime Cockpit Discovery rendering backed by live catalog DTOs and
+  `catalog_discovery_report` resources; chat remains quiet unless a separate
+  attention-worthy state exists.
+- Did not add target routing, intent execution, broad public `/engine`
+  expansion, generated `ui_surface` publication, fixed legacy panels, schema
+  repair, or copied old modules.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib catalog_discovery -- --nocapture` | exit 0 | 20 Rust catalog tests passed, covering catalog registry behavior plus search/inspect/report no-target-invocation and protected-name omission. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_trace_execution execute_catalog_search_does_not_require_working_directory_metadata -- --nocapture` | exit 0 | 1 integration test passed, proving catalog discovery through `execute` works without trusted working-directory metadata. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 tests passed; HRA inventories cover the new catalog-discovery Rust files, Swift Runtime Cockpit files, and Xcode project membership. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 tests passed; SACB guards cover provider-visible `execute`, protected-function visibility, idempotency, and working-directory scope for catalog ops. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 tests passed; PCC file inventory classifies the new domain, tests, DTOs, and cockpit files as retained implementation/test surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 tests passed; TPC retention inventory and file-budget scans include the split catalog discovery service/projection/report modules. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 tests passed; TMB confirmed catalog discovery crosses engine/resource boundaries through the engine facade rather than private stores. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 tests passed; Phase 2 docs do not reclaim removed autonomous-authorship/generated-worker completion claims. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 tests passed; BPRC feature coverage remains mapped while Slice 1 restores catalog/discovery evidence. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 tests passed; IARM Runtime Cockpit and generated-surface anchors remain classified as server-fact rendering, not fixed legacy panels. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants -- --nocapture` | exit 0 | 11 tests passed; Runtime Cockpit discovery uses live worker/function/resource facts and preserves generic runtime-surface boundaries. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture` | exit 0 | 12 tests passed; the iOS architecture remains a thin client over typed server/runtime facts. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 tests passed; Slice 1 adds no unmanaged schedulers/timers while using async resource/catalog reads. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_engine_teardown_plan_invariants capability_registry_recipe_and_conformance_scaffolding_is_deleted -- --nocapture` | exit 0 | 1 targeted teardown test passed; old capability registry/recipe/conformance scaffolding remains deleted while the new `catalog_conformance` report op is allowed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants replay_critical_entropy_is_allow_listed -- --nocapture` | exit 0 | 1 targeted determinism test passed; catalog discovery reports no longer add payload-local wall-clock timestamps outside durable resource/stream envelopes. |
+| `cd packages/ios-app && xcodegen generate` | exit 0 | Xcode project regenerated after Swift DTO/view-model/UI changes. |
+| `xcodebuild test -project TronMobile.xcodeproj -scheme Tron -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:TronMobileTests/WorkerLifecycleDTOTests -only-testing:TronMobileTests/WorkerLifecycleClientTests -only-testing:TronMobileTests/AgentCockpitStateTests -only-testing:TronMobileTests/AgentCockpitViewModelTests` | exit 0 | 20 iOS simulator tests passed across DTO decoding, worker lifecycle client, cockpit projection, and cockpit view model report creation. |
+
+## Slice 2 Implementation Evidence
+
+Branch: `codex/phase-2-approval-safety-freshness-current`
+
+Baseline HEAD: `f95d3b02efbffe15798d4164ae494e743a6332a5`
+
+Scope implemented:
+
+- Added the `approval` domain worker with `approval::request`,
+  `approval::decide`, and `approval::check`.
+- Added durable `approval_request` and `approval_decision` resource type
+  definitions with requester, action, scope, risk class, expiry/freshness,
+  evidence refs, resource selectors, trace/replay refs, decision actor/state,
+  denial behavior, idempotency, and revision metadata.
+- Added `approval.lifecycle` stream publication for requested, decided,
+  denied, and revoked lifecycle transitions. Stream payloads record that
+  approval is not authority and point execution permission back to existing
+  engine authority grants.
+- Added idempotent decision recording bound to the expected request resource
+  version and a reusable fail-closed check path for approved, denied, expired,
+  pending, missing, malformed, stale, and scope-mismatch outcomes.
+- Added structured replay/evidence explanations for every check outcome,
+  including request/decision resource ids, versions, evidence refs, resource
+  selectors, trace refs, replay refs, denial behavior, and revision metadata.
+- Added a hardening guard that aligns approval resource kind/schema ids,
+  resource-backed output contracts, and persisted payload required fields with
+  the engine resource-kernel definitions.
+- Did not add native iOS approval UI, filesystem/jobs/git/web/memory/subagent/
+  scheduling behavior, notifications, deployment behavior, or a default risky
+  approval policy.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::approval -- --nocapture` | exit 0 | 6 Rust approval tests passed, covering request resource/stream creation, approved explanation, fail-closed denial/expiry/pending/missing/malformed/stale/scope mismatch, idempotent decision replay, stale revision conflict, freshness timeout, and approval resource schema alignment. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib stream_state -- --nocapture` | exit 0 | Focused agent-loop stream-state tests passed after extracting stream-message helpers to keep the TPC file budget green without behavior changes. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib turn_runner -- --nocapture` | exit 0 | 17 focused turn-runner tests passed after extracting turn parameters and failure emission helpers to keep the TPC file budget green without behavior changes. |
+
+## Slice 3 Implementation Evidence
+
+Branch: `codex/phase-2-memory-foundation-current`
+
+Baseline HEAD: `301f61bc3af24e69decbe0281d829b9a9f7ada8e`
+
+Scope implemented:
+
+- Added the `memory` domain worker with policy/status, retain, edit,
+  tombstone, list, inspect, prompt-trace recording, and migration import/export
+  contracts.
+- Added built-in resource definitions for `memory_engine`, `memory_policy`,
+  `memory_record`, `memory_prompt_trace`, `memory_eval_run`, and
+  `memory_migration_envelope`.
+- Added source-backed protocol DTOs for memory modes, engines, policy,
+  records, prompt decisions/traces, eval runs, and migration envelopes.
+- Added read-only model `execute` operations for `memory_status`,
+  `memory_list`, and `memory_inspect`; mutating memory functions remain
+  backend domain contracts, not provider-visible tools.
+- Wired prompt assembly to include only explicit memory status/count/ref facts
+  through a private audit block and to record prompt traces without logging
+  private body content.
+- Hardened policy resolution so session-scoped memory context inherits
+  workspace policy before system default, and session policy overrides
+  workspace policy.
+- Hardened prompt-trace idempotency so each trace records fresh memory status
+  instead of replaying the first session audit after policy or record changes.
+- Hardened direct record-id operations so inspect, edit, and tombstone fail
+  closed when the addressed memory record belongs to a different
+  session/workspace/system resource scope.
+- Added a deterministic resource-backed engine shell that supports disabled,
+  active, shadow, and compare modes, redacted body refs, lifecycle metadata,
+  provenance, sensitivity/privacy class, confidence, expiry/retention, source
+  refs, trace/replay refs, tombstone state, and migration metadata.
+- Did not add semantic/vector retrieval, embeddings, ranking, summarization,
+  procedural rules/hooks/skills, automatic retention, native iOS memory UI,
+  filesystem/jobs/git/web/subagents/scheduling behavior, or deployment
+  behavior.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::memory -- --nocapture` | exit 0 | 11 memory tests passed, covering disabled writes, source-backed schema/output drift, workspace policy inheritance/session override, lifecycle/versioning, cross-session record-id denial for inspect/edit/tombstone, inline body-ref rejection, prompt trace privacy, fresh trace-specific context after policy changes, absent-context explicitness, and redacted migration export/import. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed; the memory domain and capability operations are classified without widening provider-visible authority. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 HRA tests passed; memory files and resource-definition split ownership are covered. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 TMB tests passed; memory crosses engine/resource boundaries through domain contracts and engine facades. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 TPC tests passed; new memory source files are classified and remain under the 750-line hard budget after service/prompt/migration/resource-definition splits. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 PCC tests passed; retained memory implementation, test, protocol, and resource files are inventoried. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 0 | 17 DRC tests passed after classifying memory UTC timestamps as resource/prompt-trace audit metadata, not replay ordering keys. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | 8 SSARR tests passed; successor/runtime wording remains classified and does not claim old autonomous-authorship behavior. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 CSD tests passed; Slice 3 adds no unmanaged timers, sleeps, or task ownership. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed after narrowing the old-memory-surface guard to allow only the P2AER-tracked Slice 3 foundation while still rejecting semantic/vector/procedural memory engines. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 IARM tests passed; Slice 3 keeps iOS to generic resource/runtime facts and does not add native memory panels. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 OPSAA tests passed; memory foundation does not restore removed learned-rule/skill runtime surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_updating_worker_runtime_foundation_invariants -- --nocapture` | exit 0 | 9 SUWRF tests passed after narrowing the removed-feature guard to allow only the P2AER-tracked Slice 3 foundation outside worker-lifecycle scope. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed after adding Slice 3 evidence rows. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after the memory foundation implementation, historical guard narrowing, and inventory/evidence updates. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |
+
+## Slice 4 Implementation Evidence
+
+Branch: `codex/phase-2-filesystem-agent-tools-current`
+
+Baseline HEAD: `4c35b2119`
+
+Scope implemented:
+
+- Added a filesystem-domain agent toolbox separate from the iOS
+  workspace-browser subset.
+- Added provider-visible `capability::execute` operation values for
+  `filesystem_read`, `filesystem_list`, `filesystem_find`,
+  `filesystem_glob`, `filesystem_search_text`, `filesystem_diff`,
+  `filesystem_write`, `filesystem_edit`, and `filesystem_apply_patch` while
+  keeping `execute` as the only model-facing primitive.
+- Reused existing engine primitives for trusted working-directory authority,
+  grants, idempotency, resource leases, output contracts, resources, streams,
+  trace/replay evidence, and generic result rendering.
+- Added path authority checks that reject absolute paths, parent traversal, and
+  symlink escapes outside the trusted root; search walks do not follow
+  symlinks.
+- Added bounded read/list/search/diff output, binary body omission, bounded
+  rollback previews, exact single-match text patches, expected-hash protection
+  for existing-file commits, and mutating preview default behavior.
+- Post-closeout orchestrator review hardened truncated-snapshot handling:
+  existing-file commits now reject unverifiable current hashes instead of
+  accepting a `"missing"` sentinel, and exact-text patches refuse files larger
+  than the bounded preview limit rather than editing partial content.
+- Kept provider-visible filesystem results relative to the authorized root; the
+  resource/audit layer may retain canonical locations for committed materialized
+  files.
+- Added resource-backed patch proposal evidence for previews and commits, plus
+  materialized-file resource versions and `filesystem.lifecycle` stream events
+  for commits.
+- Did not add unrelated jobs/git/web/subagent/memory/vector/procedural/
+  scheduling capabilities, native iOS file/patch UI, public DTO expansion,
+  database tables, settings, auth/provider changes, or production deployment
+  behavior.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::filesystem -- --nocapture` | exit 0 | 14 filesystem tests passed after orchestrator hardening, covering workspace-browser regressions, parent traversal denial, symlink escape denial, bounded binary read preview, bounded text search with binary skip, preview/commit patch and materialized resources, hash/exact-match patch guards, truncated-snapshot write/patch refusal, and provider-boundary idempotency. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after classifying filesystem package files, provider-visible execute ops, working-directory requirements, and mutating idempotency requirements without weakening the authority guards. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 TMB tests passed; filesystem agent support crosses engine/resource boundaries through the engine host facade rather than private stores. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 HRA tests passed; new filesystem support files and ownership mappings are inventoried. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 TPC tests passed after adding filesystem retention rows and refreshing summary counts while keeping touched Rust files under the hard line budget. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 PCC tests passed; filesystem package implementation and tests are retained surfaces rather than deleted legacy scaffolding. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed after narrowing the deleted-filesystem guard to allow only the P2AER Slice 4 package while still rejecting retired `read_file`, `write_file`, and `edit_file` spellings. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 IARM tests passed; Slice 4 remains generic-result/resource rendering first and does not add native file/patch UI. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed after adding Slice 4 inventory and evidence rows. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 OPSAA tests passed after classifying the filesystem package without restoring autonomous-authorship or generated-worker surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture` | exit 0 | 26 provider prompt/converter tests passed after documenting filesystem execute operation names and mutating-operation guardrails. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability-domain tests passed with the filesystem execute operation dispatch path registered. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::registration::tests::primitive_teardown_startup_catalog_excludes_deleted_product_domains -- --nocapture` | exit 0 | 1 startup-catalog guard test passed after allowing the new Slice 4 filesystem function ids while continuing to reject retired legacy filesystem spellings. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 4 implementation, static guard updates, inventory/evidence updates, and focused filesystem tests; existing dead-code warnings remained warnings only. |
+
+No Swift or Xcode project files changed, so XcodeGen and iOS simulator tests
+were not run for Slice 4.
+
+Adversarial self-review:
+
+- Fixed a provider-visible path disclosure issue by changing filesystem execute
+  results from absolute canonical paths to `root: "working_directory"` plus a
+  relative path. Resource/audit evidence may still retain canonical locations
+  where committed materialized files require provenance.
+- Fixed an orchestrator-review data-loss issue: exact-text patching previously
+  could operate on a truncated preview, and existing-file commit hash validation
+  treated unavailable hashes as the string `"missing"`. Both now fail closed,
+  with regressions proving the original file remains unchanged.
+- Rechecked traversal, symlink escape, unbounded IO, binary-body disclosure,
+  idempotency, expected-hash, rollback-preview, stale registration, and static
+  guard risks. Real guard drift found during validation was narrowed to the new
+  Slice 4 package and rerun.
+
+## Slice 5A Implementation Evidence
+
+Branch: `codex/phase-2-jobs-process-lifecycle-current`
+
+Baseline: `1d35ac848` on top of `2650dd0b9`
+
+Scope shipped:
+
+- Added the modular `jobs` domain as the owner for durable non-interactive
+  local process jobs and exposed `job_start`, `job_status`, `job_list`,
+  `job_log`, and `job_cancel` through the existing provider-visible
+  `capability::execute` boundary.
+- Added built-in `job_process` resource definitions, bounded
+  `execution_output` artifact creation, `jobs.lifecycle` stream evidence,
+  trace/replay refs, authority/scope refs, cancellation metadata, terminal
+  idempotency, and retention cleanup that archives scoped terminal jobs.
+- Reused existing authority, working-directory freshness, resource, stream,
+  trace, replay, output, idempotency, and shutdown primitives. Core changes
+  were limited to generic resource/authority recognition needed by the new
+  package; no transport, DB, provider, auth, settings, or iOS DTO surfaces were
+  widened.
+- Kept `process_run` as the synchronous bounded command primitive. Durable
+  lifecycle state lives in the modular jobs package.
+- Enforced fail-closed `networkPolicy: none` for process jobs: job start denies
+  unsupported policy values and fails closed when the host cannot enforce
+  network denial.
+- Post-review hardening moved jobs to an owned process group on supported
+  Unix/macOS hosts, bounds output draining to timeout/cancel/shutdown cleanup,
+  and changes cancellation from "terminal write before kill" to
+  "runtime cancel request, then terminal finalization with output evidence."
+- Late cancel requests against completed processes now return
+  completion-pending/already-terminal status and cannot overwrite completion or
+  discard `execution_output` evidence.
+- Runtime finalization now retries a stale job-resource version when a
+  cancellation-request update lands between finalization's resource read and
+  terminal update; the retry reuses the created output resource/link and
+  preserves cancellation metadata.
+- Deliberately deferred PTY/interactive terminals, interpreters/runtime
+  packages, git/worktree/source-control behavior, web/network behavior,
+  subagents, scheduling, native iOS process panels, notifications, and
+  production deployment behavior.
+- Deferred queue-backed internal job dispatch. The implementation found that
+  queuing a hidden jobs runner from model-launched `execute` would require a
+  new queued-internal-grant design, which is outside Slice 5A.
+
+Focused validation:
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::jobs -- --nocapture` | exit 0 | 11 jobs-domain tests passed, covering schema alignment, start/status/list/log/cancel behavior, terminal idempotency, bounded output, timeout terminal output, inherited-pipe background child cleanup, process-exit/cancel race, forced cancel-request/finalization version conflict retry, shutdown cancellation, output/resource evidence, cleanup archiving, and fail-closed network policy. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability-domain tests passed with job execute operations registered. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture` | exit 0 | 26 provider prompt/converter tests passed after documenting the job operation names and provider-visible execute boundary. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after classifying jobs files, operations, working-directory requirements, network-policy denial, and mutating idempotency requirements. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 TMB tests passed; jobs are classified as a package owner using engine/resource facades instead of private stores. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 CSD tests passed after classifying the process runtime and shutdown/cancellation ownership. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 HRA tests passed; jobs files and ownership rows are inventoried. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 PCC tests passed with jobs retained as shipped Slice 5A package code. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 TPC tests passed after adding jobs retention rows and refreshing summary counts. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 BPRC tests passed after documenting jobs as the planned Slice 5A restoration of process/job capability, not a legacy shell revival. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 IARM tests passed; Slice 5A remains generic resource/result rendering first and does not add native iOS process UI. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 OPSAA tests passed; jobs do not restore autonomous-authorship workers, scheduling, subagents, or generated-runtime surfaces. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test performance_resource_governance_invariants -- --nocapture` | exit 0 | 7 PRG tests passed; jobs keep bounded output and process cleanup under the existing resource-governance model. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 0 | 17 DRC tests passed after documenting jobs as the owner for lifecycle audit timestamps and elapsed-time diagnostics while keeping replay identity based on resource refs/hashes and stream/trace evidence. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed after adding Slice 5A implementation evidence and deferred queue-dispatch rationale. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 5A process-group cancellation hardening, bounded output-drain cleanup, cancel/completion race fixes, validation evidence updates, and static inventory refreshes; existing dead-code warnings remained warnings only. |
+
+No Swift or Xcode project files changed, so XcodeGen and iOS simulator tests
+were not run for Slice 5A.
+
+Adversarial self-review:
+
+- Fixed static inventory drift found by validation in SACB, TMB, CSD, HRA,
+  PCC, and TPC by adding explicit jobs rows and refreshing guarded counts.
+- Fixed a DRC allow-list gap caught by full CI: jobs lifecycle timestamps and
+  process elapsed-time measurements are now documented as audit/diagnostic
+  clocks, not replay identity inputs.
+- Rechecked core widening, hidden provider/auth/settings/iOS DTO expansion,
+  private engine store coupling, unbounded stdout/stderr, cancellation races,
+  terminal-state resurrection, idempotency gaps, stale registration, network
+  smuggling, and queue-backed dispatch. Queue-backed internal dispatch remains
+  intentionally deferred pending a separate grant model.
+- Independent review found that direct-child-only cancellation could leave
+  inherited-pipe descendants alive past timeout/cancel/shutdown, and that
+  `job_cancel` could overwrite real completion before runtime output
+  finalization. The fix moved cleanup to owned process groups, bound output
+  draining after terminal signals, and made cancellation terminal state a
+  runtime-finalized outcome rather than a pre-kill resource write.
+- Second independent review found that cancellation-request metadata could
+  still race terminal finalization's compare-and-set update. The fix added a
+  bounded finalization retry that reloads the current nonterminal job, merges
+  cancellation metadata, and attaches the existing output resource evidence
+  before writing the terminal state.
+
+## Validation Log
+
+| Command | Result | Evidence |
+| --- | --- | --- |
+| Source audit over required artifacts using `sed`, `rg`, `wc`, and `git rev-parse` | exit 0 | Required artifacts were readable; planning baseline HEAD and branch were captured; Phase 2 deferrals and BPRC feature ids were extracted into the plan. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Rust guard edits were formatted. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 tests passed; the new scorecard arithmetic and companion evidence checks passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 tests passed; Phase 1 deferral anchors remain intact. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | 8 tests passed; all BPRC feature buckets remain mapped. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test self_sufficient_agent_runtime_readiness_invariants -- --nocapture` | exit 0 | 8 tests passed; successor-term planning language is classified. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 tests passed; Phase 2 planning docs remain future/readiness wording, not a completed autonomous-authorship architecture. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::approval -- --nocapture` | exit 0 | 6 Slice 2 approval tests passed, covering durable resources, lifecycle streams, fail-closed outcomes, idempotency/revision conflicts, replay/evidence explanations, and resource schema alignment. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib stream_state -- --nocapture` | exit 0 | Focused stream-state tests passed after the non-behavioral helper split. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib turn_runner -- --nocapture` | exit 0 | 17 focused turn-runner tests passed after the non-behavioral helper split. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 tests passed; SACB inventory covers 758 rows including the approval worker, contracts, resources, lifecycle stream, not-authority boundary, and schema drift guard. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants -- --nocapture` | exit 0 | 16 tests passed; PCC file inventory covers 1737 retained files including approval and helper-split files. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture` | exit 0 | 15 tests passed; TPC retention inventory covers 1692 retained rows and the touched Rust files remain within the 750-line hard budget. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 tests passed; TMB inventory covers 1069 rows and classifies approval as a package-owned module using engine/resource facades. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 tests passed; HRA file and ownership inventories cover 1737 files including approval and helper-split ownership. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | exit 0 | 17 tests passed after documenting `domains/approval` as an approved UTC audit/freshness owner while retaining `check_approval_at` as the deterministic replay seam. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture` | exit 0 | 12 tests passed after adding the split `turn_runner/params.rs` cancellation-token owner to the CSD inventory. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_thin_client_generic_runtime_shell_invariants -- --nocapture` | exit 0 | 10 tests passed; iOS architecture docs still preserve thin-client shell boundaries. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test ios_self_adapting_agent_cockpit_baseline_invariants -- --nocapture` | exit 0 | 11 tests passed; Agent cockpit docs remain generic runtime-surface oriented. |
+| `scripts/tron ci fmt check clippy test` | exit 0 | Full Rust CI passed after Slice 2 approval work, schema alignment hardening, DRC allow-list documentation, and CSD inventory refresh. |
+| `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git diff --cached --check` | exit 0 | No whitespace errors were reported in the staged diff. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files reported. |

@@ -1,0 +1,25 @@
+id	class	source	path	current_order	replay_contract	gap_owner
+DRC-1-001	source	session_events	packages/agent/src/domains/session/event_store/	session_id + sequence ASC	Include requested session events by sequence ASC	DRC-5/DRC-6 passed
+DRC-1-002	source	provider_request_audit	packages/agent/src/domains/model/responder/	session sequence	Persist model.provider_request before provider stream open; include in replay manifest	DRC-4/DRC-5/DRC-6 passed
+DRC-1-003	source	trace_records	packages/agent/src/domains/session/event_store/sqlite/repositories/trace.rs	timestamp DESC today	Replay order timestamp ASC + id ASC	DRC-5/DRC-6 passed
+DRC-1-004	source	engine_invocations	packages/agent/src/engine/durability/ledger/	rowid append order	Include session-scoped invocation records in append order plus invocation ID and resultHash	DRC-7 passed
+DRC-1-005	source	engine_stream_events	packages/agent/src/engine/durability/streams/	cursor ASC	Include session-scoped stream rows by cursor ASC plus payloadHash	DRC-7 passed
+DRC-1-006	source	engine_queue_items	packages/agent/src/engine/durability/queue/	created_at ASC today	Replay order queue ASC + created_at ASC + receipt_id ASC plus payloadHash and attempt refs	DRC-7 passed
+DRC-1-007	source	engine_resources	packages/agent/src/engine/durability/resources/	resource API order	Use resource refs/hashes from replay-critical invocation/trace/queue/lease rows; no direct replay v1 table export	DRC-7 passed
+DRC-1-008	source	payload_blobs	packages/agent/src/shared/storage/payloads.rs	owner/ref dependent	Resolve JSON payload refs before canonical hashing	DRC-5/DRC-6 passed
+DRC-1-009	entropy	utc_now	packages/agent/src/	guarded by entropy_scanning.rs	Allow-list approved owners; replay-critical constructors use explicit identities; memory and job timestamps are resource/prompt-trace/lifecycle audit metadata and not replay ordering keys	DRC-2/DRC-3 passed; P2AER-S3 memory foundation; P2AER Slice 5A jobs foundation
+DRC-1-010	entropy	system_time_now	packages/agent/src/domains/model/providers/	guarded by entropy_scanning.rs	Allow only non-replay provider/runtime timing	DRC-2 passed
+DRC-1-011	entropy	instant_now	packages/agent/src/	guarded by entropy_scanning.rs	Allow durations/health/job elapsed-time checks only outside replay hashes	DRC-2 passed
+DRC-1-012	entropy	uuid_now_v7	packages/agent/src/	guarded by entropy_scanning.rs	Deterministic constructors for replay-critical tests/import paths	DRC-2/DRC-3 passed
+DRC-1-013	entropy	rand_random	packages/agent/src/	guarded by entropy_scanning.rs	Allow security tokens and contention jitter only	DRC-2 passed
+DRC-1-014	hash	canonical_json	packages/agent/src/domains/session/replay/	implemented	Sorted-object canonical JSON for section and overall hashes	DRC-5/DRC-6 passed
+DRC-1-015	api	session_replay_manifest	packages/agent/src/domains/session/replay/	implemented	Pure-read tron.replay.v1 capability	DRC-5 passed
+DRC-1-016	api	execute_replay_manifest	packages/agent/src/domains/capability/operations/replay.rs	implemented	Delegate to session replay builder for current session without trace mutation	DRC-5/DRC-6 passed; DRC-8 consumes
+DRC-1-017	proof	invariant_target	packages/agent/tests/determinism_replayability_invariants.rs	new target	Focused static and behavioral DRC gates	DRC-10 passed
+DRC-1-018	entropy	timestamp_only_ordering	packages/agent/src/	guarded by entropy_scanning.rs	UI/diagnostic ORDER BY timestamp paths are allowed; replay paths use stable tie-breakers	DRC-6 passed
+DRC-1-019	proof	offline_roundtrip	packages/agent/src/domains/session/replay/roundtrip.rs	implemented	Recompute replay hashes and validate cross-record refs without side effects	DRC-8 passed
+DRC-1-020	source	engine_idempotency_entries	packages/agent/src/engine/durability/ledger/	stable key order	Include session-scoped or session-invocation-referenced entries with request/outcome hashes	DRC-7 passed
+DRC-1-021	proof	docs_protocol_ios_parity	packages/agent/tests/determinism_replayability/docs_parity.rs	implemented	Guard README/protocol/session/iOS docs for replay manifest parity	DRC-9 passed
+DRC-1-022	proof	final_closeout	packages/agent/tests/determinism_replayability/closeout.rs	implemented	Enforce 100/100, complete active DRC docs, final TSV proof, and no stale unresolved closeout wording	DRC-10 passed
+DRC-1-023	proof	configuration_profile_default_drift	packages/agent/docs/configuration-profile-environment-discipline-inventory.tsv	implemented	Configuration / Profile / Environment Discipline keeps managed defaults reproducible against compiled settings	DRC-9 passed
+DRC-1-024	proof	release_install_version_finalization	packages/agent/docs/release-install-upgrade-rollback-discipline-inventory.tsv	implemented	Release / Install / Upgrade / Rollback Discipline keeps app version finalization and deploy-result records health-gated	DRC-9 passed

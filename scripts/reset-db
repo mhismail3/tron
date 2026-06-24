@@ -4,8 +4,8 @@
 #
 # Usage: scripts/reset-db
 #
-# Stops the tron server, clears all session/event/log/task data from
-# log.db, vacuums, and restarts the server.
+# Stops the tron server, clears primitive session/event/log/trace data
+# from tron.sqlite, vacuums, and restarts the server.
 
 set -euo pipefail
 
@@ -14,21 +14,15 @@ source "$(dirname "$0")/tron-lib.sh"
 
 DB_DIR="$TRON_HOME/internal/database"
 
-# Tables to clear — everything except schema_version
+# Tables to clear — everything except schema_version.
 DATA_TABLES=(
-  sessions events logs blobs
-  workspaces branches projects areas
-  device_tokens
-  tasks task_activity task_backlog task_dependencies
+  trace_records logs events sessions blobs workspaces
 )
-
-# FTS tables to rebuild (content is deleted via triggers or manually)
-FTS_TABLES=(events_fts tasks_fts areas_fts)
 
 usage() {
   echo "Usage: $(basename "$0")"
   echo ""
-  echo "Clears session/event/log data from log.db."
+  echo "Clears session/event/log data from tron.sqlite."
   echo "Stops the server, clears data, vacuums, and restarts."
   exit 0
 }
@@ -62,15 +56,8 @@ reset_database() {
 
   echo "  $db_name: clearing data..."
 
-  # Build SQL to delete from all data tables (order matters for FK constraints)
   local sql="PRAGMA foreign_keys = OFF;"
 
-  # Delete from FTS tables first (rebuild command empties them cleanly)
-  for fts in "${FTS_TABLES[@]}"; do
-    sql+="DELETE FROM ${fts} WHERE 1=1;"
-  done
-
-  # Delete from data tables (children before parents)
   for table in "${DATA_TABLES[@]}"; do
     sql+="DELETE FROM ${table};"
   done
@@ -94,10 +81,10 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   usage
 fi
 
-db_path="$DB_DIR/log.db"
+db_path="$DB_DIR/tron.sqlite"
 
 # Confirm
-echo "This will DELETE all sessions, events, logs, tasks from log.db"
+echo "This will DELETE all sessions, events, logs, traces, and blobs from tron.sqlite"
 read -rp "Continue? [y/N] " confirm
 if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
   echo "Aborted."

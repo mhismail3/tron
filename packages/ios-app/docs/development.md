@@ -7,7 +7,6 @@
 - Xcode 26+ with iOS 26 SDK
 - XcodeGen (`brew install xcodegen`)
 - Tron server running locally
-- Optional for Codex mode: current Codex CLI with WebSocket `app-server` support installed on the paired Tron server machine
 
 ### Project Generation
 
@@ -19,43 +18,93 @@ open TronMobile.xcodeproj
 
 ### Server Connection
 
-The app connects to the Tron server:
-- **Beta**: `localhost:8082` (run `tron start beta` or `tron dev`)
-- **Production**: `localhost:8080` (run `tron start`)
+The app connects to the Tron engine over `/engine`. Physical device testing
+uses the Mac pairing QR code, which carries the Mac's trusted local or Tailscale
+address, port, bearer token, and label. QR/deep-link paste and manual entry
+accept only a bare DNS name, IPv4 address, or unbracketed IPv6 address; paste
+`100.64.x.y` or `mac.tailnet.ts.net`, not `http://.../engine`. The iOS app
+declares local-network use so iOS can prompt for permission when a direct
+Mac/Tailscale connection needs it. Engine protocol envelopes are JSON WebSocket
+text frames; the client accepts text or binary responses for diagnostics, but
+outbound engine requests stay text so they match the server protocol.
 
-### Codex App Server Mode
+If pairing times out before showing an authorization error, verify that
+Tailscale is connected on both devices, accept the iOS local-network permission
+prompt if it appears, and confirm the Mac can serve
+`http://<tailscale-ip>:9847/health`.
 
-Codex mode is separate from Tron agent sessions, but its server lifecycle is
-owned by the paired Tron server. Start or restart the Tron server after
-installing a current Codex CLI; when `server.codexAppServer.enabled` is true,
-the server launches `codex app-server`, writes the capability token under
-`~/.tron/internal/run/codex-app-server-token`, and reports the live endpoint via
-`codexApp.status`.
+The iOS engine transport logs redacted connection diagnostics under the
+`[WebSocket]` category for each `/engine` upgrade: host/path, timeout budget,
+Authorization header presence, URLSession task metrics, HTTP upgrade status
+when available, and NSError domain/code/underlying details. Tokens and URL
+queries are not logged. When physical-device pairing fails, copy the
+`[WebSocket]` lines from Xcode first; they should identify whether the failure
+is local-network permission, Tailscale reachability, HTTP auth, or engine
+protocol response handling.
 
-For local verification:
+### Codex App Local Actions
+
+The repository includes `.codex/environments/environment.toml` for Codex app
+toolbar actions. `Dev Server` starts `scripts/tron dev -bdt` from the project
+root, and `Stop Dev Server` runs `scripts/tron dev --stop`.
+`Rebuild + Install + Launch iOS Beta on iPhone` and `Rebuild + Install + Launch
+iOS Beta on iPad` run `scripts/tron-ios-beta install` with generic device-name
+selectors; the helper regenerates the Xcode project, preflights the active
+Xcode toolchain, builds the `Tron Beta` scheme for a physical iOS destination,
+writes a full log plus `.xcresult` bundle, installs the resulting app bundle
+with `xcrun devicectl`, and launches the resolved bundle ID with a bounded
+`devicectl` launch timeout.
+`Rebuild + Install + Launch iOS Prod Fast Debug on iPhone` uses the same helper
+with `TRON_IOS_SCHEME='Tron Fast'` and `TRON_IOS_CONFIGURATION=ProdDebug`, so
+it builds the fast production-bundle app and launches it on the selected iPhone.
+`Rebuild + Install + Launch iOS Prod Release on iPhone` uses
+`TRON_IOS_SCHEME=Tron` and
+`TRON_IOS_CONFIGURATION=Prod`, so it builds the optimized production app,
+installs the fresh product, and then launches it through the same helper.
+After each build, the helper installs the requested configuration's `iphoneos`
+product so stale Beta or Prod app bundles left in DerivedData cannot be launched
+by a different action.
+Production rebuild actions call `install`, not `launch`, so local source changes
+are compiled before the app is reinstalled.
+The matching `Just Launch Installed ...` actions run `scripts/tron-ios-beta
+launch` for the already-installed app without rebuilding. The iPhone launch
+actions are deduplicated by bundle ID: Beta has its own launch action, and the
+single production launch action opens whichever `com.tron.mobile` binary is
+currently installed, whether it came from Prod Fast Debug or Prod Release.
+
+Keep device-specific values out of the repo. The Codex app actions use generic
+`TRON_IOS_DEVICE_NAME=iPhone` and `TRON_IOS_DEVICE_NAME=iPad` selectors. For
+manual terminal use, the helper auto-selects the only selectable physical iOS
+device, where selectable means CoreDevice reports it as `available` or
+`connected`. If multiple devices are selectable, set one of these before running
+it:
 
 ```bash
-# from the repository root
-scripts/tron dev
-# Then open Codex mode in the paired iOS app. The dashboard should connect,
-# load threads automatically, and open selected threads as full-screen detail
-# views on iPhone.
+export TRON_IOS_DEVICE_ID=<device-identifier>
+# or
+export TRON_IOS_DEVICE_NAME=<device-name>
 ```
 
-Use a Tailscale/private address for device testing. If the status page shows a
-failed Codex server, verify `codex` is on the LaunchAgent shell `PATH`, the CLI
-supports `app-server --listen ... --ws-auth capability-token --ws-token-file`,
-and the configured port is free. The Codex dashboard now stays on the thread
-list flow when the managed server is failed or restarting; it shows a retryable
-connection state and polls `codexApp.status` until the server reports a running
-endpoint.
+If Xcode needs a custom destination string, set `TRON_IOS_DESTINATION`
+directly, for example `platform=iOS,id=<device-identifier>`.
+
+The helper also accepts `TRON_IOS_SCHEME` and `TRON_IOS_CONFIGURATION` for local
+variants. Defaults remain `Tron Beta` and `Beta`; the fast production action sets
+them to `Tron Fast` and `ProdDebug`.
 
 ## Build Configurations
 
-| Config | Server | Use Case |
+| Config | Scheme | Use Case |
 |--------|--------|----------|
-| Beta | localhost:8082 | Development (debug, beta bundle ID) |
-| Prod | localhost:8080 | App Store (release, production bundle ID) |
+| Beta | Tron Beta | Development (debug, beta bundle ID) |
+| ProdDebug | Tron Fast | Local production-app iteration (debug, production bundle ID) |
+| Prod | Tron | App Store/TestFlight (release, production bundle ID) |
+
+Use `Tron Fast` when you want Xcode's debug-speed rebuilds to install over the
+production app (`com.tron.mobile`) instead of the side-by-side beta app. It uses
+the production app icon, production bundle IDs, and production entitlements, but
+keeps `-Onone`, `ENABLE_TESTABILITY=YES`, and `ONLY_ACTIVE_ARCH=YES` like the
+beta debug build.
 
 ## Running Tests
 
@@ -67,6 +116,121 @@ xcodebuild test \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
 ```
 
+For the IOSTC thin-client closeout, the focused iOS 26.5 simulator set is:
+
+```bash
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/ServerSettingsTests
+
+xcodebuild test -scheme Tron \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.5' \
+  -only-testing:TronMobileTests/SettingsParityTests \
+  -only-testing:TronMobileTests/PairingValidationTests \
+  -only-testing:TronMobileTests/PairingURLParserTests \
+  -only-testing:TronMobileTests/EventTypeRegistryTests \
+  -only-testing:TronMobileTests/ErrorEventProjectionTests \
+  -only-testing:TronMobileTests/CapabilityInvocationDisplayModelTests \
+  -only-testing:TronMobileTests/GeneratedUIRendererTests
+```
+
+The source-backed scorecard and evidence live under
+`packages/agent/docs/ios-thin-client-generic-runtime-shell-*`.
+
+### Simulator Deep-Link Harnessing
+
+Use the simulator deep-link path only when a scenario is explicitly testing
+navigation/deep-link handling, or when visible iOS evidence for an exact
+server-created session is intentionally called out. Backend evidence harnesses
+should default to isolated temporary server homes and must not populate the
+user's normal session shell or jump the visible Simulator without an explicit
+flag.
+The completed post-100 UI/UX scorecard lives at
+`packages/agent/docs/post-100-operating-conditions-scorecard.md`; use that
+scenario ledger as the archived iPhone/mac evidence model for owner
+classification and cross-client confirmation.
+The completed recent-gap campaign lives at
+`packages/agent/docs/post-scorecard-gap-hardening-scorecard.md`. Its iPad rows
+use `packages/agent/docs/post-100-ipad-ui-regression-scorecard.md` for the
+closed split-view/sidebar, popover, pointer/keyboard, and wider-viewport
+coverage instead of reopening the closed iPhone/mac scorecard. Remaining
+confirmation-gated iPad generated UI, fork, pointer, and keyboard action flows
+are owned by `packages/agent/docs/ipad-action-time-followup-scorecard.md`.
+The app registers `tron` and `tron-mobile` URL schemes, and
+`DeepLinkRouter` handles session routes in the form
+`tron://session/<session_id>`.
+
+```bash
+# Ensure a simulator is booted.
+xcrun simctl bootstatus booted
+
+# If iOS code changed, build and install the current beta app before collecting
+# app-path evidence. Unit tests alone do not update the running simulator app.
+cd packages/ios-app
+xcodebuild -scheme 'Tron Beta' \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
+  -derivedDataPath /tmp/tron-ios-beta-derived \
+  build
+xcrun simctl terminate booted com.tron.mobile.beta || true
+xcrun simctl install booted /tmp/tron-ios-beta-derived/Build/Products/Beta-iphonesimulator/TronMobile.app
+
+# Launch the installed local beta app.
+xcrun simctl launch booted com.tron.mobile.beta
+
+# Open the exact server session in the app only for intentional deep-link evidence.
+xcrun simctl openurl booted "tron://session/<session_id>"
+
+# Capture the visible state as a test artifact.
+xcrun simctl io booted screenshot /tmp/<scenario>-simulator.png
+```
+
+Harnesses must treat a nonzero `simctl openurl` return code or screenshot
+return code as invalid app-path evidence, even when the server DB reaches a
+terminal state. For non-navigation backend evidence, keep sessions in the
+isolated harness server and collect DB truth without opening them in the user's
+visible Simulator. Reset the old paired simulator or classify the run as
+`ios_rendering`/harness evidence failure instead of passing from stale UI state.
+Cold-start session routes are consumed through the pending deep-link path on
+`ContentView.onAppear`; if the app opens to the session list after a successful
+`openurl`, record the mismatch as parity drift.
+
+Record the session id, run log, screenshot path, dev-server PID or health
+snapshot, and the matching database evidence together. A screenshot captured
+right after `simctl openurl` is navigation evidence only. For chat parity
+evidence, reopen the same deep link and capture a final screenshot after the DB
+has no later `stream.turn_start` after the selected terminal event and stable
+invocation/resource/queue/stream rows. Later
+non-turn hook rows such as `hook.llm_result` should not keep a terminal session
+open by themselves. If iOS shows the system "Open in Tron?" confirmation
+instead of immediately navigating, capture that screenshot but do not treat it
+as pass evidence by itself; the canonical result still comes from engine DB
+reconstruction for the same session id.
+
+Use deep-link screenshots as a parity check, not just a navigation shortcut.
+For each harnessed session, compare the visible chat against the engine DB:
+the submitted `message.user` prompt should appear in the transcript, the latest
+assistant content should match the latest completed, paused, or blocked engine
+turn, and any generated action sheet should either disappear or become a
+clearly non-actionable historical marker once the engine has resolved it or
+moved past it. If the chat omits the user prompt, starts at agent content,
+leaves a stale actionable confirmation/action sheet mounted, or otherwise
+disagrees with events/invocations/resources, record that as chat parity drift
+while keeping DB evidence canonical for the scenario result.
+
+Harnesses should not classify a session immediately after the first
+`stream.turn_end`. A `stream.turn_end` with `stopReason = "tool_use"` is not
+terminal; it only means the provider yielded for engine tool execution and the
+assistant turn may continue after the tool result. Before collecting final
+evidence, wait for `stopReason = "end_turn"`, then verify the session family has
+no later `stream.turn_start` after the terminal event being used and that the
+DB rows for invocations, resources, queues, resource versions, streams, events,
+and logs are stable. Use
+`packages/agent/tests/fixtures/session_terminal_guard.py` for simulator or
+live-worker harnesses that need a repeatable DB-backed terminal-state gate.
+This prevents blocked-state tests and multi-step runtime tests from being
+marked complete while the engine is still recording a block or continuing into
+the next turn.
+
 ### Xcode
 
 1. Open `TronMobile.xcodeproj`
@@ -77,12 +241,13 @@ xcodebuild test \
 
 ```
 Tests/
-├── CodexApp/          # Codex JSON-RPC, reducer, managed-status, view-model tests
-├── ViewModels/        # ViewModel tests
-├── Services/          # Service tests
-├── Core/              # Event plugin tests
-├── Mocks/             # Test doubles
-└── Navigation/        # Deep link tests
+├── Engine/            # Transport, protocol, event, persistence, and model tests
+│   └── Transport/     # Clients, Retry, WebSocket, and DeepLinks tests mirror Sources
+├── Session/           # Chat, timeline, attachment, and parsing tests
+│   └── Chat/          # Coordinators, Messaging, Navigation, State, ViewModel owner roots
+├── UI/                # Chat, settings, onboarding, runtime surface, and component tests
+├── Support/           # Composition, diagnostics, foundation, pairing, and storage tests
+└── Infrastructure/    # Fakes, fixtures, SourceGuard, cleanup, and project-structure guards
 ```
 
 ## Debugging
@@ -94,7 +259,7 @@ TronLogger.shared.debug("Message", category: .network)
 TronLogger.shared.error("Error: \(error)", category: .session)
 ```
 
-Categories: `.network`, `.session`, `.events`, `.notification`, `.audio`
+Categories: `.network`, `.session`, `.events`, `.notification`, `.database`
 
 ### Network Inspector
 
@@ -118,16 +283,34 @@ Tron does not send usage analytics. `MetricKitDiagnosticsStore` subscribes to
 Apple MetricKit in `AppDelegate` and stores payload JSON under Application
 Support with 30-day / 50-file / 10 MB retention. Settings -> Send Feedback
 builds a redacted `tron-diagnostics-<timestamp>.json` attachment that includes
-bounded iOS logs, `logs.recent(limit: 1000)` when connected, local session and
+bounded iOS logs, `logs::recent(limit: 1000)` when connected, local session and
 event summaries, and MetricKit payloads.
 
-Mail delivery uses the tracked `TRON_FEEDBACK_EMAIL` build setting and opens
-the native Mail composer with the support recipient, subject, body, and JSON
-attachment filled in. The body names the attachment and describes the actual
-included log time range when parseable timestamps are available. If Mail is not
-configured, or the recipient config is missing, Settings shows an alert instead
-of a share sheet because iOS public APIs do not reliably attach files through a
-default-mail-app handoff. Release builds must keep
+When the app is connected to a paired server,
+`ClientLogIngestionService` automatically mirrors the bounded, redacted
+`TronLogger` buffer into the server `logs` table through `logs::ingest`.
+The upload redacts messages again at the send boundary; the server then applies
+its bearer/API/OAuth redactor before durable `logs` storage. Uploads track entry
+fingerprints for the active server endpoint, use deterministic batch
+idempotency, and still rely on the server's client-log dedupe index as durable
+truth. Endpoint changes cancel stale scheduled uploads, and repeated
+reconnects or foreground transitions do not resend unchanged local buffers or
+create duplicate DB rows. Successful `logs::ingest` transport/debug plumbing is
+filtered before upload so automatic syncing cannot create a self-feeding log
+loop; failed ingestion and reconnect warnings are retained. The Logs sheet
+remains production-available for local inspection and copying; it is not the
+source of durable log truth.
+
+Mail delivery uses the `TRON_FEEDBACK_EMAIL` build setting and opens the native
+Mail composer with the support recipient, subject, body, and JSON attachment
+filled in. The tracked default in `Configuration/Base.xcconfig` is blank;
+maintainer or release builds can supply it through `Configuration/Local.xcconfig`,
+CI secrets, or other runtime build settings without changing source control. The
+body names the attachment and describes the actual included log time range when
+parseable timestamps are available. If Mail is not configured, or the recipient
+config is missing, Settings shows an alert instead of a share sheet because iOS
+public APIs do not reliably attach files through a default-mail-app handoff.
+Release builds must keep
 `DEBUG_INFORMATION_FORMAT = dwarf-with-dsym`; App Store/TestFlight crashes are
 retrieved through Apple's Xcode Organizer diagnostics path.
 
@@ -255,17 +438,17 @@ version normally skip that review wait and move straight to group assignment.
 
 ### Adding a New Screen
 
-1. Create view in `Views/<Feature>/`
-2. Create view model if needed in `ViewModels/`
-3. Add navigation in parent view or sheet coordinator
+1. Create the view under the matching `UI/<Feature>/` owner.
+2. Put session/chat state under `Session/Chat` or the relevant `Session/Timeline` owner.
+3. Add navigation in the parent view or coordinator.
 4. Add deep link route if applicable
 
-### Adding a Tool Visualization
+### Adding Runtime Presentation
 
-1. Create chip in `Views/Tools/<ToolName>/<Name>Chip.swift`
-2. Create detail sheet in same folder
-3. Add case in `ToolChipFactory.swift`
-4. Add sheet case in `SheetCoordinator`
+1. Emit operation, trace ids, and runtime-owned presentation hints from the server or generated runtime data.
+2. Reuse the generic capability chip, detail sheet, result renderer, and `GeneratedRuntimeSurfaceView`.
+3. Add a reusable renderer under `UI/Capabilities/` or `UI/RuntimeSurfaces/` only when primitive trace/result rendering is not expressive enough.
+4. Add focused tests for the primitive payload/result shape and the generic sheet route.
 
 ### Updating Event Handling
 
@@ -275,14 +458,14 @@ See `docs/events.md` for the complete event handling guide.
 
 | Issue | Status | Notes |
 |-------|--------|-------|
-| DeepLinkRouter URL parsing | Bug | Host vs path confusion |
+| Simulator deep-link confirmation | Platform prompt | Some `simctl openurl` runs stop at the iOS "Open in Tron?" confirmation; keep DB evidence canonical. |
 | StreamingManager timing test | Flaky | `testRapidDeltasGetBatched` |
 
 ## Performance
 
 ### Memory Management
 
-- Event arrays capped (100 events per subagent)
+- Event arrays capped per retained session/detail view
 - Messages windowed for large sessions
 - Images loaded lazily
 

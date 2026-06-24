@@ -6,15 +6,17 @@ exactly what you need to make a green PR.
 ## TL;DR
 
 ```bash
-git clone https://github.com/mhismail3/tron.git
+git clone <repository-url>
 cd tron
 scripts/install-hooks.sh                                           # one-time
 cd packages/agent && cargo check && cargo test -- --quiet          # baseline
 ```
 
-Open a PR against `main`. CI runs the same checks plus iOS tests if you touched
-`packages/ios-app/**`. Fill out the PR template — the checklist exists because
-`README.md` and the in-tree progressive-disclosure docs drift fast.
+Open a PR against `main`. CI always runs the personal-info/version guards, runs
+the Rust closeout target set for docs/template/iOS/Mac surfaces, and runs the
+full Rust, iOS, or Mac jobs when their source paths or labels apply. Fill out
+the PR template — the checklist exists because `README.md` and the in-tree
+progressive-disclosure docs drift fast.
 
 ## Project layout
 
@@ -29,7 +31,7 @@ scripts/      Bash entrypoints — `tron`, `install-hooks.sh`, `personal-info-gu
 The root `README.md` is the canonical reference. Several sections are
 mechanically derived from code; if you change a derived source, update the
 matching README section in the same commit. The exhaustive list lives in
-[`.claude/CLAUDE.md` "README maintenance"](.claude/CLAUDE.md).
+the `README maintenance` section of `AGENTS.md`.
 
 ## Development workflow
 
@@ -47,7 +49,7 @@ scripts/tron dev
 
 # Same, but background — useful for iterating in another shell.
 scripts/tron dev --background
-scripts/tron dev stop
+scripts/tron dev --stop
 ```
 
 You should never need to run `scripts/tron deploy` or any production
@@ -69,7 +71,8 @@ for App ID `6761511764`; contributor PRs do not need App Store Connect access.
 ### Mac wrapper
 
 The Mac SwiftUI wrapper lives at `packages/mac-app/`. It's a SwiftUI app that
-bundles the headless Rust agent as `Contents/Resources/tron-agent` and presents
+bundles the headless Rust agent inside helper apps under
+`Contents/Library/LoginItems/Tron Server*.app/Contents/MacOS/tron` and presents
 a first-run wizard + menu bar icon. Both Debug and Release configurations
 build `TronMac.app` (the bundle name follows the XcodeGen target); Debug uses
 bundle ID `com.tron.mac.dev` (lives in DerivedData), Release uses
@@ -94,8 +97,10 @@ xcodebuild test \
 
 CI exercises the same flow on every PR that touches `packages/mac-app/**` or
 `packages/agent/**` (the agent binary is embedded, so a Rust change affects
-the Mac app bundle). PRs also run a dry-run DMG assembly to catch breakage
-in `release-mac.yml` before tag push.
+the Mac app bundle). It verifies XcodeGen leaves the tracked project unchanged,
+runs focused non-flaky wrapper tests for paths/status/Tailscale coverage, and
+keeps a dry-run DMG assembly to catch breakage in `release-mac.yml` before tag
+push.
 
 ## Testing
 
@@ -110,9 +115,12 @@ work test-first whenever practical — write the failing test, then make it pass
 | Personal-info guard | `scripts/personal-info-guard.sh` |
 | All-in-one (workspace only) | `scripts/tron ci` |
 
-CI runs the same commands. The Rust job runs on every PR; iOS only runs on
-PRs that touch `packages/ios-app/**` or are labeled `ios` (macOS minutes are
-~10× the cost of Linux minutes).
+CI runs the same Rust test harness through `scripts/tron ci test` when the Rust
+job is selected. A separate Ubuntu static-gates job runs the same named
+closeout targets, including PET/PCC/HRA/AHA/PAC invariants, primitive trace,
+database-path, and serial integration targets, for docs/template/iOS/Mac
+changes. iOS and Mac jobs only run for their package paths, relevant labels, or
+pushes to `main` (macOS minutes are ~10× the cost of Linux minutes).
 
 ## Commits
 
@@ -155,7 +163,9 @@ The repo's regression guards (`paths.rs:workspace_has_no_personal_info_literals`
 
 - Hardcoded usernames in source, comments, tests, or placeholder text
   (`/Users/<my-username>`, `<my-username>@…`, `e.g. <my-username>@…`).
-- Hardcoded GitHub handles other than the canonical `mhismail3`.
+- Hardcoded GitHub handles, personal domains, or maintainer-specific release
+  URLs. Use generic placeholders, local config, CI secrets, or runtime
+  configuration.
 - Encoded forms of the same (`-Users-<my-username>-…` from Claude-Code-style paths).
 
 User-specific values belong in `~/.tron/memory/MEMORY.md` (auto-loaded
@@ -171,14 +181,14 @@ explain why in the same commit.
 
 Two layers, both required:
 
-1. **Root `README.md`** — canonical reference. The
-   [README maintenance table](.claude/CLAUDE.md) lists which README section to
-   update for each kind of source change. The PR template repeats this.
+1. **Root `README.md`** — canonical reference. The README maintenance table in
+   `AGENTS.md` lists which README section to update for each kind of source
+   change. The PR template repeats this.
 2. **Progressive disclosure** — every Rust module has a `mod.rs` doc block
    with a submodule table and key invariants. Every meaningful change should
    leave the surrounding module's `mod.rs` slightly better documented than
-   you found it. iOS uses `packages/ios-app/.claude/rules/*.md` for the same
-   pattern.
+   you found it. iOS uses the architecture and development docs under
+   `packages/ios-app/docs/` for the same pattern.
 
 Drift is the enemy. If you renamed a method, removed a setting, or shifted
 responsibility between modules, audit the README + `mod.rs` files in the

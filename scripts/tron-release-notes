@@ -94,7 +94,7 @@ repository_url() {
             printf '%s\n' "${origin%.git}"
             ;;
         *)
-            printf 'https://github.com/mhismail3/tron\n'
+            printf 'https://github.com/tron-owner/tron\n'
             ;;
     esac
 }
