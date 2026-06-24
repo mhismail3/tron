@@ -3,12 +3,17 @@
 use serde_json::json;
 
 use super::types::{
-    EngineResourceVersioningMode, RegisterResourceType, WEB_SOURCE_KIND, WEB_SOURCE_SCHEMA_ID,
+    EngineResourceVersioningMode, RegisterResourceType, WEB_ROBOTS_POLICY_KIND,
+    WEB_ROBOTS_POLICY_SCHEMA_ID, WEB_SOURCE_KIND, WEB_SOURCE_SCHEMA_ID,
 };
 use crate::engine::kernel::ids::WorkerId;
 
 pub(super) fn web_resource_type_definitions() -> Vec<RegisterResourceType> {
-    vec![RegisterResourceType {
+    vec![web_source_definition(), web_robots_policy_definition()]
+}
+
+fn web_source_definition() -> RegisterResourceType {
+    RegisterResourceType {
         kind: WEB_SOURCE_KIND.to_owned(),
         schema_id: WEB_SOURCE_SCHEMA_ID.to_owned(),
         schema: json!({
@@ -87,5 +92,74 @@ pub(super) fn web_resource_type_definitions() -> Vec<RegisterResourceType> {
             "write": ["web.write", "resource.write"]
         }),
         owner_worker_id: WorkerId::new("resource").expect("valid static worker id"),
-    }]
+    }
+}
+
+fn web_robots_policy_definition() -> RegisterResourceType {
+    RegisterResourceType {
+        kind: WEB_ROBOTS_POLICY_KIND.to_owned(),
+        schema_id: WEB_ROBOTS_POLICY_SCHEMA_ID.to_owned(),
+        schema: json!({
+            "type": "object",
+            "required": [
+                "schemaVersion",
+                "operation",
+                "state",
+                "origin",
+                "targetUrl",
+                "robotsUrl",
+                "fetchedAt",
+                "status",
+                "bodyEvidence",
+                "parser",
+                "policy",
+                "sitemaps",
+                "authority",
+                "traceRefs",
+                "replayRefs",
+                "cache",
+                "idempotency",
+                "revision"
+            ],
+            "additionalProperties": true,
+            "properties": {
+                "schemaVersion": {"type": "string"},
+                "operation": {"type": "string", "enum": ["web_robots_check"]},
+                "state": {"type": "string", "enum": ["checked"]},
+                "origin": {"type": "string"},
+                "targetUrl": {"type": "string"},
+                "robotsUrl": {"type": "string"},
+                "finalRobotsUrl": {"type": "string"},
+                "fetchedAt": {"type": "string"},
+                "status": {"type": "integer"},
+                "missing": {"type": "boolean"},
+                "bodyEvidence": {"type": "object"},
+                "parser": {"type": "object"},
+                "policy": {"type": "object"},
+                "sitemaps": {"type": "object"},
+                "boundedBody": {"type": "object"},
+                "redirects": {"type": "object"},
+                "authority": {"type": "object"},
+                "traceRefs": {"type": "array"},
+                "replayRefs": {"type": "array"},
+                "cache": {"type": "object"},
+                "idempotency": {"type": "object"},
+                "revision": {"type": "integer"}
+            }
+        }),
+        lifecycle_states: ["checked"].into_iter().map(str::to_owned).collect(),
+        versioning_mode: EngineResourceVersioningMode::AppendOnly,
+        allowed_link_relations: ["evidence_for", "derived_from", "supersedes"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        default_retention: json!({"class": "robots_policy_evidence"}),
+        redaction_rules: json!({"preview": "bounded_redacted_text_only"}),
+        materialization_rules: json!({"durableOutputsRequireResourceVersion": true}),
+        required_capabilities: json!({
+            "read": ["web.read", "resource.read"],
+            "write": ["web.write", "resource.write"]
+        }),
+        owner_worker_id: WorkerId::new("resource").expect("valid static worker id"),
+    }
 }

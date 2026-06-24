@@ -67,7 +67,7 @@ use process::process_run;
 use replay::replay_manifest;
 use state::{state_get, state_list, state_set};
 use trace::{complete_trace_record, started_trace_record, trace_get, trace_list};
-use web::{web_fetch, web_source_archive, web_source_inspect, web_source_list};
+use web::{web_fetch, web_robots_check, web_source_archive, web_source_inspect, web_source_list};
 
 pub(crate) async fn execute_value(
     invocation: &Invocation,
@@ -229,6 +229,7 @@ fn validate_execute_context(
             | "question_inspect"
             | "question_answer"
             | "web_fetch"
+            | "web_robots_check"
             | "web_source_list"
             | "web_source_inspect"
             | "web_source_archive"
@@ -254,6 +255,7 @@ fn validate_execute_context(
         | "question_create"
         | "question_answer"
         | "web_fetch"
+        | "web_robots_check"
         | "web_source_archive" => require_idempotency_key(invocation, operation),
         _ => Ok(()),
     }
@@ -354,13 +356,14 @@ async fn execute_operation(
         "memory_list" => memory_list(invocation, deps).await?,
         "memory_inspect" => memory_inspect(invocation, deps).await?,
         "web_fetch" => web_fetch(invocation, deps).await?,
+        "web_robots_check" => web_robots_check(invocation, deps).await?,
         "web_source_list" => web_source_list(invocation, deps).await?,
         "web_source_inspect" => web_source_inspect(invocation, deps).await?,
         "web_source_archive" => web_source_archive(invocation, deps).await?,
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_source_list, web_source_inspect, web_source_archive, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, web_fetch, web_robots_check, web_source_list, web_source_inspect, web_source_archive, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }

@@ -272,3 +272,12 @@ archived inspect available, and keeps archive/list/inspect under
 policy, login/cookies/session reuse, deletion/pruning/automatic TTL cleanup,
 public `/engine` web APIs, native iOS source UI, and network-enabled jobs remain
 deferred.
+
+Slice 8E is an implementation candidate pending review. It adds execute-only
+`web_robots_check`, fetches one origin `robots.txt` under declared network
+authority after existing URL/redirect/DNS safety checks, records
+`web_robots_policy` evidence with bounded body/hash/parser/decision/sitemap
+metadata, and keeps sitemap traversal, search providers, browser automation,
+crawling beyond the single robots fetch, login/cookies/session reuse, public
+`/engine` web APIs, native iOS source UI, deletion/pruning/TTL cleanup, and
+network-enabled jobs deferred.

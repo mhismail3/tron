@@ -150,7 +150,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         `filesystem_apply_patch`, `git_status`, `git_diff`, `git_branch_inventory`, `git_stage`, `git_unstage`, `git_commit`, `git_branch_start`, `process_run`, `job_start`, `job_status`, `job_list`, \
         `job_log`, `job_cancel`, `goal_create`, `goal_list`, `goal_inspect`, `goal_cancel`, \
         `question_create`, `question_list`, `question_inspect`, `question_answer`, \
-        `web_fetch`, `web_source_list`, `web_source_inspect`, `web_source_archive`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
+        `web_fetch`, `web_robots_check`, `web_source_list`, `web_source_inspect`, `web_source_archive`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
         `catalog_search`, `catalog_inspect`, `catalog_conformance`, `memory_status`, `memory_list`, or `memory_inspect`. \
         Do not send `target`, `contractId`, `functionId`, or `arguments`. \
         Catalog discovery operations inspect metadata/conformance only and never execute discovered \
@@ -161,13 +161,13 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         trusted roots, `git_status`, `git_diff`, and `git_branch_inventory` for read-only repository/worktree status, \
         bounded staged/unstaged diff evidence, and bounded local branch inventory, `git_stage` and `git_unstage` for explicit relative-path Git index \
         mutations that require `expectedHead`, `reason`, and a stable `idempotencyKey`, `git_commit` for one already-staged index commit with `message`, `expectedHead`, `expectedIndexTree`, `reason`, and `idempotencyKey`, `git_branch_start` for one new local branch at `expectedHead` with `branchName`, `reason`, and `idempotencyKey` without checkout/file updates, `process_run` for short bounded shell commands, job operations for durable \
-        non-interactive command lifecycle/status/log/cancel, goal/question operations for durable lifecycle records and expected-version answer handoff, `web_fetch` for one explicit URL with declared network authority and durable `web_source` evidence, `web_source_list`/`web_source_inspect` for bounded citation fields from current-session `web_source` resources without network access, `web_source_archive` for current-session source archive lifecycle updates with `webSourceResourceId`, `expectedWebSourceVersionId`, `reason`, and stable `idempotencyKey` under `networkPolicy: none`, trace/log operations to inspect durable \
+        non-interactive command lifecycle/status/log/cancel, goal/question operations for durable lifecycle records and expected-version answer handoff, `web_fetch` for one explicit URL with declared network authority and durable `web_source` evidence, `web_robots_check` for one origin `robots.txt` policy check with declared network authority, durable `web_robots_policy` evidence, and sitemap lines recorded only as metadata with no traversal, `web_source_list`/`web_source_inspect` for bounded citation fields from current-session `web_source` resources without network access, `web_source_archive` for current-session source archive lifecycle updates with `webSourceResourceId`, `expectedWebSourceVersionId`, `reason`, and stable `idempotencyKey` under `networkPolicy: none`, trace/log operations to inspect durable \
         execution records, `replay_manifest` to \
         export the current session's `tron.replay.v1` audit manifest, and catalog operations to inspect \
         available workers/functions/schemas/conformance evidence through the same execute primitive. \
         Mutating filesystem package operations require a stable `idempotencyKey`; include `reason`, use \
         preview mode before commit when possible, and provide `expectedHash` when committing changes to \
-        an existing file. `job_start`, `job_cancel`, `goal_create`, `goal_cancel`, `question_create`, `question_answer`, and `web_source_archive` require a stable `idempotencyKey`; `question_answer` also requires `expectedQuestionVersionId` and `reason`; `web_source_archive` also requires `expectedWebSourceVersionId` and `reason`; other mutating \
+        an existing file. `job_start`, `job_cancel`, `goal_create`, `goal_cancel`, `question_create`, `question_answer`, `web_robots_check`, and `web_source_archive` require a stable `idempotencyKey`; `question_answer` also requires `expectedQuestionVersionId` and `reason`; `web_source_archive` also requires `expectedWebSourceVersionId` and `reason`; other mutating \
         operations should include a short `reason`; repeated writes, Git index mutations, Git commits, branch starts, or commands should include a stable \
         `idempotencyKey` when retry safety matters. Except for read-only `replay_manifest`, the engine records a trace \
         record for each execute operation with status, timing, provider/model context, authority metadata, \

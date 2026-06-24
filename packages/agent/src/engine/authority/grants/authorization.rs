@@ -185,7 +185,7 @@ fn authority_scopes_from_invocation(invocation: &Invocation) -> Vec<String> {
         Some("goal_list" | "goal_inspect" | "question_list" | "question_inspect") => {
             push_unique(&mut scopes, "goals.read");
         }
-        Some("web_fetch") => {
+        Some("web_fetch" | "web_robots_check") => {
             push_unique(&mut scopes, "resource.write");
             push_unique(&mut scopes, "web.write");
         }
@@ -247,6 +247,7 @@ fn capability_execute_resource_kinds(invocation: &Invocation) -> Vec<&'static st
         Some("web_fetch" | "web_source_list" | "web_source_inspect" | "web_source_archive") => {
             vec!["web_source"]
         }
+        Some("web_robots_check") => vec!["web_robots_policy"],
         _ => Vec::new(),
     }
 }
@@ -261,6 +262,7 @@ fn created_resource_kinds_from_invocation(invocation: &Invocation) -> Vec<String
         Some("question_create") => push_unique(&mut kinds, "user_question"),
         Some("question_answer") => push_unique(&mut kinds, "goal_answer"),
         Some("web_fetch") => push_unique(&mut kinds, "web_source"),
+        Some("web_robots_check") => push_unique(&mut kinds, "web_robots_policy"),
         _ => {}
     }
     kinds

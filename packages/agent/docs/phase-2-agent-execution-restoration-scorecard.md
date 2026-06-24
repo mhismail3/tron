@@ -61,6 +61,14 @@ policy, login/cookies/session reuse, native source UI, public `/engine` web
 APIs, deletion/pruning/automatic TTL cleanup, and network-enabled jobs remain
 deferred.
 
+Candidate note: Slice 8E is an implementation candidate on branch
+`codex/phase-2-slice-8e-web-robots-policy` after discovery thread
+`019efbe3-8098-7372-9c03-e3ef645badb3` selected Web Robots Policy
+Foundation. It adds execute-only `web_robots_check`, session-scoped
+`web_robots_policy` evidence, existing web URL/redirect/DNS safety reuse, and
+robots parser tests, but remains pending review and is not part of the accepted
+mainline baseline in this branch documentation.
+
 Completed Phase 2 restoration slices at this baseline:
 
 - Slice 0: planning artifacts and static entry gates;
@@ -95,15 +103,15 @@ Completed Phase 2 restoration slices at this baseline:
   archived inspection for replay/citation audit.
 
 Current next action:
-Start discovery for the next Slice 8 sub-slice from fresh `origin/main`.
+Review the Slice 8E Web Robots Policy Foundation implementation candidate.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
 Slice 8C HTML/text extraction, and Slice 8D source archive lifecycle are
 accepted.
-Search providers, browser automation, crawling, robots policy,
-login/cookies/session reuse, native source UI, public `/engine` web APIs,
-network-enabled jobs, autonomous goal execution, fetch/pull/push, PR handoff,
-production deployment behavior, and native SourceChanges UI remain deferred
-until separately scoped and reviewed.
+Search providers, browser automation, crawling beyond the narrow robots check,
+sitemap traversal, login/cookies/session reuse, native source UI, public
+`/engine` web APIs, network-enabled jobs, autonomous goal execution,
+fetch/pull/push, PR handoff, production deployment behavior, and native
+SourceChanges UI remain deferred until separately scoped and reviewed.
 
 ## Scope
 
@@ -1921,6 +1929,55 @@ Accepted validation:
   `domains::capability`, OpenAI message-converter tests, HRA/TMB/TPC/PCC/SACB/
   BPRC/IARM/DESI/public-protocol static guards, `scripts/personal-info-guard.sh`,
   `git diff --check`, and ignored-file audit, then returned `slice accepted`.
+
+#### Slice 8E Implementation Candidate: Web Robots Policy Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8e-web-robots-policy`.
+Baseline:
+`origin/main@9a74084d9ce8b241d8fdf4a7865a683bd04e652c`
+(`docs: accept phase 2 slice 8d`).
+Status:
+`implementation candidate; pending review`.
+
+Candidate scope:
+
+- Add execute-only `web_robots_check` behind the existing
+  `capability::execute` primitive.
+- Fetch only one requested origin's `robots.txt` after trusted current-session
+  context, stable `idempotencyKey`, `networkPolicy: declared`, `web.write`,
+  `resource.write`, `kind:web_robots_policy`, and existing URL/redirect/DNS
+  safety checks.
+- Add `domains/web/robots.rs` as the web-owned robots policy module with a
+  deterministic tolerant parser, matched user-agent selection, allow/deny
+  decision, relevant matched rule, bounded body metadata, captured-byte
+  SHA-256, parser id/version, authority refs, trace/replay refs, and
+  idempotency/cache refs.
+- Add engine-owned `web_robots_policy` resource definitions for append-only
+  checked evidence.
+- Record sitemap lines as metadata only and never traverse them.
+- Keep `web_fetch`, `web_source_list`, `web_source_inspect`, and
+  `web_source_archive` behavior compatible.
+
+Candidate non-goals:
+
+- No `web_search`, search provider API, crawling, sitemap traversal, browser
+  automation/control, login/cookies/session reuse, credential reuse, public
+  `/engine` web APIs, native iOS source UI, deletion/pruning/TTL cleanup,
+  settings/profile fields, database migrations, or network-enabled jobs.
+
+Candidate validation:
+
+- Focused web tests cover allow/deny decisions, matched user-agent/rule
+  evidence, missing/malformed/oversized body behavior, bounded/truncated
+  output, sitemap metadata-only recording, authority failures before network
+  I/O, unsafe initial URL/redirect/DNS rejection, and idempotent resource
+  replay without duplicate evidence.
+- Capability/provider tests cover `web_robots_check` exposure through the
+  single execute primitive and continued rejection of search/browser/crawl/
+  login/network-job non-goals.
+- HRA/TMB/TPC/PCC/SACB inventories classify the new robots implementation and
+  test files as Slice 8E pending-review surfaces.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

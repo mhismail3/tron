@@ -1291,6 +1291,46 @@ crawling, robots/sitemap policy, login/cookies/session reuse, public `/engine`
 web APIs, native iOS source UI, deletion/erasure/pruning, automatic TTL cleanup,
 settings/profile fields, database migrations, and network-enabled jobs.
 
+### Slice 8E Implementation Candidate Evidence: Web Robots Policy Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8e-web-robots-policy`.
+Baseline:
+`origin/main@9a74084d9ce8b241d8fdf4a7865a683bd04e652c`
+(`docs: accept phase 2 slice 8d`).
+Discovery thread:
+`019efbe3-8098-7372-9c03-e3ef645badb3`.
+Status:
+`implementation candidate; pending review`.
+
+Candidate evidence:
+
+- Adds `packages/agent/src/domains/web/robots.rs` as the web-owned
+  execute-only robots policy check module.
+- Adds `web_robots_check` behind `capability::execute` and wires
+  least-privilege grant derivation plus engine authorization for
+  `networkPolicy: declared`, `web.write`, `resource.write`, and
+  `web_robots_policy`.
+- Adds built-in `web_robots_policy` resource definitions for bounded
+  append-only robots evidence.
+- Reuses the existing web URL, redirect, and DNS-resolved socket safety policy
+  before target network I/O.
+- Records origin, robots URL, fetched-at time, status, captured-byte SHA-256,
+  bounded body metadata, parser id/version, matched user-agent, allow/deny
+  decision, relevant matched rule, sitemap refs as metadata only, authority
+  refs, trace/replay refs, and idempotency/cache refs.
+- Keeps sitemap traversal, search, crawl, browser, login/cookies, public
+  `/engine` web APIs, native iOS source UI, deletion/pruning/TTL cleanup,
+  settings/profile fields, database migrations, and network-enabled jobs out
+  of scope.
+
+Candidate validation recorded on branch:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::web -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture`
+
 ## Validation Log
 
 | Command | Result | Evidence |

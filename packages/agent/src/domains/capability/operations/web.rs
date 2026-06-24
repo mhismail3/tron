@@ -34,6 +34,36 @@ pub(super) async fn web_fetch(
     ))
 }
 
+pub(super) async fn web_robots_check(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let web_deps = crate::domains::web::Deps {
+        engine_host: deps.engine_host.clone(),
+        #[cfg(test)]
+        dns_overrides: None,
+    };
+    let value = crate::domains::web::robots::web_robots_check_value(
+        &web_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(ok_result(
+        format!(
+            "Checked robots policy {}",
+            value["webRobotsPolicyResourceId"]
+                .as_str()
+                .unwrap_or("web_robots_policy")
+        ),
+        json!({
+            "primitiveOperation": "web_robots_check",
+            "status": "ok",
+            "web": value
+        }),
+    ))
+}
+
 pub(super) async fn web_source_list(
     invocation: &Invocation,
     deps: &Deps,

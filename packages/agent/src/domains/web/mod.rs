@@ -12,7 +12,7 @@
 //! values; this package owns URL validation, network authority checks, bounded
 //! HTTP fetching, source/cache resource evidence, readable-text extraction,
 //! redaction metadata, replay refs, read-only citation summaries, archive
-//! lifecycle metadata, and `web.lifecycle` events.
+//! lifecycle metadata, robots-policy evidence, and `web.lifecycle` events.
 //! URL authority checks must cover initial URLs, every redirect target before
 //! it is followed, and DNS-resolved socket addresses before network I/O.
 //!
@@ -24,6 +24,7 @@
 //! | `extract` | Deterministic HTML/XHTML readable-text and title extraction |
 //! | `fetch` | Direct bounded URL fetch and source provenance resource writes |
 //! | `network_policy` | URL, redirect-target, and DNS-resolved address safety checks |
+//! | `robots` | Execute-only robots.txt policy check and bounded evidence capture |
 //! | `source` | Bounded citation summaries for active and exact archived web sources |
 //!
 //! # INVARIANT: web fetch is explicit and provenance-backed
@@ -31,11 +32,14 @@
 //! This domain must not add search providers, browser automation, crawling,
 //! login/cookie/session reuse, credential handling, process/shell network
 //! side channels, deletion/pruning, TTL cleanup, or public `/engine` web
-//! functions. `web_fetch` is the only network operation and must fail closed
-//! unless the trusted runtime context carries a derived grant whose network
-//! policy explicitly permits direct declared fetch. Source list/inspect/archive
-//! operations are resource inspections or append-only resource lifecycle updates
-//! and must remain valid under `networkPolicy none`.
+//! functions. `web_fetch` and `web_robots_check` are the only network operations
+//! and must fail closed unless the trusted runtime context carries a derived
+//! grant whose network policy explicitly permits declared network access.
+//! Source list/inspect/archive operations are resource inspections or
+//! append-only resource lifecycle updates and must remain valid under
+//! `networkPolicy none`. `web_robots_check` fetches only one origin's
+//! `robots.txt`, records sitemap lines as metadata only, and must not become
+//! search, crawl, browser, or login behavior.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
@@ -43,6 +47,7 @@ pub(crate) mod archive;
 mod extract;
 pub(crate) mod fetch;
 mod network_policy;
+pub(crate) mod robots;
 pub(crate) mod source;
 
 pub(crate) const WORKER: &str = "web";

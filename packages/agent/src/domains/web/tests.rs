@@ -13,8 +13,8 @@ use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, EngineResourceScope,
     FunctionId, Invocation, ListResources, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
     RUNTIME_METADATA_PROVIDER_INVOCATION_ID, RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_TURN,
-    RUNTIME_METADATA_WORKING_DIRECTORY, TraceId, UpdateResource, WEB_SOURCE_KIND,
-    WEB_SOURCE_SCHEMA_ID, WorkerId,
+    RUNTIME_METADATA_WORKING_DIRECTORY, TraceId, UpdateResource, WEB_ROBOTS_POLICY_KIND,
+    WEB_ROBOTS_POLICY_SCHEMA_ID, WEB_SOURCE_KIND, WEB_SOURCE_SCHEMA_ID, WorkerId,
 };
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
@@ -23,6 +23,8 @@ use crate::shared::server::test_support::make_test_context;
 mod archive_tests;
 #[path = "web_extraction_tests.rs"]
 mod extraction_tests;
+#[path = "web_robots_tests.rs"]
+mod robots_tests;
 #[path = "web_source_tests.rs"]
 mod source_tests;
 
@@ -480,6 +482,28 @@ impl<'a> WebFixture<'a> {
         .await
     }
 
+    async fn new_robots(
+        ctx: &'a ServerRuntimeContext,
+        session_id: &str,
+        network_policy: &str,
+    ) -> Self {
+        Self::new_with_authority(
+            ctx,
+            session_id,
+            network_policy,
+            &[
+                "capability.execute",
+                "web.read",
+                "web.write",
+                "resource.read",
+                "resource.write",
+            ],
+            &["agent_state", "web_robots_policy"],
+            &["kind:agent_state", "kind:web_robots_policy"],
+        )
+        .await
+    }
+
     async fn new_with_authority(
         ctx: &'a ServerRuntimeContext,
         session_id: &str,
@@ -574,6 +598,31 @@ impl<'a> WebFixture<'a> {
         super::fetch::web_fetch_value(&deps, &invocation, &payload)
             .await
             .expect_err("web_fetch should fail")
+            .to_string()
+    }
+
+    async fn invoke_direct_robots_error_with_dns_overrides(
+        &self,
+        payload: Value,
+        dns_overrides: HashMap<String, Vec<SocketAddr>>,
+    ) -> String {
+        let idempotency_key = payload
+            .get("idempotencyKey")
+            .and_then(Value::as_str)
+            .unwrap_or("web-fixture-context-key")
+            .to_owned();
+        let deps = super::Deps {
+            engine_host: self.ctx.engine_host.clone(),
+            dns_overrides: Some(Arc::new(dns_overrides)),
+        };
+        let invocation = Invocation::new_sync(
+            FunctionId::new("capability::execute").expect("function id"),
+            payload.clone(),
+            self.context(&idempotency_key),
+        );
+        super::robots::web_robots_check_value(&deps, &invocation, &payload)
+            .await
+            .expect_err("web_robots_check should fail")
             .to_string()
     }
 

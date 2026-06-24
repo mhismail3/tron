@@ -478,6 +478,7 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(!result.contains("file_write"));
     assert!(result.contains("process_run"));
     assert!(result.contains("web_fetch"));
+    assert!(result.contains("web_robots_check"));
     assert!(result.contains("web_source_list"));
     assert!(result.contains("web_source_inspect"));
     assert!(result.contains("web_source_archive"));
@@ -486,6 +487,7 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("replay_manifest"));
     for non_goal in [
         "web_search",
+        "web_sitemap_traverse",
         "browser_open",
         "browser_click",
         "web_crawl",
@@ -515,6 +517,7 @@ fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
     assert!(result.contains("catalog_inspect"));
     assert!(result.contains("catalog_conformance"));
     assert!(result.contains("web_fetch"));
+    assert!(result.contains("web_robots_check"));
     assert!(result.contains("web_source_list"));
     assert!(result.contains("web_source_inspect"));
     assert!(result.contains("Do not send `target`, `contractId`, `functionId`, or `arguments`"));
