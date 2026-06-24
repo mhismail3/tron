@@ -253,11 +253,10 @@ missing read authority, and return bounded citation-ready URL/status/content
 type/hash/truncation/redaction/snippet/trace/replay/resource refs without
 network I/O.
 
-Slice 8C is an implementation candidate for Web HTML/Text Extraction And
-Citation Quality Foundation. It keeps `web_fetch`, `web_source_list`, and
-`web_source_inspect` as the only provider-visible web operations, adds
-deterministic HTML/XHTML readable-text extraction before output bounding and
-redaction, records extraction mode/extractor/title/extracted-byte/truncation
-metadata under `textEvidence`, preserves raw captured-byte SHA-256 provenance,
-and keeps source list/inspect read-only and backward-compatible with older
-`web_source` records.
+Slice 8C accepts Web HTML/Text Extraction And Citation Quality Foundation. It
+keeps `web_fetch`, `web_source_list`, and `web_source_inspect` as the only
+provider-visible web operations, adds deterministic HTML/XHTML readable-text
+extraction before output bounding and redaction, records bounded/redacted
+extraction mode/extractor/title/extracted-byte/truncation metadata under
+`textEvidence`, preserves raw captured-byte SHA-256 provenance, and keeps source
+list/inspect read-only and backward-compatible with older `web_source` records.

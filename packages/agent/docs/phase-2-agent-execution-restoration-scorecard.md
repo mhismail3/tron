@@ -24,22 +24,29 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`main@8033e22932f55388a94f9d18ce6b11a91f9f1545`
-(`feat: add web source citation inspection`) plus this Slice 8B closeout
-documentation commit. That line includes accepted Slice 6A
+`main@5e881e8681229545fe8260a1dc2be8f47cd07a3a`
+(`fix: sanitize web html titles`) plus this Slice 8C closeout documentation
+commit. That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
 stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
 6D local branch-start evidence, accepted Slice 6E read-only branch inventory
 evidence, accepted Slice 7A goal/question lifecycle evidence, accepted Slice 8A
 web fetch/source provenance evidence, and accepted Slice 8B web source
-citation/inspection evidence.
+citation/inspection evidence, and accepted Slice 8C HTML/XHTML readable-text
+extraction evidence.
 
-Closeout note: Slice 8B is accepted after independent review thread
-`019efb6e-dfc0-7b73-8bd6-d23f91e82248` returned `slice accepted` with no
-findings. Direct URL fetch provenance and read-only source inspection are
-accepted; later search providers, browser automation, crawling, robots policy,
-login/cookies/session reuse, native source UI, public `/engine` web APIs, and
-network-enabled jobs remain deferred.
+Closeout note: Slice 8C is accepted after implementation thread
+`019efb88-d1f1-7ef2-b90d-96254eb51679`, review thread
+`019efb99-ee44-7901-b70a-56ea4643f302`, focused fix thread
+`019efb9e-766b-7273-862b-5e739ac73c01`, and re-review thread
+`019efbac-4560-7382-a034-4ef36854367f`. The initial review required safe title
+redaction/bounds and HRA ownership-map coverage; fix commit
+`5e881e8681229545fe8260a1dc2be8f47cd07a3a` addressed both, and re-review
+returned `slice accepted` with no findings. Direct URL fetch provenance,
+read-only source inspection, and deterministic HTML/XHTML readable-text
+extraction are accepted; later search providers, browser automation, crawling,
+robots policy, login/cookies/session reuse, native source UI, public `/engine`
+web APIs, and network-enabled jobs remain deferred.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -67,20 +74,19 @@ Completed Phase 2 restoration slices at this baseline:
   scope;
 - Slice 8B: read-only current-session `web_source` list/inspect
   citation fields through `capability::execute`, with no new network breadth.
-- Slice 8C: implementation candidate for deterministic HTML/XHTML readable-text
-  extraction under existing `web_fetch`/`web_source_*` operations, preserving
-  raw-byte source hashes and adding extraction metadata without search/browser
-  breadth.
+- Slice 8C: deterministic HTML/XHTML readable-text extraction under existing
+  `web_fetch`/`web_source_*` operations, preserving raw-byte source hashes and
+  adding safe extraction metadata without search/browser breadth.
 
 Current next action:
-Review the Slice 8C implementation candidate from fresh `origin/main` for
-**Web HTML/Text Extraction And Citation Quality Foundation**. Slice 8A direct
-fetch source provenance and Slice 8B read-only source inspection are accepted;
-Slice 8C remains pending review on its implementation branch. Search providers,
+Start discovery from fresh `origin/main` for the next Phase 2 Slice 8
+sub-slice. Slice 8A direct fetch source provenance, Slice 8B read-only source
+inspection, and Slice 8C HTML/text extraction are accepted. Search providers,
 browser automation, crawling, robots policy, login/cookies/session reuse,
 native source UI, public `/engine` web APIs, network-enabled jobs, autonomous
 goal execution, fetch/pull/push, PR handoff, production deployment behavior,
-and native SourceChanges UI remain deferred.
+and native SourceChanges UI remain deferred until separately scoped and
+reviewed.
 
 ## Scope
 
@@ -1780,15 +1786,23 @@ Accepted validation:
   no-network read behavior, provider operation exposure, static inventories,
   and personal-info guard, then returned `slice accepted` with no findings.
 
-#### Slice 8C Implementation Candidate: Web HTML/Text Extraction And Citation Quality Foundation
+#### Accepted Slice 8C: Web HTML/Text Extraction And Citation Quality Foundation
 
 Implementation branch:
 `codex/phase-2-slice-8c-web-html-text-extraction`.
+Fix branch:
+`codex/phase-2-slice-8c-web-html-text-extraction-fix1`.
 Baseline:
 `origin/main@5c99501b5e00305f3be95ae3fce4d2f855c6aed8`
 (`docs: accept phase 2 slice 8b`).
+Accepted implementation commit:
+`ea4a4d04ceb37a10899871c3fe4f394ae10fbfa5`
+(`feat: add web html text extraction`).
+Accepted fix commit:
+`5e881e8681229545fe8260a1dc2be8f47cd07a3a`
+(`fix: sanitize web html titles`).
 
-Candidate scope:
+Accepted scope:
 
 - Keep the provider-visible web operation set unchanged:
   `web_fetch`, `web_source_list`, and `web_source_inspect`.
@@ -1805,7 +1819,7 @@ Candidate scope:
   compatible with pre-Slice-8C `web_source` records that lack extraction
   metadata.
 
-Candidate non-goals:
+Accepted non-goals:
 
 - No `web_search`, search provider, browser automation/control, crawling,
   sitemap traversal, robots policy engine, login/cookies/session reuse,
@@ -1813,15 +1827,23 @@ Candidate non-goals:
   public `/engine` web APIs, native iOS source UI, or specialized source
   rendering.
 
-Candidate validation:
+Accepted validation:
 
 - Focused web tests cover deterministic HTML extraction, script/style/noise
   removal, redaction after extraction, plain text/JSON/XML/binary/malformed
   HTML/oversized/non-UTF8 paths, idempotent replay stability, and old
   Slice 8A/8B source inspection compatibility.
-- Capability/provider operation names remain unchanged; existing schema and
-  message-converter guards continue to reject non-goal web/browser/crawl/login
-  operation names.
+- Fix validation added coverage that safe titles are bounded/redacted in the
+  fetch result JSON, stored resource payload, source inspect, and source list
+  surfaces.
+- Implementation and re-review validation passed `cargo fmt`, `cargo check`,
+  focused `domains::web`, HRA/TMB/TPC/PCC/SACB/BPRC/IARM/DESI/public-protocol
+  static guards, `scripts/personal-info-guard.sh`, `git diff --check`, and
+  ignored-file audit.
+- Initial review thread `019efb99-ee44-7901-b70a-56ea4643f302` required changes
+  for unsafe title metadata and missing HRA ownership-map coverage. Re-review
+  thread `019efbac-4560-7382-a034-4ef36854367f` verified both fixes and
+  returned `slice accepted`.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

@@ -1182,15 +1182,23 @@ Implementation, review, and acceptance evidence:
   `git diff --check`; ignored-file audit; and
   `scripts/personal-info-guard.sh`.
 
-### Slice 8C Implementation Candidate Evidence: Web HTML/Text Extraction And Citation Quality Foundation
+### Slice 8C Accepted Evidence: Web HTML/Text Extraction And Citation Quality Foundation
 
 Implementation branch:
 `codex/phase-2-slice-8c-web-html-text-extraction`.
+Fix branch:
+`codex/phase-2-slice-8c-web-html-text-extraction-fix1`.
 Baseline:
 `origin/main@5c99501b5e00305f3be95ae3fce4d2f855c6aed8`
 (`docs: accept phase 2 slice 8b`).
+Accepted implementation commit:
+`ea4a4d04ceb37a10899871c3fe4f394ae10fbfa5`
+(`feat: add web html text extraction`).
+Accepted fix commit:
+`5e881e8681229545fe8260a1dc2be8f47cd07a3a`
+(`fix: sanitize web html titles`).
 
-Candidate evidence:
+Accepted evidence:
 
 - Added `packages/agent/src/domains/web/extract.rs` as a dependency-free,
   deterministic HTML/XHTML readable-text extraction module.
@@ -1198,21 +1206,42 @@ Candidate evidence:
   snippet generation while preserving captured raw response bytes and raw
   captured-byte SHA-256 as source provenance.
 - Added backward-compatible `textEvidence` metadata for extraction mode,
-  extractor id/version, safe title, extracted text bytes, and truncation flags.
+  extractor id/version, bounded/redacted safe title, extracted text bytes, and
+  truncation flags.
 - Updated `web_source_list` and `web_source_inspect` to surface extraction
   metadata when present and return `null` metadata for older Slice 8A/8B
   records.
+- Added defensive source list/inspect title sanitization for existing or future
+  records and deterministic regression coverage for secret-like and oversized
+  title metadata.
 - Kept provider-visible operation names unchanged and did not add search,
   browser, crawl, login, native source UI, public `/engine` web APIs, or
   network-enabled job behavior.
 
-Candidate validation evidence:
+Review/fix loop:
+
+- Initial review thread `019efb99-ee44-7901-b70a-56ea4643f302` returned
+  `changes required` for unbounded/unredacted title metadata and missing HRA
+  current-ownership-map coverage.
+- Focused fix thread `019efb9e-766b-7273-862b-5e739ac73c01` committed
+  `5e881e8681229545fe8260a1dc2be8f47cd07a3a`, adding title bounds/redaction,
+  source output hardening, regression tests, and HRA ownership rows.
+- Re-review thread `019efbac-4560-7382-a034-4ef36854367f` verified branch
+  ancestry, title safety, HRA coverage, focused web tests, static guards, and
+  repository hygiene, then returned `slice accepted`.
+
+Accepted validation evidence:
 
 - Focused web tests cover deterministic HTML fixture extraction, script/style
   and navigation/noise removal, redaction after extraction, JSON/XML/plain text
   preservation, binary omission, malformed HTML tolerance, oversized output
   bounds, non-UTF8 lossy text behavior, idempotent cache replay stability, and
   old `web_source` record inspection compatibility.
+- Fix validation covers fetch result JSON, stored payload, source inspect, and
+  source list for title redaction and title bounds.
+- Mainline closeout validation reruns focused web, HRA/TMB/TPC/PCC/SACB/BPRC/
+  IARM/DESI/public-protocol gates, repository hygiene, and personal-info guard
+  before push.
 
 ## Validation Log
 
