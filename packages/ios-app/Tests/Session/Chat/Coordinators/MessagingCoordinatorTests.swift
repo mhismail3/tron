@@ -88,6 +88,64 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.inputText, "Stream the response live")
     }
 
+    func testSendMessageDoesNotRecordRecentInputWhenLiveEventSubscriptionFails() async {
+        // Given: Valid text, but the live stream cannot be established.
+        let history = InputHistoryStore()
+        history.clearHistory()
+        mockContext.inputText = "Stream the response live"
+        mockContext.ensureLiveEventSubscriptionShouldFail = true
+
+        // When: Sending message
+        await coordinator.sendMessage(context: mockContext) { sentText in
+            history.addToHistory(sentText)
+        }
+
+        // Then: Failed subscription does not retain attempted input.
+        XCTAssertTrue(mockContext.ensureLiveEventSubscriptionCalled)
+        XCTAssertFalse(mockContext.sendPromptCalled)
+        XCTAssertTrue(history.history.isEmpty)
+
+        history.clearHistory()
+    }
+
+    func testSendMessageDoesNotRecordRecentInputWhenServerSendFails() async {
+        // Given: Valid text, but the server send request fails.
+        let history = InputHistoryStore()
+        history.clearHistory()
+        mockContext.inputText = "Prompt that fails to send"
+        mockContext.sendPromptShouldFail = true
+
+        // When: Sending message
+        await coordinator.sendMessage(context: mockContext) { sentText in
+            history.addToHistory(sentText)
+        }
+
+        // Then: Failed sends are not retained as recent sent inputs.
+        XCTAssertTrue(mockContext.sendPromptCalled)
+        XCTAssertTrue(mockContext.handleAgentErrorCalled)
+        XCTAssertTrue(history.history.isEmpty)
+
+        history.clearHistory()
+    }
+
+    func testSendMessageRecordsRecentInputAfterSuccessfulServerSend() async {
+        // Given: Valid text with surrounding whitespace.
+        let history = InputHistoryStore()
+        history.clearHistory()
+        mockContext.inputText = "  Prompt that sends successfully  "
+
+        // When: Sending message
+        await coordinator.sendMessage(context: mockContext) { sentText in
+            history.addToHistory(sentText)
+        }
+
+        // Then: Only the trimmed prompt accepted by the server is retained.
+        XCTAssertTrue(mockContext.sendPromptCalled)
+        XCTAssertEqual(history.history, ["Prompt that sends successfully"])
+
+        history.clearHistory()
+    }
+
     func testSendMessageWithAttachmentsOnlySendsToServer() async {
         // Given: No text but has attachments
         mockContext.inputText = ""

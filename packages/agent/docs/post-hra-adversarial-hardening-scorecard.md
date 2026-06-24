@@ -109,4 +109,5 @@ quietly become oversized modules.
 | `packages/ios-app/Tests/Engine/Protocol/EngineProtocolTypesTests.swift` | 627 | engine protocol test owner | Move new DTO encoding/decoding cases into type-family test files before growing this broad protocol suite. | watch |
 | `packages/ios-app/Tests/UI/Chat/TurnGroupingTests.swift` | 611 | chat grouping test owner | Split new grouping cases into role/timeline-specific tests before expanding shared fixtures. | watch |
 | `packages/ios-app/Tests/Session/Chat/TurnLifecycleCoordinatorTests.swift` | 608 | turn lifecycle test owner | Add new lifecycle cases under focused coordinator tests before increasing this broad suite. | watch |
+| `packages/ios-app/Tests/Session/Chat/Coordinators/MessagingCoordinatorTests.swift` | 603 | chat messaging coordinator test owner | Move new send-path or attachment cases into focused coordinator-adjacent test files before expanding this broad suite. | watch |
 | `packages/ios-app/Tests/Session/Chat/Navigation/ScrollStateCoordinatorTests.swift` | 590 | chat navigation test owner | Move new scroll-state cases into focused navigation tests before this threshold row grows further. | watch |

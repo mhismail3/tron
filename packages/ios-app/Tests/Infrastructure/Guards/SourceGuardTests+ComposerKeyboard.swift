@@ -114,6 +114,8 @@ extension SourceGuardTests {
         let checkedPaths = [
             "Sources/UI/Chat/Composer/InputBar.swift",
             "Sources/UI/Chat/Composer/RecentInputHistorySheet.swift",
+            "Sources/UI/Chat/Shell/ChatView+MessageList.swift",
+            "Sources/Session/Chat/Coordinators/MessagingCoordinator.swift",
             "Sources/Support/Storage/InputHistoryStore.swift",
         ]
         let combined = try checkedPaths.map { relativePath in
@@ -131,6 +133,8 @@ extension SourceGuardTests {
             "showRecentInputs = true",
             ".listRowSeparator(.hidden)",
             "actions.onHistoryNavigate?(selected)",
+            "onPromptSent?(text)",
+            "inputHistory.addToHistory(sentText)",
             "UserDefaults.standard.removeObject(forKey: storageKey)",
         ]
         let forbiddenFragments = [
@@ -144,6 +148,7 @@ extension SourceGuardTests {
             "skills::" + "activate",
             "ui::" + "submit_action",
             "artifact:prompt",
+            "addToHistory(viewModel.inputText)",
         ]
 
         for fragment in requiredFragments {

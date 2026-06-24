@@ -90,9 +90,12 @@ final class MessagingCoordinator {
     /// - Parameters:
     ///   - reasoningLevel: Optional reasoning level for extended thinking
     ///   - context: The context providing access to state and dependencies
+    ///   - onPromptSent: Called with the trimmed text prompt only after the
+    ///     server accepts the send request.
     func sendMessage(
         reasoningLevel: String? = nil,
-        context: MessagingContext
+        context: MessagingContext,
+        onPromptSent: ((String) -> Void)? = nil
     ) async {
         let text = context.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !context.attachments.isEmpty else {
@@ -155,6 +158,9 @@ final class MessagingCoordinator {
                 idempotencyKey: .userAction("agent.prompt")
             )
             context.logInfo("Prompt sent successfully")
+            if !text.isEmpty {
+                onPromptSent?(text)
+            }
         } catch {
             context.logError("Failed to send prompt: \(error.localizedDescription)")
             context.handleAgentError("Failed to send message: \(error.localizedDescription)")
