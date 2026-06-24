@@ -708,44 +708,116 @@ Validated:
 
 ## Remaining Phase 1 Queue
 
-The next recommended restoration slice is `phase1_slice_6`: notification/inbox
-concept review only if it can remain truthful without fake push state.
+### Phase 1 Slice 6: Notification/Inbox Concept Review
 
-Recommended Slice 6 starting scope:
+Branch:
+`codex/ios-notification-inbox-concept-review-current`
 
-- Start with a review packet, not implementation.
-- Inspect `IARM-SURFACE-019` and old evidence paths:
-  `packages/ios-app/Sources/Views/Notifications/`,
-  `packages/ios-app/Sources/Services/NotificationStore.swift`,
-  `packages/ios-app/Sources/Services/Notifications/`,
-  `packages/ios-app/Sources/Views/Capabilities/NotificationDelivery/`,
-  `packages/ios-app/Sources/Views/MessageBubble/NotificationViews.swift`, and
-  `packages/ios-app/Sources/ViewModels/Handlers/ChatNotificationCoordinator.swift`.
-- Compare only against current truthful sources: local in-app notifications,
-  toast/local error state, existing timeline events, existing diagnostics/log
-  surfaces, and current server facts already delivered to the app.
-- Treat APNs, device-broker delivery, background push, server notification
-  resources, notification send/list/mark-read APIs, durable inbox state, and
-  agent-execution notification families as Phase 2 unless a current owner
-  exists in source.
-- Evaluate three possible outcomes explicitly: reject the old inbox concept,
-  defer it wholly to Phase 2, or approve a smaller local-only attention surface
-  that consolidates already-visible local errors/status events without creating
-  fake backend truth.
-- Ask the user whether a notification/inbox affordance is still useful in the
-  long-term self-adapting-agent UI now that chat has local error pills, global
-  connection toasts, Server Diagnostics, feedback, and logs.
-- Required validation if implementation is approved: focused Swift tests for
-  local notification state and visibility rules, source guards against APNs and
-  server notification API resurrection, iOS 26.5 simulator screenshots for the
-  approved visible states, `xcodegen generate` when Swift files change,
-  `ios_affordance_restoration_map_invariants`, `scripts/personal-info-guard.sh`,
-  `git diff --check`, `git ls-files -ci --exclude-standard`, and clean status.
+Commit:
+`ace41ac98c0003124e2395003ddce12c4bac7b30` -
+`Defer iOS notification inbox restoration`
 
-After Slice 6 is reviewed, the Phase 1 map should be closed out by checking for
-any remaining local-native affordance families in the inventory. If none remain,
-the next major planning step is the full Phase 2 agent-execution restoration
-goal plan.
+Decision:
+
+- Do not implement a Phase 1 notification/inbox affordance.
+- Hold notification and inbox work until Tron restores APNs, server notification
+  resources, device delivery, and the agent-facing notification capability
+  through the central engine/resource mechanism.
+- This is not a permanent rejection of APNs. It rejects only a local Phase 1
+  substitute and the old fixed inbox/bell UI before the backend authority exists
+  again.
+
+Old evidence inspected:
+
+- `packages/ios-app/Sources/Views/Notifications/NotificationBellButton.swift`
+- `packages/ios-app/Sources/Views/Notifications/NotificationListSheet.swift`
+- `packages/ios-app/Sources/Views/Notifications/NotificationInboxDetailSheet.swift`
+- `packages/ios-app/Sources/Services/NotificationStore.swift`
+- `packages/ios-app/Sources/Services/Notifications/GitNotificationRouter.swift`
+- `packages/ios-app/Sources/Services/Notifications/PushNotificationService.swift`
+- `packages/ios-app/Sources/Services/Infrastructure/APNsEnvironment.swift`
+- `packages/ios-app/Sources/Services/Network/Clients/NotificationClient.swift`
+- `packages/ios-app/Sources/Models/Messages/NotificationDeliveryTypes.swift`
+- `packages/ios-app/Sources/Views/Capabilities/NotificationDelivery/`
+- `packages/ios-app/Sources/Views/MessageBubble/NotificationViews.swift`
+- `packages/ios-app/Sources/ViewModels/Handlers/ChatNotificationCoordinator.swift`
+- Nearby old APNs/device/resource evidence under old `AppDelegate.swift`,
+  `packages/ios-app/docs/apns.md`, old notification/APNs tests, and old Rust
+  `domains/notifications`, `domains/device`, `platform/apns`, and
+  `platform/device_broker` paths.
+
+Review findings:
+
+- The old bell and inbox depended on durable server notification resources,
+  unread/read decisions, `notifications::list`, `notifications::mark_read`,
+  `notifications::mark_all_read`, app badge clearing, and deep-link auto-open by
+  invocation id.
+- The old delivery chip depended on `notifications::send`, APNs/device delivery
+  evidence, success/failure device counts, and optional Markdown detail content.
+- The old APNs path depended on permission prompts, remote notification
+  registration, APNs environment detection, device token registration,
+  Cloudflare relay configuration, physical-device validation, and server-side
+  token invalidation.
+- Old message notification pills also included removed skill, rules, memory,
+  subagent, worktree, and other agent-execution concepts that do not have
+  current Phase 1 owners.
+- Current production source has no notification bell, inbox, notification
+  client/store, APNs entitlement, remote-notification registration, device-token
+  client, notification delivery chip, or notification server API. Current Swift
+  source guards and the Rust IARM invariant intentionally keep those planes
+  absent.
+- Direct inspection of the local Tron SQLite database at review time found no
+  notification/device/push/APNs tables. Current `engine_resources` rows were
+  `agent_result` only, so there was no durable notification inbox owner to
+  render truthfully.
+
+Current replacements preserved:
+
+- Local chat errors remain temporary `LocalChatNotification` timeline pills.
+- App-global connection state remains `ToastCenter`/`ConnectionToastPolicy`.
+- Durable session facts remain timeline events reconstructed from current
+  server event truth.
+- Capability activity remains generic capability evidence chips/details.
+- Diagnostics remain Logs, Server Diagnostics, feedback bundles, MetricKit
+  payload retention, and local/server log evidence.
+
+Rejected or deferred:
+
+- Rejected for Phase 1: fake unread counts, a local bell badge, placeholder
+  notification content, a local-only inbox that implies hidden backend truth,
+  notification delivery chips, and old fixed notification categories.
+- Deferred to Phase 2/restoration: APNs, background push, device broker
+  behavior, `device::register`/`device::unregister`, `notifications::send`,
+  `notifications::list`, `notifications::mark_read`,
+  `notifications::mark_all_read`, durable notification resources, read-state
+  decisions, app badge semantics, and source-control/process/job/subagent/
+  approval/web/research/skills/rules/memory notification families.
+- No Swift UI, public `/engine` methods, database tables, server settings, APNs
+  entitlements, background services, provider/auth/model behavior, or fake
+  server health/state were added.
+
+Validated:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  passed in the recorded defer thread.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed after adding the Slice 6 defer guard; the current retrospective fix
+  strengthens that guard with source-level absence checks.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` returned no tracked ignored files.
+
+Simulator validation:
+
+- Not required. Slice 6 made no Swift or UI changes; the approved outcome was a
+  documentation/static-guard decision to defer notification/inbox restoration.
+
+No remaining Phase 1 local-native slice is queued by Slice 6. The Phase 1 map
+should now get or retain a closeout pass to check whether any local-native
+affordance families remain after Slices 1-6. If none remain, the next major
+planning step is the full Phase 2 agent-execution restoration goal plan,
+including APNs/device notification capability restoration through the central
+engine/resource mechanism.
 
 ## Phase 2 Reminder
 

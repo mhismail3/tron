@@ -394,7 +394,7 @@ Current living entry points:
 - `packages/agent/docs/ios-affordance-restoration-progress.md`:
   active execution ledger for completed iOS affordance restoration slices,
   accepted off-plan UI/runtime work, validation evidence, deferred behavior, and
-  the next Phase 1 queue item.
+  the Slice 6 notification/inbox defer decision.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
