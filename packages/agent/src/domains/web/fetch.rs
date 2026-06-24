@@ -33,6 +33,7 @@ const DEFAULT_OUTPUT_BYTES: usize = 20_000;
 const MAX_OUTPUT_BYTES: usize = 100_000;
 const DEFAULT_REDIRECTS: usize = 5;
 const MAX_REDIRECTS: usize = 10;
+pub(super) const MAX_TITLE_BYTES: usize = 512;
 
 pub(crate) async fn web_fetch_value(
     deps: &Deps,
@@ -94,6 +95,7 @@ pub(crate) async fn web_fetch_value(
     let extracted = extract_response_text(content_type.as_deref(), &body.bytes);
     let (bounded_text, output_truncated) = truncate_utf8(&extracted.text, request.max_output_bytes);
     let redacted = redact_text(&bounded_text);
+    let safe_title = safe_title(extracted.title.as_deref(), request.max_output_bytes);
     let source_resource_id = source_resource_id(invocation, &request);
     let record = json!({
         "schemaVersion": WEB_SOURCE_SCHEMA_VERSION,
@@ -120,13 +122,16 @@ pub(crate) async fn web_fetch_value(
             "extractionMode": extracted.mode,
             "extractorId": extracted.extractor_id,
             "extractorVersion": extracted.extractor_version,
-            "title": extracted.title,
+            "title": safe_title.text,
+            "titleBytes": safe_title.bytes,
+            "maxTitleBytes": safe_title.max_bytes,
+            "titleTruncated": safe_title.truncated,
             "extractedTextBytes": extracted.extracted_text_bytes,
             "extractedTextTruncated": output_truncated
         },
         "redaction": {
-            "applied": redacted.count > 0,
-            "replacementCount": redacted.count,
+            "applied": redacted.count + safe_title.redaction_count > 0,
+            "replacementCount": redacted.count + safe_title.redaction_count,
             "policy": "common_token_key_password_patterns"
         },
         "redirects": {
@@ -281,12 +286,12 @@ fn truncate_utf8(value: &str, max_bytes: usize) -> (String, bool) {
     (value[..end].to_owned(), true)
 }
 
-struct RedactedText {
-    text: String,
-    count: usize,
+pub(super) struct RedactedText {
+    pub(super) text: String,
+    pub(super) count: usize,
 }
 
-fn redact_text(value: &str) -> RedactedText {
+pub(super) fn redact_text(value: &str) -> RedactedText {
     let secret_value = Regex::new("(?i)(sk-[A-Za-z0-9_-]{8,}|Bearer\\s+[A-Za-z0-9._~+/=-]{8,})")
         .expect("static redaction regex");
     let key_value =
@@ -301,6 +306,42 @@ fn redact_text(value: &str) -> RedactedText {
         .replace_all(&first, "${1}<redacted-secret>")
         .into_owned();
     RedactedText { text, count }
+}
+
+pub(super) struct SafeTitle {
+    pub(super) text: Option<String>,
+    pub(super) bytes: usize,
+    pub(super) max_bytes: usize,
+    pub(super) truncated: bool,
+    pub(super) redaction_count: usize,
+}
+
+pub(super) fn safe_title(value: Option<&str>, max_output_bytes: usize) -> SafeTitle {
+    let max_bytes = max_output_bytes.clamp(1, MAX_TITLE_BYTES);
+    let Some(value) = value else {
+        return SafeTitle {
+            text: None,
+            bytes: 0,
+            max_bytes,
+            truncated: false,
+            redaction_count: 0,
+        };
+    };
+    let (bounded, truncated) = truncate_utf8(value, max_bytes);
+    let redacted = redact_text(&bounded);
+    let (redacted_text, redaction_truncated) = truncate_utf8(&redacted.text, max_bytes);
+    let bytes = redacted_text.len();
+    SafeTitle {
+        text: if redacted_text.is_empty() {
+            None
+        } else {
+            Some(redacted_text)
+        },
+        bytes,
+        max_bytes,
+        truncated: truncated || redaction_truncated,
+        redaction_count: redacted.count,
+    }
 }
 
 fn sanitize_url_for_evidence(url: &Url) -> String {

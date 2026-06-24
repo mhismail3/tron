@@ -1,4 +1,5 @@
 use super::*;
+use sha2::{Digest, Sha256};
 
 #[tokio::test]
 async fn web_fetch_extracts_html_readable_text_before_redaction() {
@@ -64,6 +65,95 @@ async fn web_fetch_extracts_html_readable_text_before_redaction() {
     assert!(!preview.contains("skip navigation"));
     assert!(!preview.contains("super-secret-token"));
     assert_eq!(payload["redaction"]["applied"], json!(true));
+}
+
+#[tokio::test]
+async fn web_fetch_bounds_and_redacts_html_titles_before_source_exposure() {
+    let oversized_tail = "z".repeat(800);
+    let secret = "super-secret-title-token";
+    let html = format!(
+        "<html><head><title>Slice 8C token={secret} {oversized_tail}</title></head><body><main>Body citation text</main></body></html>"
+    );
+    let expected_sha256 = format!("{:x}", Sha256::digest(html.as_bytes()));
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/title"))
+        .respond_with(ResponseTemplate::new(200).set_body_raw(html, "text/html; charset=utf-8"))
+        .mount(&server)
+        .await;
+
+    let ctx = make_test_context();
+    let fetch = WebFixture::new(&ctx, "web-fetch-html-title-safe", "declared").await;
+    let fetched = fetch
+        .invoke_ok(json!({
+            "operation": "web_fetch",
+            "url": format!("{}/title", server.uri()),
+            "maxOutputBytes": 2_000,
+            "idempotencyKey": "web-fetch-html-title-safe"
+        }))
+        .await;
+    let fetched_json = serde_json::to_string(&fetched).expect("fetch result json");
+    assert_safe_title_json(&fetched_json, secret, &oversized_tail);
+
+    let resource_id = fetched["details"]["web"]["webSourceResourceId"]
+        .as_str()
+        .expect("resource id");
+    let inspection = ctx
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .expect("inspect")
+        .expect("web source resource");
+    let payload = current_payload(&inspection);
+    assert_eq!(payload["byteEvidence"]["sha256"], json!(expected_sha256));
+    assert_eq!(
+        payload["byteEvidence"]["hashScope"],
+        json!("captured_response_bytes")
+    );
+    assert_eq!(
+        payload["textEvidence"]["preview"],
+        json!("Body citation text")
+    );
+    assert_eq!(payload["textEvidence"]["titleTruncated"], json!(true));
+    assert_eq!(payload["textEvidence"]["maxTitleBytes"], json!(512));
+    assert_eq!(payload["redaction"]["applied"], json!(true));
+    let stored_title = payload["textEvidence"]["title"].as_str().expect("title");
+    assert!(stored_title.contains("token=<redacted-secret>"));
+    assert!(stored_title.len() <= 512);
+    assert!(!stored_title.contains(secret));
+    assert!(!stored_title.contains(&oversized_tail));
+
+    let read = WebFixture::new(&ctx, "web-fetch-html-title-safe", "none").await;
+    let inspected = read
+        .invoke_ok(json!({
+            "operation": "web_source_inspect",
+            "webSourceResourceId": resource_id,
+            "idempotencyKey": "web-fetch-html-title-safe-inspect"
+        }))
+        .await;
+    let inspected_json = serde_json::to_string(&inspected).expect("inspect json");
+    assert_safe_title_json(&inspected_json, secret, &oversized_tail);
+    let inspected_title = inspected["details"]["web"]["source"]["extraction"]["title"]
+        .as_str()
+        .expect("inspect title");
+    assert_eq!(inspected_title, stored_title);
+
+    let listed = read
+        .invoke_ok(json!({
+            "operation": "web_source_list",
+            "idempotencyKey": "web-fetch-html-title-safe-list"
+        }))
+        .await;
+    let listed_json = serde_json::to_string(&listed).expect("list json");
+    assert_safe_title_json(&listed_json, secret, &oversized_tail);
+    let listed_title = listed["details"]["web"]["sources"][0]["title"]
+        .as_str()
+        .expect("list title");
+    assert_eq!(listed_title, stored_title);
+    assert_eq!(
+        listed["details"]["web"]["sources"][0]["extraction"]["title"],
+        json!(stored_title)
+    );
 }
 
 #[tokio::test]
@@ -186,4 +276,15 @@ async fn web_fetch_preserves_non_html_content_type_behavior_and_bounds() {
             assert_eq!(payload["textEvidence"]["binaryBodyOmitted"], json!(true));
         }
     }
+}
+
+fn assert_safe_title_json(value: &str, secret: &str, oversized_tail: &str) {
+    assert!(
+        !value.contains(secret),
+        "title secret must not leak through JSON result: {value}"
+    );
+    assert!(
+        !value.contains(oversized_tail),
+        "oversized title must not leak through JSON result"
+    );
 }

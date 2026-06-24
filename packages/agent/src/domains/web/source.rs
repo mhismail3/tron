@@ -8,6 +8,7 @@ use crate::engine::{
 };
 use crate::shared::server::errors::CapabilityError;
 
+use super::fetch::{MAX_TITLE_BYTES, safe_title};
 use super::{Deps, READ_SCOPE, WEB_SOURCE_SCHEMA_VERSION};
 
 const RESOURCE_READ_SCOPE: &str = "resource.read";
@@ -230,7 +231,7 @@ fn source_summary(
         "fetchedAt": source.get("fetchedAt").cloned().unwrap_or(Value::Null),
         "status": source.get("status").cloned().unwrap_or(Value::Null),
         "contentType": source.get("contentType").cloned().unwrap_or(Value::Null),
-        "title": source.pointer("/textEvidence/title").cloned().unwrap_or(Value::Null),
+        "title": safe_source_title(source),
         "capturedSha256": source.pointer("/byteEvidence/sha256").cloned().unwrap_or(Value::Null),
         "capturedBytes": source.pointer("/byteEvidence/capturedBytes").cloned().unwrap_or(Value::Null),
         "outputTextBytes": source.pointer("/textEvidence/textBytes").cloned().unwrap_or(Value::Null),
@@ -289,10 +290,30 @@ fn extraction_metadata(source: &Value) -> Value {
         "mode": source.pointer("/textEvidence/extractionMode").cloned().unwrap_or(Value::Null),
         "extractorId": source.pointer("/textEvidence/extractorId").cloned().unwrap_or(Value::Null),
         "extractorVersion": source.pointer("/textEvidence/extractorVersion").cloned().unwrap_or(Value::Null),
-        "title": source.pointer("/textEvidence/title").cloned().unwrap_or(Value::Null),
+        "title": safe_source_title(source),
+        "titleBytes": source.pointer("/textEvidence/titleBytes").cloned().unwrap_or(Value::Null),
+        "maxTitleBytes": source.pointer("/textEvidence/maxTitleBytes").cloned().unwrap_or(Value::Null),
+        "titleTruncated": source.pointer("/textEvidence/titleTruncated").cloned().unwrap_or(Value::Null),
         "extractedTextBytes": source.pointer("/textEvidence/extractedTextBytes").cloned().unwrap_or(Value::Null),
         "extractedTextTruncated": source.pointer("/textEvidence/extractedTextTruncated").cloned().unwrap_or(Value::Null)
     })
+}
+
+fn safe_source_title(source: &Value) -> Value {
+    let max_bytes = source
+        .pointer("/textEvidence/maxTitleBytes")
+        .and_then(Value::as_u64)
+        .map(|value| value as usize)
+        .unwrap_or(MAX_TITLE_BYTES);
+    safe_title(
+        source
+            .pointer("/textEvidence/title")
+            .and_then(Value::as_str),
+        max_bytes,
+    )
+    .text
+    .map(Value::String)
+    .unwrap_or(Value::Null)
 }
 
 fn truncation_metadata(source: &Value, snippet: &BoundedText, max_bytes: usize) -> Value {
