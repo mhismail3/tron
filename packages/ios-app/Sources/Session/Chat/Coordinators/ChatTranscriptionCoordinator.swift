@@ -10,6 +10,7 @@ protocol ChatTranscriptionContext: LoggingContext {
 
     func requireTranscriptionReady() async throws
     func startRecording() async throws
+    func cancelRecording()
     @discardableResult
     func stopRecording() -> (url: URL?, success: Bool)
     func transcribeAudio(data: Data, mimeType: String, fileName: String) async throws -> String
@@ -31,12 +32,19 @@ final class ChatTranscriptionCoordinator {
     private func startRecording(context: ChatTranscriptionContext) async {
         guard !context.isProcessing && !context.isTranscribing else { return }
         do {
+            try Task.checkCancellation()
             try await context.requireTranscriptionReady()
             try Task.checkCancellation()
             try await context.startRecording()
+            try Task.checkCancellation()
         } catch is CancellationError {
+            context.cancelRecording()
             return
         } catch {
+            if Task.isCancelled {
+                context.cancelRecording()
+                return
+            }
             context.appendTranscriptionError(transcriptionFailureMessage(for: error))
         }
     }
