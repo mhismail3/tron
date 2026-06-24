@@ -167,7 +167,8 @@ final class MessagingCoordinator {
             }
         } catch {
             context.logError("Failed to send prompt: \(error.localizedDescription)")
-            context.appendLocalError(
+            handlePreAcceptPromptFailure(
+                context: context,
                 dedupKey: "agent.prompt.send.failed",
                 title: "Could not send message",
                 message: error.localizedDescription,
@@ -196,7 +197,8 @@ final class MessagingCoordinator {
             )
         } catch {
             context.logError("Retry failed: \(error.localizedDescription)")
-            context.appendLocalError(
+            handlePreAcceptPromptFailure(
+                context: context,
                 dedupKey: "turn.retry.failed",
                 title: "Could not retry",
                 message: error.localizedDescription,
@@ -225,6 +227,23 @@ final class MessagingCoordinator {
         }
         context.resetStreamingManager()
         return true
+    }
+
+    private func handlePreAcceptPromptFailure(
+        context: MessagingContext,
+        dedupKey: String,
+        title: String,
+        message: String,
+        suggestion: String?
+    ) {
+        context.isProcessing = false
+        context.setSessionProcessing(false)
+        context.appendLocalError(
+            dedupKey: dedupKey,
+            title: title,
+            message: message,
+            suggestion: suggestion
+        )
     }
 
     // MARK: - Abort Agent

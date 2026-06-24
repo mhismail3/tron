@@ -219,7 +219,10 @@ The chat timeline owns only truthful local/session presentation state:
 - Local chat errors are temporary `LocalChatNotification` timeline messages.
   Tapping opens `LocalErrorDetailSheet` only when structured details exist;
   there is no tap-to-dismiss, explicit dismiss button, timer-only dismissal, or
-  persisted event claim.
+  persisted event claim. Pre-accept prompt-send and retry-send failures clear
+  local and session processing before appending their deduped local
+  notification; server-accepted stream/event failures continue through the
+  server-authored event path.
 - Thinking fallback is a single app-owned `NeuralSparkIndicator`.
   Configurable thinking styles were removed; streamed thinking text still
   renders inline above the response when the current stream provides it.

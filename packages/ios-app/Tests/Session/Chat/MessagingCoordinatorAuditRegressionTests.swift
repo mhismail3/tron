@@ -33,6 +33,20 @@ final class MessagingCoordinatorAuditRegressionTests: XCTestCase {
         XCTAssertTrue(mockContext.clearLocalNotificationsCalled)
     }
 
+    func testSendMessageFailureClearsProcessingFlagsAndShowsLocalNotification() async {
+        mockContext.inputText = "Prompt that fails before server acceptance"
+        mockContext.sendPromptShouldFail = true
+
+        await coordinator.sendMessage(context: mockContext)
+
+        XCTAssertTrue(mockContext.sendPromptCalled)
+        XCTAssertFalse(mockContext.isProcessing)
+        XCTAssertEqual(mockContext.lastSessionProcessingValue, false)
+        XCTAssertTrue(mockContext.appendLocalErrorCalled)
+        XCTAssertTrue(mockContext.localErrorDedupKeys.contains("agent.prompt.send.failed"))
+        XCTAssertEqual(mockContext.lastLocalErrorTitle, "Could not send message")
+    }
+
     func testRetryMessageDoesNotSendWhenLiveEventSubscriptionFails() async {
         mockContext.ensureLiveEventSubscriptionShouldFail = true
 
@@ -85,5 +99,26 @@ final class MessagingCoordinatorAuditRegressionTests: XCTestCase {
 
         XCTAssertFalse(mockContext.localErrorDedupKeys.contains("turn.retry.failed"))
         XCTAssertTrue(mockContext.clearLocalNotificationsCalled)
+    }
+
+    func testRetryMessageFailureClearsProcessingFlagsAndShowsLocalNotification() async {
+        mockContext.inputText = "draft stays put"
+        mockContext.sendPromptShouldFail = true
+
+        await coordinator.retryMessage(
+            prompt: "retry this prompt",
+            attachments: nil,
+            context: mockContext
+        )
+
+        XCTAssertTrue(mockContext.sendPromptCalled)
+        XCTAssertEqual(mockContext.lastSentText, "retry this prompt")
+        XCTAssertFalse(mockContext.isProcessing)
+        XCTAssertEqual(mockContext.lastSessionProcessingValue, false)
+        XCTAssertTrue(mockContext.appendLocalErrorCalled)
+        XCTAssertTrue(mockContext.localErrorDedupKeys.contains("turn.retry.failed"))
+        XCTAssertEqual(mockContext.lastLocalErrorTitle, "Could not retry")
+        XCTAssertEqual(mockContext.inputText, "draft stays put")
+        XCTAssertTrue(mockContext.appendedMessages.isEmpty)
     }
 }
