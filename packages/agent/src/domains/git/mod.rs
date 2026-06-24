@@ -4,8 +4,8 @@
 //! Slice 6C Git staged-index commit foundation. It detects the repository
 //! containing a trusted runtime path, reports branch/upstream/dirty facts,
 //! returns bounded status/diff evidence, stages/unstages explicit relative
-//! paths, and creates one commit from the already-staged index through the
-//! existing `capability::execute` primitive.
+//! paths, and creates one guarded single-parent commit from the already-staged
+//! index through the existing `capability::execute` primitive.
 //!
 //! ## Submodules
 //!
@@ -25,9 +25,11 @@
 //! the Git index after validating trusted working-directory metadata, explicit
 //! relative paths, expected HEAD freshness, path existence, and path-scoped
 //! conflict state. Commit operations create exactly one commit from the
-//! already-staged index on the current named branch after expected HEAD and
-//! expected index-tree checks. Caller-controlled status/diff byte limits affect
-//! evidence only, never mutation eligibility.
+//! already-staged index on the current named branch by rechecking expected HEAD
+//! and expected index-tree at the mutation boundary, writing the commit object
+//! with exactly that parent/tree, and advancing the branch ref with guarded
+//! `update-ref`. Caller-controlled status/diff byte limits affect evidence
+//! only, never mutation eligibility.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

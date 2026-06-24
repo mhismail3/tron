@@ -533,6 +533,9 @@ async fn execute_git_commit_creates_one_commit_with_resource_and_stream() {
         git_stdout(repo.path(), ["rev-parse", "HEAD^"]),
         committed["details"]["git"]["parentOid"]
     );
+    let parents = git_stdout(repo.path(), ["rev-list", "--parents", "-n", "1", "HEAD"]);
+    let parent_oids = parents.split_whitespace().skip(1).collect::<Vec<_>>();
+    assert_eq!(parent_oids, vec![parent.as_str()]);
     assert_eq!(
         committed["details"]["git"]["actualTree"],
         committed["details"]["git"]["expectedIndexTree"]
@@ -558,7 +561,7 @@ async fn execute_git_commit_creates_one_commit_with_resource_and_stream() {
     );
     assert_eq!(
         committed["details"]["git"]["evidence"]["hookPolicy"],
-        "core.hooksPath=/dev/null"
+        "not invoked by commit-tree"
     );
     assert_eq!(
         committed["details"]["git"]["evidence"]["terminalPromptPolicy"],
@@ -1044,6 +1047,83 @@ async fn execute_git_commit_rejects_stale_head_and_stale_index_tree_before_commi
 }
 
 #[tokio::test]
+async fn execute_git_commit_rejects_stale_head_at_guarded_ref_update() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let stale_expected = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    write_file(repo.path(), "tracked.txt", "concurrent\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "concurrent");
+    let current_head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+
+    let error = super::commit::update_branch_ref_guarded(
+        repo.path(),
+        "refs/heads/main",
+        &stale_expected,
+        &stale_expected,
+    )
+    .expect_err("stale guarded ref update should fail")
+    .to_string();
+
+    assert!(error.contains("expectedHead changed before ref update"));
+    assert_eq!(git_stdout(repo.path(), ["rev-parse", "HEAD"]), current_head);
+}
+
+#[tokio::test]
+async fn execute_git_commit_rejects_resolved_merge_state() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base");
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "tracked.txt", "feature\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "feature");
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "tracked.txt", "main\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "main");
+    let head_before = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    let merge = git_failure(repo.path(), ["merge", "feature"]);
+    assert!(merge.contains("CONFLICT") || merge.contains("conflict"));
+    write_file(repo.path(), "tracked.txt", "resolved\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    assert_eq!(
+        git_stdout(repo.path(), ["ls-files", "-u", "--", "tracked.txt"]),
+        ""
+    );
+    let expected_tree = status(repo.path(), json!({})).await["repository"]["indexTreeOid"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+
+    let error = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-commit-resolved-merge",
+        json!({
+            "operation": "git_commit",
+            "message": "resolved merge",
+            "expectedHead": head_before,
+            "expectedIndexTree": expected_tree,
+            "reason": "test resolved merge rejection",
+            "idempotencyKey": "git-commit-resolved-merge"
+        }),
+    )
+    .await;
+
+    assert!(error.contains("in-progress merge state"));
+    assert_eq!(git_stdout(repo.path(), ["rev-parse", "HEAD"]), head_before);
+    let parents = git_stdout(repo.path(), ["rev-list", "--parents", "-n", "1", "HEAD"]);
+    assert_eq!(parents.split_whitespace().count(), 2);
+}
+
+#[tokio::test]
 async fn execute_git_commit_rejects_empty_index_detached_head_and_conflicts() {
     let ctx = make_test_context();
     let repo = tempdir().expect("repo");
@@ -1124,7 +1204,11 @@ async fn execute_git_commit_rejects_empty_index_detached_head_and_conflicts() {
         }),
     )
     .await;
-    assert!(conflict_error.contains("conflicted") || conflict_error.contains("unmerged"));
+    assert!(
+        conflict_error.contains("conflicted")
+            || conflict_error.contains("unmerged")
+            || conflict_error.contains("in-progress merge state")
+    );
 }
 
 #[tokio::test]
@@ -1323,7 +1407,7 @@ async fn execute_git_commit_suppresses_hooks_editors_signing_and_prompts() {
     assert!(!hook_sentinel.exists(), "commit hook must not run");
     assert_eq!(
         committed["details"]["git"]["evidence"]["editorPolicy"],
-        "disabled"
+        "not invoked by commit-tree"
     );
     assert_eq!(
         committed["details"]["git"]["evidence"]["pagerPolicy"],

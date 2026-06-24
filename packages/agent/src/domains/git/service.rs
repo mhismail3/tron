@@ -383,14 +383,20 @@ where
     })
 }
 
-pub(super) fn git_commit_output_bounded(
+pub(super) fn git_symbolic_head_ref(
+    worktree_root: &Path,
+) -> Result<Option<String>, CapabilityError> {
+    git_optional_stdout(worktree_root, ["symbolic-ref", "--quiet", "HEAD"])
+}
+
+pub(super) fn git_commit_tree_output_bounded(
     dir: &Path,
+    tree_oid: &str,
+    parent_oid: &str,
     message: &str,
     stdout_limit: usize,
 ) -> Result<BoundedGitOutput, CapabilityError> {
     let mut child = git_command_base(dir)
-        .arg("-c")
-        .arg("core.hooksPath=/dev/null")
         .arg("-c")
         .arg("commit.gpgSign=false")
         .arg("-c")
@@ -399,51 +405,67 @@ pub(super) fn git_commit_output_bounded(
         .arg("core.pager=cat")
         .arg("-c")
         .arg("credential.helper=")
-        .arg("commit")
-        .arg("--no-verify")
-        .arg("--no-gpg-sign")
-        .arg("--no-status")
-        .arg("-m")
-        .arg(message)
+        .arg("commit-tree")
+        .arg(tree_oid)
+        .arg("-p")
+        .arg(parent_oid)
         .env("GIT_TERMINAL_PROMPT", "0")
-        .env("GIT_EDITOR", ":")
-        .env("VISUAL", ":")
-        .env("EDITOR", ":")
         .env("GIT_PAGER", "cat")
         .env("PAGER", "cat")
         .env("GIT_ASKPASS", "/bin/false")
         .env("SSH_ASKPASS", "/bin/false")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|error| internal(format!("run git commit: {error}")))?;
+        .map_err(|error| internal(format!("run git commit-tree: {error}")))?;
+    child
+        .stdin
+        .take()
+        .ok_or_else(|| internal("open git commit-tree stdin"))?
+        .write_all(message.as_bytes())
+        .map_err(|error| internal(format!("write git commit-tree stdin: {error}")))?;
     let stdout = child
         .stdout
         .take()
-        .ok_or_else(|| internal("capture git commit stdout"))?;
+        .ok_or_else(|| internal("capture git commit-tree stdout"))?;
     let stderr = child
         .stderr
         .take()
-        .ok_or_else(|| internal("capture git commit stderr"))?;
+        .ok_or_else(|| internal("capture git commit-tree stderr"))?;
     let stdout_reader = thread::spawn(move || read_bounded(stdout, stdout_limit));
     let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_GIT_STDERR_BYTES));
     let status = child
         .wait()
-        .map_err(|error| internal(format!("wait for git commit: {error}")))?;
+        .map_err(|error| internal(format!("wait for git commit-tree: {error}")))?;
     let (stdout, stdout_truncated) = stdout_reader
         .join()
-        .map_err(|_| internal("join git commit stdout reader"))?
-        .map_err(|error| internal(format!("read git commit stdout: {error}")))?;
+        .map_err(|_| internal("join git commit-tree stdout reader"))?
+        .map_err(|error| internal(format!("read git commit-tree stdout: {error}")))?;
     let (stderr, _stderr_truncated) = stderr_reader
         .join()
-        .map_err(|_| internal("join git commit stderr reader"))?
-        .map_err(|error| internal(format!("read git commit stderr: {error}")))?;
+        .map_err(|_| internal("join git commit-tree stderr reader"))?
+        .map_err(|error| internal(format!("read git commit-tree stderr: {error}")))?;
     Ok(BoundedGitOutput {
         status,
         stdout,
         stdout_truncated,
         stderr,
     })
+}
+
+pub(super) fn git_update_ref_output_bounded(
+    dir: &Path,
+    ref_name: &str,
+    new_oid: &str,
+    expected_old_oid: &str,
+    stdout_limit: usize,
+) -> Result<BoundedGitOutput, CapabilityError> {
+    git_command_bounded(
+        dir,
+        ["update-ref", ref_name, new_oid, expected_old_oid],
+        stdout_limit,
+    )
 }
 
 fn staged_index_tree_oid(worktree_root: &Path) -> Result<Option<String>, CapabilityError> {

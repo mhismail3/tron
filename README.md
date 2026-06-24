@@ -930,7 +930,7 @@ Current primitive operations:
 | `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers. |
 | `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
-| `git_commit` | Candidate Slice 6C operation that creates one commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
+| `git_commit` | Candidate Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
@@ -1000,11 +1000,14 @@ dirty summaries, returns bounded status/diff evidence, exposes the staged index
 tree without writing repository tree objects, and requires idempotency key,
 human/action reason, and expected HEAD for mutation. Successful stage/unstage
 operations create `git_index_change` resources and publish `git.lifecycle`
-stream evidence. Candidate `git_commit` creates exactly one commit from the
-already-staged index on the current named branch after expected HEAD and
+stream evidence. Candidate `git_commit` creates exactly one single-parent commit
+from the already-staged index on the current named branch after expected HEAD and
 expected index tree freshness checks, rejects detached/conflicted/empty-index
-states, suppresses hooks/editors/pagers/signing/credential prompts, creates a
-`git_commit` resource, and publishes `git.commit_created` lifecycle evidence.
+and merge/sequencer states, rechecks the staged tree immediately before creating
+the commit object, then advances the branch with a guarded `update-ref` compare
+against the expected HEAD. The `commit-tree` path does not invoke hooks or an
+editor and suppresses pager/signing/credential prompts, creates a `git_commit`
+resource, and publishes `git.commit_created` lifecycle evidence.
 Merges, rebases, resets, pushes, branch checkout/deletion, conflict resolution
 workflows, PR handoff, worktree graph resources, and native iOS SourceChanges
 UI remain deferred.

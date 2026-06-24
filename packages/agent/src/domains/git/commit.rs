@@ -1,5 +1,7 @@
 //! Staged-index Git commit support.
 
+use std::path::{Path, PathBuf};
+
 use chrono::Utc;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -15,7 +17,7 @@ use crate::shared::server::errors::CapabilityError;
 use super::service;
 use super::types::{
     COMMIT_SCHEMA_VERSION, DEFAULT_DIFF_BYTES, DEFAULT_STATUS_BYTES, GitCommitRecord,
-    MAX_COMMIT_MESSAGE_BYTES, MAX_DIFF_BYTES, MAX_STATUS_BYTES, RepositoryFacts,
+    MAX_COMMIT_MESSAGE_BYTES, MAX_DIFF_BYTES, MAX_STATUS_BYTES, RepositoryFacts, ResolvedTarget,
 };
 use super::{GIT_LIFECYCLE_TOPIC, WORKER, WRITE_SCOPE};
 
@@ -79,6 +81,7 @@ fn commit_sync(invocation: &Invocation, payload: &Value) -> Result<CommitPlan, C
         .branch
         .clone()
         .ok_or_else(|| invalid("git_commit requires a named branch"))?;
+    let branch_ref = named_branch_ref(&repository)?;
     if repository.detached_head {
         return Err(invalid("git_commit rejects detached HEAD"));
     }
@@ -90,6 +93,7 @@ fn commit_sync(invocation: &Invocation, payload: &Value) -> Result<CommitPlan, C
             "expectedHead mismatch: expected {expected_head}, actual {parent_oid}"
         )));
     }
+    reject_in_progress_commit_state(&repository)?;
     if has_unmerged_index_entries(&repository)? {
         return Err(invalid(
             "git_commit refuses conflicted or unmerged index entries",
@@ -119,7 +123,13 @@ fn commit_sync(invocation: &Invocation, payload: &Value) -> Result<CommitPlan, C
         .unwrap_or(DEFAULT_DIFF_BYTES)
         .min(MAX_DIFF_BYTES);
     let before = status_diff_snapshot(&repository, max_status_bytes, max_diff_bytes)?;
-    run_commit_command(&repository, &message)?;
+    let created_commit = create_single_parent_commit(
+        &target,
+        &branch_ref,
+        &expected_head,
+        &expected_index_tree,
+        &message,
+    )?;
 
     let after_target = service::resolve_target(invocation, &json!({"path": "."}))?;
     let after_repository = service::repository_facts(&after_target)?;
@@ -127,8 +137,11 @@ fn commit_sync(invocation: &Invocation, payload: &Value) -> Result<CommitPlan, C
         .head_oid
         .clone()
         .ok_or_else(|| internal("git_commit lost repository HEAD after commit"))?;
-    if commit_oid == parent_oid {
-        return Err(internal("git_commit did not advance HEAD"));
+    if commit_oid != created_commit.commit_oid {
+        return Err(internal(format!(
+            "git_commit advanced unexpected HEAD: expected {}, actual {commit_oid}",
+            created_commit.commit_oid
+        )));
     }
     let actual_tree = after_repository
         .head_tree_oid
@@ -159,8 +172,10 @@ fn commit_sync(invocation: &Invocation, payload: &Value) -> Result<CommitPlan, C
             "diffLimitBytes": max_diff_bytes,
             "beforeTruncated": before.truncated(),
             "afterTruncated": after.truncated(),
-            "hookPolicy": "core.hooksPath=/dev/null",
-            "editorPolicy": "disabled",
+            "mutationBoundary": "commit-tree-plus-update-ref",
+            "refUpdatePolicy": "compare-and-swap",
+            "hookPolicy": "not invoked by commit-tree",
+            "editorPolicy": "not invoked by commit-tree",
             "pagerPolicy": "disabled",
             "gpgSigningPolicy": "disabled",
             "credentialPromptPolicy": "disabled",
@@ -170,20 +185,197 @@ fn commit_sync(invocation: &Invocation, payload: &Value) -> Result<CommitPlan, C
     })
 }
 
-fn run_commit_command(repository: &RepositoryFacts, message: &str) -> Result<(), CapabilityError> {
-    let output = service::git_commit_output_bounded(
+fn create_single_parent_commit(
+    target: &ResolvedTarget,
+    branch_ref: &str,
+    expected_head: &str,
+    expected_index_tree: &str,
+    message: &str,
+) -> Result<CreatedCommit, CapabilityError> {
+    let repository = service::repository_facts(target)?;
+    if repository.detached_head {
+        return Err(invalid("git_commit rejects detached HEAD"));
+    }
+    if named_branch_ref(&repository)? != branch_ref {
+        return Err(invalid("git_commit rejects branch changes before commit"));
+    }
+    let Some(actual_head) = repository.head_oid.clone() else {
+        return Err(invalid("git_commit requires a repository HEAD"));
+    };
+    if actual_head != expected_head {
+        return Err(invalid(format!(
+            "expectedHead mismatch: expected {expected_head}, actual {actual_head}"
+        )));
+    }
+    reject_in_progress_commit_state(&repository)?;
+    if has_unmerged_index_entries(&repository)? {
+        return Err(invalid(
+            "git_commit refuses conflicted or unmerged index entries",
+        ));
+    }
+    let actual_index_tree = repository
+        .index_tree_oid
+        .clone()
+        .ok_or_else(|| invalid("git_commit requires a readable staged index tree"))?;
+    if actual_index_tree != expected_index_tree {
+        return Err(invalid(format!(
+            "expectedIndexTree mismatch: expected {expected_index_tree}, actual {actual_index_tree}"
+        )));
+    }
+    let head_tree = repository
+        .head_tree_oid
+        .clone()
+        .ok_or_else(|| invalid("git_commit requires a repository HEAD tree"))?;
+    if actual_index_tree == head_tree {
+        return Err(invalid("git_commit requires non-empty staged changes"));
+    }
+
+    let written_tree = write_index_tree(&repository)?;
+    if written_tree != expected_index_tree {
+        return Err(internal(format!(
+            "git write-tree returned unexpected tree: expected {expected_index_tree}, actual {written_tree}"
+        )));
+    }
+    let commit_oid = create_commit_object(&repository, &written_tree, expected_head, message)?;
+    verify_commit_object(&repository, &commit_oid, expected_head, expected_index_tree)?;
+    update_branch_ref_guarded(
         &repository.worktree_root,
+        branch_ref,
+        &commit_oid,
+        expected_head,
+    )?;
+    Ok(CreatedCommit { commit_oid })
+}
+
+fn create_commit_object(
+    repository: &RepositoryFacts,
+    tree_oid: &str,
+    parent_oid: &str,
+    message: &str,
+) -> Result<String, CapabilityError> {
+    let output = service::git_commit_tree_output_bounded(
+        &repository.worktree_root,
+        tree_oid,
+        parent_oid,
         message,
+        COMMIT_OUTPUT_BYTES,
+    )?;
+    if !output.status.success() {
+        return Err(CapabilityError::Custom {
+            code: "GIT_COMMAND_FAILED".to_owned(),
+            message: truncate_chars(String::from_utf8_lossy(&output.stderr).trim(), 1_000),
+            details: None,
+        });
+    }
+    if output.stdout_truncated {
+        return Err(internal(
+            "git commit-tree output was unexpectedly truncated",
+        ));
+    }
+    let commit_oid = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if commit_oid.is_empty() {
+        return Err(internal("git commit-tree did not return a commit oid"));
+    }
+    Ok(commit_oid)
+}
+
+fn write_index_tree(repository: &RepositoryFacts) -> Result<String, CapabilityError> {
+    let output = service::git_output_bounded(
+        &repository.worktree_root,
+        ["write-tree"],
+        COMMIT_OUTPUT_BYTES,
+    )?;
+    if !output.status.success() {
+        return Err(CapabilityError::Custom {
+            code: "GIT_COMMAND_FAILED".to_owned(),
+            message: truncate_chars(String::from_utf8_lossy(&output.stderr).trim(), 1_000),
+            details: None,
+        });
+    }
+    if output.stdout_truncated {
+        return Err(internal("git write-tree output was unexpectedly truncated"));
+    }
+    let tree_oid = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if tree_oid.is_empty() {
+        return Err(internal("git write-tree did not return a tree oid"));
+    }
+    Ok(tree_oid)
+}
+
+fn verify_commit_object(
+    repository: &RepositoryFacts,
+    commit_oid: &str,
+    expected_head: &str,
+    expected_index_tree: &str,
+) -> Result<(), CapabilityError> {
+    let parents = service::git_output_bounded(
+        &repository.worktree_root,
+        ["rev-list", "--parents", "-n", "1", commit_oid],
+        COMMIT_OUTPUT_BYTES,
+    )?;
+    if !parents.status.success() {
+        return Err(internal(
+            "git_commit could not inspect created commit parents",
+        ));
+    }
+    let parent_line = String::from_utf8_lossy(&parents.stdout).trim().to_owned();
+    let parent_oids = parent_line.split_whitespace().skip(1).collect::<Vec<_>>();
+    if parent_oids.as_slice() != [expected_head] {
+        return Err(internal(format!(
+            "git_commit created unexpected parents: expected {expected_head}, actual {}",
+            parent_oids.join(" ")
+        )));
+    }
+    let tree = service::git_output_bounded(
+        &repository.worktree_root,
+        vec![
+            "rev-parse".to_owned(),
+            "--verify".to_owned(),
+            format!("{commit_oid}^{{tree}}"),
+        ],
+        COMMIT_OUTPUT_BYTES,
+    )?;
+    if !tree.status.success() {
+        return Err(internal("git_commit could not inspect created commit tree"));
+    }
+    let actual_tree = String::from_utf8_lossy(&tree.stdout).trim().to_owned();
+    if actual_tree != expected_index_tree {
+        return Err(internal(format!(
+            "git_commit created unexpected tree: expected {expected_index_tree}, actual {actual_tree}"
+        )));
+    }
+    Ok(())
+}
+
+pub(super) fn update_branch_ref_guarded(
+    worktree_root: &Path,
+    branch_ref: &str,
+    new_commit: &str,
+    expected_head: &str,
+) -> Result<(), CapabilityError> {
+    let output = service::git_update_ref_output_bounded(
+        worktree_root,
+        branch_ref,
+        new_commit,
+        expected_head,
         COMMIT_OUTPUT_BYTES,
     )?;
     if output.status.success() {
         return Ok(());
     }
-    Err(CapabilityError::Custom {
-        code: "GIT_COMMAND_FAILED".to_owned(),
-        message: truncate_chars(String::from_utf8_lossy(&output.stderr).trim(), 1_000),
-        details: None,
-    })
+    let detail = truncate_chars(String::from_utf8_lossy(&output.stderr).trim(), 1_000);
+    Err(invalid(format!(
+        "expectedHead changed before ref update: expected {expected_head}; {detail}"
+    )))
+}
+
+fn named_branch_ref(repository: &RepositoryFacts) -> Result<String, CapabilityError> {
+    let head_ref = service::git_symbolic_head_ref(&repository.worktree_root)?
+        .ok_or_else(|| invalid("git_commit requires a named branch"))?;
+    if !head_ref.starts_with("refs/heads/") {
+        return Err(invalid("git_commit requires a local branch ref"));
+    }
+    Ok(head_ref)
 }
 
 fn status_diff_snapshot(
@@ -222,6 +414,44 @@ fn has_unmerged_index_entries(repository: &RepositoryFacts) -> Result<bool, Capa
         1,
     )?;
     Ok(!output.stdout.is_empty() || output.stdout_truncated)
+}
+
+fn reject_in_progress_commit_state(repository: &RepositoryFacts) -> Result<(), CapabilityError> {
+    for (git_path, state) in [
+        ("MERGE_HEAD", "merge"),
+        ("CHERRY_PICK_HEAD", "cherry-pick"),
+        ("REVERT_HEAD", "revert"),
+        ("REBASE_HEAD", "rebase"),
+        ("rebase-merge", "rebase"),
+        ("rebase-apply", "rebase"),
+        ("sequencer", "sequencer"),
+    ] {
+        if git_path_exists(repository, git_path)? {
+            return Err(invalid(format!(
+                "git_commit refuses in-progress {state} state ({git_path})"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn git_path_exists(repository: &RepositoryFacts, git_path: &str) -> Result<bool, CapabilityError> {
+    let output = service::git_output_bounded(
+        &repository.worktree_root,
+        ["rev-parse", "--git-path", git_path],
+        COMMIT_OUTPUT_BYTES,
+    )?;
+    let resolved = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if resolved.is_empty() {
+        return Ok(false);
+    }
+    let path = PathBuf::from(resolved);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        repository.worktree_root.join(path)
+    };
+    Ok(path.exists())
 }
 
 async fn create_commit_resource(
@@ -440,6 +670,10 @@ struct CommitPlan {
     before: Value,
     after: Value,
     evidence: Value,
+}
+
+struct CreatedCommit {
+    commit_oid: String,
 }
 
 struct CommitSnapshot {
