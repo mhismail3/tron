@@ -24,10 +24,10 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`origin/main@ea64b991ee430ce4ca94417d40d567a88b51bc50`
-(`test: run lib tests serially in tron ci`). That line includes the
-restoration consolidation checkpoint `455e0c8a5` and the tracker update
-`705199d37`, carrying accepted source/fix/closeout work through Order 21.
+`origin/main@4a51156b78fd6c01108cecccc82af34864b943bb`
+(`docs: record slice 6a acceptance`). That line includes the accepted Slice 6A
+read-only Git/worktree foundation and its acceptance documentation after the
+restoration consolidation checkpoint `455e0c8a5` and tracker update `705199d37`.
 
 Checkout note: this update started after `git fetch --prune origin` from a
 Codex discovery branch created at the same commit as `origin/main`. The
@@ -46,13 +46,15 @@ Completed Phase 2 restoration slices at this baseline:
   hardening.
 
 Current next action:
-**Start fresh discovery for the next Phase 2 Slice 6 sub-slice** from current
+**Implement Phase 2 Slice 6B: Git Index Mutation Foundation** from current
 `origin/main`. Slice 6A used the explicit 2026-06-24 implementation order as
 authority for a fresh read-only foundation after source-resolution found no
 recoverable historical implementation branch. The missing old source is no
 longer a blocker for Slice 6A, and independent review accepted the read-only
-foundation for mainline integration. Mutating source-control behavior still
-requires a later slice shape and review.
+foundation for mainline integration. Slice 6B is the first mutating
+source-control sub-slice and is limited to explicit Git index stage/unstage
+operations with resource-backed evidence; commits, branch changes, merge/rebase,
+push/PR, worktree graph resources, and native SourceChanges UI remain deferred.
 
 ## Scope
 
@@ -809,10 +811,38 @@ worktree acquisition/release, conflict resources,
 staging/commit evidence, rollback, replay resources, push/PR approval, and
 native iOS review.
 
+Next accepted sub-slice handoff: **Slice 6B: Git Index Mutation Foundation**.
+It may add `git_stage` and `git_unstage` operation values behind
+`capability::execute`, backed by `git::stage` and `git::unstage` domain
+contracts. The slice mutates only the Git index for explicit relative paths
+inside the trusted working-directory repository. It must require caller
+idempotency, a mutation reason, and an expected HEAD precondition, reject path
+traversal/worktree-root escape, reject conflicted pathspecs, preserve the
+no-network/no-production-deploy boundary, and emit bounded before/after status
+or diff evidence. The package should create a `git_index_change` resource and
+publish a `git.lifecycle` stream event for each committed stage/unstage.
+Approval is not a hidden permission source: Slice 6B may record an explicit
+index-write approval policy, but commit/push/PR approval checks are deferred
+until those higher-risk operations exist.
+
+Slice 6B non-goals: commits, commit-message policy, branch creation/checkout/
+deletion, merge, rebase, reset, stash, clean, push/fetch/pull, PR handoff,
+conflict resolution, worktree graph acquisition/release, repo import/tree
+visualization, public `/engine` API expansion, production deployment behavior,
+and native iOS SourceChanges UI.
+
 Focused tests: clean repo, staged/unstaged/untracked dirty state, detached
 HEAD, missing upstream, upstream ahead/behind, nested paths, non-repo paths,
 trusted-root escape rejection, bounded/truncated status and diff output, and
 schema guards proving only read-only git operation names are exposed.
+
+Slice 6B focused tests: stage tracked edits, stage untracked files, unstage
+staged paths, reject conflicted paths, reject missing/absolute/traversal paths,
+reject worktree-root escapes, reject stale expected HEAD values, require
+explicit idempotency/reason through the provider boundary, verify
+`git_index_change` resource refs and `git.lifecycle` stream evidence, verify
+bounded before/after evidence, and update static guards so only `git_stage` and
+`git_unstage` are newly admitted mutating Git operations.
 
 iOS validation: source-control native surface screenshots if approved.
 

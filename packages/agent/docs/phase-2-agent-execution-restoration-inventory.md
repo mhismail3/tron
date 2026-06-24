@@ -70,6 +70,14 @@ operation values. Worktree graph resources, staging, commits, merges, rebases,
 pushes, PR handoff, conflict resolution, and native iOS SourceChanges remain
 planned future sub-slices.
 
+The next shaped sub-slice is Slice 6B: Git Index Mutation Foundation. It is
+limited to explicit `git_stage`/`git_unstage` operations over trusted-root
+relative paths, with idempotency, mutation reason, expected HEAD preconditions,
+bounded before/after evidence, `git_index_change` resources, and
+`git.lifecycle` stream events. Commits, branch operations, merges/rebases/
+resets, pushes/PRs, conflict resolution, worktree graph resources, and native
+SourceChanges remain deferred.
+
 It also maps every BPRC backlog row:
 
 - `BPRC-FEATURE-01`: capability discovery, routing, and intent execution.
@@ -181,3 +189,10 @@ planned for a later program-execution slice; Slice 5A did not restore language
 runtimes, PTY sessions, web/network research, git/source-control, subagents,
 scheduling, notifications, or native iOS process panels. Queue-backed internal
 job dispatch also remains deferred pending an explicit queued-grant design.
+
+`P2AER-INV-013` remains current baseline for Slice 6A read-only Git status and
+diff evidence. Slice 6B may start as the first mutating sub-slice only within
+the index boundary: stage/unstage explicit paths, resource-backed evidence,
+lifecycle stream evidence, and static guards proving no commit, branch,
+merge/rebase/reset, push/PR, worktree graph, or native SourceChanges surface was
+added.
