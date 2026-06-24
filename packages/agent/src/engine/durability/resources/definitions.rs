@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 
 use super::git_definitions::git_resource_type_definitions;
+use super::goal_definitions::goal_question_resource_type_definitions;
 use super::job_definitions::job_resource_type_definitions;
 use super::memory_definitions::memory_resource_type_definitions;
 use super::types::{
@@ -49,41 +50,6 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
                 "part_of",
             ],
             json!({"read": ["resource.read"], "write": ["resource.write"], "promote": ["resource.write"], "delete": ["resource.write"]}),
-        ),
-        builtin_type(
-            "goal",
-            "tron.resource.goal.v1",
-            json!({
-                "type": "object",
-                "required": ["intent"],
-                "additionalProperties": true,
-                "properties": {
-                    "intent": {"type": "string"},
-                    "successCriteria": {"type": "array", "items": {"type": "string"}},
-                    "inputResources": {"type": "array", "items": {"type": "string"}},
-                    "expectedOutputKinds": {"type": "array", "items": {"type": "string"}},
-                    "constraints": {"type": "object"},
-                    "riskBudget": {"type": "object"},
-                    "authorityPolicy": {"type": "object"},
-                    "retentionPolicy": {"type": "object"},
-                    "completionCondition": {"type": "string"}
-                }
-            }),
-            vec!["open", "in_progress", "completed", "failed", "archived"],
-            vec![
-                "input",
-                "subgoal",
-                "produced",
-                "produces",
-                "candidate_output",
-                "promoted_output",
-                "decided_by",
-                "supported_by",
-                "contradicted_by",
-                "supersedes",
-                "derived_from",
-            ],
-            json!({"read": ["resource.read"], "write": ["resource.write"], "complete": ["resource.write"]}),
         ),
         builtin_type(
             "decision",
@@ -681,6 +647,7 @@ pub fn builtin_resource_type_definitions() -> Vec<RegisterResourceType> {
         ),
     ];
     definitions.extend(git_resource_type_definitions());
+    definitions.extend(goal_question_resource_type_definitions());
     definitions.extend(job_resource_type_definitions());
     definitions.extend(memory_resource_type_definitions());
     definitions

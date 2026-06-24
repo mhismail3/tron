@@ -1598,6 +1598,26 @@ Residual risks and deferred work:
 - Expiry and cancellation must be deterministic and testable without wall-clock
   race assumptions; prefer injectable time seams in the domain service.
 
+Implementation candidate status:
+
+- Branch `codex/phase-2-slice-7a-goal-question-foundation-v2` from
+  `origin/main@9950ea484299901e09af9077f33466021118ca33` implements the Slice
+  7A candidate foundation for review.
+- Candidate scope adds `domains/goals`, execute-only goal/question operation
+  adapters, `user_question` and `goal_answer` resource definitions, and a
+  narrowed generic `goal` resource schema using existing resources, streams,
+  traces, replay refs, and execute idempotency.
+- Candidate operations are `goal_create`, `goal_list`, `goal_inspect`,
+  `goal_cancel`, `question_create`, `question_list`, `question_inspect`, and
+  `question_answer`.
+- Candidate evidence covers create/list/inspect/cancel goal behavior,
+  create/list/inspect/answer question behavior, bounded list truncation,
+  scope isolation, expiry/stale-version/malformed-input fail-closed paths,
+  answer reason/authority/freshness/idempotency provenance, and replaying the
+  same answer idempotency key without double-answering.
+- Status is implementation candidate / pending review, not accepted mainline
+  baseline.
+
 ### Slice 8: Web, Research, Browser, And Fetch
 
 Objective: restore network research with provenance and explicit authority.

@@ -5,7 +5,8 @@
 //! filesystem package operations, inspect Git state, stage Git index changes,
 //! commit already-staged Git changes under freshness guards, start a local Git
 //! branch without checkout or file updates, inventory local Git branches, run
-//! bounded local commands, and manage durable non-interactive jobs.
+//! bounded local commands, manage durable non-interactive jobs, and manage
+//! durable goal/question lifecycle records.
 
 use serde_json::{Map, Value, json};
 
@@ -49,7 +50,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "name": "execute",
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
-                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff/branch-inventory evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, start one new local Git branch at the expected HEAD without checkout/file updates, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, inspect agent trace/log records, and inspect catalog discovery evidence. ",
+                            "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, inspect Git repository status/diff/branch-inventory evidence, stage or unstage explicit Git index paths with expected HEAD checks, create one commit from the already-staged Git index with expected HEAD and expected index tree checks, start one new local Git branch at the expected HEAD without checkout/file updates, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, create/list/inspect/cancel durable goals, create/list/inspect/answer durable user questions, inspect agent trace/log records, and inspect catalog discovery evidence. ",
                     "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
@@ -70,7 +71,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "operation".to_owned(),
         json!({
             "type": "string",
-            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
         }),
     );
     insert_string(&mut properties, "input", "Text to record for observe.");
@@ -158,6 +159,69 @@ fn execute_model_request_schema() -> serde_json::Value {
         &mut properties,
         "jobResourceId",
         "Durable job_process resource id for job_status, job_log, or job_cancel.",
+    );
+    insert_string(
+        &mut properties,
+        "goalResourceId",
+        "Durable goal resource id for goal_inspect, goal_cancel, or question_create.",
+    );
+    insert_string(
+        &mut properties,
+        "questionResourceId",
+        "Durable user_question resource id for question_inspect or question_answer.",
+    );
+    insert_string(
+        &mut properties,
+        "objective",
+        "Bounded objective text for goal_create.",
+    );
+    insert_string(
+        &mut properties,
+        "prompt",
+        "Bounded prompt text for question_create.",
+    );
+    insert_string(
+        &mut properties,
+        "answerText",
+        "Bounded user answer text for question_answer.",
+    );
+    insert_string(
+        &mut properties,
+        "expectedQuestionVersionId",
+        "Expected current user_question version id for question_answer.",
+    );
+    insert_string(
+        &mut properties,
+        "expiresAt",
+        "Optional RFC3339 expiry timestamp for question_create.",
+    );
+    properties.insert(
+        "allowFreeForm".to_owned(),
+        json!({"type": "boolean", "description": "Whether question_create accepts free-form answers when options are also supplied."}),
+    );
+    properties.insert(
+        "successCriteria".to_owned(),
+        json!({"type": "array", "description": "Bounded success criteria strings for goal_create."}),
+    );
+    properties.insert(
+        "constraints".to_owned(),
+        json!({"type": "object", "description": "Bounded structured constraints for goal_create."}),
+    );
+    properties.insert(
+        "options".to_owned(),
+        json!({"type": "array", "description": "Bounded answer options for question_create."}),
+    );
+    properties.insert(
+        "queueRefs".to_owned(),
+        json!({"type": "array", "description": "Explicit bounded queue receipt refs to persist as evidence."}),
+    );
+    properties.insert(
+        "planRefs".to_owned(),
+        json!({"type": "array", "description": "Explicit bounded goal plan refs to persist as evidence."}),
+    );
+    properties.insert(
+        "evidenceRefs".to_owned(),
+        json!({"type": "array", "description": "Explicit bounded evidence refs to persist with goals, questions, or answers."}),
     );
     insert_string(
         &mut properties,
@@ -313,6 +377,14 @@ mod tests {
         assert!(operations.contains("git_unstage"));
         assert!(operations.contains("git_commit"));
         assert!(operations.contains("git_branch_start"));
+        assert!(operations.contains("goal_create"));
+        assert!(operations.contains("goal_list"));
+        assert!(operations.contains("goal_inspect"));
+        assert!(operations.contains("goal_cancel"));
+        assert!(operations.contains("question_create"));
+        assert!(operations.contains("question_list"));
+        assert!(operations.contains("question_inspect"));
+        assert!(operations.contains("question_answer"));
         assert!(
             !operations.contains("file_read") && !operations.contains("file_write"),
             "legacy file operations must not be model-reachable"
@@ -320,13 +392,25 @@ mod tests {
         assert!(!operations.contains("git_checkout"));
         assert!(!operations.contains("git_push"));
         assert!(!operations.contains("git_reset"));
+        assert!(!operations.contains("planner"));
+        assert!(!operations.contains("reminder"));
+        assert!(!operations.contains("notification"));
+        assert!(!operations.contains("subagent"));
         assert!(schema["properties"].get("branchName").is_some());
         assert!(schema["properties"].get("maxBranches").is_some());
         assert!(schema["properties"].get("maxBranchBytes").is_some());
+        assert!(schema["properties"].get("goalResourceId").is_some());
+        assert!(schema["properties"].get("questionResourceId").is_some());
+        assert!(
+            schema["properties"]
+                .get("expectedQuestionVersionId")
+                .is_some()
+        );
+        assert!(schema["properties"].get("answerText").is_some());
         assert!(schema["properties"].get("target").is_none());
         assert!(schema["properties"].get("contractId").is_none());
         assert!(schema["properties"].get("functionId").is_none());
-        assert!(schema["properties"].get("constraints").is_none());
+        assert!(schema["properties"].get("autonomy").is_none());
     }
 
     #[test]

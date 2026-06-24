@@ -1105,3 +1105,12 @@ packages/agent/src/domains/git/mutation.rs	rust	implementation	agent:git	owner-p
 packages/agent/src/domains/git/service.rs	rust	implementation	agent:git	owner-private status, diff, path, and git command service; callers use registered functions
 packages/agent/src/domains/git/types.rs	rust	implementation	agent:git	owner-private request, result, and evidence helpers for status/index/commit/branch-start/branch-inventory; callers must use git contracts or facade
 packages/agent/src/engine/durability/resources/git_definitions.rs	rust	implementation	rust:engine	owner-private Git evidence resource definition module; callers use engine resource facade
+packages/agent/src/domains/capability/operations/goals.rs	rust	implementation	agent:capability	owner-private execute adapter; callers enter through capability::execute
+packages/agent/src/domains/goals/errors.rs	rust	implementation	agent:goals	owner-private error helpers; callers receive capability errors through execute
+packages/agent/src/domains/goals/mod.rs	rust	facade	agent:goals	domain root owns docs and execute-only lifecycle boundary; behavior stays in owner modules
+packages/agent/src/domains/goals/schema_tests.rs	rust	test-support	agent:goals	test-only schema alignment guard; production code must not depend on it
+packages/agent/src/domains/goals/service.rs	rust	implementation	agent:goals	owner-private lifecycle service; callers enter through capability::execute adapters
+packages/agent/src/domains/goals/support.rs	rust	implementation	agent:goals	owner-private validation, scope, stream, trace, replay, and resource-ref helpers
+packages/agent/src/domains/goals/tests.rs	rust	test-support	agent:goals	test-only lifecycle and idempotency regression coverage; production code must not depend on it
+packages/agent/src/domains/goals/types.rs	rust	contract	agent:goals	may be shared inside the owning boundary as serializable lifecycle record shapes
+packages/agent/src/engine/durability/resources/goal_definitions.rs	rust	implementation	rust:engine	owner-private goal/question resource definition module; callers use engine resource facade

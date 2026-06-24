@@ -217,15 +217,16 @@ metadata without adding a durable resource kind. Branch deletion/rename, arbitra
 checkout, remote push/PR, merge/rebase/reset, conflict workflows, worktree graph
 resources, and native SourceChanges remain deferred.
 
-`P2AER-INV-010` is selected for the next implementation slice as `Slice 7A`:
-Goal And Question Foundation. The smallest safe first cut is a backend
-domain/package that owns durable goal lifecycle records, user-question records,
-idempotent answer provenance, lifecycle stream evidence, queue/resource refs,
-trace refs, and replay refs behind the existing `capability::execute`
-primitive. It should reuse existing queue/resource/stream/replay substrate and
-the existing generic `goal` resource kind where sufficient, adding only missing
-package-owned resource definitions such as `user_question`, `goal_plan`, or
-`goal_answer` if needed. Autonomous goal execution, hidden prompt queues,
-planner/task decomposition, scheduler/reminder behavior, notifications/APNs,
-subagents, native iOS Work dashboards, native question sheets, public `/engine`
-goal APIs, and copied historical DTOs remain deferred.
+`P2AER-INV-010` has a Slice 7A implementation candidate pending review:
+Goal And Question Foundation. The candidate adds a backend `domains/goals`
+owner for durable goal lifecycle records, user-question records, idempotent
+answer provenance, lifecycle stream evidence, queue/resource refs, trace refs,
+and replay refs behind the existing `capability::execute` primitive. It reuses
+existing resource/stream/replay/idempotency substrate, narrows the generic
+`goal` resource schema for lifecycle/evidence refs, and adds only
+`user_question` and `goal_answer` resource kinds. Autonomous goal execution,
+hidden prompt queues, planner/task decomposition, scheduler/reminder behavior,
+notifications/APNs, subagents, native iOS Work dashboards, native question
+sheets, public `/engine` goal APIs, and copied historical DTOs remain deferred.
+This candidate is not accepted/current baseline until independent review and
+mainline integration complete.

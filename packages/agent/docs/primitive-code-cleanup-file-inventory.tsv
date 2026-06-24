@@ -1780,3 +1780,12 @@ packages/agent/src/domains/git/tests.rs	retain	phase2 git	P2AER-S6E	Git tests re
 packages/agent/src/domains/git/types.rs	retain	phase2 git	P2AER-S6E	Git types retained for repository facts, branch-inventory bounds, and git_index_change, git_commit, and git_branch_start resource payloads.
 packages/agent/src/domains/capability/operations/git.rs	retain	phase2 git	P2AER-S6E	Capability execute Git adapter retained for provider-facing git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, and git_branch_start operation values.
 packages/agent/src/engine/durability/resources/git_definitions.rs	retain	phase2 git	P2AER-S6D	Git index change, commit, and branch-start resource definitions retained for engine-owned evidence schema registration.
+packages/agent/src/domains/capability/operations/goals.rs	retain	phase2 goals	P2AER-S7A	Capability execute goals adapter retained for provider-facing goal and question lifecycle operation values.
+packages/agent/src/domains/goals/errors.rs	retain	phase2 goals	P2AER-S7A	Goals error helpers retained for owner-private fail-closed capability error mapping.
+packages/agent/src/domains/goals/mod.rs	retain	phase2 goals	P2AER-S7A	Goals module root retained for progressive disclosure and execute-only lifecycle invariants.
+packages/agent/src/domains/goals/schema_tests.rs	retain	phase2 goals	P2AER-S7A	Goals schema tests retained to guard goal, user_question, and goal_answer resource definitions.
+packages/agent/src/domains/goals/service.rs	retain	phase2 goals	P2AER-S7A	Goals service retained for durable lifecycle records, answer provenance, scope checks, and stream evidence.
+packages/agent/src/domains/goals/support.rs	retain	phase2 goals	P2AER-S7A	Goals support helpers retained for bounded validation, refs, scope isolation, trace, replay, and lifecycle streams.
+packages/agent/src/domains/goals/tests.rs	retain	phase2 goals	P2AER-S7A	Goals tests retained for lifecycle, fail-closed, bounded list, and idempotent answer replay coverage.
+packages/agent/src/domains/goals/types.rs	retain	phase2 goals	P2AER-S7A	Goals record types retained for durable goal, question, answer, and idempotency payload schemas.
+packages/agent/src/engine/durability/resources/goal_definitions.rs	retain	phase2 goals	P2AER-S7A	Goal question resource definitions retained for engine-owned user_question and goal_answer schema registration.

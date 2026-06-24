@@ -454,6 +454,15 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("git_unstage"));
     assert!(result.contains("git_commit"));
     assert!(result.contains("git_branch_start"));
+    assert!(result.contains("goal_create"));
+    assert!(result.contains("goal_list"));
+    assert!(result.contains("goal_inspect"));
+    assert!(result.contains("goal_cancel"));
+    assert!(result.contains("question_create"));
+    assert!(result.contains("question_list"));
+    assert!(result.contains("question_inspect"));
+    assert!(result.contains("question_answer"));
+    assert!(result.contains("expectedQuestionVersionId"));
     assert!(result.contains("expectedHead"));
     assert!(result.contains("expectedIndexTree"));
     assert!(result.contains("branchName"));
@@ -461,6 +470,10 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(!result.contains("git_reset"));
     assert!(!result.contains("git_checkout"));
     assert!(!result.contains("git_branch_delete"));
+    assert!(!result.contains("subagent"));
+    assert!(!result.contains("reminder"));
+    assert!(!result.contains("notification"));
+    assert!(!result.contains("planner"));
     assert!(!result.contains("file_read"));
     assert!(!result.contains("file_write"));
     assert!(result.contains("process_run"));

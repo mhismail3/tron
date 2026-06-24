@@ -146,6 +146,8 @@ fn resource_ids_from_invocation(invocation: &Invocation) -> Vec<String> {
         "sourceResourceId",
         "targetResourceId",
         "goalResourceId",
+        "questionResourceId",
+        "answerResourceId",
     ]
     .into_iter()
     .filter_map(|field| invocation.payload.get(field).and_then(Value::as_str))

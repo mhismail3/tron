@@ -37,6 +37,7 @@ use tracing::{info, warn};
 mod catalog;
 mod filesystem;
 mod git;
+mod goals;
 mod jobs;
 mod logs;
 mod memory;
@@ -53,6 +54,10 @@ use filesystem::{
 use git::{
     git_branch_inventory, git_branch_start, git_commit, git_diff, git_stage, git_status,
     git_unstage,
+};
+use goals::{
+    goal_cancel, goal_create, goal_inspect, goal_list, question_answer, question_create,
+    question_inspect, question_list,
 };
 use jobs::{job_cancel, job_list, job_log, job_start, job_status};
 use logs::log_recent;
@@ -208,7 +213,19 @@ fn validate_execute_context(
     }
     if matches!(
         operation,
-        "job_start" | "job_status" | "job_list" | "job_log" | "job_cancel"
+        "job_start"
+            | "job_status"
+            | "job_list"
+            | "job_log"
+            | "job_cancel"
+            | "goal_create"
+            | "goal_list"
+            | "goal_inspect"
+            | "goal_cancel"
+            | "question_create"
+            | "question_list"
+            | "question_inspect"
+            | "question_answer"
     ) {
         require_current_session(invocation, operation)?;
     }
@@ -225,7 +242,11 @@ fn validate_execute_context(
         | "git_commit"
         | "git_branch_start"
         | "job_start"
-        | "job_cancel" => require_idempotency_key(invocation, operation),
+        | "job_cancel"
+        | "goal_create"
+        | "goal_cancel"
+        | "question_create"
+        | "question_answer" => require_idempotency_key(invocation, operation),
         _ => Ok(()),
     }
 }
@@ -306,6 +327,14 @@ async fn execute_operation(
         "job_list" => job_list(invocation, deps).await?,
         "job_log" => job_log(invocation, deps).await?,
         "job_cancel" => job_cancel(invocation, deps).await?,
+        "goal_create" => goal_create(invocation, deps).await?,
+        "goal_list" => goal_list(invocation, deps).await?,
+        "goal_inspect" => goal_inspect(invocation, deps).await?,
+        "goal_cancel" => goal_cancel(invocation, deps).await?,
+        "question_create" => question_create(invocation, deps).await?,
+        "question_list" => question_list(invocation, deps).await?,
+        "question_inspect" => question_inspect(invocation, deps).await?,
+        "question_answer" => question_answer(invocation, deps).await?,
         "trace_list" => trace_list(invocation, deps)?,
         "trace_get" => trace_get(invocation, deps)?,
         "log_recent" => log_recent(invocation, deps).await?,
@@ -319,7 +348,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, git_branch_inventory, git_stage, git_unstage, git_commit, git_branch_start, process_run, job_start, job_status, job_list, job_log, job_cancel, goal_create, goal_list, goal_inspect, goal_cancel, question_create, question_list, question_inspect, question_answer, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }

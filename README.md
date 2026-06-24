@@ -710,6 +710,11 @@ stop/retire functions, verified source-tree package digests, scoped token
 minting, conformance reports, and `worker_package` resource/event evidence.
 It is host lifecycle infrastructure, not a provider-visible toolbox, and it
 does not add fixed iOS product panels.
+`domains/goals` owns the Slice 7A candidate backend foundation for durable
+goal, user-question, and answer provenance records. It uses existing engine
+resources, streams, traces, replay refs, and the execute idempotency ledger; it
+does not run autonomous goals, plan task decomposition, schedule reminders,
+launch subagents, create notification inboxes, or add native Work/question UI.
 `stream.rs` publishes only that domain's declared topics. Cross-domain access
 goes through explicit domain services or shared DTOs, so an engineer can follow
 a capability by reading one domain folder instead of a central dispatch table.
@@ -878,7 +883,9 @@ schema requires an `operation` field and accepts only operation-specific
 primitive fields such as `input`, `scope`, `namespace`, `key`, `value`,
 `path`, `content`, `command`, `traceId`, `traceRecordId`, `limit`,
 `timeoutMs`, `maxOutputBytes`, `jobResourceId`, `state`, `cleanupAfterSeconds`,
-`kind`, `id`, catalog search filters,
+`goalResourceId`, `questionResourceId`, `objective`, `prompt`, `answerText`,
+`expectedQuestionVersionId`, `expiresAt`, `allowFreeForm`, `successCriteria`,
+`constraints`, `queueRefs`, `planRefs`, `evidenceRefs`, `kind`, `id`, catalog search filters,
 `idempotencyKey`, and `reason`.
 Agent-launched `execute` invocations carry provider type, provider call id,
 run/turn ids, canonical working directory, and trace parentage as trusted engine
@@ -939,6 +946,14 @@ Current primitive operations:
 | `job_list` | List durable `job_process` resources in the current session scope, optionally filtered by lifecycle state. |
 | `job_log` | Read bounded stdout/stderr previews and output-resource refs for one durable job. |
 | `job_cancel` | Request cancellation for a running durable job; runtime finalization records terminal cancellation with bounded output evidence after signalling the owned process group. |
+| `goal_create` | Create a scoped durable `goal` record with bounded objective, owner/scope, queue/plan/evidence refs, trace/replay refs, lifecycle state, and resource evidence. |
+| `goal_list` | List scoped goal records with bounded summaries and explicit truncation metadata. |
+| `goal_inspect` | Inspect one scoped goal record with current resource/version refs and lifecycle evidence. |
+| `goal_cancel` | Cancel one nonterminal goal idempotently with required reason, lifecycle stream evidence, and resource-version freshness. |
+| `question_create` | Create a scoped durable `user_question` record, optionally associated with a goal, with prompt/options/free-form/expiry and trace/replay evidence. |
+| `question_list` | List scoped user questions with bounded summaries and explicit truncation metadata. |
+| `question_inspect` | Inspect one scoped user question with current resource/version refs, lifecycle state, and answer summary when present. |
+| `question_answer` | Record one idempotent `goal_answer` handoff for a pending question after expected-version and expiry checks, with required reason, authority/freshness evidence, stream refs, and no authority minting. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -987,6 +1002,24 @@ Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, web/network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
 not part of this foundation.
+The Slice 7A candidate `goals` domain owns durable backend records only.
+Provider-visible access remains operation values behind the single
+`capability::execute` primitive: `goal_create`, `goal_list`, `goal_inspect`,
+`goal_cancel`, `question_create`, `question_list`, `question_inspect`, and
+`question_answer`. Goal records use the generic `goal` resource kind with
+bounded objective/success criteria/constraints, owner/scope, queue/plan/
+evidence refs, lifecycle, trace refs, replay refs, and revisions. Question
+records use `user_question` resources with pending/answered/expired/cancelled
+lifecycle, prompt/options/free-form allowance, expiry, goal refs, trace/replay
+refs, and answer summaries. Answers create `goal_answer` resources with the
+question version they answered, answer text, required reason, actor,
+authority/freshness evidence, idempotency details, trace/replay refs, and
+bounded provider-visible refs. Answering requires a stable idempotency key and
+`expectedQuestionVersionId`; stale, wrong-scope, expired, closed, malformed,
+empty, oversized, missing-reason, or untrusted-context calls fail closed.
+This foundation does not add an autonomous goal runner, planner, hidden prompt
+queue, scheduler/reminder, notification/APNs behavior, subagents, public
+`/engine` goal API expansion, settings fields, or native Work/question UI.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
@@ -1199,7 +1232,11 @@ runtime cancellation first signals the owned process group and terminal
 finalization then records bounded output evidence. If a nonterminal cancel
 request wins the resource-version race, finalization reloads, preserves the
 request metadata, and retries the terminal update so output refs stay attached.
-Late cancel requests do not overwrite already-completed jobs. The replay snapshot includes resolved
+Late cancel requests do not overwrite already-completed jobs. Goal/question
+records are generic `goal`, `user_question`, and `goal_answer` resources with
+lifecycle events on `goals.lifecycle`; answer handoff uses the execute
+idempotency ledger and resource expected-version checks so replaying the same
+answer key returns the same evidence without double-answering. The replay snapshot includes resolved
 session events, provider request audits, trace records, engine idempotency
 entries, engine invocations, engine stream rows, and engine queue rows. It adds
 stable section hashes plus request/result/outcome/payload hashes where the
@@ -1220,7 +1257,7 @@ artifacts.
 
 ## Event System
 
-The primitive branch event store uses an immutable, append-only log with **24 typed event variants**. Sessions remain tree-structured for forks, but the persisted event surface is limited to loop truth: session lifecycle, messages, provider request audits, provider streaming, primitive `execute` invocations, compaction/context boundaries, metadata, errors, and turn failure. Domain lifecycle streams such as `jobs.lifecycle`, `approval.lifecycle`, and `git.lifecycle` live in the engine stream substrate, not in the transport-visible session event enum.
+The primitive branch event store uses an immutable, append-only log with **24 typed event variants**. Sessions remain tree-structured for forks, but the persisted event surface is limited to loop truth: session lifecycle, messages, provider request audits, provider streaming, primitive `execute` invocations, compaction/context boundaries, metadata, errors, and turn failure. Domain lifecycle streams such as `jobs.lifecycle`, `approval.lifecycle`, `git.lifecycle`, and `goals.lifecycle` live in the engine stream substrate, not in the transport-visible session event enum.
 
 The event enum is generated by the `define_events!` macro in `packages/agent/src/domains/session/event_store/types/macros.rs`, invoked from `packages/agent/src/domains/session/event_store/types/generated.rs`. Transport-visible event DTOs and stream factories live under `packages/agent/src/shared/protocol/events/`. Adding a new event means editing `generated.rs` and adding a payload type only when the event is true loop infrastructure. Product events, fixed capability events, rules/skills/hooks, prompt queue events, worktree/repo events, push-token events, and config mutation events are intentionally absent on this branch.
 
@@ -1569,7 +1606,7 @@ without exposing bearer/API/OAuth secrets.
 | `engine_catalog_changes`, `engine_catalog_workers`, `engine_catalog_functions` | Live catalog audit trail plus reopened worker/function snapshots for registration, health, visibility, and lifecycle changes |
 | `engine_idempotency_entries` | Durable idempotency reservations and replay records |
 | `engine_state_entries`, `engine_queue_items`, `engine_resource_leases`, `engine_compensation_records` | Primitive worker state owned by the engine runtime |
-| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process` lifecycle records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
+| `engine_resource_type_definitions`, `engine_resources`, `engine_resource_versions`, `engine_resource_links`, `engine_resource_events` | Generic typed resource substrate for agent-owned artifacts, generated UI surfaces, execution outputs, durable `job_process`, goal, `user_question`, and `goal_answer` lifecycle records, memory engine/policy/record/prompt-trace/eval-run/migration contracts, and agent results; resource versions carry `available`, `quarantined`, `damaged`, or `discarded` state |
 | `storage_metadata`, `storage_payload_refs` | Storage generation marker plus owner refs for blob-backed payloads (owner kind/id, field, preview, hash, size, retention, trace/session/workspace) |
 | `storage_checkpoints`, `storage_exports`, `storage_retention_runs` | Storage operations audit records for checkpoint/export/retention capabilities |
 

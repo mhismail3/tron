@@ -979,6 +979,55 @@ Discovery validation:
 - `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
   passed with 14 tests.
 
+## Phase 2 Slice 7A Implementation Candidate: Goal And Question Foundation
+
+Implementation branch: `codex/phase-2-slice-7a-goal-question-foundation-v2`.
+Baseline:
+`origin/main@9950ea484299901e09af9077f33466021118ca33`
+(`docs: shape phase 2 slice 7a handoff`).
+
+Candidate status: pending review. This section records implementation
+candidate evidence only; it does not mark Slice 7A accepted or current
+mainline baseline.
+
+Candidate scope:
+
+- Added `packages/agent/src/domains/goals/` as the backend owner for durable
+  goal records, user-question records, and answer provenance.
+- Kept provider-visible access under `capability::execute` operation values:
+  `goal_create`, `goal_list`, `goal_inspect`, `goal_cancel`,
+  `question_create`, `question_list`, `question_inspect`, and
+  `question_answer`.
+- Reused existing engine resources, streams, traces, replay refs, and the
+  execute idempotency ledger; no autonomous runner, planner, scheduler,
+  reminder, notification, subagent, public `/engine` goal API, settings, or
+  native Work/question UI was added.
+- Added `user_question` and `goal_answer` resource definitions and expanded the
+  generic `goal` resource schema narrowly for lifecycle/evidence refs.
+
+Candidate evidence:
+
+- Goal create/list/inspect/cancel records include scoped resource refs,
+  lifecycle state, bounded summaries, queue/plan/evidence refs, trace refs,
+  replay refs, and cancellation reason/idempotency details.
+- Question create/list/inspect/answer records include optional goal association,
+  prompt/options/free-form/expiry fields, pending/answered/expired/cancelled
+  lifecycle, answer provenance, authority/freshness refs, stream evidence, and
+  expected-version guarding.
+- Replaying the same `question_answer` idempotency key through
+  `capability::execute` returns the stored answer evidence and leaves exactly
+  one `goal_answer` resource.
+- Stale expected versions, wrong scope, expired/closed questions,
+  malformed/missing resource ids, missing reason, empty/oversized text, and
+  missing/untrusted execution context fail closed in focused candidate tests.
+
+Candidate validation run during implementation:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all`
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::goals -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture`
+
 ## Validation Log
 
 | Command | Result | Evidence |
