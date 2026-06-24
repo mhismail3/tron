@@ -17,23 +17,21 @@ Companion artifacts:
 
 ## Current Restoration Baseline
 
-Discovery update: 2026-06-23.
+Discovery update: 2026-06-24.
 
 Canonical plan file: this scorecard. The README names this file as the durable
 Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
-Current implementation baseline assumed by this update:
-`codex/phase-2-filesystem-agent-tools-current` through
-`2650dd0b9 Harden filesystem truncated snapshot mutations`, including
-`27e5847c9 Implement Phase 2 filesystem agent tools`.
+Current implementation baseline verified by this update:
+`origin/main@ea64b991ee430ce4ca94417d40d567a88b51bc50`
+(`test: run lib tests serially in tron ci`). That line includes the
+restoration consolidation checkpoint `455e0c8a5` and the tracker update
+`705199d37`, carrying accepted source/fix/closeout work through Order 21.
 
-Checkout note: the active Codex worktree for this update was detached at
-`2650dd0b9`, matching the requested latest completed baseline. The delegated
-`/Users/<USER>/Workspace/tron` checkout was on
-`codex/phase-2-memory-foundation-current` at `4c35b2119`, behind the requested
-filesystem-tools baseline, so this plan update uses the detached
-`2650dd0b9` worktree as the source of truth.
+Checkout note: this update started after `git fetch --prune origin` from a
+Codex discovery branch created at the same commit as `origin/main`. The
+retrospective tracker remains the source of truth for source-resolution state.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -43,17 +41,18 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 3: memory foundation, redacted record custody, prompt traces, and
   migration envelopes;
 - Slice 4: bounded filesystem agent toolbox with resource-backed previews,
-  commits, patch evidence, and truncated-snapshot hardening.
+  commits, patch evidence, and truncated-snapshot hardening;
+- Slice 5A: durable jobs and process lifecycle foundation with accepted race
+  hardening.
 
-Selected next implementation slice:
-**Slice 5A: Durable Jobs And Process Lifecycle Foundation**. This is the first
-sub-slice of broad Slice 5. It should restore durable background command
-execution, logs, cancellation, timeout, terminal state, and artifact/resource
-evidence while preserving the existing synchronous `process_run` operation as a
-short bounded primitive. It should not restore PTY sessions, embedded
-interpreter runtimes, git/source-control workflows, web/network research,
-subagents, goals/questions, scheduling, notifications, or native iOS process
-panels.
+Blocked next action:
+**Phase 2 Slice 6: Git and Worktree Restoration source resolution**. Slice 6 is
+the next roadmap slice after accepted Slice 5A, but current local and remote
+refs do not contain a completed Slice 6 implementation branch, range, canonical
+artifacts, or accepted fix commits. The exact current action is `source
+blocked`: orchestration must provide a resolvable source ref/range or start an
+explicit new implementation order. Do not invent a Slice 6 source from legacy
+pre-restoration/productization work; legacy remains evidence, not authority.
 
 ## Scope
 
@@ -694,7 +693,8 @@ Likely implementation files/domains to inspect or touch:
 
 #### Slice 5A Implementation Status
 
-Status: **implemented on branch `codex/phase-2-jobs-process-lifecycle-current`**.
+Status: **implemented on branch `codex/phase-2-jobs-process-lifecycle-current`
+and accepted on current consolidated `main`**.
 
 Shipped behavior:
 
@@ -767,8 +767,9 @@ Core/modular split as implemented:
 Remaining non-goals after Slice 5A: PTY/interactive terminal, interpreter or
 runtime package, git/worktree/source-control behavior, web/network behavior,
 subagents, scheduling, native iOS process panels, and production deployment
-behavior. Follow-up re-audit fixes remain branch-scoped until final all-slices
-consolidation and audit.
+behavior. Follow-up re-audit fixes are now represented on the consolidated
+mainline; Order 21 remains blocked until a resolvable Slice 6 source branch or
+explicit new implementation order exists.
 
 ### Slice 6: Git, Worktrees, And Source Control
 
@@ -1152,9 +1153,11 @@ Implementation slices add:
 ## Closure Verdict
 
 Phase 2 remains source-backed and proceeds one slice at a time. At the
-2026-06-23 retrospective audit discovery update, Slices 1 through 4 and Slice
-5A are complete through the jobs process lifecycle hardening baseline
-`0d76be40df3ec6ddf96574546ec220fb992c6478`. Before starting another feature
-restoration slice, retrospective audit should begin from
-`restoration-retrospective-audit-status.md` and preserve the Slice 5A
-constraints and non-goals above.
+2026-06-24 discovery update, `origin/main` is
+`ea64b991ee430ce4ca94417d40d567a88b51bc50`; Slices 1 through 4 and Slice 5A
+are represented on the consolidated mainline, and Order 21 remains blocked
+because no completed Phase 2 Slice 6 git/worktree source branch, range,
+canonical artifacts, or accepted fix commits are available. Before starting
+another feature restoration slice, orchestration must either provide that
+resolvable Slice 6 source or issue an explicit new implementation order while
+preserving the Slice 5A constraints and non-goals above.

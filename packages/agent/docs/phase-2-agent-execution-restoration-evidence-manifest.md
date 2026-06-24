@@ -207,11 +207,9 @@ Branch: `codex/phase-2-filesystem-agent-tools-current`
 
 Baseline HEAD: `4c35b2119`
 
-This section records branch-scoped implementation evidence for the Order 19
-filesystem slice. It is not a claim that Slice 4 is already integrated into the
-separate retrospective tracker/current consolidation line. Final all-slices
-consolidation must still port these branch artifacts or explicitly supersede
-them with truthful replacement evidence.
+This section records implementation evidence for the Order 19 filesystem
+slice. The branch refs below remain provenance, and their accepted source/fix
+artifacts are represented on the current consolidated mainline.
 
 Scope implemented:
 
@@ -283,9 +281,9 @@ Order 19 audit-fix evidence on branch `codex/order-19-filesystem-tools-fix`:
 - Narrowed provider/evidence claims: provider converter tests cover operation
   names and prompt guidance; filesystem/capability execution tests cover
   mutation refusals for unavailable hashes and truncated exact-patch previews.
-- Clarified that this Slice 4 evidence is branch-scoped historical evidence.
-  Final all-slices consolidation still must port these artifacts or truthfully
-  supersede them.
+- Clarified the historical branch evidence for Slice 4. Current consolidated
+  mainline state carries the accepted artifacts; the branch refs remain
+  provenance rather than a separate source of authority.
 
 Adversarial self-review:
 
@@ -380,9 +378,9 @@ Focused validation:
 No Swift or Xcode project files changed, so XcodeGen and iOS simulator tests
 were not run for Slice 5A.
 
-Order 20/Slice 5A re-audit evidence on follow-up branches remains
-branch-scoped until the final all-slices consolidation and audit explicitly
-rolls it into the canonical Phase 2 checkpoint.
+Order 20/Slice 5A re-audit evidence on follow-up branches is represented on the
+current consolidated mainline; the branch refs remain provenance for the
+accepted fixes.
 
 Adversarial self-review:
 

@@ -410,7 +410,7 @@ Current living entry points:
 - `packages/agent/docs/restoration-retrospective-audit-status.md`: active
   retrospective audit tracker for the ordered completed-slice queue, audit
   constraints, first-audit target, accepted deferred scope, and current
-  Phase 2 Slice 5A baseline.
+  Phase 2 Slice 5A baseline plus blocked Order 21 source-resolution state.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
