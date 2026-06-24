@@ -307,6 +307,45 @@ async fn inline_body_refs_are_rejected() {
 }
 
 #[tokio::test]
+async fn nested_inline_body_refs_are_rejected_on_retain() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-nested-inline-configure").await;
+
+    let rejected = invoke_write_result(
+        &ctx,
+        super::RETAIN_FUNCTION,
+        json!({
+            "recordId": "memory_record:nested-inline-rejected",
+            "subject": "nested-inline",
+            "scope": {"kind": "session", "id": "memory-session"},
+            "preview": "Nested inline private material",
+            "bodyRef": {
+                "kind": "resource_pointer",
+                "resourceId": "blob:nested-inline",
+                "metadata": {
+                    "text": "secret private body"
+                }
+            },
+            "provenance": {"source": "test"},
+            "confidence": {"score": 0.9},
+            "sensitivity": "private",
+            "retention": {"policy": "explicit"}
+        }),
+        "memory-nested-inline-retain",
+    )
+    .await;
+
+    assert!(
+        rejected
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("cannot include inline text")),
+        "nested inline body text must be rejected: {:?}",
+        rejected.error
+    );
+}
+
+#[tokio::test]
 async fn prompt_trace_records_audit_without_private_memory_content() {
     let ctx = make_test_context();
     configure_active(&ctx, "memory-prompt-configure").await;
@@ -471,6 +510,47 @@ async fn migration_export_import_uses_redacted_portable_envelope() {
     );
 }
 
+#[tokio::test]
+async fn migration_import_rejects_nested_inline_body_ref_content() {
+    let ctx = make_test_context();
+    configure_active(&ctx, "memory-migration-inline-configure").await;
+
+    let rejected = invoke_write_result(
+        &ctx,
+        super::IMPORT_FUNCTION,
+        json!({
+            "envelope": {
+                "schemaVersion": "1",
+                "operation": "import",
+                "sourceEngineId": "resource-backed-memory",
+                "records": [{
+                    "record": imported_record_payload(
+                        "migration-nested-inline",
+                        json!({
+                            "kind": "resource_pointer",
+                            "resourceId": "blob:migration-nested-inline",
+                            "metadata": {
+                                "text": "secret private body"
+                            }
+                        })
+                    )
+                }]
+            }
+        }),
+        "memory-migration-inline-import",
+    )
+    .await;
+
+    assert!(
+        rejected
+            .error
+            .as_ref()
+            .is_some_and(|error| error.to_string().contains("cannot include inline text")),
+        "migration import must reject nested inline body text: {:?}",
+        rejected.error
+    );
+}
+
 async fn configure_active(ctx: &ServerRuntimeContext, key: &str) -> Value {
     invoke_write(
         ctx,
@@ -598,6 +678,26 @@ fn retain_payload(record_id: &str) -> Value {
         "retention": {"policy": "explicit", "until": "2099-01-01T00:00:00Z"},
         "sourceRefs": [{"kind": "message", "id": "msg-test"}],
         "migration": {"portable": true}
+    })
+}
+
+fn imported_record_payload(record_id: &str, body_ref: Value) -> Value {
+    json!({
+        "schemaVersion": "1",
+        "subject": record_id,
+        "scope": {"kind": "session", "id": "memory-session"},
+        "preview": "Imported preference preview",
+        "bodyRef": body_ref,
+        "provenance": {"source": "test_import"},
+        "confidence": {"score": 0.95, "basis": "explicit"},
+        "sensitivity": "private",
+        "retention": {"policy": "explicit", "until": "2099-01-01T00:00:00Z"},
+        "sourceRefs": [{"kind": "message", "id": "msg-import"}],
+        "traceRefs": [],
+        "replayRefs": [],
+        "lifecycle": {"state": "retained"},
+        "migration": {"portable": true},
+        "revision": 1
     })
 }
 

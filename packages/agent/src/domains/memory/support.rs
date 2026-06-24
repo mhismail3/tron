@@ -207,15 +207,31 @@ pub(super) fn replay_refs(invocation: &Invocation) -> Vec<Value> {
 }
 
 pub(super) fn ensure_body_ref_is_pointer(body_ref: &Value) -> Result<(), CapabilityError> {
-    let Some(object) = body_ref.as_object() else {
+    if !body_ref.is_object() {
         return Err(invalid_params("bodyRef must be an object"));
-    };
-    for forbidden in ["content", "text", "body", "raw"] {
-        if object.contains_key(forbidden) {
-            return Err(invalid_params(format!(
-                "bodyRef must point to private material and cannot include inline {forbidden}"
-            )));
+    }
+    ensure_body_ref_has_no_inline_content(body_ref, "bodyRef")
+}
+
+fn ensure_body_ref_has_no_inline_content(value: &Value, path: &str) -> Result<(), CapabilityError> {
+    match value {
+        Value::Object(object) => {
+            for (key, nested) in object {
+                let nested_path = format!("{path}.{key}");
+                if matches!(key.as_str(), "content" | "text" | "body" | "raw") {
+                    return Err(invalid_params(format!(
+                        "bodyRef must point to private material and cannot include inline {key} at {nested_path}"
+                    )));
+                }
+                ensure_body_ref_has_no_inline_content(nested, &nested_path)?;
+            }
         }
+        Value::Array(items) => {
+            for (index, nested) in items.iter().enumerate() {
+                ensure_body_ref_has_no_inline_content(nested, &format!("{path}[{index}]"))?;
+            }
+        }
+        _ => {}
     }
     Ok(())
 }
