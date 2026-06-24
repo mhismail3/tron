@@ -60,7 +60,7 @@ completed slice.
 | 7 | iOS Phase 1 Slice 2: Composer Voice Transcription | Phase 1 iOS affordance restoration | Commits `c5f92eed3`, `ec3428283`, `abd396897`, `e095249be`; final branch head `4e66af302` includes accepted session-list/title work; retrospective fix commits `f2fb7c3303da51cb91893ff87b9d41af240702aa`, `9008894583d05fbc7848c290d2c0a75eea3e6109` | `codex/ios-voice-dictation-affordance-current` plus retrospective fix commits | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; transcription Rust/iOS tests; settings parity tests | Accepted by second re-audit thread `019ef6fa-166f-7a40-ba0d-118af72f7f94` after two focused fix commits; no blocking or important findings remain. Fixes cancel in-flight transcription/upload on chat exit, prevent late transcript/error mutation after cancellation, and make recording startup cancellation-aware across readiness, permission, recorder engine startup, post-start, and auto-stop registration boundaries. | Voice notes, persistent media storage, media client, APNs/background delivery, fake transcription, and agent-execution voice surfaces remain absent. Local-native boundaries, temp-file cleanup, recorder cancellation, and readiness/settings behavior are preserved. | Closed. Continue with Accepted Off-Plan: Session List Simplification and Native Title Generation. |
 | 8 | Accepted Off-Plan: Session List Simplification and Native Title Generation | Phase 1 accepted follow-up | Commits `0f58806c5`, `4e66af302`; retrospective fix commits `634fb7469`, `72a5b9c7` | `codex/ios-voice-dictation-affordance-current`; progress ledger; retrospective fix branches `codex/session-title-cache-audit-fix`, `codex/session-title-sync-legacy-normalize` | `ios-affordance-restoration-progress.md`; session-list/title-generation tests; README/iOS docs where touched | Accepted by second re-audit thread `019ef717-d7f4-78e3-b2d5-6684e400b59f` after two focused fix commits; no findings remain. New/fork local caches no longer seed workspace basenames as row titles, legacy nil-title sync clears only exact workspace-basename titles, and rows/accessibility use `listTitle`. | Work overview, import tree, source-control graph, workspace analytics, old title hooks/skills/rules/subagents, existing-session backfill, and title management UI remain absent. Server/generated titles remain authoritative; legitimate non-workspace local titles are preserved. | Closed. Continue with iOS Phase 1 Slice 3: Recent Input History. |
 | 9 | iOS Phase 1 Slice 3: Recent Input History | Phase 1 iOS affordance restoration | Commits `16586ae07`, `3740b33a2`, `ad777a3dd`, `0655e7131`, `d69afc6a1`; progress reconciliation `48054db64`; retrospective fix commits `705253e16644b1b8f4c05f6a57533f320703df49`, `90784394899a88e9b7877c027905d6f6f0cd2d31` | `codex/ios-prompt-input-snippet-affordance-current` plus retrospective fix branches `codex/order-9-recent-input-history-fix`, `codex/order-9-recent-input-history-share-fix` | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; recent-input/input-history/attachment/source-guard tests | Accepted by second re-audit thread `019ef733-d2a9-7961-8387-db21cb646ca9` after two focused fix commits; no findings remain. Recent input history persists only after successful `agent::prompt` server sends for normal composer and pending-share text paths; failure, empty text, and attachment-only paths do not persist attempted text. | Snippets/templates, search/pagination/use counts, server prompt history, prompt-library APIs, generated prompt management, skills, queues, routing, agent-execution behavior, fake backend truth, provider/public/auth/API drift, and broad refactors remain absent. | Closed. Continue with iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances. |
-| 10 | iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances | Phase 1 iOS affordance restoration | Commits `bb9057148`, `09d155bda`; reconciliation `f4cb11d68`; branch ref also has duplicate `87f53a0ca`; focused audit fix branch `codex/order-10-ios-chat-affordance-audit-fixes` | `codex/ios-chat-visual-cues-status-affordance-current`; progress ledger plus focused fix branch | `ios-affordance-restoration-progress.md`; chat visual/local notification/capability evidence/source-guard tests | Independent audit thread `019ef73c-0509-7eb0-a4d3-ebc257b8b9cd` returned `changes required`; focused fix covers local notification routing for pre-accept send failures, retry setup/status reset/subscription parity, and visible reconstruction-load failure while preserving quiet successful empty sessions. | Fixed process/job/subagent/source-control/approval/memory/rules/hooks/skill/inbox panels, fake activity, notification expansion, and rich connection sheets remain deferred. | Re-audit local notification dedupe/lifecycle, retry idempotency/setup, reconstruction failure visibility, quiet empty/loading state, and source guards against old status panels. |
+| 10 | iOS Phase 1 Slice 4: Chat Visual Cues / Status / Error Affordances | Phase 1 iOS affordance restoration | Commits `bb9057148`, `09d155bda`; reconciliation `f4cb11d68`; branch ref also has duplicate `87f53a0ca`; retrospective fix branches `codex/order-10-ios-chat-affordance-audit-fixes`, `codex/order-10-ios-chat-affordance-preaccept-cleanup`; fix commits `ea2e01ec7e33a69136915b3c1a04c009b1dccfdc`, `a3d6ddcb0b088165af25cd798cddef65667dc74e` | `codex/ios-chat-visual-cues-status-affordance-current`; progress ledger plus retrospective fix commits | `ios-affordance-restoration-progress.md`; chat visual/local notification/capability evidence/source-guard tests | Accepted by second re-audit thread `019ef765-b32b-7431-bc6a-c1f7402ea901` after two focused fix commits; no findings remain. Pre-accept normal send and retry failures now surface as deduped local notifications after clearing composer/session processing, retry shares normal setup/reset behavior, and reconstruction failures render visible local load errors while successful empty/loading states stay quiet. | Fixed process/job/subagent/source-control/approval/memory/rules/hooks/skill/inbox panels, fake activity, notification expansion, rich connection sheets, fake backend truth, provider/public/auth/settings/API drift, and agent-execution restoration remain deferred. | Closed. Continue with iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish. |
 | 11 | iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish | Phase 1 iOS affordance restoration | Commit `3680ea271` | `codex/ios-settings-onboarding-diagnostics-pairing-current` | `ios-affordance-restoration-progress.md`; settings/onboarding/provider/server/source-guard tests; iOS docs | Focused iOS simulator tests, Computer Use validation, screenshots, IARM invariant, personal-info guard, whitespace, ignored-file recorded. | Fixed product session lists, APNs/device broker, skills/rules/memory/worktree/process/job/goal/subagent/approval/web state, fake server-health facts, new server settings, DB tables, auth/provider behavior remain absent. | Settings parity, provider id truthfulness, pairing repair vs new origin, diagnostics copy, feedback path, and no invented server facts. |
 | 12 | Accepted Follow-Up: Cockpit Placement and Session-List Row Polish | Phase 1 accepted follow-up | Commits `becbc0e95`, `34c53dc93`, `22cb96e72`, `9d172aa27`, `0176379ba`; progress checkpoint `da53490c1` | `codex/ios-cockpit-placement-cleanup-current`; progress ledger | `ios-affordance-restoration-progress.md`; IOSAC/IARM invariants; session-list/cockpit/settings placement tests | Focused iOS tests, simulator/Computer Use evidence, IARM and IOSAC invariants, personal-info guard, whitespace, ignored-file recorded. | No notification inbox, APNs, device broker, worker launch flow, Phase 2 capability, or passive chat runtime banner. | Placement truthfulness, diagnostics-only cockpit access, native row interaction, no custom press feedback, and no passive idle signal in chat. |
 | 13 | iOS Phase 1 Slice 6: Notification / Inbox Concept Review | Phase 1 iOS defer decision | Commit `ace41ac98`; closeout `fda2eaf6d` | `codex/ios-notification-inbox-concept-review-current`; progress ledger | `ios-affordance-restoration-progress.md`; `ios_affordance_restoration_map_invariants.rs`; BPRC/IARM docs | Defer decision; no Swift/UI changes; IARM invariant with defer guard, cargo fmt check, personal-info guard, whitespace, ignored-file recorded. | APNs, background push, device broker, notification resources, read state, app badge semantics, delivery chips, and tool-family notifications remain Phase 2/later. | Whether current source truly lacks fake notification owners; defer guard coverage; database/resource absence evidence; no local-only inbox implying backend truth. |
@@ -598,11 +598,82 @@ Verification recorded by the accepted re-audit:
 - `git ls-files -ci --exclude-standard` passed with empty output.
 - The review worktree had no edits or commits.
 
+## Completed Audit: iOS Phase 1 Slice 4 Chat Visual Cues / Status / Error Affordances
+
+Original audit thread: `019ef73c-0509-7eb0-a4d3-ebc257b8b9cd`
+
+Original verdict: `changes required`, because server-send failures bypassed
+local notifications, retry bypassed normal subscription/status reset, and
+session reconstruction failure could render as quiet blank chat.
+
+First fix thread: `019ef742-e80b-7923-8127-34f6fcf5c65d`
+
+First fix commit: `ea2e01ec7e33a69136915b3c1a04c009b1dccfdc`
+(`Fix chat affordance audit regressions`) on
+`codex/order-10-ios-chat-affordance-audit-fixes`
+
+First independent re-audit thread: `019ef75a-96d2-71b0-9ca7-ac25e1b5b853`
+
+First re-audit verdict: `changes required`, because pre-accept normal send and
+retry failures appended local notifications but left `isProcessing` and
+session-processing stuck.
+
+Second fix thread: `019ef760-23ee-7d53-84b5-edfcde1a6f08`
+
+Second fix commit: `a3d6ddcb0b088165af25cd798cddef65667dc74e`
+(`Fix pre-accept chat send cleanup`) on
+`codex/order-10-ios-chat-affordance-preaccept-cleanup`
+
+Second independent re-audit thread: `019ef765-b32b-7431-bc6a-c1f7402ea901`
+
+Second re-audit verdict: `slice accepted`
+
+Status: accepted with no findings after the second fix.
+
+Accepted result:
+
+- Server-send and other pre-accept failures surface as deduped local
+  notifications, not generic `.error`, and later prompt-start clears stale local
+  notifications.
+- Normal prompt-send and retry-send pre-accept failures reset `isProcessing` and
+  `setSessionProcessing(false)` before local notification emission, avoiding
+  stuck composer or session state.
+- Retry shares normal subscription, status reset, local-notification clearing,
+  processing, session-processing, and streaming-reset behavior while preserving
+  retry prompt selection, idempotency, no user-bubble append, and no composer or
+  attachment consumption.
+- Session reconstruction failure surfaces a local load/reconstruction error.
+  Successful empty and loading states stay quiet.
+- Post-accept server-event, provider, and streaming errors remain on existing
+  server-event paths.
+
+Accepted deferred scope:
+
+- Fixed process/job/subagent/source-control/approval/memory/rules/hooks/skill
+  and inbox panels remain absent.
+- Old connection detail sheets, cockpit/status-pill restoration, process/job
+  and subagent UI, notification expansion, provider/public/auth/settings/API
+  drift, fake backend truth, and agent-execution restoration remain out of scope
+  for this Phase 1 chat-affordance slice.
+
+Verification recorded by the accepted re-audit:
+
+- Focused `xcodebuild test` selected
+  `TronMobileTests/MessagingCoordinatorTests`,
+  `TronMobileTests/MessagingCoordinatorAuditRegressionTests`,
+  `TronMobileTests/MessagingCoordinatorDraftTests`,
+  `TronMobileTests/ConnectionCoordinatorTests`, and
+  `TronMobileTests/SourceGuardTests`; 58 XCTest cases plus 53 source-guard tests
+  passed.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- The re-audit worktree was clean.
+
 ## Next Audit
 
-The next action is independent re-audit of **Order 10: iOS Phase 1 Slice 4:
-Chat Visual Cues / Status / Error Affordances** after the focused audit-fix
-branch `codex/order-10-ios-chat-affordance-audit-fixes`.
+The next action is first independent audit of **Order 11: iOS Phase 1 Slice 5:
+Settings / Onboarding / Diagnostics / Pairing Polish**.
 
 ## Per-Slice Audit Start State
 
