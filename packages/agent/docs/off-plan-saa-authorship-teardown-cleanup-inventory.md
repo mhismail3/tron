@@ -37,10 +37,17 @@ Machine-readable inventory:
 ## Required Retained Primitive Operations
 
 `capability::execute` remains limited to these model-visible operations:
-`observe`, `state_get`, `state_set`, `state_list`, `file_read`, `file_write`,
-`process_run`, `trace_list`, `trace_get`, `log_recent`, and
-`replay_manifest`, plus inspect/evidence-only `catalog_search`,
-`catalog_inspect`, and `catalog_conformance`.
+`observe`, `state_get`, `state_set`, `state_list`, `filesystem_read`,
+`filesystem_list`, `filesystem_find`, `filesystem_glob`,
+`filesystem_search_text`, `filesystem_diff`, `filesystem_write`,
+`filesystem_edit`, `filesystem_apply_patch`, `process_run`, `trace_list`,
+`trace_get`, `log_recent`, and `replay_manifest`, plus inspect/evidence-only
+`catalog_search`, `catalog_inspect`, `catalog_conformance`, `memory_status`,
+`memory_list`, and `memory_inspect`.
+
+Legacy `file_read` and `file_write` operation names are
+historical/provenance-only in older cleanup evidence and are not current
+provider-visible operations.
 
 The underlying engine `resource::*` primitive worker remains available to
 trusted engine callers. This cleanup only removes the off-plan provider-facing

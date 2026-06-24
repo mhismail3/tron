@@ -55,9 +55,13 @@ The current baseline is intentionally smaller and harder:
 - Current provider-visible model surface is the single `capability::execute`
   primitive.
 - Current execute operations are `observe`, `state_get`, `state_set`,
-  `state_list`, `file_read`, `file_write`, `process_run`, `trace_list`,
-  `trace_get`, `log_recent`, `replay_manifest`, `catalog_search`,
-  `catalog_inspect`, and `catalog_conformance`.
+  `state_list`, `filesystem_read`, `filesystem_list`, `filesystem_find`,
+  `filesystem_glob`, `filesystem_search_text`, `filesystem_diff`,
+  `filesystem_write`, `filesystem_edit`, `filesystem_apply_patch`,
+  `process_run`, `trace_list`, `trace_get`, `log_recent`,
+  `replay_manifest`, `catalog_search`, `catalog_inspect`,
+  `catalog_conformance`, `memory_status`, `memory_list`, and
+  `memory_inspect`.
 - iOS moved from product-specific `Core`, `Database`, `Models`, `Services`,
   `ViewModels`, and `Views` trees to a thinner `Engine`, `Session`, `Support`,
   and `UI` runtime shell.
@@ -198,7 +202,12 @@ Old surface:
 
 Current state:
 
-- Primitive `file_read` and `file_write` exist under `capability::execute`.
+- Primitive filesystem access exists under `capability::execute` as
+  `filesystem_read`, `filesystem_list`, `filesystem_find`, `filesystem_glob`,
+  `filesystem_search_text`, `filesystem_diff`, `filesystem_write`,
+  `filesystem_edit`, and `filesystem_apply_patch`.
+- Legacy `file_read` and `file_write` names are historical/provenance-only and
+  are not current provider-visible operations.
 - No first-class filesystem domain, search, glob, edit, diff, patch, directory
   creation, or home-directory helper remains.
 
