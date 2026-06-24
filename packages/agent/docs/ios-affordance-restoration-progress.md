@@ -853,9 +853,13 @@ Closeout cleanup expectations:
 - Historical IARM rows remain as evidence and classification records; they are
   not a live queue to implement legacy surfaces by default.
 
-The next planned body of work is the full Phase 2 agent-execution restoration
-goal plan, including APNs/device notification capability restoration through the
-central engine/resource mechanism.
+Remaining live work is execution of the approved Phase 2 slices recorded in
+`phase-2-agent-execution-restoration-scorecard.md`,
+`phase-2-agent-execution-restoration-evidence-manifest.md`,
+`phase-2-agent-execution-restoration-inventory.md`, and
+`phase-2-agent-execution-restoration-inventory.tsv`, including APNs/device
+notification capability restoration through the central engine/resource
+mechanism.
 
 ## Phase 2 Reminder
 
