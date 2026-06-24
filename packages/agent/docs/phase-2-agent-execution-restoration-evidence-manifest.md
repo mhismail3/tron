@@ -979,18 +979,18 @@ Discovery validation:
 - `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
   passed with 14 tests.
 
-## Phase 2 Slice 7A Implementation Candidate: Goal And Question Foundation
+## Phase 2 Slice 7A Accepted Implementation: Goal And Question Foundation
 
 Implementation branch: `codex/phase-2-slice-7a-goal-question-foundation-v2`.
 Baseline:
 `origin/main@9950ea484299901e09af9077f33466021118ca33`
 (`docs: shape phase 2 slice 7a handoff`).
 
-Candidate status: pending review. This section records implementation
-candidate evidence only; it does not mark Slice 7A accepted or current
-mainline baseline.
+Accepted status: current baseline after independent review and mainline
+integration. Final accepted branch head:
+`4ecb612612abd7f000c059aafcd2c5e135361fa3`.
 
-Candidate scope:
+Accepted scope:
 
 - Added `packages/agent/src/domains/goals/` as the backend owner for durable
   goal records, user-question records, and answer provenance.
@@ -1005,7 +1005,7 @@ Candidate scope:
 - Added `user_question` and `goal_answer` resource definitions and expanded the
   generic `goal` resource schema narrowly for lifecycle/evidence refs.
 
-Candidate evidence:
+Accepted evidence:
 
 - Goal create/list/inspect/cancel records include scoped resource refs,
   lifecycle state, bounded summaries, queue/plan/evidence refs, trace refs,
@@ -1019,14 +1019,35 @@ Candidate evidence:
   one `goal_answer` resource.
 - Stale expected versions, wrong scope, expired/closed questions,
   malformed/missing resource ids, missing reason, empty/oversized text, and
-  missing/untrusted execution context fail closed in focused candidate tests.
+  missing/untrusted execution context fail closed in focused tests.
 
-Candidate validation run during implementation:
+Implementation, review, and acceptance evidence:
 
 - `cargo fmt --manifest-path packages/agent/Cargo.toml --all`
 - `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::goals -- --nocapture`
 - `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`
 - `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture`
+- Review `019efabf-6f5b-76b0-951b-13e28ae785f4` required resource-authority
+  hardening for inner goal/question operations.
+- Fix commits `6915bcfcd` and `b96494d89` require goal/question resource
+  kinds/selectors and `goals.read`/`goals.write` scopes before handlers run.
+- Review `019eface-a421-7271-b688-f5250066cf26` found the new authority test
+  file missing from HRA inventory coverage; fix commit `4ecb61261` added the
+  row across tracked inventories.
+- Final review `019efad9-68bb-7ab0-9933-df140600ebed` accepted the slice with
+  no blocking findings after `cargo fmt`, focused goal tests, execute authority
+  regression, execute schema test, `cargo check`, HRA/TMB/TPC/PCC/SACB
+  invariant group, `git diff --check`, ignored-file audit, and
+  `scripts/personal-info-guard.sh` all passed.
+- Mainline closeout validation after fast-forwarding `main` passed:
+  `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`;
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::goals`;
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib capability_execute_inner_goal_operations_require_resource_authority -- --nocapture`;
+  `cargo test --manifest-path packages/agent/Cargo.toml execute_schema_exposes_primitive_operations_not_catalog_targets`;
+  `cargo check --manifest-path packages/agent/Cargo.toml`;
+  HRA/TMB/TPC/PCC/SACB invariant group; DESI/BPRC/IARM documentation gates;
+  `git diff --check`; ignored-file audit; and
+  `scripts/personal-info-guard.sh`.
 
 ## Validation Log
 

@@ -55,17 +55,18 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 6D: local branch-start with guarded symbolic `HEAD` movement, resource
   evidence, lifecycle evidence, and no checkout;
 - Slice 6E: read-only local branch inventory evidence through
-  `git_branch_inventory`, including bounded truncated metadata handling.
+  `git_branch_inventory`, including bounded truncated metadata handling;
+- Slice 7A: durable goal/question lifecycle records, bounded backend evidence,
+  and explicit execute authority/resource checks without autonomous execution.
 
 Current next action:
-Start implementation from fresh `origin/main` for **Slice 7A: Goal And Question
-Foundation**. This is the smallest safe sub-slice of Slice 7: it restores
-durable goal/question objects and bounded queue/resource evidence without
-autonomous execution, full planning, a native Work dashboard, or fake local
-question sheets. Branch deletion, rename, arbitrary checkout, detached-HEAD
-commits, merge/rebase/reset, stash/clean, fetch/pull/push, PR handoff,
-conflict resolution workflows, worktree graph resources, public API expansion,
-production deployment behavior, and native SourceChanges UI remain deferred.
+Start discovery from fresh `origin/main` for **Slice 8: Web, Research,
+Browser, And Fetch**, unless discovery identifies a smaller required
+source-control or goal/question follow-up in the current canonical docs. Slice 7A is
+accepted as the durable backend goal/question foundation only; autonomous goal
+execution, full planning, native Work/question UI, public `/engine` goal APIs,
+fetch/pull/push, PR handoff, production deployment behavior, and native
+SourceChanges UI remain deferred.
 
 ## Scope
 
@@ -1598,25 +1599,32 @@ Residual risks and deferred work:
 - Expiry and cancellation must be deterministic and testable without wall-clock
   race assumptions; prefer injectable time seams in the domain service.
 
-Implementation candidate status:
+Accepted implementation status:
 
 - Branch `codex/phase-2-slice-7a-goal-question-foundation-v2` from
-  `origin/main@9950ea484299901e09af9077f33466021118ca33` implements the Slice
-  7A candidate foundation for review.
-- Candidate scope adds `domains/goals`, execute-only goal/question operation
+  `origin/main@9950ea484299901e09af9077f33466021118ca33` implements the
+  accepted Slice 7A foundation.
+- Accepted commits are `22ff03e89`, `17a6869c9`, `5826fb787`, `4a9454e53`,
+  `6915bcfcd`, `b96494d89`, and `4ecb61261`.
+- Accepted scope adds `domains/goals`, execute-only goal/question operation
   adapters, `user_question` and `goal_answer` resource definitions, and a
   narrowed generic `goal` resource schema using existing resources, streams,
   traces, replay refs, and execute idempotency.
-- Candidate operations are `goal_create`, `goal_list`, `goal_inspect`,
+- Accepted operations are `goal_create`, `goal_list`, `goal_inspect`,
   `goal_cancel`, `question_create`, `question_list`, `question_inspect`, and
   `question_answer`.
-- Candidate evidence covers create/list/inspect/cancel goal behavior,
+- Accepted evidence covers create/list/inspect/cancel goal behavior,
   create/list/inspect/answer question behavior, bounded list truncation,
   scope isolation, expiry/stale-version/malformed-input fail-closed paths,
   answer reason/authority/freshness/idempotency provenance, and replaying the
   same answer idempotency key without double-answering.
-- Status is implementation candidate / pending review, not accepted mainline
-  baseline.
+- Review/fix loop: review `019efabf-6f5b-76b0-951b-13e28ae785f4` led to
+  resource authority hardening; review `019eface-a421-7271-b688-f5250066cf26`
+  found the missing HRA inventory row for
+  `engine/tests/authority/execute_goal_authorization.rs`; final review
+  `019efad9-68bb-7ab0-9933-df140600ebed` accepted the slice with no blocking
+  findings.
+- Status is accepted mainline baseline after mainline closeout validation.
 
 ### Slice 8: Web, Research, Browser, And Fetch
 
@@ -1930,13 +1938,12 @@ Implementation slices add:
 
 ## Closure Verdict
 
-Phase 2 remains source-backed and proceeds one slice at a time. As of
-`main@db05cd467ff028530df043dc754dfd252c2211ac`, Slices 1 through 4,
-Slice 5A, Slice 6A, Slice 6B, Slice 6C, Slice 6D, and Slice 6E are represented
-on the consolidated mainline after independent acceptance. Slice 6E restores
-read-only local Git branch inventory through `git_branch_inventory` and keeps
-arbitrary checkout, branch deletion/rename, merge/rebase/reset, remote
-push/PR handoff, conflict workflow, worktree graph, production deploy, and
-native SourceChanges deferred. The next implementation slice is Slice 7A Goal
-And Question Foundation, limited to durable backend goal/question lifecycle
-contracts and bounded queue/resource evidence.
+Phase 2 remains source-backed and proceeds one slice at a time. As of the
+Slice 7A mainline closeout, Slices 1 through 4, Slice 5A, Slice 6A, Slice 6B,
+Slice 6C, Slice 6D, Slice 6E, and Slice 7A are represented on the consolidated
+mainline after independent acceptance. Slice 7A restores durable backend
+goal/question lifecycle contracts and bounded queue/resource evidence through
+`capability::execute`; autonomous execution, full planning, question UI,
+web/research/fetch/browser capability, production deploy, and native
+SourceChanges remain deferred. The next discovery slice is Slice 8 unless the
+fresh canonical docs identify a narrower required follow-up first.

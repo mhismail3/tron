@@ -710,7 +710,7 @@ stop/retire functions, verified source-tree package digests, scoped token
 minting, conformance reports, and `worker_package` resource/event evidence.
 It is host lifecycle infrastructure, not a provider-visible toolbox, and it
 does not add fixed iOS product panels.
-`domains/goals` owns the Slice 7A candidate backend foundation for durable
+`domains/goals` owns the accepted Slice 7A backend foundation for durable
 goal, user-question, and answer provenance records. It uses existing engine
 resources, streams, traces, replay refs, and the execute idempotency ledger; it
 does not run autonomous goals, plan task decomposition, schedule reminders,
@@ -1002,7 +1002,7 @@ Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, web/network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
 not part of this foundation.
-The Slice 7A candidate `goals` domain owns durable backend records only.
+The accepted Slice 7A `goals` domain owns durable backend records only.
 Provider-visible access remains operation values behind the single
 `capability::execute` primitive: `goal_create`, `goal_list`, `goal_inspect`,
 `goal_cancel`, `question_create`, `question_list`, `question_inspect`, and

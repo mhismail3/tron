@@ -217,8 +217,8 @@ metadata without adding a durable resource kind. Branch deletion/rename, arbitra
 checkout, remote push/PR, merge/rebase/reset, conflict workflows, worktree graph
 resources, and native SourceChanges remain deferred.
 
-`P2AER-INV-010` has a Slice 7A implementation candidate pending review:
-Goal And Question Foundation. The candidate adds a backend `domains/goals`
+`P2AER-INV-010` is current baseline after accepted Slice 7A:
+Goal And Question Foundation. Slice 7A adds a backend `domains/goals`
 owner for durable goal lifecycle records, user-question records, idempotent
 answer provenance, lifecycle stream evidence, queue/resource refs, trace refs,
 and replay refs behind the existing `capability::execute` primitive. It reuses
@@ -228,5 +228,6 @@ existing resource/stream/replay/idempotency substrate, narrows the generic
 hidden prompt queues, planner/task decomposition, scheduler/reminder behavior,
 notifications/APNs, subagents, native iOS Work dashboards, native question
 sheets, public `/engine` goal APIs, and copied historical DTOs remain deferred.
-This candidate is not accepted/current baseline until independent review and
-mainline integration complete.
+The accepted review/fix loop added explicit `capability::execute` scope,
+resource-kind, and selector checks for goal/question operations before handler
+execution.
