@@ -260,6 +260,50 @@ async fn git_branch_inventory_bounds_count_and_bytes_with_explicit_metadata() {
 }
 
 #[tokio::test]
+async fn git_branch_inventory_returns_row_when_metadata_truncates_before_all_fields() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    let oversized_author = "A".repeat(24 * 1024);
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo.path())
+        .arg("-c")
+        .arg(format!("user.name={oversized_author}"))
+        .arg("-c")
+        .arg("user.email=tron-test@invalid.local")
+        .arg("commit")
+        .arg("-m")
+        .arg("oversized author metadata")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .expect("run git commit with oversized author");
+    assert!(
+        output.status.success(),
+        "git failed\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let value = branch_inventory(repo.path(), json!({})).await;
+
+    assert_eq!(value["evidence"]["returnedBranches"], 1);
+    let main = branch_by_name(&value, "main");
+    assert_eq!(main["oid"], git_stdout(repo.path(), ["rev-parse", "main"]));
+    assert_eq!(main["lastCommit"]["metadataTruncated"], true);
+    assert_eq!(main["lastCommit"]["author"]["nameTruncated"], true);
+    assert_eq!(main["lastCommit"]["subjectTruncated"], true);
+    assert!(
+        main["lastCommit"]["author"]["name"]
+            .as_str()
+            .expect("author name")
+            .len()
+            <= 512
+    );
+}
+
+#[tokio::test]
 async fn git_branch_inventory_rejects_non_repo_traversal_missing_metadata_and_nested_repo() {
     let non_repo = tempdir().expect("non repo");
     let non_repo_error = branch_inventory_error(non_repo.path(), json!({})).await;

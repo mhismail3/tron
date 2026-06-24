@@ -1029,8 +1029,9 @@ merge/rebase/reset, index mutation, and worktree file updates are not invoked.
 Slice 6E `git_branch_inventory` enumerates only local `refs/heads/*`, reports
 the current branch or detached HEAD, serializes sorted branch names/refs/OIDs,
 computes ahead/behind only from already-present local upstream refs, retains
-bounded last-commit metadata, and records explicit count/byte truncation
-metadata without adding a durable resource kind.
+bounded last-commit metadata, keeps oversized metadata rows as truncated
+evidence, and records explicit count/byte truncation metadata without adding a
+durable resource kind.
 Merges, rebases, resets, pushes, arbitrary branch checkout, branch
 deletion/rename, conflict resolution
 workflows, PR handoff, worktree graph resources, and native iOS SourceChanges

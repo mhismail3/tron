@@ -42,8 +42,9 @@
 //! still points at the expected OID. Caller-controlled status/diff byte limits
 //! affect evidence only, never mutation eligibility. Branch inventory is
 //! read-only: it enumerates local `refs/heads/*`, computes ahead/behind only
-//! against already-present local upstream refs, and never fetches, switches,
-//! creates, deletes, renames, or contacts remotes.
+//! against already-present local upstream refs, reports oversized last-commit
+//! metadata as truncated row evidence, and never fetches, switches, creates,
+//! deletes, renames, or contacts remotes.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

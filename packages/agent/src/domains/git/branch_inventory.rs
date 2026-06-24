@@ -231,7 +231,10 @@ fn branch_metadata(
         BRANCH_METADATA_BYTES,
     )?;
     let complete_stdout = trim_line_end(&output.stdout);
-    let fields = complete_stdout.split(|byte| *byte == 0).collect::<Vec<_>>();
+    let mut fields = complete_stdout.split(|byte| *byte == 0).collect::<Vec<_>>();
+    if fields.len() < 7 && output.stdout_truncated {
+        fields.resize(7, &[]);
+    }
     if fields.len() != 7 {
         return Err(internal(format!(
             "parse git branch metadata for {full_ref}"
