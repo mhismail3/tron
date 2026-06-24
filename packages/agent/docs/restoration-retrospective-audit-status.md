@@ -69,7 +69,7 @@ completed slice.
 | 13 | iOS Phase 1 Slice 6: Notification / Inbox Concept Review | Phase 1 iOS defer decision | Commit `ace41ac98`; closeout `fda2eaf6d`; retrospective fix commit `0ff5d2b28de52dda2beb64245c1d6524ed835969` | `codex/ios-notification-inbox-concept-review-current`; progress ledger plus retrospective fix branch `codex/order-13-notification-inbox-concept-fix` | `ios-affordance-restoration-progress.md`; `ios_affordance_restoration_map_invariants.rs`; BPRC/IARM docs; iOS architecture doc | Accepted by re-audit thread `019ef7a8-1ac7-76d1-9024-4127a0cfdf71` after fix commit `0ff5d2b28de52dda2beb64245c1d6524ed835969`; no findings remain. Slice 6 is recorded as a defer/concept decision, not a runtime notification UI implementation; current line/tracker docs no longer claim it is next or pending implementation. | APNs, background push, device broker, notification resources, durable inbox storage, read state, app badge semantics, delivery chips, tool-family notifications, and agent-execution inbox remain Phase 2/later. | Closed. Continue with Accepted Follow-Up: Server-Backed Workspace Browser. |
 | 14 | Accepted Follow-Up: Server-Backed Workspace Browser | Phase 1 accepted follow-up / Phase 2 precursor | Commits `70780b798`, `f34ac1bdd`, `c818cc296`, `ceb6aab35`, `7a9de156b`, `8054ed17e`, `74a5564d3`, `38a88ede9`; reconciliation `980867c35` | `codex/ios-affordance-restoration-map-current`; progress ledger | `ios-affordance-restoration-progress.md`; filesystem workspace-browser docs/tests; IARM/BPRC invariants | Accepted by audit thread `019ef7ae-6dd0-77f2-851b-78934da65718`; no blocking or important findings. Server-backed workspace browser is accepted as a workspace selector precursor only; authenticated engine clients keep first-party filesystem-browser access by design, without adding model-facing filesystem tools. | Native file/patch review UI, import, worktree, git, broad file-management/product panels, fake analytics, source-control surfaces, and Phase 2 model-facing filesystem tools remain absent. | Closed. Follow-up: align symlinked-directory advertisement/navigation behavior; tighten workspace path abbreviation to the server-returned home path. Continue with Phase 2 Agent Execution Restoration Plan. |
 | 15 | Phase 2 Agent Execution Restoration Plan | Phase 2 planning | Planning baseline `980867c35`; final `7db72c1ee`; retrospective fix commit `737411eefa30aa5a9b7ebd040583e62c995ba48f` | Historical branch evidence at `codex/ios-affordance-restoration-map-current@7db72c1ee`; the files are not present on this tracker branch. | Historical branch-only files: `phase-2-agent-execution-restoration-scorecard.md`; `phase-2-agent-execution-restoration-evidence-manifest.md`; `phase-2-agent-execution-restoration-inventory.md`; `phase-2-agent-execution-restoration-inventory.tsv`; DESI/IARM/BPRC/SSARR/OPSAA invariants on that source branch. | Accepted by re-audit thread `019ef7c2-a23a-7cf3-80c9-21695a1f84f1` after focused fix commit `737411eefa30aa5a9b7ebd040583e62c995ba48f`; no findings remain. Historical plan evidence reports score 100/100, all 24 BPRC buckets mapped, ordered roadmap, memory architecture, validation protocol, and handoff packet. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | Planning does not implement runtime behavior. Future slices still need user decisions and per-slice validation. | Closed. Continue with Phase 2 Slice 1: Catalog Discovery Evidence. |
-| 16 | Phase 2 Slice 1: Catalog Discovery Evidence | Phase 2 agent-execution restoration | Baseline `7db72c1ee`; commits `a9c3d3507`, `ca471fcde`, `680d9429f`; final `f95d3b02e` | Historical branch evidence at `codex/phase-2-catalog-discovery-evidence-current@f95d3b02e`; the canonical artifacts and implementation files are not present on this tracker branch. | Historical branch-only files: `phase-2-agent-execution-restoration-scorecard.md`; `phase-2-agent-execution-restoration-evidence-manifest.md`; `phase-2-agent-execution-restoration-inventory.md`; `phase-2-agent-execution-restoration-inventory.tsv`; `packages/agent/src/domains/catalog_discovery/`; Runtime Cockpit Discovery tests; SACB/HRA/PCC/TPC/TMB/IARM/IOSAC/IOSTC/CSD invariants on that source branch. | Historical branch-scoped evidence records catalog search/inspect/conformance through `execute`, resource-backed reports, Runtime Cockpit Discovery, protected omission, and Rust/iOS/static validations. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | No target routing, intent execution, public `/engine` expansion, generated `ui_surface` publication, fixed legacy panels, schema repair, or old module copies. | Protected visibility, no target invocation, idempotency/lease/compensation, provider-visible singularity, cockpit DTO truthfulness, log redaction hardening, and current-line artifact truthfulness. |
+| 16 | Phase 2 Slice 1: Catalog Discovery Evidence | Phase 2 agent-execution restoration | Baseline `7db72c1ee`; commits `a9c3d3507`, `ca471fcde`, `680d9429f`; final `f95d3b02e`; retrospective fix commit `e9fb48c3b9469d4b8122ab76c299eba3832df8c0` | Historical branch evidence at `codex/phase-2-catalog-discovery-evidence-current@f95d3b02e`; the canonical artifacts and implementation files are not present on this tracker branch. | Historical branch-only files: `phase-2-agent-execution-restoration-scorecard.md`; `phase-2-agent-execution-restoration-evidence-manifest.md`; `phase-2-agent-execution-restoration-inventory.md`; `phase-2-agent-execution-restoration-inventory.tsv`; `packages/agent/src/domains/catalog_discovery/`; Runtime Cockpit Discovery tests; SACB/HRA/PCC/TPC/TMB/IARM/IOSAC/IOSTC/CSD invariants on that source branch. | Accepted by re-audit thread `019ef7ce-cb06-7242-9361-06e28bf01aa9` after focused tracker/docs fix commit `e9fb48c3b9469d4b8122ab76c299eba3832df8c0`; no findings remain. Historical branch-scoped evidence records catalog search/inspect/conformance through `execute`, resource-backed reports, Runtime Cockpit Discovery, protected omission, and Rust/iOS/static validations. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | No target routing, intent execution, public `/engine` expansion, generated `ui_surface` publication, fixed legacy panels, schema repair, or old module copies. | Closed. Continue with Phase 2 Slice 2: Approval Safety / Freshness + Schema Hardening. |
 | 17 | Phase 2 Slice 2: Approval Safety / Freshness + Schema Hardening | Phase 2 agent-execution restoration | Baseline `f95d3b02e`; final pre-hardening `5ea963008`; hardening final `301f61bc3` | `codex/phase-2-approval-safety-freshness-current`; `codex/phase-2-approval-schema-hardening-current` | Phase 2 scorecard/evidence/inventory; approval domain docs/tests; SACB/TMB/HRA/TPC/PCC/DRC/CSD/DESI invariants | Durable approval request/decision resources, lifecycle stream, idempotent decision recording, fail-closed checks, replay explanations, schema alignment guard, full Rust CI recorded. | Native iOS approval UI, risk taxonomy, default expiry policy, interruption behavior, per-package risky-action triggers, and unrelated capability behavior remain deferred. | Approval-is-not-authority boundary, stale version/idempotency, expiry/freshness determinism, schema/output drift, and denial behavior. |
 | 18 | Phase 2 Slice 3: Memory Foundation + Scope Hardening | Phase 2 agent-execution restoration | Baseline `301f61bc3`; commits `29024b677`, `20dde9894`, `4c35b2119` | `codex/phase-2-memory-foundation-current` | Phase 2 scorecard/evidence/inventory; memory domain docs/tests; SACB/HRA/TMB/TPC/PCC/DRC/SSARR/CSD/BPRC/IARM/OPSAA/SUWRF/DESI invariants | Memory policy/status, resource definitions, redacted records, prompt traces, migration envelopes, scope hardening, no hidden body-context inclusion, full Rust CI and guards recorded. | Semantic/vector retrieval, embeddings, ranking, summarization, episodic retrieval, procedural rules/hooks/skills, automatic retention, native iOS memory UI, and unrelated features remain deferred. | Privacy and bodyRef custody, scope isolation, prompt trace freshness, policy inheritance, migration redaction, hidden memory leakage, and guard narrowing. |
 | 19 | Phase 2 Slice 4: Filesystem Agent Tools + Truncated Snapshot Hardening | Phase 2 agent-execution restoration | Baseline `4c35b2119`; commits `27e5847c9`, `2650dd0b9` | `codex/phase-2-filesystem-agent-tools-current` | Phase 2 scorecard/evidence/inventory; filesystem domain docs/tests; SACB/TMB/HRA/TPC/PCC/BPRC/IARM/DESI/OPSAA invariants; provider message converter tests | Bounded read/list/find/glob/search/diff/write/edit/apply-patch through `execute`; path authority; symlink/traversal denial; patch/materialized resources; truncated snapshot refusal; personal-info guard recorded. | Jobs, git, web, subagents, memory/vector/procedural/scheduling, native file/patch UI, public DTO expansion, DB/settings/auth/provider changes, and production deploy remain deferred. | Path canonicalization, symlink escapes, bounded output, binary omission, exact edit/hash guards, preview/commit idempotency, rollback evidence, and provider prompt guardrails. |
@@ -957,20 +957,90 @@ Validation recorded by the accepted re-audit:
 - The independent re-audit returned `verdict: slice accepted`.
 - The independent re-audit reported no findings.
 
+## Completed Audit: Phase 2 Slice 1: Catalog Discovery Evidence
+
+Original audit thread: `019ef7c8-3427-7420-9c5c-f43b4fdd5b4f`
+
+Focused fix thread: `019ef7cc-23f2-7391-830c-7e5e97305aed`
+
+Independent re-audit thread: `019ef7ce-cb06-7242-9361-06e28bf01aa9`
+
+Original audit verdict: `changes required`, because Order 16 branch-scoped
+artifacts were described as current-line artifacts.
+
+Re-audit verdict: `slice accepted`
+
+Status: accepted with no findings after the focused tracker/docs fix.
+
+Accepted fix:
+
+- Fix commit:
+  `e9fb48c3b9469d4b8122ab76c299eba3832df8c0`
+- The fix clarified that Phase 2 Slice 1 catalog discovery implementation and
+  evidence are historical branch-scoped artifacts at
+  `codex/phase-2-catalog-discovery-evidence-current@f95d3b02e`, not files
+  present on this tracker branch.
+- The fix preserved the consolidation requirement: before any all-slices
+  integrated acceptance claim, a final consolidation branch and explicit
+  consolidation audit must verify branch-scoped artifacts have either been
+  ported into that branch or truthfully superseded by current-line records.
+- The fix changed docs/tracker wording only and did not alter runtime or product
+  behavior.
+
+Accepted result:
+
+- Phase 2 Slice 1 Catalog Discovery Evidence is accepted as branch-scoped
+  historical evidence.
+- Historical range: baseline `7db72c1ee`, commits `a9c3d3507`,
+  `ca471fcde`, and `680d9429f`, final `f95d3b02e` on
+  `codex/phase-2-catalog-discovery-evidence-current`.
+- The accepted historical evidence covers catalog search/inspect/conformance
+  through `execute`, resource-backed reports, Runtime Cockpit Discovery,
+  protected omission, and recorded Rust/iOS/static validations.
+- Acceptance does not claim the canonical Phase 2 Slice 1 artifacts or
+  `packages/agent/src/domains/catalog_discovery/` are present on this tracker
+  branch.
+
+Accepted deferred scope:
+
+- No target routing, intent execution, public `/engine` expansion, generated
+  `ui_surface` publication, fixed legacy panels, schema repair, or old module
+  copies are accepted as part of this slice.
+- Integrated all-slices acceptance remains blocked until the final
+  consolidation branch/audit requirement is completed.
+
+Validation recorded by the accepted re-audit:
+
+- `git show --stat --oneline e9fb48c3b9469d4b8122ab76c299eba3832df8c0`
+  reported one docs file changed.
+- `git diff ca74c9f...e9fb48c3 -- packages/agent/docs/restoration-retrospective-audit-status.md`
+  showed wording correction only.
+- Current `HEAD` tracked-file checks confirmed the canonical Order 16 files are
+  absent from this tracker branch.
+- Historical ref `codex/phase-2-catalog-discovery-evidence-current` resolved to
+  `f95d3b02e`, and historical docs plus `catalog_discovery` implementation
+  files exist there.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture`
+  passed, 11 tests.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+
 ## Next Audit
 
-The next action is audit of **Order 16: Phase 2 Slice 1: Catalog Discovery
-Evidence**.
+The next action is audit of **Order 17: Phase 2 Slice 2: Approval Safety /
+Freshness + Schema Hardening**.
 
-The tracker queue is not ambiguous: Order 15 is now closed, and Order 16 is the
-next open row. It starts from baseline `7db72c1ee`, includes commits
-`a9c3d3507`, `ca471fcde`, and `680d9429f`, and has final commit `f95d3b02e`.
-Its historical branch source of truth is
-`codex/phase-2-catalog-discovery-evidence-current@f95d3b02e`. The Phase 2
-scorecard/evidence/inventory files and `packages/agent/src/domains/catalog_discovery/`
-implementation are not present on this tracker branch, so Order 16 re-audit
-must treat them as branch-scoped evidence unless and until a consolidation
-branch ports or truthfully supersedes them.
+The tracker queue is not ambiguous: Order 16 is now closed, and Order 17 is the
+next open row:
+
+> `| 17 | Phase 2 Slice 2: Approval Safety / Freshness + Schema Hardening | Phase 2 agent-execution restoration | Baseline f95d3b02e; final pre-hardening 5ea963008; hardening final 301f61bc3 | codex/phase-2-approval-safety-freshness-current; codex/phase-2-approval-schema-hardening-current | ... |`
+
+Order 17 starts from baseline `f95d3b02e`, has final pre-hardening commit
+`5ea963008`, hardening final commit `301f61bc3`, and uses
+`codex/phase-2-approval-safety-freshness-current` plus
+`codex/phase-2-approval-schema-hardening-current` as source-of-truth refs. The
+recommended next orchestration target is Order 17.
 
 Before any all-slices integrated acceptance claim, create a final consolidation
 branch and run an explicit consolidation audit that verifies accepted
