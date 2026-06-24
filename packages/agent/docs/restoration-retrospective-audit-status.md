@@ -64,7 +64,7 @@ completed slice.
 | 11 | iOS Phase 1 Slice 5: Settings / Onboarding / Diagnostics / Pairing Polish | Phase 1 iOS affordance restoration | Commit `3680ea271`; retrospective fix commit `49b76afa3805eeed7b4f5847779cfb2eb69a8edf` | `codex/ios-settings-onboarding-diagnostics-pairing-current`; retrospective fix branch `codex/order-11-ios-settings-onboarding-polish-fix` | `ios-affordance-restoration-progress.md`; settings/onboarding/provider/server/source-guard tests; iOS docs | Accepted by re-audit thread `019ef77a-bce7-7d23-815f-2a06a719b79c` after fix commit `49b76afa3805eeed7b4f5847779cfb2eb69a8edf`; no findings remain. Active-server repair uses truthful re-pair wording, the real new-server path still uses `prefill: nil`, source guards pin label-to-prefill intent, and docs match the corrected behavior. | Fixed product session lists, APNs/device broker, skills/rules/memory/worktree/process/job/goal/subagent/approval/web state, fake server-health facts, new server settings, DB tables, auth/provider behavior, backend facts, diagnostics execution changes, and future agent-execution surfaces remain absent. | Closed. Continue with Accepted Follow-Up: Cockpit Placement and Session-List Row Polish. |
 | 12 | Accepted Follow-Up: Cockpit Placement and Session-List Row Polish | Phase 1 accepted follow-up | Commits `becbc0e95`, `34c53dc93`, `22cb96e72`, `9d172aa27`, `0176379ba`; progress checkpoint `da53490c1`; retrospective fix commit `2b546ee9316ae758193b96b594a2002733e2afc9` | `codex/ios-cockpit-placement-cleanup-current`; progress ledger; retrospective fix branch `codex/order-12-cockpit-placement-repair-cta-fix` | `ios-affordance-restoration-progress.md`; IOSAC/IARM invariants; session-list/cockpit/settings placement tests; README/onboarding docs; settings source guards | Accepted by re-audit thread `019ef78e-d30c-7f82-96ab-206c34af2276` after fix commit `2b546ee9316ae758193b96b594a2002733e2afc9`; no findings remain. Active-server repair uses truthful re-pair wording, true new-server flow still uses `prefill: nil`, docs match behavior, and Order 12 cockpit/dashboard/session-row behavior remains intact. | No backend facts, server settings, provider/auth APIs, fake backend truth, diagnostics execution changes, worker lifecycle changes, future agent-execution surfaces, notification inbox, APNs, device broker, Phase 2 capability, or passive chat runtime banner. | Closed. Continue with iOS Phase 1 Slice 6: Notification / Inbox Concept Review. |
 | 13 | iOS Phase 1 Slice 6: Notification / Inbox Concept Review | Phase 1 iOS defer decision | Commit `ace41ac98`; closeout `fda2eaf6d`; retrospective fix commit `0ff5d2b28de52dda2beb64245c1d6524ed835969` | `codex/ios-notification-inbox-concept-review-current`; progress ledger plus retrospective fix branch `codex/order-13-notification-inbox-concept-fix` | `ios-affordance-restoration-progress.md`; `ios_affordance_restoration_map_invariants.rs`; BPRC/IARM docs; iOS architecture doc | Accepted by re-audit thread `019ef7a8-1ac7-76d1-9024-4127a0cfdf71` after fix commit `0ff5d2b28de52dda2beb64245c1d6524ed835969`; no findings remain. Slice 6 is recorded as a defer/concept decision, not a runtime notification UI implementation; current line/tracker docs no longer claim it is next or pending implementation. | APNs, background push, device broker, notification resources, durable inbox storage, read state, app badge semantics, delivery chips, tool-family notifications, and agent-execution inbox remain Phase 2/later. | Closed. Continue with Accepted Follow-Up: Server-Backed Workspace Browser. |
-| 14 | Accepted Follow-Up: Server-Backed Workspace Browser | Phase 1 accepted follow-up / Phase 2 precursor | Commits `70780b798`, `f34ac1bdd`, `c818cc296`, `ceb6aab35`, `7a9de156b`, `8054ed17e`, `74a5564d3`, `38a88ede9`; reconciliation `980867c35` | `codex/ios-affordance-restoration-map-current`; progress ledger | `ios-affordance-restoration-progress.md`; filesystem workspace-browser docs/tests; IARM/BPRC invariants | Progress ledger records server-backed home/list/create-dir selector, compact UI follow-ups, and expected focused validation. | Native file/patch review UI, import, worktree, git, broad file-management/product panels, fake analytics, source-control surfaces remain absent. | Filesystem boundary separation from Phase 2 agent tools, server-fact rendering, path/root handling, hidden-folder behavior, create-dir authority, and selector reuse. |
+| 14 | Accepted Follow-Up: Server-Backed Workspace Browser | Phase 1 accepted follow-up / Phase 2 precursor | Commits `70780b798`, `f34ac1bdd`, `c818cc296`, `ceb6aab35`, `7a9de156b`, `8054ed17e`, `74a5564d3`, `38a88ede9`; reconciliation `980867c35` | `codex/ios-affordance-restoration-map-current`; progress ledger | `ios-affordance-restoration-progress.md`; filesystem workspace-browser docs/tests; IARM/BPRC invariants | Accepted by audit thread `019ef7ae-6dd0-77f2-851b-78934da65718`; no blocking or important findings. Server-backed workspace browser is accepted as a workspace selector precursor only; authenticated engine clients keep first-party filesystem-browser access by design, without adding model-facing filesystem tools. | Native file/patch review UI, import, worktree, git, broad file-management/product panels, fake analytics, source-control surfaces, and Phase 2 model-facing filesystem tools remain absent. | Closed. Follow-up: align symlinked-directory advertisement/navigation behavior; tighten workspace path abbreviation to the server-returned home path. Continue with Phase 2 Agent Execution Restoration Plan. |
 | 15 | Phase 2 Agent Execution Restoration Plan | Phase 2 planning | Planning baseline `980867c35`; final `7db72c1ee` | `codex/ios-affordance-restoration-map-current` | `phase-2-agent-execution-restoration-scorecard.md`; `phase-2-agent-execution-restoration-evidence-manifest.md`; `phase-2-agent-execution-restoration-inventory.md`; `phase-2-agent-execution-restoration-inventory.tsv`; DESI/IARM/BPRC/SSARR/OPSAA invariants | Score 100/100; all 24 BPRC buckets mapped; ordered roadmap; memory architecture; validation protocol; handoff packet recorded. | Planning does not implement runtime behavior. Future slices still need user decisions and per-slice validation. | Roadmap completeness, stale closure text, inventory row status drift, deferral preservation, and handoff constraints. |
 | 16 | Phase 2 Slice 1: Catalog Discovery Evidence | Phase 2 agent-execution restoration | Baseline `7db72c1ee`; commits `a9c3d3507`, `ca471fcde`, `680d9429f`; final `f95d3b02e` | `codex/phase-2-catalog-discovery-evidence-current` | Phase 2 scorecard/evidence/inventory; catalog discovery domain docs/tests; Runtime Cockpit tests; SACB/HRA/PCC/TPC/TMB/IARM/IOSAC/IOSTC/CSD invariants | Catalog search/inspect/conformance through `execute`; resource-backed reports; Runtime Cockpit Discovery; protected omission; many Rust/iOS/static validations recorded. | No target routing, intent execution, public `/engine` expansion, generated `ui_surface` publication, fixed legacy panels, schema repair, or old module copies. | Protected visibility, no target invocation, idempotency/lease/compensation, provider-visible singularity, cockpit DTO truthfulness, and log redaction hardening. |
 | 17 | Phase 2 Slice 2: Approval Safety / Freshness + Schema Hardening | Phase 2 agent-execution restoration | Baseline `f95d3b02e`; final pre-hardening `5ea963008`; hardening final `301f61bc3` | `codex/phase-2-approval-safety-freshness-current`; `codex/phase-2-approval-schema-hardening-current` | Phase 2 scorecard/evidence/inventory; approval domain docs/tests; SACB/TMB/HRA/TPC/PCC/DRC/CSD/DESI invariants | Durable approval request/decision resources, lifecycle stream, idempotent decision recording, fail-closed checks, replay explanations, schema alignment guard, full Rust CI recorded. | Native iOS approval UI, risk taxonomy, default expiry policy, interruption behavior, per-package risky-action triggers, and unrelated capability behavior remain deferred. | Approval-is-not-authority boundary, stale version/idempotency, expiry/freshness determinism, schema/output drift, and denial behavior. |
@@ -843,10 +843,78 @@ Validation recorded by the accepted re-audit:
 - `git ls-files -ci --exclude-standard` passed with empty output.
 - The review worktree remained clean.
 
+## Completed Audit: Accepted Follow-Up Server-Backed Workspace Browser
+
+Audit thread: `019ef7ae-6dd0-77f2-851b-78934da65718`
+
+Verdict: `slice accepted`
+
+Status: accepted with no blocking or important findings. The two audit findings
+below are accepted non-blocking follow-up work, not blockers.
+
+Accepted range:
+
+- Tracker-listed audited range: `70780b798^..980867c35`
+- Audited head: `980867c35`
+- The audit inspected runtime and test behavior detached at `980867c35`.
+
+Accepted result:
+
+- Server-backed workspace browser is accepted as a workspace selector precursor
+  only.
+- It does not restore native file/patch review UI, import/worktree/git broad
+  file-management panels, fake analytics/source-control surfaces, or Phase 2
+  model-facing filesystem tools.
+- Authenticated engine clients retain first-party filesystem-browser access by
+  design. The slice did not add model-facing filesystem tools.
+
+Accepted deferred scope:
+
+- Native file/patch review UI, import/worktree/git panels, broad
+  file-management or product panels, fake analytics, source-control surfaces,
+  and Phase 2 model-facing filesystem tools remain deferred or absent.
+
+Non-blocking follow-up findings:
+
+- Symlinked directories are advertised as navigable but then rejected on
+  navigation. The service marks symlink-to-directory entries as `isDirectory`,
+  while `list_dir` validates the selected path with `symlink_metadata`.
+  Audit refs:
+  `packages/agent/src/domains/filesystem/service.rs:158`,
+  `packages/agent/src/domains/filesystem/service.rs:229`.
+- Workspace path display abbreviates any `/Users/<name>` path as `~`, not
+  specifically the server-returned home path. This can mislabel
+  `/Users/Public` or another account home if the browser navigates outside the
+  paired user home. Audit refs:
+  `packages/ios-app/Sources/Support/Foundation/Formatting/String+Extensions.swift:78`,
+  `packages/ios-app/Sources/UI/Chat/Sheets/WorkspaceSelector.swift:155`.
+
+Validation recorded by the accepted audit:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml filesystem --lib -- --nocapture`
+  passed, 5 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
+  passed, 8 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture`
+  passed, 8 tests.
+- Focused Xcode tests for `TronMobileTests/NewSessionFlowTests` and
+  `TronMobileTests/FolderCreationTests` passed with existing Swift warning
+  noise.
+- XcodeGen drift checked in a temporary copy of `packages/ios-app`: no diff.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+- The audit worktree remained clean.
+
 ## Next Audit
 
-The next action is audit of **Order 14: Accepted Follow-Up: Server-Backed
-Workspace Browser**.
+The next action is audit of **Order 15: Phase 2 Agent Execution Restoration
+Plan**.
+
+The tracker queue is not ambiguous: Order 14 is now closed, and Order 15 is the
+next open row. It starts from planning baseline `980867c35` and final
+`7db72c1ee`, with `codex/ios-affordance-restoration-map-current` as source of
+truth.
 
 ## Per-Slice Audit Start State
 
