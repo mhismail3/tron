@@ -353,7 +353,7 @@ pub(super) fn update_branch_ref_guarded(
     new_commit: &str,
     expected_head: &str,
 ) -> Result<(), CapabilityError> {
-    let output = service::git_update_ref_output_bounded(
+    let output = service::git_update_branch_ref_with_locked_head(
         worktree_root,
         branch_ref,
         new_commit,

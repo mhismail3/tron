@@ -635,9 +635,10 @@ Candidate implementation evidence:
   `git write-tree`; the tree hash is derived from `git ls-files -s -z` and
   `git hash-object -t tree --stdin` without `-w`, and fails closed if the
   index listing is truncated.
-- Rejects stale head, stale index tree, empty staged index, detached HEAD,
-  conflicted/unmerged index entries, non-repo and nested-repo misuse, path
-  escapes, missing trusted working-directory metadata, empty message, and empty
+- Rejects stale head, symbolic HEAD branch drift, stale index tree, empty staged
+  index, detached HEAD, conflicted/unmerged index entries, non-repo and
+  nested-repo misuse, path escapes, missing trusted working-directory metadata,
+  empty message, and empty
   reason before committing.
 - Suppresses hooks, editors, pagers, GPG signing, terminal prompts, askpass,
   and credential helpers with explicit command environment/config controls.

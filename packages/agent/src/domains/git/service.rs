@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 
 use serde_json::{Value, json};
@@ -17,6 +19,7 @@ use super::types::{
 };
 
 const MAX_GIT_STDERR_BYTES: usize = 4 * 1024;
+static SYNTHETIC_GIT_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) async fn status_value(
     invocation: &Invocation,
@@ -454,18 +457,194 @@ pub(super) fn git_commit_tree_output_bounded(
     })
 }
 
-pub(super) fn git_update_ref_output_bounded(
-    dir: &Path,
+pub(super) fn git_update_ref_git_dir_output_bounded(
+    git_dir: &Path,
     ref_name: &str,
     new_oid: &str,
     expected_old_oid: &str,
     stdout_limit: usize,
 ) -> Result<BoundedGitOutput, CapabilityError> {
-    git_command_bounded(
-        dir,
-        ["update-ref", ref_name, new_oid, expected_old_oid],
+    let mut child = Command::new("git")
+        .arg("--no-optional-locks")
+        .arg("--git-dir")
+        .arg(git_dir)
+        .arg("update-ref")
+        .arg(ref_name)
+        .arg(new_oid)
+        .arg(expected_old_oid)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| internal(format!("run git update-ref: {error}")))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| internal("capture git update-ref stdout"))?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| internal("capture git update-ref stderr"))?;
+    let stdout_reader = thread::spawn(move || read_bounded(stdout, stdout_limit));
+    let stderr_reader = thread::spawn(move || read_bounded(stderr, MAX_GIT_STDERR_BYTES));
+    let status = child
+        .wait()
+        .map_err(|error| internal(format!("wait for git update-ref: {error}")))?;
+    let (stdout, stdout_truncated) = stdout_reader
+        .join()
+        .map_err(|_| internal("join git update-ref stdout reader"))?
+        .map_err(|error| internal(format!("read git update-ref stdout: {error}")))?;
+    let (stderr, _stderr_truncated) = stderr_reader
+        .join()
+        .map_err(|_| internal("join git update-ref stderr reader"))?
+        .map_err(|error| internal(format!("read git update-ref stderr: {error}")))?;
+    Ok(BoundedGitOutput {
+        status,
+        stdout,
+        stdout_truncated,
+        stderr,
+    })
+}
+
+pub(super) fn git_update_branch_ref_with_locked_head(
+    worktree_root: &Path,
+    branch_ref: &str,
+    new_oid: &str,
+    expected_old_oid: &str,
+    stdout_limit: usize,
+) -> Result<BoundedGitOutput, CapabilityError> {
+    let _head_lock = WorktreeHeadLock::acquire(worktree_root)?;
+    let actual_head_ref = git_symbolic_head_ref(worktree_root)?
+        .ok_or_else(|| invalid("git_commit rejects detached HEAD before ref update"))?;
+    if actual_head_ref != branch_ref {
+        return Err(invalid(format!(
+            "git_commit rejects branch changes before ref update: expected {branch_ref}, actual {actual_head_ref}"
+        )));
+    }
+    let git_dir = SyntheticGitDir::create(worktree_root, expected_old_oid)?;
+    git_update_ref_git_dir_output_bounded(
+        git_dir.path(),
+        branch_ref,
+        new_oid,
+        expected_old_oid,
         stdout_limit,
     )
+}
+
+struct WorktreeHeadLock {
+    path: PathBuf,
+    _file: File,
+}
+
+impl WorktreeHeadLock {
+    fn acquire(worktree_root: &Path) -> Result<Self, CapabilityError> {
+        let head_path = git_path(worktree_root, "HEAD")?;
+        let head_file_name = head_path
+            .file_name()
+            .ok_or_else(|| internal("git HEAD path has no file name"))?;
+        let mut lock_path = head_path.clone();
+        lock_path.set_file_name(format!("{}.lock", head_file_name.to_string_lossy()));
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&lock_path)
+            .map_err(|error| {
+                invalid(format!(
+                    "git_commit could not lock HEAD before ref update: {error}"
+                ))
+            })?;
+        file.write_all(b"tron git_commit guarded ref update\n")
+            .map_err(|error| internal(format!("write git HEAD lock: {error}")))?;
+        Ok(Self {
+            path: lock_path,
+            _file: file,
+        })
+    }
+}
+
+impl Drop for WorktreeHeadLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+struct SyntheticGitDir {
+    path: PathBuf,
+}
+
+impl SyntheticGitDir {
+    fn create(worktree_root: &Path, expected_head: &str) -> Result<Self, CapabilityError> {
+        let common_dir = git_common_dir(worktree_root)?;
+        let base = std::env::temp_dir();
+        let sequence = SYNTHETIC_GIT_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
+        for attempt in 0..1024 {
+            let path = base.join(format!("tron-update-ref-{sequence}-{attempt}"));
+            match fs::create_dir(&path) {
+                Ok(()) => {
+                    fs::write(
+                        path.join("commondir"),
+                        format!("{}\n", common_dir.display()),
+                    )
+                    .map_err(|error| internal(format!("write synthetic git commondir: {error}")))?;
+                    fs::write(path.join("HEAD"), format!("{expected_head}\n"))
+                        .map_err(|error| internal(format!("write synthetic git HEAD: {error}")))?;
+                    return Ok(Self { path });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(internal(format!("create synthetic git dir: {error}")));
+                }
+            }
+        }
+        Err(internal("create synthetic git dir: exhausted unique names"))
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for SyntheticGitDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+fn git_common_dir(worktree_root: &Path) -> Result<PathBuf, CapabilityError> {
+    let output = git_output_bounded(
+        worktree_root,
+        ["rev-parse", "--git-common-dir"],
+        MAX_GIT_STDERR_BYTES,
+    )?;
+    let raw = trim_stdout(&output.stdout);
+    if raw.is_empty() {
+        return Err(internal("git rev-parse returned empty common dir"));
+    }
+    Ok(resolve_git_path_output(worktree_root, &raw))
+}
+
+fn git_path(worktree_root: &Path, path: &str) -> Result<PathBuf, CapabilityError> {
+    let output = git_output_bounded(
+        worktree_root,
+        ["rev-parse", "--git-path", path],
+        MAX_GIT_STDERR_BYTES,
+    )?;
+    let raw = trim_stdout(&output.stdout);
+    if raw.is_empty() {
+        return Err(internal(format!(
+            "git rev-parse returned empty git path for {path}"
+        )));
+    }
+    Ok(resolve_git_path_output(worktree_root, &raw))
+}
+
+fn resolve_git_path_output(worktree_root: &Path, raw: &str) -> PathBuf {
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        worktree_root.join(path)
+    }
 }
 
 fn staged_index_tree_oid(worktree_root: &Path) -> Result<Option<String>, CapabilityError> {

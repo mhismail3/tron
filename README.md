@@ -1005,9 +1005,10 @@ from the already-staged index on the current named branch after expected HEAD an
 expected index tree freshness checks, rejects detached/conflicted/empty-index
 and merge/sequencer states, rechecks the staged tree immediately before creating
 the commit object, then advances the branch with a guarded `update-ref` compare
-against the expected HEAD. The `commit-tree` path does not invoke hooks or an
-editor and suppresses pager/signing/credential prompts, creates a `git_commit`
-resource, and publishes `git.commit_created` lifecycle evidence.
+against the expected HEAD while symbolic `HEAD` is locked and reverified. The
+`commit-tree` path does not invoke hooks or an editor and suppresses
+pager/signing/credential prompts, creates a `git_commit` resource, and publishes
+`git.commit_created` lifecycle evidence.
 Merges, rebases, resets, pushes, branch checkout/deletion, conflict resolution
 workflows, PR handoff, worktree graph resources, and native iOS SourceChanges
 UI remain deferred.

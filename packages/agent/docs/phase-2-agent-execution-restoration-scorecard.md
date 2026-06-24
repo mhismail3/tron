@@ -879,8 +879,9 @@ Core versus modular split:
   second model-facing tool, or public `/engine` API.
 - Mutation boundary: `git_commit` may create exactly one commit from the
   already-staged index and advance the current named branch from
-  `expectedHead` to the new commit. It must not auto-stage files, edit
-  worktree content, checkout/create/delete branches, merge, rebase, reset,
+  `expectedHead` to the new commit only after proving symbolic `HEAD` still
+  names that branch at the ref-update boundary. It must not auto-stage files,
+  edit worktree content, checkout/create/delete branches, merge, rebase, reset,
   stash, clean, fetch, pull, push, or create PRs.
 - Freshness boundary: `git_commit` must require both `expectedHead` and an
   expected staged index tree value. The slice should expose the staged index

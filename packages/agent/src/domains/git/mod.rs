@@ -26,10 +26,10 @@
 //! relative paths, expected HEAD freshness, path existence, and path-scoped
 //! conflict state. Commit operations create exactly one commit from the
 //! already-staged index on the current named branch by rechecking expected HEAD
-//! and expected index-tree at the mutation boundary, writing the commit object
-//! with exactly that parent/tree, and advancing the branch ref with guarded
-//! `update-ref`. Caller-controlled status/diff byte limits affect evidence
-//! only, never mutation eligibility.
+//! and expected index-tree, writing the commit object with exactly that
+//! parent/tree, and advancing the branch ref with guarded `update-ref` while
+//! the worktree's symbolic `HEAD` is locked and reverified. Caller-controlled
+//! status/diff byte limits affect evidence only, never mutation eligibility.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

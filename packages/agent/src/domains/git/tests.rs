@@ -1073,6 +1073,47 @@ async fn execute_git_commit_rejects_stale_head_at_guarded_ref_update() {
 }
 
 #[tokio::test]
+async fn execute_git_commit_rejects_head_branch_mismatch_at_guarded_ref_update() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let main_before = git_stdout(repo.path(), ["rev-parse", "refs/heads/main"]);
+    let new_commit = git_stdout(
+        repo.path(),
+        [
+            "commit-tree",
+            "refs/heads/main^{tree}",
+            "-p",
+            "refs/heads/main",
+            "-m",
+            "guarded update candidate",
+        ],
+    );
+    git(repo.path(), ["checkout", "-b", "other"]);
+
+    let error = super::commit::update_branch_ref_guarded(
+        repo.path(),
+        "refs/heads/main",
+        &new_commit,
+        &main_before,
+    )
+    .expect_err("HEAD branch mismatch should fail before advancing captured branch")
+    .to_string();
+
+    assert!(error.contains("branch changes before ref update"));
+    assert_eq!(
+        git_stdout(repo.path(), ["rev-parse", "refs/heads/main"]),
+        main_before
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["symbolic-ref", "HEAD"]),
+        "refs/heads/other"
+    );
+}
+
+#[tokio::test]
 async fn execute_git_commit_rejects_resolved_merge_state() {
     let ctx = make_test_context();
     let repo = tempdir().expect("repo");
