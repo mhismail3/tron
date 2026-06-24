@@ -1,14 +1,14 @@
 use serde_json::{Value, json};
 
 use crate::engine::{
-    CreateResource, EngineResourceScope, Invocation, InvocationId, LinkResources,
-    PublishStreamEvent, StreamCursor, UpdateResource, VisibilityScope, WorkerId,
+    CreateResource, EngineResourceScope, Invocation, InvocationId, LinkResources, ListResources,
+    PublishStreamEvent, StreamCursor, TraceId, UpdateResource, VisibilityScope, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
 use super::errors::{engine_error, internal_error};
 use super::manifest::{ValidatedPackage, WorkerPackageManifest, manifest_from_payload};
-use super::params::PackageRef;
+use super::params::{PackageRef, package_ref_from_payload};
 use super::{Deps, manifest::validate_manifest_full};
 use super::{WORKER, WORKER_LIFECYCLE_TOPIC};
 
@@ -226,6 +226,213 @@ pub(super) async fn update_package_and_installation_status(
     Ok((package_write, installation_write))
 }
 
+pub(super) async fn update_package_and_installation_status_from_ref(
+    deps: &Deps,
+    invocation: &Invocation,
+    package_ref: &PackageRef,
+    status: &str,
+    reason: Option<String>,
+) -> Result<(ResourceWrite, ResourceWrite), CapabilityError> {
+    let package_write = update_payload_status_resource(
+        deps,
+        &package_resource_id_from_ref(package_ref),
+        status,
+        reason.clone(),
+        Some(invocation),
+    )
+    .await?;
+    let installation_write = update_payload_status_resource(
+        deps,
+        &installation_resource_id_from_ref(package_ref),
+        status,
+        reason,
+        Some(invocation),
+    )
+    .await?;
+    Ok((package_write, installation_write))
+}
+
+pub(super) async fn reconcile_owned_launch_attempts_on_startup(
+    deps: &Deps,
+) -> Result<usize, CapabilityError> {
+    let mut reconciled = 0;
+    for lifecycle in ["launching", "running"] {
+        let resources = deps
+            .engine_host
+            .list_resources(ListResources {
+                kind: Some(super::LAUNCH_KIND.to_owned()),
+                scope: None,
+                lifecycle: Some(lifecycle.to_owned()),
+                limit: 10_000,
+            })
+            .await
+            .map_err(engine_error)?;
+        for resource in resources {
+            let mut payload = current_resource_payload(deps, &resource.resource_id).await?;
+            let package_ref = package_ref_from_payload(&payload)?;
+            mark_payload_ownership_lost(&mut payload);
+            update_payload_status_resource_without_invocation(
+                deps,
+                &resource.resource_id,
+                "unhealthy",
+                payload,
+            )
+            .await?;
+            let reason = Some(
+                "worker launch process ownership was lost during worker_lifecycle startup"
+                    .to_owned(),
+            );
+            let _ = try_update_payload_status_resource_without_invocation(
+                deps,
+                &package_resource_id_from_ref(&package_ref),
+                "enabled",
+                reason.clone(),
+            )
+            .await;
+            let _ = try_update_payload_status_resource_without_invocation(
+                deps,
+                &installation_resource_id_from_ref(&package_ref),
+                "enabled",
+                reason,
+            )
+            .await;
+            reconciled += 1;
+        }
+    }
+    Ok(reconciled)
+}
+
+async fn update_payload_status_resource(
+    deps: &Deps,
+    resource_id: &str,
+    status: &str,
+    reason: Option<String>,
+    invocation: Option<&Invocation>,
+) -> Result<ResourceWrite, CapabilityError> {
+    let payload = status_payload(
+        current_resource_payload(deps, resource_id).await?,
+        status,
+        reason,
+        invocation,
+    );
+    match invocation {
+        Some(invocation) => {
+            update_status_resource(deps, resource_id, status, payload, invocation).await
+        }
+        None => {
+            update_payload_status_resource_without_invocation(deps, resource_id, status, payload)
+                .await
+        }
+    }
+}
+
+async fn update_payload_status_resource_without_invocation(
+    deps: &Deps,
+    resource_id: &str,
+    lifecycle: &str,
+    payload: Value,
+) -> Result<ResourceWrite, CapabilityError> {
+    let existing = deps
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .map_err(engine_error)?
+        .ok_or_else(|| CapabilityError::NotFound {
+            code: "WORKER_LIFECYCLE_RESOURCE_NOT_FOUND".to_owned(),
+            message: format!("missing lifecycle resource {resource_id}"),
+        })?;
+    deps.engine_host
+        .update_resource(UpdateResource {
+            resource_id: resource_id.to_owned(),
+            expected_current_version_id: existing.resource.current_version_id,
+            lifecycle: Some(lifecycle.to_owned()),
+            payload,
+            state: None,
+            locations: Vec::new(),
+            trace_id: TraceId::new("worker-lifecycle-startup-reconcile").map_err(engine_error)?,
+            invocation_id: None,
+        })
+        .await
+        .map_err(engine_error)?;
+    Ok(ResourceWrite {
+        resource_id: resource_id.to_owned(),
+    })
+}
+
+async fn try_update_payload_status_resource_without_invocation(
+    deps: &Deps,
+    resource_id: &str,
+    lifecycle: &str,
+    reason: Option<String>,
+) -> Result<Option<ResourceWrite>, CapabilityError> {
+    let Some(existing) = deps
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .map_err(engine_error)?
+    else {
+        return Ok(None);
+    };
+    let payload = status_payload(
+        current_resource_payload(deps, resource_id).await?,
+        lifecycle,
+        reason,
+        None,
+    );
+    deps.engine_host
+        .update_resource(UpdateResource {
+            resource_id: resource_id.to_owned(),
+            expected_current_version_id: existing.resource.current_version_id,
+            lifecycle: Some(lifecycle.to_owned()),
+            payload,
+            state: None,
+            locations: Vec::new(),
+            trace_id: TraceId::new("worker-lifecycle-startup-reconcile").map_err(engine_error)?,
+            invocation_id: None,
+        })
+        .await
+        .map_err(engine_error)?;
+    Ok(Some(ResourceWrite {
+        resource_id: resource_id.to_owned(),
+    }))
+}
+
+fn status_payload(
+    mut payload: Value,
+    status: &str,
+    reason: Option<String>,
+    invocation: Option<&Invocation>,
+) -> Value {
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("status".to_owned(), json!(status));
+        if let Some(reason) = reason {
+            object.insert("reason".to_owned(), json!(reason));
+        }
+        if let Some(invocation) = invocation {
+            object.insert(
+                "updatedByInvocationId".to_owned(),
+                json!(invocation.id.as_str()),
+            );
+        }
+    }
+    payload
+}
+
+fn mark_payload_ownership_lost(payload: &mut Value) {
+    if let Some(object) = payload.as_object_mut() {
+        object.insert("status".to_owned(), json!("unhealthy"));
+        object.insert("stopped".to_owned(), json!(false));
+        object.insert("ownershipLost".to_owned(), json!(true));
+        object.insert(
+            "failure".to_owned(),
+            json!({
+                "reason": "worker launch process ownership was lost during worker_lifecycle startup",
+                "recoverBy": "launch_worker",
+            }),
+        );
+    }
+}
+
 pub(super) async fn link_if_possible(
     deps: &Deps,
     source_resource_id: &str,
@@ -361,10 +568,24 @@ pub(super) fn package_resource_id(manifest: &WorkerPackageManifest) -> String {
     )
 }
 
+fn package_resource_id_from_ref(package_ref: &PackageRef) -> String {
+    format!(
+        "worker_package:{}:{}",
+        package_ref.package_id, package_ref.package_version
+    )
+}
+
 pub(super) fn installation_resource_id(manifest: &WorkerPackageManifest) -> String {
     format!(
         "worker_package_installation:{}:{}",
         manifest.package_id, manifest.package_version
+    )
+}
+
+fn installation_resource_id_from_ref(package_ref: &PackageRef) -> String {
+    format!(
+        "worker_package_installation:{}:{}",
+        package_ref.package_id, package_ref.package_version
     )
 }
 

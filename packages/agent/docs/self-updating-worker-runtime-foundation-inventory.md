@@ -34,6 +34,18 @@ may mint a scoped token and start a local process, but conformance is accepted
 only after the worker reconnects through the existing protocol and the live
 catalog matches the package manifest.
 
+Full package validation verifies `packageDigest` against a deterministic
+source-tree digest of every regular file below the canonical package source
+root. Symlinks and other non-regular paths fail closed; OS metadata is ignored;
+there are no excluded files.
+
+Stopping a tracked launch attempt marks that launch attempt `stopped` and
+returns the package and installation resources to `enabled` so a trusted caller
+can relaunch immediately. If process ownership is missing, stop fails without
+writing clean stopped evidence. Startup reconciliation marks durable
+`launching`/`running` attempts `unhealthy` with ownership-loss evidence and
+returns the package and installation records to `enabled`.
+
 The lifecycle domain is intentionally split by primitive owner:
 `authority.rs` owns trusted-apply checks, `manifest.rs` owns package schema and
 root validation, `launcher.rs` owns local process isolation and conformance,

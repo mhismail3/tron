@@ -20,18 +20,32 @@ use super::launcher::{
 };
 use super::manifest::{
     ConformancePolicy, PackageSource, RequestedGrantPolicy, RollbackPolicy, WorkerPackageManifest,
-    validate_manifest_full, validate_manifest_shape,
+    package_source_digest, validate_manifest_full, validate_manifest_shape,
 };
-use super::resources::launch_attempt_resource_id;
+use super::resources::{launch_attempt_resource_id, reconcile_owned_launch_attempts_on_startup};
 use super::{
     APPLY_SCOPE, Deps, ENABLE_FUNCTION, INSTALL_FUNCTION, LAUNCH_FUNCTION, PACKAGE_SCHEMA_VERSION,
     PROPOSE_FUNCTION, PROPOSE_SCOPE, SOURCE_KIND_LOCAL_FILESYSTEM, STOP_FUNCTION,
 };
 
-#[derive(Default)]
 struct FakeLauncher {
     launches: Mutex<Vec<WorkerLaunchRequest>>,
+    stops: Mutex<Vec<String>>,
     fail_launch: bool,
+    fail_stop: bool,
+    stopped: bool,
+}
+
+impl Default for FakeLauncher {
+    fn default() -> Self {
+        Self {
+            launches: Mutex::new(Vec::new()),
+            stops: Mutex::new(Vec::new()),
+            fail_launch: false,
+            fail_stop: false,
+            stopped: true,
+        }
+    }
 }
 
 #[async_trait]
@@ -46,8 +60,14 @@ impl WorkerLauncher for FakeLauncher {
         })
     }
 
-    async fn stop(&self, _launch_attempt_id: &str) -> Result<WorkerStopReceipt, String> {
-        Ok(WorkerStopReceipt { stopped: true })
+    async fn stop(&self, launch_attempt_id: &str) -> Result<WorkerStopReceipt, String> {
+        self.stops.lock().await.push(launch_attempt_id.to_owned());
+        if self.fail_stop {
+            return Err("launch attempt is not owned".to_owned());
+        }
+        Ok(WorkerStopReceipt {
+            stopped: self.stopped,
+        })
     }
 }
 
@@ -56,7 +76,7 @@ fn manifest(root: &Path) -> WorkerPackageManifest {
         schema_version: PACKAGE_SCHEMA_VERSION.to_owned(),
         package_id: "local.echo".to_owned(),
         package_version: "1.0.0".to_owned(),
-        package_digest: format!("sha256:{}", "a".repeat(64)),
+        package_digest: package_source_digest(root).expect("package digest"),
         provenance: json!({"source": "test"}),
         source: PackageSource {
             kind: SOURCE_KIND_LOCAL_FILESYSTEM.to_owned(),
@@ -135,20 +155,38 @@ fn invocation(
     actor_kind: ActorKind,
     scopes: &[&str],
 ) -> Invocation {
+    invocation_with_suffix(
+        function_id,
+        "default",
+        payload,
+        grant_id,
+        actor_kind,
+        scopes,
+    )
+}
+
+fn invocation_with_suffix(
+    function_id: &str,
+    suffix: &str,
+    payload: Value,
+    grant_id: AuthorityGrantId,
+    actor_kind: ActorKind,
+    scopes: &[&str],
+) -> Invocation {
     let mut context = CausalContext::new(
         ActorId::new("test-user").unwrap(),
         actor_kind,
         grant_id,
-        TraceId::new(format!("trace-{function_id}")).unwrap(),
+        TraceId::new(format!("trace-{function_id}-{suffix}")).unwrap(),
     )
     .with_workspace_id("workspace-test")
-    .with_idempotency_key(format!("idem-{function_id}"))
+    .with_idempotency_key(format!("idem-{function_id}-{suffix}"))
     .with_runtime_metadata(RUNTIME_METADATA_WORKING_DIRECTORY, "/tmp");
     for scope in scopes {
         context = context.with_scope(*scope);
     }
     Invocation {
-        id: InvocationId::new(format!("invocation-{function_id}")).unwrap(),
+        id: InvocationId::new(format!("invocation-{function_id}-{suffix}")).unwrap(),
         function_id: FunctionId::new(function_id).unwrap(),
         delivery_mode: DeliveryMode::Sync,
         payload,
@@ -236,6 +274,42 @@ fn manifest_full_accepts_local_package_under_root() {
     let validated = validate_manifest_full(manifest(&package), &deps).expect("valid package");
     assert_eq!(validated.argv.len(), 2);
     assert!(validated.argv[0].ends_with("worker.sh"));
+}
+
+#[test]
+fn manifest_full_rejects_package_digest_mismatch() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("workers");
+    let package = root.join("local.echo");
+    std::fs::create_dir_all(&package).expect("package dir");
+    std::fs::write(package.join("worker.sh"), "#!/bin/sh\n").expect("worker file");
+    let deps = Deps::for_test(
+        crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
+        root,
+        Arc::new(FakeLauncher::default()),
+    );
+    let mut manifest = manifest(&package);
+    manifest.package_digest = format!("sha256:{}", "0".repeat(64));
+    let error = validate_manifest_full(manifest, &deps).expect_err("digest mismatch");
+    assert!(format!("{error}").contains("packageDigest mismatch"));
+}
+
+#[test]
+fn package_digest_covers_every_regular_source_file() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("workers");
+    let package = root.join("local.echo");
+    std::fs::create_dir_all(package.join("nested")).expect("package dir");
+    std::fs::write(package.join("worker.sh"), "#!/bin/sh\n").expect("worker file");
+    let deps = Deps::for_test(
+        crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
+        root,
+        Arc::new(FakeLauncher::default()),
+    );
+    let manifest = manifest(&package);
+    std::fs::write(package.join("nested").join("extra.txt"), "included\n").expect("extra file");
+    let error = validate_manifest_full(manifest, &deps).expect_err("all files are hashed");
+    assert!(format!("{error}").contains("packageDigest mismatch"));
 }
 
 #[tokio::test]
@@ -343,8 +417,8 @@ async fn launch_failure_records_failed_state() {
         crate::engine::EngineHostHandle::new_in_memory().expect("engine host"),
         root,
         Arc::new(FakeLauncher {
-            launches: Mutex::new(Vec::new()),
             fail_launch: true,
+            ..FakeLauncher::default()
         }),
     );
     let grant = derived_lifecycle_grant(&deps.engine_host).await;
@@ -523,7 +597,7 @@ async fn launch_success_mints_scoped_token_and_records_running_state() {
         &invocation(
             STOP_FUNCTION,
             json!({"launchAttemptResourceId": launch_attempt_id, "reason": "test stop"}),
-            grant,
+            grant.clone(),
             ActorKind::User,
             &[APPLY_SCOPE],
         ),
@@ -543,4 +617,198 @@ async fn launch_success_mints_scoped_token_and_records_running_state() {
     assert_eq!(payload["packageId"], "local.echo");
     assert!(payload["argv"].is_array());
     assert_eq!(payload["reason"], "test stop");
+    let package_resource = deps
+        .engine_host
+        .inspect_resource("worker_package:local.echo:1.0.0")
+        .await
+        .unwrap()
+        .expect("package resource");
+    let installation = deps
+        .engine_host
+        .inspect_resource("worker_package_installation:local.echo:1.0.0")
+        .await
+        .unwrap()
+        .expect("installation resource");
+    assert_eq!(package_resource.resource.lifecycle, "enabled");
+    assert_eq!(installation.resource.lifecycle, "enabled");
+
+    let relaunched = launch_worker(
+        &invocation_with_suffix(
+            LAUNCH_FUNCTION,
+            "relaunch",
+            json!({"packageId": "local.echo", "packageVersion": "1.0.0"}),
+            grant,
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &deps,
+    )
+    .await
+    .expect("immediate relaunch after stop");
+    assert_eq!(relaunched["status"], "running");
+}
+
+#[tokio::test]
+async fn stop_worker_does_not_record_clean_stop_when_launcher_lost_ownership() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("workers");
+    let package = root.join("local.echo");
+    std::fs::create_dir_all(&package).expect("package dir");
+    std::fs::write(package.join("worker.sh"), "#!/bin/sh\n").expect("worker file");
+    let handle = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
+    register_expected_worker(&handle).await;
+    let fake = Arc::new(FakeLauncher {
+        fail_stop: true,
+        ..FakeLauncher::default()
+    });
+    let deps = Deps::for_test(handle, root, fake);
+    let grant = derived_lifecycle_grant(&deps.engine_host).await;
+    install_package(
+        &invocation(
+            INSTALL_FUNCTION,
+            json!({"manifest": manifest(&package)}),
+            grant.clone(),
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &deps,
+    )
+    .await
+    .unwrap();
+    set_package_enabled(
+        &invocation(
+            ENABLE_FUNCTION,
+            json!({"packageId": "local.echo", "packageVersion": "1.0.0"}),
+            grant.clone(),
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &deps,
+        true,
+    )
+    .await
+    .unwrap();
+    let launched = launch_worker(
+        &invocation(
+            LAUNCH_FUNCTION,
+            json!({"packageId": "local.echo", "packageVersion": "1.0.0"}),
+            grant.clone(),
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &deps,
+    )
+    .await
+    .expect("launch worker");
+    let launch_attempt_id = launched["launchAttemptResourceId"].as_str().unwrap();
+    let error = stop_worker(
+        &invocation(
+            STOP_FUNCTION,
+            json!({"launchAttemptResourceId": launch_attempt_id}),
+            grant,
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &deps,
+    )
+    .await
+    .expect_err("lost ownership must fail stop");
+    assert!(format!("{error}").contains("worker stop failed"));
+    let launch = deps
+        .engine_host
+        .inspect_resource(launch_attempt_id)
+        .await
+        .unwrap()
+        .expect("launch attempt resource");
+    assert_eq!(launch.resource.lifecycle, "running");
+    assert_ne!(launch.versions.last().unwrap().payload["status"], "stopped");
+}
+
+#[tokio::test]
+async fn startup_reconcile_marks_durable_running_attempts_unhealthy_and_relaunchable() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path().join("workers");
+    let package = root.join("local.echo");
+    std::fs::create_dir_all(&package).expect("package dir");
+    std::fs::write(package.join("worker.sh"), "#!/bin/sh\n").expect("worker file");
+    let handle = crate::engine::EngineHostHandle::new_in_memory().expect("engine host");
+    register_expected_worker(&handle).await;
+    let deps = Deps::for_test(handle, root, Arc::new(FakeLauncher::default()));
+    let grant = derived_lifecycle_grant(&deps.engine_host).await;
+    install_package(
+        &invocation(
+            INSTALL_FUNCTION,
+            json!({"manifest": manifest(&package)}),
+            grant.clone(),
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &deps,
+    )
+    .await
+    .unwrap();
+    set_package_enabled(
+        &invocation(
+            ENABLE_FUNCTION,
+            json!({"packageId": "local.echo", "packageVersion": "1.0.0"}),
+            grant.clone(),
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &deps,
+        true,
+    )
+    .await
+    .unwrap();
+    let launched = launch_worker(
+        &invocation(
+            LAUNCH_FUNCTION,
+            json!({"packageId": "local.echo", "packageVersion": "1.0.0"}),
+            grant.clone(),
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &deps,
+    )
+    .await
+    .expect("launch worker");
+    let launch_attempt_id = launched["launchAttemptResourceId"].as_str().unwrap();
+
+    let reconciled = reconcile_owned_launch_attempts_on_startup(&deps)
+        .await
+        .expect("startup reconcile");
+    assert_eq!(reconciled, 1);
+    let launch = deps
+        .engine_host
+        .inspect_resource(launch_attempt_id)
+        .await
+        .unwrap()
+        .expect("launch attempt resource");
+    assert_eq!(launch.resource.lifecycle, "unhealthy");
+    assert_eq!(
+        launch.versions.last().unwrap().payload["ownershipLost"],
+        true
+    );
+    let installation = deps
+        .engine_host
+        .inspect_resource("worker_package_installation:local.echo:1.0.0")
+        .await
+        .unwrap()
+        .expect("installation resource");
+    assert_eq!(installation.resource.lifecycle, "enabled");
+
+    let relaunched = launch_worker(
+        &invocation_with_suffix(
+            LAUNCH_FUNCTION,
+            "after-reconcile",
+            json!({"packageId": "local.echo", "packageVersion": "1.0.0"}),
+            grant,
+            ActorKind::User,
+            &[APPLY_SCOPE],
+        ),
+        &deps,
+    )
+    .await
+    .expect("relaunch after startup reconcile");
+    assert_eq!(relaunched["status"], "running");
 }

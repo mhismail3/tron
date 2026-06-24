@@ -52,8 +52,8 @@ completed slice.
 | Order | Slice | Phase | Range / final commit | Source of truth | Canonical files | Current acceptance evidence | Deferred scope to preserve | Likely audit focus |
 | ---: | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | Primitive Minimality Closure | Pre-restoration foundation | Baseline `7b03b51f`; final `1545da37d` | `codex/primitive-minimality-closure-current` | `primitive-minimality-closure-scorecard.md`; `primitive-minimality-closure-evidence-manifest.md`; `primitive-minimality-closure-inventory.md`; `primitive-minimality-closure-inventory.tsv`; `primitive_minimality_closure_invariants.rs` | Accepted by audit thread `019ef654-8726-7781-91bf-5bbb6f6321cd`; no blocking or important findings; score 100/100 and focused deletion/minimality tests remain accepted. | No successor features, provider-visible tool widening, settings/auth/DB/iOS DTO expansion, or deploy behavior. | Closed. Future cleanup: align the invariant endpoint constant with the documented slice boundary. |
-| 2 | Baseline Pre-Restoration Closure | Pre-restoration foundation | Baseline `1545da37d`; final `4cb2387f1` | `codex/baseline-pre-restoration-closure-current`; tag `pre-restoration-baseline-2026-06-14` | `baseline-pre-restoration-closure-scorecard.md`; `baseline-pre-restoration-closure-evidence-manifest.md`; `baseline-pre-restoration-closure-inventory.md`; `baseline-pre-restoration-closure-inventory.tsv`; `baseline_pre_restoration_closure_invariants.rs`; `README.md` | Score 100/100; 24 restoration backlog rows; absence guards; full Rust CI, personal-info guard, XcodeGen drift, whitespace, ignored-file, push/tag handoff recorded. | No restored product domains, fixed iOS panels, MCP, web/git, prompt library, notifications, voice notes, subagents, scheduler/autostart, DB migrations, or deploy/install behavior. | Whether backlog coverage is exhaustive; absence guards still distinguish approved Phase 2 restorations; active docs do not claim future behavior. |
-| 3 | Self-Updating Worker Runtime Foundation | First post-BPRC restoration foundation | Baseline `4cb2387f1`; final `6aa395fdd` | `codex/self-updating-worker-runtime-foundation-current` | `self-updating-worker-runtime-foundation-scorecard.md`; `self-updating-worker-runtime-foundation-evidence-manifest.md`; `self-updating-worker-runtime-foundation-inventory.md`; `self-updating-worker-runtime-foundation-inventory.tsv`; `self_updating_worker_runtime_foundation_invariants.rs` | Score 100/100; worker lifecycle package resources, manifest validation, scoped launch token, conformance, rollback, and generic resource/stream visibility recorded. | No MCP, skills, memory, web/browser, scheduler, subagents, prompt library, program execution, fixed iOS product panels, provider-visible tool widening, or production deploy behavior. | Launch isolation, env clearing, token scope, conformance failure rollback, resource retention, generic iOS visibility, and package/source trust boundaries. |
+| 2 | Baseline Pre-Restoration Closure | Pre-restoration foundation | Baseline `1545da37d`; final `4cb2387f1` | `codex/baseline-pre-restoration-closure-current`; tag `pre-restoration-baseline-2026-06-14` | `baseline-pre-restoration-closure-scorecard.md`; `baseline-pre-restoration-closure-evidence-manifest.md`; `baseline-pre-restoration-closure-inventory.md`; `baseline-pre-restoration-closure-inventory.tsv`; `baseline_pre_restoration_closure_invariants.rs`; `README.md` | Accepted by re-audit thread `019ef668-26d1-7123-924c-e7077c2232d2` after fix commit `9329dd1f92440500afd861293a9d4b6e981930ef`; no blocking, important, or non-blocking findings remain; BPRC and DESI invariants passed. | Approved restored roots `catalog_discovery`, `approval`, `jobs`, memory, and filesystem remain mapped to canonical Phase 2/BPRC lineage; deferred roots remain forbidden. | Closed. Preserve tracker active status and continue with Self-Updating Worker Runtime Foundation. |
+| 3 | Self-Updating Worker Runtime Foundation | First post-BPRC restoration foundation | Baseline `4cb2387f1`; final `6aa395fdd`; retrospective fix branch `codex/slice-3-suwrf-audit-fixes` | `codex/self-updating-worker-runtime-foundation-current` plus retrospective fix commit | `self-updating-worker-runtime-foundation-scorecard.md`; `self-updating-worker-runtime-foundation-evidence-manifest.md`; `self-updating-worker-runtime-foundation-inventory.md`; `self-updating-worker-runtime-foundation-inventory.tsv`; `self_updating_worker_runtime_foundation_invariants.rs` | Original audit verdict was changes required. Retrospective fix covers stop-to-enabled relaunch state, verified source-tree `packageDigest`, fail-closed unowned stops, fail-safe child drop, and startup ownership-loss reconciliation. | No MCP, skills, memory, web/browser, scheduler, subagents, prompt library, program execution, fixed iOS product panels, provider-visible tool widening, or production deploy behavior. | Re-audit should focus on digest determinism/no exclusions, stop/relaunch lifecycle state, and restart ownership-loss evidence. |
 | 4 | iOS Self-Adapting Agent Cockpit Baseline | iOS baseline | Baseline `6aa395fdd`; final `a0b80c7d2` | `codex/ios-agent-cockpit-baseline-current` | `ios-self-adapting-agent-cockpit-baseline-scorecard.md`; `ios-self-adapting-agent-cockpit-baseline-evidence-manifest.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.md`; `ios-self-adapting-agent-cockpit-baseline-inventory.tsv`; `ios_self_adapting_agent_cockpit_baseline_invariants.rs` | Score 100/100; generic runtime/cockpit rendering, DTO/source guard, simulator evidence, README/iOS docs, and static gate coverage recorded. | No fixed product panels or restored old agent-execution surfaces. | Whether cockpit renders only server facts, stays diagnostics/generic, and does not imply hidden runtime truth. |
 | 5 | iOS Affordance Restoration Map | Phase 1 planning | Baseline `a0b80c7d2`; map commit `d1fd79878`; current branch head `7db72c1ee` also contains Phase 2 plan | `codex/ios-affordance-restoration-map-current` | `ios-affordance-restoration-map-scorecard.md`; `ios-affordance-restoration-map-evidence-manifest.md`; `ios-affordance-restoration-map-inventory.md`; `ios-affordance-restoration-map-inventory.tsv`; `ios_affordance_restoration_map_invariants.rs`; `ios-affordance-restoration-progress.md` | Score 100/100; old tree census of 848 deleted/renamed iOS paths; Phase 1 queue and Phase 2 deferral anchor; invariant coverage recorded. | Mapping is not permission to restore legacy UI. Agent-execution-dependent surfaces remain Phase 2 or later. | Coverage gaps in old-path classification, overbroad grouping, stale queue state after closeout, and false implication that mapped affordances are shipped. |
 | 6 | iOS Phase 1 Slice 1: Composer Attachment / Camera / Native Menu | Phase 1 iOS affordance restoration | Baseline after IARM; commits `473cce8b3`, `62b577047`, `84451c969`, `019f3b9ce`, `279fafe4e`; final native-menu cleanup later `d69afc6a1` | Progress ledger; `codex/ios-voice-dictation-affordance-current`; `codex/ios-prompt-input-snippet-affordance-current` for later label cleanup | `ios-affordance-restoration-progress.md`; `ios-affordance-restoration-map-evidence-manifest.md`; iOS attachment/camera/source-guard tests | Ledger records functional local actions only: Take Photo, Select Photos, Attach Files; native SwiftUI menu; removed custom sheet path; focused iOS tests and source guards. | Skills, prompt snippets, queue controls, plugin/catalog concepts, and old non-functional menu actions remain absent. | Local-only ownership, file/photo privacy, menu sizing/accessibility, source guards against old popup/actions, and interaction with later recent-input menu action. |
@@ -121,9 +121,61 @@ Non-blocking finding:
   Future cleanup should update, rename, or split the endpoint constant so the
   gate matches the documented slice boundary.
 
+## Completed Audit: Baseline Pre-Restoration Closure
+
+Original audit thread: `019ef65b-3c3f-7b92-9c01-869f5e66e05e`
+
+Original verdict: `changes required`
+
+Fix thread: `019ef661-4751-76a1-a18c-2a569cbad71b`
+
+Fix commit: `9329dd1f92440500afd861293a9d4b6e981930ef` (`Fix BPRC audit
+lineage gates`) on `codex/bprc-audit-fix`
+
+Independent re-audit thread: `019ef668-26d1-7123-924c-e7077c2232d2`
+
+Re-audit verdict: `slice accepted`
+
+Status: accepted with no blocking, important, or non-blocking findings after the
+fix.
+
+Accepted range:
+
+- Documented baseline: `1545da37d3c6186fbc6613789bae3d4a5481f976`
+- Documented final commit: `4cb2387f1a872f9fabaf58bdd88330065113b914`
+- Re-audit verified `HEAD` descends from both the documented BPRC baseline and
+  final commits.
+
+Verification recorded by the re-audit:
+
+- `git show --stat --oneline 9329dd1f92440500afd861293a9d4b6e981930ef`
+  reported 3 changed files, scoped to `README.md`, the tracker doc, and the
+  BPRC invariant test.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture`
+  passed, 8 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture`
+  passed, 9 tests.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+
+Accepted deferred scope:
+
+- README active wording now describes the current restoration baseline and the
+  single `execute` provider surface without teardown branch/path language.
+- BPRC invariants explicitly map approved restored roots `catalog_discovery`,
+  `approval`, `jobs`, plus existing memory and filesystem, to canonical Phase 2
+  and BPRC lineage.
+- Deferred roots remain forbidden. This includes fixed product panels, MCP,
+  web/git, prompt library, notifications, voice notes, subagents,
+  scheduler/autostart, PTY terminals, semantic memory engines, risky default
+  approval policies, unapproved DB migrations, deploy/install behavior, and
+  other future restoration scope.
+- The retrospective tracker remains active and does not claim the entire audit
+  campaign is complete.
+
 ## Next Audit
 
-The next slice to audit is **Baseline Pre-Restoration Closure**.
+The next slice to audit is **Self-Updating Worker Runtime Foundation**.
 
 ## Per-Slice Audit Start State
 

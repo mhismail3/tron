@@ -21,7 +21,8 @@ use super::resources::{
     installation_payload, installation_resource_id, json_patch_status, launch_attempt_resource_id,
     link_if_possible, load_installed_package, package_payload, package_resource_id,
     proposal_resource_id, publish_lifecycle_event, update_package_and_installation_status,
-    update_status_resource, upsert_lifecycle_resource,
+    update_package_and_installation_status_from_ref, update_status_resource,
+    upsert_lifecycle_resource,
 };
 use super::{Deps, INSTALLATION_KIND, LAUNCH_KIND, PACKAGE_KIND, PROPOSAL_KIND};
 
@@ -346,12 +347,18 @@ pub(super) async fn stop_worker(
 ) -> Result<Value, CapabilityError> {
     ensure_apply_authority(invocation, deps).await?;
     let launch_attempt_id = required_string(&invocation.payload, "launchAttemptResourceId")?;
+    let mut payload = current_resource_payload(deps, &launch_attempt_id).await?;
+    let package_ref = package_ref_from_payload(&payload)?;
     let receipt = deps
         .launcher
         .stop(&launch_attempt_id)
         .await
         .map_err(|error| policy_error(format!("worker stop failed: {error}")))?;
-    let mut payload = current_resource_payload(deps, &launch_attempt_id).await?;
+    if !receipt.stopped {
+        return Err(policy_error(format!(
+            "worker stop did not stop launch attempt {launch_attempt_id}"
+        )));
+    }
     let object = payload
         .as_object_mut()
         .ok_or_else(|| internal_error("worker launch attempt payload must be an object"))?;
@@ -362,12 +369,22 @@ pub(super) async fn stop_worker(
     }
     let write =
         update_status_resource(deps, &launch_attempt_id, "stopped", payload, invocation).await?;
+    let (package_write, installation_write) = update_package_and_installation_status_from_ref(
+        deps,
+        invocation,
+        &package_ref,
+        "enabled",
+        reason_from_payload(&invocation.payload),
+    )
+    .await?;
     let cursor = publish_lifecycle_event(
         deps,
         invocation,
         "worker_package.stopped",
         json!({
             "launchAttemptResourceId": write.resource_id,
+            "packageResourceId": package_write.resource_id,
+            "installationResourceId": installation_write.resource_id,
             "stopped": receipt.stopped,
             "reason": reason_from_payload(&invocation.payload),
         }),
@@ -466,6 +483,7 @@ fn launch_attempt_payload(
     let mut payload = json!({
         "packageId": package.manifest.package_id,
         "packageVersion": package.manifest.package_version,
+        "packageDigest": package.manifest.package_digest,
         "workerId": package.manifest.worker_id,
         "status": status,
         "argv": package.argv,
