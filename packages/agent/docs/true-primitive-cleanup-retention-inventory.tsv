@@ -1723,3 +1723,12 @@ packages/agent/src/domains/jobs/support.rs	implementation	jobs	Phase2-Slice5A	Jo
 packages/agent/src/domains/jobs/tests.rs	test	test_harness	Phase2-Slice5A	Jobs focused tests retained for lifecycle, cancellation, bounded output, cleanup, and fail-closed policy.
 packages/agent/src/domains/jobs/types.rs	implementation	jobs	Phase2-Slice5A	Jobs record types retained for durable lifecycle, authority, limits, retention, trace, replay, and output schemas.
 packages/agent/src/engine/durability/resources/job_definitions.rs	primitive	engine	Phase2-Slice5A	Job process resource type definition retained as an engine-owned contract schema without job runtime internals.
+packages/agent/src/domains/git/contract.rs	implementation	git	Phase2-Slice6B	Git contracts retained for status, diff, and index-only stage/unstage schemas.
+packages/agent/src/domains/git/handlers.rs	implementation	git	Phase2-Slice6B	Git handlers retained for backend function dispatch under the git domain boundary.
+packages/agent/src/domains/git/mod.rs	implementation	git	Phase2-Slice6B	Git module root retained for progressive disclosure and index-only mutation invariants.
+packages/agent/src/domains/git/mutation.rs	implementation	git	Phase2-Slice6B	Git mutation service retained for explicit index-only stage/unstage with evidence resources and lifecycle streams.
+packages/agent/src/domains/git/service.rs	implementation	git	Phase2-Slice6B	Git read/evidence service retained for trusted repo detection, status, diff, and bounded output helpers.
+packages/agent/src/domains/git/tests.rs	test	test_harness	Phase2-Slice6B	Git tests retained for read-only status/diff preservation plus index mutation rejection, resource, stream, and idempotency coverage.
+packages/agent/src/domains/git/types.rs	implementation	git	Phase2-Slice6B	Git types retained for repository facts and git_index_change resource payloads.
+packages/agent/src/domains/capability/operations/git.rs	implementation	capability_execute	Phase2-Slice6B	Capability execute Git adapter retained for provider-facing git_status, git_diff, git_stage, and git_unstage operation values.
+packages/agent/src/engine/durability/resources/git_definitions.rs	primitive	engine	Phase2-Slice6B	Git index change resource type definition retained as an engine-owned evidence schema without Git runtime internals.

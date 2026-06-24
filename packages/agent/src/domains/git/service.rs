@@ -145,7 +145,7 @@ fn diff_value_sync(invocation: &Invocation, payload: &Value) -> Result<Value, Ca
     }))
 }
 
-fn git_diff_text(
+pub(super) fn git_diff_text(
     worktree_root: &Path,
     staged: bool,
     pathspec: &str,
@@ -199,9 +199,18 @@ where
     })
 }
 
-fn repository_facts(target: &ResolvedTarget) -> Result<RepositoryFacts, CapabilityError> {
-    let worktree_stdout =
-        git_output_allow_not_repo(&target.canonical, ["rev-parse", "--show-toplevel"])?;
+pub(super) fn repository_facts(
+    target: &ResolvedTarget,
+) -> Result<RepositoryFacts, CapabilityError> {
+    let git_dir = if target.canonical.is_dir() {
+        target.canonical.as_path()
+    } else {
+        target
+            .canonical
+            .parent()
+            .ok_or_else(|| invalid("git path has no parent directory"))?
+    };
+    let worktree_stdout = git_output_allow_not_repo(git_dir, ["rev-parse", "--show-toplevel"])?;
     let worktree_root = PathBuf::from(trim_stdout(&worktree_stdout.stdout))
         .canonicalize()
         .map_err(|error| internal(format!("canonicalize git worktree root: {error}")))?;
@@ -257,7 +266,7 @@ fn repository_facts(target: &ResolvedTarget) -> Result<RepositoryFacts, Capabili
     })
 }
 
-fn resolve_target(
+pub(super) fn resolve_target(
     invocation: &Invocation,
     payload: &Value,
 ) -> Result<ResolvedTarget, CapabilityError> {
@@ -347,7 +356,7 @@ where
     })
 }
 
-fn git_output_bounded<I, S>(
+pub(super) fn git_output_bounded<I, S>(
     dir: &Path,
     args: I,
     stdout_limit: usize,
@@ -540,11 +549,11 @@ fn read_status_counts_bounded<R: Read>(
     Ok((stored, truncated, counts))
 }
 
-struct BoundedGitOutput {
-    status: ExitStatus,
-    stdout: Vec<u8>,
-    stdout_truncated: bool,
-    stderr: Vec<u8>,
+pub(super) struct BoundedGitOutput {
+    pub(super) status: ExitStatus,
+    pub(super) stdout: Vec<u8>,
+    pub(super) stdout_truncated: bool,
+    pub(super) stderr: Vec<u8>,
 }
 
 struct BoundedGitStatusCounts {
@@ -688,7 +697,7 @@ impl GitStatusSummary {
     }
 }
 
-fn repository_value(target: &ResolvedTarget, repository: &RepositoryFacts) -> Value {
+pub(super) fn repository_value(target: &ResolvedTarget, repository: &RepositoryFacts) -> Value {
     json!({
         "repositoryRoot": {
             "root": "working_directory",
@@ -710,7 +719,7 @@ fn repository_value(target: &ResolvedTarget, repository: &RepositoryFacts) -> Va
     })
 }
 
-fn path_value(target: &ResolvedTarget) -> Value {
+pub(super) fn path_value(target: &ResolvedTarget) -> Value {
     json!({
         "root": "working_directory",
         "relativePath": target.relative_path

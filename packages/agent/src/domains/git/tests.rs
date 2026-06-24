@@ -10,13 +10,16 @@ use crate::engine::{
     ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation,
     RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
     RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
-    RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
+    RUNTIME_METADATA_WORKING_DIRECTORY, StreamActorScope, StreamCursor, TraceId,
 };
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
 
 use super::service::{diff_value, status_value};
 use crate::domains::capability::contract;
+use crate::engine::{
+    GIT_INDEX_CHANGE_KIND, GIT_INDEX_CHANGE_SCHEMA_ID, builtin_resource_type_definitions,
+};
 
 #[tokio::test]
 async fn status_reports_clean_repo() {
@@ -286,13 +289,14 @@ async fn execute_git_status_uses_single_provider_tool_boundary() {
 }
 
 #[test]
-fn model_schema_exposes_only_read_only_git_operations() {
+fn model_schema_exposes_index_only_git_operations() {
     let metadata = contract::model_metadata(contract::EXECUTE_FUNCTION_ID);
     let schema_text = metadata["capabilitySchema"]["parameters"].to_string();
     assert!(schema_text.contains("git_status"));
     assert!(schema_text.contains("git_diff"));
+    assert!(schema_text.contains("git_stage"));
+    assert!(schema_text.contains("git_unstage"));
     for forbidden in [
-        "git_stage",
         "git_commit",
         "git_merge",
         "git_rebase",
@@ -305,6 +309,351 @@ fn model_schema_exposes_only_read_only_git_operations() {
             "mutating git operation leaked into execute schema: {forbidden}"
         );
     }
+}
+
+#[test]
+fn git_index_change_resource_definition_is_registered() {
+    let definitions = builtin_resource_type_definitions();
+    let definition = definitions
+        .iter()
+        .find(|definition| definition.kind == GIT_INDEX_CHANGE_KIND)
+        .expect("git index change resource type");
+    assert_eq!(definition.schema_id, GIT_INDEX_CHANGE_SCHEMA_ID);
+    assert_eq!(
+        definition.lifecycle_states,
+        vec!["committed".to_owned(), "archived".to_owned()]
+    );
+    assert_eq!(
+        definition.schema["properties"]["operation"]["enum"],
+        json!(["stage", "unstage"])
+    );
+    assert_eq!(
+        definition.required_capabilities["write"],
+        json!(["git.write", "resource.write"])
+    );
+}
+
+#[tokio::test]
+async fn execute_git_stage_and_unstage_mutate_only_index_with_resource_and_stream() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    write_file(repo.path(), "tracked.txt", "after\n");
+    let before_cursor = ctx
+        .engine_host
+        .latest_stream_cursor(super::GIT_LIFECYCLE_TOPIC)
+        .await
+        .expect("latest cursor");
+
+    let staged = execute_git_ok(
+        &ctx,
+        repo.path(),
+        "git-stage-success",
+        json!({
+            "operation": "git_stage",
+            "path": "tracked.txt",
+            "expectedHead": head,
+            "reason": "test stage",
+            "maxDiffBytes": 16,
+            "idempotencyKey": "git-stage-success"
+        }),
+    )
+    .await;
+    assert_eq!(staged["details"]["primitiveOperation"], "git_stage");
+    assert_eq!(staged["details"]["git"]["status"], "committed");
+    assert_eq!(
+        staged["details"]["git"]["evidence"]["beforeTruncated"],
+        true
+    );
+    assert_eq!(staged["details"]["git"]["evidence"]["afterTruncated"], true);
+    assert!(git_stdout(repo.path(), ["diff", "--cached", "--", "tracked.txt"]).contains("after"));
+    assert_eq!(
+        fs::read_to_string(repo.path().join("tracked.txt")).unwrap(),
+        "after\n"
+    );
+    let resource_id = staged["details"]["git"]["gitIndexChangeResourceId"]
+        .as_str()
+        .expect("resource id");
+    let inspection = ctx
+        .engine_host
+        .inspect_resource(resource_id)
+        .await
+        .expect("inspect resource")
+        .expect("git index change resource");
+    assert_eq!(inspection.resource.kind, "git_index_change");
+    assert_eq!(inspection.resource.lifecycle, "committed");
+    assert_eq!(inspection.versions[0].payload["operation"], "stage");
+    assert_eq!(inspection.versions[0].payload["reason"], "test stage");
+    let after_cursor = StreamCursor(
+        staged["details"]["git"]["streamCursor"]
+            .as_u64()
+            .expect("stream cursor"),
+    );
+    assert!(after_cursor > before_cursor);
+    assert_git_lifecycle_event(&ctx, before_cursor, resource_id).await;
+
+    let unstaged = execute_git_ok(
+        &ctx,
+        repo.path(),
+        "git-unstage-success",
+        json!({
+            "operation": "git_unstage",
+            "path": "tracked.txt",
+            "expectedHead": head,
+            "reason": "test unstage",
+            "idempotencyKey": "git-unstage-success"
+        }),
+    )
+    .await;
+    assert_eq!(unstaged["details"]["primitiveOperation"], "git_unstage");
+    assert_eq!(
+        git_stdout(repo.path(), ["diff", "--cached", "--", "tracked.txt"]),
+        ""
+    );
+    assert!(git_stdout(repo.path(), ["diff", "--", "tracked.txt"]).contains("after"));
+}
+
+#[tokio::test]
+async fn execute_git_stage_replays_with_same_idempotency_key() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    write_file(repo.path(), "tracked.txt", "after\n");
+
+    let payload = json!({
+        "operation": "git_stage",
+        "path": "tracked.txt",
+        "expectedHead": head,
+        "reason": "test idempotent replay",
+        "idempotencyKey": "git-stage-replay"
+    });
+    let first = execute_git_ok(&ctx, repo.path(), "git-stage-replay", payload.clone()).await;
+    let first_resource = first["details"]["git"]["gitIndexChangeResourceId"]
+        .as_str()
+        .expect("first resource")
+        .to_owned();
+    let first_cursor = first["details"]["git"]["streamCursor"].as_u64().unwrap();
+
+    let second = execute_git_ok(&ctx, repo.path(), "git-stage-replay", payload).await;
+    assert_eq!(
+        second["details"]["git"]["gitIndexChangeResourceId"],
+        json!(first_resource)
+    );
+    assert_eq!(
+        second["details"]["git"]["streamCursor"],
+        json!(first_cursor)
+    );
+    let latest_cursor = ctx
+        .engine_host
+        .latest_stream_cursor(super::GIT_LIFECYCLE_TOPIC)
+        .await
+        .expect("latest cursor");
+    assert_eq!(latest_cursor, StreamCursor(first_cursor));
+}
+
+#[tokio::test]
+async fn execute_git_stage_rejects_stale_expected_head() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    write_file(repo.path(), "tracked.txt", "after\n");
+
+    let error = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-stage-stale-head",
+        json!({
+            "operation": "git_stage",
+            "path": "tracked.txt",
+            "expectedHead": "0000000000000000000000000000000000000000",
+            "reason": "test stale",
+            "idempotencyKey": "git-stage-stale-head"
+        }),
+    )
+    .await;
+    assert!(
+        error.contains("expectedHead mismatch"),
+        "unexpected error: {error}"
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["diff", "--cached", "--", "tracked.txt"]),
+        ""
+    );
+}
+
+#[tokio::test]
+async fn execute_git_stage_rejects_absolute_traversal_and_missing_paths() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "initial");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+
+    let absolute = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-stage-absolute",
+        json!({
+            "operation": "git_stage",
+            "path": repo.path().join("tracked.txt").display().to_string(),
+            "expectedHead": head,
+            "reason": "test absolute",
+            "idempotencyKey": "git-stage-absolute"
+        }),
+    )
+    .await;
+    assert!(
+        absolute.contains("must be relative") || absolute.contains("does not allow file path"),
+        "unexpected absolute path error: {absolute}"
+    );
+
+    let traversal = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-stage-traversal",
+        json!({
+            "operation": "git_stage",
+            "path": "../escape.txt",
+            "expectedHead": head,
+            "reason": "test traversal",
+            "idempotencyKey": "git-stage-traversal"
+        }),
+    )
+    .await;
+    assert!(
+        traversal.contains("must not escape the root")
+            || traversal.contains("does not allow file path"),
+        "unexpected traversal error: {traversal}"
+    );
+
+    let missing = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-stage-missing",
+        json!({
+            "operation": "git_stage",
+            "path": "missing.txt",
+            "expectedHead": git_stdout(repo.path(), ["rev-parse", "HEAD"]),
+            "reason": "test missing",
+            "idempotencyKey": "git-stage-missing"
+        }),
+    )
+    .await;
+    assert!(
+        missing.contains("not found"),
+        "unexpected missing error: {missing}"
+    );
+}
+
+#[tokio::test]
+async fn execute_git_stage_rejects_non_repo_and_nested_repo_misuse() {
+    let ctx = make_test_context();
+    let non_repo = tempdir().expect("non repo");
+    write_file(non_repo.path(), "tracked.txt", "content\n");
+
+    let non_repo_error = execute_git_error(
+        &ctx,
+        non_repo.path(),
+        "git-stage-non-repo",
+        json!({
+            "operation": "git_stage",
+            "path": "tracked.txt",
+            "expectedHead": "0000000000000000000000000000000000000000",
+            "reason": "test non repo",
+            "idempotencyKey": "git-stage-non-repo"
+        }),
+    )
+    .await;
+    assert!(
+        non_repo_error.contains("not inside a Git worktree"),
+        "unexpected non-repo error: {non_repo_error}"
+    );
+
+    let outer = tempdir().expect("outer repo");
+    init_repo(outer.path());
+    write_file(outer.path(), "outer.txt", "outer\n");
+    git(outer.path(), ["add", "outer.txt"]);
+    commit(outer.path(), "outer");
+    let head = git_stdout(outer.path(), ["rev-parse", "HEAD"]);
+    let nested = outer.path().join("nested");
+    fs::create_dir(&nested).expect("nested dir");
+    init_repo(&nested);
+    write_file(&nested, "inner.txt", "inner\n");
+    git(&nested, ["add", "inner.txt"]);
+    commit(&nested, "inner");
+
+    let nested_error = execute_git_error(
+        &ctx,
+        outer.path(),
+        "git-stage-nested-repo",
+        json!({
+            "operation": "git_stage",
+            "path": "nested/inner.txt",
+            "expectedHead": head,
+            "reason": "test nested repo misuse",
+            "idempotencyKey": "git-stage-nested-repo"
+        }),
+    )
+    .await;
+    assert!(
+        nested_error.contains("trusted working-directory repository"),
+        "unexpected nested repo error: {nested_error}"
+    );
+}
+
+#[tokio::test]
+async fn execute_git_stage_rejects_conflicted_pathspecs() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "base\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "base");
+    git(repo.path(), ["checkout", "-b", "feature"]);
+    write_file(repo.path(), "tracked.txt", "feature\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "feature");
+    git(repo.path(), ["checkout", "main"]);
+    write_file(repo.path(), "tracked.txt", "main\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    commit(repo.path(), "main");
+    let merge = git_failure(repo.path(), ["merge", "feature"]);
+    assert!(
+        merge.contains("CONFLICT") || merge.contains("conflict"),
+        "unexpected merge output: {merge}"
+    );
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+
+    let error = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-stage-conflict",
+        json!({
+            "operation": "git_stage",
+            "path": "tracked.txt",
+            "expectedHead": head,
+            "reason": "test conflict",
+            "idempotencyKey": "git-stage-conflict"
+        }),
+    )
+    .await;
+    assert!(
+        error.contains("conflicted pathspecs"),
+        "unexpected conflict error: {error}"
+    );
 }
 
 async fn status(root: &Path, payload: Value) -> Value {
@@ -346,6 +695,80 @@ fn invocation(root: &Path, trace: &str) -> Invocation {
     )
 }
 
+async fn execute_git_ok(
+    ctx: &ServerRuntimeContext,
+    root: &Path,
+    key: &str,
+    payload: Value,
+) -> Value {
+    let result = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("capability::execute").unwrap(),
+            payload,
+            execute_context_with_idempotency(ctx, root, key).await,
+        ))
+        .await;
+    assert_eq!(result.error, None, "execute failed: {:?}", result.error);
+    result.value.expect("value")
+}
+
+async fn execute_git_error(
+    ctx: &ServerRuntimeContext,
+    root: &Path,
+    key: &str,
+    payload: Value,
+) -> String {
+    let result = ctx
+        .engine_host
+        .invoke(Invocation::new_sync(
+            FunctionId::new("capability::execute").unwrap(),
+            payload,
+            execute_context_with_idempotency(ctx, root, key).await,
+        ))
+        .await;
+    result.error.expect("execute should fail").to_string()
+}
+
+async fn assert_git_lifecycle_event(
+    ctx: &ServerRuntimeContext,
+    before_cursor: StreamCursor,
+    resource_id: &str,
+) {
+    ctx.engine_host
+        .subscribe_stream(
+            "git-stage-test".to_owned(),
+            super::GIT_LIFECYCLE_TOPIC.to_owned(),
+            before_cursor,
+            crate::engine::VisibilityScope::Session,
+            Some("git-stage-success-session".to_owned()),
+            Some("git-stage-success-workspace".to_owned()),
+        )
+        .await
+        .expect("subscribe");
+    let page = ctx
+        .engine_host
+        .poll_stream(
+            "git-stage-test",
+            Some(before_cursor),
+            10,
+            &StreamActorScope::scoped(
+                Some("git-stage-success-session".to_owned()),
+                Some("git-stage-success-workspace".to_owned()),
+            ),
+        )
+        .await
+        .expect("poll");
+    assert!(
+        page.events.iter().any(|event| {
+            event.topic == super::GIT_LIFECYCLE_TOPIC
+                && event.payload["gitIndexChangeResourceId"] == json!(resource_id)
+        }),
+        "missing git lifecycle event in {:?}",
+        page.events
+    );
+}
+
 async fn execute_context(ctx: &ServerRuntimeContext, root: &Path, key: &str) -> CausalContext {
     let trace_id = TraceId::new(key).unwrap();
     let session_id = format!("{key}-session");
@@ -367,6 +790,16 @@ async fn execute_context(ctx: &ServerRuntimeContext, root: &Path, key: &str) -> 
         .with_runtime_metadata(RUNTIME_METADATA_TURN, "1")
 }
 
+async fn execute_context_with_idempotency(
+    ctx: &ServerRuntimeContext,
+    root: &Path,
+    key: &str,
+) -> CausalContext {
+    execute_context(ctx, root, key)
+        .await
+        .with_idempotency_key(key.to_owned())
+}
+
 async fn derive_execute_grant(
     ctx: &ServerRuntimeContext,
     actor_id: &ActorId,
@@ -384,12 +817,12 @@ async fn derive_execute_grant(
                 "allowedCapabilities": ["capability::execute"],
                 "allowedNamespaces": ["__no_namespace_authority__"],
                 "allowedAuthorityScopes": ["capability.execute"],
-                "allowedResourceKinds": ["agent_state"],
-                "resourceSelectors": ["kind:agent_state"],
+                "allowedResourceKinds": ["agent_state", "git_index_change"],
+                "resourceSelectors": ["kind:agent_state", "kind:git_index_change"],
                 "fileRoots": [root.display().to_string()],
                 "networkPolicy": "none",
                 "maxRisk": "medium",
-                "budget": {"remainingInvocations": 1},
+                "budget": {"remainingInvocations": 3},
                 "canDelegate": false,
                 "provenance": {"source": "git_test"}
             }),
@@ -471,6 +904,27 @@ fn git_stdout<const N: usize>(path: &Path, args: [&str; N]) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+fn git_failure<const N: usize>(path: &Path, args: [&str; N]) -> String {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .expect("run git");
+    assert!(
+        !output.status.success(),
+        "git unexpectedly succeeded\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    )
 }
 
 fn shell_quote(path: &Path) -> String {

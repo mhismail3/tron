@@ -24,10 +24,11 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`origin/main@4a51156b78fd6c01108cecccc82af34864b943bb`
-(`docs: record slice 6a acceptance`). That line includes the accepted Slice 6A
-read-only Git/worktree foundation and its acceptance documentation after the
-restoration consolidation checkpoint `455e0c8a5` and tracker update `705199d37`.
+`origin/main@743b783976b0515372e5525c0c1671f5dbec37bd`
+(`docs: shape slice 6b git index handoff`). That line includes the accepted
+Slice 6A read-only Git/worktree foundation, its acceptance documentation after
+the restoration consolidation checkpoint `455e0c8a5` and tracker update
+`705199d37`, and the Slice 6B discovery/handoff packet.
 
 Checkout note: this update started after `git fetch --prune origin` from a
 Codex discovery branch created at the same commit as `origin/main`. The
@@ -43,18 +44,16 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 4: bounded filesystem agent toolbox with resource-backed previews,
   commits, patch evidence, and truncated-snapshot hardening;
 - Slice 5A: durable jobs and process lifecycle foundation with accepted race
-  hardening.
+  hardening;
+- Slice 6A: read-only Git/worktree status and bounded diff evidence.
 
 Current next action:
-**Implement Phase 2 Slice 6B: Git Index Mutation Foundation** from current
-`origin/main`. Slice 6A used the explicit 2026-06-24 implementation order as
-authority for a fresh read-only foundation after source-resolution found no
-recoverable historical implementation branch. The missing old source is no
-longer a blocker for Slice 6A, and independent review accepted the read-only
-foundation for mainline integration. Slice 6B is the first mutating
-source-control sub-slice and is limited to explicit Git index stage/unstage
-operations with resource-backed evidence; commits, branch changes, merge/rebase,
-push/PR, worktree graph resources, and native SourceChanges UI remain deferred.
+**Review Phase 2 Slice 6B: Git Index Mutation Foundation** on
+`codex/phase-2-slice-6b-git-index-mutation`. Slice 6B is the first mutating
+source-control sub-slice and remains limited to explicit Git index
+stage/unstage operations with resource-backed evidence; commits, branch
+changes, merge/rebase/reset, push/PR, worktree graph resources, conflict
+resolution workflows, and native SourceChanges UI remain deferred.
 
 ## Scope
 
@@ -772,7 +771,7 @@ interpreter or runtime package, mutating git/worktree/source-control behavior,
 web/network behavior, subagents, scheduling, native iOS process panels, and
 production deployment behavior.
 
-### Slice 6: Git, Worktrees, And Source Control
+### Slice 6: Git And Worktree Foundations
 
 Objective: restore source-control workflows over durable worktree resources.
 Slice 6A begins with accepted read-only repository observation; later accepted
@@ -780,24 +779,28 @@ sub-slices would own mutating workflows.
 
 Accepted user-facing outcome: Slice 6A lets users inspect branch status,
 detached HEAD state, upstream/ahead-behind, dirty summaries, and bounded
-staged/unstaged diff evidence. Later sub-slices may add staging, commits,
-conflicts, merges, rebases, pushes, and PR handoff with evidence after separate
-approval.
+staged/unstaged diff evidence. Slice 6B adds explicit index-only stage/unstage
+for relative paths after expected HEAD, reason, idempotency, and conflict
+checks. Later sub-slices may add commits, conflict workflows, merges, rebases,
+pushes, and PR handoff with evidence after separate approval.
 
 True primitives: filesystem package, jobs package, resource graph, authority,
 replay, trace, and approval decisions.
 
 Modular boundaries: the git/worktree package owns repo facts and Git command
 execution. Slice 6A adds a narrow read-only `domains/git` boundary with
-`git::status` and `git::diff` backend contracts plus
-provider-visible `git_status` and `git_diff` execute operations. It does not
-hide worktree state inside sessions or iOS caches.
+`git::status` and `git::diff` backend contracts plus provider-visible
+`git_status` and `git_diff` execute operations. Slice 6B adds only
+`git::stage`/`git::unstage` backend contracts plus provider-visible
+`git_stage`/`git_unstage` operation values. It does not hide worktree state
+inside sessions or iOS caches.
 
 Current files/areas: `packages/agent/src/domains/git/`,
-`packages/agent/src/domains/capability/operations/git.rs`, provider execute
-schema text, startup registration, docs, and deterministic Rust tests. Future
-areas: `domains/worktree`, resources, events, and iOS SourceChanges only after
-a stable mutating server contract.
+`packages/agent/src/domains/capability/operations/git.rs`,
+`packages/agent/src/engine/durability/resources/git_definitions.rs`, provider
+execute schema text, startup registration, docs, and deterministic Rust tests.
+Future areas: `domains/worktree`, commit/PR resources, conflict workflows, and
+iOS SourceChanges only after a stable higher-level source-control contract.
 
 Old evidence paths: `BPRC-FEATURE-05`, `BPRC-FEATURE-16`,
 `IARM-SURFACE-025`, `IARM-SURFACE-029`, feature index sections 5 and 16.
@@ -806,24 +809,27 @@ Slice 6A acceptance criteria: Slice 6A covers trusted-path repo detection,
 branch or detached HEAD identity, upstream/ahead-behind,
 dirty/staged/unstaged/untracked summaries, bounded/truncated status and diff
 evidence, non-repo and out-of-root rejection, textconv suppression for diff
-evidence, and no implicit production deployment path. Later sub-slices own
-worktree acquisition/release, conflict resources,
-staging/commit evidence, rollback, replay resources, push/PR approval, and
-native iOS review.
+evidence, and no implicit production deployment path. Slice 6B acceptance
+criteria cover explicit index-only stage/unstage, expected HEAD freshness,
+reason/idempotency requirements, absolute/traversal/missing path rejection,
+nested-repository misuse rejection, conflicted pathspec rejection, bounded
+before/after evidence, `git_index_change` resources, `git.lifecycle` stream
+events, idempotency replay, and static guards admitting no other Git mutation
+operation names. Later sub-slices own worktree acquisition/release, commit
+evidence, rollback, push/PR approval, conflict resources, and native iOS review.
 
-Next accepted sub-slice handoff: **Slice 6B: Git Index Mutation Foundation**.
-It may add `git_stage` and `git_unstage` operation values behind
+Implemented sub-slice: **Slice 6B: Git Index Mutation Foundation**.
+It adds `git_stage` and `git_unstage` operation values behind
 `capability::execute`, backed by `git::stage` and `git::unstage` domain
 contracts. The slice mutates only the Git index for explicit relative paths
-inside the trusted working-directory repository. It must require caller
-idempotency, a mutation reason, and an expected HEAD precondition, reject path
-traversal/worktree-root escape, reject conflicted pathspecs, preserve the
-no-network/no-production-deploy boundary, and emit bounded before/after status
-or diff evidence. The package should create a `git_index_change` resource and
-publish a `git.lifecycle` stream event for each committed stage/unstage.
-Approval is not a hidden permission source: Slice 6B may record an explicit
-index-write approval policy, but commit/push/PR approval checks are deferred
-until those higher-risk operations exist.
+inside the trusted working-directory repository. It requires caller idempotency,
+a mutation reason, and an expected HEAD precondition, rejects
+absolute/traversal/worktree-root escape, rejects conflicted pathspecs, preserves
+the no-network/no-production-deploy boundary, and emits bounded before/after
+status and diff evidence. The package creates a `git_index_change` resource and
+publishes a `git.lifecycle` stream event for each committed stage/unstage.
+Approval is not a hidden permission source: commit/push/PR approval checks are
+deferred until those higher-risk operations exist.
 
 Slice 6B non-goals: commits, commit-message policy, branch creation/checkout/
 deletion, merge, rebase, reset, stash, clean, push/fetch/pull, PR handoff,
@@ -834,20 +840,21 @@ and native iOS SourceChanges UI.
 Focused tests: clean repo, staged/unstaged/untracked dirty state, detached
 HEAD, missing upstream, upstream ahead/behind, nested paths, non-repo paths,
 trusted-root escape rejection, bounded/truncated status and diff output, and
-schema guards proving only read-only git operation names are exposed.
+schema guards proving only the accepted Git operation names are exposed.
 
-Slice 6B focused tests: stage tracked edits, stage untracked files, unstage
-staged paths, reject conflicted paths, reject missing/absolute/traversal paths,
-reject worktree-root escapes, reject stale expected HEAD values, require
-explicit idempotency/reason through the provider boundary, verify
-`git_index_change` resource refs and `git.lifecycle` stream evidence, verify
-bounded before/after evidence, and update static guards so only `git_stage` and
-`git_unstage` are newly admitted mutating Git operations.
+Slice 6B focused tests: stage tracked edits, unstage staged paths, replay stage
+with the same idempotency key, reject conflicted paths, reject
+missing/absolute/traversal paths, reject worktree-root escapes, reject stale
+expected HEAD values, reject non-repo/nested-repo misuse, require explicit
+idempotency/reason through the provider boundary, verify `git_index_change`
+resource refs and `git.lifecycle` stream evidence, verify bounded before/after
+evidence, and update static guards so only `git_stage` and `git_unstage` are
+newly admitted mutating Git operations.
 
-iOS validation: source-control native surface screenshots if approved.
+iOS validation: no native SourceChanges UI is part of Slice 6B.
 
-Docs/static updates: README capabilities, database, iOS architecture,
-manual-deploy boundary.
+Docs/static updates: README capabilities, Phase 2 scorecard/evidence/inventory,
+retrospective tracker, provider instruction tests, and static guard inventories.
 
 User decisions: default branch naming, push/PR approval, native source-control
 UI scope, and conflict-resolution delegation.

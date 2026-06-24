@@ -53,6 +53,10 @@ pub const MEMORY_MIGRATION_ENVELOPE_SCHEMA_ID: &str = "tron.resource.memory_migr
 pub const JOB_PROCESS_KIND: &str = "job_process";
 /// Built-in durable process job resource schema id.
 pub const JOB_PROCESS_SCHEMA_ID: &str = "tron.resource.job_process.v1";
+/// Built-in Git index mutation evidence resource kind.
+pub const GIT_INDEX_CHANGE_KIND: &str = "git_index_change";
+/// Built-in Git index mutation evidence resource schema id.
+pub const GIT_INDEX_CHANGE_SCHEMA_ID: &str = "tron.resource.git_index_change.v1";
 /// Scope for a durable engine resource.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

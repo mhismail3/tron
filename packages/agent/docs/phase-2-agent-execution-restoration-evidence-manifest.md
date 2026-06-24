@@ -464,6 +464,64 @@ Validation on final review and mainline closeout:
 - `git diff --check` passed.
 - `scripts/personal-info-guard.sh` passed.
 
+## Phase 2 Slice 6B: Git Index Mutation Foundation
+
+Implementation branch:
+`codex/phase-2-slice-6b-git-index-mutation`.
+Required baseline:
+`origin/main@743b783976b0515372e5525c0c1671f5dbec37bd`
+(`docs: shape slice 6b git index handoff`).
+
+What changed:
+
+- Slice 6B keeps provider-visible Git access behind the existing
+  `capability::execute` primitive and adds only `git_stage` and `git_unstage`
+  operation values.
+- Slice 6B adds explicit `git_stage`/`git_unstage` index mutation as the only
+  admitted Git write operation names.
+- The Git domain owns backend `git::stage` and `git::unstage` contracts with
+  `git.write` authority, explicit caller idempotency, expected HEAD, human/action
+  reason, resource lease, manual compensation note, resource-backed output, and
+  `git.lifecycle` stream evidence.
+- Stage/unstage mutate only the Git index for explicit relative paths under
+  trusted working-directory metadata. The implementation rejects absolute paths,
+  traversal/worktree-root escapes, missing paths, non-repo targets, nested-repo
+  misuse, stale expected HEAD, and conflicted pathspecs before running the index
+  command.
+- Successful index mutations create a `git_index_change` resource carrying
+  bounded before/after status and staged/unstaged diff evidence, trace/replay
+  refs, authority metadata, idempotency metadata, and revision/timestamp fields.
+- Successful index mutations publish `git.lifecycle` stream events pointing back
+  to the `git_index_change` resource. This uses the existing engine stream
+  substrate rather than adding transport-visible session event DTOs.
+- Non-goal Git behavior remains absent: commits, branch create/checkout/delete,
+  merge, rebase, reset, stash, clean, fetch/pull/push, PR handoff, conflict
+  resolution workflows, worktree graph resources, public `/engine` DTO expansion,
+  native iOS SourceChanges UI, and production deploy behavior.
+
+Deterministic coverage:
+
+- Successful stage and unstage in a temp repository, proving only the index
+  changes while worktree content remains untouched.
+- Resource and stream evidence for committed stage operations.
+- Idempotency replay with the same caller key returning the same resource and
+  stream cursor without publishing a new lifecycle event.
+- Rejection coverage for stale expected HEAD, absolute paths, traversal escapes,
+  missing paths, non-repo targets, nested-repository misuse, and conflicted
+  pathspecs/index conflicts.
+- Bounded before/after evidence and truncation flags for index mutation
+  snapshots.
+- Slice 6A read-only status/diff coverage remains in the same Git-focused test
+  target, including textconv suppression and bounded diff/status evidence.
+- Provider schema/instruction tests and BPRC static guards now allow only
+  `git_stage`/`git_unstage` as the Slice 6B mutation exception while continuing
+  to reject later source-control non-goals.
+
+Validation on implementation branch before commit:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml git -- --nocapture`
+  passed with 22 matching library tests plus matched static gate tests.
+
 ## Validation Log
 
 | Command | Result | Evidence |

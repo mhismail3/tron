@@ -1,8 +1,8 @@
-//! Read-only Git primitive execute operations.
+//! Git primitive execute operations.
 
 use serde_json::json;
 
-use super::ok_result;
+use super::{Deps, ok_result};
 use crate::domains::git::service;
 use crate::engine::Invocation;
 use crate::shared::protocol::model_capabilities::CapabilityResult;
@@ -18,6 +18,32 @@ pub(super) async fn git_status(
 pub(super) async fn git_diff(invocation: &Invocation) -> Result<CapabilityResult, CapabilityError> {
     let result = service::diff_value(invocation, &invocation.payload).await?;
     git_result("git_diff", result)
+}
+
+pub(super) async fn git_stage(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let result = crate::domains::git::mutation::stage_value(
+        &deps.engine_host,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    git_result("git_stage", result)
+}
+
+pub(super) async fn git_unstage(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let result = crate::domains::git::mutation::unstage_value(
+        &deps.engine_host,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    git_result("git_unstage", result)
 }
 
 fn git_result(

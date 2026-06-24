@@ -12,5 +12,11 @@ operation_bindings! {
         "diff" => |invocation, _deps| {
             service::diff_value(invocation, &invocation.payload).await
         },
+        "stage" => |invocation, deps| {
+            super::mutation::stage_value(&deps.engine_host, invocation, &invocation.payload).await
+        },
+        "unstage" => |invocation, deps| {
+            super::mutation::unstage_value(&deps.engine_host, invocation, &invocation.payload).await
+        },
     ];
 }

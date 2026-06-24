@@ -63,20 +63,16 @@ skills/rules/hooks, memory, MCP, scheduling, program execution,
 database/events/settings, dependency restoration, and APNs/device notification
 capability.
 
-Slice 6A changes only the git/worktree row as an accepted read-only
-implementation baseline: repository status and bounded staged/unstaged diff
-evidence are current behavior through `domains/git` and `capability::execute`
-operation values. Worktree graph resources, staging, commits, merges, rebases,
-pushes, PR handoff, conflict resolution, and native iOS SourceChanges remain
-planned future sub-slices.
-
-The next shaped sub-slice is Slice 6B: Git Index Mutation Foundation. It is
-limited to explicit `git_stage`/`git_unstage` operations over trusted-root
-relative paths, with idempotency, mutation reason, expected HEAD preconditions,
-bounded before/after evidence, `git_index_change` resources, and
-`git.lifecycle` stream events. Commits, branch operations, merges/rebases/
-resets, pushes/PRs, conflict resolution, worktree graph resources, and native
-SourceChanges remain deferred.
+Slice 6A and Slice 6B change only the git/worktree row as a source-control
+foundation: repository status, bounded staged/unstaged diff evidence, and
+index-only stage/unstage are current behavior through `domains/git` and
+`capability::execute` operation values. Slice 6B is limited to explicit
+`git_stage`/`git_unstage` operations over trusted-root relative paths, with
+idempotency, mutation reason, expected HEAD preconditions, bounded before/after
+evidence, `git_index_change` resources, and `git.lifecycle` stream events.
+Worktree graph resources, commits, branch operations, merges/rebases/resets,
+pushes/PRs, conflict resolution workflows, and native SourceChanges remain
+deferred.
 
 It also maps every BPRC backlog row:
 
@@ -190,9 +186,9 @@ runtimes, PTY sessions, web/network research, git/source-control, subagents,
 scheduling, notifications, or native iOS process panels. Queue-backed internal
 job dispatch also remains deferred pending an explicit queued-grant design.
 
-`P2AER-INV-013` remains current baseline for Slice 6A read-only Git status and
-diff evidence. Slice 6B may start as the first mutating sub-slice only within
-the index boundary: stage/unstage explicit paths, resource-backed evidence,
-lifecycle stream evidence, and static guards proving no commit, branch,
-merge/rebase/reset, push/PR, worktree graph, or native SourceChanges surface was
-added.
+`P2AER-INV-013` is now current baseline for Slice 6A read-only Git status/diff
+evidence plus Slice 6B index-only stage/unstage. The mutating boundary is
+intentionally narrow: explicit paths, resource-backed evidence, lifecycle stream
+evidence, expected HEAD freshness, idempotency, and static guards proving no
+commit, branch, merge/rebase/reset, push/PR, worktree graph, conflict
+resolution workflow, or native SourceChanges surface was added.

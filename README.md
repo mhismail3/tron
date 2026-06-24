@@ -410,7 +410,8 @@ Current living entry points:
 - `packages/agent/docs/restoration-retrospective-audit-status.md`: active
   retrospective audit tracker for the ordered completed-slice queue, audit
   constraints, first-audit target, accepted deferred scope, and current
-  Phase 2 Slice 5A and accepted Slice 6A read-only git/worktree baselines.
+  Phase 2 Slice 5A, accepted Slice 6A read-only git/worktree baseline, and
+  Slice 6B Git index mutation implementation evidence.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -926,6 +927,8 @@ Current primitive operations:
 | `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
 | `git_status` | Inspect trusted-root repository state: branch or detached HEAD, upstream/ahead-behind, dirty summaries, and bounded porcelain evidence. |
 | `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers. |
+| `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
+| `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
@@ -981,15 +984,19 @@ operation values; PTY sessions, interpreters, web/network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
 not part of this foundation.
 The accepted Slice 6A read-only source-control foundation registers the `git`
-domain with `git::status` and `git::diff` backend read contracts, while
-provider-visible access remains `git_status` and `git_diff` operation values
-behind `capability::execute`. The implementation resolves only relative paths
-under trusted working-directory metadata, rejects path traversal and
-worktree-root escapes, reports branch/detached HEAD/upstream/ahead-behind/dirty
-summaries, and returns bounded status/diff evidence. Staging, commits, merges,
-rebases, resets, pushes, branch checkout/deletion, conflict resolution, PR
-handoff, worktree graph resources, and native iOS SourceChanges UI remain
-deferred.
+domain with `git::status` and `git::diff` backend read contracts, while Slice
+6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
+Provider-visible access remains operation values behind the single
+`capability::execute` primitive: `git_status`, `git_diff`, `git_stage`, and
+`git_unstage`. The implementation resolves only relative paths under trusted
+working-directory metadata, rejects path traversal and worktree-root escapes,
+reports branch/detached HEAD/upstream/ahead-behind/dirty summaries, returns
+bounded status/diff evidence, and requires idempotency key, human/action
+reason, and expected HEAD for index mutation. Successful stage/unstage
+operations create `git_index_change` resources and publish `git.lifecycle`
+stream evidence. Commits, merges, rebases, resets, pushes, branch
+checkout/deletion, conflict resolution workflows, PR handoff, worktree graph
+resources, and native iOS SourceChanges UI remain deferred.
 Policy lookup is `session -> workspace -> system`, and prompt-trace audit
 idempotency is keyed by trace so memory status can change across turns.
 Direct record-id inspect/edit/tombstone operations reject cross-scope resources.
@@ -1174,7 +1181,7 @@ artifacts.
 
 ## Event System
 
-The primitive branch event store uses an immutable, append-only log with **24 typed event variants**. Sessions remain tree-structured for forks, but the persisted event surface is limited to loop truth: session lifecycle, messages, provider request audits, provider streaming, primitive `execute` invocations, compaction/context boundaries, metadata, errors, and turn failure.
+The primitive branch event store uses an immutable, append-only log with **24 typed event variants**. Sessions remain tree-structured for forks, but the persisted event surface is limited to loop truth: session lifecycle, messages, provider request audits, provider streaming, primitive `execute` invocations, compaction/context boundaries, metadata, errors, and turn failure. Domain lifecycle streams such as `jobs.lifecycle`, `approval.lifecycle`, and `git.lifecycle` live in the engine stream substrate, not in the transport-visible session event enum.
 
 The event enum is generated by the `define_events!` macro in `packages/agent/src/domains/session/event_store/types/macros.rs`, invoked from `packages/agent/src/domains/session/event_store/types/generated.rs`. Transport-visible event DTOs and stream factories live under `packages/agent/src/shared/protocol/events/`. Adding a new event means editing `generated.rs` and adding a payload type only when the event is true loop infrastructure. Product events, fixed capability events, rules/skills/hooks, prompt queue events, worktree/repo events, push-token events, and config mutation events are intentionally absent on this branch.
 

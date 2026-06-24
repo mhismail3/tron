@@ -96,6 +96,10 @@ Proof:
   `domains/capability/mod.rs`: the capability worker captures a UTC
   `startup_cutoff` for jobs reconciliation so stale pre-startup running-state
   cleanup stays bounded to process startup instead of replay identity.
+- P2AER Slice 6B refreshed the allow-list for `domains/git/mutation.rs`: the
+  Git index-change resource records a UTC `createdAt` audit timestamp, while
+  replay ordering stays anchored to trace, invocation, resource, and stream
+  refs.
 
 Open rows after DRC-2: DRC-4, DRC-5, DRC-6, DRC-7, DRC-8, DRC-9, and DRC-10.
 DRC-5/DRC-6 must keep replay builders out of the entropy allow-list and prove

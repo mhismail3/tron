@@ -40,6 +40,7 @@ fn replay_critical_entropy_is_allow_listed() {
                 "packages/agent/src/domains/auth/",
                 "packages/agent/src/domains/capability/mod.rs",
                 "packages/agent/src/domains/capability/operations/",
+                "packages/agent/src/domains/git/mutation.rs",
                 "packages/agent/src/domains/jobs/",
                 "packages/agent/src/domains/memory/",
                 "packages/agent/src/domains/model/",
