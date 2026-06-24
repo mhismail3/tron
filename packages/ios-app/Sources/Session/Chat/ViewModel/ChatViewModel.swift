@@ -160,6 +160,11 @@ final class ChatViewModel {
     let compactionCoordinator = CompactionCoordinator()
     /// Coordinates local composer mic recording and transcription.
     let transcriptionCoordinator = ChatTranscriptionCoordinator()
+    /// Cancellable composer voice task covering readiness, stop, file load, and transcription upload.
+    @ObservationIgnored
+    var transcriptionTask: Task<Void, Never>?
+    @ObservationIgnored
+    var transcriptionTaskGeneration: UInt64 = 0
     /// Composer-scoped microphone recorder.
     let micRecorder = ComposerMicRecorder()
     /// O(1) message lookup index — kept in sync with `messages` array
@@ -337,6 +342,7 @@ final class ChatViewModel {
             eventTask?.cancel()
             for task in observationTasks { task.cancel() }
             for task in backgroundTasks { task.cancel() }
+            transcriptionTask?.cancel()
             micRecorder.cancelRecording()
         }
     }

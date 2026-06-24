@@ -50,6 +50,34 @@ final class ChatTranscriptionCoordinatorTests: XCTestCase {
         XCTAssertFalse(context.isTranscribing)
     }
 
+    func testCancelledTranscriptionDoesNotMutateDraftAfterLateCompletion() async {
+        let coordinator = ChatTranscriptionCoordinator()
+        let context = MockTranscriptionContext()
+        let transcriptionStarted = expectation(description: "transcription started")
+        context.nextTranscript = "late transcript"
+        context.onTranscriptionStarted = {
+            transcriptionStarted.fulfill()
+        }
+
+        let task = Task { @MainActor in
+            await coordinator.handleRecordingFinished(
+                url: URL(fileURLWithPath: "/tmp/input.wav"),
+                success: true,
+                context: context
+            )
+        }
+
+        await fulfillment(of: [transcriptionStarted], timeout: 1.0)
+        task.cancel()
+        context.resumeTranscription()
+        await task.value
+
+        XCTAssertEqual(context.inputText, "")
+        XCTAssertTrue(context.errors.isEmpty)
+        XCTAssertFalse(context.isTranscribing)
+        XCTAssertEqual(context.transcribedMimeType, "audio/wav")
+    }
+
     func testToggleRecordingStopsActiveRecordingAndTranscribes() async {
         let coordinator = ChatTranscriptionCoordinator()
         let context = MockTranscriptionContext()
@@ -159,6 +187,8 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
     var transcribedMimeType: String?
     var errors: [String] = []
     var shownErrors: [String] = []
+    var onTranscriptionStarted: (() -> Void)?
+    private var transcribeContinuation: CheckedContinuation<String, Error>?
 
     func requireTranscriptionReady() async throws {
         readinessCallCount += 1
@@ -181,7 +211,18 @@ private final class MockTranscriptionContext: ChatTranscriptionContext {
 
     func transcribeAudio(data: Data, mimeType: String, fileName: String) async throws -> String {
         transcribedMimeType = mimeType
+        if onTranscriptionStarted != nil {
+            return try await withCheckedThrowingContinuation { continuation in
+                transcribeContinuation = continuation
+                onTranscriptionStarted?()
+            }
+        }
         return nextTranscript
+    }
+
+    func resumeTranscription() {
+        transcribeContinuation?.resume(returning: nextTranscript)
+        transcribeContinuation = nil
     }
 
     func loadAudioData(from url: URL) async throws -> Data {
