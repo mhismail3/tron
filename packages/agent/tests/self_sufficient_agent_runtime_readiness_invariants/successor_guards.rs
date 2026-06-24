@@ -50,6 +50,7 @@ fn classified_successor_term_path(path: &str, source: &str) -> bool {
         || path.starts_with("packages/agent/docs/ios-affordance-restoration-map-")
         || path == "packages/agent/docs/ios-affordance-restoration-progress.md"
         || path.starts_with("packages/agent/docs/phase-2-agent-execution-restoration-")
+        || path == "packages/agent/docs/restoration-retrospective-audit-status.md"
         || path == "packages/agent/tests/ios_affordance_restoration_map_invariants.rs"
         || path == "packages/agent/tests/ios_self_adapting_agent_cockpit_baseline_invariants.rs"
         || path

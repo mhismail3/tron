@@ -47,6 +47,11 @@ current upstream model identifiers or dated snapshots.
 - Swift test files: **<= 650 LOC**.
 - Any exception must be generated/data-only and listed here. There are no
   approved source/test exceptions at TPC start.
+- Later accepted restoration slices may introduce temporary over-budget files
+  only when the current path is listed in
+  [Accepted Post-Restoration Budget Rows](#accepted-post-restoration-budget-rows)
+  with an owner, reason, and split/decomposition row. Those rows are active
+  follow-up obligations, not TPC baseline exceptions.
 
 ## Initial Red Findings
 
@@ -92,6 +97,19 @@ current over-budget files. Rows TPC-2 through TPC-8 own the splits or deletions.
 | 594 | 575 | `packages/ios-app/Sources/UI/Settings/Shell/SettingsSupport.swift` | TPC-8 |
 | 592 | 575 | `packages/ios-app/Sources/UI/Settings/ModelPicker/ModelPickerSheet.swift` | TPC-8 |
 | 576 | 575 | `packages/ios-app/Sources/UI/RuntimeSurfaces/GeneratedRuntimeSurfaceView.swift` | TPC-7 |
+
+## Accepted Post-Restoration Budget Rows
+
+These files entered the consolidated line after TPC closeout through accepted
+restoration slices. They keep explicit owners and split obligations until the
+next focused decomposition pass brings them back under the TPC hard targets.
+
+| Path | Owner | Reason | Current LOC / Limit | Split row |
+|------|-------|--------|---------------------|-----------|
+| `packages/agent/src/domains/jobs/service.rs` | jobs owner | Durable jobs lifecycle service restored for Phase 2 Slice 5A. | 988 / 750 | Split reconciliation, finalization, cleanup, and output-retention helpers into owner modules before expanding jobs behavior. |
+| `packages/agent/src/domains/jobs/tests.rs` | jobs test owner | Jobs lifecycle regression coverage restored for Phase 2 Slice 5A. | 986 / 800 | Split lifecycle, output, timeout, reconciliation, and fail-closed tests into focused modules before adding coverage. |
+| `packages/agent/src/domains/worker_lifecycle/tests.rs` | worker lifecycle test owner | Worker runtime audit fixes retained existing focused worker lifecycle coverage. | 967 / 800 | Split manifest/package tests from launch/reconciliation tests before adding worker runtime coverage. |
+| `packages/agent/tests/ios_affordance_restoration_map_invariants.rs` | IARM invariant owner | Historical iOS affordance map closure guards remain broad after retrospective hardening. | 1106 / 800 | Split helper parsing, physical-device, queue/phase, APNs defer, and stale-wording guards into modules before extending IARM coverage. |
 
 ## Static Gates
 

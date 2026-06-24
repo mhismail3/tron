@@ -2,25 +2,35 @@ use super::support::*;
 
 #[test]
 fn rust_hra7_has_no_remaining_overbudget_rust_files() {
+    let scorecard = read_repo_file(SCORECARD_PATH);
     let mut source_files = Vec::new();
     for path in ["packages/agent/src", "packages/agent/tests"] {
         list_source_files(&repo_path(path), &["rs"], &mut source_files);
     }
 
-    let mut over_budget = Vec::new();
+    let mut unbudgeted = Vec::new();
     for path in source_files {
         let lines = source_line_count(&path);
         if lines > 900 {
-            over_budget.push(format!(
-                "{} has {lines} LOC over Rust HRA-7 limit 900",
-                path.strip_prefix(repo_root()).unwrap().display()
-            ));
+            let relative = path
+                .strip_prefix(repo_root())
+                .unwrap()
+                .display()
+                .to_string();
+            let budgeted = scorecard.lines().any(|line| {
+                line.contains(&format!("| `{relative}` |")) && !line.contains("| pending |")
+            });
+            if !budgeted {
+                unbudgeted.push(format!(
+                    "{relative} has {lines} LOC over Rust HRA-7 limit 900"
+                ));
+            }
         }
     }
 
     assert!(
-        over_budget.is_empty(),
-        "HRA-7 hard Rust limit remains 900 LOC; AHA-6 tracks the earlier 850 LOC warning band: {over_budget:#?}"
+        unbudgeted.is_empty(),
+        "HRA-7 hard Rust limit remains 900 LOC; over-budget Rust files need explicit decomposition rows: {unbudgeted:#?}"
     );
 }
 

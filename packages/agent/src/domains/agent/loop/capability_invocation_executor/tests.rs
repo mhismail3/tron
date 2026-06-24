@@ -174,7 +174,7 @@ async fn model_capability_invocation_invokes_execute_primitive_through_engine() 
     let mut args = serde_json::Map::new();
     args.insert(
         "operation".to_owned(),
-        Value::String("file_read".to_owned()),
+        Value::String("filesystem_read".to_owned()),
     );
     args.insert("path".to_owned(), Value::String("note.txt".to_owned()));
     let call = CapabilityInvocationDraft::new("tc1", "execute", args);
@@ -187,17 +187,10 @@ async fn model_capability_invocation_invokes_execute_primitive_through_engine() 
     .await;
 
     assert_eq!(result.result.is_error, Some(false));
-    match result.result.content {
-        CapabilityResultBody::Text(text) => assert!(text.contains("hello from engine")),
-        CapabilityResultBody::Blocks(blocks) => {
-            let rendered = blocks
-                .iter()
-                .map(|block| format!("{block:?}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            assert!(rendered.contains("hello from engine"));
-        }
-    }
+    assert_eq!(
+        result.result.details.as_ref().unwrap()["filesystem"]["file"]["content"],
+        "hello from engine"
+    );
 }
 
 #[derive(Clone)]

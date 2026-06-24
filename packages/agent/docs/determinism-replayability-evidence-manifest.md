@@ -92,6 +92,10 @@ Proof:
 - P2AER-S2 refreshed the allow-list for `domains/approval`: live
   request/decision handlers write UTC audit/freshness timestamps, and replayed
   approval checks use the deterministic `check_approval_at` timestamp seam.
+- The restoration consolidation refreshed the allow-list for
+  `domains/capability/mod.rs`: the capability worker captures a UTC
+  `startup_cutoff` for jobs reconciliation so stale pre-startup running-state
+  cleanup stays bounded to process startup instead of replay identity.
 
 Open rows after DRC-2: DRC-4, DRC-5, DRC-6, DRC-7, DRC-8, DRC-9, and DRC-10.
 DRC-5/DRC-6 must keep replay builders out of the entropy allow-list and prove

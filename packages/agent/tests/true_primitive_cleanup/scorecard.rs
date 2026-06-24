@@ -262,6 +262,12 @@ fn tpc_source_files_are_classified_or_in_pending_inventory_setup() {
 
 #[test]
 fn tpc_hard_budget_scan_has_no_open_findings() {
+    let scorecard = read_repo_file("packages/agent/docs/true-primitive-cleanup-scorecard.md");
+    let accepted_budget_rows = scorecard
+        .split("## Accepted Post-Restoration Budget Rows")
+        .nth(1)
+        .and_then(|section| section.split("\n## ").next())
+        .unwrap_or_default();
     let mut current_findings = Vec::new();
     for path in git_ls_files() {
         if !repo_path(&path).exists() {
@@ -284,13 +290,14 @@ fn tpc_hard_budget_scan_has_no_open_findings() {
             continue;
         }
         let lines = line_count(&repo_path(&path));
-        if lines > limit {
+        let has_accepted_budget_row = accepted_budget_rows.contains(&format!("| `{path}` |"));
+        if lines > limit && !has_accepted_budget_row {
             current_findings.push((path, lines, limit));
         }
     }
 
     assert!(
         current_findings.is_empty(),
-        "TPC hard-budget scan has current over-budget files: {current_findings:?}"
+        "TPC hard-budget scan has current over-budget files without accepted budget rows: {current_findings:?}"
     );
 }

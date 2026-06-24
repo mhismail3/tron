@@ -1674,6 +1674,11 @@ packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md	docs	docs/s
 packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation
 packages/agent/docs/phase-2-agent-execution-restoration-inventory.md	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation
 packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv	docs	docs/static gates	Phase2-plan	durable Phase 2 architecture, scorecard, inventory, or evidence documentation
+packages/agent/docs/restoration-retrospective-audit-status.md	docs	docs/static gates	Restoration-consolidation	Retrospective audit tracker retained for accepted restoration lineage, consolidation status, and Order 21 source-resolution truth.
+packages/agent/src/domains/jobs/race_tests.rs	test	test_harness	Phase2-Slice5A	Jobs race regression tests retained for cancellation/finalization interleavings and targeted reconciliation coverage.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+CameraCaptureLifecycle.swift	test	test_harness	Phase1-closeout	Camera capture lifecycle source guard retained to prove captured-photo preview stops the live camera session.
+packages/ios-app/Tests/Session/Chat/MessagingCoordinatorAuditRegressionTests.swift	test	test_harness	Phase1-closeout	Messaging coordinator audit regression tests retained for local chat error affordance behavior.
+packages/ios-app/Tests/Session/Chat/MessagingCoordinatorDraftTests.swift	test	test_harness	Phase1-closeout	Messaging coordinator draft tests retained for recent-input and pending-share persistence behavior.
 packages/agent/src/domains/capability/operations/catalog.rs	implementation	capability	Phase2-Slice1	Catalog discovery execute operation retained as an inspect/conformance adapter behind the singular execute primitive.
 packages/agent/src/domains/catalog_discovery/mod.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery domain facade retained for native inspect/search/conformance surfaces.
 packages/agent/src/domains/catalog_discovery/contract.rs	implementation	catalog_discovery	Phase2-Slice1	Catalog discovery contracts retained for schemas, metadata, and durable conformance evidence.

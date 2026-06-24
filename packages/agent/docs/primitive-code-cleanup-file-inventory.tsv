@@ -1701,9 +1701,12 @@ packages/ios-app/Sources/UI/Chat/Shell/SessionList.swift	retain	ios chat shell	P
 packages/ios-app/Sources/UI/Onboarding/Flow/OnboardingFlowPresentation.swift	retain	ios onboarding ui	Phase1-closeout	Onboarding presentation helper retained for shared first-run and server-repair pairing sheets.
 packages/ios-app/Tests/Engine/Protocol/EngineProtocolTypesTranscriptionTests.swift	retain	ios test	Phase1-closeout	Transcription DTO tests retained for protocol decoding coverage.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ChatAffordanceStatus.swift	retain	ios guard test	Phase1-closeout	Chat affordance source guards retained to keep passive cockpit, loading row, and custom row fallback code out.
+packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+CameraCaptureLifecycle.swift	retain	ios guard test	Phase1-closeout	Camera capture lifecycle source guards retained to ensure captured-photo preview stops the live camera session.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+ComposerKeyboard.swift	retain	ios guard test	Phase1-closeout	Composer source guards retained for attachment menu and recent-input affordance boundaries.
 packages/ios-app/Tests/Infrastructure/Guards/SourceGuardTests+VoiceTranscription.swift	retain	ios guard test	Phase1-closeout	Voice transcription source guards retained for local audio capture and no voice-note/backend expansion boundaries.
 packages/ios-app/Tests/Session/Chat/Coordinators/ChatTranscriptionCoordinatorTests.swift	retain	ios test	Phase1-closeout	Chat transcription coordinator tests retained for readiness, cancellation, and draft insertion behavior.
+packages/ios-app/Tests/Session/Chat/MessagingCoordinatorAuditRegressionTests.swift	retain	ios test	Phase1-closeout	Messaging coordinator audit regression tests retained for local chat error affordance behavior.
+packages/ios-app/Tests/Session/Chat/MessagingCoordinatorDraftTests.swift	retain	ios test	Phase1-closeout	Messaging coordinator draft tests retained for recent-input and pending-share persistence behavior.
 packages/ios-app/Tests/Session/Timeline/Messages/CapabilityEvidencePresentationTests.swift	retain	ios test	Phase1-closeout	Capability evidence presentation tests retained for compact invocation rendering.
 packages/ios-app/Tests/Session/Timeline/Messages/LocalChatNotificationTests.swift	retain	ios test	Phase1-closeout	Local chat notification tests retained for dedupe and display rules.
 packages/ios-app/Tests/UI/Chat/AttachmentMenuTests.swift	retain	ios test	Phase1-closeout	Attachment menu tests retained for native menu actions and absence of nonfunctional legacy entries.
@@ -1718,6 +1721,7 @@ packages/ios-app/Tests/UI/Chat/WorkspaceSelectorVisualRenderTests.swift	retain	i
 packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md	retain	phase2 docs	Phase2-plan	Phase 2 planning scorecard retained as durable agent-execution restoration handoff; planning only, no feature implementation.
 packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md	retain	phase2 docs	Phase2-plan	Phase 2 planning evidence manifest retained for source audit and validation provenance.
 packages/agent/docs/phase-2-agent-execution-restoration-inventory.md	retain	phase2 docs	Phase2-plan	Phase 2 narrative inventory retained for feature-family classification and handoff guidance.
+packages/agent/docs/restoration-retrospective-audit-status.md	retain	restoration tracker	Restoration-consolidation	Retrospective audit tracker retained for accepted slice lineage, consolidation status, and blocked Order 21 source-resolution truth.
 packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv	retain	phase2 docs	Phase2-plan	Phase 2 machine-readable feature-family inventory retained for future slice planning.
 packages/agent/src/domains/capability/operations/catalog.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery execute adapter retained for inspect-only search, inspect, and conformance operations behind the singular execute primitive.
 packages/agent/src/domains/catalog_discovery/mod.rs	retain	phase2 catalog discovery	P2AER-S1	Catalog discovery domain facade retained for native self-inspection without public engine expansion.
@@ -1757,6 +1761,7 @@ packages/agent/src/domains/jobs/contract.rs	retain	phase2 jobs	P2AER-S5A	Jobs co
 packages/agent/src/domains/jobs/errors.rs	retain	phase2 jobs	P2AER-S5A	Jobs errors retained for malformed payload and fail-closed network-policy semantics.
 packages/agent/src/domains/jobs/handlers.rs	retain	phase2 jobs	P2AER-S5A	Jobs handlers retained as narrow invocation entrypoints for jobs contract operations.
 packages/agent/src/domains/jobs/runtime.rs	retain	phase2 jobs	P2AER-S5A	Jobs runtime retained for domain-owned process handles, sandboxed execution, bounded output capture, and cancellation.
+packages/agent/src/domains/jobs/race_tests.rs	retain	phase2 jobs	P2AER-S5A	Jobs race regression tests retained for cancellation/finalization interleavings and targeted reconciliation coverage.
 packages/agent/src/domains/jobs/schema_tests.rs	retain	phase2 jobs	P2AER-S5A	Jobs schema alignment tests retained to guard resource kind, schema id, output contract, and required field drift.
 packages/agent/src/domains/jobs/service.rs	retain	phase2 jobs	P2AER-S5A	Jobs service retained for resource-backed lifecycle, terminal idempotency, streams, cleanup, and output evidence.
 packages/agent/src/domains/jobs/support.rs	retain	phase2 jobs	P2AER-S5A	Jobs support helpers retained for payload parsing, lifecycle streams, idempotency, and resource refs.
