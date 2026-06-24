@@ -162,4 +162,33 @@ extension SourceGuardTests {
             )
         }
     }
+
+    @Test("Pending share text send uses recent input success callback")
+    func testPendingShareTextSendUsesRecentInputSuccessCallback() throws {
+        let iosRoot = iosAppRoot()
+        let source = try String(
+            contentsOf: iosRoot.appendingPathComponent("Sources/UI/Chat/Shell/ChatView.swift"),
+            encoding: .utf8
+        )
+        let receiverStart = try #require(source.range(of: ".onReceive(NotificationCenter.default.publisher(for: .pendingShareMessage))"))
+        let receiverEnd = try #require(source[receiverStart.upperBound...].range(of: ".onAppear"))
+        let receiverSource = String(source[receiverStart.lowerBound..<receiverEnd.lowerBound])
+
+        #expect(
+            receiverSource.contains("viewModel.inputText = payload.prompt"),
+            "Pending share text should still route through the chat input text before sending"
+        )
+        #expect(
+            receiverSource.contains("viewModel.sendMessage(") &&
+                receiverSource.contains("onPromptSent: { sentText in") &&
+                receiverSource.contains("inputHistory.addToHistory(sentText)"),
+            "Pending share text sends must persist recent input history only through the successful prompt callback"
+        )
+        #expect(
+            !receiverSource.contains("viewModel.sendMessage()") &&
+                !receiverSource.contains("inputHistory.addToHistory(payload.prompt)") &&
+                !receiverSource.contains("inputHistory.addToHistory(viewModel.inputText)"),
+            "Pending share text must not persist attempted text before the successful send boundary"
+        )
+    }
 }

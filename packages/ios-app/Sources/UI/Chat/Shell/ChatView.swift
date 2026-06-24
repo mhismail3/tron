@@ -114,7 +114,11 @@ struct ChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: .pendingShareMessage)) { notification in
             guard let payload = notification.object as? ShareMessagePayload else { return }
             viewModel.inputText = payload.prompt
-            viewModel.sendMessage()
+            viewModel.sendMessage(
+                onPromptSent: { sentText in
+                    inputHistory.addToHistory(sentText)
+                }
+            )
         }
         .onAppear {
             // Reasoning level is restored from server via reconstruction (config.reasoning_level events)
