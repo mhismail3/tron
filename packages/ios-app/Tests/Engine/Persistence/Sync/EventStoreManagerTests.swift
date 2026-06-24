@@ -165,6 +165,33 @@ final class CachedSessionTests: XCTestCase {
         XCTAssertEqual(merged.listTitle, "Fix session list title fallback")
     }
 
+    func testServerGeneratedTitleReplacesPreFixWorkspaceFallbackDuringMerge() {
+        let database = EventDatabase(
+            databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
+        )
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let existing = createTestSession(
+            id: "pre-fix-session",
+            title: "Project",
+            workingDirectory: "/tmp/tron-fixtures/Project"
+        )
+        let serverInfo = makeSessionInfo(
+            sessionId: existing.id,
+            title: "Fix session list title fallback",
+            workingDirectory: existing.workingDirectory
+        )
+
+        let merged = manager.mergeSessionData(
+            existing: existing,
+            serverInfo: serverInfo,
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertEqual(merged.title, "Fix session list title fallback")
+        XCTAssertEqual(merged.listTitle, "Fix session list title fallback")
+    }
+
     func testNilServerTitlePreservesLocalNewSessionFallbackDuringMerge() {
         let database = EventDatabase(
             databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
@@ -195,6 +222,89 @@ final class CachedSessionTests: XCTestCase {
 
         XCTAssertNil(merged.title)
         XCTAssertEqual(merged.listTitle, "New Session")
+    }
+
+    func testNilServerTitleClearsPreFixWorkspaceFallbackDuringMerge() {
+        let database = EventDatabase(
+            databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
+        )
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let existing = createTestSession(
+            id: "pre-fix-session",
+            title: "Project",
+            workingDirectory: "/tmp/tron-fixtures/Project"
+        )
+        let serverInfo = makeSessionInfo(
+            sessionId: existing.id,
+            title: nil,
+            workingDirectory: existing.workingDirectory
+        )
+
+        let merged = manager.mergeSessionData(
+            existing: existing,
+            serverInfo: serverInfo,
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertNil(merged.title)
+        XCTAssertEqual(merged.listTitle, "New Session")
+    }
+
+    func testNilServerTitleClearsPreFixWorkspaceFallbackAndUsesPromptFallbackDuringMerge() {
+        let database = EventDatabase(
+            databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
+        )
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let existing = createTestSession(
+            id: "pre-fix-session",
+            title: "Project",
+            workingDirectory: "/tmp/tron-fixtures/Project"
+        )
+        let serverInfo = makeSessionInfo(
+            sessionId: existing.id,
+            title: nil,
+            workingDirectory: existing.workingDirectory,
+            lastUserPrompt: "Review cache title sync"
+        )
+
+        let merged = manager.mergeSessionData(
+            existing: existing,
+            serverInfo: serverInfo,
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertNil(merged.title)
+        XCTAssertEqual(merged.lastUserPrompt, "Review cache title sync")
+        XCTAssertEqual(merged.listTitle, "Review cache title sync")
+    }
+
+    func testNilServerTitlePreservesNonWorkspaceLocalTitleDuringMerge() {
+        let database = EventDatabase(
+            databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
+        )
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let existing = createTestSession(
+            id: "local-title-session",
+            title: "Accepted generated title",
+            workingDirectory: "/tmp/tron-fixtures/Project"
+        )
+        let serverInfo = makeSessionInfo(
+            sessionId: existing.id,
+            title: nil,
+            workingDirectory: existing.workingDirectory
+        )
+
+        let merged = manager.mergeSessionData(
+            existing: existing,
+            serverInfo: serverInfo,
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertEqual(merged.title, "Accepted generated title")
+        XCTAssertEqual(merged.listTitle, "Accepted generated title")
     }
 
     // MARK: - Helper
@@ -236,7 +346,8 @@ final class CachedSessionTests: XCTestCase {
     private func makeSessionInfo(
         sessionId: String,
         title: String?,
-        workingDirectory: String?
+        workingDirectory: String?,
+        lastUserPrompt: String? = nil
     ) -> SessionInfo {
         SessionInfo(
             sessionId: sessionId,
@@ -257,7 +368,7 @@ final class CachedSessionTests: XCTestCase {
             workingDirectory: workingDirectory,
             parentSessionId: nil,
             title: title,
-            lastUserPrompt: nil,
+            lastUserPrompt: lastUserPrompt,
             lastAssistantResponse: nil,
             source: nil,
             profile: nil,
