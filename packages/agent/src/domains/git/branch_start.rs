@@ -20,7 +20,7 @@ use super::types::{
 };
 use super::{GIT_LIFECYCLE_TOPIC, WORKER, WRITE_SCOPE};
 
-const BRANCH_START_OUTPUT_BYTES: usize = 8 * 1024;
+pub(super) const BRANCH_START_OUTPUT_BYTES: usize = 8 * 1024;
 
 pub(crate) async fn branch_start_value(
     engine_host: &EngineHostHandle,
@@ -241,29 +241,101 @@ fn create_branch_and_move_head(
     branch_ref: &str,
     expected_head: &str,
 ) -> Result<(), CapabilityError> {
-    let create = service::git_output_status_bounded(
+    create_branch_and_move_head_with_runner(
+        &ServiceBranchStartGitRunner,
         worktree_root,
-        ["update-ref", branch_ref, expected_head, ""],
-        BRANCH_START_OUTPUT_BYTES,
-    )?;
-    if !create.status.success() {
-        let detail = truncate_chars(String::from_utf8_lossy(&create.stderr).trim(), 1_000);
+        branch_ref,
+        expected_head,
+    )
+}
+
+pub(super) trait BranchStartGitRunner {
+    fn git_output_status_bounded(
+        &self,
+        worktree_root: &Path,
+        args: &[&str],
+        stdout_limit: usize,
+    ) -> Result<BranchStartGitStatus, CapabilityError>;
+}
+
+pub(super) struct BranchStartGitStatus {
+    pub(super) success: bool,
+    pub(super) stderr: Vec<u8>,
+}
+
+struct ServiceBranchStartGitRunner;
+
+impl BranchStartGitRunner for ServiceBranchStartGitRunner {
+    fn git_output_status_bounded(
+        &self,
+        worktree_root: &Path,
+        args: &[&str],
+        stdout_limit: usize,
+    ) -> Result<BranchStartGitStatus, CapabilityError> {
+        let output =
+            service::git_output_status_bounded(worktree_root, args.iter().copied(), stdout_limit)?;
+        Ok(BranchStartGitStatus {
+            success: output.status.success(),
+            stderr: output.stderr,
+        })
+    }
+}
+
+pub(super) fn create_branch_and_move_head_with_runner(
+    runner: &impl BranchStartGitRunner,
+    worktree_root: &Path,
+    branch_ref: &str,
+    expected_head: &str,
+) -> Result<(), CapabilityError> {
+    let create_args = ["update-ref", branch_ref, expected_head, ""];
+    let create =
+        runner.git_output_status_bounded(worktree_root, &create_args, BRANCH_START_OUTPUT_BYTES)?;
+    if !create.success {
+        let detail = stderr_detail(&create.stderr);
         return Err(invalid(format!(
             "git_branch_start could not create branch at expectedHead: {detail}"
         )));
     }
-    let move_head = service::git_output_status_bounded(
+
+    let move_head_args = ["symbolic-ref", "HEAD", branch_ref];
+    let move_head = runner.git_output_status_bounded(
         worktree_root,
-        ["symbolic-ref", "HEAD", branch_ref],
+        &move_head_args,
         BRANCH_START_OUTPUT_BYTES,
     )?;
-    if !move_head.status.success() {
-        let detail = truncate_chars(String::from_utf8_lossy(&move_head.stderr).trim(), 1_000);
+    if !move_head.success {
+        let detail = stderr_detail(&move_head.stderr);
+        rollback_created_branch_ref(runner, worktree_root, branch_ref, expected_head, &detail)?;
         return Err(internal(format!(
-            "git_branch_start created branch but could not move symbolic HEAD: {detail}"
+            "git_branch_start created branch but could not move symbolic HEAD; rolled back {branch_ref} at {expected_head}: {detail}"
         )));
     }
     Ok(())
+}
+
+fn rollback_created_branch_ref(
+    runner: &impl BranchStartGitRunner,
+    worktree_root: &Path,
+    branch_ref: &str,
+    expected_head: &str,
+    move_head_detail: &str,
+) -> Result<(), CapabilityError> {
+    let rollback_args = ["update-ref", "-d", branch_ref, expected_head];
+    let rollback = runner
+        .git_output_status_bounded(worktree_root, &rollback_args, BRANCH_START_OUTPUT_BYTES)
+        .map_err(|error| {
+            internal(format!(
+                "git_branch_start could not move symbolic HEAD ({move_head_detail}); rollback command failed for {branch_ref} at {expected_head}: {error}"
+            ))
+        })?;
+    if rollback.success {
+        return Ok(());
+    }
+
+    let rollback_detail = stderr_detail(&rollback.stderr);
+    Err(internal(format!(
+        "git_branch_start could not move symbolic HEAD ({move_head_detail}); rollback failed for {branch_ref} at {expected_head}: {rollback_detail}"
+    )))
 }
 
 fn git_ref_oid(worktree_root: &Path, branch_ref: &str) -> Result<String, CapabilityError> {
@@ -523,6 +595,15 @@ fn truncate_chars(value: &str, max: usize) -> String {
         end -= 1;
     }
     value[..end].to_owned()
+}
+
+fn stderr_detail(stderr: &[u8]) -> String {
+    let detail = truncate_chars(String::from_utf8_lossy(stderr).trim(), 1_000);
+    if detail.is_empty() {
+        "<no stderr>".to_owned()
+    } else {
+        detail
+    }
 }
 
 fn invalid(message: impl Into<String>) -> CapabilityError {

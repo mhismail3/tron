@@ -33,8 +33,10 @@
 //! the worktree's symbolic `HEAD` is locked and reverified. Branch-start
 //! operations create exactly one missing local branch at the current expected
 //! `HEAD` and move symbolic `HEAD` to that new branch without checkout, hooks,
-//! remotes, index mutation, or worktree file updates. Caller-controlled
-//! status/diff byte limits affect evidence only, never mutation eligibility.
+//! remotes, index mutation, or worktree file updates; if symbolic `HEAD`
+//! movement fails, the just-created ref is removed only when it still points at
+//! the expected OID. Caller-controlled status/diff byte limits affect evidence
+//! only, never mutation eligibility.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

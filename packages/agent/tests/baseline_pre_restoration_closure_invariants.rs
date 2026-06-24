@@ -518,7 +518,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-05",
         "worktree_git",
         "Slice 6: Git And Worktree Foundations",
-        "current_baseline",
+        "pending_review",
         &[
             "accepted Slice 6B adds index-only Git stage/unstage",
             "git_status",

@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -15,12 +17,17 @@ use crate::engine::{
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
 
+use super::branch_start::{
+    BRANCH_START_OUTPUT_BYTES, BranchStartGitRunner, BranchStartGitStatus,
+    create_branch_and_move_head_with_runner,
+};
 use super::service::{diff_value, status_value};
 use crate::domains::capability::contract;
 use crate::engine::{
     GIT_BRANCH_START_KIND, GIT_BRANCH_START_SCHEMA_ID, GIT_COMMIT_KIND, GIT_COMMIT_SCHEMA_ID,
     GIT_INDEX_CHANGE_KIND, GIT_INDEX_CHANGE_SCHEMA_ID, builtin_resource_type_definitions,
 };
+use crate::shared::server::errors::CapabilityError;
 
 #[tokio::test]
 async fn status_reports_clean_repo() {
@@ -696,6 +703,82 @@ async fn execute_git_commit_replays_with_same_idempotency_key() {
         git_stdout(repo.path(), ["rev-list", "--count", "HEAD"]),
         "2"
     );
+}
+
+#[test]
+fn git_branch_start_symbolic_head_failure_rolls_back_created_branch_ref() {
+    let branch_ref = "refs/heads/feature/symbolic-fails";
+    let expected_head = "1111111111111111111111111111111111111111";
+    let runner = FakeBranchStartGitRunner::new([
+        expected_branch_start_call(
+            ["update-ref", branch_ref, expected_head, ""],
+            branch_start_status(true, ""),
+        ),
+        expected_branch_start_call(
+            ["symbolic-ref", "HEAD", branch_ref],
+            branch_start_status(false, "symbolic-ref denied"),
+        ),
+        expected_branch_start_call(
+            ["update-ref", "-d", branch_ref, expected_head],
+            branch_start_status(true, ""),
+        ),
+    ]);
+
+    let error = create_branch_and_move_head_with_runner(
+        &runner,
+        Path::new("/unused"),
+        branch_ref,
+        expected_head,
+    )
+    .expect_err("symbolic-ref failure should fail")
+    .to_string();
+
+    assert!(error.contains("could not move symbolic HEAD"));
+    assert!(error.contains("rolled back refs/heads/feature/symbolic-fails"));
+    assert!(error.contains(expected_head));
+    assert!(error.contains("symbolic-ref denied"));
+    assert!(
+        !error.contains("rollback failed"),
+        "successful rollback should not be reported as a rollback failure: {error}"
+    );
+    runner.assert_drained();
+}
+
+#[test]
+fn git_branch_start_symbolic_head_failure_reports_guarded_rollback_failure() {
+    let branch_ref = "refs/heads/feature/rollback-fails";
+    let expected_head = "2222222222222222222222222222222222222222";
+    let runner = FakeBranchStartGitRunner::new([
+        expected_branch_start_call(
+            ["update-ref", branch_ref, expected_head, ""],
+            branch_start_status(true, ""),
+        ),
+        expected_branch_start_call(
+            ["symbolic-ref", "HEAD", branch_ref],
+            branch_start_status(false, "symbolic-ref denied"),
+        ),
+        expected_branch_start_call(
+            ["update-ref", "-d", branch_ref, expected_head],
+            branch_start_status(false, "cannot lock ref"),
+        ),
+    ]);
+
+    let error = create_branch_and_move_head_with_runner(
+        &runner,
+        Path::new("/unused"),
+        branch_ref,
+        expected_head,
+    )
+    .expect_err("rollback failure should fail")
+    .to_string();
+
+    assert!(error.contains("could not move symbolic HEAD"));
+    assert!(error.contains("rollback failed"));
+    assert!(error.contains(branch_ref));
+    assert!(error.contains(expected_head));
+    assert!(error.contains("symbolic-ref denied"));
+    assert!(error.contains("cannot lock ref"));
+    runner.assert_drained();
 }
 
 #[tokio::test]
@@ -2387,6 +2470,65 @@ async fn derive_execute_grant(
             .to_owned(),
     )
     .unwrap()
+}
+
+struct FakeBranchStartGitRunner {
+    expected: RefCell<VecDeque<ExpectedGitCall>>,
+}
+
+impl FakeBranchStartGitRunner {
+    fn new<const N: usize>(calls: [ExpectedGitCall; N]) -> Self {
+        Self {
+            expected: RefCell::new(VecDeque::from(calls)),
+        }
+    }
+
+    fn assert_drained(&self) {
+        assert!(
+            self.expected.borrow().is_empty(),
+            "not all expected Git calls were consumed"
+        );
+    }
+}
+
+impl BranchStartGitRunner for FakeBranchStartGitRunner {
+    fn git_output_status_bounded(
+        &self,
+        _worktree_root: &Path,
+        args: &[&str],
+        stdout_limit: usize,
+    ) -> Result<BranchStartGitStatus, CapabilityError> {
+        assert_eq!(stdout_limit, BRANCH_START_OUTPUT_BYTES);
+        let call = self
+            .expected
+            .borrow_mut()
+            .pop_front()
+            .expect("unexpected Git command");
+        assert_eq!(args, call.args.as_slice());
+        Ok(call.status)
+    }
+}
+
+struct ExpectedGitCall {
+    args: Vec<&'static str>,
+    status: BranchStartGitStatus,
+}
+
+fn expected_branch_start_call<const N: usize>(
+    args: [&'static str; N],
+    status: BranchStartGitStatus,
+) -> ExpectedGitCall {
+    ExpectedGitCall {
+        args: args.to_vec(),
+        status,
+    }
+}
+
+fn branch_start_status(success: bool, stderr: &str) -> BranchStartGitStatus {
+    BranchStartGitStatus {
+        success,
+        stderr: stderr.as_bytes().to_vec(),
+    }
 }
 
 fn init_repo(path: &Path) {

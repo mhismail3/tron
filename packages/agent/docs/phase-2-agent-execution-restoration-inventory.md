@@ -80,6 +80,8 @@ provider-visible `git_branch_start` operation through `capability::execute`
 that creates one new local branch at `expectedHead`, moves symbolic `HEAD`
 without checkout, preserves index/worktree content, and records
 `git_branch_start` resource plus `git.branch_started` lifecycle evidence.
+`P2AER-INV-013` remains `pending_review` for Slice 6D until orchestrator
+integration accepts the candidate into mainline.
 Worktree graph resources, arbitrary checkout, branch deletion/rename,
 merges/rebases/resets, stash/clean, fetch/pull/push, PR handoff, conflict
 resolution workflows, and native SourceChanges remain deferred.

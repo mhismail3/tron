@@ -991,9 +991,10 @@ domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
 Accepted Slice 6C adds the `git_commit` execute operation with backend
 staged-index commit evidence; commit is not registered as a direct `git::*`
-catalog function. Slice 6D adds the local-only `git_branch_start` execute
-operation for creating one new local branch at the current expected `HEAD` and
-moving symbolic `HEAD` to it without checkout or file updates.
+catalog function. The Slice 6D implementation candidate adds the local-only
+`git_branch_start` execute operation for creating one new local branch at the
+current expected `HEAD` and moving symbolic `HEAD` to it without checkout or
+file updates.
 Provider-visible access remains operation values behind the single
 `capability::execute` primitive: `git_status`, `git_diff`, `git_stage`,
 `git_unstage`, `git_commit`, and `git_branch_start`. The implementation resolves only
@@ -1011,15 +1012,16 @@ the commit object, then advances the branch with a guarded `update-ref` compare
 against the expected HEAD while symbolic `HEAD` is locked and reverified. The
 `commit-tree` path does not invoke hooks or an editor and suppresses
 pager/signing/credential prompts, creates a `git_commit` resource, and publishes
-`git.commit_created` lifecycle evidence. Slice 6D `git_branch_start` requires a
-safe new branch name, non-conflicted and sequencer-clean repository state,
-trusted working-directory metadata, expected `HEAD`, reason, and explicit
+`git.commit_created` lifecycle evidence. Candidate Slice 6D `git_branch_start`
+requires a safe new branch name, non-conflicted and sequencer-clean repository
+state, trusted working-directory metadata, expected `HEAD`, reason, and explicit
 idempotency. It creates a `git_branch_start` resource, publishes
 `git.branch_started` lifecycle evidence, rejects detached HEAD, existing or
 unsafe branch names, stale `expectedHead`, missing idempotency, nested/non-repo
-misuse, and merge/rebase/cherry-pick/sequencer states, and proves checkout,
-hooks, remotes, merge/rebase/reset, index mutation, and worktree file updates
-are not invoked.
+misuse, and merge/rebase/cherry-pick/sequencer states, rolls back the newly
+created branch ref if symbolic `HEAD` movement fails while it still points at
+`expectedHead`, and proves checkout, hooks, remotes, merge/rebase/reset, index
+mutation, and worktree file updates are not invoked.
 Merges, rebases, resets, pushes, arbitrary branch checkout, branch
 deletion/rename, conflict resolution
 workflows, PR handoff, worktree graph resources, and native iOS SourceChanges
