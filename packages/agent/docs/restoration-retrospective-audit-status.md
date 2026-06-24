@@ -13,7 +13,7 @@ Current audit tracker lineage:
   recorded as the head of `codex/restoration-retrospective-audit-status-current`
   before the retrospective audit-fix pass.
 - Baseline assumption: this tracker records accepted retrospective audit state
-  through Phase 2 Slice 5A after the final job-finalization cancel-race fix. It
+  through Phase 2 Slice 5A after the stale durable job reconciliation fixes. It
   is not an all-slices integrated artifact branch; some canonical evidence
   remains branch-scoped and must be consolidated before any integrated
   acceptance claim.
@@ -73,7 +73,7 @@ completed slice.
 | 17 | Phase 2 Slice 2: Approval Safety / Freshness + Schema Hardening | Phase 2 agent-execution restoration | Baseline `f95d3b02e`; final pre-hardening `5ea963008`; hardening final `301f61bc3` | Historical branch evidence at `codex/phase-2-approval-safety-freshness-current` and `codex/phase-2-approval-schema-hardening-current@301f61bc3`; the canonical artifacts and implementation files are not present on this tracker branch. | Historical branch-only files: Phase 2 scorecard/evidence/inventory; `packages/agent/src/domains/approval/`; approval domain docs/tests; SACB/TMB/HRA/TPC/PCC/DRC/CSD/DESI invariants on the source branches. | Accepted by audit thread `019ef7d6-60f7-79f0-a39f-2ab59fb44ae6`; no findings remain. Historical branch-scoped evidence records durable approval request/decision resources, lifecycle stream, idempotent decision replay through engine idempotency, stale version conflict, deterministic `check_approval_at`, fail-closed denial/expiry/pending/missing/malformed/stale/scope mismatch, schema alignment guard, replay/evidence explanations, approval-is-not-authority metadata, and full Rust CI. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | Native iOS approval UI, risk taxonomy, default expiry policy, interruption behavior, per-package risky-action triggers, and unrelated capability behavior remain deferred. | Closed. Continue with Phase 2 Slice 3: Memory Foundation + Scope Hardening. |
 | 18 | Phase 2 Slice 3: Memory Foundation + Scope Hardening | Phase 2 agent-execution restoration | Baseline `301f61bc3`; original commits `29024b677`, `20dde9894`, `4c35b2119`; accepted fix commit `be1300934fb36ec9bac650eedfee933c9daf0d9d` | Historical branch evidence at `codex/phase-2-memory-foundation-current@4c35b2119` plus accepted fix ref `codex/order-18-memory-bodyref-recursive-validation@be1300934fb36ec9bac650eedfee933c9daf0d9d`; the canonical artifacts, memory implementation, and fix files are not present on this tracker branch. | Historical branch-only files: Phase 2 scorecard/evidence/inventory; memory domain docs/tests; SACB/HRA/TMB/TPC/PCC/DRC/SSARR/CSD/BPRC/IARM/OPSAA/SUWRF/DESI invariants on the source/fix branches. | Accepted by independent re-audit thread `019ef7ee-0b9b-7213-a51c-d66a89e8b483` after focused fix commit `be1300934fb36ec9bac650eedfee933c9daf0d9d`; no findings remain. Historical branch-scoped evidence records memory policy/status, resource definitions, redacted records, prompt traces, migration envelopes, scope hardening, no hidden body-context inclusion, recursive `bodyRef` inline-body rejection, full Rust CI, and guards. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | Semantic/vector retrieval, embeddings, ranking, summarization, episodic retrieval, procedural rules/hooks/skills, automatic retention, native iOS memory UI, and unrelated features remain deferred. | Closed. Continue with Phase 2 Slice 4: Filesystem Agent Tools + Truncated Snapshot Hardening. |
 | 19 | Phase 2 Slice 4: Filesystem Agent Tools + Truncated Snapshot Hardening | Phase 2 agent-execution restoration | Baseline `4c35b2119`; original commits `27e5847c9`, `2650dd0b9`; accepted fix commits `6c53f3ee9761efce0539363e2c54dd1b80b4f735`, `b373a367887d5fb114ed66fdc1023401bcd0aaa5` | Historical branch evidence at `codex/phase-2-filesystem-agent-tools-current@2650dd0b9` plus accepted fix refs `codex/order-19-filesystem-tools-fix@6c53f3ee9761efce0539363e2c54dd1b80b4f735` and `codex/order-19-filesystem-tools-docs-followup@b373a367887d5fb114ed66fdc1023401bcd0aaa5`; the canonical artifacts, filesystem implementation, and fix files are not automatically current-line integrated on this tracker branch. | Historical branch-only files: Phase 2 scorecard/evidence/inventory; filesystem domain docs/tests; SACB/TMB/HRA/TPC/PCC/BPRC/IARM/DESI/OPSAA invariants; provider message converter tests on the source/fix branches. | Accepted by independent re-audit thread `019ef810-db9e-7081-a64f-265c781ea15c` after focused fix commits `6c53f3ee9761efce0539363e2c54dd1b80b4f735` and `b373a367887d5fb114ed66fdc1023401bcd0aaa5`; no blocking or important findings remain. Historical branch-scoped evidence records hardened `filesystem_*` operations through `execute`, legacy `file_read` / `file_write` removal from model-visible dispatch, relative path authority, canonical root checks, symlink escape denial, preview/commit idempotency, hash guards, patch/materialized evidence, bounded output, binary omission, truncated snapshot refusal, and corrected provider/evidence wording. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | Jobs, git, web, subagents, semantic/vector/procedural/scheduling work, native file/patch UI, public DTO expansion, unrelated DB/settings/auth/provider expansion, and production deploy behavior remain deferred. | Closed. Continue with Phase 2 Slice 5A: Durable Jobs and Process Lifecycle + Race Hardening. |
-| 20 | Phase 2 Slice 5A: Durable Jobs and Process Lifecycle + Race Hardening | Phase 2 agent-execution restoration | Baseline `1d35ac848` on `2650dd0b9`; commits `404290d06`, `4fb134c64`, `0d76be40d`; final `0d76be40d` | `codex/phase-2-jobs-process-lifecycle-current` | Phase 2 scorecard/evidence/inventory; jobs domain docs/tests; SACB/TMB/CSD/HRA/PCC/TPC/BPRC/IARM/OPSAA/PRG/DRC/DESI invariants | Durable `jobs` domain, `job_process` resources, bounded `execution_output`, lifecycle streams, start/status/list/log/cancel `execute` ops, process-group cleanup, cancellation/finalization race fixes, full Rust CI recorded. | PTY/interactive terminals, interpreter runtimes, git/source control, web/network research, subagents, scheduling, notifications, native iOS process panels, and queue-backed internal dispatch remain deferred. | Process-group cleanup, network denial fail-closed, output-drain bounds, terminal idempotency, cancel/completion races, stale-version retry, cleanup archiving, and no hidden queue grant. |
+| 20 | Phase 2 Slice 5A: Durable Jobs and Process Lifecycle + Race Hardening | Phase 2 agent-execution restoration | Baseline `1d35ac848` on `2650dd0b9`; original commits `404290d06`, `4fb134c64`, `0d76be40d`; accepted fix commits `8702a7e8cb6346d29ac5247ee87344f34b766143`, `d57aaf83e94693e2eaefde16108202ea4e254e5e` | Historical branch evidence at `codex/phase-2-jobs-process-lifecycle-current@0d76be40d` plus accepted fix refs `codex/order-20-jobs-process-lifecycle-fix@8702a7e8cb6346d29ac5247ee87344f34b766143` and `codex/order-20-jobs-process-lifecycle-reconcile-targeted@d57aaf83e94693e2eaefde16108202ea4e254e5e`; the canonical artifacts, jobs implementation, and fix files are not automatically current-line integrated on this tracker branch. | Historical branch-only files: Phase 2 scorecard/evidence/inventory; jobs domain docs/tests; SACB/TMB/CSD/HRA/PCC/TPC/BPRC/IARM/OPSAA/PRG/DRC/DESI invariants on the source/fix branches. | Accepted by independent re-audit thread `019ef83d-dc76-7031-ae09-8774db2443f4` after focused fix commits `8702a7e8cb6346d29ac5247ee87344f34b766143` and `d57aaf83e94693e2eaefde16108202ea4e254e5e`; no findings remain. Historical branch-scoped evidence records durable `jobs` domain, `job_process` resources, bounded `execution_output`, lifecycle streams, start/status/list/log/cancel `execute` ops, process-group cleanup, cancellation/finalization race fixes, stale running-state reconciliation after restart/crash, targeted status/log/cancel reconciliation after scope validation, and SACB/CSD coverage for `packages/agent/src/domains/jobs/race_tests.rs`. Current-line integrated acceptance still requires a final consolidation branch/audit that ports or truthfully supersedes branch-scoped artifacts before claiming one integrated accepted state. | PTY/interactive terminals, interpreter runtimes, git/source control, web/network research, subagents, scheduling, notifications, native iOS process panels, public DTO expansion, production deploy behavior, unrelated settings/auth/provider changes, and queue-backed internal dispatch remain deferred. | Closed. Continue with Phase 2 Slice 6: Git, Worktrees, And Source Control. |
 
 ## Completed Audit: Primitive Minimality Closure
 
@@ -1239,20 +1239,124 @@ Validation recorded by the accepted re-audit:
   passed, 3 tests.
 - `git diff --check` passed.
 
+## Completed Audit: Phase 2 Slice 5A: Durable Jobs and Process Lifecycle + Race Hardening
+
+Original audit thread: `019ef819-970d-7672-b088-e8097005b23b`
+
+Original audit verdict: `changes required`, because stale durable
+`job_process` resources could remain observable as `running` after restart or
+crash. Live ownership was only in memory, and status/list/cleanup did not
+reconcile stale running state unless a later cancel was called. The audit also
+identified false SACB/CSD validation claims because
+`packages/agent/src/domains/jobs/race_tests.rs` was missing from the SACB/CSD
+inventories and guards.
+
+Focused fix thread: `019ef820-a8b2-7873-b5c5-c4e827b80121`
+
+Focused fix commit:
+`8702a7e8cb6346d29ac5247ee87344f34b766143`
+(`codex/order-20-jobs-process-lifecycle-fix`)
+
+First independent re-audit thread: `019ef831-0a55-7b10-9a0d-ea836b919452`
+
+First re-audit verdict: `changes required`, because reconciliation still had
+a pagination hole when more than 500 newer non-reconcilable running rows could
+hide the targeted stale resource needed by status/log/cancel.
+
+Follow-up focused fix thread: `019ef835-909c-7ed1-93a4-f795345b1afc`
+
+Follow-up fix commit:
+`d57aaf83e94693e2eaefde16108202ea4e254e5e`
+(`codex/order-20-jobs-process-lifecycle-reconcile-targeted`)
+
+Accepted independent re-audit thread: `019ef83d-dc76-7031-ae09-8774db2443f4`
+
+Accepted re-audit verdict: `slice accepted`
+
+Status: accepted with no findings after both focused fix commits.
+
+Closeout checkout assumption:
+
+- This docs-only closeout started from detached `HEAD` at
+  `6505d30ca56abc0d5f9f3700242f862fe078e571`, decorated as
+  `codex/order-19-filesystem-closeout`, and created the focused tracker
+  closeout branch `codex/order-20-jobs-closeout` from that point.
+
+Accepted result:
+
+- Phase 2 Slice 5A Durable Jobs and Process Lifecycle + Race Hardening is
+  accepted as branch-scoped historical evidence.
+- Historical range: baseline `1d35ac848` on `2650dd0b9`, original
+  implementation commits `404290d06`, `4fb134c64`, and `0d76be40d` at
+  `codex/phase-2-jobs-process-lifecycle-current@0d76be40d`, plus accepted fix
+  commits `8702a7e8cb6346d29ac5247ee87344f34b766143` at
+  `codex/order-20-jobs-process-lifecycle-fix@8702a7e8cb6346d29ac5247ee87344f34b766143`
+  and `d57aaf83e94693e2eaefde16108202ea4e254e5e` at
+  `codex/order-20-jobs-process-lifecycle-reconcile-targeted@d57aaf83e94693e2eaefde16108202ea4e254e5e`.
+- Stale durable `job_process` resources after restart or crash are reconciled
+  into truthful terminal state with inspectable evidence instead of remaining
+  observable as stale `running`.
+- The follow-up fix closes the greater-than-500 newer non-reconcilable
+  running-row pagination hole using an internal scan and targeted status,
+  log, and cancel reconciliation after scope validation, without changing
+  public list limits.
+- Request-triggered reconciliation is invocation-scoped, while startup
+  reconciliation may scan all scopes.
+- Runtime-owned and post-startup jobs are not falsely marked stale.
+- SACB/CSD inventory coverage for
+  `packages/agent/src/domains/jobs/race_tests.rs` is now present and guarded.
+- Acceptance does not claim the canonical Phase 2 Slice 5A artifacts, jobs
+  implementation files, or focused fix files are present on this tracker
+  branch unless a future consolidation branch ports or truthfully supersedes
+  them.
+- The original and follow-up audits treated source/fix evidence as
+  branch-scoped; that distinction remains preserved in this tracker.
+
+Accepted deferred scope:
+
+- PTY/interactive terminals, interpreter runtimes, git/source control,
+  web/network research, subagents, scheduling, notifications, native iOS
+  process panels, public DTO expansion, production deploy behavior, unrelated
+  settings/auth/provider changes, and broader final all-slices integration
+  remain deferred.
+- Integrated all-slices acceptance remains blocked until the final
+  consolidation branch/audit requirement is completed.
+
+Validation recorded by the accepted re-audit:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml domains::jobs -- --nocapture`
+  passed, 13 jobs tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture`
+  passed, 17 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test concurrency_scheduling_discipline_invariants -- --nocapture`
+  passed, 12 tests.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture`
+  passed, 9 tests.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  passed.
+- `scripts/personal-info-guard.sh` passed.
+- `git diff --check` passed.
+- `git ls-files -ci --exclude-standard` passed with empty output.
+
 ## Next Audit
 
-The next action is audit of **Order 20: Phase 2 Slice 5A: Durable Jobs and
-Process Lifecycle + Race Hardening**.
+The next action is audit of **Order 21: Phase 2 Slice 6: Git, Worktrees, And
+Source Control**.
 
-The tracker queue is not ambiguous: Order 19 is now closed, and Order 20 is the
-next open row:
+The tracker queue is not ambiguous: Order 20 is now closed, and the Phase 2
+roadmap names Slice 6 after the completed Slice 5A jobs/process lifecycle
+foundation:
 
-> `| 20 | Phase 2 Slice 5A: Durable Jobs and Process Lifecycle + Race Hardening | Phase 2 agent-execution restoration | Baseline 1d35ac848 on 2650dd0b9; commits 404290d06, 4fb134c64, 0d76be40d; final 0d76be40d | codex/phase-2-jobs-process-lifecycle-current | ... |`
+> `### Slice 6: Git, Worktrees, And Source Control`
 
-Order 20 starts from baseline `1d35ac848` on `2650dd0b9`, includes commits
-`404290d06`, `4fb134c64`, and `0d76be40d`, and uses
-`codex/phase-2-jobs-process-lifecycle-current` as the source-of-truth ref. The
-recommended next orchestration target is Order 20.
+Order 21 should start from the accepted Phase 2 source/fix lineage only after
+orchestration confirms the intended source branch/ref for Slice 6. The roadmap
+describes Slice 6 as restoring source-control workflows over durable worktree
+resources, including branch status, diffs, staging, commits, conflicts, merges,
+rebases, pushes, and PR handoff with evidence. It depends on filesystem, jobs,
+resources, authority, replay, trace, and approval decisions. Likely areas are
+future `domains/git`, future `domains/worktree`, resources, events, and iOS
+SourceChanges only after a stable server contract.
 
 Before any all-slices integrated acceptance claim, create a final consolidation
 branch and run an explicit consolidation audit that verifies accepted
