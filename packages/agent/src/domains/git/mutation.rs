@@ -73,6 +73,7 @@ fn index_mutation_sync(
     payload: &Value,
     operation: IndexOperation,
 ) -> Result<IndexMutationPlan, CapabilityError> {
+    required_str(payload, "path")?;
     let target = service::resolve_target(invocation, payload)?;
     let repository = service::repository_facts(&target)?;
     let trusted_root = service::resolve_target(invocation, &json!({"path": "."}))?;
@@ -99,7 +100,7 @@ fn index_mutation_sync(
         .unwrap_or(DEFAULT_DIFF_BYTES)
         .min(MAX_DIFF_BYTES);
     let before = status_diff_snapshot(&repository, max_status_bytes, max_diff_bytes)?;
-    if has_conflicts(&before.status_porcelain) {
+    if has_unmerged_index_entries(&repository)? {
         return Err(invalid("git index mutation refuses conflicted pathspecs"));
     }
     run_index_command(&repository, operation)?;
@@ -187,6 +188,15 @@ fn status_diff_snapshot(
         unstaged_diff: unstaged.0,
         unstaged_diff_truncated: unstaged.1,
     })
+}
+
+fn has_unmerged_index_entries(repository: &RepositoryFacts) -> Result<bool, CapabilityError> {
+    let output = service::git_output_bounded(
+        &repository.worktree_root,
+        ["ls-files", "-u", "-z", "--", repository.pathspec.as_str()],
+        1,
+    )?;
+    Ok(!output.stdout.is_empty() || output.stdout_truncated)
 }
 
 async fn create_index_change_resource(
@@ -322,18 +332,6 @@ fn resource_ref(resource: &EngineResource, role: &str) -> Value {
         "versionId": resource.current_version_id,
         "role": role
     })
-}
-
-fn has_conflicts(status_porcelain: &str) -> bool {
-    status_porcelain
-        .as_bytes()
-        .split(|byte| *byte == 0)
-        .filter(|record| record.len() >= 2)
-        .any(|record| {
-            let x = record[0] as char;
-            let y = record[1] as char;
-            x == 'U' || y == 'U' || matches!((x, y), ('A', 'A') | ('D', 'D'))
-        })
 }
 
 fn required_str<'a>(payload: &'a Value, field: &str) -> Result<&'a str, CapabilityError> {

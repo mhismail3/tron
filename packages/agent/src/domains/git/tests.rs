@@ -460,6 +460,104 @@ async fn execute_git_stage_replays_with_same_idempotency_key() {
 }
 
 #[tokio::test]
+async fn execute_git_stage_and_unstage_reject_missing_and_empty_paths() {
+    let ctx = make_test_context();
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "a.txt", "before a\n");
+    write_file(repo.path(), "b.txt", "before b\n");
+    git(repo.path(), ["add", "a.txt", "b.txt"]);
+    commit(repo.path(), "initial");
+    let head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    write_file(repo.path(), "a.txt", "after a\n");
+    write_file(repo.path(), "b.txt", "after b\n");
+
+    let missing_stage = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-stage-missing-path",
+        json!({
+            "operation": "git_stage",
+            "expectedHead": head,
+            "reason": "test missing path",
+            "idempotencyKey": "git-stage-missing-path"
+        }),
+    )
+    .await;
+    assert!(
+        missing_stage.contains("missing path"),
+        "unexpected missing stage path error: {missing_stage}"
+    );
+
+    let empty_stage = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-stage-empty-path",
+        json!({
+            "operation": "git_stage",
+            "path": "   ",
+            "expectedHead": git_stdout(repo.path(), ["rev-parse", "HEAD"]),
+            "reason": "test empty path",
+            "idempotencyKey": "git-stage-empty-path"
+        }),
+    )
+    .await;
+    assert!(
+        empty_stage.contains("path must not be empty"),
+        "unexpected empty stage path error: {empty_stage}"
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["diff", "--cached", "--name-only"]),
+        ""
+    );
+
+    git(repo.path(), ["add", "a.txt", "b.txt"]);
+    assert_eq!(
+        git_stdout(repo.path(), ["diff", "--cached", "--name-only"]),
+        "a.txt\nb.txt"
+    );
+
+    let missing_unstage = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-unstage-missing-path",
+        json!({
+            "operation": "git_unstage",
+            "expectedHead": git_stdout(repo.path(), ["rev-parse", "HEAD"]),
+            "reason": "test missing unstage path",
+            "idempotencyKey": "git-unstage-missing-path"
+        }),
+    )
+    .await;
+    assert!(
+        missing_unstage.contains("missing path"),
+        "unexpected missing unstage path error: {missing_unstage}"
+    );
+
+    let empty_unstage = execute_git_error(
+        &ctx,
+        repo.path(),
+        "git-unstage-empty-path",
+        json!({
+            "operation": "git_unstage",
+            "path": "",
+            "expectedHead": git_stdout(repo.path(), ["rev-parse", "HEAD"]),
+            "reason": "test empty unstage path",
+            "idempotencyKey": "git-unstage-empty-path"
+        }),
+    )
+    .await;
+    assert!(
+        empty_unstage.contains("path must not be empty"),
+        "unexpected empty unstage path error: {empty_unstage}"
+    );
+    assert_eq!(
+        git_stdout(repo.path(), ["diff", "--cached", "--name-only"]),
+        "a.txt\nb.txt"
+    );
+}
+
+#[tokio::test]
 async fn execute_git_stage_rejects_stale_expected_head() {
     let ctx = make_test_context();
     let repo = tempdir().expect("repo");
@@ -646,6 +744,7 @@ async fn execute_git_stage_rejects_conflicted_pathspecs() {
             "path": "tracked.txt",
             "expectedHead": head,
             "reason": "test conflict",
+            "maxStatusBytes": 1,
             "idempotencyKey": "git-stage-conflict"
         }),
     )
@@ -653,6 +752,14 @@ async fn execute_git_stage_rejects_conflicted_pathspecs() {
     assert!(
         error.contains("conflicted pathspecs"),
         "unexpected conflict error: {error}"
+    );
+    assert!(
+        git_stdout(
+            repo.path(),
+            ["status", "--porcelain=v1", "--", "tracked.txt"]
+        )
+        .contains("UU tracked.txt"),
+        "conflicted pathspec must remain unmerged"
     );
 }
 

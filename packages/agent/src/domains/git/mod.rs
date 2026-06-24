@@ -22,7 +22,9 @@
 //! resolve conflicts, or mutate repository files. Stage/unstage operations only
 //! mutate the Git index after validating trusted working-directory metadata,
 //! explicit relative paths, expected HEAD freshness, path existence, and
-//! path-scoped conflict state.
+//! path-scoped conflict state. Conflict preflight reads unmerged index entries
+//! directly; caller-controlled status/diff byte limits affect evidence only,
+//! never mutation eligibility.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

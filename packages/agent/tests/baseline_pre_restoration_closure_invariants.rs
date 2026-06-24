@@ -163,10 +163,14 @@ fn assert_phase_two_restored_domain_lineage(
         .lines()
         .find(|line| line.starts_with(&format!("{phase_two_row_id}\t")))
         .unwrap_or_else(|| panic!("missing Phase 2 inventory row {phase_two_row_id}"));
+    let inventory_columns: Vec<&str> = inventory_row.split('\t').collect();
+    assert_eq!(
+        inventory_columns.get(14).copied(),
+        Some(expected_status),
+        "{domain} must have exact {expected_status} Phase 2 inventory status: {inventory_row}"
+    );
     assert!(
-        inventory_row.contains(expected_status)
-            && inventory_row.contains(bprc_feature_id)
-            && inventory_row.contains(domain),
+        inventory_row.contains(bprc_feature_id) && inventory_row.contains(domain),
         "{domain} must have explicit {expected_status} Phase 2 inventory lineage to {bprc_feature_id}: {inventory_row}"
     );
     for required in required_inventory_text {
@@ -514,14 +518,15 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-05",
         "worktree_git",
         "Slice 6: Git And Worktree Foundations",
-        "current_baseline",
+        "pending_review",
         &[
-            "Slice 6B extends Slice 6A with index-only Git stage/unstage",
+            "Slice 6B fix branch is an implementation candidate",
+            "pending independent acceptance and mainline integration",
             "git_status",
             "git_diff",
             "git_stage",
             "git_unstage",
-            "current_baseline",
+            "pending_review",
         ],
         &[
             "Slice 6B adds explicit `git_stage`/`git_unstage` index mutation",
@@ -529,6 +534,20 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "`git::diff` backend contracts",
             "`git_index_change` resource",
         ],
+    );
+    let phase_two_inventory_doc =
+        read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.md");
+    assert!(
+        phase_two_inventory_doc
+            .contains("Slice 6B index-only stage/unstage is an implementation candidate")
+            && phase_two_inventory_doc
+                .contains("pending independent acceptance and mainline integration"),
+        "Slice 6B docs must keep implementation-candidate status before acceptance/integration"
+    );
+    assert!(
+        !phase_two_inventory_doc.contains("`P2AER-INV-013` is now current baseline")
+            && !phase_two_inventory_doc.contains("evidence plus Slice 6B index-only stage/unstage"),
+        "Slice 6B docs must not claim current baseline before independent acceptance and mainline integration"
     );
     let git_source = read_repo_file("packages/agent/src/domains/git/mod.rs")
         + &read_repo_file("packages/agent/src/domains/git/contract.rs")
