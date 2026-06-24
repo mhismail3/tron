@@ -925,8 +925,6 @@ Current primitive operations:
 | `filesystem_write` | Create a patch proposal by default, or commit UTF-8 content with idempotency and a verifiable expected hash for existing files. |
 | `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence; truncated file previews are refused. |
 | `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
-| `git_status` | Inspect read-only repository/worktree status for a trusted path, including branch or detached HEAD, upstream/ahead/behind, dirty state, staged/unstaged/untracked summaries, and bounded porcelain evidence. |
-| `git_diff` | Read bounded staged and unstaged diff evidence for tracked changes under the trusted working-directory root. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
@@ -948,8 +946,8 @@ Legacy `file_read` and `file_write` operation names are not part of the
 provider-visible execute surface; file access goes through the hardened
 `filesystem_*` operation package.
 
-Startup registration currently keeps only loop infrastructure domains:
-`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `git`, `filesystem`, `blob`, `message`,
+The accepted startup-registration baseline keeps only loop infrastructure domains:
+`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
 `worker_lifecycle`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
@@ -981,15 +979,18 @@ Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, web/network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
 not part of this foundation.
-The `git` domain is the Slice 6A read-only source-control foundation:
-`git::status` and `git::diff` are registered as backend read contracts, while
-provider-visible access remains `git_status` and `git_diff` operation values
-behind `capability::execute`. The domain resolves only relative paths under
-trusted working-directory metadata, rejects path traversal and worktree-root
-escapes, reports branch/detached HEAD/upstream/ahead-behind/dirty summaries,
-and returns bounded status/diff evidence. Staging, commits, merges, rebases,
-resets, pushes, branch checkout/deletion, conflict resolution, PR handoff,
-worktree graph resources, and native iOS SourceChanges UI remain deferred.
+This pending-review branch additionally registers the Slice 6A read-only
+source-control implementation candidate: the `git` domain registers
+`git::status` and `git::diff` backend read contracts, while provider-visible
+access remains `git_status` and `git_diff` operation values behind
+`capability::execute`. The candidate resolves only relative paths under trusted
+working-directory metadata, rejects path traversal and worktree-root escapes,
+reports branch/detached HEAD/upstream/ahead-behind/dirty summaries, and returns
+bounded status/diff evidence. These git operation values are not part of the
+accepted current primitive baseline until Slice 6A review and mainline
+integration complete. Staging, commits, merges, rebases, resets, pushes, branch
+checkout/deletion, conflict resolution, PR handoff, worktree graph resources,
+and native iOS SourceChanges UI remain deferred.
 Policy lookup is `session -> workspace -> system`, and prompt-trace audit
 idempotency is keyed by trace so memory status can change across turns.
 Direct record-id inspect/edit/tombstone operations reject cross-scope resources.
