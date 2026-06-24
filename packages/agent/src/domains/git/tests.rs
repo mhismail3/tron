@@ -21,7 +21,7 @@ use super::branch_start::{
     BRANCH_START_OUTPUT_BYTES, BranchStartGitRunner, BranchStartGitStatus,
     create_branch_and_move_head_with_runner,
 };
-use super::service::{diff_value, status_value};
+use super::service::{self, diff_value, status_value};
 use crate::domains::capability::contract;
 use crate::engine::{
     GIT_BRANCH_START_KIND, GIT_BRANCH_START_SCHEMA_ID, GIT_COMMIT_KIND, GIT_COMMIT_SCHEMA_ID,
@@ -707,26 +707,32 @@ async fn execute_git_commit_replays_with_same_idempotency_key() {
 
 #[test]
 fn git_branch_start_symbolic_head_failure_rolls_back_created_branch_ref() {
+    let previous_branch_ref = "refs/heads/main";
     let branch_ref = "refs/heads/feature/symbolic-fails";
     let expected_head = "1111111111111111111111111111111111111111";
-    let runner = FakeBranchStartGitRunner::new([
-        expected_branch_start_call(
-            ["update-ref", branch_ref, expected_head, ""],
-            branch_start_status(true, ""),
-        ),
-        expected_branch_start_call(
-            ["symbolic-ref", "HEAD", branch_ref],
-            branch_start_status(false, "symbolic-ref denied"),
-        ),
-        expected_branch_start_call(
-            ["update-ref", "-d", branch_ref, expected_head],
-            branch_start_status(true, ""),
-        ),
-    ]);
+    let runner = FakeBranchStartGitRunner::new(
+        [
+            expected_branch_start_call(
+                ["update-ref", branch_ref, expected_head, ""],
+                branch_start_status(true, ""),
+            ),
+            expected_branch_start_call(
+                ["update-ref", "-d", branch_ref, expected_head],
+                branch_start_status(true, ""),
+            ),
+        ],
+        [expected_guarded_head_move(
+            previous_branch_ref,
+            expected_head,
+            branch_ref,
+            Err("symbolic-ref denied"),
+        )],
+    );
 
     let error = create_branch_and_move_head_with_runner(
         &runner,
         Path::new("/unused"),
+        previous_branch_ref,
         branch_ref,
         expected_head,
     )
@@ -746,26 +752,32 @@ fn git_branch_start_symbolic_head_failure_rolls_back_created_branch_ref() {
 
 #[test]
 fn git_branch_start_symbolic_head_failure_reports_guarded_rollback_failure() {
+    let previous_branch_ref = "refs/heads/main";
     let branch_ref = "refs/heads/feature/rollback-fails";
     let expected_head = "2222222222222222222222222222222222222222";
-    let runner = FakeBranchStartGitRunner::new([
-        expected_branch_start_call(
-            ["update-ref", branch_ref, expected_head, ""],
-            branch_start_status(true, ""),
-        ),
-        expected_branch_start_call(
-            ["symbolic-ref", "HEAD", branch_ref],
-            branch_start_status(false, "symbolic-ref denied"),
-        ),
-        expected_branch_start_call(
-            ["update-ref", "-d", branch_ref, expected_head],
-            branch_start_status(false, "cannot lock ref"),
-        ),
-    ]);
+    let runner = FakeBranchStartGitRunner::new(
+        [
+            expected_branch_start_call(
+                ["update-ref", branch_ref, expected_head, ""],
+                branch_start_status(true, ""),
+            ),
+            expected_branch_start_call(
+                ["update-ref", "-d", branch_ref, expected_head],
+                branch_start_status(false, "cannot lock ref"),
+            ),
+        ],
+        [expected_guarded_head_move(
+            previous_branch_ref,
+            expected_head,
+            branch_ref,
+            Err("symbolic-ref denied"),
+        )],
+    );
 
     let error = create_branch_and_move_head_with_runner(
         &runner,
         Path::new("/unused"),
+        previous_branch_ref,
         branch_ref,
         expected_head,
     )
@@ -779,6 +791,45 @@ fn git_branch_start_symbolic_head_failure_reports_guarded_rollback_failure() {
     assert!(error.contains("symbolic-ref denied"));
     assert!(error.contains("cannot lock ref"));
     runner.assert_drained();
+}
+
+#[test]
+fn git_branch_start_guarded_symbolic_head_move_rejects_head_oid_drift() {
+    let repo = tempdir().expect("repo");
+    init_repo(repo.path());
+    write_file(repo.path(), "tracked.txt", "before\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git(repo.path(), ["commit", "-m", "initial"]);
+    let stale_head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+    let new_branch_ref = "refs/heads/codex/drift-guard";
+    git(repo.path(), ["update-ref", new_branch_ref, &stale_head, ""]);
+
+    write_file(repo.path(), "tracked.txt", "after\n");
+    git(repo.path(), ["add", "tracked.txt"]);
+    git(repo.path(), ["commit", "-m", "advance main"]);
+    let current_head = git_stdout(repo.path(), ["rev-parse", "HEAD"]);
+
+    let error = service::git_move_symbolic_head_with_locked_current_head(
+        repo.path(),
+        "refs/heads/main",
+        &stale_head,
+        new_branch_ref,
+    )
+    .expect_err("stale guarded symbolic HEAD move should fail")
+    .to_string();
+
+    assert!(error.contains("expectedHead changes before symbolic HEAD update"));
+    assert!(error.contains(&stale_head));
+    assert!(error.contains(&current_head));
+    assert_eq!(
+        git_stdout(repo.path(), ["symbolic-ref", "HEAD"]),
+        "refs/heads/main"
+    );
+    assert_eq!(git_stdout(repo.path(), ["rev-parse", "HEAD"]), current_head);
+    assert_eq!(
+        git_stdout(repo.path(), ["rev-parse", new_branch_ref]),
+        stale_head
+    );
 }
 
 #[tokio::test]
@@ -2474,12 +2525,17 @@ async fn derive_execute_grant(
 
 struct FakeBranchStartGitRunner {
     expected: RefCell<VecDeque<ExpectedGitCall>>,
+    expected_moves: RefCell<VecDeque<ExpectedGuardedHeadMove>>,
 }
 
 impl FakeBranchStartGitRunner {
-    fn new<const N: usize>(calls: [ExpectedGitCall; N]) -> Self {
+    fn new<const N: usize, const M: usize>(
+        calls: [ExpectedGitCall; N],
+        moves: [ExpectedGuardedHeadMove; M],
+    ) -> Self {
         Self {
             expected: RefCell::new(VecDeque::from(calls)),
+            expected_moves: RefCell::new(VecDeque::from(moves)),
         }
     }
 
@@ -2487,6 +2543,10 @@ impl FakeBranchStartGitRunner {
         assert!(
             self.expected.borrow().is_empty(),
             "not all expected Git calls were consumed"
+        );
+        assert!(
+            self.expected_moves.borrow().is_empty(),
+            "not all expected guarded HEAD moves were consumed"
         );
     }
 }
@@ -2506,6 +2566,31 @@ impl BranchStartGitRunner for FakeBranchStartGitRunner {
             .expect("unexpected Git command");
         assert_eq!(args, call.args.as_slice());
         Ok(call.status)
+    }
+
+    fn move_symbolic_head_guarded(
+        &self,
+        _worktree_root: &Path,
+        expected_current_branch_ref: &str,
+        expected_head: &str,
+        branch_ref: &str,
+    ) -> Result<(), CapabilityError> {
+        let move_call = self
+            .expected_moves
+            .borrow_mut()
+            .pop_front()
+            .expect("unexpected guarded HEAD move");
+        assert_eq!(
+            expected_current_branch_ref,
+            move_call.expected_current_branch_ref
+        );
+        assert_eq!(expected_head, move_call.expected_head);
+        assert_eq!(branch_ref, move_call.branch_ref);
+        move_call
+            .result
+            .map_err(|message| CapabilityError::Internal {
+                message: message.to_owned(),
+            })
     }
 }
 
@@ -2528,6 +2613,27 @@ fn branch_start_status(success: bool, stderr: &str) -> BranchStartGitStatus {
     BranchStartGitStatus {
         success,
         stderr: stderr.as_bytes().to_vec(),
+    }
+}
+
+struct ExpectedGuardedHeadMove {
+    expected_current_branch_ref: &'static str,
+    expected_head: &'static str,
+    branch_ref: &'static str,
+    result: Result<(), &'static str>,
+}
+
+fn expected_guarded_head_move(
+    expected_current_branch_ref: &'static str,
+    expected_head: &'static str,
+    branch_ref: &'static str,
+    result: Result<(), &'static str>,
+) -> ExpectedGuardedHeadMove {
+    ExpectedGuardedHeadMove {
+        expected_current_branch_ref,
+        expected_head,
+        branch_ref,
+        result,
     }
 }
 

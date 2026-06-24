@@ -743,7 +743,8 @@ Implemented scope:
   existing single `capability::execute` primitive.
 - Kept backend behavior in `domains/git` with a new `branch_start` module.
 - Creates exactly one new local branch ref at `expectedHead` and moves symbolic
-  `HEAD` to it through Git ref primitives without invoking checkout.
+  `HEAD` to it through a locked guard that rechecks the old symbolic branch and
+  resolved OID without invoking checkout.
 - Requires `branchName`, `expectedHead`, non-empty `reason`, explicit payload
   `idempotencyKey`, trusted working-directory metadata, current named branch
   provenance, and clean conflict/sequencer state.
@@ -754,7 +755,8 @@ Implemented scope:
   lifecycle stream evidence with trace/replay/idempotency/authority refs.
 - Preserves staged, unstaged, and untracked worktree state; tests compare
   before/after status, staged names, unstaged names, index tree, branch refs,
-  and file content.
+  file content, and branch-start rejection when the current branch OID drifts
+  before symbolic `HEAD` movement.
 - Provider schema and instruction tests expose only the new
   `git_branch_start` source-control operation while continuing to reject
   checkout, branch delete/rename/move, merge/rebase/reset, push/pull/fetch,
@@ -763,7 +765,7 @@ Implemented scope:
 Implementation evidence:
 
 - `cargo test --manifest-path packages/agent/Cargo.toml git` passed on the
-  implementation branch with 43 git-filtered tests, including branch-start
+  implementation branch with 46 git-filtered tests, including branch-start
   success, replay, stale/existing/invalid branch rejection, detached/conflict/
   sequencer rejection, missing metadata/idempotency/reason rejection, nested
   repo rejection, checkout-hook suppression, resource-definition coverage, and

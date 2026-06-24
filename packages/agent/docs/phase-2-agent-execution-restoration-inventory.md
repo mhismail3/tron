@@ -78,8 +78,9 @@ review and two focused guard fixes.
 Slice 6D now has an implementation candidate for local branch start: a
 provider-visible `git_branch_start` operation through `capability::execute`
 that creates one new local branch at `expectedHead`, moves symbolic `HEAD`
-without checkout, preserves index/worktree content, and records
-`git_branch_start` resource plus `git.branch_started` lifecycle evidence.
+without checkout after a locked old-ref/OID guard, preserves index/worktree
+content, and records `git_branch_start` resource plus `git.branch_started`
+lifecycle evidence.
 `P2AER-INV-013` remains `pending_review` for Slice 6D until orchestrator
 integration accepts the candidate into mainline.
 Worktree graph resources, arbitrary checkout, branch deletion/rename,
@@ -201,7 +202,7 @@ job dispatch also remains deferred pending an explicit queued-grant design.
 `P2AER-INV-013` is current baseline for Slice 6A read-only Git status/diff
 evidence, accepted Slice 6B index-only stage/unstage, and accepted Slice 6C
 staged-index commit evidence. Slice 6D has an implementation candidate for
-local `git_branch_start` branch creation and symbolic-HEAD movement. The
+local `git_branch_start` branch creation and locked symbolic-HEAD movement. The
 mutating boundary is intentionally narrow: explicit paths for index mutation,
 resource-backed evidence, lifecycle stream evidence, expected HEAD freshness,
 expected index-tree freshness for commit, idempotency, branch-name validation,

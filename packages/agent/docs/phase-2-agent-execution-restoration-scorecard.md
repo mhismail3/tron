@@ -1066,10 +1066,11 @@ Core versus modular split:
   `/engine` API, native iOS SourceChanges surface, or a broad `worktree` domain.
 - Mutation boundary: `git_branch_start` may create exactly one local
   `refs/heads/<branchName>` ref at `expectedHead` and move symbolic `HEAD` to
-  that ref after rechecking the repository still has that head. It must not
-  run `git checkout`, write worktree files, stage/unstage, commit, delete or
-  rename branches, set upstreams, fetch, pull, push, merge, rebase, reset,
-  stash, clean, or create PRs.
+  that ref after a locked check proves the old symbolic branch and resolved OID
+  still match the preflight state. It must not run `git checkout`, write
+  worktree files, stage/unstage, commit, delete or rename branches, set
+  upstreams, fetch, pull, push, merge, rebase, reset, stash, clean, or create
+  PRs.
 - Worktree preservation boundary: the operation must prove before/after index
   and worktree evidence is unchanged except for branch identity. Staged,
   unstaged, and untracked files may be preserved only when the target branch is

@@ -931,7 +931,7 @@ Current primitive operations:
 | `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_commit` | Accepted Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
-| `git_branch_start` | Slice 6D operation that creates one new local branch at `expectedHead`, moves symbolic `HEAD` to it without checkout, preserves index/worktree content, and records branch-start resource and stream evidence. |
+| `git_branch_start` | Slice 6D operation that creates one new local branch at `expectedHead`, moves symbolic `HEAD` to it after a guarded ref/OID check without checkout, preserves index/worktree content, and records branch-start resource and stream evidence. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
@@ -993,8 +993,8 @@ Accepted Slice 6C adds the `git_commit` execute operation with backend
 staged-index commit evidence; commit is not registered as a direct `git::*`
 catalog function. The Slice 6D implementation candidate adds the local-only
 `git_branch_start` execute operation for creating one new local branch at the
-current expected `HEAD` and moving symbolic `HEAD` to it without checkout or
-file updates.
+current expected `HEAD` and moving symbolic `HEAD` to it after rechecking the
+old symbolic ref and OID without checkout or file updates.
 Provider-visible access remains operation values behind the single
 `capability::execute` primitive: `git_status`, `git_diff`, `git_stage`,
 `git_unstage`, `git_commit`, and `git_branch_start`. The implementation resolves only
@@ -1019,9 +1019,9 @@ idempotency. It creates a `git_branch_start` resource, publishes
 `git.branch_started` lifecycle evidence, rejects detached HEAD, existing or
 unsafe branch names, stale `expectedHead`, missing idempotency, nested/non-repo
 misuse, and merge/rebase/cherry-pick/sequencer states, rolls back the newly
-created branch ref if symbolic `HEAD` movement fails while it still points at
-`expectedHead`, and proves checkout, hooks, remotes, merge/rebase/reset, index
-mutation, and worktree file updates are not invoked.
+created branch ref if locked symbolic `HEAD` movement fails while it still
+points at `expectedHead`, and proves checkout, hooks, remotes,
+merge/rebase/reset, index mutation, and worktree file updates are not invoked.
 Merges, rebases, resets, pushes, arbitrary branch checkout, branch
 deletion/rename, conflict resolution
 workflows, PR handoff, worktree graph resources, and native iOS SourceChanges

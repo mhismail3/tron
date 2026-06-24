@@ -6,7 +6,8 @@
 //! returns bounded status/diff evidence, stages/unstages explicit relative
 //! paths, creates one guarded single-parent commit from the already-staged
 //! index, and creates one local branch at the expected `HEAD` before moving the
-//! symbolic `HEAD` through the existing `capability::execute` primitive.
+//! symbolic `HEAD` through a guarded ref/OID check in the existing
+//! `capability::execute` primitive.
 //!
 //! ## Submodules
 //!
@@ -32,11 +33,12 @@
 //! parent/tree, and advancing the branch ref with guarded `update-ref` while
 //! the worktree's symbolic `HEAD` is locked and reverified. Branch-start
 //! operations create exactly one missing local branch at the current expected
-//! `HEAD` and move symbolic `HEAD` to that new branch without checkout, hooks,
-//! remotes, index mutation, or worktree file updates; if symbolic `HEAD`
-//! movement fails, the just-created ref is removed only when it still points at
-//! the expected OID. Caller-controlled status/diff byte limits affect evidence
-//! only, never mutation eligibility.
+//! `HEAD`, then move symbolic `HEAD` to that new branch only after rechecking the
+//! old symbolic ref and OID while `HEAD` is locked. They do this without
+//! checkout, hooks, remotes, index mutation, or worktree file updates; if
+//! symbolic `HEAD` movement fails, the just-created ref is removed only when it
+//! still points at the expected OID. Caller-controlled status/diff byte limits
+//! affect evidence only, never mutation eligibility.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 

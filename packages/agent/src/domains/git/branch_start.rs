@@ -105,7 +105,13 @@ fn branch_start_sync(
         .unwrap_or(DEFAULT_DIFF_BYTES)
         .min(MAX_DIFF_BYTES);
     let before = status_diff_snapshot(&repository, max_status_bytes, max_diff_bytes)?;
-    create_branch_and_move_head(&repository.worktree_root, &branch_ref, &expected_head)?;
+    let previous_branch_ref = format!("refs/heads/{previous_branch}");
+    create_branch_and_move_head(
+        &repository.worktree_root,
+        &previous_branch_ref,
+        &branch_ref,
+        &expected_head,
+    )?;
 
     let after_target = service::resolve_target(invocation, &json!({"path": "."}))?;
     let after_repository = service::repository_facts(&after_target)?;
@@ -150,9 +156,9 @@ fn branch_start_sync(
             "diffLimitBytes": max_diff_bytes,
             "beforeTruncated": before.truncated(),
             "afterTruncated": after.truncated(),
-            "mutationBoundary": "update-ref-plus-symbolic-head",
+            "mutationBoundary": "update-ref-plus-locked-symbolic-head",
             "refUpdatePolicy": "create-missing-ref-at-expected-head",
-            "headPolicy": "symbolic-head-only",
+            "headPolicy": "locked-symbolic-head-with-expected-ref-and-oid",
             "checkoutPolicy": "not invoked",
             "hookPolicy": "not invoked",
             "indexPolicy": "preserved",
@@ -238,12 +244,14 @@ fn reject_existing_branch(worktree_root: &Path, branch_ref: &str) -> Result<(), 
 
 fn create_branch_and_move_head(
     worktree_root: &Path,
+    expected_current_branch_ref: &str,
     branch_ref: &str,
     expected_head: &str,
 ) -> Result<(), CapabilityError> {
     create_branch_and_move_head_with_runner(
         &ServiceBranchStartGitRunner,
         worktree_root,
+        expected_current_branch_ref,
         branch_ref,
         expected_head,
     )
@@ -256,6 +264,14 @@ pub(super) trait BranchStartGitRunner {
         args: &[&str],
         stdout_limit: usize,
     ) -> Result<BranchStartGitStatus, CapabilityError>;
+
+    fn move_symbolic_head_guarded(
+        &self,
+        worktree_root: &Path,
+        expected_current_branch_ref: &str,
+        expected_head: &str,
+        branch_ref: &str,
+    ) -> Result<(), CapabilityError>;
 }
 
 pub(super) struct BranchStartGitStatus {
@@ -279,11 +295,27 @@ impl BranchStartGitRunner for ServiceBranchStartGitRunner {
             stderr: output.stderr,
         })
     }
+
+    fn move_symbolic_head_guarded(
+        &self,
+        worktree_root: &Path,
+        expected_current_branch_ref: &str,
+        expected_head: &str,
+        branch_ref: &str,
+    ) -> Result<(), CapabilityError> {
+        service::git_move_symbolic_head_with_locked_current_head(
+            worktree_root,
+            expected_current_branch_ref,
+            expected_head,
+            branch_ref,
+        )
+    }
 }
 
 pub(super) fn create_branch_and_move_head_with_runner(
     runner: &impl BranchStartGitRunner,
     worktree_root: &Path,
+    expected_current_branch_ref: &str,
     branch_ref: &str,
     expected_head: &str,
 ) -> Result<(), CapabilityError> {
@@ -297,14 +329,13 @@ pub(super) fn create_branch_and_move_head_with_runner(
         )));
     }
 
-    let move_head_args = ["symbolic-ref", "HEAD", branch_ref];
-    let move_head = runner.git_output_status_bounded(
+    if let Err(error) = runner.move_symbolic_head_guarded(
         worktree_root,
-        &move_head_args,
-        BRANCH_START_OUTPUT_BYTES,
-    )?;
-    if !move_head.success {
-        let detail = stderr_detail(&move_head.stderr);
+        expected_current_branch_ref,
+        expected_head,
+        branch_ref,
+    ) {
+        let detail = error.to_string();
         rollback_created_branch_ref(runner, worktree_root, branch_ref, expected_head, &detail)?;
         return Err(internal(format!(
             "git_branch_start created branch but could not move symbolic HEAD; rolled back {branch_ref} at {expected_head}: {detail}"

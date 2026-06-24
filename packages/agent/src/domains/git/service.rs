@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -404,6 +404,31 @@ pub(super) fn git_symbolic_head_ref(
     git_optional_stdout(worktree_root, ["symbolic-ref", "--quiet", "HEAD"])
 }
 
+pub(super) fn git_move_symbolic_head_with_locked_current_head(
+    worktree_root: &Path,
+    expected_current_branch_ref: &str,
+    expected_head_oid: &str,
+    new_branch_ref: &str,
+) -> Result<(), CapabilityError> {
+    let head_lock = WorktreeHeadLock::acquire_for_operation(worktree_root, "git_branch_start")?;
+    let actual_head_ref = git_symbolic_head_ref(worktree_root)?.ok_or_else(|| {
+        invalid("git_branch_start rejects detached HEAD before symbolic HEAD update")
+    })?;
+    if actual_head_ref != expected_current_branch_ref {
+        return Err(invalid(format!(
+            "git_branch_start rejects branch changes before symbolic HEAD update: expected {expected_current_branch_ref}, actual {actual_head_ref}"
+        )));
+    }
+    let actual_head_oid = git_optional_stdout(worktree_root, ["rev-parse", "--verify", "HEAD"])?
+        .ok_or_else(|| invalid("git_branch_start requires HEAD before symbolic HEAD update"))?;
+    if actual_head_oid != expected_head_oid {
+        return Err(invalid(format!(
+            "git_branch_start rejects expectedHead changes before symbolic HEAD update: expected {expected_head_oid}, actual {actual_head_oid}"
+        )));
+    }
+    head_lock.replace_symbolic_head(new_branch_ref, "git_branch_start")
+}
+
 pub(super) fn git_commit_tree_output_bounded(
     dir: &Path,
     tree_oid: &str,
@@ -544,12 +569,21 @@ pub(super) fn git_update_branch_ref_with_locked_head(
 }
 
 struct WorktreeHeadLock {
+    head_path: PathBuf,
     path: PathBuf,
-    _file: File,
+    file: File,
+    committed: bool,
 }
 
 impl WorktreeHeadLock {
     fn acquire(worktree_root: &Path) -> Result<Self, CapabilityError> {
+        Self::acquire_for_operation(worktree_root, "git_commit")
+    }
+
+    fn acquire_for_operation(
+        worktree_root: &Path,
+        operation: &str,
+    ) -> Result<Self, CapabilityError> {
         let head_path = git_path(worktree_root, "HEAD")?;
         let head_file_name = head_path
             .file_name()
@@ -562,21 +596,51 @@ impl WorktreeHeadLock {
             .open(&lock_path)
             .map_err(|error| {
                 invalid(format!(
-                    "git_commit could not lock HEAD before ref update: {error}"
+                    "{operation} could not lock HEAD before guarded HEAD update: {error}"
                 ))
             })?;
-        file.write_all(b"tron git_commit guarded ref update\n")
+        file.write_all(format!("tron {operation} guarded HEAD update\n").as_bytes())
             .map_err(|error| internal(format!("write git HEAD lock: {error}")))?;
         Ok(Self {
+            head_path,
             path: lock_path,
-            _file: file,
+            file,
+            committed: false,
         })
+    }
+
+    fn replace_symbolic_head(
+        mut self,
+        target_ref: &str,
+        operation: &str,
+    ) -> Result<(), CapabilityError> {
+        self.file
+            .set_len(0)
+            .map_err(|error| internal(format!("truncate git HEAD lock: {error}")))?;
+        self.file
+            .seek(SeekFrom::Start(0))
+            .map_err(|error| internal(format!("seek git HEAD lock: {error}")))?;
+        self.file
+            .write_all(format!("ref: {target_ref}\n").as_bytes())
+            .map_err(|error| internal(format!("write git HEAD lock: {error}")))?;
+        self.file
+            .sync_all()
+            .map_err(|error| internal(format!("sync git HEAD lock: {error}")))?;
+        fs::rename(&self.path, &self.head_path).map_err(|error| {
+            internal(format!(
+                "{operation} could not replace symbolic HEAD with {target_ref}: {error}"
+            ))
+        })?;
+        self.committed = true;
+        Ok(())
     }
 }
 
 impl Drop for WorktreeHeadLock {
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        if !self.committed {
+            let _ = fs::remove_file(&self.path);
+        }
     }
 }
 
