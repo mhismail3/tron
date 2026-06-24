@@ -727,15 +727,15 @@ Discovery evidence:
   non-goals, safety risks, deterministic tests, docs/static updates, validation
   commands, and residual decisions.
 
-## Phase 2 Slice 6D Implementation Candidate: Git Branch Start Foundation
+## Phase 2 Slice 6D Accepted Implementation: Git Branch Start Foundation
 
 Implementation branch: `codex/phase-2-slice-6d-branch-start`.
 Baseline:
 `origin/main@4d7221bf436acce3406d50ab0b1f2a06415616be`
 (`docs: shape slice 6d branch start handoff`).
 
-Implementation status: candidate ready for independent review, not recorded as
-mainline acceptance by this artifact.
+Implementation status: accepted after independent review/fix loops and
+integrated into mainline.
 
 Implemented scope:
 
@@ -770,6 +770,51 @@ Implementation evidence:
   sequencer rejection, missing metadata/idempotency/reason rejection, nested
   repo rejection, checkout-hook suppression, resource-definition coverage, and
   provider/static schema guards.
+
+Independent review and fix-loop evidence:
+
+- Implementation thread `019efa12-c7ca-7942-a90b-e52f721fbee7` produced
+  `83030ba226a436cd72406fae1d5a53aa01dbed59`, adding local branch-start
+  behavior through `capability::execute` and `domains/git`.
+- Review thread `019efa28-ffe5-7291-b7de-00ab4c700557` required rollback
+  hardening for symbolic `HEAD` movement failures after branch creation.
+- Fix thread `019efa32-013b-70d1-9fe7-2824c84eda5c` produced
+  `2d8d804ce00358800746d46788e03ab584cc12ec`, adding deterministic rollback
+  coverage for successful and failed branch-ref cleanup.
+- Re-review thread `019efa3c-8a0c-7863-9ea7-3d337fa8a7ec` required guarding
+  against stale symbolic-HEAD movement after the current branch or OID changed
+  between preflight and branch switch.
+- Focused fix commit `cfff8bc5f732243724dc97c964a613070ef9736c` added the
+  locked symbolic-HEAD old-ref/OID recheck, deterministic OID-drift coverage,
+  and evidence/docs updates. The queued fix worker
+  `019efa3f-df78-7d71-ab38-345daeb55d98` was paused without edits before this
+  narrow fix was committed in the implementation worktree.
+- Final independent review thread `019efa4a-ffdd-7e32-b08e-f175e2a44f1a`
+  returned `slice accepted` with no blocking findings. It verified branch
+  topology, execute-only dispatch, resource schema registration, prior P1
+  fixes, and focused validation.
+
+Validation on final review and mainline closeout:
+
+- Final review passed `cargo fmt --manifest-path packages/agent/Cargo.toml
+  --all -- --check`, `git diff --check origin/main...HEAD`, and `cargo test
+  --manifest-path packages/agent/Cargo.toml git_branch_start -- --nocapture`
+  with 10 branch-start tests.
+- Implementation branch validation passed `scripts/personal-info-guard.sh`,
+  `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`,
+  `git diff --check origin/main...HEAD && git diff --check`, `cargo test
+  --manifest-path packages/agent/Cargo.toml --lib domains::capability --
+  --nocapture`, `cargo test --manifest-path packages/agent/Cargo.toml git --
+  --nocapture`, and the touched BPRC, HRA, TMB, TPC, PCC, DRC, DESI, IARM, and
+  SACB invariant files.
+- Mainline closeout from `main` passed `cargo check --manifest-path
+  packages/agent/Cargo.toml`, `cargo test --manifest-path
+  packages/agent/Cargo.toml git -- --nocapture` with 46 git-filtered tests,
+  `cargo test --manifest-path packages/agent/Cargo.toml --lib
+  domains::capability -- --nocapture`, the touched BPRC, HRA, TMB, TPC, PCC,
+  DRC, DESI, IARM, and SACB invariant files, `cargo fmt --manifest-path
+  packages/agent/Cargo.toml --all -- --check`, `git diff --check`, and
+  `scripts/personal-info-guard.sh`.
 
 ## Validation Log
 

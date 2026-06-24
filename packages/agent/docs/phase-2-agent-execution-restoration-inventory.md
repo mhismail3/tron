@@ -75,14 +75,13 @@ the already-staged index on the current named branch, guarded by expected HEAD,
 expected index tree, idempotency, reason, resource evidence, lifecycle events,
 and hook/editor/signing suppression. Mainline acceptance followed independent
 review and two focused guard fixes.
-Slice 6D now has an implementation candidate for local branch start: a
+Accepted Slice 6D adds local branch start: a
 provider-visible `git_branch_start` operation through `capability::execute`
 that creates one new local branch at `expectedHead`, moves symbolic `HEAD`
 without checkout after a locked old-ref/OID guard, preserves index/worktree
 content, and records `git_branch_start` resource plus `git.branch_started`
-lifecycle evidence.
-`P2AER-INV-013` remains `pending_review` for Slice 6D until orchestrator
-integration accepts the candidate into mainline.
+lifecycle evidence. Mainline acceptance followed independent review and two
+focused guard fixes.
 Worktree graph resources, arbitrary checkout, branch deletion/rename,
 merges/rebases/resets, stash/clean, fetch/pull/push, PR handoff, conflict
 resolution workflows, and native SourceChanges remain deferred.
@@ -200,9 +199,9 @@ scheduling, notifications, or native iOS process panels. Queue-backed internal
 job dispatch also remains deferred pending an explicit queued-grant design.
 
 `P2AER-INV-013` is current baseline for Slice 6A read-only Git status/diff
-evidence, accepted Slice 6B index-only stage/unstage, and accepted Slice 6C
-staged-index commit evidence. Slice 6D has an implementation candidate for
-local `git_branch_start` branch creation and locked symbolic-HEAD movement. The
+evidence, accepted Slice 6B index-only stage/unstage, accepted Slice 6C
+staged-index commit evidence, and accepted Slice 6D local `git_branch_start`
+branch creation with locked symbolic-HEAD movement. The
 mutating boundary is intentionally narrow: explicit paths for index mutation,
 resource-backed evidence, lifecycle stream evidence, expected HEAD freshness,
 expected index-tree freshness for commit, idempotency, branch-name validation,

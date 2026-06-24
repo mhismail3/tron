@@ -518,7 +518,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-05",
         "worktree_git",
         "Slice 6: Git And Worktree Foundations",
-        "pending_review",
+        "current_baseline",
         &[
             "accepted Slice 6B adds index-only Git stage/unstage",
             "git_status",
@@ -528,7 +528,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "git_commit",
             "git_branch_start",
             "accepted Slice 6C adds staged-index commit evidence",
-            "Slice 6D",
+            "accepted Slice 6D adds",
         ],
         &[
             "Slice 6B adds explicit `git_stage`/`git_unstage` index mutation",
@@ -536,7 +536,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "`git::diff` backend contracts",
             "`git_index_change` resource",
             "Slice 6C Accepted Implementation",
-            "Slice 6D",
+            "Slice 6D Accepted Implementation",
         ],
     );
     let phase_two_inventory_doc =
@@ -557,6 +557,16 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             && !phase_two_inventory_doc
                 .contains("Mainline acceptance of `git_commit` remains pending review"),
         "Slice 6C docs must not retain pre-acceptance candidate wording after integration"
+    );
+    assert!(
+        phase_two_inventory_doc.contains("Accepted Slice 6D adds local branch start")
+            && phase_two_inventory_doc.contains("accepted Slice 6D local `git_branch_start`"),
+        "Slice 6D docs must record accepted current-baseline status after independent acceptance and integration"
+    );
+    assert!(
+        !phase_two_inventory_doc.contains("Slice 6D now has an implementation candidate")
+            && !phase_two_inventory_doc.contains("P2AER-INV-013 remains `pending_review`"),
+        "Slice 6D docs must not retain pre-acceptance candidate wording after integration"
     );
     let normalized_inventory_doc = phase_two_inventory_doc
         .split_whitespace()

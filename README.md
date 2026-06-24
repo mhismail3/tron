@@ -991,7 +991,7 @@ domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.
 Accepted Slice 6C adds the `git_commit` execute operation with backend
 staged-index commit evidence; commit is not registered as a direct `git::*`
-catalog function. The Slice 6D implementation candidate adds the local-only
+catalog function. Accepted Slice 6D adds the local-only
 `git_branch_start` execute operation for creating one new local branch at the
 current expected `HEAD` and moving symbolic `HEAD` to it after rechecking the
 old symbolic ref and OID without checkout or file updates.
@@ -1012,7 +1012,7 @@ the commit object, then advances the branch with a guarded `update-ref` compare
 against the expected HEAD while symbolic `HEAD` is locked and reverified. The
 `commit-tree` path does not invoke hooks or an editor and suppresses
 pager/signing/credential prompts, creates a `git_commit` resource, and publishes
-`git.commit_created` lifecycle evidence. Candidate Slice 6D `git_branch_start`
+`git.commit_created` lifecycle evidence. Accepted Slice 6D `git_branch_start`
 requires a safe new branch name, non-conflicted and sequencer-clean repository
 state, trusted working-directory metadata, expected `HEAD`, reason, and explicit
 idempotency. It creates a `git_branch_start` resource, publishes

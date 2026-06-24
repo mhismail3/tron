@@ -48,24 +48,27 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 6A: read-only Git/worktree status and bounded diff evidence;
 - Slice 6B: index-only Git stage/unstage with resource and lifecycle evidence;
 - Slice 6C: guarded staged-index Git commit evidence with resource and
-  lifecycle evidence.
+  lifecycle evidence;
+- Slice 6D: local branch-start with guarded symbolic `HEAD` movement, resource
+  evidence, lifecycle evidence, and no checkout.
 
 Current next action:
-Independently review the **Slice 6D: Git Branch Start Foundation**
-implementation candidate from fresh `origin/main`. Slice 6D is the local branch
-create-and-switch boundary after accepted Slice 6C completed staged-index
-commit creation. Branch deletion, rename, arbitrary checkout, detached-HEAD
-commits, merge/rebase/reset, stash/clean, fetch/pull/push, PR handoff,
-conflict resolution workflows, worktree graph resources, public API expansion,
-production deployment behavior, and native SourceChanges UI remain deferred.
+Start fresh discovery from current `origin/main` for the next source-control
+slice after accepted Slice 6D. Branch deletion, rename, arbitrary checkout,
+detached-HEAD commits, merge/rebase/reset, stash/clean, fetch/pull/push, PR
+handoff, conflict resolution workflows, worktree graph resources, public API
+expansion, production deployment behavior, and native SourceChanges UI remain
+deferred unless the discovery packet explicitly justifies one narrow next
+boundary.
 
 ## Scope
 
 This is a planning, handoff, and implementation-evidence artifact. It records
-candidate branch work without making pre-acceptance claims. It does not by
-itself restore agent-execution features, add public `/engine` methods, add
-database migrations, add iOS product panels, add worker packages, or
-reintroduce repo-managed first-party skills.
+candidate and accepted branch work without making acceptance claims before the
+recorded review/fix loop. It does not by itself restore agent-execution
+features, add public `/engine` methods, add database migrations, add iOS
+product panels, add worker packages, or reintroduce repo-managed first-party
+skills.
 
 The plan converts Phase 1 deferrals and the BPRC restoration backlog into an
 ordered Phase 2 roadmap. Future implementation threads must treat old modular
@@ -1189,6 +1192,36 @@ only if generic runtime/resource rendering changes.
 User decisions still deferred after Slice 6D: push/PR approval, arbitrary
 checkout policy, branch deletion/rename policy, native source-control UI scope,
 and conflict-resolution delegation.
+
+#### Slice 6D Accepted Implementation Note
+
+Implementation branch `codex/phase-2-slice-6d-branch-start` starts from
+`origin/main@4d7221bf436acce3406d50ab0b1f2a06415616be`. The accepted
+implementation adds only `git_branch_start` through the existing
+`capability::execute` and `domains/git` boundaries, with safe branch-name
+validation, expected-HEAD freshness, conflict/sequencer rejection, idempotency,
+resource/stream evidence, dirty-state preservation, checkout/hook suppression,
+and locked symbolic-HEAD old-ref/OID recheck protection. It is recorded as an
+accepted mainline baseline after the independent review/fix loop.
+
+Review outcome and residual risks:
+
+- First review thread `019efa28-ffe5-7291-b7de-00ab4c700557` required rollback
+  hardening for symbolic `HEAD` movement failures after branch creation.
+- Fix thread `019efa32-013b-70d1-9fe7-2824c84eda5c` produced
+  `2d8d804ce00358800746d46788e03ab584cc12ec`, adding branch-ref rollback
+  hardening and deterministic regression coverage.
+- Re-review thread `019efa3c-8a0c-7863-9ea7-3d337fa8a7ec` required a guard for
+  stale symbolic-HEAD movement if current branch identity or OID drifted before
+  the branch switch.
+- Focused fix commit `cfff8bc5f732243724dc97c964a613070ef9736c` added locked
+  symbolic-HEAD old-ref/OID rechecks and deterministic OID-drift coverage.
+- Final review thread `019efa4a-ffdd-7e32-b08e-f175e2a44f1a` returned
+  `slice accepted` with no findings after source inspection and focused
+  validation.
+- Abrupt process termination can still leave a normal Git-style `HEAD.lock`
+  until cleanup, matching interrupted Git operation behavior; normal error
+  paths remove the lock or use all-or-nothing branch-ref rollback.
 
 ### Slice 7: Goals, Queues, Questions, And Planning
 
