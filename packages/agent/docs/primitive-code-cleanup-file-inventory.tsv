@@ -1793,5 +1793,6 @@ packages/agent/src/engine/durability/resources/goal_definitions.rs	retain	phase2
 packages/agent/src/domains/capability/operations/web.rs	retain	phase2 web	P2AER-S8A	Capability execute web adapter retained for provider-facing web_fetch operation values behind the singular execute primitive.
 packages/agent/src/domains/web/mod.rs	retain	phase2 web	P2AER-S8A	Web module root retained for direct fetch source provenance ownership and no search/browser/crawl/login scope.
 packages/agent/src/domains/web/fetch.rs	retain	phase2 web	P2AER-S8A	Web fetch service retained for declared-network authority checks, URL validation, bounded direct fetch, redaction, and web_source resource evidence.
+packages/agent/src/domains/web/network_policy.rs	retain	phase2 web	P2AER-S8A	Web network policy retained for Slice 8A candidate direct fetch URL, redirect-target, and DNS-resolved address safety checks.
 packages/agent/src/domains/web/tests.rs	retain	phase2 web	P2AER-S8A	Web focused tests retained for authority denial, deterministic loopback fetch, URL validation, redirects, truncation, redaction, hash evidence, and idempotent replay.
 packages/agent/src/engine/durability/resources/web_definitions.rs	retain	phase2 web	P2AER-S8A	Web source resource definitions retained for engine-owned source provenance schema registration.

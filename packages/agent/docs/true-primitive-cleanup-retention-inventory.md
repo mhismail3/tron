@@ -42,7 +42,7 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 111 |
-| implementation | 601 |
+| implementation | 602 |
 | support | 385 |
 | test | 523 |
 | docs | 131 |
@@ -89,7 +89,7 @@ The TSV covers tracked and newly introduced files under:
 | `test_harness` | 522 |
 | `transcription` | 11 |
 | `transport` | 25 |
-| `web` | 2 |
+| `web` | 3 |
 | `worker_lifecycle` | 9 |
 
 ## Delete Candidates

@@ -1748,5 +1748,6 @@ packages/agent/src/engine/durability/resources/goal_definitions.rs	primitive	eng
 packages/agent/src/domains/capability/operations/web.rs	implementation	capability_execute	Phase2-Slice8A	Capability execute web adapter retained for provider-facing web_fetch operation values.
 packages/agent/src/domains/web/mod.rs	implementation	web	Phase2-Slice8A	Web module root retained for direct fetch source provenance ownership and no search/browser/crawl/login scope.
 packages/agent/src/domains/web/fetch.rs	implementation	web	Phase2-Slice8A	Web fetch service retained for declared-network authority checks, structured URL validation, bounded direct fetch, redaction, and web_source resource evidence.
+packages/agent/src/domains/web/network_policy.rs	implementation	web	Phase2-Slice8A	Web network policy retained for Slice 8A candidate direct fetch URL, redirect-target, DNS-resolved address safety checks, and internal target rejection.
 packages/agent/src/domains/web/tests.rs	test	test_harness	Phase2-Slice8A	Web tests retained for authority denial, deterministic loopback fetch, URL validation, redirects, truncation, redaction, hash evidence, and idempotent replay.
 packages/agent/src/engine/durability/resources/web_definitions.rs	primitive	engine	Phase2-Slice8A	Web source resource definitions retained as engine-owned source provenance contract schemas.

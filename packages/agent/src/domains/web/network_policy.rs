@@ -168,7 +168,38 @@ fn is_unsafe_ipv6(addr: Ipv6Addr) -> bool {
         || addr.is_multicast()
         || addr.is_unique_local()
         || addr.is_unicast_link_local()
+        || is_site_local_ipv6(addr)
+        || embedded_unsafe_ipv4(addr).is_some()
         || matches!(addr.segments(), [0x2001, 0x0db8, ..])
+}
+
+fn is_site_local_ipv6(addr: Ipv6Addr) -> bool {
+    (addr.segments()[0] & 0xffc0) == 0xfec0
+}
+
+fn embedded_unsafe_ipv4(addr: Ipv6Addr) -> Option<Ipv4Addr> {
+    ipv4_compatible_addr(addr)
+        .or_else(|| ipv4_translated_addr(addr))
+        .filter(|addr| is_unsafe_ipv4(*addr))
+}
+
+fn ipv4_compatible_addr(addr: Ipv6Addr) -> Option<Ipv4Addr> {
+    let segments = addr.segments();
+    matches!(segments, [0, 0, 0, 0, 0, 0, _, _]).then(|| ipv4_from_tail(segments))
+}
+
+fn ipv4_translated_addr(addr: Ipv6Addr) -> Option<Ipv4Addr> {
+    let segments = addr.segments();
+    matches!(segments, [0, 0, 0, 0, 0xffff, 0, _, _]).then(|| ipv4_from_tail(segments))
+}
+
+fn ipv4_from_tail(segments: [u16; 8]) -> Ipv4Addr {
+    Ipv4Addr::new(
+        (segments[6] >> 8) as u8,
+        segments[6] as u8,
+        (segments[7] >> 8) as u8,
+        segments[7] as u8,
+    )
 }
 
 #[derive(Debug)]
