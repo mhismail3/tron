@@ -765,17 +765,18 @@ Core/modular split as implemented:
   separate design problem and is deferred until a queued-internal-grant model
   is explicitly approved.
 
-Remaining non-goals after Slice 5A and accepted Slice 6A:
+Remaining non-goals after Slice 5A and accepted Slices 6A/6B:
 PTY/interactive terminal,
-interpreter or runtime package, mutating git/worktree/source-control behavior,
-web/network behavior, subagents, scheduling, native iOS process panels, and
-production deployment behavior.
+interpreter or runtime package, git/worktree/source-control behavior beyond
+index-only stage/unstage, web/network behavior, subagents, scheduling, native
+iOS process panels, and production deployment behavior.
 
 ### Slice 6: Git And Worktree Foundations
 
 Objective: restore source-control workflows over durable worktree resources.
-Slice 6A begins with accepted read-only repository observation; later accepted
-sub-slices would own mutating workflows.
+Slice 6A begins with accepted read-only repository observation; Slice 6B accepts
+index-only stage/unstage; later accepted sub-slices own higher-risk source
+control workflows.
 
 Accepted user-facing outcome: Slice 6A lets users inspect branch status,
 detached HEAD state, upstream/ahead-behind, dirty summaries, and bounded

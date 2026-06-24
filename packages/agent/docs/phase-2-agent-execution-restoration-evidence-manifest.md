@@ -522,6 +522,63 @@ Validation on implementation branch before commit:
 - `cargo test --manifest-path packages/agent/Cargo.toml git -- --nocapture`
   passed with 22 matching library tests plus matched static gate tests.
 
+Independent review and fix-loop evidence:
+
+- Implementation thread `019ef956-6555-78d3-9956-8147108c7c14` produced
+  `0689cbd5d58efcd764fbd6124e618bf0546e051b`.
+- Review thread `019ef979-66d7-7aa2-8a83-21e2285522b4` required fixes for
+  missing provider-visible mutation path requirements, bounded-status conflict
+  preflight, and pre-acceptance docs wording.
+- Fix thread `019ef982-1405-7a61-9231-9ecb95dddce8` produced
+  `982e753d4a5a697c291307fbc9da466089e03b87`; review thread
+  `019ef98b-d735-7c31-b564-b52b24bece05` then required static docs/inventory
+  fixes.
+- Fix thread `019ef993-a563-77b3-916b-c4d7cfc08f9b` produced
+  `c473be51dd35d8083ca736f30e81cbfa83e81d78`; final review thread
+  `019ef99a-3d8a-7fc2-9dca-a9251947d29e` then required HRA pending-review
+  wording fixes.
+- Docs-only fix commit `34b860b56ab20f6ff69f7ee177ce8906ceeead87` corrected
+  HRA pre-integration wording; re-review thread
+  `019ef9a4-2cc8-7f82-8f4c-6d95fe13b4ce` then required the BPRC invariant
+  test file to receive an HRA large-file budget row.
+- Fix thread `019ef9a8-79ae-7b82-9fb4-4e5bf6426d49` produced
+  `c9583b1f4647bae7e5c09bf8460f2e40a340ac77`.
+- Final accepting review thread `019ef9aa-d71e-7010-be57-82f8ca6ca323`
+  reported no findings, verified `origin/main@743b783976b0515372e5525c0c1671f5dbec37bd`
+  as an ancestor, verified all five candidate commits in order, and passed:
+  `git diff --check`, `scripts/personal-info-guard.sh`,
+  `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`,
+  `cargo test --manifest-path packages/agent/Cargo.toml git -- --nocapture`,
+  `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture`,
+  `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture`,
+  `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants large_source_files_have_explicit_cleanup_budget_rows -- --nocapture`,
+  `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants boundary_inventory_covers_tracked_sources -- --nocapture`,
+  and `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture`.
+
+Mainline closeout validation before push:
+
+- `git diff --check` passed.
+- `scripts/personal-info-guard.sh` passed.
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
+  passed.
+- `cargo check --manifest-path packages/agent/Cargo.toml` passed with existing
+  dead-code warnings.
+- `cargo test --manifest-path packages/agent/Cargo.toml git -- --nocapture`
+  passed from `main`.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture`
+  passed from `main` after the BPRC static gate was updated to require accepted
+  Slice 6B current-baseline status and reject stale pre-integration wording.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test primitive_code_cleanup_invariants large_source_files_have_explicit_cleanup_budget_rows -- --nocapture`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test true_primitive_cleanup_invariants -- --nocapture`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants boundary_inventory_covers_tracked_sources -- --nocapture`
+  passed.
+- `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture`
+  passed.
+
 ## Validation Log
 
 | Command | Result | Evidence |

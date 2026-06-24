@@ -518,15 +518,14 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-05",
         "worktree_git",
         "Slice 6: Git And Worktree Foundations",
-        "pending_review",
+        "current_baseline",
         &[
-            "Slice 6B fix branch is an implementation candidate",
-            "pending independent acceptance and mainline integration",
+            "accepted Slice 6B adds index-only Git stage/unstage",
             "git_status",
             "git_diff",
             "git_stage",
             "git_unstage",
-            "pending_review",
+            "current_baseline",
         ],
         &[
             "Slice 6B adds explicit `git_stage`/`git_unstage` index mutation",
@@ -538,16 +537,15 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
     let phase_two_inventory_doc =
         read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.md");
     assert!(
-        phase_two_inventory_doc
-            .contains("Slice 6B index-only stage/unstage is an implementation candidate")
-            && phase_two_inventory_doc
-                .contains("pending independent acceptance and mainline integration"),
-        "Slice 6B docs must keep implementation-candidate status before acceptance/integration"
+        phase_two_inventory_doc.contains("Accepted Slice 6B adds index-only")
+            && phase_two_inventory_doc.contains("accepted Slice 6B index-only stage/unstage"),
+        "Slice 6B docs must record accepted current-baseline status after independent acceptance and integration"
     );
     assert!(
-        !phase_two_inventory_doc.contains("`P2AER-INV-013` is now current baseline")
-            && !phase_two_inventory_doc.contains("evidence plus Slice 6B index-only stage/unstage"),
-        "Slice 6B docs must not claim current baseline before independent acceptance and mainline integration"
+        !phase_two_inventory_doc.contains("Slice 6B fix branch is an implementation candidate")
+            && !phase_two_inventory_doc
+                .contains("pending independent acceptance and mainline integration"),
+        "Slice 6B docs must not retain pre-acceptance candidate wording after integration"
     );
     let normalized_inventory_doc = phase_two_inventory_doc
         .split_whitespace()
@@ -559,19 +557,15 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             continue;
         }
         for forbidden in [
-            "current behavior",
-            "current baseline",
-            "accepted behavior",
-            "accepted baseline",
-            "is accepted",
-            "has been accepted",
-            "is integrated",
-            "has been integrated",
-            "mainline baseline",
+            "implementation candidate",
+            "pending independent acceptance",
+            "pending-review",
+            "pending review",
+            "until mainline integration",
         ] {
             assert!(
                 !lower_sentence.contains(forbidden),
-                "Slice 6B docs must not overclaim pre-integration status with `{forbidden}` in sentence: {sentence}"
+                "Slice 6B docs must not retain pre-integration status with `{forbidden}` in sentence: {sentence}"
             );
         }
     }

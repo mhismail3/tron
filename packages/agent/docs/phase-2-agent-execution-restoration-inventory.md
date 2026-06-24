@@ -65,12 +65,11 @@ capability.
 
 Slice 6A is the current git/worktree source-control foundation for repository
 status and bounded staged/unstaged diff evidence through `domains/git` and
-`capability::execute` operation values. Slice 6B index-only stage/unstage is an
-implementation candidate on the fix branch pending independent acceptance and
-mainline integration. It is limited to explicit `git_stage`/`git_unstage`
-operations over trusted-root relative paths, with idempotency, mutation reason,
-expected HEAD preconditions, bounded before/after evidence, `git_index_change`
-resources, and `git.lifecycle` stream events.
+`capability::execute` operation values. Accepted Slice 6B adds index-only
+stage/unstage through explicit `git_stage`/`git_unstage` operations over
+trusted-root relative paths, with idempotency, mutation reason, expected HEAD
+preconditions, bounded before/after evidence, `git_index_change` resources, and
+`git.lifecycle` stream events.
 Worktree graph resources, commits, branch operations, merges/rebases/resets,
 pushes/PRs, conflict resolution workflows, and native SourceChanges remain
 deferred.
@@ -187,10 +186,9 @@ runtimes, PTY sessions, web/network research, git/source-control, subagents,
 scheduling, notifications, or native iOS process panels. Queue-backed internal
 job dispatch also remains deferred pending an explicit queued-grant design.
 
-`P2AER-INV-013` remains current baseline for Slice 6A read-only Git status/diff
-evidence. Slice 6B index-only stage/unstage is an implementation candidate on
-the fix branch pending independent acceptance and mainline integration. The
-mutating boundary is intentionally narrow: explicit paths, resource-backed
+`P2AER-INV-013` is current baseline for Slice 6A read-only Git status/diff
+evidence and accepted Slice 6B index-only stage/unstage. The mutating boundary
+is intentionally narrow: explicit paths, resource-backed
 evidence, lifecycle stream evidence, expected HEAD freshness, idempotency, and
 static guards proving no commit, branch, merge/rebase/reset, push/PR, worktree
 graph, conflict resolution workflow, or native SourceChanges surface was added.
