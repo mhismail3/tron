@@ -19,9 +19,11 @@
 //!
 //! The engine provides resources, streams, traces, replay, and idempotency.
 //! This domain owns the durable records that let users inspect pending work and
-//! answer handoffs. Queue refs are evidence refs only in this slice; no hidden
-//! prompt queue, autonomous runner, planner, scheduler, notification path, or
-//! subagent dispatch is restored here.
+//! answer handoffs. Question answers acquire a short engine resource lease on
+//! the question before recording answer resources so expected-version handoffs
+//! remain serialized. Queue refs are evidence refs only in this slice; no
+//! hidden prompt queue, autonomous runner, planner, scheduler, notification
+//! path, or subagent dispatch is restored here.
 
 mod errors;
 pub(crate) mod service;

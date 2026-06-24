@@ -2,8 +2,9 @@ use chrono::{Duration, SecondsFormat, Utc};
 use serde_json::json;
 
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, EngineResourceVersioningMode, FunctionId,
-    Invocation, ListResources, RegisterResourceType, TraceId, WorkerId,
+    AcquireResourceLease, ActorId, ActorKind, AuthorityGrantId, CausalContext,
+    EngineResourceVersioningMode, FunctionId, Invocation, ListResources, RegisterResourceType,
+    TraceId, WorkerId,
 };
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
@@ -174,6 +175,110 @@ async fn create_question_and_answer_once_with_expected_version_guard() {
             || stale.to_string().contains("closed and cannot be answered"),
         "{stale}"
     );
+}
+
+#[tokio::test]
+async fn active_question_answer_lease_blocks_answer_without_orphan_resource() {
+    let ctx = test_context().await;
+    let question_invocation = invocation(
+        "leased-question-create",
+        QUESTION_CREATE_FUNCTION,
+        Some("leased-question-key"),
+    );
+    let question = super::service::create_question_value(
+        &ctx.engine_host,
+        &question_invocation,
+        &json!({"prompt": "Lease protected?"}),
+    )
+    .await
+    .expect("create question");
+    let question_id = question["questionResourceId"].as_str().unwrap().to_owned();
+    let question_version = question["questionVersionId"].as_str().unwrap().to_owned();
+    let holder = invocation(
+        "leased-question-holder",
+        QUESTION_ANSWER_FUNCTION,
+        Some("held-answer-lease"),
+    );
+    let held_lease = ctx
+        .engine_host
+        .acquire_resource_lease(AcquireResourceLease {
+            resource_kind: super::USER_QUESTION_KIND.to_owned(),
+            resource_id: question_id.clone(),
+            holder_invocation_id: holder.id.clone(),
+            function_id: holder.function_id.clone(),
+            actor_id: holder.causal_context.actor_id.clone(),
+            authority_grant_id: holder.causal_context.authority_grant_id.clone(),
+            trace_id: holder.causal_context.trace_id.clone(),
+            parent_invocation_id: holder.causal_context.parent_invocation_id.clone(),
+            idempotency_key: holder.causal_context.idempotency_key.clone(),
+            ttl_ms: 60_000,
+        })
+        .await
+        .expect("hold question lease");
+
+    let blocked = super::service::answer_question_value(
+        &ctx.engine_host,
+        &invocation(
+            "leased-question-blocked",
+            QUESTION_ANSWER_FUNCTION,
+            Some("blocked-answer-key"),
+        ),
+        &json!({
+            "questionResourceId": question_id,
+            "expectedQuestionVersionId": question_version,
+            "answerText": "This must not create an orphan answer.",
+            "reason": "The question is already leased."
+        }),
+    )
+    .await
+    .expect_err("active question lease should block answer");
+    assert!(blocked.to_string().contains("resource lease conflict"));
+
+    let answers = ctx
+        .engine_host
+        .list_resources(ListResources {
+            kind: Some(super::GOAL_ANSWER_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 10,
+        })
+        .await
+        .expect("list answers after blocked attempt");
+    assert_eq!(answers.len(), 0, "blocked answer must not create resources");
+
+    ctx.engine_host
+        .release_resource_lease(&held_lease.lease_id)
+        .await
+        .expect("release held question lease");
+    let answered = super::service::answer_question_value(
+        &ctx.engine_host,
+        &invocation(
+            "leased-question-answer",
+            QUESTION_ANSWER_FUNCTION,
+            Some("answer-after-lease"),
+        ),
+        &json!({
+            "questionResourceId": question["questionResourceId"].as_str().unwrap(),
+            "expectedQuestionVersionId": question["questionVersionId"].as_str().unwrap(),
+            "answerText": "The lease is released now.",
+            "reason": "The answer can proceed after serialization."
+        }),
+    )
+    .await
+    .expect("answer after lease release");
+    assert_eq!(answered["status"], "answered");
+
+    let answers = ctx
+        .engine_host
+        .list_resources(ListResources {
+            kind: Some(super::GOAL_ANSWER_KIND.to_owned()),
+            scope: None,
+            lifecycle: None,
+            limit: 10,
+        })
+        .await
+        .expect("list answers after successful attempt");
+    assert_eq!(answers.len(), 1, "only the successful answer is recorded");
 }
 
 #[tokio::test]

@@ -2,8 +2,8 @@ use chrono::Utc;
 use serde_json::{Value, json};
 
 use crate::engine::{
-    CreateResource, EngineHostHandle, EngineResourceInspection, ListResources, UpdateResource,
-    WorkerId,
+    AcquireResourceLease, CreateResource, EngineHostHandle, EngineResourceInspection,
+    ListResources, UpdateResource, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -17,6 +17,8 @@ use super::types::{
 use super::{
     GOAL_ANSWER_KIND, GOAL_ANSWER_SCHEMA_ID, USER_QUESTION_KIND, USER_QUESTION_SCHEMA_ID, WORKER,
 };
+
+const QUESTION_ANSWER_LEASE_TTL_MS: i64 = 60_000;
 
 pub(crate) async fn create_goal_value(
     engine_host: &EngineHostHandle,
@@ -343,6 +345,44 @@ pub(crate) async fn inspect_question_value(
 }
 
 pub(crate) async fn answer_question_value(
+    engine_host: &EngineHostHandle,
+    invocation: &crate::engine::Invocation,
+    payload: &Value,
+) -> Result<Value, CapabilityError> {
+    let question_resource_id = required_string(payload, "questionResourceId")?;
+    validate_resource_id(
+        "questionResourceId",
+        &question_resource_id,
+        "user_question:",
+    )?;
+    let lease = engine_host
+        .acquire_resource_lease(AcquireResourceLease {
+            resource_kind: USER_QUESTION_KIND.to_owned(),
+            resource_id: question_resource_id,
+            holder_invocation_id: invocation.id.clone(),
+            function_id: invocation.function_id.clone(),
+            actor_id: invocation.causal_context.actor_id.clone(),
+            authority_grant_id: invocation.causal_context.authority_grant_id.clone(),
+            trace_id: invocation.causal_context.trace_id.clone(),
+            parent_invocation_id: invocation.causal_context.parent_invocation_id.clone(),
+            idempotency_key: invocation.causal_context.idempotency_key.clone(),
+            ttl_ms: QUESTION_ANSWER_LEASE_TTL_MS,
+        })
+        .await
+        .map_err(engine_error)?;
+    let result = answer_question_value_locked(engine_host, invocation, payload).await;
+    let release_result = engine_host
+        .release_resource_lease(&lease.lease_id)
+        .await
+        .map_err(engine_error);
+    match (result, release_result) {
+        (Ok(value), Ok(_)) => Ok(value),
+        (Ok(_), Err(error)) => Err(error),
+        (Err(error), _) => Err(error),
+    }
+}
+
+async fn answer_question_value_locked(
     engine_host: &EngineHostHandle,
     invocation: &crate::engine::Invocation,
     payload: &Value,
