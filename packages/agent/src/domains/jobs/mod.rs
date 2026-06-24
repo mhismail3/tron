@@ -27,7 +27,11 @@
 //! On domain startup and before lifecycle reads/cleanup, persisted `running`
 //! job resources from before the current service instance are reconciled:
 //! owned jobs continue under their runtime handle, while non-owned stale jobs
-//! are marked with inspectable unknown/failure terminal evidence.
+//! are marked with inspectable unknown/failure terminal evidence. Reconciliation
+//! uses an internal scoped scan so a newest-first public list page full of live
+//! or post-startup rows cannot hide older stale records; targeted
+//! status/log/cancel paths also recheck the addressed resource after scope
+//! validation before returning it.
 
 use std::sync::{Arc, LazyLock};
 

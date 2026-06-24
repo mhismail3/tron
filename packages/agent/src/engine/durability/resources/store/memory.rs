@@ -263,6 +263,38 @@ impl InMemoryEngineResourceStore {
         Ok(resources)
     }
 
+    /// List resources for crate-internal maintenance scans without the public
+    /// response cap. Callers must keep their own mutation scope narrow.
+    pub(in crate::engine) fn list_internal_scan(
+        &self,
+        filter: ListResources,
+    ) -> Result<Vec<EngineResource>> {
+        validate_list_filter(&filter)?;
+        let mut resources = self
+            .resources
+            .values()
+            .filter(|resource| {
+                filter
+                    .kind
+                    .as_ref()
+                    .is_none_or(|kind| &resource.kind == kind)
+                    && filter
+                        .scope
+                        .as_ref()
+                        .is_none_or(|scope| &resource.scope == scope)
+                    && filter
+                        .lifecycle
+                        .as_ref()
+                        .is_none_or(|lifecycle| &resource.lifecycle == lifecycle)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        resources.sort_by_key(|resource| resource.updated_at);
+        resources.reverse();
+        resources.truncate(filter.limit);
+        Ok(resources)
+    }
+
     fn append_version_inner(
         &mut self,
         resource_id: &str,

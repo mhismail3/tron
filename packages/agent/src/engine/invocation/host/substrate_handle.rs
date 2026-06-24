@@ -189,6 +189,19 @@ impl EngineHostHandle {
             .list(filter)
     }
 
+    /// Scan typed resources for crate-internal maintenance without the public
+    /// list cap. Callers must keep filtering and mutations scoped.
+    pub(crate) async fn scan_resources_internal(
+        &self,
+        filter: ListResources,
+    ) -> Result<Vec<EngineResource>> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .list_internal_scan(filter)
+    }
+
     /// Get a high-risk resource lease record.
     pub async fn get_resource_lease(&self, lease_id: &str) -> Result<Option<EngineResourceLease>> {
         let store = self.inner.lock().await.primitives.leases.clone();

@@ -26,7 +26,6 @@ use super::types::{
 use super::{JOB_PROCESS_KIND, JOB_PROCESS_SCHEMA_ID, JOBS_LIFECYCLE_TOPIC, WORKER};
 
 const FINALIZE_VERSION_CONFLICT_RETRIES: usize = 16;
-const RECONCILE_RUNNING_BATCH_LIMIT: usize = 500;
 
 #[derive(Clone)]
 pub(crate) struct ReconcileContext {
@@ -186,8 +185,17 @@ pub(crate) async fn status_job_value(
     invocation: &crate::engine::Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    reconcile_stale_running_jobs(engine_host, runtime, reconcile, Some(invocation)).await?;
+    reconcile_stale_running_jobs(
+        engine_host,
+        runtime.clone(),
+        reconcile.clone(),
+        Some(invocation),
+    )
+    .await?;
     let inspection = require_job(engine_host, invocation, payload).await?;
+    let inspection =
+        reconcile_targeted_running_job(engine_host, &runtime, &reconcile, invocation, inspection)
+            .await?;
     let (version_id, record) = job_record(&inspection)?;
     Ok(json!({
         "schemaVersion": JOB_SCHEMA_VERSION,
@@ -240,8 +248,17 @@ pub(crate) async fn log_job_value(
     invocation: &crate::engine::Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    reconcile_stale_running_jobs(engine_host, runtime, reconcile, Some(invocation)).await?;
+    reconcile_stale_running_jobs(
+        engine_host,
+        runtime.clone(),
+        reconcile.clone(),
+        Some(invocation),
+    )
+    .await?;
     let inspection = require_job(engine_host, invocation, payload).await?;
+    let inspection =
+        reconcile_targeted_running_job(engine_host, &runtime, &reconcile, invocation, inspection)
+            .await?;
     let (version_id, record) = job_record(&inspection)?;
     Ok(json!({
         "schemaVersion": JOB_SCHEMA_VERSION,
@@ -264,8 +281,17 @@ pub(crate) async fn cancel_job_value(
     invocation: &crate::engine::Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
-    reconcile_stale_running_jobs(engine_host, runtime.clone(), reconcile, Some(invocation)).await?;
+    reconcile_stale_running_jobs(
+        engine_host,
+        runtime.clone(),
+        reconcile.clone(),
+        Some(invocation),
+    )
+    .await?;
     let inspection = require_job(engine_host, invocation, payload).await?;
+    let inspection =
+        reconcile_targeted_running_job(engine_host, &runtime, &reconcile, invocation, inspection)
+            .await?;
     let (current_version_id, record) = job_record(&inspection)?;
     if record.state.is_terminal() {
         return Ok(already_terminal_response(
@@ -460,58 +486,83 @@ pub(crate) async fn reconcile_stale_running_jobs(
 ) -> Result<usize, CapabilityError> {
     let mut reconciled = 0;
     let scope = invocation.map(resource_scope);
-    loop {
-        let resources = engine_host
-            .list_resources(ListResources {
-                kind: Some(JOB_PROCESS_KIND.to_owned()),
-                scope: scope.clone(),
-                lifecycle: Some(JobState::Running.as_str().to_owned()),
-                limit: RECONCILE_RUNNING_BATCH_LIMIT,
-            })
+    let resources = engine_host
+        .scan_resources_internal(ListResources {
+            kind: Some(JOB_PROCESS_KIND.to_owned()),
+            scope,
+            lifecycle: Some(JobState::Running.as_str().to_owned()),
+            limit: usize::MAX,
+        })
+        .await
+        .map_err(engine_error)?;
+
+    for resource in resources {
+        if runtime.owns_job(&resource.resource_id).await {
+            continue;
+        }
+        let Some(inspection) = engine_host
+            .inspect_resource(&resource.resource_id)
             .await
-            .map_err(engine_error)?;
-        if resources.is_empty() {
-            break;
+            .map_err(engine_error)?
+        else {
+            continue;
+        };
+        let (current_version_id, record) = job_record(&inspection)?;
+        if !should_reconcile_stale_running_job(&runtime, &reconcile, &inspection, &record).await {
+            continue;
         }
-
-        let mut batch_reconciled = 0;
-        for resource in resources {
-            if runtime.owns_job(&resource.resource_id).await {
-                continue;
-            }
-            let Some(inspection) = engine_host
-                .inspect_resource(&resource.resource_id)
-                .await
-                .map_err(engine_error)?
-            else {
-                continue;
-            };
-            let (current_version_id, record) = job_record(&inspection)?;
-            if record.state.is_terminal()
-                || record.started_at > reconcile.startup_cutoff
-                || runtime.owns_job(&inspection.resource.resource_id).await
-            {
-                continue;
-            }
-            if reconcile_one_stale_running_job(
-                engine_host,
-                invocation,
-                inspection,
-                current_version_id,
-                record,
-            )
-            .await?
-            {
-                batch_reconciled += 1;
-            }
-        }
-
-        reconciled += batch_reconciled;
-        if batch_reconciled == 0 {
-            break;
+        if reconcile_one_stale_running_job(
+            engine_host,
+            invocation,
+            inspection,
+            current_version_id,
+            record,
+        )
+        .await?
+        {
+            reconciled += 1;
         }
     }
     Ok(reconciled)
+}
+
+async fn reconcile_targeted_running_job(
+    engine_host: &EngineHostHandle,
+    runtime: &JobRuntime,
+    reconcile: &ReconcileContext,
+    invocation: &crate::engine::Invocation,
+    inspection: EngineResourceInspection,
+) -> Result<EngineResourceInspection, CapabilityError> {
+    let (current_version_id, record) = job_record(&inspection)?;
+    if !should_reconcile_stale_running_job(runtime, reconcile, &inspection, &record).await {
+        return Ok(inspection);
+    }
+
+    let resource_id = inspection.resource.resource_id.clone();
+    reconcile_one_stale_running_job(
+        engine_host,
+        Some(invocation),
+        inspection,
+        current_version_id,
+        record,
+    )
+    .await?;
+    engine_host
+        .inspect_resource(&resource_id)
+        .await
+        .map_err(engine_error)?
+        .ok_or_else(|| invalid_params(format!("job resource {resource_id} was not found")))
+}
+
+async fn should_reconcile_stale_running_job(
+    runtime: &JobRuntime,
+    reconcile: &ReconcileContext,
+    inspection: &EngineResourceInspection,
+    record: &JobProcessRecord,
+) -> bool {
+    record.state == JobState::Running
+        && record.started_at <= reconcile.startup_cutoff
+        && !runtime.owns_job(&inspection.resource.resource_id).await
 }
 
 async fn reconcile_one_stale_running_job(

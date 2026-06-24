@@ -740,6 +740,11 @@ Shipped behavior:
   as a retryable jobs-domain race: it reloads the current nonterminal job,
   preserves cancellation metadata, and retries the terminal update using the
   already-created output resource/link.
+- Re-audit follow-up for Order 20/Slice 5A reconciles stale pre-startup
+  `running` job records even when more than 500 newer live or post-startup rows
+  fill the public newest-first list page. Startup/list/cleanup use an internal
+  scoped scan, and targeted status/log/cancel rechecks only the addressed scoped
+  resource before returning it.
 - Domain shutdown requests cancellation for running process groups through the
   existing shutdown coordinator when present. Terminal cleanup archives scoped
   terminal jobs by retention criteria.
@@ -762,7 +767,8 @@ Core/modular split as implemented:
 Remaining non-goals after Slice 5A: PTY/interactive terminal, interpreter or
 runtime package, git/worktree/source-control behavior, web/network behavior,
 subagents, scheduling, native iOS process panels, and production deployment
-behavior.
+behavior. Follow-up re-audit fixes remain branch-scoped until final all-slices
+consolidation and audit.
 
 ### Slice 6: Git, Worktrees, And Source Control
 
