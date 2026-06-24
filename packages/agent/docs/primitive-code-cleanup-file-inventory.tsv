@@ -475,6 +475,7 @@ packages/agent/src/engine/runtime/external_workers/proxy.rs	retain	rust agent	PC
 packages/agent/src/engine/runtime/mod.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/runtime/triggers.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/runtime/worker_protocol.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
+packages/agent/src/engine/tests/authority/execute_goal_authorization.rs	retain	phase2 goals	P2AER-S7A	Authority regression test retained for capability execute goal/question scope, resource-kind, and selector coverage.
 packages/agent/src/engine/tests/authority/grant_derivation.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/authority/helpers.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.
 packages/agent/src/engine/tests/authority/invocation_authorization.rs	retain	rust agent	PCC-10/AHA-9	Current tracked file retained after AHA-9 inventory provenance cleanup.

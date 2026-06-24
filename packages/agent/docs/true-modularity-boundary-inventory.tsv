@@ -442,6 +442,7 @@ packages/agent/src/engine/runtime/external_workers/validation.rs	rust	implementa
 packages/agent/src/engine/runtime/mod.rs	rust	facade	rust:engine	callers may depend on this narrow owner-approved surface only
 packages/agent/src/engine/runtime/triggers.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
 packages/agent/src/engine/runtime/worker_protocol.rs	rust	implementation	rust:engine	owner-private; callers must enter through the owner facade or contract
+packages/agent/src/engine/tests/authority/execute_goal_authorization.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/engine/tests/authority/grant_derivation.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/engine/tests/authority/helpers.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it
 packages/agent/src/engine/tests/authority/invocation_authorization.rs	rust	test-support	rust:engine	test-only helper; production code must not depend on it

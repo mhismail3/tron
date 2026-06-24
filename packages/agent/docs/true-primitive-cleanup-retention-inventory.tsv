@@ -475,6 +475,7 @@ packages/agent/src/engine/runtime/external_workers/validation.rs	primitive	engin
 packages/agent/src/engine/runtime/mod.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/triggers.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
 packages/agent/src/engine/runtime/worker_protocol.rs	primitive	engine	TPC-2	primitive engine catalog, durability, invocation, runtime, authority, or kernel substrate
+packages/agent/src/engine/tests/authority/execute_goal_authorization.rs	test	test_harness	Phase2-Slice7A	Authority regression retained for capability execute goal/question scope, resource-kind, and selector coverage.
 packages/agent/src/engine/tests/authority/grant_derivation.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/authority/helpers.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
 packages/agent/src/engine/tests/authority/invocation_authorization.rs	test	test_harness	TPC-10	concern-owned verification or static gate coverage
