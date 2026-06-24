@@ -314,6 +314,40 @@ async fn invalid_scope_expired_question_and_oversized_text_fail_closed() {
     .expect_err("expired answer should fail");
     assert!(expired.to_string().contains("expired"));
 
+    let option_invocation = invocation(
+        "question-options",
+        QUESTION_CREATE_FUNCTION,
+        Some("option-key"),
+    );
+    let option_question = super::service::create_question_value(
+        &ctx.engine_host,
+        &option_invocation,
+        &json!({
+            "prompt": "Proceed?",
+            "options": ["yes"],
+            "allowFreeForm": false
+        }),
+    )
+    .await
+    .expect("create option question");
+    let option_rejection = super::service::answer_question_value(
+        &ctx.engine_host,
+        &invocation(
+            "answer-bad-option",
+            QUESTION_ANSWER_FUNCTION,
+            Some("bad-option-answer"),
+        ),
+        &json!({
+            "questionResourceId": option_question["questionResourceId"].as_str().unwrap(),
+            "expectedQuestionVersionId": option_question["questionVersionId"].as_str().unwrap(),
+            "answerText": "no",
+            "reason": "outside the allowed choices"
+        }),
+    )
+    .await
+    .expect_err("non-free-form question should reject answers outside options");
+    assert!(option_rejection.to_string().contains("question options"));
+
     let other_scope = CausalContext::new(
         ActorId::new("agent:other-session").unwrap(),
         ActorKind::Agent,

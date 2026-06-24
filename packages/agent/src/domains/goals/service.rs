@@ -386,6 +386,11 @@ pub(crate) async fn answer_question_value(
         1,
         ANSWER_MAX_CHARS,
     )?;
+    if !record.allow_free_form && !record.options.iter().any(|option| option == &answer_text) {
+        return Err(invalid_params(
+            "answerText must match one of the question options",
+        ));
+    }
     let reason = bounded_text(
         "reason",
         &required_string(payload, "reason")?,
