@@ -480,6 +480,8 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("web_fetch"));
     assert!(result.contains("web_source_list"));
     assert!(result.contains("web_source_inspect"));
+    assert!(result.contains("web_source_archive"));
+    assert!(result.contains("expectedWebSourceVersionId"));
     assert!(result.contains("trace_list"));
     assert!(result.contains("replay_manifest"));
     for non_goal in [

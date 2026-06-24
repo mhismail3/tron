@@ -956,8 +956,9 @@ Current primitive operations:
 | `question_inspect` | Inspect one scoped user question with current resource/version refs, lifecycle state, and answer summary when present. |
 | `question_answer` | Record one idempotent `goal_answer` handoff for a pending question after expected-version and expiry checks, with required reason, authority/freshness evidence, stream refs, and no authority minting. |
 | `web_fetch` | Fetch one explicit URL as bounded source provenance after declared network authority checks, producing redacted `web_source` resource/cache evidence with readable HTML/XHTML text extraction when applicable. |
-| `web_source_list` | List current-session `web_source` records as bounded citation-ready summaries without network access. |
-| `web_source_inspect` | Inspect one current-session `web_source` resource/version as bounded citation-ready source metadata and redacted snippet evidence without network access. |
+| `web_source_list` | List active current-session `web_source` records as bounded citation-ready summaries without network access, with explicit `includeArchived` for archived audit records. |
+| `web_source_inspect` | Inspect one current-session `web_source` resource/version, including exact archived records, as bounded citation-ready source metadata and redacted snippet evidence without network access. |
+| `web_source_archive` | Archive one current-session `web_source` resource with expected-version CAS, reason, idempotency, and append-only lifecycle evidence without deleting source provenance. |
 | `trace_list` | List durable Agent Trace-style records for the current session, optionally filtered by trace id. |
 | `trace_get` | Read one durable trace record by id within the current session. |
 | `log_recent` | Read bounded recent log evidence, optionally filtered by trace id, through the same `execute` primitive. |
@@ -1029,7 +1030,8 @@ owner without adding direct public `web::*` catalog functions, and the accepted
 Slice 8B foundation adds read-only source list/inspect operations for citation
 assembly. Provider-visible access remains the single
 `capability::execute` primitive with operation values `web_fetch`,
-`web_source_list`, and `web_source_inspect`. Direct fetch requires a trusted
+`web_source_list`, `web_source_inspect`, and the Slice 8D implementation
+candidate `web_source_archive`. Direct fetch requires a trusted
 agent/system runtime context, current session, idempotency key, allowed
 `web_source` write authority, and a derived grant with `networkPolicy:
 declared`; grants with `networkPolicy: none` fail before any HTTP client is
@@ -1049,11 +1051,21 @@ raw captured-byte SHA-256 as the durable source hash. `web_source_list` and
 and `resource.read` authority, inspect only scoped `web_source` resources, and
 return bounded requested/final URLs, fetched time, status, content type,
 captured SHA-256, byte/truncation/redaction/extraction metadata,
-trace/replay refs, resource refs, and redacted snippets; they perform no
-network I/O and remain valid under `networkPolicy: none`. Search providers,
-browser automation, crawling, sitemap traversal, robots policy, login/cookies,
-credential reuse, shell/process network side channels, native iOS web UI, and
-public `/engine` web API expansion remain deferred to later slices.
+trace/replay refs, resource refs, archive metadata when present, and redacted
+snippets; they perform no network I/O and require `networkPolicy: none`.
+List defaults to active/fetched sources and returns archived records only when
+`includeArchived` is explicitly true, while inspect can still read the exact
+archived source for replay/citation audit. `web_source_archive` is a
+pending-review Slice 8D lifecycle operation requiring trusted current-session
+context, `web.read`, `web.write`, `resource.read`, `resource.write`,
+`kind:web_source`, stable `idempotencyKey`, bounded non-empty `reason`, and
+`expectedWebSourceVersionId`; it appends an archived resource version with
+actor/grant identity, previous version id, trace/replay refs, and retention
+metadata while preserving source payload/provenance. Search providers, browser
+automation, crawling, sitemap traversal, robots policy, login/cookies,
+credential reuse, deletion/pruning/automatic TTL cleanup, shell/process network
+side channels, native iOS web UI, and public `/engine` web API expansion
+remain deferred to later slices.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.

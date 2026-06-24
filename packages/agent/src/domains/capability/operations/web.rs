@@ -89,3 +89,33 @@ pub(super) async fn web_source_inspect(
         }),
     ))
 }
+
+pub(super) async fn web_source_archive(
+    invocation: &Invocation,
+    deps: &Deps,
+) -> Result<CapabilityResult, CapabilityError> {
+    let web_deps = crate::domains::web::Deps {
+        engine_host: deps.engine_host.clone(),
+        #[cfg(test)]
+        dns_overrides: None,
+    };
+    let value = crate::domains::web::archive::web_source_archive_value(
+        &web_deps,
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    Ok(ok_result(
+        format!(
+            "Archived source {}",
+            value["webSourceResourceId"]
+                .as_str()
+                .unwrap_or("web_source")
+        ),
+        json!({
+            "primitiveOperation": "web_source_archive",
+            "status": "ok",
+            "web": value
+        }),
+    ))
+}

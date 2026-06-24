@@ -44,6 +44,13 @@ pub(super) async fn derive_capability_runtime_grant(
         allowed_authority_scopes.extend(["resource.write".to_owned(), "web.write".to_owned()]);
     } else if matches!(operation, "web_source_list" | "web_source_inspect") {
         allowed_authority_scopes.extend(["resource.read".to_owned(), "web.read".to_owned()]);
+    } else if operation == "web_source_archive" {
+        allowed_authority_scopes.extend([
+            "resource.read".to_owned(),
+            "resource.write".to_owned(),
+            "web.read".to_owned(),
+            "web.write".to_owned(),
+        ]);
     }
     allowed_authority_scopes.sort();
     allowed_authority_scopes.dedup();
@@ -55,7 +62,7 @@ pub(super) async fn derive_capability_runtime_grant(
     let mut allowed_resource_kinds = vec!["agent_state".to_owned()];
     if matches!(
         operation,
-        "web_fetch" | "web_source_list" | "web_source_inspect"
+        "web_fetch" | "web_source_list" | "web_source_inspect" | "web_source_archive"
     ) {
         allowed_resource_kinds.push("web_source".to_owned());
     }

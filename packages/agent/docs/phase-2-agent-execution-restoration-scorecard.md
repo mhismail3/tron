@@ -23,7 +23,7 @@ Canonical plan file: this scorecard. The README names this file as the durable
 Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
-Current implementation baseline verified by this update:
+Current implementation baseline verified before the Slice 8D candidate:
 `main@5e881e8681229545fe8260a1dc2be8f47cd07a3a`
 (`fix: sanitize web html titles`) plus this Slice 8C closeout documentation
 commit. That line includes accepted Slice 6A
@@ -47,6 +47,13 @@ read-only source inspection, and deterministic HTML/XHTML readable-text
 extraction are accepted; later search providers, browser automation, crawling,
 robots policy, login/cookies/session reuse, native source UI, public `/engine`
 web APIs, and network-enabled jobs remain deferred.
+
+Slice 8D implementation candidate note: branch
+`codex/phase-2-slice-8d-web-source-retention-cache-policy` starts from
+`origin/main@8ed8db55500f3a05aef55a1e2ec39acba30a8c07` (`docs: accept phase
+2 slice 8c`) and adds a pending-review `web_source_archive` foundation for
+append-only source retention/cache lifecycle metadata. This branch does not
+mark Slice 8D accepted or part of the current mainline baseline.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -77,16 +84,19 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 8C: deterministic HTML/XHTML readable-text extraction under existing
   `web_fetch`/`web_source_*` operations, preserving raw-byte source hashes and
   adding safe extraction metadata without search/browser breadth.
+- Slice 8D candidate: current-session `web_source_archive` lifecycle updates,
+  default active-source listing, explicit archived-source inclusion, and exact
+  archived inspection for replay/citation audit; pending independent review.
 
 Current next action:
-Start discovery from fresh `origin/main` for the next Phase 2 Slice 8
-sub-slice. Slice 8A direct fetch source provenance, Slice 8B read-only source
-inspection, and Slice 8C HTML/text extraction are accepted. Search providers,
-browser automation, crawling, robots policy, login/cookies/session reuse,
-native source UI, public `/engine` web APIs, network-enabled jobs, autonomous
-goal execution, fetch/pull/push, PR handoff, production deployment behavior,
-and native SourceChanges UI remain deferred until separately scoped and
-reviewed.
+Review the Slice 8D implementation candidate before any mainline acceptance.
+Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
+and Slice 8C HTML/text extraction are accepted. Slice 8D is pending review.
+Search providers, browser automation, crawling, robots policy,
+login/cookies/session reuse, native source UI, public `/engine` web APIs,
+network-enabled jobs, autonomous goal execution, fetch/pull/push, PR handoff,
+production deployment behavior, and native SourceChanges UI remain deferred
+until separately scoped and reviewed.
 
 ## Scope
 
@@ -1844,6 +1854,55 @@ Accepted validation:
   for unsafe title metadata and missing HRA ownership-map coverage. Re-review
   thread `019efbac-4560-7382-a034-4ef36854367f` verified both fixes and
   returned `slice accepted`.
+
+#### Slice 8D Implementation Candidate: Web Source Retention And Cache Policy Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8d-web-source-retention-cache-policy`.
+Baseline:
+`origin/main@8ed8db55500f3a05aef55a1e2ec39acba30a8c07`
+(`docs: accept phase 2 slice 8c`).
+Status:
+`pending_review`.
+
+Candidate scope:
+
+- Add execute-only `web_source_archive` behind the existing
+  `capability::execute` primitive.
+- Archive only current-session `web_source` resources after trusted runtime
+  context, `web.read`, `web.write`, `resource.read`, `resource.write`,
+  `kind:web_source`, stable `idempotencyKey`, bounded non-empty `reason`, and
+  `expectedWebSourceVersionId` checks.
+- Append an archived resource version/lifecycle update with archive metadata
+  while preserving source payload, byte/text evidence, provenance, trace refs,
+  replay refs, and resource version history.
+- Make `web_source_list` default to active/fetched records only and include
+  archived records only with explicit `includeArchived`.
+- Keep `web_source_inspect` able to inspect exact archived source records for
+  replay/citation audit.
+- Keep archive/list/inspect valid only under `networkPolicy: none` with no HTTP
+  client construction or network I/O.
+
+Candidate non-goals:
+
+- No `web_search`, search provider, browser automation/control, crawling,
+  sitemap traversal, robots policy engine, login/cookies/session reuse,
+  credential reuse, shell/process network side channel, network-enabled jobs,
+  public `/engine` web APIs, native iOS source UI, deletion/erasure/pruning,
+  automatic TTL cleanup, settings/profile fields, or database migrations.
+
+Candidate validation:
+
+- Focused web tests cover successful archive preservation, stale CAS denial,
+  wrong kind/scope denial, missing authority denial before mutation,
+  idempotency replay without duplicate archive versions, default list filtering,
+  explicit archived inclusion, exact archived inspection, and no-network
+  archive/list/inspect behavior.
+- Capability/provider tests cover `web_source_archive`,
+  `expectedWebSourceVersionId`, `includeArchived`, and continued rejection of
+  search/browser/crawl/login/network-job non-goals.
+- HRA/TMB/TPC/PCC/SACB inventories classify the new archive implementation and
+  test files as pending-review Slice 8D surfaces.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

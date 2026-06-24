@@ -26,6 +26,7 @@ pub(crate) async fn web_source_list_value(
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
     inspect_read_grant(deps, invocation, "web_source_list").await?;
+    let include_archived = optional_bool(payload, "includeArchived")?.unwrap_or(false);
     let limit = optional_u64(payload, "limit")?
         .map(|value| value as usize)
         .unwrap_or(LIST_LIMIT_DEFAULT)
@@ -40,7 +41,11 @@ pub(crate) async fn web_source_list_value(
         .list_resources(ListResources {
             kind: Some(WEB_SOURCE_KIND.to_owned()),
             scope: Some(scope.clone()),
-            lifecycle: None,
+            lifecycle: if include_archived {
+                None
+            } else {
+                Some("fetched".to_owned())
+            },
             limit: limit.saturating_add(1),
         })
         .await
@@ -77,7 +82,8 @@ pub(crate) async fn web_source_list_value(
             "requestedLimit": limit,
             "returned": returned,
             "truncated": truncated,
-            "maxPreviewBytes": max_preview_bytes
+            "maxPreviewBytes": max_preview_bytes,
+            "includeArchived": include_archived
         },
         "network": {"performed": false, "requiredPolicy": "none"}
     }))
@@ -162,6 +168,11 @@ async fn inspect_read_grant(
         "resource kind",
         operation,
     )?;
+    if grant.network_policy != "none" {
+        return Err(invalid(format!(
+            "{operation} requires an authority grant with networkPolicy none"
+        )));
+    }
     if !allows_item(&grant.resource_selectors, "*")
         && !allows_item(
             &grant.resource_selectors,
@@ -228,6 +239,7 @@ fn source_summary(
     json!({
         "requestedUrl": source.get("requestedUrl").cloned().unwrap_or(Value::Null),
         "finalUrl": source.get("finalUrl").cloned().unwrap_or(Value::Null),
+        "state": source.get("state").cloned().unwrap_or(Value::Null),
         "fetchedAt": source.get("fetchedAt").cloned().unwrap_or(Value::Null),
         "status": source.get("status").cloned().unwrap_or(Value::Null),
         "contentType": source.get("contentType").cloned().unwrap_or(Value::Null),
@@ -241,6 +253,7 @@ fn source_summary(
         "snippet": snippet.text,
         "traceRefs": source.get("traceRefs").cloned().unwrap_or_else(|| json!([])),
         "replayRefs": source.get("replayRefs").cloned().unwrap_or_else(|| json!([])),
+        "archive": source.get("archive").cloned().unwrap_or(Value::Null),
         "resourceRefs": [resource_ref(resource, version, "source")]
     })
 }
@@ -259,6 +272,7 @@ fn source_details(
     json!({
         "requestedUrl": source.get("requestedUrl").cloned().unwrap_or(Value::Null),
         "finalUrl": source.get("finalUrl").cloned().unwrap_or(Value::Null),
+        "state": source.get("state").cloned().unwrap_or(Value::Null),
         "fetchedAt": source.get("fetchedAt").cloned().unwrap_or(Value::Null),
         "status": source.get("status").cloned().unwrap_or(Value::Null),
         "contentType": source.get("contentType").cloned().unwrap_or(Value::Null),
@@ -280,6 +294,7 @@ fn source_details(
         "redirects": source.get("redirects").cloned().unwrap_or(Value::Null),
         "traceRefs": source.get("traceRefs").cloned().unwrap_or_else(|| json!([])),
         "replayRefs": source.get("replayRefs").cloned().unwrap_or_else(|| json!([])),
+        "archive": source.get("archive").cloned().unwrap_or(Value::Null),
         "resourceRefs": [resource_ref(resource, version, "source")],
         "cache": source.get("cache").cloned().unwrap_or(Value::Null)
     })
@@ -466,6 +481,14 @@ fn optional_u64(payload: &Value, field: &str) -> Result<Option<u64>, CapabilityE
             .map(Some)
             .ok_or_else(|| invalid(format!("{field} must be a positive integer"))),
         Some(_) => Err(invalid(format!("{field} must be a positive integer"))),
+    }
+}
+
+fn optional_bool(payload: &Value, field: &str) -> Result<Option<bool>, CapabilityError> {
+    match payload.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        Some(_) => Err(invalid(format!("{field} must be a boolean"))),
     }
 }
 

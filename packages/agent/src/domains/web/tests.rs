@@ -19,6 +19,8 @@ use crate::engine::{
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
 
+#[path = "web_archive_tests.rs"]
+mod archive_tests;
 #[path = "web_extraction_tests.rs"]
 mod extraction_tests;
 #[path = "web_source_tests.rs"]

@@ -1243,6 +1243,41 @@ Accepted validation evidence:
   IARM/DESI/public-protocol gates, repository hygiene, and personal-info guard
   before push.
 
+### Slice 8D Implementation Candidate Evidence: Web Source Retention And Cache Policy Foundation
+
+Implementation branch:
+`codex/phase-2-slice-8d-web-source-retention-cache-policy`.
+Baseline:
+`origin/main@8ed8db55500f3a05aef55a1e2ec39acba30a8c07`
+(`docs: accept phase 2 slice 8c`).
+Status:
+`pending_review`.
+
+Candidate evidence:
+
+- Adds `packages/agent/src/domains/web/archive.rs` as the web-owned
+  current-session source archive lifecycle module.
+- Adds execute-only `web_source_archive` behind `capability::execute` and
+  wires least-privilege grant derivation plus engine authorization scope/kind
+  checks for `web.read`, `web.write`, `resource.read`, `resource.write`, and
+  `web_source`.
+- Appends archived `web_source` versions with archive metadata while preserving
+  source payload/provenance and using `expectedWebSourceVersionId` CAS.
+- Updates `web_source_list` to default to active/fetched records and require
+  explicit `includeArchived` for archived records.
+- Keeps `web_source_inspect` able to inspect exact archived records for
+  replay/citation audit.
+- Keeps archive/list/inspect at `networkPolicy: none` with no network I/O.
+- Adds focused `web_archive_tests.rs` coverage for archive success, stale CAS,
+  wrong kind/scope, missing authority, idempotency replay, default list
+  filtering, explicit archived inclusion, archived inspect, and no-network
+  behavior.
+
+Candidate non-goals remain deferred: search providers, browser automation,
+crawling, robots/sitemap policy, login/cookies/session reuse, public `/engine`
+web APIs, native iOS source UI, deletion/erasure/pruning, automatic TTL cleanup,
+settings/profile fields, database migrations, and network-enabled jobs.
+
 ## Validation Log
 
 | Command | Result | Evidence |
