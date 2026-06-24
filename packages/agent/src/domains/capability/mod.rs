@@ -24,6 +24,9 @@
 //! Provider integrations must expose exactly this one tool. Additional behavior
 //! can only appear later as agent-owned state or generated helper substrate, not
 //! as checked-in target functions.
+//! File access through this tool must use the hardened `filesystem_*` operation
+//! package; legacy `file_read`/`file_write` operation names are not a supported
+//! model-facing surface.
 //! Agent-launched executions persist trace provider ownership and canonical
 //! working directory from trusted `CausalContext` runtime metadata, not from
 //! model-id string parsing, shell aliases, caller-supplied public context, or

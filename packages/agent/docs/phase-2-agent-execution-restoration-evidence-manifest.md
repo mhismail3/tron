@@ -207,6 +207,12 @@ Branch: `codex/phase-2-filesystem-agent-tools-current`
 
 Baseline HEAD: `4c35b2119`
 
+This section records branch-scoped implementation evidence for the Order 19
+filesystem slice. It is not a claim that Slice 4 is already integrated into the
+separate retrospective tracker/current consolidation line. Final all-slices
+consolidation must still port these branch artifacts or explicitly supersede
+them with truthful replacement evidence.
+
 Scope implemented:
 
 - Added a filesystem-domain agent toolbox separate from the iOS
@@ -226,9 +232,9 @@ Scope implemented:
   rollback previews, exact single-match text patches, expected-hash protection
   for existing-file commits, and mutating preview default behavior.
 - Post-closeout orchestrator review hardened truncated-snapshot handling:
-  existing-file commits now reject unverifiable current hashes instead of
-  accepting a `"missing"` sentinel, and exact-text patches refuse files larger
-  than the bounded preview limit rather than editing partial content.
+  committed writes to existing files reject unavailable current hashes, and
+  exact-text patches refuse files larger than the bounded preview limit rather
+  than editing partial content.
 - Kept provider-visible filesystem results relative to the authorized root; the
   resource/audit layer may retain canonical locations for committed materialized
   files.
@@ -244,7 +250,7 @@ Focused validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::filesystem -- --nocapture` | exit 0 | 14 filesystem tests passed after orchestrator hardening, covering workspace-browser regressions, parent traversal denial, symlink escape denial, bounded binary read preview, bounded text search with binary skip, preview/commit patch and materialized resources, hash/exact-match patch guards, truncated-snapshot write/patch refusal, and provider-boundary idempotency. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::filesystem -- --nocapture` | exit 0 | 17 filesystem tests passed after Order 19 audit hardening, covering workspace-browser regressions, parent traversal denial, symlink escape denial, bounded binary read preview, bounded text search with binary skip, preview/commit patch and materialized resources, hash/exact-match patch guards, direct package and `capability::execute` refusal for existing-file commits with unavailable hashes and exact patches on truncated previews, provider-boundary idempotency, and legacy `file_write` rejection. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test security_authority_capability_boundaries_invariants -- --nocapture` | exit 0 | 17 SACB tests passed after classifying filesystem package files, provider-visible execute ops, working-directory requirements, and mutating idempotency requirements without weakening the authority guards. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test true_modularity_boundary_invariants -- --nocapture` | exit 0 | 12 TMB tests passed; filesystem agent support crosses engine/resource boundaries through the engine host facade rather than private stores. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test hierarchical_rearchitecture_invariants -- --nocapture` | exit 0 | 35 HRA tests passed; new filesystem support files and ownership mappings are inventoried. |
@@ -254,7 +260,7 @@ Focused validation:
 | `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture` | exit 0 | 8 IARM tests passed; Slice 4 remains generic-result/resource rendering first and does not add native file/patch UI. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | 9 DESI tests passed after adding Slice 4 inventory and evidence rows. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --test off_plan_saa_authorship_teardown_cleanup_invariants -- --nocapture` | exit 0 | 11 OPSAA tests passed after classifying the filesystem package without restoring autonomous-authorship or generated-worker surfaces. |
-| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture` | exit 0 | 26 provider prompt/converter tests passed after documenting filesystem execute operation names and mutating-operation guardrails. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture` | exit 0 | 26 provider prompt/converter tests passed after documenting filesystem execute operation names, relative-path guidance, and preview/hash/idempotency instructions. Mutating refusal behavior is covered by filesystem/capability execution tests rather than by the provider converter. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability-domain tests passed with the filesystem execute operation dispatch path registered. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::registration::tests::primitive_teardown_startup_catalog_excludes_deleted_product_domains -- --nocapture` | exit 0 | 1 startup-catalog guard test passed after allowing the new Slice 4 filesystem function ids while continuing to reject retired legacy filesystem spellings. |
 | `scripts/personal-info-guard.sh` | exit 0 | Full scan reported no personal-info leaks in source. |
@@ -264,6 +270,22 @@ Focused validation:
 
 No Swift or Xcode project files changed, so XcodeGen and iOS simulator tests
 were not run for Slice 4.
+
+Order 19 audit-fix evidence on branch `codex/order-19-filesystem-tools-fix`:
+
+- Removed legacy `file_read`/`file_write` from provider schema, OpenAI prompt
+  guidance, authority working-directory classification, and
+  `capability::execute` dispatch. Regression coverage now proves `file_write`
+  is rejected through `capability::execute` and does not write a file.
+- Preserved trace file evidence for committed filesystem mutations by deriving
+  trace file records from hardened `filesystem_*` result metadata rather than
+  from legacy request content.
+- Narrowed provider/evidence claims: provider converter tests cover operation
+  names and prompt guidance; filesystem/capability execution tests cover
+  mutation refusals for unavailable hashes and truncated exact-patch previews.
+- Clarified that this Slice 4 evidence is branch-scoped historical evidence.
+  Final all-slices consolidation still must port these artifacts or truthfully
+  supersede them.
 
 Adversarial self-review:
 

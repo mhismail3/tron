@@ -20,8 +20,7 @@ use crate::engine::{
     RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
     RUNTIME_METADATA_WORKING_DIRECTORY,
 };
-use crate::shared::protocol::content::CapabilityResultContent;
-use crate::shared::protocol::model_capabilities::{CapabilityResult, CapabilityResultBody};
+use crate::shared::protocol::model_capabilities::CapabilityResult;
 use crate::shared::server::errors::CapabilityError;
 
 pub(super) fn trace_list(
@@ -330,50 +329,52 @@ fn trace_files_for_operation(
         .and_then(Value::as_str)
         .unwrap_or("")
     {
-        "file_write" => {
-            let path = required_str(&invocation.payload, "path").unwrap_or("<unknown>");
-            let content = required_str(&invocation.payload, "content").unwrap_or("");
-            vec![trace_file_record(path, content, "ai", model_id)]
-        }
-        "file_read" => {
-            let path = required_str(&invocation.payload, "path").unwrap_or("<unknown>");
-            let content = capability_result_text(result);
-            vec![trace_file_record(path, &content, "unknown", model_id)]
+        "filesystem_write" | "filesystem_edit" | "filesystem_apply_patch" => {
+            trace_files_for_filesystem_result(result, model_id)
         }
         _ => Vec::new(),
     }
 }
 
-fn trace_file_record(path: &str, content: &str, contributor_type: &str, model_id: &str) -> Value {
-    let line_count = content.lines().count().max(1);
+fn trace_files_for_filesystem_result(result: &CapabilityResult, model_id: &str) -> Vec<Value> {
+    let Some(details) = result.details.as_ref() else {
+        return Vec::new();
+    };
+    let filesystem = &details["filesystem"];
+    if filesystem["status"] != "committed" {
+        return Vec::new();
+    }
+    let Some(path) = filesystem
+        .pointer("/path/relativePath")
+        .and_then(Value::as_str)
+    else {
+        return Vec::new();
+    };
+    let Some(hash) = filesystem
+        .pointer("/materialized/contentHash")
+        .or_else(|| filesystem.pointer("/after/contentHash"))
+        .and_then(Value::as_str)
+    else {
+        return Vec::new();
+    };
+    vec![trace_file_hash_record(path, hash, model_id)]
+}
+
+fn trace_file_hash_record(path: &str, content_hash: &str, model_id: &str) -> Value {
     json!({
         "path": path,
         "conversations": [{
             "contributor": {
-                "type": contributor_type,
+                "type": "ai",
                 "model_id": model_id
             },
             "ranges": [{
                 "start_line": 1,
-                "end_line": line_count,
-                "content_hash": hash_bytes(content.as_bytes())
+                "end_line": 1,
+                "content_hash": format!("sha256:{content_hash}")
             }]
         }]
     })
-}
-
-fn capability_result_text(result: &CapabilityResult) -> String {
-    match &result.content {
-        CapabilityResultBody::Text(text) => text.clone(),
-        CapabilityResultBody::Blocks(blocks) => blocks
-            .iter()
-            .filter_map(|block| match block {
-                CapabilityResultContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    }
 }
 
 fn runtime_i64(invocation: &Invocation, key: &str) -> Option<i64> {

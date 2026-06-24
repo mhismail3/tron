@@ -173,8 +173,16 @@ pub async fn derive_capability_execute_grant(
                     "state.read",
                     "state.write"
                 ],
-                "allowedResourceKinds": ["agent_state"],
-                "resourceSelectors": ["kind:agent_state"],
+                "allowedResourceKinds": [
+                    "agent_state",
+                    "patch_proposal",
+                    "materialized_file"
+                ],
+                "resourceSelectors": [
+                    "kind:agent_state",
+                    "kind:patch_proposal",
+                    "kind:materialized_file"
+                ],
                 "fileRoots": [root],
                 "networkPolicy": network_policy,
                 "maxRisk": "medium",

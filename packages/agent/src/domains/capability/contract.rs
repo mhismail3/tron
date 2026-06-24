@@ -1,9 +1,9 @@
 //! Capability contracts owned by the capability domain worker.
 //!
 //! This worker is the model-facing harness collapse point: providers see one
-//! `execute` primitive that can observe, touch agent-owned state, read/write the
-//! workspace, run bounded local commands, and manage durable non-interactive
-//! jobs.
+//! `execute` primitive that can observe, touch agent-owned state, use hardened
+//! filesystem package operations, run bounded local commands, and manage durable
+//! non-interactive jobs.
 
 use serde_json::{Map, Value, json};
 
@@ -47,7 +47,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "name": "execute",
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
-                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, inspect agent trace/log records, inspect catalog discovery evidence, and use bounded filesystem package previews under the current working directory. ",
+                    "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, run a bounded local command, start/status/list/log/cancel durable non-interactive jobs, inspect agent trace/log records, and inspect catalog discovery evidence. ",
                     "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
@@ -68,7 +68,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "operation".to_owned(),
         json!({
             "type": "string",
-            "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+            "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
         }),
     );
     insert_string(&mut properties, "input", "Text to record for observe.");
@@ -91,7 +91,7 @@ fn execute_model_request_schema() -> serde_json::Value {
     insert_string(
         &mut properties,
         "content",
-        "UTF-8 file content for file_write.",
+        "UTF-8 file content for filesystem_write.",
     );
     insert_string(
         &mut properties,
@@ -265,6 +265,8 @@ mod tests {
             .expect("execute description");
         assert!(description.contains("Primitive host operation"));
         assert!(description.contains("Choose one operation per call"));
+        assert!(!description.contains("file_read"));
+        assert!(!description.contains("file_write"));
 
         let schema = execute_model_request_schema();
         assert_eq!(schema["required"], json!(["operation"]));
@@ -274,6 +276,15 @@ mod tests {
             "primitive execute should accept only its direct request shape"
         );
         assert_eq!(schema["properties"]["operation"]["type"], json!("string"));
+        let operations = schema["properties"]["operation"]["description"]
+            .as_str()
+            .expect("operation description");
+        assert!(operations.contains("filesystem_read"));
+        assert!(operations.contains("filesystem_write"));
+        assert!(
+            !operations.contains("file_read") && !operations.contains("file_write"),
+            "legacy file operations must not be model-reachable"
+        );
         assert!(schema["properties"].get("target").is_none());
         assert!(schema["properties"].get("contractId").is_none());
         assert!(schema["properties"].get("functionId").is_none());

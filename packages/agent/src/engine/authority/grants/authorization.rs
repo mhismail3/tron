@@ -225,9 +225,7 @@ fn capability_execute_requires_working_directory(invocation: &Invocation) -> boo
             .is_some_and(|operation| {
                 matches!(
                     operation,
-                    "file_read"
-                        | "file_write"
-                        | "filesystem_read"
+                    "filesystem_read"
                         | "filesystem_list"
                         | "filesystem_find"
                         | "filesystem_glob"

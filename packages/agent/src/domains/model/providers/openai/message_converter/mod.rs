@@ -144,8 +144,8 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         \n\
         ## Execute Operations\n\
         Each `execute` call performs one direct host operation. Set `operation` to exactly one of: \
-        `observe`, `state_get`, `state_set`, `state_list`, `file_read`, `file_write`, \
-        `filesystem_read`, `filesystem_list`, `filesystem_find`, `filesystem_glob`, \
+        `observe`, `state_get`, `state_set`, `state_list`, `filesystem_read`, \
+        `filesystem_list`, `filesystem_find`, `filesystem_glob`, \
         `filesystem_search_text`, `filesystem_diff`, `filesystem_write`, `filesystem_edit`, \
         `filesystem_apply_patch`, `process_run`, `job_start`, `job_status`, `job_list`, \
         `job_log`, `job_cancel`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
@@ -154,7 +154,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         Catalog discovery operations inspect metadata/conformance only and never execute discovered \
         functions. Put operation fields at the top level of the execute payload. \
         Use `observe` to record reasoning-relevant facts, state operations for agent-owned memory, \
-        primitive file operations for simple current-working-directory reads/writes, filesystem package \
+        filesystem package \
         operations for bounded read/list/find/glob/search/diff and preview-first write/edit/patch under \
         trusted roots, `process_run` for short bounded shell commands, job operations for durable \
         non-interactive command lifecycle/status/log/cancel, trace/log operations to inspect durable \
@@ -172,7 +172,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         ## Important Rules\n\
         1. Use one operation per `execute` call\n\
         2. Inspect files before changing them unless the user explicitly provides full replacement content\n\
-        3. Use relative paths under the current working directory unless an absolute path is clearly required\n\
+        3. Use relative paths under the current working directory\n\
         4. Prefer small, tested changes and record useful evidence through `observe` or trace inspection\n\
         5. When authority is unavailable, report the blocked state inside the current authority envelope\n\
         6. Be helpful, accurate, and efficient when working with code",

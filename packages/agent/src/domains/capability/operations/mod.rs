@@ -46,9 +46,8 @@ mod trace;
 
 use catalog::{catalog_conformance, catalog_inspect, catalog_search};
 use filesystem::{
-    file_read, file_write, filesystem_apply_patch, filesystem_diff, filesystem_edit,
-    filesystem_find, filesystem_glob, filesystem_list, filesystem_read, filesystem_search_text,
-    filesystem_write,
+    filesystem_apply_patch, filesystem_diff, filesystem_edit, filesystem_find, filesystem_glob,
+    filesystem_list, filesystem_read, filesystem_search_text, filesystem_write,
 };
 use jobs::{job_cancel, job_list, job_log, job_start, job_status};
 use logs::log_recent;
@@ -276,8 +275,6 @@ async fn execute_operation(
         "state_get" => state_get(invocation, deps).await?,
         "state_set" => state_set(invocation, deps).await?,
         "state_list" => state_list(invocation, deps).await?,
-        "file_read" => file_read(invocation).await?,
-        "file_write" => file_write(invocation).await?,
         "filesystem_read" => filesystem_read(invocation).await?,
         "filesystem_list" => filesystem_list(invocation).await?,
         "filesystem_find" => filesystem_find(invocation).await?,
@@ -306,7 +303,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, file_read, file_write, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }

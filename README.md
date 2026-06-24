@@ -915,8 +915,6 @@ Current primitive operations:
 | `state_get` | Read an agent-owned state value. |
 | `state_set` | Write an agent-owned state value. |
 | `state_list` | List agent-owned state entries for a scope/namespace. |
-| `file_read` | Read a UTF-8 file under the current working directory. |
-| `file_write` | Write UTF-8 content under the current working directory. |
 | `filesystem_read` | Read a bounded text preview under the trusted working-directory root; binary content bodies are omitted. |
 | `filesystem_list` | List bounded directory entries under the trusted working-directory root. |
 | `filesystem_find` | Walk bounded entries matching a simple name/path pattern without following symlinks. |
@@ -942,6 +940,10 @@ Current primitive operations:
 | `catalog_search` | Inspect visible workers, functions, schemas, health, protected omission counts, runtime surfaces, and report evidence without invoking catalog targets. |
 | `catalog_inspect` | Inspect one visible function, worker, trigger type, or trigger definition with schema/conformance hints and no target execution. |
 | `catalog_conformance` | Create an idempotent, resource-backed `catalog_discovery_report` plus stream evidence for visible catalog conformance and protected omission checks. |
+
+Legacy `file_read` and `file_write` operation names are not part of the
+provider-visible execute surface; file access goes through the hardened
+`filesystem_*` operation package.
 
 Startup registration currently keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
