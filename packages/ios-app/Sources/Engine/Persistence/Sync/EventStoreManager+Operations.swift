@@ -18,29 +18,16 @@ extension EventStoreManager {
         // CRITICAL: Tag with current server origin for filtering
         let serverOrigin = engineClient.serverOrigin
 
-        var session = CachedSession(
-            id: sessionId,
+        let session = Self.makeLocalNewSessionCache(
+            sessionId: sessionId,
             workspaceId: workspaceId,
-            rootEventId: nil,
-            headEventId: nil,
-            title: source == "chat" ? "Chat" : URL(fileURLWithPath: workingDirectory).lastPathComponent,
-            latestModel: model,
+            model: model,
             workingDirectory: workingDirectory,
-            createdAt: now,
-            lastActivityAt: now,
-            archivedAt: nil,
-            eventCount: 0,
-            messageCount: 0,
-            inputTokens: 0,
-            outputTokens: 0,
-            lastTurnInputTokens: 0,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0,
-            cost: 0,
+            source: source,
+            profile: profile,
+            now: now,
             serverOrigin: serverOrigin
         )
-        session.source = source
-        session.profile = profile
 
         try await eventDB.sessions.insert(session)
         loadSessions()
@@ -258,36 +245,14 @@ extension EventStoreManager {
             sourceSession = nil
         }
         let now = DateParser.now
-        let workingDir = sourceSession?.workingDirectory ?? ""
-        let workspaceName = URL(fileURLWithPath: workingDir).lastPathComponent
         // CRITICAL: Tag with current server origin for filtering
         let serverOrigin = engineClient.serverOrigin
-        var forkedSession = CachedSession(
-            id: result.newSessionId,
-            workspaceId: sourceSession?.workspaceId ?? workingDir,
-            rootEventId: result.rootEventId,
-            headEventId: result.rootEventId,
-            title: workspaceName.isEmpty ? nil : workspaceName,
-            latestModel: sourceSession?.latestModel ?? "unknown",
-            workingDirectory: workingDir,
-            createdAt: now,
-            lastActivityAt: now,
-            archivedAt: nil,
-            eventCount: 0,
-            messageCount: 0,
-            inputTokens: 0,
-            outputTokens: 0,
-            lastTurnInputTokens: 0,
-            cacheReadTokens: 0,
-            cacheCreationTokens: 0,
-            cost: 0.0,
-            lastUserPrompt: sourceSession?.lastUserPrompt,
-            lastAssistantResponse: sourceSession?.lastAssistantResponse,
-            isProcessing: false,
-            isFork: true,
+        let forkedSession = Self.makeLocalForkSessionCache(
+            result: result,
+            sourceSession: sourceSession,
+            now: now,
             serverOrigin: serverOrigin
         )
-        forkedSession.source = sourceSession?.source
         try await eventDB.sessions.insert(forkedSession)
         logger.info("[FORK] Inserted forked session into local DB", category: .session)
 
@@ -336,5 +301,84 @@ extension EventStoreManager {
         setActiveSessionId(nil)
         UserDefaults.standard.removeObject(forKey: "tron.activeSessionId")
         logger.info("Cleared all local data", category: .session)
+    }
+
+    /// Build the local cache row for a server-created session.
+    /// Untitled sessions intentionally keep `title` nil so the list uses its
+    /// `New Session` fallback until the server supplies a generated title.
+    static func makeLocalNewSessionCache(
+        sessionId: String,
+        workspaceId: String,
+        model: String,
+        workingDirectory: String,
+        source: String?,
+        profile: String?,
+        now: String,
+        serverOrigin: String
+    ) -> CachedSession {
+        var session = CachedSession(
+            id: sessionId,
+            workspaceId: workspaceId,
+            rootEventId: nil,
+            headEventId: nil,
+            title: source == "chat" ? "Chat" : nil,
+            latestModel: model,
+            workingDirectory: workingDirectory,
+            createdAt: now,
+            lastActivityAt: now,
+            archivedAt: nil,
+            eventCount: 0,
+            messageCount: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            lastTurnInputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            cost: 0,
+            serverOrigin: serverOrigin
+        )
+        session.source = source
+        session.profile = profile
+        return session
+    }
+
+    /// Build the local cache row for a forked session.
+    /// Workspace names stay on `workingDirectory` for grouping and are not
+    /// promoted into row titles for untitled forks.
+    static func makeLocalForkSessionCache(
+        result: SessionForkResult,
+        sourceSession: CachedSession?,
+        now: String,
+        serverOrigin: String
+    ) -> CachedSession {
+        let workingDir = sourceSession?.workingDirectory ?? ""
+        var session = CachedSession(
+            id: result.newSessionId,
+            workspaceId: sourceSession?.workspaceId ?? workingDir,
+            rootEventId: result.rootEventId,
+            headEventId: result.rootEventId,
+            title: nil,
+            latestModel: sourceSession?.latestModel ?? "unknown",
+            workingDirectory: workingDir,
+            createdAt: now,
+            lastActivityAt: now,
+            archivedAt: nil,
+            eventCount: 0,
+            messageCount: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            lastTurnInputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            cost: 0.0,
+            lastUserPrompt: sourceSession?.lastUserPrompt,
+            lastAssistantResponse: sourceSession?.lastAssistantResponse,
+            isProcessing: false,
+            isFork: true,
+            serverOrigin: serverOrigin
+        )
+        session.source = sourceSession?.source
+        session.profile = sourceSession?.profile
+        return session
     }
 }

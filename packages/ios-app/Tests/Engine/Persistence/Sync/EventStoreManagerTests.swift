@@ -47,6 +47,156 @@ final class CachedSessionTests: XCTestCase {
         XCTAssertEqual(session.cacheCreationTokens, 100)
     }
 
+    func testLocalNewSessionCacheDoesNotPromoteWorkspaceNameToTitle() {
+        let session = EventStoreManager.makeLocalNewSessionCache(
+            sessionId: "new-local-session",
+            workspaceId: "/tmp/tron-fixtures/Project",
+            model: "gpt-5",
+            workingDirectory: "/tmp/tron-fixtures/Project",
+            source: nil,
+            profile: nil,
+            now: "2026-06-23T12:00:00Z",
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertNil(session.title)
+        XCTAssertEqual(session.workingDirectory, "/tmp/tron-fixtures/Project")
+        XCTAssertEqual(session.listTitle, "New Session")
+    }
+
+    func testChatLocalNewSessionCacheKeepsAcceptedChatTitle() {
+        let session = EventStoreManager.makeLocalNewSessionCache(
+            sessionId: "chat-session",
+            workspaceId: "/tmp/tron-fixtures/Project",
+            model: "gpt-5",
+            workingDirectory: "/tmp/tron-fixtures/Project",
+            source: "chat",
+            profile: nil,
+            now: "2026-06-23T12:00:00Z",
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertEqual(session.title, "Chat")
+        XCTAssertEqual(session.source, "chat")
+        XCTAssertEqual(session.listTitle, "New Session")
+    }
+
+    func testLocalForkCacheDoesNotPromoteWorkspaceNameToTitle() {
+        let untitledSource = createTestSession(
+            id: "untitled-source-session",
+            title: nil,
+            workingDirectory: "/tmp/tron-fixtures/ForkWorkspace"
+        )
+
+        let untitledFork = EventStoreManager.makeLocalForkSessionCache(
+            result: SessionForkResult(
+                newSessionId: "untitled-forked-session",
+                forkedFromEventId: "source-event",
+                forkedFromSessionId: "untitled-source-session",
+                rootEventId: "fork-root"
+            ),
+            sourceSession: untitledSource,
+            now: "2026-06-23T12:05:00Z",
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertNil(untitledFork.title)
+        XCTAssertEqual(untitledFork.workingDirectory, "/tmp/tron-fixtures/ForkWorkspace")
+        XCTAssertEqual(untitledFork.listTitle, "New Session")
+
+        var sourceWithPrompt = createTestSession(
+            id: "source-session",
+            title: nil,
+            workingDirectory: "/tmp/tron-fixtures/ForkWorkspace"
+        )
+        sourceWithPrompt.lastUserPrompt = "Summarize the cache audit finding"
+        sourceWithPrompt.lastAssistantResponse = "Working on it"
+        sourceWithPrompt.source = nil
+        sourceWithPrompt.profile = "default"
+
+        let promptFallbackFork = EventStoreManager.makeLocalForkSessionCache(
+            result: SessionForkResult(
+                newSessionId: "forked-session",
+                forkedFromEventId: "source-event",
+                forkedFromSessionId: "source-session",
+                rootEventId: "fork-root"
+            ),
+            sourceSession: sourceWithPrompt,
+            now: "2026-06-23T12:05:00Z",
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertNil(promptFallbackFork.title)
+        XCTAssertEqual(promptFallbackFork.workingDirectory, "/tmp/tron-fixtures/ForkWorkspace")
+        XCTAssertEqual(promptFallbackFork.lastUserPrompt, "Summarize the cache audit finding")
+        XCTAssertEqual(promptFallbackFork.profile, "default")
+        XCTAssertEqual(promptFallbackFork.listTitle, "Summarize the cache audit finding")
+    }
+
+    func testServerGeneratedTitleReplacesLocalFallbackDuringMerge() {
+        let database = EventDatabase(
+            databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
+        )
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let existing = EventStoreManager.makeLocalNewSessionCache(
+            sessionId: "new-local-session",
+            workspaceId: "/tmp/tron-fixtures/Project",
+            model: "gpt-5",
+            workingDirectory: "/tmp/tron-fixtures/Project",
+            source: nil,
+            profile: nil,
+            now: "2026-06-23T12:00:00Z",
+            serverOrigin: "localhost:8080"
+        )
+        let serverInfo = makeSessionInfo(
+            sessionId: existing.id,
+            title: "Fix session list title fallback",
+            workingDirectory: existing.workingDirectory
+        )
+
+        let merged = manager.mergeSessionData(
+            existing: existing,
+            serverInfo: serverInfo,
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertEqual(merged.title, "Fix session list title fallback")
+        XCTAssertEqual(merged.listTitle, "Fix session list title fallback")
+    }
+
+    func testNilServerTitlePreservesLocalNewSessionFallbackDuringMerge() {
+        let database = EventDatabase(
+            databasePath: NSTemporaryDirectory() + "tron-title-merge-\(UUID().uuidString).db"
+        )
+        let engineClient = EngineClient(serverURL: URL(string: "ws://localhost:8080/engine")!)
+        let manager = EventStoreManager(eventDB: database, engineClient: engineClient)
+        let existing = EventStoreManager.makeLocalNewSessionCache(
+            sessionId: "new-local-session",
+            workspaceId: "/tmp/tron-fixtures/Project",
+            model: "gpt-5",
+            workingDirectory: "/tmp/tron-fixtures/Project",
+            source: nil,
+            profile: nil,
+            now: "2026-06-23T12:00:00Z",
+            serverOrigin: "localhost:8080"
+        )
+        let serverInfo = makeSessionInfo(
+            sessionId: existing.id,
+            title: nil,
+            workingDirectory: existing.workingDirectory
+        )
+
+        let merged = manager.mergeSessionData(
+            existing: existing,
+            serverInfo: serverInfo,
+            serverOrigin: "localhost:8080"
+        )
+
+        XCTAssertNil(merged.title)
+        XCTAssertEqual(merged.listTitle, "New Session")
+    }
+
     // MARK: - Helper
 
     private func createTestSession(
@@ -80,6 +230,39 @@ final class CachedSessionTests: XCTestCase {
             cost: 0.0,
             isProcessing: false,
             isFork: false
+        )
+    }
+
+    private func makeSessionInfo(
+        sessionId: String,
+        title: String?,
+        workingDirectory: String?
+    ) -> SessionInfo {
+        SessionInfo(
+            sessionId: sessionId,
+            model: "gpt-5",
+            createdAt: "2026-06-23T12:00:00Z",
+            eventCount: 0,
+            turnCount: 0,
+            messageCount: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            lastTurnInputTokens: 0,
+            cacheReadTokens: 0,
+            cacheCreationTokens: 0,
+            cost: 0,
+            lastActivity: "2026-06-23T12:10:00Z",
+            isActive: false,
+            isArchived: false,
+            workingDirectory: workingDirectory,
+            parentSessionId: nil,
+            title: title,
+            lastUserPrompt: nil,
+            lastAssistantResponse: nil,
+            source: nil,
+            profile: nil,
+            isRunning: false,
+            activityLines: nil
         )
     }
 }
