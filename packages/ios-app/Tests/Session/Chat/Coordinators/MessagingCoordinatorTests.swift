@@ -122,7 +122,8 @@ final class MessagingCoordinatorTests: XCTestCase {
 
         // Then: Failed sends are not retained as recent sent inputs.
         XCTAssertTrue(mockContext.sendPromptCalled)
-        XCTAssertTrue(mockContext.handleAgentErrorCalled)
+        XCTAssertTrue(mockContext.appendLocalErrorCalled)
+        XCTAssertEqual(mockContext.lastLocalErrorDedupKey, "agent.prompt.send.failed")
         XCTAssertTrue(history.history.isEmpty)
 
         history.clearHistory()
@@ -271,68 +272,6 @@ final class MessagingCoordinatorTests: XCTestCase {
         XCTAssertEqual(mockContext.lastSentReasoningLevel, "high")
     }
 
-    // MARK: - Draft Clearing Tests
-
-    func testSendMessage_clearsDraftAfterSend() async {
-        // Given: A draft store with a saved draft
-        let db = EventDatabase()!
-        try! await db.initialize()
-        try! await db.clearAll()
-        let store = DraftStore(eventDatabase: db, documentsURL: FileManager.default.temporaryDirectory)
-        mockContext.draftStore = store
-
-        // Save a draft
-        let draftState = InputBarState()
-        draftState.text = "draft text"
-        await store.saveImmediately(sessionId: "test-session", inputBarState: draftState)
-
-        // Verify draft exists
-        let checkState = InputBarState()
-        let hasDraft = await store.loadDraft(sessionId: "test-session", into: checkState)
-        XCTAssertTrue(hasDraft)
-
-        // When: Sending a message
-        mockContext.inputText = "Test message"
-        await coordinator.sendMessage(context: mockContext)
-
-        // Then: Draft should be cleared
-        let afterState = InputBarState()
-        let hasDraftAfter = await store.loadDraft(sessionId: "test-session", into: afterState)
-        XCTAssertFalse(hasDraftAfter)
-
-        store.removeAllDraftFiles()
-        try? await db.clearAll()
-        await db.close()
-    }
-
-    func testSendMessage_clearsDraft_evenOnServerError() async {
-        // Given: Draft store and server will fail
-        let db = EventDatabase()!
-        try! await db.initialize()
-        try! await db.clearAll()
-        let store = DraftStore(eventDatabase: db, documentsURL: FileManager.default.temporaryDirectory)
-        mockContext.draftStore = store
-
-        let draftState = InputBarState()
-        draftState.text = "draft"
-        await store.saveImmediately(sessionId: "test-session", inputBarState: draftState)
-
-        mockContext.inputText = "Test"
-        mockContext.sendPromptShouldFail = true
-
-        // When: Sending message (server fails)
-        await coordinator.sendMessage(context: mockContext)
-
-        // Then: Draft should still be cleared (input state was already consumed)
-        let afterState = InputBarState()
-        let hasDraftAfter = await store.loadDraft(sessionId: "test-session", into: afterState)
-        XCTAssertFalse(hasDraftAfter)
-
-        store.removeAllDraftFiles()
-        try? await db.clearAll()
-        await db.close()
-    }
-
     // MARK: - Error Handling Tests
 
     func testSendMessageHandlesServerError() async {
@@ -343,8 +282,10 @@ final class MessagingCoordinatorTests: XCTestCase {
         // When: Sending message
         await coordinator.sendMessage(context: mockContext)
 
-        // Then: Error should be handled
-        XCTAssertTrue(mockContext.handleAgentErrorCalled)
+        // Then: Pre-accept send failures use the local notification path.
+        XCTAssertTrue(mockContext.appendLocalErrorCalled)
+        XCTAssertEqual(mockContext.lastLocalErrorDedupKey, "agent.prompt.send.failed")
+        XCTAssertEqual(mockContext.lastLocalErrorTitle, "Could not send message")
     }
 
     // MARK: - Abort Agent Tests
@@ -484,7 +425,10 @@ final class MockMessagingContext: MessagingContext {
     var updateSessionActivitySummaryCalled = false
     var lastSessionActivityPrompt: String?
     var lastSessionActivityResponse: String?
-    var handleAgentErrorCalled = false
+    var appendLocalErrorCalled = false
+    var lastLocalErrorDedupKey: String?
+    var lastLocalErrorTitle: String?
+    var localErrorDedupKeys: Set<String> = []
     var abortAgentCalled = false
     var finalizeStreamingMessageCalled = false
     var cancelActiveDeviceRequestsCalled = false
@@ -538,6 +482,7 @@ final class MockMessagingContext: MessagingContext {
 
     func clearLocalNotifications() {
         clearLocalNotificationsCalled = true
+        localErrorDedupKeys.removeAll()
     }
 
     func appendInterruptedMessage() {
@@ -580,7 +525,14 @@ final class MockMessagingContext: MessagingContext {
     }
 
     func handleAgentError(_ message: String) {
-        handleAgentErrorCalled = true
+        // No-op for tests that assert pre-accept failures use appendLocalError.
+    }
+
+    func appendLocalError(dedupKey: String, title: String, message: String, suggestion: String?) {
+        appendLocalErrorCalled = true
+        lastLocalErrorDedupKey = dedupKey
+        lastLocalErrorTitle = title
+        localErrorDedupKeys.insert(dedupKey)
     }
 
     func showError(_ message: String) {

@@ -137,6 +137,31 @@ final class ConnectionCoordinatorTests: XCTestCase {
         XCTAssertFalse(mockContext.isReconstructing)
     }
 
+    func testReconstructionFailureSurfacesLocalLoadError() async {
+        mockContext.isConnected = true
+        mockContext.reconstructShouldFail = true
+
+        await coordinator.connectAndReconstruct(context: mockContext)
+
+        XCTAssertTrue(mockContext.appendLocalErrorCalled)
+        XCTAssertEqual(mockContext.lastLocalErrorDedupKey, "session.reconstruct.failed")
+        XCTAssertEqual(mockContext.lastLocalErrorTitle, "Could not load chat")
+        XCTAssertEqual(
+            mockContext.lastLocalErrorSuggestion,
+            "Check the connection, then reopen this chat to retry loading history."
+        )
+    }
+
+    func testSuccessfulEmptyReconstructionStaysQuiet() async {
+        mockContext.isConnected = true
+
+        await coordinator.connectAndReconstruct(context: mockContext)
+
+        XCTAssertFalse(mockContext.appendLocalErrorCalled)
+        XCTAssertFalse(mockContext.showErrorCalled)
+        XCTAssertTrue(mockContext.processReconstructionResultCalled)
+    }
+
     // MARK: - Reconnect Tests
 
     func testReconnectAndReconstructCallsReconstruct() async {
@@ -196,6 +221,11 @@ final class MockConnectionContext: ConnectionContext {
     var setSessionProcessingCalled = false
     var lastSessionProcessingValue: Bool?
     var showErrorCalled = false
+    var appendLocalErrorCalled = false
+    var lastLocalErrorDedupKey: String?
+    var lastLocalErrorTitle: String?
+    var lastLocalErrorMessage: String?
+    var lastLocalErrorSuggestion: String?
     var cleanUpStreamingStateCalled = false
     var drainEventBufferCalled = false
     var captureReconstructingDuringConnect = false
@@ -279,6 +309,14 @@ final class MockConnectionContext: ConnectionContext {
 
     func showError(_ message: String) {
         showErrorCalled = true
+    }
+
+    func appendLocalError(dedupKey: String, title: String, message: String, suggestion: String?) {
+        appendLocalErrorCalled = true
+        lastLocalErrorDedupKey = dedupKey
+        lastLocalErrorTitle = title
+        lastLocalErrorMessage = message
+        lastLocalErrorSuggestion = suggestion
     }
 
     // MARK: - Logging (no-op)

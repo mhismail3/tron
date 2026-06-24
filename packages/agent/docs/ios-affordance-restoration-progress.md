@@ -398,6 +398,8 @@ Commits:
 
 - `bb9057148 Restore chat visual affordances`
 - `09d155bda Remove empty chat placeholder`
+- Focused audit fix branch:
+  `codex/order-10-ios-chat-affordance-audit-fixes`
 
 Session analysis:
 
@@ -441,6 +443,12 @@ Approved and shipped:
   and retry failures, capability abort failure, model switch failure, message
   delete failure, transcription failure/no speech, photo processing failure,
   file-read failure, and file-too-large validation.
+- Focused audit fixes keep pre-accept server-send failures on the same
+  deduped local notification path, make retry reuse normal subscription,
+  notification clearing, processing-state, session-processing, and streaming
+  reset setup without consuming composer state, and surface
+  `session::reconstruct` load failure as a local retry-directed error while
+  successful empty sessions remain visually quiet.
 - Capability invocation chat chips now use
   `CapabilityEvidencePresentation`: inline chips are one line and details move
   to a sectioned sheet with summary, target/input/result/error, and technical

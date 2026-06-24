@@ -129,24 +129,16 @@ extension ChatViewModel {
             return
         }
 
-        logInfo("Retrying last turn (\"\(prompt.prefix(50))...\")")
-
         let fileAttachments: [FileAttachment]? = lastUserMessage.attachments?.map { attachment in
             FileAttachment(attachment: attachment)
         }
 
         Task {
-            do {
-                try await sendPromptToServer(
-                    text: prompt,
-                    attachments: fileAttachments,
-                    reasoningLevel: nil,
-                    idempotencyKey: .userAction("agent.prompt.retry")
-                )
-            } catch {
-                logError("Retry failed: \(error.localizedDescription)")
-                appendLocalError(dedupKey: "turn.retry.failed", title: "Could not retry", message: error.localizedDescription)
-            }
+            await messagingCoordinator.retryMessage(
+                prompt: prompt,
+                attachments: fileAttachments,
+                context: self
+            )
         }
     }
 
