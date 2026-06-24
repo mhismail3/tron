@@ -70,6 +70,38 @@ fn read_repo_file(path: &str) -> String {
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", full_path.display()))
 }
 
+fn collect_files_with_extensions(root: &Path, extensions: &[&str], files: &mut Vec<PathBuf>) {
+    if !root.exists() {
+        return;
+    }
+    for entry in std::fs::read_dir(root)
+        .unwrap_or_else(|error| panic!("failed to read directory {}: {error}", root.display()))
+    {
+        let entry = entry.unwrap_or_else(|error| {
+            panic!(
+                "failed to read directory entry under {}: {error}",
+                root.display()
+            )
+        });
+        let path = entry.path();
+        let file_type = entry
+            .file_type()
+            .unwrap_or_else(|error| panic!("failed to stat {}: {error}", path.display()));
+        if file_type.is_dir() {
+            collect_files_with_extensions(&path, extensions, files);
+            continue;
+        }
+        if !file_type.is_file() {
+            continue;
+        }
+        if let Some(extension) = path.extension().and_then(|extension| extension.to_str()) {
+            if extensions.contains(&extension) {
+                files.push(path);
+            }
+        }
+    }
+}
+
 fn git_output(args: &[&str]) -> String {
     let output = Command::new("git")
         .args(args)
@@ -937,6 +969,114 @@ fn phase_one_closeout_removes_retired_local_scaffolding_from_sources() {
         !chat_source_text.contains("AgentCockpitViewModel()"),
         "chat source must not instantiate the diagnostics-owned Agent cockpit"
     );
+}
+
+#[test]
+fn notification_inbox_apns_runtime_planes_remain_absent_after_slice_six_defer() {
+    let forbidden_paths = [
+        "packages/ios-app/Sources/Views/Notifications",
+        "packages/ios-app/Sources/UI/Notifications",
+        "packages/ios-app/Sources/Views/Capabilities/NotificationDelivery",
+        "packages/ios-app/Sources/UI/Capabilities/NotificationDelivery",
+        "packages/ios-app/Sources/Services/NotificationStore.swift",
+        "packages/ios-app/Sources/Support/Storage/NotificationStore.swift",
+        "packages/ios-app/Sources/Services/Notifications",
+        "packages/ios-app/Sources/Support/Notifications/PushNotificationService.swift",
+        "packages/ios-app/Sources/Services/Infrastructure/APNsEnvironment.swift",
+        "packages/ios-app/Sources/Support/Infrastructure/APNsEnvironment.swift",
+        "packages/ios-app/Sources/Services/Network/Clients/NotificationClient.swift",
+        "packages/ios-app/Sources/Engine/Network/Clients/NotificationClient.swift",
+        "packages/ios-app/Sources/Models/Messages/NotificationDeliveryTypes.swift",
+        "packages/ios-app/Sources/Session/Timeline/Messages/NotificationDeliveryTypes.swift",
+        "packages/ios-app/Sources/ViewModels/Handlers/ChatNotificationCoordinator.swift",
+        "packages/ios-app/Tests/Services/PushNotificationServiceTests.swift",
+        "packages/ios-app/Tests/Services/APNsEnvironmentTests.swift",
+        "packages/ios-app/Tests/Services/NotificationClientTests.swift",
+        "packages/ios-app/Tests/Services/NotificationStoreTests.swift",
+        "packages/ios-app/Tests/Views/NotificationInboxFilterTests.swift",
+        "packages/ios-app/Tests/Views/NotificationSheetPresentationTests.swift",
+        "packages/agent/src/domains/notifications",
+        "packages/agent/src/domains/device",
+        "packages/agent/src/platform/apns",
+        "packages/agent/src/platform/device_broker",
+    ];
+    for relative_path in forbidden_paths {
+        assert!(
+            !repo_path(relative_path).exists(),
+            "Slice 6 deferred runtime plane should stay absent: {relative_path}"
+        );
+    }
+
+    for entitlement in [
+        "packages/ios-app/TronMobileBeta.entitlements",
+        "packages/ios-app/TronMobileProd.entitlements",
+    ] {
+        assert!(
+            !read_repo_file(entitlement).contains("aps-environment"),
+            "{entitlement} must not restore APNs entitlement while Slice 6 is deferred"
+        );
+    }
+
+    let forbidden_tokens = [
+        "NotificationBellButton",
+        "NotificationListSheet",
+        "NotificationInboxDetailSheet",
+        "NotificationInboxFilter",
+        "NotificationSheetPresentation",
+        "NotificationClient",
+        "NotificationStore",
+        "NotificationDeliveryTypes",
+        "NotificationDeliveryView",
+        "ChatNotificationCoordinator",
+        "GitNotificationRouter",
+        "PushNotificationService",
+        "APNsEnvironment",
+        "UNUserNotificationCenter",
+        "registerForRemoteNotifications",
+        "didRegisterForRemoteNotifications",
+        "registerPushIfAuthorized",
+        "registerDeviceToken",
+        "DeviceTokenRegister",
+        "notifications::send",
+        "notifications::list",
+        "notifications::mark_read",
+        "notifications::mark_all_read",
+        "device::register",
+        "device::unregister",
+    ];
+    let mut source_files = Vec::new();
+    for root in [
+        "packages/ios-app/Sources",
+        "packages/ios-app/Tests",
+        "packages/agent/src",
+    ] {
+        collect_files_with_extensions(&repo_path(root), &["rs", "swift"], &mut source_files);
+    }
+    for file in [
+        "packages/ios-app/TronMobileBeta.entitlements",
+        "packages/ios-app/TronMobileProd.entitlements",
+        "packages/ios-app/Sources/Info.plist",
+    ] {
+        source_files.push(repo_path(file));
+    }
+    for path in source_files {
+        if path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("SourceGuardTests"))
+        {
+            continue;
+        }
+        let source = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+        for token in forbidden_tokens {
+            assert!(
+                !source.contains(token),
+                "Slice 6 defer guard found forbidden notification/APNs token `{token}` in {}",
+                path.display()
+            );
+        }
+    }
 }
 
 #[test]
