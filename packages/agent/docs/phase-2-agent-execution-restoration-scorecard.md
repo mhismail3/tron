@@ -51,13 +51,13 @@ Completed Phase 2 restoration slices at this baseline:
   lifecycle evidence.
 
 Current next action:
-Start discovery for the next Phase 2 Slice 6 source-control sub-slice from
-fresh `origin/main`. Slice 6C completed local staged-index commit creation;
-branch creation/checkout/deletion, detached-HEAD commits, merge/rebase/reset,
+Implement **Slice 6D: Git Branch Start Foundation** from fresh `origin/main`.
+Slice 6D is selected as a local branch create-and-switch boundary after
+accepted Slice 6C completed staged-index commit creation. Branch deletion,
+rename, arbitrary checkout, detached-HEAD commits, merge/rebase/reset,
 stash/clean, fetch/pull/push, PR handoff, conflict resolution workflows,
 worktree graph resources, public API expansion, production deployment
-behavior, and native SourceChanges UI remain deferred until a discovery packet
-selects the next narrow source-control boundary.
+behavior, and native SourceChanges UI remain deferred.
 
 ## Scope
 
@@ -769,11 +769,12 @@ Core/modular split as implemented:
   separate design problem and is deferred until a queued-internal-grant model
   is explicitly approved.
 
-Remaining non-goals after Slice 5A and accepted Slices 6A/6B:
+Remaining non-goals after Slice 5A and accepted Slices 6A/6B/6C:
 PTY/interactive terminal,
 interpreter or runtime package, git/worktree/source-control behavior beyond
-index-only stage/unstage, web/network behavior, subagents, scheduling, native
-iOS process panels, and production deployment behavior.
+read-only status/diff, index-only stage/unstage, and staged-index commit,
+web/network behavior, subagents, scheduling, native iOS process panels, and
+production deployment behavior.
 
 ### Slice 6: Git And Worktree Foundations
 
@@ -786,8 +787,9 @@ Accepted user-facing outcome: Slice 6A lets users inspect branch status,
 detached HEAD state, upstream/ahead-behind, dirty summaries, and bounded
 staged/unstaged diff evidence. Slice 6B adds explicit index-only stage/unstage
 for relative paths after expected HEAD, reason, idempotency, and conflict
-checks. Later sub-slices may add commits, conflict workflows, merges, rebases,
-pushes, and PR handoff with evidence after separate approval.
+checks. Slice 6C adds guarded staged-index commit evidence. Later sub-slices
+may add branch starts, conflict workflows, merges, rebases, pushes, and PR
+handoff with evidence after separate approval.
 
 True primitives: filesystem package, jobs package, resource graph, authority,
 replay, trace, and approval decisions.
@@ -804,7 +806,7 @@ Current files/areas: `packages/agent/src/domains/git/`,
 `packages/agent/src/domains/capability/operations/git.rs`,
 `packages/agent/src/engine/durability/resources/git_definitions.rs`, provider
 execute schema text, startup registration, docs, and deterministic Rust tests.
-Future areas: `domains/worktree`, commit/PR resources, conflict workflows, and
+Future areas: `domains/worktree`, branch/PR resources, conflict workflows, and
 iOS SourceChanges only after a stable higher-level source-control contract.
 
 Old evidence paths: `BPRC-FEATURE-05`, `BPRC-FEATURE-16`,
@@ -821,7 +823,8 @@ nested-repository misuse rejection, conflicted pathspec rejection, bounded
 before/after evidence, `git_index_change` resources, `git.lifecycle` stream
 events, idempotency replay, and static guards admitting no other Git mutation
 operation names. Later sub-slices own worktree acquisition/release, commit
-evidence, rollback, push/PR approval, conflict resources, and native iOS review.
+evidence beyond accepted Slice 6C, rollback, push/PR approval, conflict
+resources, and native iOS review.
 
 Implemented sub-slice: **Slice 6B: Git Index Mutation Foundation**.
 It adds `git_stage` and `git_unstage` operation values behind
@@ -1034,6 +1037,163 @@ retrospective tracker, provider instruction tests, and static guard inventories.
 
 User decisions: default branch naming, push/PR approval, native source-control
 UI scope, and conflict-resolution delegation.
+
+#### Selected Slice 6D Discovery Packet
+
+Exact next slice to implement: **Slice 6D: Git Branch Start Foundation**.
+
+Why this slice is next: accepted Slice 6C can create local commits, but the
+agent still cannot move work off the current integration branch before making
+or committing changes. A local branch-start operation is the narrowest useful
+follow-up because it enables a safe `codex/...` work branch without remote
+network behavior, PR handoff, arbitrary checkout, merge/rebase/reset,
+conflict-resolution UI, or worktree graph management.
+
+User-facing objective: let the agent create one new local branch at the
+currently reviewed HEAD and make it the current branch, preserving the existing
+index and worktree content exactly. This supports future local file/stage/commit
+work on a named task branch before any push or PR workflow exists.
+
+Core versus modular split:
+
+- Core/harness: reuse the existing `capability::execute` primitive, authority
+  grants, idempotency ledger, resource kernel, stream substrate, trace/replay
+  refs, and bounded Git command helpers. Add only generic resource definition
+  constants/schema wiring needed for a `git_branch_change` evidence resource.
+- Modular package: keep behavior in `domains/git`. Add backend branch-start
+  service code plus a provider-visible `git_branch_start` operation value
+  through `capability::execute`; do not add a second model-facing tool, public
+  `/engine` API, native iOS SourceChanges surface, or a broad `worktree` domain.
+- Mutation boundary: `git_branch_start` may create exactly one local
+  `refs/heads/<branchName>` ref at `expectedHead` and move symbolic `HEAD` to
+  that ref after rechecking the repository still has that head. It must not
+  run `git checkout`, write worktree files, stage/unstage, commit, delete or
+  rename branches, set upstreams, fetch, pull, push, merge, rebase, reset,
+  stash, clean, or create PRs.
+- Worktree preservation boundary: the operation must prove before/after index
+  and worktree evidence is unchanged except for branch identity. Staged,
+  unstaged, and untracked files may be preserved only when the target branch is
+  created at the current `expectedHead`; conflicted/unmerged index state and
+  in-progress merge/rebase/cherry-pick/sequencer state must reject.
+- Branch-name boundary: validate the caller-supplied branch name as a local
+  branch ref, require an allowed task-branch shape such as `codex/<slug>` unless
+  the implementation packet explicitly documents a narrower accepted pattern,
+  reject existing local branches, and reject branch names that resolve outside
+  `refs/heads/` or imply remote/upstream configuration.
+- Hook/network boundary: branch start must be non-interactive, must not run
+  checkout hooks, editors, pagers, credential prompts, GPG helpers, or network
+  commands, and must not modify production deployment state.
+
+Required request shape:
+
+- `operation: "git_branch_start"`;
+- `branchName`;
+- `expectedHead`;
+- optional `expectedCurrentBranch` for named-branch freshness;
+- non-empty `reason`;
+- explicit caller idempotency key through the existing provider boundary;
+- optional bounded evidence controls such as `maxStatusBytes` and
+  `maxDiffBytes`.
+
+Required resource/event shape:
+
+- Add a `git_branch_change` resource kind with schema id
+  `tron.resource.git_branch_change.v1`.
+- Resource payload should include schema version, operation
+  `branch_start`, state, repository facts, previous branch or detached-HEAD
+  marker, previous head, new branch name, branch ref, expected head, actual
+  head, reason, authority, before/after bounded status/diff evidence,
+  trace refs, replay refs, idempotency, revision, and created timestamp.
+- Resource lifecycle states should start with `committed` and `archived`.
+- Publish a `git.lifecycle` event such as `git.branch_started` pointing to the
+  resource and carrying branch name, branch ref, previous branch/head,
+  expected head, reason, authority grant id, and actor id.
+- Compensation should be best-effort before success: if branch ref creation
+  succeeds but the symbolic-HEAD switch fails before a committed result, delete
+  only the just-created branch when it still points at `expectedHead`. After a
+  committed result, compensation is manual-only; branch deletion/rename is a
+  future source-control slice.
+
+Likely implementation files/domains to inspect or touch:
+
+- `packages/agent/src/domains/git/{mod.rs,contract.rs,handlers.rs,service.rs,types.rs,tests.rs}`;
+- likely new `packages/agent/src/domains/git/branch.rs` plus small shared
+  helpers if the existing commit HEAD-lock/ref-update code should be reused;
+- `packages/agent/src/domains/capability/operations/{git.rs,mod.rs}`;
+- `packages/agent/src/domains/capability/contract.rs`;
+- `packages/agent/src/engine/durability/resources/{types.rs,git_definitions.rs}`;
+- `packages/agent/src/domains/model/providers/openai/message_converter/{mod.rs,tests.rs}`;
+- static guard inventories and tests under `packages/agent/tests/`, especially
+  BPRC, DESI, HRA, PCC, TPC, TMB, SACB, DRC, and IARM as touched;
+- README capability and Git/source-control sections plus this scorecard,
+  inventory, evidence manifest, and retrospective tracker closeout records.
+
+Deterministic tests required:
+
+- successful branch start from a named branch creates `refs/heads/<branchName>`
+  at `expectedHead`, moves symbolic `HEAD` to that branch, records the resource
+  ref and stream cursor, and leaves `rev-parse HEAD` unchanged;
+- staged, unstaged, and untracked worktree content is preserved byte-for-byte
+  and remains visible in before/after status evidence;
+- idempotency replay with the same caller key returns the original branch
+  resource/cursor and does not create or switch another branch;
+- stale `expectedHead` and mismatched `expectedCurrentBranch` reject before
+  creating a branch;
+- existing branch name, invalid branch name, remote-like branch name,
+  non-`codex/` branch name if that policy is selected, unborn HEAD, non-repo,
+  nested-repo misuse, absolute path/traversal/root escape, and missing trusted
+  working-directory metadata reject;
+- conflicted/unmerged index and in-progress merge/rebase/cherry-pick/sequencer
+  state reject;
+- checkout hooks, editors, pagers, credential prompts, GPG helpers, and network
+  commands are not invoked;
+- bounded before/after status and diff evidence reports truncation flags;
+- provider schema and instruction tests expose `git_branch_start` while
+  continuing to reject `git_checkout`, `git_branch_delete`,
+  `git_branch_rename`, `git_merge`, `git_rebase`, `git_reset`, `git_push`,
+  and other later source-control operation names;
+- resource-definition tests cover `git_branch_change` schema required fields,
+  lifecycle states, link relations, and required capabilities.
+
+Explicit non-goals:
+
+- no arbitrary branch checkout or switching to an existing branch;
+- no branch deletion, rename, upstream/tracking setup, default branch
+  auto-detection policy, or detached-HEAD commit support;
+- no file edits, staging/unstaging, commit creation, conflict resolution, or
+  index repair;
+- no merge, rebase, reset, revert, cherry-pick, stash, clean, fetch, pull,
+  push, remote configuration, or PR handoff;
+- no worktree graph resource acquisition/release or repo import/tree
+  visualization;
+- no native iOS SourceChanges UI or public `/engine` DTO expansion;
+- no production deployment behavior and no `tron deploy`;
+- no hidden approval policy changes. Push/PR approval and branch deletion
+  approval wait for later policy slices.
+
+Docs/static updates for implementation: README current operations and
+Git/source-control paragraph, Phase 2 scorecard/evidence/inventory,
+retrospective tracker, provider instruction tests, resource definition
+docs/tests, BPRC current-baseline wording, and static guard inventories.
+
+Validation commands:
+
+- `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`;
+- `cargo check --manifest-path packages/agent/Cargo.toml`;
+- `cargo test --manifest-path packages/agent/Cargo.toml git -- --nocapture`;
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture`;
+- `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::model::providers::openai::message_converter -- --nocapture`;
+- targeted static gates for touched inventories: BPRC, DESI, HRA, PCC, TPC,
+  TMB, SACB, DRC, and IARM as applicable;
+- `scripts/personal-info-guard.sh`;
+- `git diff --check`.
+
+iOS validation: no native SourceChanges UI is part of Slice 6D. Run iOS tests
+only if generic runtime/resource rendering changes.
+
+User decisions still deferred after Slice 6D: push/PR approval, arbitrary
+checkout policy, branch deletion/rename policy, native source-control UI scope,
+and conflict-resolution delegation.
 
 ### Slice 7: Goals, Queues, Questions, And Planning
 

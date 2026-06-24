@@ -683,6 +683,50 @@ Validation on final review and mainline closeout:
 - Mainline closeout reruns the same focused validation from `main` before
   pushing and records accepted commit ancestry in the orchestration summary.
 
+## Phase 2 Slice 6D Discovery: Git Branch Start Foundation
+
+Discovery branch: `codex/phase-2-slice-6d-discovery`.
+Baseline:
+`origin/main@1fa3e0009176a5c8df9a659e81e4f1329c4c2b96`
+(`docs: record slice 6c acceptance`).
+
+Discovery status: selected. Implementation may start from fresh `origin/main`;
+this discovery does not implement runtime behavior.
+
+Selected scope:
+
+- Add only a local `git_branch_start` source-control operation through the
+  existing `capability::execute` primitive and `domains/git` package boundary.
+- Create exactly one new local `refs/heads/<branchName>` ref at `expectedHead`
+  and move symbolic `HEAD` to that ref after freshness checks.
+- Preserve the current index and worktree content exactly; no `git checkout`,
+  file writes, stage/unstage, commit, branch deletion/rename, upstream setup,
+  remote/network command, PR handoff, merge/rebase/reset, stash/clean, conflict
+  workflow, worktree graph resource, native SourceChanges UI, or production
+  deployment behavior is in scope.
+- Require branch-name validation, expected head, reason, idempotency, trusted
+  working-directory repository checks, conflict/sequencer rejection, bounded
+  before/after evidence, `git_branch_change` resource evidence, and
+  `git.lifecycle` stream evidence.
+
+Discovery evidence:
+
+- Baseline was verified clean on `main` after `git fetch origin main`; local
+  `HEAD` and `origin/main` both resolved to
+  `1fa3e0009176a5c8df9a659e81e4f1329c4c2b96`.
+- Required canonical docs were read from the accepted Slice 6C mainline:
+  README capability/source-control sections, Phase 2 scorecard/evidence/
+  inventory artifacts, retrospective tracker, inventory TSV row
+  `P2AER-INV-013`, and `packages/agent/src/domains/git/mod.rs`.
+- Existing `domains/git` architecture shows a staged-state-only invariant with
+  status/diff, stage/unstage, and commit support. Branch start is the next
+  narrow local boundary before remote push/PR, conflict, merge/rebase/reset, or
+  native UI work.
+- The scorecard now contains the full Slice 6D handoff packet: objective,
+  user value, modular boundary, request/resource/event shape, likely files,
+  non-goals, safety risks, deterministic tests, docs/static updates, validation
+  commands, and residual decisions.
+
 ## Validation Log
 
 | Command | Result | Evidence |

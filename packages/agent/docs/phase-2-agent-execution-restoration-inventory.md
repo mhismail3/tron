@@ -198,4 +198,9 @@ narrow: explicit paths for index mutation, resource-backed evidence, lifecycle
 stream evidence, expected HEAD freshness, expected index-tree freshness for
 commit, idempotency, and static guards proving no branch, merge/rebase/reset,
 push/PR, worktree graph, conflict resolution workflow, or native SourceChanges
-surface was added.
+surface was added. The selected next discovery packet is Slice 6D Git Branch
+Start Foundation: a local-only `git_branch_start` operation that creates a new
+task branch at the current expected HEAD and moves symbolic `HEAD` to it while
+preserving index/worktree content. Branch deletion/rename, arbitrary checkout,
+remote push/PR, merge/rebase/reset, conflict workflows, worktree graph
+resources, and native SourceChanges remain deferred.
