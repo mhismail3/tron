@@ -1,9 +1,10 @@
 //! Git and worktree domain.
 //!
 //! This Phase 2 package restores source-control observation plus the narrow
-//! Slice 6C Git staged-index commit and Slice 6D branch-start foundations. It detects the repository
-//! containing a trusted runtime path, reports branch/upstream/dirty facts,
-//! returns bounded status/diff evidence, stages/unstages explicit relative
+//! Slice 6C Git staged-index commit, Slice 6D branch-start, and Slice 6E
+//! branch-inventory foundations. It detects the repository containing a trusted
+//! runtime path, reports branch/upstream/dirty facts, returns bounded
+//! status/diff and branch-list evidence, stages/unstages explicit relative
 //! paths, creates one guarded single-parent commit from the already-staged
 //! index, and creates one local branch at the expected `HEAD` before moving the
 //! symbolic `HEAD` through a guarded ref/OID check in the existing
@@ -13,6 +14,7 @@
 //!
 //! | Module | Purpose |
 //! |--------|---------|
+//! | `branch_inventory` | Read-only bounded local branch inventory evidence |
 //! | `branch_start` | Local branch creation plus symbolic `HEAD` movement |
 //! | `commit` | Staged-index commit implementation and evidence |
 //! | `contract` | Read and index-mutation `git::*` function contracts and schemas |
@@ -38,10 +40,14 @@
 //! checkout, hooks, remotes, index mutation, or worktree file updates; if
 //! symbolic `HEAD` movement fails, the just-created ref is removed only when it
 //! still points at the expected OID. Caller-controlled status/diff byte limits
-//! affect evidence only, never mutation eligibility.
+//! affect evidence only, never mutation eligibility. Branch inventory is
+//! read-only: it enumerates local `refs/heads/*`, computes ahead/behind only
+//! against already-present local upstream refs, and never fetches, switches,
+//! creates, deletes, renames, or contacts remotes.
 
 use crate::domains::registration::worker::{DomainRegistrationContext, DomainWorkerModule};
 
+pub(crate) mod branch_inventory;
 pub(crate) mod branch_start;
 pub(crate) mod commit;
 pub(crate) mod contract;

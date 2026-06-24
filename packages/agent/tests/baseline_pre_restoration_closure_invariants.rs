@@ -529,7 +529,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "git_branch_start",
             "accepted Slice 6C adds staged-index commit evidence",
             "accepted Slice 6D adds",
-            "selected Slice 6E is read-only local branch inventory evidence",
+            "Slice 6E implementation candidate adds read-only local branch inventory evidence",
         ],
         &[
             "Slice 6B adds explicit `git_stage`/`git_unstage` index mutation",
@@ -539,6 +539,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "Slice 6C Accepted Implementation",
             "Slice 6D Accepted Implementation",
             "Phase 2 Slice 6E Discovery: Git Branch Inventory Foundation",
+            "Phase 2 Slice 6E Implementation Candidate",
         ],
     );
     let phase_two_inventory_doc =
@@ -571,17 +572,18 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "Slice 6D docs must not retain pre-acceptance candidate wording after integration"
     );
     assert!(
-        phase_two_inventory_doc.contains("source-control slice is Slice 6E")
-            && phase_two_inventory_doc.contains("read-only local branch inventory"),
-        "Slice 6E discovery docs must identify the next read-only branch inventory boundary"
+        phase_two_inventory_doc.contains("Slice 6E now has an implementation")
+            && phase_two_inventory_doc.contains("candidate for read-only local branch inventory")
+            && phase_two_inventory_doc.contains("`git_branch_inventory`"),
+        "Slice 6E docs must identify the read-only branch inventory candidate boundary"
     );
     let phase_two_inventory_tsv =
         read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-inventory.tsv");
     assert!(
-        phase_two_inventory_tsv
-            .contains("selected Slice 6E is read-only local branch inventory evidence")
-            && phase_two_inventory_tsv.contains("\tSlice 6E\t"),
-        "Slice 6E discovery must update the machine-readable P2AER inventory row"
+        phase_two_inventory_tsv.contains(
+            "Slice 6E implementation candidate adds read-only local branch inventory evidence"
+        ) && phase_two_inventory_tsv.contains("\tSlice 6E\t"),
+        "Slice 6E candidate must update the machine-readable P2AER inventory row"
     );
     let phase_two_evidence_doc = read_repo_file(
         "packages/agent/docs/phase-2-agent-execution-restoration-evidence-manifest.md",
@@ -589,24 +591,25 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
     assert!(
         phase_two_evidence_doc
             .contains("Phase 2 Slice 6E Discovery: Git Branch Inventory Foundation")
-            && phase_two_evidence_doc.contains("Implementation may start from fresh `origin/main`"),
-        "Slice 6E discovery evidence must record handoff status"
+            && phase_two_evidence_doc.contains("Phase 2 Slice 6E Implementation Candidate")
+            && phase_two_evidence_doc.contains("candidate pending independent review"),
+        "Slice 6E evidence must record discovery and pending-review candidate status"
     );
     let phase_two_scorecard =
         read_repo_file("packages/agent/docs/phase-2-agent-execution-restoration-scorecard.md");
     assert!(
         phase_two_scorecard.contains("Selected Slice 6E Discovery Packet")
-            && phase_two_scorecard.contains("Implement Slice 6E from fresh `origin/main`"),
-        "Slice 6E discovery scorecard must carry the implementation handoff packet"
+            && phase_two_scorecard.contains("Slice 6E Implementation Candidate")
+            && phase_two_scorecard.contains("Review the Slice 6E implementation candidate"),
+        "Slice 6E scorecard must carry the handoff packet and implementation candidate status"
     );
     let retrospective_tracker =
         read_repo_file("packages/agent/docs/restoration-retrospective-audit-status.md");
     assert!(
         retrospective_tracker.contains("Phase 2 Slice 6D: Git Branch Start Foundation")
-            && retrospective_tracker
-                .contains("Next source-control handoff after accepted Slice 6D")
-            && retrospective_tracker.contains("read-only Git branch inventory foundation"),
-        "retrospective tracker must include accepted Slice 6D and the Slice 6E handoff"
+            && retrospective_tracker.contains("Phase 2 Slice 6E: Git Branch Inventory Foundation")
+            && retrospective_tracker.contains("Pending independent review"),
+        "retrospective tracker must include accepted Slice 6D and pending Slice 6E candidate"
     );
     let normalized_inventory_doc = phase_two_inventory_doc
         .split_whitespace()
@@ -631,6 +634,7 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         }
     }
     let git_source = read_repo_file("packages/agent/src/domains/git/mod.rs")
+        + &read_repo_file("packages/agent/src/domains/git/branch_inventory.rs")
         + &read_repo_file("packages/agent/src/domains/git/branch_start.rs")
         + &read_repo_file("packages/agent/src/domains/git/contract.rs")
         + &read_repo_file("packages/agent/src/domains/git/commit.rs")

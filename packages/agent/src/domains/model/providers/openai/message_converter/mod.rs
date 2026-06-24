@@ -147,7 +147,7 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         `observe`, `state_get`, `state_set`, `state_list`, `filesystem_read`, \
         `filesystem_list`, `filesystem_find`, `filesystem_glob`, \
         `filesystem_search_text`, `filesystem_diff`, `filesystem_write`, `filesystem_edit`, \
-        `filesystem_apply_patch`, `git_status`, `git_diff`, `git_stage`, `git_unstage`, `git_commit`, `git_branch_start`, `process_run`, `job_start`, `job_status`, `job_list`, \
+        `filesystem_apply_patch`, `git_status`, `git_diff`, `git_branch_inventory`, `git_stage`, `git_unstage`, `git_commit`, `git_branch_start`, `process_run`, `job_start`, `job_status`, `job_list`, \
         `job_log`, `job_cancel`, `trace_list`, `trace_get`, `log_recent`, `replay_manifest`, \
         `catalog_search`, `catalog_inspect`, `catalog_conformance`, `memory_status`, `memory_list`, or `memory_inspect`. \
         Do not send `target`, `contractId`, `functionId`, or `arguments`. \
@@ -156,8 +156,8 @@ pub fn generate_capability_instruction_text(capabilities: &[ModelCapability]) ->
         Use `observe` to record reasoning-relevant facts, state operations for agent-owned memory, \
         filesystem package \
         operations for bounded read/list/find/glob/search/diff and preview-first write/edit/patch under \
-        trusted roots, `git_status` and `git_diff` for read-only repository/worktree status and \
-        bounded staged/unstaged diff evidence, `git_stage` and `git_unstage` for explicit relative-path Git index \
+        trusted roots, `git_status`, `git_diff`, and `git_branch_inventory` for read-only repository/worktree status, \
+        bounded staged/unstaged diff evidence, and bounded local branch inventory, `git_stage` and `git_unstage` for explicit relative-path Git index \
         mutations that require `expectedHead`, `reason`, and a stable `idempotencyKey`, `git_commit` for one already-staged index commit with `message`, `expectedHead`, `expectedIndexTree`, `reason`, and `idempotencyKey`, `git_branch_start` for one new local branch at `expectedHead` with `branchName`, `reason`, and `idempotencyKey` without checkout/file updates, `process_run` for short bounded shell commands, job operations for durable \
         non-interactive command lifecycle/status/log/cancel, trace/log operations to inspect durable \
         execution records, `replay_manifest` to \

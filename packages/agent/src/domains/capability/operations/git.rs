@@ -20,6 +20,17 @@ pub(super) async fn git_diff(invocation: &Invocation) -> Result<CapabilityResult
     git_result("git_diff", result)
 }
 
+pub(super) async fn git_branch_inventory(
+    invocation: &Invocation,
+) -> Result<CapabilityResult, CapabilityError> {
+    let result = crate::domains::git::branch_inventory::branch_inventory_value(
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
+    git_result("git_branch_inventory", result)
+}
+
 pub(super) async fn git_stage(
     invocation: &Invocation,
     deps: &Deps,

@@ -861,6 +861,42 @@ Discovery evidence:
   deterministic tests, docs/static updates, validation commands, and residual
   decisions.
 
+## Phase 2 Slice 6E Implementation Candidate: Git Branch Inventory Foundation
+
+Candidate branch: `codex/phase-2-slice-6e-branch-inventory-v2`.
+Implementation baseline:
+`origin/main@2241def83033d3bb49836b0d6b1ecf3c36fc8c39`
+(`docs: shape slice 6e branch inventory handoff`).
+
+Implementation status: candidate pending independent review, fix loop if
+needed, mainline integration, push, and ancestry proof. This section is not an
+acceptance claim.
+
+Candidate evidence:
+
+- Adds read-only `git_branch_inventory` behind the existing
+  `capability::execute` primitive; no direct `git::branch_inventory` catalog
+  contract and no branch-inventory resource kind are added.
+- Implements branch inventory under `packages/agent/src/domains/git/` with
+  trusted-root repository validation shared with prior Git slices.
+- Returns current branch or detached `HEAD` evidence, sorted local branch
+  rows, local branch refs/names/OIDs, optional local upstream/ahead-behind
+  counts, bounded last-commit subject/time/author metadata, and explicit
+  `maxBranches`/`maxBranchBytes` truncation metadata.
+- Rejects non-repo paths, traversal, missing trusted working-directory
+  metadata, and nested-repo misuse.
+- Keeps later mutation scope deferred: checkout/switch, branch deletion/rename,
+  upstream setup, merge/rebase/reset/revert/cherry-pick, stash/clean,
+  fetch/pull/push, PR handoff, worktree graph resources, public `/engine`
+  DTOs, native SourceChanges UI, and production deployment behavior.
+
+Candidate validation recorded before review:
+
+- `cargo test --manifest-path packages/agent/Cargo.toml git_branch_inventory -- --nocapture`
+  passed with six focused tests covering sorted/current branch evidence,
+  detached `HEAD`, upstream/no-upstream, count/byte truncation, unusual branch
+  names, path/repo rejection, and provider execute boundary.
+
 ## Validation Log
 
 | Command | Result | Evidence |

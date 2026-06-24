@@ -42,7 +42,7 @@ The TSV covers tracked and newly introduced files under:
 | Classification | Count |
 |----------------|------:|
 | primitive | 109 |
-| implementation | 591 |
+| implementation | 592 |
 | support | 385 |
 | test | 519 |
 | docs | 131 |
@@ -63,7 +63,7 @@ The TSV covers tracked and newly introduced files under:
 | `domain_worker` | 6 |
 | `engine` | 104 |
 | `filesystem` | 7 |
-| `git` | 8 |
+| `git` | 9 |
 | `jobs` | 8 |
 | `ios` | 98 |
 | `ios_engine` | 138 |

@@ -928,6 +928,7 @@ Current primitive operations:
 | `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
 | `git_status` | Inspect trusted-root repository state: branch or detached HEAD, upstream/ahead-behind, dirty summaries, and bounded porcelain evidence. |
 | `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers. |
+| `git_branch_inventory` | Return bounded read-only local branch inventory evidence: current/detached state, sorted local branch refs, OIDs, upstream/ahead-behind when locally available, and last-commit metadata. |
 | `git_stage` | Stage one explicit relative path into the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_unstage` | Remove one explicit relative path from the Git index after idempotency, reason, expected-HEAD, trusted-root, and conflict checks; records bounded before/after evidence. |
 | `git_commit` | Accepted Slice 6C operation that creates one guarded single-parent commit from the already-staged index on the current named branch after idempotency, reason, expected-HEAD, and expected-index-tree checks; records commit resource and stream evidence. |
@@ -994,15 +995,18 @@ staged-index commit evidence; commit is not registered as a direct `git::*`
 catalog function. Accepted Slice 6D adds the local-only
 `git_branch_start` execute operation for creating one new local branch at the
 current expected `HEAD` and moving symbolic `HEAD` to it after rechecking the
-old symbolic ref and OID without checkout or file updates.
+old symbolic ref and OID without checkout or file updates. Slice 6E adds the
+read-only `git_branch_inventory` execute operation for bounded local branch
+inventory evidence without branch mutation or remote access.
 Provider-visible access remains operation values behind the single
-`capability::execute` primitive: `git_status`, `git_diff`, `git_stage`,
-`git_unstage`, `git_commit`, and `git_branch_start`. The implementation resolves only
-relative paths under trusted working-directory metadata, rejects path traversal
-and worktree-root escapes, reports branch/detached HEAD/upstream/ahead-behind/
-dirty summaries, returns bounded status/diff evidence, exposes the staged index
-tree without writing repository tree objects, and requires idempotency key,
-human/action reason, and expected HEAD for mutation. Successful stage/unstage
+`capability::execute` primitive: `git_status`, `git_diff`,
+`git_branch_inventory`, `git_stage`, `git_unstage`, `git_commit`, and
+`git_branch_start`. The implementation resolves only relative paths under
+trusted working-directory metadata, rejects path traversal and worktree-root
+escapes, reports branch/detached HEAD/upstream/ahead-behind/dirty summaries,
+returns bounded status/diff and branch-inventory evidence, exposes the staged
+index tree without writing repository tree objects, and requires idempotency
+key, human/action reason, and expected HEAD for mutation. Successful stage/unstage
 operations create `git_index_change` resources and publish `git.lifecycle`
 stream evidence. Accepted Slice 6C `git_commit` creates exactly one single-parent commit
 from the already-staged index on the current named branch after expected HEAD and
@@ -1022,6 +1026,11 @@ misuse, and merge/rebase/cherry-pick/sequencer states, rolls back the newly
 created branch ref if locked symbolic `HEAD` movement fails while it still
 points at `expectedHead`, and proves checkout, hooks, remotes,
 merge/rebase/reset, index mutation, and worktree file updates are not invoked.
+Slice 6E `git_branch_inventory` enumerates only local `refs/heads/*`, reports
+the current branch or detached HEAD, serializes sorted branch names/refs/OIDs,
+computes ahead/behind only from already-present local upstream refs, retains
+bounded last-commit metadata, and records explicit count/byte truncation
+metadata without adding a durable resource kind.
 Merges, rebases, resets, pushes, arbitrary branch checkout, branch
 deletion/rename, conflict resolution
 workflows, PR handoff, worktree graph resources, and native iOS SourceChanges

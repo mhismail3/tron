@@ -1096,11 +1096,12 @@ packages/agent/src/domains/jobs/types.rs	rust	contract	agent:jobs	may be shared 
 packages/agent/src/engine/durability/resources/job_definitions.rs	rust	implementation	rust:engine	owner-private resource definition module; callers use engine resource facade
 packages/agent/src/domains/capability/operations/git.rs	rust	implementation	agent:capability	owner-private execute adapter; callers enter through capability::execute
 packages/agent/src/domains/git/mod.rs	rust	facade	agent:git	domain root owns registration and docs; implementation stays in owner modules
+packages/agent/src/domains/git/branch_inventory.rs	rust	implementation	agent:git	owner-private read-only local branch inventory and bounded evidence; callers enter through capability::execute
 packages/agent/src/domains/git/branch_start.rs	rust	implementation	agent:git	owner-private local branch-start and evidence; callers enter through capability::execute
 packages/agent/src/domains/git/commit.rs	rust	implementation	agent:git	owner-private staged-index commit and evidence; callers enter through capability::execute
 packages/agent/src/domains/git/contract.rs	rust	contract	agent:git	may be shared across registration while preserving git owner schemas
 packages/agent/src/domains/git/handlers.rs	rust	implementation	agent:git	owner-private handler bindings; external callers use registered functions
 packages/agent/src/domains/git/mutation.rs	rust	implementation	agent:git	owner-private index-only mutation and evidence; callers use registered functions
 packages/agent/src/domains/git/service.rs	rust	implementation	agent:git	owner-private status, diff, path, and git command service; callers use registered functions
-packages/agent/src/domains/git/types.rs	rust	implementation	agent:git	owner-private request, result, and evidence helpers for status/index/commit/branch-start; callers must use git contracts or facade
+packages/agent/src/domains/git/types.rs	rust	implementation	agent:git	owner-private request, result, and evidence helpers for status/index/commit/branch-start/branch-inventory; callers must use git contracts or facade
 packages/agent/src/engine/durability/resources/git_definitions.rs	rust	implementation	rust:engine	owner-private Git evidence resource definition module; callers use engine resource facade

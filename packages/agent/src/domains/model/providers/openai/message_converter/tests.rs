@@ -449,6 +449,7 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("filesystem_write"));
     assert!(result.contains("git_status"));
     assert!(result.contains("git_diff"));
+    assert!(result.contains("git_branch_inventory"));
     assert!(result.contains("git_stage"));
     assert!(result.contains("git_unstage"));
     assert!(result.contains("git_commit"));

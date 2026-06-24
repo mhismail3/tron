@@ -8,10 +8,15 @@ pub(super) const SCHEMA_VERSION: &str = "tron.git_readonly.v1";
 pub(super) const INDEX_CHANGE_SCHEMA_VERSION: &str = "tron.git_index_change.v1";
 pub(super) const COMMIT_SCHEMA_VERSION: &str = "tron.git_commit.v1";
 pub(super) const BRANCH_START_SCHEMA_VERSION: &str = "tron.git_branch_start.v1";
+pub(super) const BRANCH_INVENTORY_SCHEMA_VERSION: &str = "tron.git_branch_inventory.v1";
 pub(super) const DEFAULT_STATUS_BYTES: usize = 64 * 1024;
 pub(super) const MAX_STATUS_BYTES: usize = 200 * 1024;
 pub(super) const DEFAULT_DIFF_BYTES: usize = 64 * 1024;
 pub(super) const MAX_DIFF_BYTES: usize = 128 * 1024;
+pub(super) const DEFAULT_BRANCH_COUNT: usize = 200;
+pub(super) const MAX_BRANCH_COUNT: usize = 500;
+pub(super) const DEFAULT_BRANCH_BYTES: usize = 64 * 1024;
+pub(super) const MAX_BRANCH_BYTES: usize = 200 * 1024;
 pub(super) const MAX_COMMIT_MESSAGE_BYTES: usize = 8 * 1024;
 
 #[derive(Clone)]
