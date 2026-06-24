@@ -220,9 +220,12 @@ async fn execute_catalog_search_emits_structured_agent_logs() {
 }
 
 #[tokio::test]
-async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
+async fn execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it() {
     let runtime = test_runtime();
     let workspace = tempfile::tempdir().unwrap();
+    let target = workspace.path().join("notes/trace.txt");
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, "before\n").unwrap();
     let created = runtime
         .ctx
         .event_store
@@ -238,9 +241,11 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
     let write_value = invoke_execute(
         &runtime.ctx,
         json!({
-            "operation": "file_write",
+            "operation": "filesystem_write",
             "path": "notes/trace.txt",
             "content": "traceable\ncontent\n",
+            "expectedHash": "9160d4be34c8695bd172a76c7c7966587ea5a4d991ad22c87b2b91af54aa9ebb",
+            "commit": true,
             "reason": "prove primitive trace capture"
         }),
         causal_context(
@@ -258,7 +263,11 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
     let write_result: CapabilityResult = serde_json::from_value(write_value).unwrap();
     assert_eq!(
         write_result.details.as_ref().unwrap()["primitiveOperation"],
-        "file_write"
+        "filesystem_write"
+    );
+    assert_eq!(
+        write_result.details.as_ref().unwrap()["filesystem"]["status"],
+        "committed"
     );
 
     let list_value = invoke_execute(
@@ -287,10 +296,10 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
     let write_record = records
         .iter()
         .find(|record| {
-            record["metadata"]["dev.tron"]["operation"] == "file_write"
+            record["metadata"]["dev.tron"]["operation"] == "filesystem_write"
                 && record["metadata"]["dev.tron"]["providerInvocationId"] == "provider-call-write-1"
         })
-        .expect("file_write trace record");
+        .expect("filesystem_write trace record");
     let write_record = write_record.clone();
     let write_record_id = write_record["id"].as_str().unwrap().to_owned();
 
@@ -315,7 +324,7 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
     let get_result: CapabilityResult = serde_json::from_value(get_value).unwrap();
     assert_eq!(
         get_result.details.as_ref().unwrap()["record"]["metadata"]["dev.tron"]["operation"],
-        "file_write"
+        "filesystem_write"
     );
     assert_eq!(
         get_result.details.as_ref().unwrap()["record"]["id"],
@@ -328,7 +337,7 @@ async fn execute_file_write_records_agent_trace_and_trace_list_exposes_it() {
         write_record["metadata"]["dev.tron"]["traceId"],
         trace_id.as_str()
     );
-    assert_eq!(write_record["metadata"]["dev.tron"]["status"], "ok");
+    assert_eq!(write_record["metadata"]["dev.tron"]["status"], "committed");
     assert_eq!(
         write_record["metadata"]["dev.tron"]["authority"]["scopes"],
         json!(["capability.execute"])

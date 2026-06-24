@@ -452,6 +452,76 @@ async fn execute_filesystem_write_requires_idempotency_at_provider_boundary() {
     assert!(error.contains("requires an idempotencyKey"));
 }
 
+#[tokio::test]
+async fn execute_rejects_legacy_file_write_operation() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let target = root.path().join("legacy.txt");
+    let error = invoke_error(
+        &ctx,
+        "capability::execute",
+        json!({
+            "operation": "file_write",
+            "path": "legacy.txt",
+            "content": "bypass"
+        }),
+        execute_context(&ctx, root.path(), "legacy-file-write-rejected", true).await,
+    )
+    .await;
+    assert!(error.contains("Unsupported primitive execute operation 'file_write'"));
+    assert!(!target.exists());
+}
+
+#[tokio::test]
+async fn execute_filesystem_write_commit_refuses_truncated_existing_hash() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let target = root.path().join("large.txt");
+    let large = format!("header\n{}", "tail\n".repeat(70_000));
+    fs::write(&target, &large).expect("large file");
+
+    let error = invoke_error(
+        &ctx,
+        "capability::execute",
+        json!({
+            "operation": "filesystem_write",
+            "path": "large.txt",
+            "content": "replacement\n",
+            "expectedHash": "missing",
+            "commit": true
+        }),
+        execute_context(&ctx, root.path(), "execute-large-write-refused", true).await,
+    )
+    .await;
+    assert!(error.contains("hash is unavailable"));
+    assert_eq!(fs::read_to_string(&target).unwrap(), large);
+}
+
+#[tokio::test]
+async fn execute_filesystem_apply_patch_refuses_truncated_preview() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let target = root.path().join("large.txt");
+    let large = format!("needle\n{}", "tail\n".repeat(70_000));
+    fs::write(&target, &large).expect("large file");
+
+    let error = invoke_error(
+        &ctx,
+        "capability::execute",
+        json!({
+            "operation": "filesystem_apply_patch",
+            "path": "large.txt",
+            "oldText": "needle",
+            "newText": "changed",
+            "commit": true
+        }),
+        execute_context(&ctx, root.path(), "execute-large-patch-refused", true).await,
+    )
+    .await;
+    assert!(error.contains("refuses files larger"));
+    assert_eq!(fs::read_to_string(&target).unwrap(), large);
+}
+
 async fn invoke_ok(
     ctx: &ServerRuntimeContext,
     function_id: &str,
@@ -504,6 +574,44 @@ fn client_context(root: &Path, key: &str, write: bool) -> CausalContext {
     );
     if write {
         context = context.with_scope(WRITE_SCOPE).with_idempotency_key(key);
+    }
+    context
+}
+
+async fn execute_context(
+    ctx: &ServerRuntimeContext,
+    root: &Path,
+    key: &str,
+    idempotent: bool,
+) -> CausalContext {
+    let trace_id = TraceId::new(key).unwrap();
+    let session_id = format!("{key}-session");
+    let workspace_id = format!("{key}-workspace");
+    let actor_id = ActorId::new(format!("agent:{session_id}")).unwrap();
+    let grant_id = derive_execute_grant(
+        ctx,
+        &actor_id,
+        trace_id.clone(),
+        &session_id,
+        &workspace_id,
+        root,
+    )
+    .await;
+    let mut context = CausalContext::new(actor_id, ActorKind::Agent, grant_id, trace_id)
+        .with_scope("capability.execute")
+        .with_session_id(session_id)
+        .with_workspace_id(workspace_id)
+        .with_runtime_metadata(
+            RUNTIME_METADATA_WORKING_DIRECTORY,
+            root.display().to_string(),
+        )
+        .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_INVOCATION_ID, key)
+        .with_runtime_metadata(RUNTIME_METADATA_PROVIDER_TYPE, "openai")
+        .with_runtime_metadata(RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, "execute")
+        .with_runtime_metadata(RUNTIME_METADATA_RUN_ID, format!("run-{key}"))
+        .with_runtime_metadata(RUNTIME_METADATA_TURN, "1");
+    if idempotent {
+        context = context.with_idempotency_key(key);
     }
     context
 }

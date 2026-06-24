@@ -1,8 +1,8 @@
 //! Capability contracts owned by the capability domain worker.
 //!
 //! This worker is the model-facing harness collapse point: providers see one
-//! `execute` primitive that can observe, touch agent-owned state, read/write the
-//! workspace, and run bounded local commands.
+//! `execute` primitive that can observe, touch agent-owned state, use hardened
+//! filesystem package operations, and run bounded local commands.
 
 use serde_json::json;
 
@@ -46,7 +46,7 @@ pub(crate) fn model_metadata(function_id: &str) -> serde_json::Value {
                         "name": "execute",
                         "description": concat!(
                             "Primitive host operation for the bare Tron loop. ",
-                    "Use execute to observe, read/write agent-owned state, read/write files under the current working directory, run a bounded local command, inspect agent trace/log records, inspect catalog discovery evidence, and use bounded filesystem package previews under the current working directory. ",
+                    "Use execute to observe, read/write agent-owned state, read and mutate files only through bounded filesystem package operations under the current working directory, run a bounded local command, inspect agent trace/log records, and inspect catalog discovery evidence. ",
                     "It can also export the current session replay manifest without side effects and inspect redacted memory status/record audit evidence. ",
                     "Choose one operation per call. Catalog discovery operations inspect metadata and conformance only; they do not execute discovered capabilities. Keep mutation reasons and idempotency keys in this payload when they matter for evidence."
                 ),
@@ -69,7 +69,7 @@ fn execute_model_request_schema() -> serde_json::Value {
         "properties": {
             "operation": {
                 "type": "string",
-                "description": "One primitive operation: observe, state_get, state_set, state_list, file_read, file_write, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                "description": "One primitive operation: observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
             },
             "input": {"type": "string", "description": "Text to record for observe."},
             "scope": {"type": "string", "description": "State scope: session, workspace, or system."},
@@ -77,7 +77,7 @@ fn execute_model_request_schema() -> serde_json::Value {
             "key": {"type": "string", "description": "Agent-owned state key."},
             "value": {"description": "JSON value for state_set."},
             "path": {"type": "string", "description": "Relative file path under the current working directory."},
-            "content": {"type": "string", "description": "UTF-8 file content for file_write."},
+            "content": {"type": "string", "description": "UTF-8 file content for filesystem_write."},
             "oldText": {"type": "string", "description": "Exact text to replace for filesystem_edit or filesystem_apply_patch."},
             "newText": {"type": "string", "description": "Replacement text for filesystem_edit or filesystem_apply_patch."},
             "expectedHash": {"type": "string", "description": "Expected SHA-256 content hash before a filesystem commit."},
@@ -133,6 +133,8 @@ mod tests {
             .expect("execute description");
         assert!(description.contains("Primitive host operation"));
         assert!(description.contains("Choose one operation per call"));
+        assert!(!description.contains("file_read"));
+        assert!(!description.contains("file_write"));
 
         let schema = execute_model_request_schema();
         assert_eq!(schema["required"], json!(["operation"]));
@@ -142,6 +144,15 @@ mod tests {
             "primitive execute should accept only its direct request shape"
         );
         assert_eq!(schema["properties"]["operation"]["type"], json!("string"));
+        let operations = schema["properties"]["operation"]["description"]
+            .as_str()
+            .expect("operation description");
+        assert!(operations.contains("filesystem_read"));
+        assert!(operations.contains("filesystem_write"));
+        assert!(
+            !operations.contains("file_read") && !operations.contains("file_write"),
+            "legacy file operations must not be model-reachable"
+        );
         assert!(schema["properties"].get("target").is_none());
         assert!(schema["properties"].get("contractId").is_none());
         assert!(schema["properties"].get("functionId").is_none());

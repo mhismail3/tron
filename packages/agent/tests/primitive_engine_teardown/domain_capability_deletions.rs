@@ -407,7 +407,7 @@ fn agent_trace_records_are_first_class_and_agent_visible() {
 
     let integration_test = read_repo_file("packages/agent/tests/primitive_trace_execution.rs");
     for required in [
-        "execute_file_write_records_agent_trace_and_trace_list_exposes_it",
+        "execute_filesystem_write_records_agent_trace_and_trace_list_exposes_it",
         "execute_process_run_expands_home_alias_in_trace_working_directory",
         "execute_log_recent_exposes_bounded_session_trace_logs",
         "\"operation\": \"trace_list\"",

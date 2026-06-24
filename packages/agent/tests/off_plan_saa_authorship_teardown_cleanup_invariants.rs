@@ -29,8 +29,6 @@ const RETAINED_EXECUTE_OPS: &[&str] = &[
     "state_get",
     "state_set",
     "state_list",
-    "file_read",
-    "file_write",
     "filesystem_read",
     "filesystem_list",
     "filesystem_find",

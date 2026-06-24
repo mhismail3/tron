@@ -445,7 +445,10 @@ fn clarification_includes_capability_execution_guidance() {
     let result = generate_capability_instruction_text(&[]);
     assert!(result.contains("Execute Operations"));
     assert!(result.contains("state_get"));
-    assert!(result.contains("file_write"));
+    assert!(result.contains("filesystem_read"));
+    assert!(result.contains("filesystem_write"));
+    assert!(!result.contains("file_read"));
+    assert!(!result.contains("file_write"));
     assert!(result.contains("process_run"));
     assert!(result.contains("trace_list"));
     assert!(result.contains("replay_manifest"));
@@ -468,6 +471,8 @@ fn clarification_forbids_probe_calls_when_user_supplies_exact_payload() {
     assert!(result.contains("Catalog discovery operations inspect metadata/conformance only"));
     assert!(result.contains("Put operation fields at the top level"));
     assert!(result.contains("Use one operation per `execute` call"));
+    assert!(result.contains("Use relative paths under the current working directory"));
+    assert!(!result.contains("absolute path is clearly required"));
     assert!(result.contains("When authority is unavailable"));
 }
 
