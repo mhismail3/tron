@@ -979,14 +979,25 @@ Discovery validation:
 - `cargo test --manifest-path packages/agent/Cargo.toml --test ios_affordance_restoration_map_invariants -- --nocapture`
   passed with 14 tests.
 
-## Phase 2 Slice 8A Implementation Candidate: Web Fetch And Source Provenance Foundation
+## Phase 2 Slice 8A Accepted Implementation: Web Fetch And Source Provenance Foundation
 
 Implementation branch: `codex/phase-2-slice-8a-web-fetch-source-provenance`.
 Baseline:
 `origin/main@49a47cc1902a958eb775bcb5a3a28913d0d3aefb`
 (`docs: accept phase 2 slice 7a`).
+Accepted commits:
+`f5b0bb0895f9f829541bfa426453b59cf0a401cd`,
+`37e835d7b575ef3b4063a5c0da0b050fd6f8b192`, and
+`77f0620545b4d277c0288cc9503e2d90cdf7e0b8`.
+Threads:
+implementation `019efaed-2665-72c2-aa07-11c1ba094076`, initial review
+`019efb09-38db-7f20-9e12-e8424180b747`, focused fix
+`019efb12-6784-7943-a134-41cb1669dc18`, first re-review
+`019efb24-c729-7502-a099-a504b54190df`, second focused fix
+`019efb2d-dced-7cf1-a139-a4c9c6c5aded`, and final accepting re-review
+`019efb3c-e2b3-7950-b1f6-56cc884c509e`.
 
-Candidate implementation evidence:
+Accepted implementation evidence:
 
 - Added the `web` domain owner for direct fetch source provenance without
   adding public `web::*` catalog functions.
@@ -1000,22 +1011,46 @@ Candidate implementation evidence:
   operations and derives `networkPolicy: declared` only for `web_fetch`, with
   `web_source` as the additional resource kind.
 - Fetch validation rejects unsupported schemes, credentials, fragments,
-  malformed or overlong URLs, and unsafe local/internal targets except
-  deterministic HTTP loopback test targets.
+  malformed or overlong URLs, unsafe IPv4/IPv6 literals, unsafe DNS-resolved
+  socket addresses, and unsafe redirect targets except deterministic HTTP
+  loopback test targets.
 - Fetch execution uses structured URL parsing and `reqwest`, not shell/process
   network paths, browser sessions, cookies, credentials, or provider search
   APIs.
 
-Candidate validation run so far:
+Review findings and fixes:
+
+- Initial review found redirect targets could be fetched before validation,
+  domain hosts could resolve to local/internal IPs, and README startup wording
+  could be read as accepting the candidate too early.
+- Focused fix `37e835d7b575ef3b4063a5c0da0b050fd6f8b192` added redirect
+  target validation before `follow()`, canonical host and resolver filtering,
+  deterministic regressions, and candidate-scoped README wording.
+- First re-review found IPv6 site-local/IPv4-compatible edge gaps and missing
+  `network_policy.rs` inventory coverage.
+- Focused fix `77f0620545b4d277c0288cc9503e2d90cdf7e0b8` rejects `fec0::/10`,
+  unsafe IPv4-compatible `::/96`, and unsafe IPv4-translated embeddings,
+  adds URL-literal and DNS-override regressions, and covers
+  `network_policy.rs` in HRA, SACB, PCC, TMB, and TPC inventories.
+- Final re-review returned `slice accepted` with no findings.
+
+Accepted validation:
 
 | Command | Result | Notes |
 |---------|--------|-------|
 | `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Compile check passed with pre-existing dead-code warnings. |
-| `cargo test --manifest-path packages/agent/Cargo.toml domains::web -- --nocapture` | exit 0 | 5 focused web-domain tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml domains::web -- --nocapture` | exit 0 | 10 focused web-domain tests passed, including unsafe IPv6 URL-literal and DNS-override regressions. |
 | `cargo test --manifest-path packages/agent/Cargo.toml --lib domains::capability -- --nocapture` | exit 0 | 3 capability schema tests passed. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Formatting passed. |
+| Static/inventory invariant bundle for SACB, HRA, TMB, TPC, PCC, BPRC, IARM, DESI, and public protocol | exit 0 | Static inventories and public-surface claims passed in implementation/fix/re-review validation. |
+| `git diff --check 49a47cc1902a958eb775bcb5a3a28913d0d3aefb..77f0620545b4d277c0288cc9503e2d90cdf7e0b8` | exit 0 | Whitespace check passed for accepted range. |
+| `git ls-files -ci --exclude-standard` | exit 0 | No tracked ignored files. |
+| `scripts/personal-info-guard.sh` | exit 0 | Personal-info guard passed. |
 
-Candidate status: pending independent review and mainline integration. Do not
-treat Slice 8A as accepted/current baseline until the review process closes.
+Deferred scope: search providers, browser automation, crawling, sitemap
+traversal, robots policy, login/cookies/session reuse, credential reuse, shell
+or process network side channels, native iOS web/source UI, public `/engine`
+web APIs, and network-enabled jobs remain deferred to later slices.
 
 ## Phase 2 Slice 7A Accepted Implementation: Goal And Question Foundation
 

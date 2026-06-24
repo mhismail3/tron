@@ -24,18 +24,20 @@ Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
 Current implementation baseline verified by this update:
-`main@db05cd467ff028530df043dc754dfd252c2211ac`
-(`docs: record slice 6e acceptance`). That line includes accepted Slice 6A
+`main@77f0620545b4d277c0288cc9503e2d90cdf7e0b8`
+(`fix: close web fetch ipv6 policy gaps`) plus the Slice 8A closeout
+documentation commit. That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
 stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
 6D local branch-start evidence, accepted Slice 6E read-only branch inventory
-evidence, and mainline closeout documentation through Slice 6E.
+evidence, accepted Slice 7A goal/question lifecycle evidence, and accepted
+Slice 8A web fetch/source provenance evidence.
 
 Closeout note: this update verified current `origin/main` after accepted Slice
-6E and records the next goal/question discovery boundary here and in the
-companion artifacts. No smaller source-control follow-up is required before the
-next Phase 2 slice: later Git branch checkout/delete/rename, remote, conflict,
-worktree graph, and native SourceChanges work remains intentionally deferred.
+8A and records the next Slice 8 discovery boundary here and in the companion
+artifacts. Direct URL fetch provenance is accepted; later search providers,
+browser automation, crawling, robots policy, login/cookies/session reuse, native
+source UI, public `/engine` web APIs, and network-enabled jobs remain deferred.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -57,16 +59,20 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 6E: read-only local branch inventory evidence through
   `git_branch_inventory`, including bounded truncated metadata handling;
 - Slice 7A: durable goal/question lifecycle records, bounded backend evidence,
-  and explicit execute authority/resource checks without autonomous execution.
+  and explicit execute authority/resource checks without autonomous execution;
+- Slice 8A: direct `web_fetch` source provenance with declared-network
+  authority, bounded evidence, `web_source` resources, and no search/browser
+  scope.
 
 Current next action:
-Start discovery from fresh `origin/main` for **Slice 8: Web, Research,
-Browser, And Fetch**, unless discovery identifies a smaller required
-source-control or goal/question follow-up in the current canonical docs. Slice 7A is
-accepted as the durable backend goal/question foundation only; autonomous goal
-execution, full planning, native Work/question UI, public `/engine` goal APIs,
-fetch/pull/push, PR handoff, production deployment behavior, and native
-SourceChanges UI remain deferred.
+Start discovery from fresh `origin/main` for the next **Slice 8: Web,
+Research, Browser, And Fetch** sub-slice unless the current canonical docs
+identify a narrower required follow-up. Slice 8A is accepted as direct fetch
+source provenance only; search providers, browser automation, crawling, robots
+policy, login/cookies/session reuse, native source UI, public `/engine` web
+APIs, network-enabled jobs, autonomous goal execution, fetch/pull/push, PR
+handoff, production deployment behavior, and native SourceChanges UI remain
+deferred.
 
 ## Scope
 
@@ -1661,15 +1667,19 @@ dependency inventory.
 User decisions: allowed search/fetch providers, default network mode,
 retention, and browser automation scope.
 
-#### Slice 8A Implementation Candidate: Web Fetch And Source Provenance Foundation
+#### Slice 8A Accepted Implementation: Web Fetch And Source Provenance Foundation
 
 Implementation branch:
 `codex/phase-2-slice-8a-web-fetch-source-provenance`.
 Baseline:
 `origin/main@49a47cc1902a958eb775bcb5a3a28913d0d3aefb`
 (`docs: accept phase 2 slice 7a`).
+Accepted commits:
+`f5b0bb0895f9f829541bfa426453b59cf0a401cd`,
+`37e835d7b575ef3b4063a5c0da0b050fd6f8b192`, and
+`77f0620545b4d277c0288cc9503e2d90cdf7e0b8`.
 
-Candidate scope:
+Accepted scope:
 
 - Add `domains/web` as the package owner for direct URL fetch source
   provenance, without adding public `web::*` catalog functions.
@@ -1696,17 +1706,24 @@ Non-goals:
   network side channel, native iOS web UI, public `/engine` expansion, or
   network-enabled `job_*` behavior.
 
-Candidate validation:
+Accepted validation:
 
 - Focused web-domain tests cover declared-network authority denial, successful
   deterministic loopback fetch, URL validation, redirects/final URL evidence,
   byte/output truncation, content-type handling, redaction, hash/source
-  evidence, and idempotent replay without duplicate durable evidence.
+  evidence, unsafe IPv4/IPv6 and DNS-result rejection, and idempotent replay
+  without duplicate durable evidence.
 - Capability schema tests cover `web_fetch` exposure and reject non-goal names
   such as `web_search`, `browser_open`, `browser_click`, `web_crawl`,
   `web_login`, and network-enabled `job_*` variants.
-- Review and mainline acceptance remain pending; this section must not be
-  treated as current baseline until accepted by the review/integration process.
+- Initial review found redirect-target validation and DNS/internal-IP gaps plus
+  README acceptance wording; focused fix `37e835d7` added redirect validation
+  before follow, resolver filtering, and candidate-scoped docs.
+- Re-review found IPv6 site-local/IPv4-compatible edge gaps and missing
+  `network_policy.rs` static inventory rows; focused fix `77f06205` added
+  deterministic regressions and inventory coverage.
+- Final independent re-review `019efb3c-e2b3-7950-b1f6-56cc884c509e`
+  returned `slice accepted` with no findings.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

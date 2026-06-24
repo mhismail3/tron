@@ -410,9 +410,9 @@ Current living entry points:
 - `packages/agent/docs/restoration-retrospective-audit-status.md`: active
   retrospective audit tracker for the ordered completed-slice queue, audit
   constraints, first-audit target, accepted deferred scope, and current
-  Phase 2 Slice 5A, accepted Slice 6A read-only git/worktree baseline,
-  accepted Slice 6B Git index mutation foundation, and accepted Slice 6C Git
-  commit evidence foundation.
+  Phase 2 Slice 5A, accepted Slice 6A through Slice 6E source-control
+  foundations, accepted Slice 7A goal/question foundation, and accepted Slice
+  8A web fetch/source provenance foundation.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -973,9 +973,7 @@ provider-visible execute surface; file access goes through the hardened
 The accepted startup-registration baseline keeps only loop infrastructure domains:
 `system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
-`worker_lifecycle`, and model-provider modules. On this candidate branch only,
-the pending Slice 8A `web` domain is registered for review; it is not part of
-the accepted/current baseline until mainline acceptance. The
+`worker_lifecycle`, `web`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
 limited to `filesystem::get_home`, `filesystem::list_dir`, and
 `filesystem::create_dir`, while agent-facing read/list/find/glob/search/diff/
@@ -1023,8 +1021,8 @@ empty, oversized, missing-reason, or untrusted-context calls fail closed.
 This foundation does not add an autonomous goal runner, planner, hidden prompt
 queue, scheduler/reminder, notification/APNs behavior, subagents, public
 `/engine` goal API expansion, settings fields, or native Work/question UI.
-The Slice 8A implementation candidate adds the `web` domain as a source
-provenance owner without adding direct public `web::*` catalog functions.
+The accepted Slice 8A foundation adds the `web` domain as a source provenance
+owner without adding direct public `web::*` catalog functions.
 Provider-visible access remains the single `capability::execute` primitive with
 one new operation value: `web_fetch`. Direct fetch requires a trusted
 agent/system runtime context, current session, idempotency key, allowed
@@ -1040,8 +1038,7 @@ and error details, sanitized source/final URLs, replay refs, and idempotent
 `web_source` resource/cache evidence on `web.lifecycle`. Search providers,
 browser automation, crawling, sitemap traversal, robots policy, login/cookies,
 credential reuse, shell/process network side channels, native iOS web UI, and
-public `/engine` web API expansion remain deferred pending review and mainline
-integration.
+public `/engine` web API expansion remain deferred to later slices.
 The accepted Slice 6A read-only source-control foundation registers the `git`
 domain with `git::status` and `git::diff` backend read contracts, while Slice
 6B adds the narrow `git::stage` and `git::unstage` index-only write contracts.

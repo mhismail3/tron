@@ -232,8 +232,8 @@ The accepted review/fix loop added explicit `capability::execute` scope,
 resource-kind, and selector checks for goal/question operations before handler
 execution.
 
-`P2AER-INV-012` has a Slice 8A implementation candidate, not an accepted
-baseline: Web Fetch And Source Provenance Foundation. The candidate adds
+`P2AER-INV-012` is current baseline after accepted Slice 8A:
+Web Fetch And Source Provenance Foundation. Slice 8A adds
 `domains/web` as the package owner, one execute-only `web_fetch` operation,
 declared-network authority checks, bounded direct fetch, sanitized URL/final
 URL evidence, content-type handling, deterministic byte/output truncation
@@ -242,4 +242,4 @@ replay refs, idempotent `web_source` resource/cache evidence, and
 `web.lifecycle` stream evidence. Search providers, browser automation, crawling,
 robots policy, login/cookies/session reuse, credential handling, public
 `/engine` web APIs, native iOS source UI, and network-enabled jobs remain
-deferred pending review and mainline integration.
+deferred to later Slice 8 sub-slices.

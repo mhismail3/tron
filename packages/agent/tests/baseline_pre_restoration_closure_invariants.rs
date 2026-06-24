@@ -686,15 +686,15 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "BPRC-FEATURE-04",
         "web_browser",
         "Slice 8: Web, Research, Browser, And Fetch",
-        "implementation_candidate",
+        "current_baseline",
         &[
-            "Slice 8A implementation candidate",
+            "Accepted Slice 8A",
             "web_fetch",
             "web_source",
             "domains/web",
         ],
         &[
-            "Phase 2 Slice 8A Implementation Candidate",
+            "Phase 2 Slice 8A Accepted Implementation",
             "`web_fetch`",
             "`web_source`",
         ],
