@@ -46,13 +46,13 @@ Completed Phase 2 restoration slices at this baseline:
   hardening.
 
 Current next action:
-**Complete independent review for the Phase 2 Slice 6A implementation
-candidate**. Slice 6A uses the explicit 2026-06-24 implementation order as
+**Start fresh discovery for the next Phase 2 Slice 6 sub-slice** from current
+`origin/main`. Slice 6A used the explicit 2026-06-24 implementation order as
 authority for a fresh read-only foundation after source-resolution found no
 recoverable historical implementation branch. The missing old source is no
-longer a blocker for building the 6A candidate, but 6A is still pending
-independent acceptance and mainline integration. Mutating source-control
-behavior still requires a later slice shape and review.
+longer a blocker for Slice 6A, and independent review accepted the read-only
+foundation for mainline integration. Mutating source-control behavior still
+requires a later slice shape and review.
 
 ## Scope
 
@@ -764,32 +764,30 @@ Core/modular split as implemented:
   separate design problem and is deferred until a queued-internal-grant model
   is explicitly approved.
 
-Remaining non-goals after Slice 5A and the Slice 6A candidate:
+Remaining non-goals after Slice 5A and accepted Slice 6A:
 PTY/interactive terminal,
 interpreter or runtime package, mutating git/worktree/source-control behavior,
 web/network behavior, subagents, scheduling, native iOS process panels, and
-production deployment behavior. Slice 6A follow-up fixes remain branch-scoped
-candidate work until independent review accepts them and integration promotes
-them.
+production deployment behavior.
 
 ### Slice 6: Git, Worktrees, And Source Control
 
 Objective: restore source-control workflows over durable worktree resources.
-The Slice 6A implementation candidate begins with read-only repository
-observation; later accepted sub-slices would own mutating workflows.
+Slice 6A begins with accepted read-only repository observation; later accepted
+sub-slices would own mutating workflows.
 
-Candidate user-facing outcome: Slice 6A would let users inspect branch status,
+Accepted user-facing outcome: Slice 6A lets users inspect branch status,
 detached HEAD state, upstream/ahead-behind, dirty summaries, and bounded
-staged/unstaged diff evidence after review acceptance and integration. Later
-sub-slices may add staging, commits, conflicts, merges, rebases, pushes, and PR
-handoff with evidence after separate approval.
+staged/unstaged diff evidence. Later sub-slices may add staging, commits,
+conflicts, merges, rebases, pushes, and PR handoff with evidence after separate
+approval.
 
 True primitives: filesystem package, jobs package, resource graph, authority,
 replay, trace, and approval decisions.
 
 Modular boundaries: the git/worktree package owns repo facts and Git command
-execution. The Slice 6A candidate adds a narrow read-only `domains/git`
-boundary with `git::status` and `git::diff` backend contracts plus
+execution. Slice 6A adds a narrow read-only `domains/git` boundary with
+`git::status` and `git::diff` backend contracts plus
 provider-visible `git_status` and `git_diff` execute operations. It does not
 hide worktree state inside sessions or iOS caches.
 
@@ -802,7 +800,7 @@ a stable mutating server contract.
 Old evidence paths: `BPRC-FEATURE-05`, `BPRC-FEATURE-16`,
 `IARM-SURFACE-025`, `IARM-SURFACE-029`, feature index sections 5 and 16.
 
-Candidate acceptance criteria: Slice 6A must cover trusted-path repo detection,
+Slice 6A acceptance criteria: Slice 6A covers trusted-path repo detection,
 branch or detached HEAD identity, upstream/ahead-behind,
 dirty/staged/unstaged/untracked summaries, bounded/truncated status and diff
 evidence, non-repo and out-of-root rejection, textconv suppression for diff
@@ -1171,11 +1169,12 @@ Implementation slices add:
 ## Closure Verdict
 
 Phase 2 remains source-backed and proceeds one slice at a time. At the
-2026-06-24 Slice 6A implementation-candidate update, the branch starts from
-`origin/main@470e73897b885264aec0a6c9692e54eb2a186ef1`. Slices 1 through 4
-and Slice 5A are represented on the consolidated mainline, and the explicit
-fresh-implementation order authorizes Slice 6A despite the missing historical
-source. The next Phase 2 action is independent review and acceptance for the
-6A candidate; only after that acceptance should a fresh discovery slice for
-mutating Git/worktree operations proceed while preserving the Slice 5A and 6A
-constraints and non-goals above.
+2026-06-24 Slice 6A acceptance update, the implementation starts from
+`origin/main@470e73897b885264aec0a6c9692e54eb2a186ef1` and is integrated into
+`main` after independent review thread `019ef942-3a15-74c0-8230-7065c4e0000d`
+accepted it. Slices 1 through 4, Slice 5A, and Slice 6A are represented on the
+consolidated mainline, and the explicit fresh-implementation order authorizes
+Slice 6A despite the missing historical source. The next Phase 2 action is
+fresh discovery for the next Slice 6 sub-slice, likely mutating Git/worktree
+operations, while preserving the Slice 5A and 6A constraints and non-goals
+above.

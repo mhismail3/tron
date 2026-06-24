@@ -408,28 +408,35 @@ Adversarial self-review:
 
 ## Phase 2 Slice 6A: Read-only Git/Worktree Foundation
 
-Implementation candidate branch: `codex/phase-2-slice-6a-review-fixes`
-(review-fix continuation of `codex/phase-2-slice-6a-readonly-git-worktree`).
+Accepted implementation branches:
+`codex/phase-2-slice-6a-readonly-git-worktree`,
+`codex/phase-2-slice-6a-review-fixes`,
+`codex/phase-2-slice-6a-review-fixes-2`, and
+`codex/review-phase-2-slice-6a-final`.
 Baseline: `origin/main@470e73897b885264aec0a6c9692e54eb2a186ef1`.
-Review status: pending independent acceptance and mainline integration.
+Independent review thread `019ef942-3a15-74c0-8230-7065c4e0000d` returned
+`slice accepted` with no remaining findings. Mainline integration preserves
+the reviewed commits through merge parent `1ecfb7ffb` and equivalent
+mainline cherry-picks `76b1ce6cc`, `60bd839a7`, and `a86d9a470`.
 
 What changed:
 
-- Candidate adds a narrow read-only `domains/git` package with `git::status`
+- Slice 6A adds a narrow read-only `domains/git` package with `git::status`
   and `git::diff` backend contracts.
-- Candidate exposes provider access only as `git_status` and `git_diff`
+- Slice 6A exposes provider access only as `git_status` and `git_diff`
   operation values behind the existing `capability::execute` primitive.
-- Candidate reports trusted-path repository facts: worktree root, requested
+- Slice 6A reports trusted-path repository facts: worktree root, requested
   path, branch or detached HEAD, HEAD OID, upstream, ahead/behind, dirty state,
   staged/unstaged/untracked/conflicted summaries, and bounded status/diff
   evidence.
-- Candidate keeps the implementation read-only: no staging, commits, merges,
+- Slice 6A keeps the implementation read-only: no staging, commits, merges,
   rebases, resets, pushes, branch checkout/deletion, conflict resolution,
   worktree graph resources, PR handoff, public API expansion, production
   deployment behavior, or native iOS SourceChanges UI.
-- Review-fix candidate disables configured Git textconv commands for staged
-  and unstaged diff evidence and captures status/diff stdout through bounded
-  readers so caller byte limits bound retained output memory.
+- Review fixes disable configured Git textconv commands for staged and
+  unstaged diff evidence, capture status/diff stdout through bounded readers,
+  and stream full `git_diff` status-preflight counts while retaining only
+  bounded status evidence bytes.
 
 Deterministic coverage:
 
@@ -439,16 +446,18 @@ Deterministic coverage:
   diff output, configured textconv suppression, provider execute routing, and
   schema guards proving no mutating git operation names are exposed.
 
-Validation on the implementation candidate branch:
+Validation on final review and mainline closeout:
 
 - `cargo test --manifest-path packages/agent/Cargo.toml git -- --nocapture`
-  passed; 14 filtered tests passed, covering git-domain behavior, provider
+  passed; final review observed 15 matching library tests plus filtered static
+  gate matches, covering git-domain behavior, provider
   execute routing, read-time bounded/truncated output, textconv suppression,
   static-gate wiring matches, event-store OAuth redaction, and the read-only
   schema guard.
 - `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture`
-  passed; 8 BPRC tests passed after narrowing the retired-domain guard to
-  allow only the Slice 6A pending-review read-only git package.
+  passed; final review passed the pending-review guard, and mainline closeout
+  passed all 8 BPRC tests after promoting the Slice 6A read-only git package
+  to current baseline.
 - `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check`
   passed.
 - `cargo check --manifest-path packages/agent/Cargo.toml` passed.

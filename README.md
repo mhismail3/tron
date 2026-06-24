@@ -410,8 +410,7 @@ Current living entry points:
 - `packages/agent/docs/restoration-retrospective-audit-status.md`: active
   retrospective audit tracker for the ordered completed-slice queue, audit
   constraints, first-audit target, accepted deferred scope, and current
-  Phase 2 Slice 5A baseline plus the Slice 6A read-only git/worktree
-  restoration candidate.
+  Phase 2 Slice 5A and accepted Slice 6A read-only git/worktree baselines.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -925,6 +924,8 @@ Current primitive operations:
 | `filesystem_write` | Create a patch proposal by default, or commit UTF-8 content with idempotency and a verifiable expected hash for existing files. |
 | `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence; truncated file previews are refused. |
 | `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
+| `git_status` | Inspect trusted-root repository state: branch or detached HEAD, upstream/ahead-behind, dirty summaries, and bounded porcelain evidence. |
+| `git_diff` | Return bounded staged and unstaged diff evidence plus read-only repository dirty summaries without invoking external diff/textconv helpers. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
@@ -979,18 +980,16 @@ Provider-visible access remains the single `execute` tool through `job_*`
 operation values; PTY sessions, interpreters, web/network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
 not part of this foundation.
-This pending-review branch additionally registers the Slice 6A read-only
-source-control implementation candidate: the `git` domain registers
-`git::status` and `git::diff` backend read contracts, while provider-visible
-access remains `git_status` and `git_diff` operation values behind
-`capability::execute`. The candidate resolves only relative paths under trusted
-working-directory metadata, rejects path traversal and worktree-root escapes,
-reports branch/detached HEAD/upstream/ahead-behind/dirty summaries, and returns
-bounded status/diff evidence. These git operation values are not part of the
-accepted current primitive baseline until Slice 6A review and mainline
-integration complete. Staging, commits, merges, rebases, resets, pushes, branch
-checkout/deletion, conflict resolution, PR handoff, worktree graph resources,
-and native iOS SourceChanges UI remain deferred.
+The accepted Slice 6A read-only source-control foundation registers the `git`
+domain with `git::status` and `git::diff` backend read contracts, while
+provider-visible access remains `git_status` and `git_diff` operation values
+behind `capability::execute`. The implementation resolves only relative paths
+under trusted working-directory metadata, rejects path traversal and
+worktree-root escapes, reports branch/detached HEAD/upstream/ahead-behind/dirty
+summaries, and returns bounded status/diff evidence. Staging, commits, merges,
+rebases, resets, pushes, branch checkout/deletion, conflict resolution, PR
+handoff, worktree graph resources, and native iOS SourceChanges UI remain
+deferred.
 Policy lookup is `session -> workspace -> system`, and prompt-trace audit
 idempotency is keyed by trace so memory status can change across turns.
 Direct record-id inspect/edit/tombstone operations reject cross-scope resources.
