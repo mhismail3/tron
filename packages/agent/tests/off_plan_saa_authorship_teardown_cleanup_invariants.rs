@@ -620,6 +620,7 @@ fn is_post_ppacd_audited_text_surface(path: &str) -> bool {
 fn post_ppacd_residue_classification(path: &str) -> Option<ResidueClass> {
     match path {
         "README.md"
+        | "packages/agent/docs/restoration-retrospective-audit-status.md"
         | "packages/agent/docs/hierarchical-rearchitecture-current-ownership-map.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-file-inventory.tsv"
         | "packages/agent/docs/hierarchical-rearchitecture-inventory.md"
