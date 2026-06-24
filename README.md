@@ -1388,7 +1388,7 @@ The token is generated during first server startup and written as `bearerToken` 
 # Rotate the token (forces every paired iOS device to pair again)
 tron auth rotate
 
-# Then use iOS Settings → Servers → Connect to a new server to scan or paste a fresh token.
+# Then use the iOS re-pair action for each affected server to scan or paste the fresh token.
 ```
 
 Rotation is serialized through a process-wide mutex and the on-disk write is atomic (`tempfile + sync_all + rename`), so a concurrent rotate from the menu bar and CLI cannot corrupt the file. After rotation the daemon's in-memory token cache picks up the new value within a few seconds via mtime comparison; iOS clients carrying the old token receive HTTP 401 on next connect and fall into `ConnectionState.unauthorized`.
