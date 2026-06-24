@@ -1,6 +1,6 @@
 # Concurrency Scheduling Discipline Inventory
 
-Status: CSD-10 `passed_after_fix`; 123 scheduling-surface rows and 23 static-gate/predecessor rows inventoried and classified.
+Status: CSD-10 `passed_after_fix`; 123 scheduling-surface rows and 24 static-gate/predecessor rows inventoried and classified.
 
 This inventory classifies production scheduling surfaces by owner, scheduler
 class, start site, cancellation or stop path, backpressure or capacity policy,

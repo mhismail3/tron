@@ -1,9 +1,10 @@
-use chrono::{Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde_json::{Value, json};
 
 use crate::engine::{
     CreateResource, EngineHostHandle, EngineResource, EngineResourceInspection,
-    EngineResourceVersion, LinkResources, ListResources, WorkerId,
+    EngineResourceScope, EngineResourceVersion, LinkResources, ListResources, PublishStreamEvent,
+    TraceId, UpdateResource, VisibilityScope, WorkerId,
 };
 use crate::shared::server::errors::CapabilityError;
 
@@ -22,9 +23,15 @@ use super::types::{
     JobCancellationRecord, JobCommandRecord, JobLimitsRecord, JobOutputRef, JobProcessRecord,
     JobRunOutcome, JobState, JobTerminalRecord, JobWorkingDirectory,
 };
-use super::{JOB_PROCESS_KIND, JOB_PROCESS_SCHEMA_ID, WORKER};
+use super::{JOB_PROCESS_KIND, JOB_PROCESS_SCHEMA_ID, JOBS_LIFECYCLE_TOPIC, WORKER};
 
 const FINALIZE_VERSION_CONFLICT_RETRIES: usize = 16;
+const RECONCILE_RUNNING_BATCH_LIMIT: usize = 500;
+
+#[derive(Clone)]
+pub(crate) struct ReconcileContext {
+    pub(crate) startup_cutoff: DateTime<Utc>,
+}
 
 pub(crate) async fn start_job_value(
     engine_host: &EngineHostHandle,
@@ -174,9 +181,12 @@ pub(crate) async fn start_job_value(
 
 pub(crate) async fn status_job_value(
     engine_host: &EngineHostHandle,
+    runtime: JobRuntime,
+    reconcile: ReconcileContext,
     invocation: &crate::engine::Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    reconcile_stale_running_jobs(engine_host, runtime, reconcile, Some(invocation)).await?;
     let inspection = require_job(engine_host, invocation, payload).await?;
     let (version_id, record) = job_record(&inspection)?;
     Ok(json!({
@@ -189,9 +199,12 @@ pub(crate) async fn status_job_value(
 
 pub(crate) async fn list_jobs_value(
     engine_host: &EngineHostHandle,
+    runtime: JobRuntime,
+    reconcile: ReconcileContext,
     invocation: &crate::engine::Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    reconcile_stale_running_jobs(engine_host, runtime, reconcile, Some(invocation)).await?;
     let lifecycle = optional_string(payload, "state")?;
     let resources = engine_host
         .list_resources(ListResources {
@@ -222,9 +235,12 @@ pub(crate) async fn list_jobs_value(
 
 pub(crate) async fn log_job_value(
     engine_host: &EngineHostHandle,
+    runtime: JobRuntime,
+    reconcile: ReconcileContext,
     invocation: &crate::engine::Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    reconcile_stale_running_jobs(engine_host, runtime, reconcile, Some(invocation)).await?;
     let inspection = require_job(engine_host, invocation, payload).await?;
     let (version_id, record) = job_record(&inspection)?;
     Ok(json!({
@@ -244,9 +260,11 @@ pub(crate) async fn log_job_value(
 pub(crate) async fn cancel_job_value(
     engine_host: &EngineHostHandle,
     runtime: JobRuntime,
+    reconcile: ReconcileContext,
     invocation: &crate::engine::Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    reconcile_stale_running_jobs(engine_host, runtime.clone(), reconcile, Some(invocation)).await?;
     let inspection = require_job(engine_host, invocation, payload).await?;
     let (current_version_id, record) = job_record(&inspection)?;
     if record.state.is_terminal() {
@@ -363,9 +381,12 @@ pub(crate) async fn cancel_job_value(
 
 pub(crate) async fn cleanup_jobs_value(
     engine_host: &EngineHostHandle,
+    runtime: JobRuntime,
+    reconcile: ReconcileContext,
     invocation: &crate::engine::Invocation,
     payload: &Value,
 ) -> Result<Value, CapabilityError> {
+    reconcile_stale_running_jobs(engine_host, runtime, reconcile, Some(invocation)).await?;
     let older_than = optional_u64(payload, "olderThanSeconds")?.unwrap_or(0);
     let cutoff = Utc::now() - ChronoDuration::seconds(older_than as i64);
     let resources = engine_host
@@ -429,6 +450,202 @@ pub(crate) async fn cleanup_jobs_value(
         "archivedCount": archived.len(),
         "archived": archived
     }))
+}
+
+pub(crate) async fn reconcile_stale_running_jobs(
+    engine_host: &EngineHostHandle,
+    runtime: JobRuntime,
+    reconcile: ReconcileContext,
+    invocation: Option<&crate::engine::Invocation>,
+) -> Result<usize, CapabilityError> {
+    let mut reconciled = 0;
+    let scope = invocation.map(resource_scope);
+    loop {
+        let resources = engine_host
+            .list_resources(ListResources {
+                kind: Some(JOB_PROCESS_KIND.to_owned()),
+                scope: scope.clone(),
+                lifecycle: Some(JobState::Running.as_str().to_owned()),
+                limit: RECONCILE_RUNNING_BATCH_LIMIT,
+            })
+            .await
+            .map_err(engine_error)?;
+        if resources.is_empty() {
+            break;
+        }
+
+        let mut batch_reconciled = 0;
+        for resource in resources {
+            if runtime.owns_job(&resource.resource_id).await {
+                continue;
+            }
+            let Some(inspection) = engine_host
+                .inspect_resource(&resource.resource_id)
+                .await
+                .map_err(engine_error)?
+            else {
+                continue;
+            };
+            let (current_version_id, record) = job_record(&inspection)?;
+            if record.state.is_terminal()
+                || record.started_at > reconcile.startup_cutoff
+                || runtime.owns_job(&inspection.resource.resource_id).await
+            {
+                continue;
+            }
+            if reconcile_one_stale_running_job(
+                engine_host,
+                invocation,
+                inspection,
+                current_version_id,
+                record,
+            )
+            .await?
+            {
+                batch_reconciled += 1;
+            }
+        }
+
+        reconciled += batch_reconciled;
+        if batch_reconciled == 0 {
+            break;
+        }
+    }
+    Ok(reconciled)
+}
+
+async fn reconcile_one_stale_running_job(
+    engine_host: &EngineHostHandle,
+    invocation: Option<&crate::engine::Invocation>,
+    inspection: EngineResourceInspection,
+    current_version_id: String,
+    mut record: JobProcessRecord,
+) -> Result<bool, CapabilityError> {
+    let completed_at = Utc::now();
+    record.state = JobState::Failed;
+    record.completed_at = Some(completed_at);
+    record.terminal = Some(JobTerminalRecord {
+        status: JobState::Failed.as_str().to_owned(),
+        exit_code: None,
+        timed_out: false,
+        cancelled: false,
+        error: Some(
+            "process ownership unknown after jobs domain restart; running resource was not owned by this runtime"
+                .to_owned(),
+        ),
+    });
+    record.revision += 1;
+
+    let trace_id = invocation
+        .map(|invocation| invocation.causal_context.trace_id.clone())
+        .unwrap_or_else(TraceId::generate);
+    let version = update_job_record_for_reconcile(
+        engine_host,
+        &inspection.resource.resource_id,
+        Some(current_version_id),
+        &record,
+        trace_id.clone(),
+        invocation.map(|invocation| invocation.id.clone()),
+    )
+    .await;
+    let version = match version {
+        Ok(version) => version,
+        Err(error) if is_resource_version_conflict(&error) => return Ok(false),
+        Err(error) => return Err(engine_error(error)),
+    };
+    publish_reconcile_event(
+        engine_host,
+        invocation,
+        &inspection.resource,
+        &version,
+        &trace_id,
+    )
+    .await;
+    Ok(true)
+}
+
+async fn update_job_record_for_reconcile(
+    engine_host: &EngineHostHandle,
+    job_resource_id: &str,
+    expected_current_version_id: Option<String>,
+    record: &JobProcessRecord,
+    trace_id: TraceId,
+    invocation_id: Option<crate::engine::InvocationId>,
+) -> crate::engine::Result<EngineResourceVersion> {
+    engine_host
+        .update_resource(UpdateResource {
+            resource_id: job_resource_id.to_owned(),
+            expected_current_version_id,
+            lifecycle: Some(record.state.as_str().to_owned()),
+            payload: to_value(record, "job process reconciliation").map_err(|error| {
+                crate::engine::EngineError::HandlerFailed(format!(
+                    "serialize job process reconciliation: {error}"
+                ))
+            })?,
+            state: None,
+            locations: Vec::new(),
+            trace_id,
+            invocation_id,
+        })
+        .await
+}
+
+async fn publish_reconcile_event(
+    engine_host: &EngineHostHandle,
+    invocation: Option<&crate::engine::Invocation>,
+    resource: &EngineResource,
+    version: &EngineResourceVersion,
+    trace_id: &TraceId,
+) {
+    let (visibility, session_id, workspace_id) = visibility_for_scope(&resource.scope);
+    let payload = json!({
+        "type": "jobs.reconciled_unknown",
+        "authorityGrantId": invocation.map(|invocation| invocation.causal_context.authority_grant_id.as_str()),
+        "actorId": invocation.map(|invocation| invocation.causal_context.actor_id.as_str()),
+        "payload": {
+            "jobResourceId": resource.resource_id,
+            "jobVersionId": version.version_id,
+            "state": JobState::Failed.as_str(),
+            "previousState": JobState::Running.as_str(),
+            "runtimeHadJob": false,
+            "reason": "jobs domain startup found non-owned running job_process resource",
+            "resourceRefs": [version_ref(resource, version, "job_process")]
+        }
+    });
+    let result = engine_host
+        .publish_stream_event(PublishStreamEvent {
+            topic: JOBS_LIFECYCLE_TOPIC.to_owned(),
+            payload,
+            visibility,
+            session_id,
+            workspace_id,
+            producer: WORKER.to_owned(),
+            trace_id: Some(trace_id.clone()),
+            parent_invocation_id: invocation.map(|invocation| invocation.id.clone()),
+        })
+        .await;
+    if let Err(error) = result {
+        tracing::warn!(
+            component = "jobs",
+            job_resource_id = resource.resource_id,
+            error = %error,
+            "failed to publish stale job reconciliation event"
+        );
+    }
+}
+
+fn visibility_for_scope(
+    scope: &EngineResourceScope,
+) -> (VisibilityScope, Option<String>, Option<String>) {
+    match scope {
+        EngineResourceScope::Session(session_id) => {
+            (VisibilityScope::Session, Some(session_id.clone()), None)
+        }
+        EngineResourceScope::Workspace(workspace_id) => {
+            (VisibilityScope::Workspace, None, Some(workspace_id.clone()))
+        }
+        EngineResourceScope::System => (VisibilityScope::System, None, None),
+    }
 }
 
 pub(super) async fn finalize_job_from_runtime(

@@ -27,8 +27,14 @@ pub(super) async fn job_status(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let result =
-        jobs::service::status_job_value(&deps.engine_host, invocation, &invocation.payload).await?;
+    let result = jobs::service::status_job_value(
+        &deps.engine_host,
+        jobs::runtime(),
+        deps.jobs_reconcile.clone(),
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
     job_result("job_status", result)
 }
 
@@ -36,8 +42,14 @@ pub(super) async fn job_list(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let result =
-        jobs::service::list_jobs_value(&deps.engine_host, invocation, &invocation.payload).await?;
+    let result = jobs::service::list_jobs_value(
+        &deps.engine_host,
+        jobs::runtime(),
+        deps.jobs_reconcile.clone(),
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
     job_result("job_list", result)
 }
 
@@ -45,8 +57,14 @@ pub(super) async fn job_log(
     invocation: &Invocation,
     deps: &Deps,
 ) -> Result<CapabilityResult, CapabilityError> {
-    let result =
-        jobs::service::log_job_value(&deps.engine_host, invocation, &invocation.payload).await?;
+    let result = jobs::service::log_job_value(
+        &deps.engine_host,
+        jobs::runtime(),
+        deps.jobs_reconcile.clone(),
+        invocation,
+        &invocation.payload,
+    )
+    .await?;
     job_result("job_log", result)
 }
 
@@ -57,6 +75,7 @@ pub(super) async fn job_cancel(
     let result = jobs::service::cancel_job_value(
         &deps.engine_host,
         jobs::runtime(),
+        deps.jobs_reconcile.clone(),
         invocation,
         &invocation.payload,
     )

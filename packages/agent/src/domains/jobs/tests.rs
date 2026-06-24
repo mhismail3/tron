@@ -2,15 +2,17 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::{Value, json};
 use tempfile::tempdir;
 
 use crate::app::lifecycle::shutdown::{ShutdownCoordinator, ShutdownPhase};
 use crate::engine::{
-    ActorId, ActorKind, AuthorityGrantId, CausalContext, FunctionId, Invocation, InvocationResult,
-    RUNTIME_METADATA_MODEL_PRIMITIVE_NAME, RUNTIME_METADATA_PROVIDER_INVOCATION_ID,
-    RUNTIME_METADATA_PROVIDER_TYPE, RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN,
-    RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
+    ActorId, ActorKind, AuthorityGrantId, CausalContext, CreateResource, EngineResourceScope,
+    FunctionId, Invocation, InvocationResult, RUNTIME_METADATA_MODEL_PRIMITIVE_NAME,
+    RUNTIME_METADATA_PROVIDER_INVOCATION_ID, RUNTIME_METADATA_PROVIDER_TYPE,
+    RUNTIME_METADATA_RUN_ID, RUNTIME_METADATA_TURN, RUNTIME_METADATA_WORKING_DIRECTORY, TraceId,
+    WorkerId,
 };
 use crate::shared::server::context::ServerRuntimeContext;
 use crate::shared::server::test_support::make_test_context;
@@ -118,6 +120,10 @@ async fn job_cleanup_archives_terminal_resources() {
 
     let cleanup = super::service::cleanup_jobs_value(
         &ctx.engine_host,
+        super::runtime::JobRuntime::default(),
+        super::service::ReconcileContext {
+            startup_cutoff: Utc::now(),
+        },
         &cleanup_invocation(root.path(), "jobs-cleanup-direct"),
         &json!({"olderThanSeconds": 0, "limit": 10}),
     )
@@ -132,6 +138,100 @@ async fn job_cleanup_archives_terminal_resources() {
         }))
         .await;
     assert_eq!(jobs_details(&status)["job"]["state"], json!("archived"));
+}
+
+#[tokio::test]
+async fn stale_running_job_is_reconciled_after_restart_before_status_list_and_cleanup() {
+    let ctx = make_test_context();
+    let root = tempdir().expect("root");
+    let fixture = ExecuteFixture::new(&ctx, root.path(), "jobs-stale-restart").await;
+    let job_resource_id = "job_process:jobs-stale-restart-orphan";
+    create_stale_running_job_resource(&ctx, &fixture, job_resource_id).await;
+
+    let status = fixture
+        .invoke_ok(json!({
+            "operation": "job_status",
+            "jobResourceId": job_resource_id
+        }))
+        .await;
+    let status_job = &jobs_details(&status)["job"];
+    assert_eq!(status_job["state"], json!("failed"));
+    assert_eq!(status_job["terminal"]["exitCode"], Value::Null);
+    assert_eq!(status_job["terminal"]["cancelled"], json!(false));
+    assert!(
+        status_job["terminal"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("ownership unknown after jobs domain restart")
+    );
+    assert_eq!(status_job["output"], Value::Null);
+
+    let running = fixture
+        .invoke_ok(json!({
+            "operation": "job_list",
+            "state": "running"
+        }))
+        .await;
+    assert!(
+        jobs_details(&running)["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|job| job["jobResourceId"] != json!(job_resource_id))
+    );
+
+    let failed = fixture
+        .invoke_ok(json!({
+            "operation": "job_list",
+            "state": "failed"
+        }))
+        .await;
+    assert!(
+        jobs_details(&failed)["jobs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|job| job["jobResourceId"] == json!(job_resource_id))
+    );
+
+    let inspection = ctx
+        .engine_host
+        .inspect_resource(job_resource_id)
+        .await
+        .expect("inspect")
+        .expect("stale job resource");
+    assert_eq!(inspection.resource.lifecycle, "failed");
+    assert!(
+        inspection
+            .events
+            .iter()
+            .any(|event| event.payload["versionId"] == status_job["jobVersionId"])
+    );
+
+    let cleanup = super::service::cleanup_jobs_value(
+        &ctx.engine_host,
+        super::runtime::JobRuntime::default(),
+        super::service::ReconcileContext {
+            startup_cutoff: Utc::now(),
+        },
+        &cleanup_invocation_for(
+            root.path(),
+            "jobs-stale-restart-cleanup",
+            &fixture.session_id,
+            &fixture.workspace_id,
+        ),
+        &json!({"olderThanSeconds": 0, "limit": 10}),
+    )
+    .await;
+    assert_eq!(cleanup.expect("cleanup")["archivedCount"], json!(1));
+
+    let archived = fixture
+        .invoke_ok(json!({
+            "operation": "job_status",
+            "jobResourceId": job_resource_id
+        }))
+        .await;
+    assert_eq!(jobs_details(&archived)["job"]["state"], json!("archived"));
 }
 
 #[tokio::test]
@@ -597,6 +697,15 @@ fn execute_context(
 }
 
 fn cleanup_invocation(root: &Path, key: &str) -> Invocation {
+    cleanup_invocation_for(root, key, "jobs-cleanup-session", "jobs-cleanup-workspace")
+}
+
+fn cleanup_invocation_for(
+    root: &Path,
+    key: &str,
+    session_id: &str,
+    workspace_id: &str,
+) -> Invocation {
     Invocation::new_sync(
         FunctionId::new(super::CLEANUP_FUNCTION).unwrap(),
         json!({}),
@@ -607,8 +716,8 @@ fn cleanup_invocation(root: &Path, key: &str) -> Invocation {
             TraceId::new(key).unwrap(),
         )
         .with_scope(super::WRITE_SCOPE)
-        .with_session_id("jobs-cleanup-session")
-        .with_workspace_id("jobs-cleanup-workspace")
+        .with_session_id(session_id)
+        .with_workspace_id(workspace_id)
         .with_runtime_metadata(
             RUNTIME_METADATA_WORKING_DIRECTORY,
             root.display().to_string(),
@@ -669,6 +778,81 @@ async fn derive_execute_grant(
             .to_owned(),
     )
     .unwrap()
+}
+
+async fn create_stale_running_job_resource(
+    ctx: &ServerRuntimeContext,
+    fixture: &ExecuteFixture<'_>,
+    job_resource_id: &str,
+) {
+    let stale_time = Utc::now() - ChronoDuration::minutes(5);
+    let record = super::types::JobProcessRecord {
+        schema_version: super::types::JOB_SCHEMA_VERSION.to_owned(),
+        state: super::types::JobState::Running,
+        command: super::types::JobCommandRecord {
+            kind: "shell_command".to_owned(),
+            command: "sleep 600".to_owned(),
+            working_directory: super::types::JobWorkingDirectory {
+                root: "trusted_runtime_metadata".to_owned(),
+                canonical_path: fixture.root.display().to_string(),
+            },
+            network_policy: "none".to_owned(),
+        },
+        authority: super::types::JobAuthorityRecord {
+            actor_id: fixture.actor_id.as_str().to_owned(),
+            authority_grant_id: fixture.grant_id.as_str().to_owned(),
+            authority_scopes: vec!["capability.execute".to_owned()],
+            session_id: Some(fixture.session_id.clone()),
+            workspace_id: Some(fixture.workspace_id.clone()),
+        },
+        limits: super::types::JobLimitsRecord {
+            timeout_ms: 60_000,
+            max_output_bytes: 1000,
+        },
+        retention: json!({
+            "mode": "explicit",
+            "cleanupAfterSeconds": Value::Null
+        }),
+        created_at: stale_time,
+        started_at: stale_time,
+        completed_at: None,
+        cancellation: super::types::JobCancellationRecord {
+            requested: false,
+            requested_at: None,
+            requested_by: None,
+            reason: None,
+        },
+        terminal: None,
+        output: None,
+        trace_refs: vec![json!({
+            "traceId": fixture.trace_id.as_str(),
+            "invocationId": "stale-before-restart",
+            "functionId": super::START_FUNCTION
+        })],
+        replay_refs: vec![json!({
+            "kind": "engine_invocation",
+            "invocationId": "stale-before-restart",
+            "traceId": fixture.trace_id.as_str()
+        })],
+        revision: 1,
+    };
+    ctx.engine_host
+        .create_resource(CreateResource {
+            resource_id: Some(job_resource_id.to_owned()),
+            kind: super::JOB_PROCESS_KIND.to_owned(),
+            schema_id: Some(super::JOB_PROCESS_SCHEMA_ID.to_owned()),
+            scope: EngineResourceScope::Session(fixture.session_id.clone()),
+            owner_worker_id: WorkerId::new(super::WORKER).unwrap(),
+            owner_actor_id: fixture.actor_id.clone(),
+            lifecycle: Some(super::types::JobState::Running.as_str().to_owned()),
+            policy: super::support::resource_policy(),
+            initial_payload: Some(serde_json::to_value(record).expect("job record payload")),
+            locations: Vec::new(),
+            trace_id: fixture.trace_id.clone(),
+            invocation_id: None,
+        })
+        .await
+        .expect("create stale job resource");
 }
 
 fn job_resource_id(value: &Value) -> String {
