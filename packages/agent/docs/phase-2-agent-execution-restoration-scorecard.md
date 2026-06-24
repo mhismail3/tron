@@ -23,17 +23,18 @@ Canonical plan file: this scorecard. The README names this file as the durable
 Phase 2 plan, while the inventory and evidence manifest are companion
 machine-readable and validation artifacts.
 
-Current implementation baseline verified before the Slice 8D candidate:
-`main@5e881e8681229545fe8260a1dc2be8f47cd07a3a`
-(`fix: sanitize web html titles`) plus this Slice 8C closeout documentation
-commit. That line includes accepted Slice 6A
+Current implementation baseline verified for Slice 8D closeout:
+`main@3a9d4f35674b166528d7e15aea0e17802d634cea`
+(`feat: add web source archive lifecycle`) plus this Slice 8D closeout
+documentation commit. That line includes accepted Slice 6A
 read-only Git/worktree status and diff evidence, accepted Slice 6B index-only
 stage/unstage, accepted Slice 6C staged-index commit evidence, accepted Slice
 6D local branch-start evidence, accepted Slice 6E read-only branch inventory
 evidence, accepted Slice 7A goal/question lifecycle evidence, accepted Slice 8A
 web fetch/source provenance evidence, and accepted Slice 8B web source
-citation/inspection evidence, and accepted Slice 8C HTML/XHTML readable-text
-extraction evidence.
+citation/inspection evidence, accepted Slice 8C HTML/XHTML readable-text
+extraction evidence, and accepted Slice 8D web source archive lifecycle
+evidence.
 
 Closeout note: Slice 8C is accepted after implementation thread
 `019efb88-d1f1-7ef2-b90d-96254eb51679`, review thread
@@ -48,12 +49,17 @@ extraction are accepted; later search providers, browser automation, crawling,
 robots policy, login/cookies/session reuse, native source UI, public `/engine`
 web APIs, and network-enabled jobs remain deferred.
 
-Slice 8D implementation candidate note: branch
-`codex/phase-2-slice-8d-web-source-retention-cache-policy` starts from
-`origin/main@8ed8db55500f3a05aef55a1e2ec39acba30a8c07` (`docs: accept phase
-2 slice 8c`) and adds a pending-review `web_source_archive` foundation for
-append-only source retention/cache lifecycle metadata. This branch does not
-mark Slice 8D accepted or part of the current mainline baseline.
+Closeout note: Slice 8D is accepted after implementation thread
+`019efbbd-f745-7752-8cd8-fdd86194d138` and independent review thread
+`019efbd4-b199-71c2-b56d-4d8c7aa02976`. Implementation commit
+`3a9d4f35674b166528d7e15aea0e17802d634cea` adds execute-only
+`web_source_archive`, append-only source archive lifecycle metadata, default
+active source listing, explicit archived inclusion, exact archived inspection,
+and no-network archive/list/inspect behavior. Review returned `slice accepted`
+with no findings. Search providers, browser automation, crawling, robots
+policy, login/cookies/session reuse, native source UI, public `/engine` web
+APIs, deletion/pruning/automatic TTL cleanup, and network-enabled jobs remain
+deferred.
 
 Completed Phase 2 restoration slices at this baseline:
 
@@ -84,14 +90,15 @@ Completed Phase 2 restoration slices at this baseline:
 - Slice 8C: deterministic HTML/XHTML readable-text extraction under existing
   `web_fetch`/`web_source_*` operations, preserving raw-byte source hashes and
   adding safe extraction metadata without search/browser breadth.
-- Slice 8D candidate: current-session `web_source_archive` lifecycle updates,
+- Slice 8D: current-session `web_source_archive` lifecycle updates,
   default active-source listing, explicit archived-source inclusion, and exact
-  archived inspection for replay/citation audit; pending independent review.
+  archived inspection for replay/citation audit.
 
 Current next action:
-Review the Slice 8D implementation candidate before any mainline acceptance.
+Start discovery for the next Slice 8 sub-slice from fresh `origin/main`.
 Slice 8A direct fetch source provenance, Slice 8B read-only source inspection,
-and Slice 8C HTML/text extraction are accepted. Slice 8D is pending review.
+Slice 8C HTML/text extraction, and Slice 8D source archive lifecycle are
+accepted.
 Search providers, browser automation, crawling, robots policy,
 login/cookies/session reuse, native source UI, public `/engine` web APIs,
 network-enabled jobs, autonomous goal execution, fetch/pull/push, PR handoff,
@@ -1855,17 +1862,24 @@ Accepted validation:
   thread `019efbac-4560-7382-a034-4ef36854367f` verified both fixes and
   returned `slice accepted`.
 
-#### Slice 8D Implementation Candidate: Web Source Retention And Cache Policy Foundation
+#### Accepted Slice 8D: Web Source Retention And Cache Policy Foundation
 
 Implementation branch:
 `codex/phase-2-slice-8d-web-source-retention-cache-policy`.
 Baseline:
 `origin/main@8ed8db55500f3a05aef55a1e2ec39acba30a8c07`
 (`docs: accept phase 2 slice 8c`).
+Accepted implementation commit:
+`3a9d4f35674b166528d7e15aea0e17802d634cea`
+(`feat: add web source archive lifecycle`).
+Implementation thread:
+`019efbbd-f745-7752-8cd8-fdd86194d138`.
+Independent review thread:
+`019efbd4-b199-71c2-b56d-4d8c7aa02976`.
 Status:
-`pending_review`.
+`accepted`.
 
-Candidate scope:
+Accepted scope:
 
 - Add execute-only `web_source_archive` behind the existing
   `capability::execute` primitive.
@@ -1883,7 +1897,7 @@ Candidate scope:
 - Keep archive/list/inspect valid only under `networkPolicy: none` with no HTTP
   client construction or network I/O.
 
-Candidate non-goals:
+Accepted non-goals:
 
 - No `web_search`, search provider, browser automation/control, crawling,
   sitemap traversal, robots policy engine, login/cookies/session reuse,
@@ -1891,7 +1905,7 @@ Candidate non-goals:
   public `/engine` web APIs, native iOS source UI, deletion/erasure/pruning,
   automatic TTL cleanup, settings/profile fields, or database migrations.
 
-Candidate validation:
+Accepted validation:
 
 - Focused web tests cover successful archive preservation, stale CAS denial,
   wrong kind/scope denial, missing authority denial before mutation,
@@ -1902,7 +1916,11 @@ Candidate validation:
   `expectedWebSourceVersionId`, `includeArchived`, and continued rejection of
   search/browser/crawl/login/network-job non-goals.
 - HRA/TMB/TPC/PCC/SACB inventories classify the new archive implementation and
-  test files as pending-review Slice 8D surfaces.
+  test files as accepted Slice 8D surfaces.
+- Independent review passed `cargo fmt`, `cargo check`, focused `domains::web`,
+  `domains::capability`, OpenAI message-converter tests, HRA/TMB/TPC/PCC/SACB/
+  BPRC/IARM/DESI/public-protocol static guards, `scripts/personal-info-guard.sh`,
+  `git diff --check`, and ignored-file audit, then returned `slice accepted`.
 
 ### Slice 9: Worker Self-Extension, MCP, Plugins, And Tool Sources
 

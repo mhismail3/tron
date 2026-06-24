@@ -232,9 +232,8 @@ The accepted review/fix loop added explicit `capability::execute` scope,
 resource-kind, and selector checks for goal/question operations before handler
 execution.
 
-`P2AER-INV-012` is current baseline after accepted Slice 8C:
-Web HTML/Text Extraction And Citation Quality Foundation, with a pending-review
-Slice 8D implementation candidate for source retention/cache lifecycle policy.
+`P2AER-INV-012` is current baseline after accepted Slice 8D:
+Web Source Retention And Cache Policy Foundation.
 Slice 8A adds
 `domains/web` as the package owner, one execute-only `web_fetch` operation,
 declared-network authority checks, bounded direct fetch, sanitized URL/final
@@ -263,13 +262,13 @@ extraction mode/extractor/title/extracted-byte/truncation metadata under
 `textEvidence`, preserves raw captured-byte SHA-256 provenance, and keeps source
 list/inspect read-only and backward-compatible with older `web_source` records.
 
-Slice 8D is a pending-review implementation candidate for Web Source Retention
-And Cache Policy Foundation. It adds execute-only `web_source_archive`, archives
-only current-session `web_source` resources through append-only CAS lifecycle
-updates, preserves source evidence and replay/citation refs, defaults
-`web_source_list` to active/fetched records, exposes archived records only with
-explicit `includeArchived`, keeps exact archived inspect available, and keeps
-archive/list/inspect under `networkPolicy: none`. Search providers, browser
-automation, crawling, robots policy, login/cookies/session reuse,
-deletion/pruning/automatic TTL cleanup, public `/engine` web APIs, native iOS
-source UI, and network-enabled jobs remain deferred.
+Slice 8D accepts Web Source Retention And Cache Policy Foundation. It adds
+execute-only `web_source_archive`, archives only current-session `web_source`
+resources through append-only CAS lifecycle updates, preserves source evidence
+and replay/citation refs, defaults `web_source_list` to active/fetched records,
+exposes archived records only with explicit `includeArchived`, keeps exact
+archived inspect available, and keeps archive/list/inspect under
+`networkPolicy: none`. Search providers, browser automation, crawling, robots
+policy, login/cookies/session reuse, deletion/pruning/automatic TTL cleanup,
+public `/engine` web APIs, native iOS source UI, and network-enabled jobs remain
+deferred.

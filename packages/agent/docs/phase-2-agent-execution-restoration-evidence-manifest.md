@@ -1243,17 +1243,24 @@ Accepted validation evidence:
   IARM/DESI/public-protocol gates, repository hygiene, and personal-info guard
   before push.
 
-### Slice 8D Implementation Candidate Evidence: Web Source Retention And Cache Policy Foundation
+### Slice 8D Accepted Evidence: Web Source Retention And Cache Policy Foundation
 
 Implementation branch:
 `codex/phase-2-slice-8d-web-source-retention-cache-policy`.
 Baseline:
 `origin/main@8ed8db55500f3a05aef55a1e2ec39acba30a8c07`
 (`docs: accept phase 2 slice 8c`).
+Accepted implementation commit:
+`3a9d4f35674b166528d7e15aea0e17802d634cea`
+(`feat: add web source archive lifecycle`).
+Implementation thread:
+`019efbbd-f745-7752-8cd8-fdd86194d138`.
+Independent review thread:
+`019efbd4-b199-71c2-b56d-4d8c7aa02976`.
 Status:
-`pending_review`.
+`accepted`.
 
-Candidate evidence:
+Accepted evidence:
 
 - Adds `packages/agent/src/domains/web/archive.rs` as the web-owned
   current-session source archive lifecycle module.
@@ -1273,7 +1280,13 @@ Candidate evidence:
   filtering, explicit archived inclusion, archived inspect, and no-network
   behavior.
 
-Candidate non-goals remain deferred: search providers, browser automation,
+Independent review found no findings and returned `slice accepted`. Review
+validation passed `cargo fmt`, `cargo check`, focused `domains::web`,
+`domains::capability`, OpenAI message-converter tests, HRA/TMB/TPC/PCC/SACB/
+BPRC/IARM/DESI/public-protocol static guards, `scripts/personal-info-guard.sh`,
+`git diff --check`, and ignored-file audit.
+
+Accepted non-goals remain deferred: search providers, browser automation,
 crawling, robots/sitemap policy, login/cookies/session reuse, public `/engine`
 web APIs, native iOS source UI, deletion/erasure/pruning, automatic TTL cleanup,
 settings/profile fields, database migrations, and network-enabled jobs.

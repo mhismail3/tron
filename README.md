@@ -1030,8 +1030,8 @@ owner without adding direct public `web::*` catalog functions, and the accepted
 Slice 8B foundation adds read-only source list/inspect operations for citation
 assembly. Provider-visible access remains the single
 `capability::execute` primitive with operation values `web_fetch`,
-`web_source_list`, `web_source_inspect`, and the Slice 8D implementation
-candidate `web_source_archive`. Direct fetch requires a trusted
+`web_source_list`, `web_source_inspect`, and the accepted Slice 8D
+`web_source_archive`. Direct fetch requires a trusted
 agent/system runtime context, current session, idempotency key, allowed
 `web_source` write authority, and a derived grant with `networkPolicy:
 declared`; grants with `networkPolicy: none` fail before any HTTP client is
@@ -1055,9 +1055,9 @@ trace/replay refs, resource refs, archive metadata when present, and redacted
 snippets; they perform no network I/O and require `networkPolicy: none`.
 List defaults to active/fetched sources and returns archived records only when
 `includeArchived` is explicitly true, while inspect can still read the exact
-archived source for replay/citation audit. `web_source_archive` is a
-pending-review Slice 8D lifecycle operation requiring trusted current-session
-context, `web.read`, `web.write`, `resource.read`, `resource.write`,
+archived source for replay/citation audit. `web_source_archive` is an accepted
+Slice 8D lifecycle operation requiring trusted current-session context,
+`web.read`, `web.write`, `resource.read`, `resource.write`,
 `kind:web_source`, stable `idempotencyKey`, bounded non-empty `reason`, and
 `expectedWebSourceVersionId`; it appends an archived resource version with
 actor/grant identity, previous version id, trace/replay refs, and retention
