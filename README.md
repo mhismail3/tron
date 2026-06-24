@@ -410,7 +410,8 @@ Current living entry points:
 - `packages/agent/docs/restoration-retrospective-audit-status.md`: active
   retrospective audit tracker for the ordered completed-slice queue, audit
   constraints, first-audit target, accepted deferred scope, and current
-  Phase 2 Slice 5A baseline plus blocked Order 21 source-resolution state.
+  Phase 2 Slice 5A baseline plus the Slice 6A read-only git/worktree
+  restoration candidate.
 - `packages/agent/docs/hierarchical-rearchitecture-scorecard.md`: completed
   whole-repo hierarchical rearchitecture scorecard for server, iOS, Mac,
   scripts, docs, inventories, and static gates.
@@ -924,6 +925,8 @@ Current primitive operations:
 | `filesystem_write` | Create a patch proposal by default, or commit UTF-8 content with idempotency and a verifiable expected hash for existing files. |
 | `filesystem_edit` | Apply an exact single text replacement as preview or commit with patch/resource evidence; truncated file previews are refused. |
 | `filesystem_apply_patch` | Alias the exact-text patch flow for provider-facing patch operations; truncated file previews are refused. |
+| `git_status` | Inspect read-only repository/worktree status for a trusted path, including branch or detached HEAD, upstream/ahead/behind, dirty state, staged/unstaged/untracked summaries, and bounded porcelain evidence. |
+| `git_diff` | Read bounded staged and unstaged diff evidence for tracked changes under the trusted working-directory root. |
 | `process_run` | Run a bounded local shell command with timeout, output limits, and fail-closed no-network enforcement. |
 | `job_start` | Start a non-interactive local command as a durable `job_process` resource with bounded output, lifecycle stream evidence, and fail-closed `networkPolicy: none`. |
 | `job_status` | Inspect one durable `job_process` resource in the current session scope. |
@@ -946,7 +949,7 @@ provider-visible execute surface; file access goes through the hardened
 `filesystem_*` operation package.
 
 Startup registration currently keeps only loop infrastructure domains:
-`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `filesystem`, `blob`, `message`,
+`system`, `capability`, `catalog_discovery`, `approval`, `memory`, `jobs`, `git`, `filesystem`, `blob`, `message`,
 `settings`, `auth`, `agent`, `logs`, `session`, `transcription`,
 `worker_lifecycle`, and model-provider modules. The
 `filesystem` domain is deliberately split: workspace-browser functions remain
@@ -975,9 +978,18 @@ pre-startup stale records cannot be hidden behind a public list page of live or
 post-startup rows; targeted status/log/cancel also rechecks the addressed
 resource after scope validation without mutating unrelated scopes.
 Provider-visible access remains the single `execute` tool through `job_*`
-operation values; PTY sessions, interpreters, git, web/network behavior,
+operation values; PTY sessions, interpreters, web/network behavior,
 subagents, scheduling, native iOS process panels, and deployment behavior are
 not part of this foundation.
+The `git` domain is the Slice 6A read-only source-control foundation:
+`git::status` and `git::diff` are registered as backend read contracts, while
+provider-visible access remains `git_status` and `git_diff` operation values
+behind `capability::execute`. The domain resolves only relative paths under
+trusted working-directory metadata, rejects path traversal and worktree-root
+escapes, reports branch/detached HEAD/upstream/ahead-behind/dirty summaries,
+and returns bounded status/diff evidence. Staging, commits, merges, rebases,
+resets, pushes, branch checkout/deletion, conflict resolution, PR handoff,
+worktree graph resources, and native iOS SourceChanges UI remain deferred.
 Policy lookup is `session -> workspace -> system`, and prompt-trace audit
 idempotency is keyed by trace so memory status can change across turns.
 Direct record-id inspect/edit/tombstone operations reject cross-scope resources.
@@ -988,7 +1000,7 @@ recording, treats recording startup as cancellation-aware, cancels capture and
 in-flight transcription when leaving chat, the server reports explicit
 disabled/loading/ready/failed model state, and no media or voice notes are
 stored. Product/tool domains such as
-`process`, `program`, `web`, `git`, `worktree`, `browser`, `display`, `plan`,
+`process`, `program`, `web`, `worktree`, `browser`, `display`, `plan`,
 `prompt_library`, `cron`, `mcp`, `skills`, `sandbox`, `self_extension`,
 `worker`, `notifications`, `voice_notes`, and media/import surfaces are
 not registered by default on this branch.

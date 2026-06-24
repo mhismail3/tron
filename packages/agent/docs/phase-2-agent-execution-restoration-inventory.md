@@ -61,6 +61,12 @@ skills/rules/hooks, memory, MCP, scheduling, program execution,
 database/events/settings, dependency restoration, and APNs/device notification
 capability.
 
+Slice 6A changes only the git/worktree row: read-only repository status and
+bounded staged/unstaged diff evidence are now current baseline behavior through
+`domains/git` and `capability::execute` operation values. Worktree graph
+resources, staging, commits, merges, rebases, pushes, PR handoff, conflict
+resolution, and native iOS SourceChanges remain planned future sub-slices.
+
 It also maps every BPRC backlog row:
 
 - `BPRC-FEATURE-01`: capability discovery, routing, and intent execution.

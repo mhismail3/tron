@@ -447,6 +447,8 @@ fn clarification_includes_capability_execution_guidance() {
     assert!(result.contains("state_get"));
     assert!(result.contains("filesystem_read"));
     assert!(result.contains("filesystem_write"));
+    assert!(result.contains("git_status"));
+    assert!(result.contains("git_diff"));
     assert!(!result.contains("file_read"));
     assert!(!result.contains("file_write"));
     assert!(result.contains("process_run"));

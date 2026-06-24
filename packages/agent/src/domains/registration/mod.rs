@@ -30,8 +30,8 @@ use crate::domains::registration::worker::{
     DomainFunctionRegistration, DomainRegistrationContext, DomainWorkerModule,
 };
 use crate::domains::{
-    agent, approval, auth, blob, capability, catalog_discovery, filesystem, jobs, logs, memory,
-    message, model, session, settings, system, transcription, worker_lifecycle,
+    agent, approval, auth, blob, capability, catalog_discovery, filesystem, git, jobs, logs,
+    memory, message, model, session, settings, system, transcription, worker_lifecycle,
 };
 
 /// Register server-owned domain workers, canonical functions, and trigger records.
@@ -64,6 +64,7 @@ fn domain_worker_modules(ctx: &ServerRuntimeContext) -> EngineResult<Vec<DomainW
         approval::worker_module(&deps)?,
         memory::worker_module(&deps)?,
         jobs::worker_module(&deps)?,
+        git::worker_module(&deps)?,
         filesystem::worker_module(&deps)?,
         blob::worker_module(&deps)?,
         message::worker_module(&deps)?,
@@ -259,6 +260,8 @@ mod tests {
             "filesystem::read",
             "filesystem::search_text",
             "filesystem::write",
+            "git::diff",
+            "git::status",
             "memory::configure_policy",
             "memory::edit",
             "memory::inspect",
@@ -274,7 +277,7 @@ mod tests {
                 function_ids
                     .iter()
                     .any(|function_id| function_id == expected),
-                "approved Slice 3 memory function missing from startup catalog: {expected}"
+                "approved restored function missing from startup catalog: {expected}"
             );
         }
         for retired_prefix in retired_startup_prefixes() {
@@ -379,7 +382,6 @@ mod tests {
             "cron".to_owned(),
             "display".to_owned(),
             "events".to_owned(),
-            "git".to_owned(),
             "import".to_owned(),
             "job".to_owned(),
             "mcp".to_owned(),

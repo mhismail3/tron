@@ -36,6 +36,7 @@ use tracing::{info, warn};
 
 mod catalog;
 mod filesystem;
+mod git;
 mod jobs;
 mod logs;
 mod memory;
@@ -49,6 +50,7 @@ use filesystem::{
     filesystem_apply_patch, filesystem_diff, filesystem_edit, filesystem_find, filesystem_glob,
     filesystem_list, filesystem_read, filesystem_search_text, filesystem_write,
 };
+use git::{git_diff, git_status};
 use jobs::{job_cancel, job_list, job_log, job_start, job_status};
 use logs::log_recent;
 use memory::{memory_inspect, memory_list, memory_status};
@@ -284,6 +286,8 @@ async fn execute_operation(
         "filesystem_write" => filesystem_write(invocation, deps).await?,
         "filesystem_edit" => filesystem_edit(invocation, deps).await?,
         "filesystem_apply_patch" => filesystem_apply_patch(invocation, deps).await?,
+        "git_status" => git_status(invocation).await?,
+        "git_diff" => git_diff(invocation).await?,
         "process_run" => process_run(invocation, deps).await?,
         "job_start" => job_start(invocation, deps).await?,
         "job_status" => job_status(invocation, deps).await?,
@@ -303,7 +307,7 @@ async fn execute_operation(
         other => {
             return Err(CapabilityError::InvalidParams {
                 message: format!(
-                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
+                    "Unsupported primitive execute operation '{other}'. Use observe, state_get, state_set, state_list, filesystem_read, filesystem_list, filesystem_find, filesystem_glob, filesystem_search_text, filesystem_diff, filesystem_write, filesystem_edit, filesystem_apply_patch, git_status, git_diff, process_run, job_start, job_status, job_list, job_log, job_cancel, trace_list, trace_get, log_recent, replay_manifest, catalog_search, catalog_inspect, catalog_conformance, memory_status, memory_list, or memory_inspect."
                 ),
             });
         }
