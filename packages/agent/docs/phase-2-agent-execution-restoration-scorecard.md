@@ -2419,8 +2419,8 @@ policy tighter than the current 90-day/500-record defaults.
 ### Slice 14: Media, Voice Notes, Imports, Repository Trees, And System Updates
 
 Implementation status: Accepted Slice 14A media artifact and voice-note
-resource foundation is current baseline. Slice 14B import/session-resource
-graph foundation is an implementation candidate pending review. Slice 14
+resource foundation and accepted Slice 14B import/session-resource graph
+foundation are current baseline. Slice 14
 remains split because media, imports, repository trees, and system updates are
 separate families.
 
@@ -2428,7 +2428,7 @@ Objective: restore lower-priority product surfaces only after the core
 agent-execution patterns are proven.
 
 User-facing outcome: Slice 14A gives the backend a durable place to hold
-voice/media artifact metadata and blob refs. Slice 14B candidate gives the
+voice/media artifact metadata and blob refs. Slice 14B gives the
 backend a durable place to hold generic session/resource import lineage
 metadata without exposing raw import payloads or repository trees. Import
 previews, session tree/history views, repository divergence, update
@@ -2442,13 +2442,13 @@ retention, redacted projections, lifecycle evidence, and local transcription
 metadata. Import/history package owns generic graph lineage operations,
 bounded import provenance metadata, redacted projections, and lifecycle
 evidence; repository trees, import execution, and native tree rendering remain
-outside the candidate scope. Update package owns signed update checks and never
+outside the accepted scope. Update package owns signed update checks and never
 production deployment.
 
 Files/areas accepted for Slice 14A: `domains/media`, built-in
 `media_artifact` resource definition, capability execute adapters, runtime
 grant narrowing, provider schema/instruction text, README, and static
-inventories. Slice 14B candidate adds `domains/import_history`, built-in
+inventories. Slice 14B accepts `domains/import_history`, built-in
 `import_history_record` resource definitions, execute adapters, runtime grant
 narrowing, provider schema/instruction text, README, and static inventories.
 Future Slice 14 sub-slices still own repository/update domains and iOS native
@@ -2463,7 +2463,7 @@ Acceptance criteria for Slice 14A: media resources store blob refs only, reject
 raw bytes/base64, enforce MIME allow-list and size bounds, retain source and
 evidence refs, record lifecycle/trace/replay refs, keep provider projections
 redacted, require exact resource authority, and remain scoped to the current
-session/workspace. Slice 14B candidate must store bounded lineage refs only,
+session/workspace. Slice 14B stores bounded lineage refs only,
 reject raw import payloads/repository trees/unsafe paths, require exact
 `import_history_record` authority/selectors plus trusted current-session or
 workspace scope, record lifecycle/trace/replay refs, keep provider
@@ -2475,7 +2475,7 @@ review, iOS parity decision, and no deploy automation.
 Focused tests: Slice 14A covers media bounds, MIME validation, redaction,
 retention, resource schema, lifecycle evidence, authority/scope isolation,
 idempotency/replay refs, and no raw-audio/provider projection leaks. Slice 14B
-candidate covers import-history resource schema, authority/scope isolation,
+covers import-history resource schema, authority/scope isolation,
 bounded graph lineage projection, lifecycle evidence, idempotency fingerprint
 redaction, deterministic timestamp handling, and no raw import/repository/path
 leaks. Later Slice 14 sub-slices cover import preview/execute, repository

@@ -2018,21 +2018,29 @@ Focused validation:
 | `test ! -e packages/agent/skills` | exit 0 | Repo-managed first-party skills remain absent. |
 | iOS/media capture validation | not run | No Swift source, microphone/camera permission, native voice-note UI, capture flow, or physical-device media path changed in Slice 14A. |
 
-### Slice 14B Implementation Candidate: Import And Session/Resource Graph Foundation
+### Accepted Slice 14B: Import And Session/Resource Graph Foundation
 
-Candidate branch:
+Accepted branch:
 `codex/phase-2-slice-14b-import-session-resource-graph-foundation`.
 
 Baseline HEAD:
 `495881c1e4f30604640cf91761515ac9f3a97279`
 
-Implementation candidate status: implementation thread
-`019effd9-089b-7f41-a035-3ec11620f1ae` is preparing the Slice 14B backend-only
-import/session-resource graph foundation on a focused branch for independent
-review. This section must remain pending-review wording until an adversarial
-review thread returns exact verdict `slice accepted`.
+Accepted commits:
+`ae2d44b7e35f73dcec2be7ca6ac72dd9bd3b0be1` and
+`e34fb0a9747ff2cfd176fa75499e61b48138cfe6`.
 
-Scope implemented on the candidate branch:
+Thread evidence: discovery thread `019effd6-4548-7991-b9ce-cefee80394be`
+selected Slice 14B; implementation thread `019effd9-089b-7f41-a035-3ec11620f1ae`
+completed exact status `implementation complete`; independent review thread
+`019effff-c021-7be2-940b-3843e1ed5d68` returned exact verdict
+`changes required` for UTF-8-unsafe projection truncation; focused fix thread
+`019f0007-29a4-7c52-8fd2-3417b60a29c6` completed exact status
+`fix ready for review`; accepting re-review thread
+`019f000b-4d47-7791-81c3-59396ae34ed5` returned exact verdict
+`slice accepted`.
+
+Scope accepted:
 
 - Adds `domains/import_history` as the server owner for durable
   `import_history_record` resources containing bounded generic
@@ -2052,17 +2060,20 @@ Scope implemented on the candidate branch:
   import preview/execute behavior, no repository visualization, no update
   diagnostics, and no native iOS session/import/tree UI.
 
-Focused validation so far:
+Accepted validation:
 
 | Command | Result | Evidence |
 | --- | --- | --- |
-| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | pending rerun | Branch wiring is in place and the command is part of implementation closeout validation. |
-| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate checks after the import-history domain, execute adapters, grants, and resource definitions were added; only unrelated existing provider/resource dead-code warnings remain. |
-| `cargo test --manifest-path packages/agent/Cargo.toml import_history -- --nocapture` | in progress during implementation | Focused import-history domain regressions now pass; the broader command continues through static suites and is being used to surface remaining inventory/doc gaps before independent review. |
-| `cargo test --manifest-path packages/agent/Cargo.toml grant_import_history -- --nocapture` | exit 0 | Focused runtime grant regressions passed for read-only and write import-history grant derivation. |
-| `cargo test --manifest-path packages/agent/Cargo.toml domains::capability::contract -- --nocapture` | pending rerun | Capability schema guidance was updated for the new execute operations and will be rerun in closeout validation. |
-| `cargo test --manifest-path packages/agent/Cargo.toml clarification_includes_capability_execution_guidance -- --nocapture` | pending rerun | Provider instruction guidance now names import-history operations and raw import/repository tree rejection boundaries; focused rerun remains part of closeout validation. |
-| `cargo test --manifest-path packages/agent/Cargo.toml resource_kernel_builtin_definitions_keep_core_kinds_and_relations -- --nocapture` | pending rerun | Resource kernel coverage will verify `import_history_record` registration during closeout validation. |
+| `cargo fmt --manifest-path packages/agent/Cargo.toml --all -- --check` | exit 0 | Formatting passed on the accepted branch. |
+| `cargo check --manifest-path packages/agent/Cargo.toml` | exit 0 | Agent crate checks passed after import-history implementation and UTF-8-safe truncation fix; only unrelated existing warnings remained. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib import_history_projections_truncate_multibyte_utf8_without_panicking -- --nocapture` | exit 0 | Regression proves provider-visible list/inspect truncation is UTF-8 safe for multi-byte text. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --lib import_history -- --nocapture` | exit 0 | Focused import-history domain tests passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test baseline_pre_restoration_closure_invariants -- --nocapture` | exit 0 | BPRC/Phase 2 inventory invariants passed for accepted Slice 14B state. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test documentation_evidence_scorecard_integrity_invariants -- --nocapture` | exit 0 | DESI evidence and scorecard integrity passed. |
+| `cargo test --manifest-path packages/agent/Cargo.toml --test determinism_replayability_invariants -- --nocapture` | known caveat only | DRC reported only the pre-existing non-selected `goals`/`web`/`tool_sources` UTC allow-list gap; no import-history findings were present. |
+| `scripts/personal-info-guard.sh` | exit 0 | Personal-info guard passed. |
+| `git diff --check` | exit 0 | No whitespace errors were reported. |
+| `git ls-files -ci --exclude-standard` and `test ! -e packages/agent/skills` | exit 0 | No ignored tracked files and no repo-managed first-party skills were present. |
 
 ## Validation Log
 

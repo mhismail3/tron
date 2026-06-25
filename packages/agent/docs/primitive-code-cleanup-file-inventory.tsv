@@ -1884,7 +1884,7 @@ packages/agent/src/domains/media/service.rs	retain	media owner	PCC-10/P2AER-S14A
 packages/agent/src/domains/media/tests.rs	retain	media test owner	PCC-10/P2AER-S14A	Media bounds MIME redaction retention authority scope lifecycle and idempotency tests retained.
 packages/agent/src/domains/media/validation.rs	retain	media owner	PCC-10/P2AER-S14A	Media MIME size raw payload refs transcription and retention validation retained.
 packages/agent/src/engine/durability/resources/media_definitions.rs	retain	resource definition owner	PCC-10/P2AER-S14A	Media artifact resource schema retained.
-packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_import_history_tests.rs	retain	phase2 agent	PCC-10/P2AER-S14B	Import-history runtime grant regression tests retained for pending-review least-privilege authority coverage.
+packages/agent/src/domains/agent/loop/capability_invocation_executor/grant_import_history_tests.rs	retain	phase2 agent	PCC-10/P2AER-S14B	Import-history runtime grant regression tests retained for accepted least-privilege authority coverage.
 packages/agent/src/domains/capability/import_history_contract.rs	retain	capability contract owner	PCC-10/P2AER-S14B	Import-history request schema helper retained outside the broad capability contract file.
 packages/agent/src/domains/capability/operations/import_history.rs	retain	capability execute owner	PCC-10/P2AER-S14B	Import-history execute adapter retained for durable import_history_record record list and inspect projections.
 packages/agent/src/domains/import_history/authority.rs	retain	import-history owner	PCC-10/P2AER-S14B	Import-history authority guards retained for exact resource kind selectors scope isolation and networkPolicy none.

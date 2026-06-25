@@ -803,15 +803,15 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
             "Slice 14: Media, Voice",
             " Notes, Imports, Repository Trees, And System Updates"
         ),
-        "pending_review",
+        "current_baseline",
         &[
-            "Implementation candidate Slice 14B adds backend-only `domains/import_history`",
+            "Accepted Slice 14B adds backend-only `domains/import_history`",
             "import_history_record",
             "generic graph first; native tree only with proof",
             "Raw import payloads, repository trees, unsafe paths",
         ],
         &[
-            "Slice 14B Implementation Candidate: Import And Session/Resource Graph Foundation",
+            "Accepted Slice 14B: Import And Session/Resource Graph Foundation",
             "`domains/import_history`",
             "`import_history_record`",
         ],

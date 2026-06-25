@@ -128,17 +128,16 @@ validation, server transcription model changes, public `/engine` media APIs,
 imports/session trees, repository visualization, and update diagnostics remain
 deferred to later slices.
 
-Slice 14B is now a `pending_review` implementation candidate for
+Slice 14B is now an accepted current-baseline foundation for
 `BPRC-FEATURE-16`. It adds backend-only `domains/import_history`, the built-in
 `import_history_record` resource definition, `import_history.lifecycle` stream
 evidence, and execute-only `import_history_record`, `import_history_list`, and
-`import_history_inspect` operations behind `capability::execute`. The candidate
+`import_history_inspect` operations behind `capability::execute`. The foundation
 stores only bounded generic session/resource lineage refs, retention metadata,
 trace/replay refs, and redacted projections. Raw import payloads, repository
 trees, unsafe paths, import preview/execute, repository visualization, update
-diagnostics, and native iOS session/import/tree UI remain deferred until the
-generic graph foundation is independently reviewed and later slices justify
-anything broader.
+diagnostics, and native iOS session/import/tree UI remain deferred to later
+slices.
 
 It also maps every BPRC backlog row:
 

@@ -1116,9 +1116,9 @@ foundation may record bounded metadata about existing local transcription
 output, but it does not add server transcription models, native capture UI,
 microphone/camera permission changes, public media APIs, or provider-visible
 raw audio.
-The Slice 14B implementation candidate adds `domains/import_history` as a
-narrow server-owned import/session-resource graph foundation behind the same
-single `capability::execute` primitive. Import-history records are durable
+Accepted Slice 14B adds `domains/import_history` as a narrow server-owned
+import/session-resource graph foundation behind the same single
+`capability::execute` primitive. Import-history records are durable
 `import_history_record` resources that store bounded subject, parent, child,
 source, and evidence refs; bounded lineage metadata; retention policy;
 trace/replay refs; lifecycle evidence; and fingerprinted idempotency evidence.
