@@ -86,7 +86,7 @@ Worktree graph resources, arbitrary checkout, branch deletion/rename,
 merges/rebases/resets, stash/clean, fetch/pull/push, PR handoff, conflict
 resolution workflows, and native SourceChanges remain deferred.
 
-Accepted Slice 12 adds the scheduler backend foundation for BPRC-FEATURE-17:
+Slice 12 review candidate adds the scheduler backend foundation for BPRC-FEATURE-17:
 `domains/scheduler`, built-in `schedule` and `schedule_run` resources,
 `scheduler.lifecycle` stream evidence, and execute-only `schedule_create`,
 `schedule_list`, `schedule_inspect`, `schedule_cancel`, and

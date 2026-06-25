@@ -199,6 +199,36 @@ impl InMemoryEngineResourceStore {
         Ok(link)
     }
 
+    /// List outgoing links for one resource/relation with a caller-supplied cap.
+    pub fn list_links_for_source(
+        &self,
+        source_resource_id: &str,
+        relation: &str,
+        limit: usize,
+    ) -> Result<Vec<EngineResourceLink>> {
+        validate_token("source resource id", source_resource_id)?;
+        validate_token("link relation", relation)?;
+        if limit == 0 {
+            return Err(EngineError::PolicyViolation(
+                "resource link list limit must be greater than zero".to_owned(),
+            ));
+        }
+        let mut links = Vec::new();
+        for link in self.links.values().filter(|link| {
+            link.source_resource_id == source_resource_id && link.relation == relation
+        }) {
+            links.push(link.clone());
+            links.sort_by(|left, right| {
+                right
+                    .created_at
+                    .cmp(&left.created_at)
+                    .then_with(|| right.link_id.cmp(&left.link_id))
+            });
+            links.truncate(limit);
+        }
+        Ok(links)
+    }
+
     /// Inspect one resource.
     pub fn inspect(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>> {
         validate_token("resource id", resource_id)?;
@@ -238,28 +268,31 @@ impl InMemoryEngineResourceStore {
     /// List resources.
     pub fn list(&self, filter: ListResources) -> Result<Vec<EngineResource>> {
         validate_list_filter(&filter)?;
-        let mut resources = self
-            .resources
-            .values()
-            .filter(|resource| {
-                filter
-                    .kind
+        let cap = filter.limit.min(500);
+        let mut resources = Vec::new();
+        for resource in self.resources.values().filter(|resource| {
+            filter
+                .kind
+                .as_ref()
+                .is_none_or(|kind| &resource.kind == kind)
+                && filter
+                    .scope
                     .as_ref()
-                    .is_none_or(|kind| &resource.kind == kind)
-                    && filter
-                        .scope
-                        .as_ref()
-                        .is_none_or(|scope| &resource.scope == scope)
-                    && filter
-                        .lifecycle
-                        .as_ref()
-                        .is_none_or(|lifecycle| &resource.lifecycle == lifecycle)
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        resources.sort_by_key(|resource| resource.updated_at);
-        resources.reverse();
-        resources.truncate(filter.limit.min(500));
+                    .is_none_or(|scope| &resource.scope == scope)
+                && filter
+                    .lifecycle
+                    .as_ref()
+                    .is_none_or(|lifecycle| &resource.lifecycle == lifecycle)
+        }) {
+            resources.push(resource.clone());
+            resources.sort_by(|left, right| {
+                right
+                    .updated_at
+                    .cmp(&left.updated_at)
+                    .then_with(|| right.resource_id.cmp(&left.resource_id))
+            });
+            resources.truncate(cap);
+        }
         Ok(resources)
     }
 

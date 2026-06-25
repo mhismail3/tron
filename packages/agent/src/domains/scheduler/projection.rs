@@ -1,41 +1,33 @@
 use serde_json::{Value, json};
 
-use crate::engine::{EngineHostHandle, EngineResource, EngineResourceInspection, ListResources};
+use crate::engine::{EngineHostHandle, EngineResource, EngineResourceInspection};
 use crate::shared::server::errors::CapabilityError;
 
-use super::SCHEDULE_RUN_KIND;
 use super::errors::{engine_error, invalid_params};
-use super::support::{current_payload, resource_ref, resource_scope, to_value};
+use super::support::{current_payload, resource_ref};
 use super::types::{ScheduleRecord, ScheduleRunRecord, TargetRecord};
+
+const PRODUCED_RUN_RELATION: &str = "produced_run";
 
 pub(super) async fn list_run_summaries(
     engine_host: &EngineHostHandle,
-    invocation: &crate::engine::Invocation,
     schedule_resource_id: &str,
     limit: usize,
 ) -> Result<Vec<Value>, CapabilityError> {
-    let resources = engine_host
-        .scan_resources_internal(ListResources {
-            kind: Some(SCHEDULE_RUN_KIND.to_owned()),
-            scope: Some(resource_scope(invocation)),
-            lifecycle: None,
-            limit: usize::MAX,
-        })
+    let links = engine_host
+        .list_resource_links_for_source(schedule_resource_id, PRODUCED_RUN_RELATION, limit)
         .await
         .map_err(engine_error)?;
     let mut runs = Vec::new();
-    for resource in resources {
+    for link in links {
         let inspection = engine_host
-            .inspect_resource(&resource.resource_id)
+            .inspect_resource(&link.target_resource_id)
             .await
             .map_err(engine_error)?
             .ok_or_else(|| invalid_params("listed schedule_run disappeared before inspection"))?;
         let (_, run) = run_record(&inspection)?;
         if run.schedule_resource_id == schedule_resource_id {
             runs.push(run_summary(&inspection, &run));
-            if runs.len() >= limit {
-                break;
-            }
         }
     }
     Ok(runs)
@@ -67,11 +59,47 @@ pub(super) fn schedule_detail(
     version_id: &str,
     record: &ScheduleRecord,
 ) -> Value {
-    let mut value = to_value(record, "schedule detail").expect("schedule detail serialization");
-    value["scheduleResourceId"] = json!(inspection.resource.resource_id);
-    value["scheduleVersionId"] = json!(version_id);
-    value["resourceRefs"] = json!([resource_ref(&inspection.resource, "schedule")]);
-    value
+    json!({
+        "schemaVersion": record.schema_version,
+        "scheduleResourceId": inspection.resource.resource_id,
+        "scheduleVersionId": version_id,
+        "state": record.state.as_str(),
+        "title": record.title,
+        "scheduleKind": record.schedule_kind.as_str(),
+        "trigger": {
+            "kind": record.trigger.kind.as_str(),
+            "startAt": record.trigger.start_at,
+            "intervalSeconds": record.trigger.interval_seconds
+        },
+        "timezonePolicy": {
+            "timezone": record.timezone_policy.timezone,
+            "resolution": record.timezone_policy.resolution,
+            "dstPolicy": record.timezone_policy.dst_policy
+        },
+        "missedRunPolicy": {
+            "mode": record.missed_run_policy.mode.as_str(),
+            "maxCatchUpRuns": record.missed_run_policy.max_catch_up_runs
+        },
+        "target": target_detail(&record.target),
+        "retention": {
+            "maxRunRecords": record.retention.max_run_records,
+            "maxAgeDays": record.retention.max_age_days
+        },
+        "createdAt": record.created_at,
+        "updatedAt": record.updated_at,
+        "nextFireAt": record.next_fire_at,
+        "lastEvaluatedAt": record.last_evaluated_at,
+        "lastRunAt": record.last_run_at,
+        "cancellation": record.cancellation.as_ref().map(|cancellation| json!({
+            "reason": cancellation.reason,
+            "cancelledAt": cancellation.cancelled_at,
+            "actorId": cancellation.actor_id
+        })),
+        "traceRefs": record.trace_refs,
+        "replayRefs": record.replay_refs,
+        "revision": record.revision,
+        "resourceRefs": [resource_ref(&inspection.resource, "schedule")]
+    })
 }
 
 pub(super) fn run_summary_from_parts(
@@ -121,6 +149,16 @@ fn target_summary(target: &TargetRecord) -> Value {
     json!({
         "resourceKind": target.resource_kind,
         "action": target.action,
+        "selectorBound": target.selector_bound,
+        "dispatch": target.dispatch
+    })
+}
+
+fn target_detail(target: &TargetRecord) -> Value {
+    json!({
+        "resourceKind": target.resource_kind,
+        "action": target.action,
+        "resourceIds": target.resource_ids,
         "selectorBound": target.selector_bound,
         "dispatch": target.dispatch
     })

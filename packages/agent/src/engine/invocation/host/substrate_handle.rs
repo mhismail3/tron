@@ -168,6 +168,20 @@ impl EngineHostHandle {
             .link(request)
     }
 
+    /// List outgoing resource links for one relation with a caller-supplied cap.
+    pub(crate) async fn list_resource_links_for_source(
+        &self,
+        source_resource_id: &str,
+        relation: &str,
+        limit: usize,
+    ) -> Result<Vec<EngineResourceLink>> {
+        let store = self.inner.lock().await.primitives.resources.clone();
+        store
+            .lock()
+            .map_err(|_| EngineError::HandlerFailed("resource store lock poisoned".to_owned()))?
+            .list_links_for_source(source_resource_id, relation, limit)
+    }
+
     /// Inspect one resource and its version/link/event history.
     pub async fn inspect_resource(
         &self,

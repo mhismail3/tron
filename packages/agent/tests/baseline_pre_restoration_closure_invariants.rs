@@ -713,6 +713,26 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         ],
         &["Slice 10A accepted evidence", "`subagent_task`"],
     );
+    assert_phase_two_restored_domain_lineage(
+        &domain_root,
+        "scheduler",
+        "P2AER-INV-028",
+        "BPRC-FEATURE-17",
+        "cron_scheduling",
+        "Slice 12: Scheduling, Reminders, Automations, And Background Work",
+        "pending_review",
+        &[
+            "Slice 12 review candidate adds the scheduler domain",
+            "schedule_fire_due",
+            "Hidden cron tables",
+            "autonomous planning remain deferred",
+        ],
+        &[
+            "Slice 12 Implementation Evidence",
+            "Added `domains/scheduler`",
+            "no hidden cron tables",
+        ],
+    );
     for forbidden in [
         "autostart",
         "browser",
@@ -734,7 +754,6 @@ fn old_product_surfaces_and_fixed_ios_panels_remain_absent() {
         "prompt_library",
         "repo",
         "sandbox",
-        "scheduler",
         "self_extension",
         "skills",
         "tree",

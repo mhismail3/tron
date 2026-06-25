@@ -20,9 +20,9 @@ use crate::engine::durability::queue::{
     SqliteEngineQueueStore,
 };
 use crate::engine::durability::resources::{
-    CreateResource, EngineResource, EngineResourceInspection, EngineResourceTypeDefinition,
-    EngineResourceVersion, InMemoryEngineResourceStore, LinkResources, ListResources,
-    RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
+    CreateResource, EngineResource, EngineResourceInspection, EngineResourceLink,
+    EngineResourceTypeDefinition, EngineResourceVersion, InMemoryEngineResourceStore,
+    LinkResources, ListResources, RegisterResourceType, SqliteEngineResourceStore, UpdateResource,
     builtin_resource_type_definitions,
 };
 use crate::engine::durability::state::{
@@ -433,6 +433,20 @@ impl ResourceStoreBackend {
         match self {
             Self::InMemory(store) => store.link(request),
             Self::Sqlite(store) => store.link(request),
+        }
+    }
+
+    pub(in crate::engine) fn list_links_for_source(
+        &self,
+        source_resource_id: &str,
+        relation: &str,
+        limit: usize,
+    ) -> Result<Vec<EngineResourceLink>> {
+        match self {
+            Self::InMemory(store) => {
+                store.list_links_for_source(source_resource_id, relation, limit)
+            }
+            Self::Sqlite(store) => store.list_links_for_source(source_resource_id, relation, limit),
         }
     }
 

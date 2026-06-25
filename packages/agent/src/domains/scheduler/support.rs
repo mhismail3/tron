@@ -258,7 +258,9 @@ pub(super) fn retention(payload: &Value) -> Result<RetentionRecord, CapabilityEr
     })
 }
 
-pub(super) fn resource_scope(invocation: &Invocation) -> EngineResourceScope {
+pub(super) fn resource_scope(
+    invocation: &Invocation,
+) -> Result<EngineResourceScope, CapabilityError> {
     invocation
         .causal_context
         .session_id
@@ -271,14 +273,18 @@ pub(super) fn resource_scope(invocation: &Invocation) -> EngineResourceScope {
                 .as_ref()
                 .map(|workspace| EngineResourceScope::Workspace(workspace.clone()))
         })
-        .unwrap_or(EngineResourceScope::System)
+        .ok_or_else(|| {
+            invalid_params(
+                "scheduler operation requires trusted current session or workspace context",
+            )
+        })
 }
 
 pub(super) fn ensure_scope(
     invocation: &Invocation,
     actual: &EngineResourceScope,
 ) -> Result<(), CapabilityError> {
-    let expected = resource_scope(invocation);
+    let expected = resource_scope(invocation)?;
     if &expected != actual {
         return Err(invalid_params(format!(
             "resource scope mismatch: expected {}:{}, actual {}:{}",

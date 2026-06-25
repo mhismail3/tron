@@ -2,10 +2,12 @@
 //!
 //! This Slice 12 domain owns schedules, timezone policy, missed-run handling,
 //! explicit due-trigger evaluation, run records, cancellation, and bounded
-//! inspection projections. It does not start a polling loop, run feature work,
-//! deliver APNs/device notifications, launch workers/processes/network work, or
-//! merge background results into conversation state. Feature domains consume
-//! `schedule_run` records and own the work those records describe.
+//! redacted inspection projections. Provider-visible service calls fail closed
+//! without trusted session/workspace context. This domain does not start a
+//! polling loop, run feature work, deliver APNs/device notifications, launch
+//! workers/processes/network work, or merge background results into conversation
+//! state. Feature domains consume `schedule_run` records and own the work those
+//! records describe.
 //!
 //! ## Submodules
 //!

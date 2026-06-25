@@ -44,6 +44,24 @@ fn invocation(key: &str, scopes: &[&str], payload: Value) -> Invocation {
     )
 }
 
+fn invocation_without_context(key: &str, scopes: &[&str], payload: Value) -> Invocation {
+    let mut context = CausalContext::new(
+        ActorId::new("agent:scheduler-session").unwrap(),
+        ActorKind::Agent,
+        AuthorityGrantId::new("scheduler-grant").unwrap(),
+        TraceId::new(format!("scheduler-trace-{key}")).unwrap(),
+    )
+    .with_idempotency_key(key);
+    for scope in scopes {
+        context = context.with_scope(*scope);
+    }
+    Invocation::new_sync(
+        FunctionId::new("capability::execute").unwrap(),
+        payload,
+        context,
+    )
+}
+
 fn create_payload(start_at: &str, policy: &str) -> Value {
     json!({
         "title": "Daily standup review",
@@ -62,6 +80,37 @@ fn create_payload(start_at: &str, policy: &str) -> Value {
         "maxRunRecords": 100,
         "maxAgeDays": 30
     })
+}
+
+fn assert_no_grant_or_token_like_leak(value: &Value) {
+    fn walk(path: &str, value: &Value) {
+        match value {
+            Value::Object(map) => {
+                for (key, child) in map {
+                    let lower = key.to_ascii_lowercase();
+                    assert!(
+                        !lower.contains("grant") && !lower.contains("token"),
+                        "grant/token-like key leaked at {path}.{key}: {value}"
+                    );
+                    walk(&format!("{path}.{key}"), child);
+                }
+            }
+            Value::Array(items) => {
+                for (index, child) in items.iter().enumerate() {
+                    walk(&format!("{path}[{index}]"), child);
+                }
+            }
+            Value::String(text) => {
+                assert!(
+                    !text.contains("scheduler-grant")
+                        && !text.to_ascii_lowercase().contains("token"),
+                    "grant/token-like value leaked at {path}: {text}"
+                );
+            }
+            _ => {}
+        }
+    }
+    walk("$", value);
 }
 
 #[tokio::test]
@@ -297,6 +346,228 @@ async fn schedule_create_rejects_missing_write_scope_and_wildcard_target() {
     .await
     .unwrap_err();
     assert!(error.to_string().contains("non-wildcard"));
+}
+
+#[tokio::test]
+async fn schedule_inspect_redacts_authority_grants_and_token_like_fields() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let create = invocation(
+        "create-redaction",
+        &["scheduler.write"],
+        create_payload("2026-01-01T00:00:00Z", "fire_once"),
+    );
+    let created = service::create_schedule_value(&ctx.engine_host, &create, &create.payload)
+        .await
+        .unwrap();
+    let schedule_id = created["scheduleResourceId"].as_str().unwrap();
+
+    let cancel = invocation(
+        "cancel-redaction",
+        &["scheduler.write"],
+        json!({"scheduleResourceId": schedule_id, "reason": "Redaction coverage"}),
+    );
+    service::cancel_schedule_value(&ctx.engine_host, &cancel, &cancel.payload)
+        .await
+        .unwrap();
+
+    let inspect = invocation(
+        "inspect-redaction",
+        &["scheduler.read"],
+        json!({"scheduleResourceId": schedule_id, "limit": 10}),
+    );
+    let inspected = service::inspect_schedule_value(&ctx.engine_host, &inspect, &inspect.payload)
+        .await
+        .unwrap();
+
+    assert_eq!(inspected["schedule"]["state"], json!("cancelled"));
+    assert!(inspected["schedule"].get("authority").is_none());
+    assert!(
+        inspected["schedule"]["cancellation"]
+            .get("idempotency")
+            .is_none()
+    );
+    assert_no_grant_or_token_like_leak(&inspected);
+}
+
+#[tokio::test]
+async fn fire_due_uses_bounded_candidate_window_independent_of_total_schedules() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    for index in 0..105 {
+        let create = invocation(
+            &format!("create-bounded-fire-{index}"),
+            &["scheduler.write"],
+            create_payload("2026-01-01T00:00:00Z", "fire_once"),
+        );
+        service::create_schedule_value(&ctx.engine_host, &create, &create.payload)
+            .await
+            .unwrap();
+    }
+
+    let fire = invocation(
+        "fire-bounded-window",
+        &["scheduler.write", "scheduler.fire"],
+        json!({"limit": 100}),
+    );
+    let fired = service::fire_due_schedules_with_clock(
+        &ctx.engine_host,
+        &fire,
+        &fire.payload,
+        &FixedClock {
+            now: dt("2026-01-01T00:01:00Z"),
+        },
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(fired["candidateLimit"], json!(100));
+    assert_eq!(fired["candidateScheduleCount"], json!(100));
+    assert_eq!(fired["evaluatedSchedules"], json!(50));
+    assert_eq!(fired["runRecordCount"], json!(50));
+}
+
+#[tokio::test]
+async fn schedule_inspect_uses_bounded_run_links_independent_of_total_runs() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let mut payload = create_payload("2026-01-01T00:00:00Z", "catch_up");
+    payload["intervalSeconds"] = json!(60);
+    payload["maxCatchUpRuns"] = json!(40);
+    let create = invocation("create-bounded-runs", &["scheduler.write"], payload);
+    let created = service::create_schedule_value(&ctx.engine_host, &create, &create.payload)
+        .await
+        .unwrap();
+    let schedule_id = created["scheduleResourceId"].as_str().unwrap();
+
+    let fire = invocation(
+        "fire-bounded-runs",
+        &["scheduler.write", "scheduler.fire"],
+        json!({"limit": 10}),
+    );
+    let fired = service::fire_due_schedules_with_clock(
+        &ctx.engine_host,
+        &fire,
+        &fire.payload,
+        &FixedClock {
+            now: dt("2026-01-01T00:39:00Z"),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(fired["runRecordCount"], json!(40));
+
+    let inspect = invocation(
+        "inspect-bounded-runs",
+        &["scheduler.read"],
+        json!({"scheduleResourceId": schedule_id, "limit": 5}),
+    );
+    let inspected = service::inspect_schedule_value(&ctx.engine_host, &inspect, &inspect.payload)
+        .await
+        .unwrap();
+    let runs = inspected["runs"].as_array().unwrap();
+
+    assert_eq!(inspected["runLimit"], json!(5));
+    assert_eq!(runs.len(), 5);
+    assert!(
+        runs.iter()
+            .all(|run| run["scheduleResourceId"] == schedule_id)
+    );
+}
+
+#[tokio::test]
+async fn scheduler_service_rejects_missing_session_or_workspace_context() {
+    let ctx = crate::shared::server::test_support::make_test_context();
+    let create = invocation(
+        "create-context",
+        &["scheduler.write"],
+        create_payload("2026-01-01T00:00:00Z", "fire_once"),
+    );
+    let created = service::create_schedule_value(&ctx.engine_host, &create, &create.payload)
+        .await
+        .unwrap();
+    let schedule_id = created["scheduleResourceId"].as_str().unwrap();
+
+    let no_context_create = invocation_without_context(
+        "create-no-context",
+        &["scheduler.write"],
+        create_payload("2026-01-01T00:00:00Z", "fire_once"),
+    );
+    let error = service::create_schedule_value(
+        &ctx.engine_host,
+        &no_context_create,
+        &no_context_create.payload,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("trusted current session or workspace")
+    );
+
+    let no_context_list =
+        invocation_without_context("list-no-context", &["scheduler.read"], json!({"limit": 10}));
+    let error =
+        service::list_schedules_value(&ctx.engine_host, &no_context_list, &no_context_list.payload)
+            .await
+            .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("trusted current session or workspace")
+    );
+
+    let no_context_inspect = invocation_without_context(
+        "inspect-no-context",
+        &["scheduler.read"],
+        json!({"scheduleResourceId": schedule_id}),
+    );
+    let error = service::inspect_schedule_value(
+        &ctx.engine_host,
+        &no_context_inspect,
+        &no_context_inspect.payload,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("trusted current session or workspace")
+    );
+
+    let no_context_cancel = invocation_without_context(
+        "cancel-no-context",
+        &["scheduler.write"],
+        json!({"scheduleResourceId": schedule_id, "reason": "No context"}),
+    );
+    let error = service::cancel_schedule_value(
+        &ctx.engine_host,
+        &no_context_cancel,
+        &no_context_cancel.payload,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("trusted current session or workspace")
+    );
+
+    let no_context_fire = invocation_without_context(
+        "fire-no-context",
+        &["scheduler.write", "scheduler.fire"],
+        json!({"evaluationAt": "2026-01-01T00:01:00Z"}),
+    );
+    let error = service::fire_due_schedules_value(
+        &ctx.engine_host,
+        &no_context_fire,
+        &no_context_fire.payload,
+    )
+    .await
+    .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("trusted current session or workspace")
+    );
 }
 
 #[test]

@@ -25,6 +25,8 @@ use super::{
 
 const SCHEDULE_LEASE_TTL_MS: i64 = 60_000;
 const FIRE_BATCH_LIMIT: usize = 50;
+const FIRE_CANDIDATE_LIMIT: usize = 100;
+const PRODUCED_RUN_RELATION: &str = "produced_run";
 
 pub(crate) trait Clock {
     fn now(&self) -> DateTime<Utc>;
@@ -117,7 +119,7 @@ pub(crate) async fn create_schedule_value(
             resource_id: Some(format!("{SCHEDULE_KIND}:{}", invocation.id.as_str())),
             kind: SCHEDULE_KIND.to_owned(),
             schema_id: Some(SCHEDULE_SCHEMA_ID.to_owned()),
-            scope: resource_scope(invocation),
+            scope: resource_scope(invocation)?,
             owner_worker_id: WorkerId::new(WORKER).map_err(engine_error)?,
             owner_actor_id: invocation.causal_context.actor_id.clone(),
             lifecycle: Some(ScheduleState::Active.as_str().to_owned()),
@@ -164,7 +166,7 @@ pub(crate) async fn list_schedules_value(
     let resources = engine_host
         .list_resources(ListResources {
             kind: Some(SCHEDULE_KIND.to_owned()),
-            scope: Some(resource_scope(invocation)),
+            scope: Some(resource_scope(invocation)?),
             lifecycle: optional_string(payload, "state")?,
             limit: requested,
         })
@@ -199,13 +201,7 @@ pub(crate) async fn inspect_schedule_value(
     let inspection = require_schedule(engine_host, invocation, payload).await?;
     let (version_id, record) = schedule_record(&inspection)?;
     let run_limit = list_limit(payload)?.min(25);
-    let runs = list_run_summaries(
-        engine_host,
-        invocation,
-        &inspection.resource.resource_id,
-        run_limit,
-    )
-    .await?;
+    let runs = list_run_summaries(engine_host, &inspection.resource.resource_id, run_limit).await?;
     Ok(json!({
         "schemaVersion": SCHEDULE_SCHEMA_VERSION,
         "status": record.state.as_str(),
@@ -317,14 +313,15 @@ pub(crate) async fn fire_due_schedules_with_clock<C: Clock>(
     let now = clock.now();
     let limit = list_limit(payload)?.min(FIRE_BATCH_LIMIT);
     let resources = engine_host
-        .scan_resources_internal(ListResources {
+        .list_resources(ListResources {
             kind: Some(SCHEDULE_KIND.to_owned()),
-            scope: Some(resource_scope(invocation)),
+            scope: Some(resource_scope(invocation)?),
             lifecycle: Some(ScheduleState::Active.as_str().to_owned()),
-            limit: usize::MAX,
+            limit: FIRE_CANDIDATE_LIMIT,
         })
         .await
         .map_err(engine_error)?;
+    let candidate_count = resources.len();
     let mut evaluated = 0usize;
     let mut fired = Vec::new();
     for resource in resources {
@@ -360,7 +357,9 @@ pub(crate) async fn fire_due_schedules_with_clock<C: Clock>(
             "evaluatedSchedules": evaluated,
             "runRecordCount": fired.len(),
             "evaluatedAt": now,
-            "runRefs": fired
+            "runRefs": fired,
+            "candidateScheduleCount": candidate_count,
+            "candidateLimit": FIRE_CANDIDATE_LIMIT
         }),
     )
     .await?;
@@ -371,6 +370,8 @@ pub(crate) async fn fire_due_schedules_with_clock<C: Clock>(
         "evaluatedSchedules": evaluated,
         "runRecordCount": fired.len(),
         "runs": fired,
+        "candidateScheduleCount": candidate_count,
+        "candidateLimit": FIRE_CANDIDATE_LIMIT,
         "streamCursor": cursor.0
     }))
 }
@@ -613,7 +614,7 @@ async fn create_run_resource(
         .link_resources(LinkResources {
             source_resource_id: inspection.resource.resource_id.clone(),
             target_resource_id: resource.resource_id.clone(),
-            relation: "produced_run".to_owned(),
+            relation: PRODUCED_RUN_RELATION.to_owned(),
             metadata: json!({
                 "scheduledFor": scheduled_for,
                 "evaluatedAt": evaluated_at,

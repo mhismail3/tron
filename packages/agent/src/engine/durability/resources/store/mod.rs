@@ -341,6 +341,40 @@ impl SqliteEngineResourceStore {
         Ok(link)
     }
 
+    /// List outgoing links for one resource/relation with a caller-supplied cap.
+    pub fn list_links_for_source(
+        &self,
+        source_resource_id: &str,
+        relation: &str,
+        limit: usize,
+    ) -> Result<Vec<EngineResourceLink>> {
+        validate_token("source resource id", source_resource_id)?;
+        validate_token("link relation", relation)?;
+        if limit == 0 {
+            return Err(EngineError::PolicyViolation(
+                "resource link list limit must be greater than zero".to_owned(),
+            ));
+        }
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT link_id, source_resource_id, target_resource_id, relation, metadata_json,
+                        created_by_invocation_id, trace_id, created_at
+                 FROM engine_resource_links
+                 WHERE source_resource_id = ?1 AND relation = ?2
+                 ORDER BY created_at DESC, link_id DESC
+                 LIMIT ?3",
+            )
+            .map_err(|err| sqlite_err("resource.links.source_limited.prepare", err.to_string()))?;
+        let rows = stmt
+            .query_map(
+                params![source_resource_id, relation, limit as i64],
+                row_to_resource_link,
+            )
+            .map_err(|err| sqlite_err("resource.links.source_limited.query", err.to_string()))?;
+        collect_rows(rows, "resource.links.source_limited.row")
+    }
+
     /// Inspect one resource.
     pub fn inspect(&self, resource_id: &str) -> Result<Option<EngineResourceInspection>> {
         validate_token("resource id", resource_id)?;
@@ -359,6 +393,8 @@ impl SqliteEngineResourceStore {
     /// List resources.
     pub fn list(&self, filter: ListResources) -> Result<Vec<EngineResource>> {
         validate_list_filter(&filter)?;
+        let scope_kind = filter.scope.as_ref().map(EngineResourceScope::kind);
+        let scope_value = filter.scope.as_ref().map(EngineResourceScope::value);
         let mut resources = Vec::new();
         let mut stmt = self
             .conn
@@ -367,32 +403,29 @@ impl SqliteEngineResourceStore {
                         owner_actor_id, lifecycle, policy_json, current_version_id, trace_id,
                         created_by_invocation_id, created_at, updated_at
                  FROM engine_resources
-                 ORDER BY updated_at DESC",
+                 WHERE (?1 IS NULL OR kind = ?1)
+                   AND (?2 IS NULL OR scope_kind = ?2)
+                   AND (?3 IS NULL OR scope_value = ?3)
+                   AND (?4 IS NULL OR lifecycle = ?4)
+                 ORDER BY updated_at DESC, resource_id DESC
+                 LIMIT ?5",
             )
             .map_err(|err| sqlite_err("resource.list.prepare", err.to_string()))?;
         let rows = stmt
-            .query_map([], row_to_resource)
+            .query_map(
+                params![
+                    filter.kind.as_deref(),
+                    scope_kind,
+                    scope_value,
+                    filter.lifecycle.as_deref(),
+                    filter.limit.min(500) as i64
+                ],
+                row_to_resource,
+            )
             .map_err(|err| sqlite_err("resource.list.query", err.to_string()))?;
         for row in rows {
             let resource = row.map_err(|err| sqlite_err("resource.list.row", err.to_string()))?;
-            if filter
-                .kind
-                .as_ref()
-                .is_none_or(|kind| &resource.kind == kind)
-                && filter
-                    .scope
-                    .as_ref()
-                    .is_none_or(|scope| &resource.scope == scope)
-                && filter
-                    .lifecycle
-                    .as_ref()
-                    .is_none_or(|lifecycle| &resource.lifecycle == lifecycle)
-            {
-                resources.push(resource);
-                if resources.len() >= filter.limit.min(500) {
-                    break;
-                }
-            }
+            resources.push(resource);
         }
         Ok(resources)
     }

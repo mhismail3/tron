@@ -2334,7 +2334,7 @@ Docs/static updates: README event/database/settings, CSD inventory.
 User decisions: supported schedule grammar, timezone behavior, missed-run
 policy, and default notification path.
 
-Implementation status: accepted Slice 12 adds durable `schedule` and
+Implementation status: Slice 12 review candidate adds durable `schedule` and
 `schedule_run` resources, `domains/scheduler`, execute-only
 `schedule_create`, `schedule_list`, `schedule_inspect`, `schedule_cancel`, and
 `schedule_fire_due`, explicit non-wildcard target selectors, authority records,
